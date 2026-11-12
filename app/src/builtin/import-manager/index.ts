@@ -11,8 +11,8 @@ import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, reforgedPathOf, rowEntries, rowMoves, samePath, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type UseIn } from "../../lib/imports";
-import { followingTextures, shownEntry, versionToAdd } from "./versions";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
+import { followingTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
 import { parseMdx } from "../../lib/model/mdx";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -60,14 +60,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // The selected import's other version (Reforged for a plain file, Classic for a Reforged one), or the import of
     // `path` (an archive path, either version; the Problems view's fixes), picked on disk.
-    w3.commands.register("w3.imports.addVersion", async (path?: string) => {
+    w3.commands.register("w3.imports.addVersion", async (path?: string, side?: Side) => {
       if (typeof path === "string" && path) {
         await w3.commands.execute("w3.imports.open");
         if (!openView?.isListOf(w3.workspace.project()?.root)) throw new Error("The Import Manager can't change this project's list.");
         openView.selectPath(path);
       }
       if (!openView) throw new Error("Open the Import Manager and select a file first.");
-      await openView.addVersionSelected();
+      await openView.addVersionSelected(side);
+    }),
+    // The selected import's 3.0 version (`_DE.w3mod\`).
+    w3.commands.register("w3.imports.addDeVersion", async () => {
+      if (!openView) throw new Error("Open the Import Manager and select a file first.");
+      await openView.addVersionSelected("de");
     }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
@@ -286,7 +291,7 @@ class ImportView {
     const use = this.useIn;
     const paths = sources.map((s) => {
       const plain = s.relative ? importTreePath(s.relative, taken, this.folder) : importPath(s.src, taken, this.folder);
-      // Reforged only: models and textures below _HD.w3mod\ (the object data names the plain path all the same).
+      // Reforged only / 3.0 only: models and textures below _HD.w3mod\ / _DE.w3mod\ (the object data names the plain path all the same).
       const path = pathForUse(plain, use);
       used.add(path.toLowerCase());
       return path;
@@ -301,10 +306,10 @@ class ImportView {
     if (done.length) await this.write();
     this.select(done);
     if (error) throw new Error(`${done.length} of ${paths.length} imported, then: ${error}`);
-    if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}${use === "reforged" ? " (models and textures for Reforged only)" : ""}.`);
+    if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}${use === "reforged" ? " (models and textures for Reforged only)" : use === "de" ? " (models and textures for 3.0 only)" : ""}.`);
     // A model for one graphics mode: the textures next to it on disk can go into the same mode's folder.
     if (use !== "both" && !sources.some((s) => s.relative)) {
-      for (const [i, path] of done.entries()) if (/\.mdx$/i.test(path)) await this.bringTextures(sources[i].src, path, use === "reforged");
+      for (const [i, path] of done.entries()) if (/\.mdx$/i.test(path)) await this.bringTextures(sources[i].src, path, use === "reforged" ? "reforged" : use === "de" ? "de" : "classic");
     }
     if (use === "classic" && done.some(hasModeVersions)) {
       // A note, not a question: the import is done either way.
@@ -320,14 +325,14 @@ class ImportView {
   /** Asks whether the textures a model names that lie next to it on disk (`src`) go into the map with it, at the
    *  model's graphics mode's path (`reforged`: below _HD.w3mod\), and imports them. Textures whose path is taken stay
    *  out; a model that can't be read brings none. */
-  private async bringTextures(src: string, model: string, reforged: boolean) {
+  private async bringTextures(src: string, model: string, side: Side) {
     let textures: { path: string; replaceableId: number }[];
     try { textures = parseMdx(await this.w3.backend.readBytes(src)).textures; } catch { return; }
     const dir = src.replace(/[\\/][^\\/]*$/, "");
-    const found = await followingTextures(dir, textures, (a) => (reforged ? reforgedPathOf(a) : a),
+    const found = await followingTextures(dir, textures, (a) => sidePathOf(a, side),
       (f) => this.w3.backend.invoke<boolean>("fs_exists", { path: f }).catch(() => false), (a) => this.taken(a));
     if (!found.length || this.disposed) return;
-    const mode = reforged ? "Reforged" : "Classic";
+    const mode = SIDE_NAME[side];
     const names = found.map((t) => t.archive).join(", ");
     const c = await this.w3.window.showInfo(`${model.split("\\").pop()} names ${plural(found.length, "texture")} found next to it: ${names}. Import ${found.length === 1 ? "it" : "them"} for ${mode} too?`, "Import textures", "Skip");
     if (c !== "Import textures" || this.disposed || this.w3.workspace.project()?.root !== this.root) return;
@@ -416,8 +421,8 @@ class ImportView {
     void this.run("Remove", async () => {
       // A row's versions go together (the question says so).
       let entries = rows.flatMap(rowEntries);
-      const pair = rows.length === 1 && !!rows[0].classic && !!rows[0].reforged;
-      const what = pair ? `${rows[0].path} (both its Classic and its Reforged version)` : entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
+      const versions = rows.length === 1 ? SIDES.filter((s) => rows[0][s]) : [];
+      const what = versions.length > 1 ? `${rows[0].path} (its ${versions.slice(0, -1).map((s) => SIDE_NAME[s]).join(", ")} and ${SIDE_NAME[versions[versions.length - 1]]} versions)` : entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
       const asked = [...new Set(entries.flatMap((e) => this.fileOf(e)?.path ?? []))];
       let withFiles = false;
       if (!asked.length) {
@@ -484,31 +489,34 @@ class ImportView {
     const sel = this.shown.filter((r) => this.selected.has(r.key));
     if (sel.length !== 1) throw new Error("Select one imported file to replace.");
     let e = rowEntries(sel[0])[0];
-    // A row with both versions: which one.
-    if (sel[0].classic && sel[0].reforged) {
-      const c = await this.w3.window.showInfo(`Replace which version of ${sel[0].path}?`, "Classic version", "Reforged version", "Cancel");
-      if (c !== "Classic version" && c !== "Reforged version") return;
-      e = c === "Classic version" ? sel[0].classic : sel[0].reforged;
+    // A row with several versions: which one.
+    const sides = SIDES.filter((s) => sel[0][s]);
+    if (sides.length > 1) {
+      const c = await this.w3.window.showInfo(`Replace which version of ${sel[0].path}?`, ...sides.map((s) => `${SIDE_NAME[s]} version`), "Cancel");
+      const side = sides.find((s) => c === `${SIDE_NAME[s]} version`);
+      if (!side) return;
+      e = sel[0][side]!;
     }
     const f = this.fileOf(e);
     if (!f) throw new Error(`${e.path} isn't in the project's map folder.`);
     this.replace(e, f.path);
   }
-  /** "Add Reforged Version…" / "Add Classic Version…" on the one selected row (the command). */
-  async addVersionSelected() {
+  /** "Add Reforged Version…" / "Add Classic Version…" / "Add 3.0 Version…" on the one selected row (the command): `side`'s,
+   *  else the likeliest (Reforged for a plain file, Classic for a Reforged one; 3.0 only when named). */
+  async addVersionSelected(side?: Side) {
     const sel = this.shown.filter((r) => this.selected.has(r.key));
     if (sel.length !== 1) throw new Error("Select one imported file to add a version to.");
-    if (!versionToAdd(sel[0])) throw new Error(`${sel[0].path} has both a Classic and a Reforged version.`);
-    await this.addVersion(sel[0]);
+    if (!versionToAdd(sel[0], side)) throw new Error(`${sel[0].path} has ${side ? `a ${SIDE_NAME[side]} version` : "all of its versions"} already.`);
+    await this.addVersion(sel[0], side);
   }
   /** Picks a file on disk and stores it as the row's other version: below _HD.w3mod\ for a plain import, at the plain
    *  path for a Reforged one; the same name, so the object data's one path finds the version of each graphics mode. A
    *  model's textures next to it can come along (asked). */
-  private addVersion(row: ImportRow): Promise<boolean> {
+  private addVersion(row: ImportRow, side?: Side): Promise<boolean> {
     return this.run("Add version", async () => {
-      const add = versionToAdd(row);
+      const add = versionToAdd(row, side);
       if (!add) return;
-      const mode = add.side === "reforged" ? "Reforged" : "Classic";
+      const mode = SIDE_NAME[add.side];
       const root = this.w3.workspace.project()?.root;
       const src = await this.w3.window.pickFile({ title: `${mode} version of ${row.path}` });
       if (!src || this.disposed || this.w3.workspace.project()?.root !== root) return;
@@ -522,7 +530,7 @@ class ImportView {
       await this.write();
       this.select([add.path]);
       this.render();
-      if (/\.mdx$/i.test(add.path)) await this.bringTextures(src, add.path, add.side === "reforged");
+      if (/\.mdx$/i.test(add.path)) await this.bringTextures(src, add.path, add.side);
       void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
     });
   }
@@ -608,7 +616,8 @@ class ImportView {
     const USE_IN: [UseIn, string, string][] = [
       ["both", "Both graphics modes", "Models and textures go to their plain path: Classic and Reforged both read it"],
       ["classic", "Classic only", "The plain path; Reforged reads it too until it has a Reforged version (Add Reforged Version…)"],
-      ["reforged", "Reforged only", "Models and textures go below _HD.w3mod\\ (the object data names the plain path): only Reforged reads them"]];
+      ["reforged", "Reforged only", "Models and textures go below _HD.w3mod\\ (the object data names the plain path): only Reforged reads them"],
+      ["de", "3.0 only", "Models and textures go below _DE.w3mod\\ (the object data names the plain path): only 3.0 reads them"]];
     const useIn = h("select.imp-use-in", { title: USE_IN.find((u) => u[0] === this.useIn)?.[2] ?? "",
       onchange: () => { this.useIn = useIn.value as UseIn; this.render(); } },
     ...USE_IN.map(([value, label, title]) => h("option", { value, title, selected: value === this.useIn }, label))) as HTMLSelectElement;
@@ -653,49 +662,52 @@ class ImportView {
   }
 
   private detail(row: ImportRow, files: Map<string, FileInfo>): HTMLElement {
-    const both = !!(row.classic && row.reforged);
+    const several = rowEntries(row).length > 1;
     // The version the graphics mode set reads (opened, previewed); a row of one version has just that.
     const e = shownEntry(row, this.mode());
     const file = this.fileOf(e, files);
     const exists = !!file;
-    const versions = rowEntries(row).map((x) => ({ e: x, f: this.fileOf(x, files), mode: x === row.reforged ? "Reforged" : "Classic" }));
+    const versions = rowEntries(row).map((x) => ({ e: x, f: this.fileOf(x, files), mode: SIDE_NAME[SIDES.find((s) => row[s] === x)!] }));
     const path = h("input.imp-path-edit", { type: "text", value: row.classic ? this.shownPath(row.classic, versions[0].f) : row.path, readOnly: !this.editable });
-    const add = this.editable ? versionToAdd(row) : null;
-    const modes = both ? `Classic: ${versions[0].e.path} · Reforged: ${versions[1].e.path}`
+    const adds = this.editable ? versionsToAdd(row) : [];
+    const modes = several ? versions.map((v) => `${v.mode}: ${v.e.path}`).join(" · ")
       : row.reforged ? `Reforged only (${row.reforged.path}): Classic reads nothing at this path from the map.`
-      : "Both graphics modes (one file at the plain path).";
+      : row.de ? `3.0 only (${row.de.path}): Classic and Reforged read nothing at this path from the map.`
+      : "All graphics modes (one file at the plain path).";
     return h("div", {},
       h("h3", {}, row.path.split(/[\\/]/).pop() ?? row.path, ...this.badges(row)),
       h("div.imp-field", {}, h("label", {}, "Path in the map"), path,
-        ...(this.editable ? [h("button", { title: row.reforged ? "The Reforged version moves along, below _HD.w3mod\\" : "", onclick: () => this.changePath(row, path.value) }, "Change path")] : [])),
+        ...(this.editable ? [h("button", { title: row.reforged || row.de ? "The other versions move along, below _HD.w3mod\\ and _DE.w3mod\\" : "", onclick: () => this.changePath(row, path.value) }, "Change path")] : [])),
       h("p.muted", {}, "Models, textures and sounds are referred to by this path (object data, triggers, other models)."),
       h("div.imp-field", {}, h("label", {}, "Graphics modes"), h("span.imp-modes", {}, modes)),
       h("div.imp-field", {}, h("label", {}, "Type"), h("span", {}, `${kindOf(row.path)} · flags ${versions.map((v) => v.e.flags).join(" / ")}`)),
       versions.every((v) => v.f) ? null : h("p.imp-warn", {}, `${versions.length > 1 ? `The ${versions.filter((v) => !v.f).map((v) => v.mode).join(" and ")} version isn't` : "This file isn't"} in the project's map folder, so it isn't packed. (Blizzard's own maps list files the game provides itself.)`),
       h("div.imp-actions", {},
         // Viewers load the whole file: very large ones (maps, campaigns, movies) can only be exported.
-        h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : both ? `The ${e === row.reforged ? "Reforged" : "Classic"} version (the graphics mode set)` : "",
+        h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : several ? `The ${SIDE_NAME[SIDES.find((s) => row[s] === e)!]} version (the graphics mode set)` : "",
           onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
         // A row's versions are exported together, each at its place in the map.
-        h("button", { disabled: !versions.some((v) => v.f), title: both ? "Both versions, each at its place in the map below the chosen folder" : "",
-          onclick: () => (both ? this.exportMany(versions.flatMap((v) => v.f?.path ?? [])) : file && this.exportFile(e.path, file.path)) }, "Export…"),
+        h("button", { disabled: !versions.some((v) => v.f), title: several ? "Every version, each at its place in the map below the chosen folder" : "",
+          onclick: () => (several ? this.exportMany(versions.flatMap((v) => v.f?.path ?? [])) : file && this.exportFile(e.path, file.path)) }, "Export…"),
         ...(this.editable ? [
           ...versions.map((v) => h("button.imp-replace", { disabled: !v.f, title: "Another file's content under this path (Ctrl+Z takes it back)",
-            onclick: () => v.f && this.replace(v.e, v.f.path) }, both ? `Replace ${v.mode}…` : "Replace…")),
+            onclick: () => v.f && this.replace(v.e, v.f.path) }, several ? `Replace ${v.mode}…` : "Replace…")),
           h("button", { onclick: () => this.remove([row]) }, "Remove")] : [])),
-      add ? h("div.imp-actions", {}, h("button.imp-add-version", {
-        title: add.side === "reforged" ? `A file for Reforged, stored as ${add.path}: Reforged reads it instead of this one, Classic keeps this one`
-          : `A file for Classic, stored as ${add.path}: Classic reads it, Reforged keeps the Reforged version`,
-        onclick: () => void this.addVersion(row) }, add.side === "reforged" ? "Add Reforged Version…" : "Add Classic Version…")) : null,
-      file ? this.preview(e.path, file, e === row.reforged) : null);
+      adds.length ? h("div.imp-actions", {}, ...adds.map((add) => h("button.imp-add-version", {
+        title: add.side === "reforged" ? `A file for Reforged, stored as ${add.path}: Reforged reads it instead of the plain one`
+          : add.side === "de" ? `A file for 3.0, stored as ${add.path}: 3.0 reads it before the Reforged and the plain one`
+          : `A file for Classic, stored as ${add.path}: Classic reads it, the other graphics modes keep their own version`,
+        onclick: () => void this.addVersion(row, add.side) }, `Add ${SIDE_NAME[add.side]} Version…`))) : null,
+      file ? this.preview(e.path, file, SIDES.find((s) => row[s] === e)!) : null);
   }
 
-  /** The graphics modes of a row with a Reforged version ("Classic", "Reforged"); none for a plain file alone (both
-   *  modes read it). */
+  /** The graphics modes of a row with a Reforged or 3.0 version ("Classic", "Reforged", "3.0"); none for a plain file
+   *  alone (every mode reads it). */
   private badges(row: ImportRow): HTMLElement[] {
-    if (!row.reforged) return [];
+    if (!row.reforged && !row.de) return [];
     return [...(row.classic ? [h("span.imp-badge", { title: "Classic reads this version" }, "Classic")] : []),
-      h("span.imp-badge.reforged", { title: `Reforged reads ${row.reforged.path}` }, "Reforged")];
+      ...(row.reforged ? [h("span.imp-badge.reforged", { title: `Reforged reads ${row.reforged.path}` }, "Reforged")] : []),
+      ...(row.de ? [h("span.imp-badge.de", { title: `3.0 reads ${row.de.path}` }, "3.0")] : [])];
   }
 
   private detailMany(rows: ImportRow[], files: Map<string, FileInfo>): HTMLElement {
@@ -705,7 +717,7 @@ class ImportView {
     const paths = [...new Set(found.map((f) => f.path))];
     const missing = entries.length - found.length;
     return h("div", {},
-      h("h3", {}, plural(entries.length, "file") + (entries.length !== rows.length ? ` in ${rows.length.toLocaleString()} rows (Classic and Reforged versions)` : "")),
+      h("h3", {}, plural(entries.length, "file") + (entries.length !== rows.length ? ` in ${rows.length.toLocaleString()} rows (Classic, Reforged and 3.0 versions)` : "")),
       h("p.muted", {}, `${formatBytes(size)}${missing ? ` · ${missing} not in the project's map folder` : ""}`),
       h("div.imp-actions", {},
         h("button", { disabled: !paths.length, title: "Keeps each file's path in the map below the chosen folder", onclick: () => this.exportMany(paths) }, "Export…"),
@@ -717,9 +729,9 @@ class ImportView {
     this.modelPreview?.view.dispose();
     this.modelPreview = null;
   }
-  /** `reforged`: the file is a Reforged version, whose model reads the map's and the game's Reforged files first
-   *  whatever the graphics mode set. */
-  private preview(path: string, file: FileInfo, reforged = false): HTMLElement | null {
+  /** `side`: the version the file is, whose model reads the map's and the game's files of that graphics mode first
+   *  whatever the graphics mode set (Classic: the one set). */
+  private preview(path: string, file: FileInfo, side: Side = "classic"): HTMLElement | null {
     const modelKey = kindOf(path) === "Model" ? previewKey(path, file, "model") : null;
     if (modelKey === null) this.dropModelPreview();
     if (modelKey !== null) {
@@ -728,7 +740,7 @@ class ImportView {
         try {
           const entry = { key: modelKey, view: null as unknown as ModelPreview, failed: false };
           // A model that can't be shown says so like an image does (the preview's own message names the file).
-          entry.view = new ModelPreview(this.w3, { prefer: reforged ? "hd" : undefined, exact: true,
+          entry.view = new ModelPreview(this.w3, { prefer: SIDE_PREFER[side], exact: true,
             onFail: () => { entry.failed = true; entry.view.el.replaceChildren(h("small.muted", {}, "No preview for this file.")); } });
           this.modelPreview = entry;
           entry.view.show(path);

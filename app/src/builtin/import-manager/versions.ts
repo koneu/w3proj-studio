@@ -2,22 +2,34 @@
 // `<path>`): which version a row can still get, which file of a row is shown in a mode, and the textures a model added
 // for one mode brings along from next to it on disk. Pure, so tests need no app.
 
-import { newEntryFlags, reforgedPathOf, type ImportEntry, type ImportRow } from "../../lib/imports";
+import { newEntryFlags, sidePathOf, type ImportEntry, type ImportRow, type Side } from "../../lib/imports";
 
-/** The version a row can still get ("Add Reforged Version…", "Add Classic Version…"): its side, archive path and the
- *  flags of its entry. Null: the row has both. */
-export function versionToAdd(row: ImportRow): { side: "classic" | "reforged"; path: string; flags: number } | null {
-  if (row.classic && row.reforged) return null;
-  const side = row.classic ? "reforged" : "classic";
-  const path = side === "reforged" ? reforgedPathOf(row.path) : row.path;
-  return { side, path, flags: newEntryFlags(path) };
+/** What a side is called in the Import Manager. */
+export const SIDE_NAME: Record<Side, string> = { classic: "Classic", reforged: "Reforged", de: "3.0" };
+/** The graphics mode a side's file is previewed in (ModelPreview's `prefer`); Classic follows the graphics mode set. */
+export const SIDE_PREFER: Record<Side, "reforged" | "de" | undefined> = { classic: undefined, reforged: "reforged", de: "de" };
+
+/** The versions a row can still get ("Add Reforged Version…", "Add Classic Version…", "Add 3.0 Version…"), each with its
+ *  side, archive path and the flags of its entry; the likeliest first (Reforged for a plain file, Classic for a Reforged
+ *  one). Empty: the row has all three. */
+export function versionsToAdd(row: ImportRow): { side: Side; path: string; flags: number }[] {
+  return (["reforged", "classic", "de"] as const).filter((side) => !row[side]).map((side) => {
+    const path = sidePathOf(row.path, side);
+    return { side, path, flags: newEntryFlags(path) };
+  });
+}
+/** The version a row can still get: `side`'s, else the likeliest. Null: the row has it (has all three). */
+export function versionToAdd(row: ImportRow, side?: Side): { side: Side; path: string; flags: number } | null {
+  const all = versionsToAdd(row);
+  return (side ? all.find((v) => v.side === side) : all[0]) ?? null;
 }
 
-/** The entry of a row a graphics mode shows (game.graphicsMode: "sd" Classic, else Reforged): its own version, else the
- *  other one (Reforged falls back to the plain path; a Reforged version alone is what the row has). */
+/** The entry of a row a graphics mode shows (game.graphicsMode), in the order the mode reads the versions (modeNames):
+ *  Classic its plain one; Reforged its `_HD.w3mod\` one, then the plain one; 3.0 its `_DE.w3mod\` one, then the Reforged
+ *  one, then the plain one. A version the mode never reads is shown when the row has nothing else. */
 export function shownEntry(row: ImportRow, mode: string | undefined): ImportEntry {
-  const reforged = mode !== "sd";
-  return (reforged ? row.reforged ?? row.classic : row.classic ?? row.reforged)!;
+  const order: Side[] = mode === "sd" ? ["classic", "reforged", "de"] : mode === "de" ? ["de", "reforged", "classic"] : ["reforged", "classic", "de"];
+  return row[order.find((s) => row[s])!]!;
 }
 
 /** Where a texture a model names may lie next to the model on disk (`dir`, the model's folder), most exact first: its

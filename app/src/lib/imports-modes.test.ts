@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  classicPathOf, importedPathFor, importRows, isReforgedPath, modeNames, newEntryFlags, ownNames, pathForUse, previewMode, readImportedFor,
+  classicPathOf, dePathOf, importedPathFor, isDePath, importRows, isReforgedPath, modeNames, newEntryFlags, ownNames, pathForUse, previewMode, readImportedFor,
   reforgedPathOf, rowEntries, rowMoves, takenWithVersions, type ImportEntry,
 } from "./imports";
 import type { W3Api } from "../extensions/api";
@@ -79,18 +79,23 @@ test("Change path moves both versions of a row; a Classic entry alone goes where
 
 test("the map's own files per graphics mode: Reforged reads the _HD.w3mod\\ version first, Classic never", () => {
   assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "hd"), ["_HD.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"]);
-  assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "de"), ["_HD.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"]);
+  // 3.0: its own _DE.w3mod\ version, then the Reforged one, then the plain file (from any version's spelling).
+  const deOrder = ["_DE.w3mod\\war3mapImported\\Hero.mdx", "_HD.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"];
+  assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "de"), deOrder);
+  assert.deepEqual(modeNames("_de.w3mod/war3mapImported/Hero.mdx", "de"), deOrder);
   assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "sd"), ["war3mapImported\\Hero.mdx"]);
   // A preview's preference wins over the mode set; without either, Reforged HD (the setting's default).
   assert.equal(previewMode("classic", "hd"), "sd");
   assert.equal(previewMode("hd", "sd"), "hd");
   assert.equal(previewMode("reforged", "sd"), "hd");
   assert.equal(previewMode(undefined, "sd"), "sd");
-  assert.equal(previewMode(undefined, "de"), "hd");
+  assert.equal(previewMode(undefined, "de"), "de");
+  assert.equal(previewMode("de", "sd"), "de");
   assert.equal(previewMode(undefined, undefined), "hd");
   // A texture's names (its .blp and the .dds the game reads instead): every Reforged version before any plain file.
   assert.deepEqual(ownNames(["a.blp", "a.dds"], "hd"), ["_HD.w3mod\\a.blp", "_HD.w3mod\\a.dds", "a.blp", "a.dds"]);
   assert.deepEqual(ownNames(["a.blp", "a.dds"], "sd"), ["a.blp", "a.dds"]);
+  assert.deepEqual(ownNames(["a.blp", "a.dds"], "de"), ["_DE.w3mod\\a.blp", "_DE.w3mod\\a.dds", "_HD.w3mod\\a.blp", "_HD.w3mod\\a.dds", "a.blp", "a.dds"]);
 });
 
 test("the map's file of a graphics mode is found under its name on disk; Classic never reads the Reforged one", async () => {
@@ -105,4 +110,42 @@ test("the map's file of a graphics mode is found under its name on disk; Classic
   assert.deepEqual(await readImportedFor(w3, "war3mapImported\\Hero.mdx", "de"), new Uint8Array([1]));
   assert.equal(await readImportedFor(w3, "war3mapImported\\Night.mdx", "sd"), null);
   assert.deepEqual(read, ["map/_hd.w3mod/war3mapimported/hero.mdx"]);
+});
+
+const H = "war3mapImported\\Hero.mdx";
+const DE_H = `_DE.w3mod\\${H}`;
+
+test("3.0 versions: _DE.w3mod\\ path, flags, a row of three, the files of the modes, Use in", () => {
+  assert.equal(dePathOf(H), DE_H);
+  assert.equal(dePathOf("war3mapImported/Hero.mdx"), DE_H);
+  assert.ok(isDePath("_de.W3MOD/a.blp") && !isDePath("_HD.w3mod\\a.blp") && !isDePath("war3mapImported\\_DE.w3mod\\a.blp"));
+  assert.equal(classicPathOf("_DE.w3mod\\x.mdx"), "x.mdx");
+  assert.equal(newEntryFlags(DE_H), 13);
+  assert.equal(pathForUse(H, "de"), DE_H);
+  assert.equal(pathForUse("war3mapImported\\a.lua", "de"), "war3mapImported\\a.lua", "a script has no 3.0 version");
+  const e = (flags: number, path: string): ImportEntry => ({ flags, path });
+  const plain = e(21, H), hd = e(13, `_HD.w3mod\\${H}`), de = e(13, DE_H.toUpperCase());
+  const rows = importRows([de, hd, plain, e(13, `_DE.w3mod\\${H}`)]);
+  assert.deepEqual(rows.map((r) => [r.path, r.classic ?? null, r.reforged ?? null, r.de ?? null]), [
+    [H, plain, hd, de],
+    // A second 3.0 entry of the same name is a row of its own.
+    [H, null, null, e(13, DE_H)],
+  ]);
+  assert.deepEqual(rowEntries(rows[0]), [plain, hd, de]);
+  assert.deepEqual(rowMoves(rows[0], "x\\b.mdx").map((m) => m.to), ["x\\b.mdx", "_HD.w3mod\\x\\b.mdx", "_DE.w3mod\\x\\b.mdx"]);
+  assert.deepEqual(rowMoves(importRows([de])[0], "_DE.w3mod\\y.mdx").map((m) => m.to), ["_DE.w3mod\\y.mdx"]);
+  // A name is taken when any of its three versions is.
+  const taken = (have: string) => (p: string) => p.toLowerCase() === have.toLowerCase();
+  for (const have of [H, `_HD.w3mod\\${H}`, DE_H]) for (const p of [H, `_HD.w3mod\\${H}`, DE_H]) assert.ok(takenWithVersions(p, taken(have)), `${p} vs ${have}`);
+  assert.ok(!takenWithVersions(H, taken("war3mapImported\\Other.mdx")));
+  // Each mode reads its own order from the project's files.
+  const files = ["map/war3mapImported/Hero.mdx", "map/_HD.w3mod/war3mapImported/Hero.mdx", "map/_DE.w3mod/war3mapImported/Hero.mdx"].map((path) => ({ path, size: 1, modified: 0 }));
+  const w3 = (list: typeof files) => ({ workspace: { files: () => list } }) as unknown as W3Api;
+  assert.deepEqual(["sd", "hd", "de"].map((m) => importedPathFor(w3(files), H, m)), [files[0].path, files[1].path, files[2].path]);
+  // Without the 3.0 file 3.0 reads the Reforged one; without that, the plain one; Reforged never reads the 3.0 one.
+  assert.equal(importedPathFor(w3(files.slice(0, 2)), H, "de"), files[1].path);
+  assert.equal(importedPathFor(w3([files[0], files[2]]), H, "de"), files[2].path);
+  assert.equal(importedPathFor(w3([files[0]]), H, "de"), files[0].path);
+  assert.equal(importedPathFor(w3([files[2]]), H, "hd"), undefined);
+  assert.equal(importedPathFor(w3([files[2]]), H, "sd"), undefined);
 });

@@ -5,21 +5,32 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { importRows } from "../../lib/imports";
-import { followingTextures, shownEntry, textureSpots, versionToAdd } from "./versions";
+import { followingTextures, shownEntry, textureSpots, versionsToAdd, versionToAdd } from "./versions";
 
 const plain = { flags: 21, path: "war3mapImported\\Hero.mdx" }, hd = { flags: 13, path: "_HD.w3mod\\war3mapImported\\Hero.mdx" };
+const de = { flags: 13, path: "_DE.w3mod\\war3mapImported\\Hero.mdx" };
 
-test("the version a row can still get: Reforged for a plain file, Classic for a Reforged one, none for a pair", () => {
+test("the version a row can still get: Reforged for a plain file, Classic for a Reforged one, 3.0 for a pair, none for all", () => {
   assert.deepEqual(versionToAdd(importRows([plain])[0]), { side: "reforged", path: "_HD.w3mod\\war3mapImported\\Hero.mdx", flags: 13 });
   assert.deepEqual(versionToAdd(importRows([hd])[0]), { side: "classic", path: "war3mapImported\\Hero.mdx", flags: 21 });
-  assert.equal(versionToAdd(importRows([plain, hd])[0]), null);
+  assert.deepEqual(versionToAdd(importRows([plain, hd])[0]), { side: "de", path: "_DE.w3mod\\war3mapImported\\Hero.mdx", flags: 13 });
+  assert.equal(versionToAdd(importRows([plain, hd, de])[0]), null);
+  // The 3.0 version can be asked for by name; one the row has isn't offered.
+  assert.deepEqual(versionToAdd(importRows([plain])[0], "de"), { side: "de", path: "_DE.w3mod\\war3mapImported\\Hero.mdx", flags: 13 });
+  assert.equal(versionToAdd(importRows([plain, de])[0], "de"), null);
+  assert.deepEqual(versionsToAdd(importRows([de])[0]).map((v) => v.side), ["reforged", "classic"]);
 });
 
 test("a row shows the version of the graphics mode set, else the one it has", () => {
   const [pair] = importRows([plain, hd]);
   assert.equal(shownEntry(pair, "sd"), plain);
   assert.equal(shownEntry(pair, "hd"), hd);
-  assert.equal(shownEntry(pair, "de"), hd);
+  assert.equal(shownEntry(pair, "de"), hd, "3.0 reads the Reforged version when the row has no 3.0 one");
+  // A row of three: each mode its own; 3.0 falls back to Reforged, then to the plain file.
+  const [three] = importRows([plain, hd, de]);
+  assert.deepEqual(["sd", "hd", "de"].map((m) => shownEntry(three, m)), [plain, hd, de]);
+  assert.equal(shownEntry(importRows([plain, de])[0], "hd"), plain);
+  assert.equal(shownEntry(importRows([de])[0], "sd"), de, "a version no mode of the choice reads is shown when it is all the row has");
   assert.equal(shownEntry(importRows([hd])[0], "sd"), hd);
   assert.equal(shownEntry(importRows([plain])[0], "hd"), plain);
 });
