@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { facing, GAME_LIGHT_FILL, hdLight, hdTone, objectLight, shadeWrap, SUN_SHADE, sunAmbient, sunFacing, sunLight, toneOf } from "./tone";
+import { facing, GAME_LIGHT_FILL, HD_EXPOSURE, HD_SATURATION, hdLight, hdPixel, hdTone, objectLight, shadeWrap, SUN_SHADE, sunAmbient, sunFacing, sunLight, toneOf } from "./tone";
 import type { SceneLight } from "./dnclight";
 
 const near = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} not within ${tol} of ${b}`);
@@ -66,15 +66,42 @@ test("HD: the shadow intensity lifts cliff walls as much as flat ground, and amb
   near(surfaceFactor(cliff(0, 0), [0, 0, 1]), 0.779, 0.06, "grass, ambient 0, shadow 0");
 });
 
-test("HD: the picture's curve is ACES up to the middle, and white sooner near the top (the editor's shoulder)", () => {
+test("HD: the picture's curve is the light without the exposure up to the middle, ACES above, and white sooner near the top (the editor's shoulder)", () => {
   const aces = (x: number) => (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-  for (const x of [0, 0.02, 0.1, 0.2, 0.3]) near(hdTone(x), aces(x), 0.01, `x ${x}`);
+  for (const x of [0, 0.002, 0.02, 0.1]) near(hdTone(x), x / HD_EXPOSURE, 1e-9, `x ${x}: no toe`);
+  assert.ok(hdTone(0.02) > aces(0.02) * 2, "far above ACES's toe in the dark");
+  assert.ok(hdTone(0.1) > aces(0.1), "above it still at 0.1");
+  for (const x of [0.2, 0.3]) near(hdTone(x), aces(x), 0.01, `x ${x}`);
   near(hdTone(0.45), 0.649, 0.005, "lifted from ACES's 0.581");
   near(hdTone(0.6), 0.917, 0.005, "lifted from 0.673");
   assert.equal(hdTone(0.7), 1, "white where ACES is still at 0.71");
   assert.equal(hdTone(50), 1);
   assert.equal(hdTone(-1), 0);
   for (let x = 0; x < 2; x += 0.01) assert.ok(hdTone(x + 0.01) >= hdTone(x), `rising at ${x}`);
+});
+
+/** hdPixel in sRGB levels (0–255). */
+const pixel = (base: number[], light: number) => hdPixel(base.map((v) => v / 255), [light, light, light]).map((v) => v * 255);
+
+test("HD: dark ground shows as dark as its texture with the editor's own light, not crushed (we-drive 2026-11-12)", () => {
+  // Studio's even light on flat ground is 1.01 (HD_EXPOSURE); the editor's View > Lighting off pictures of new maps.
+  const cave = pixel([30, 26, 25], 1.01), ice = pixel([29, 45, 49], 1.01);
+  [30, 25, 24].forEach((v, c) => near(cave[c], v, 2.5, `Dungeon's Cave_Dirt, channel ${c}`));
+  [27, 46, 49].forEach((v, c) => near(ice[c], v, 2.5, `Icecrown's Ice_Dirt, channel ${c}`));
+  // Darker light keeps the order and goes to black.
+  assert.ok(pixel([30, 26, 25], 0.5)[0] < cave[0] && pixel([30, 26, 25], 0)[0] === 0);
+});
+
+test("HD: grass's red and blue stay near 0 (the saturation), its green as the editor shows it", () => {
+  // Lords_Grass_Diffuse 20, 124, 18 shows as 3, 131, 0 in the editor (light about 1.1 there).
+  const g = pixel([20, 124, 18], 1.1);
+  assert.ok(g[0] <= 6 && g[2] <= 6, `red and blue ${g[0]}, ${g[2]}`);
+  near(g[1], 131, 6, "green");
+  // A grey keeps its grey: the saturation moves only what differs from the luminance.
+  const grey = pixel([60, 60, 60], 1.01);
+  near(grey[0], grey[1], 1e-6, "grey red");
+  near(grey[2], grey[1], 1e-6, "grey blue");
+  assert.ok(HD_SATURATION > 1 && HD_SATURATION < 1.2);
 });
 
 test("HD's real shadows: lit, the shading is facing()'s; between, it goes over smoothly", () => {
