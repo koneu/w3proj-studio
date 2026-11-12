@@ -5,6 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { rangeOf, type FieldRange } from "./limits";
 import { artValue } from "./artset";
+import { isSkinFileOf, SkinIds } from "./skinids";
 import { listItem, parseIni, parseIniRaw, parseSlk, unquote, westring } from "../formats/text";
 
 export type ValueType = "int" | "real" | "unreal" | "string";
@@ -96,7 +97,8 @@ export function englishWords(rows: readonly Record<string, string>[]) {
   return [...words].join(" ");
 }
 
-/** Per object kind: metadata SLK and the data tables (SLK name → path, key column). */
+/** Per object kind: metadata SLK and the data tables (SLK name → path, key column). The SLK name is the one the
+ *  metadata's `slk` column gives (DoodadMetaData says "DoodadData" for Doodads.slk); see tableOf. */
 const KINDS: Record<string, { meta: string; tables: Record<string, [string, string]>; main: string }> = {
   w3u: {
     meta: "Units\\UnitMetaData.slk",
@@ -113,7 +115,7 @@ const KINDS: Record<string, { meta: string; tables: Record<string, [string, stri
   w3a: { meta: "Units\\AbilityMetaData.slk", main: "AbilityData", tables: { AbilityData: ["Units\\AbilityData.slk", "alias"] } },
   w3h: { meta: "Units\\AbilityBuffMetaData.slk", main: "AbilityBuffData", tables: { AbilityBuffData: ["Units\\AbilityBuffData.slk", "alias"] } },
   w3b: { meta: "Units\\DestructableMetaData.slk", main: "DestructableData", tables: { DestructableData: ["Units\\DestructableData.slk", "DestructableID"] } },
-  w3d: { meta: "Doodads\\DoodadMetaData.slk", main: "Doodads", tables: { Doodads: ["Doodads\\Doodads.slk", "doodID"] } },
+  w3d: { meta: "Doodads\\DoodadMetaData.slk", main: "DoodadData", tables: { DoodadData: ["Doodads\\Doodads.slk", "doodID"] } },
   w3q: { meta: "Units\\UpgradeMetaData.slk", main: "UpgradeData", tables: { UpgradeData: ["Units\\UpgradeData.slk", "upgradeid"] } },
 };
 
@@ -124,6 +126,8 @@ interface Shared {
   /** Merged INI "profile" data of every Units/Doodads *.txt, locale files last. */
   profile: Map<string, Map<string, string>>;
   names: Map<string, string>;
+  /** Section names and skinTypes of each profile file (game path), for SkinIds. */
+  sections: { path: string; sections: [string, string | undefined][] }[];
 }
 
 /** The game reads of one load, as background reads while nobody waits on it (see loadKind). */
@@ -176,8 +180,11 @@ function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
       for (const section of ini.values()) for (const [k, v] of section) we.set(k.toUpperCase(), v);
     }
     const profile = new Map<string, Map<string, string>>();
-    for (const text of texts) {
-      for (const [id, kv] of parseIniRaw(await text)) {
+    const sections: Shared["sections"] = [];
+    for (const [i, text] of texts.entries()) {
+      const ini = parseIniRaw(await text);
+      sections.push({ path: files[i], sections: [...ini].map(([id, kv]) => [id, kv.get("skintype")]) });
+      for (const [id, kv] of ini) {
         const merged = profile.get(id) ?? new Map();
         for (const [k, v] of kv) merged.set(k, v);
         profile.set(id, merged);
@@ -192,7 +199,7 @@ function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
       const text = n ? westring(we, unquote(n)) : "";
       if (n && !text.startsWith("WESTRING_")) names.set(id, unquote(n).startsWith("WESTRING_") ? text : unquote(n));
     }
-    return { we, editData, profile, names };
+    return { we, editData, profile, names, sections };
   })();
   const entry = { data, reads };
   shared = entry;
@@ -228,7 +235,7 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
   const tableTexts = Object.values(spec.tables).map(([path]) => reads.text(path));
   const metaText = reads.text(spec.meta);
   for (const t of [...tableTexts, metaText]) t.catch(() => {});
-  const { we, editData, profile, names: sharedNames } = await loadShared(w3, background);
+  const { we, editData, profile, names: sharedNames, sections } = await loadShared(w3, background);
 
   const tables = new Map<string, Map<string, Record<string, string>>>();
   for (const [i, [name, [, key]]] of Object.entries(spec.tables).entries()) {
@@ -237,6 +244,21 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     tables.set(name, rows);
   }
   const main = tables.get(spec.main)!;
+  /** A metadata `slk` name's table: as spelled, else in another case, else a kind's only table (a metadata file
+   *  naming its table otherwise than KINDS would otherwise give no defaults at all). */
+  const tableOf = (slk: string) => {
+    const lower = slk.toLowerCase();
+    return tables.get(slk) ?? [...tables].find(([name]) => name.toLowerCase() === lower)?.[1] ?? (tables.size === 1 ? main : undefined);
+  };
+  // The kind's skin sections, for types whose section is spelled in another case (skinids.ts).
+  const skinIds = new SkinIds(kind, sections.filter((s) => isSkinFileOf(kind, s.path)).flatMap((s) => s.sections));
+  /** A type's profile values: its own sections', then its skin section's where that's spelled otherwise. */
+  const profileOf = (baseId: string): ((key: string) => string | undefined) | undefined => {
+    const own = profile.get(baseId), skin = skinIds.section(baseId);
+    const other = skin !== undefined && skin !== baseId ? profile.get(skin) : undefined;
+    if (!own && !other) return undefined;
+    return (key) => own?.get(key) ?? other?.get(key);
+  };
 
   const fields: FieldMeta[] = [];
   for (const r of parseSlk(await metaText)) {
@@ -265,6 +287,10 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
   const fieldById = new Map(fields.map((f) => [f.id, f]));
 
   const names = new Map(sharedNames);
+  for (const id of main.keys()) {
+    const skin = skinIds.section(id);
+    if (!names.has(id) && skin !== undefined && skin !== id && sharedNames.has(skin)) names.set(id, sharedNames.get(skin)!);
+  }
   for (const [id, r] of main) {
     const n = r.Name ?? r.name;
     const text = n?.startsWith("WESTRING_") ? westring(we, n) : "";
@@ -301,7 +327,7 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
       [{ id: "category", label: "Category" }, (id) => category("DestructibleCategories", row("DestructableData", id).category)],
       [{ id: "target", label: "Targeted as" }, (id) => row("DestructableData", id).targType ?? "—"],
     ],
-    w3d: [[{ id: "category", label: "Category" }, (id) => category("DoodadCategories", row("Doodads", id).category)]],
+    w3d: [[{ id: "category", label: "Category" }, (id) => category("DoodadCategories", row("DoodadData", id).category)]],
     w3q: [[{ id: "race", label: "Race" }, (id) => raceLabel(row("UpgradeData", id).race)]],
   };
   const fns = facetFns[kind] ?? [];
@@ -334,14 +360,14 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     defaultValue(baseId, f, level, artMode) {
       if (f.slk === "Profile") {
         // Reforged skin files split some fields per art set ("Art:sd", "Art:hd").
-        const kv = profile.get(baseId), key = f.field.toLowerCase();
+        const get = profileOf(baseId), key = f.field.toLowerCase();
         const mode = artMode ?? w3.settings.get<string>("game.graphicsMode") ?? "hd";
-        const raw = kv ? artValue((k) => kv.get(k), key, mode) : undefined;
+        const raw = get ? artValue(get, key, mode) : undefined;
         if (raw === undefined) return undefined;
         if (f.repeat > 0) return listItem(raw, Math.max(0, level - 1)) ?? undefined;
         return f.index > 0 ? listItem(raw, f.index) : unquote(raw);
       }
-      const row = tables.get(f.slk)?.get(baseId);
+      const row = tableOf(f.slk)?.get(baseId);
       if (!row) return undefined;
       let col = f.field;
       if (f.data > 0) col += String.fromCharCode(64 + f.data);
