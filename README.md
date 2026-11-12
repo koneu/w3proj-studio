@@ -219,6 +219,12 @@ On Linux:
   Steam itself starts. (Steam can't pass a map to a game it starts itself, so Studio doesn't go through the Steam
   client. `proton run` isn't used: its steam.exe stays until every other program in the prefix, Battle.net
   included, has ended.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
+- **Your game's Wine prefix is shared.** Studio has no Wine prefix of its own: the game, the World Editor and
+  JassHelper (every save of a vJass map) run in the game's Steam prefix, the one your Battle.net may live in. While
+  one of them runs you'll see Wine's own processes there (`wineserver`, `explorer.exe`, `services.exe`); they end with
+  it. Studio stops a JassHelper that doesn't finish, and its Wine processes with it. Nothing in the prefix is changed
+  beyond what running these programs does; if the game or Battle.net misbehaves while Studio compiles a vJass map, save
+  that map in plain JASS or Lua, or close Studio while playing.
 - **The MCP server** uses a Unix socket in `$XDG_RUNTIME_DIR`, or `/run/user/<uid>` when a launcher leaves the variable out (only you can reach it), instead of the Windows
   named pipe; `w3proj mcp` connects to it the same way. "Try to set up for …" looks for clients in `~/.config`
   and the home folder.
