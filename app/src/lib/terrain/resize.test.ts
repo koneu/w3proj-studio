@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { newCliffVariation, resizedCameraZoom, resizeTerrain } from "./resize";
+import { newCliffVariation, resizedCameraZoom, resizeSpecials, resizeTerrain } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -283,4 +283,17 @@ test("applyResizePathing: what resizeMap applies and writes", () => {
   w = wpm();
   assert.equal(applyResizePathing(w, planPathingOverrides(file(t, [[3, 4, 8, 0]]), t, [0, 0, 0, 0]), t, [0, 0, 0, 0]), null);
   assert.ok(w.every((b) => b === 0));
+});
+
+test("special doodads stay on their ground: their tiles shift by the left and bottom change, those cut off go", () => {
+  const t = terrain(33, 33); // 32 × 32 tiles
+  const list = [{ id: "YCx7", z: 0, x: 13, y: 24 }, { id: "LCc0", z: 0, x: 0, y: 31 }, { id: "LCc2", z: 0, x: 31, y: 0 }];
+  // Grown by 32 on the left and bottom: everything 32 tiles further in, nothing lost.
+  assert.deepEqual(resizeSpecials(list, t, [32, 0, 32, 0]), { kept: [{ id: "YCx7", z: 0, x: 45, y: 56 }, { id: "LCc0", z: 0, x: 32, y: 63 }, { id: "LCc2", z: 0, x: 63, y: 32 }], removed: 0 });
+  // Grown on the right and top: tiles stay.
+  assert.deepEqual(resizeSpecials(list, t, [0, 32, 0, 32]).kept, list);
+  // Cut by 1 on the left and the top: the one on column 0, row 31 goes; the left cut moves the rest one tile left.
+  const cut = resizeSpecials(list, t, [-1, 0, 0, -1]);
+  assert.deepEqual(cut, { kept: [{ id: "YCx7", z: 0, x: 12, y: 24 }, { id: "LCc2", z: 0, x: 30, y: 0 }], removed: 1 });
+  assert.deepEqual(list[0], { id: "YCx7", z: 0, x: 13, y: 24 }, "the list given isn't changed");
 });

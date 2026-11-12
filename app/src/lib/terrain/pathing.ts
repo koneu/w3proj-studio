@@ -30,6 +30,10 @@ export interface PathingStamp {
   /** Walkable destructables (bridges): the game adds their pathing at run
    *  time, the map only has the covered cells cleared. */
   clear?: boolean;
+  /** A cliff doodad (a cave or collapsed cliff: the doodad file's special doodads). Red blocks as everywhere; where
+   *  its texture is blue only (a cave's floor) the cliff and dry ground under it become open unbuildable ground
+   *  (0x08) and water stays as it is. Measured on the caves of Snoware Bay (tile 70,10) and Eversong (12,52). */
+  cliffDoodad?: boolean;
 }
 
 export interface PathingInput {
@@ -164,14 +168,16 @@ export function generatePathing(input: PathingInput): Uint8Array {
       cells[cy * w + cx] = p;
     }
   }
+  const stamps = input.stamps ?? [];
+  // Cliff doodads change the ground itself: before the border, which stays as it is.
+  for (const s of stamps) if (s.cliffDoodad) stamp(cells, w, h, t, s);
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {
       if (cx < ml * 4 || cx >= w - mr * 4 || cy < mb * 4 || cy >= h - mt * 4) cells[cy * w + cx] = BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK;
     }
   }
-  const stamps = input.stamps ?? [];
   for (const s of stamps) if (s.clear) stamp(cells, w, h, t, s);
-  for (const s of stamps) if (!s.clear) stamp(cells, w, h, t, s);
+  for (const s of stamps) if (!s.clear && !s.cliffDoodad) stamp(cells, w, h, t, s);
   return out;
 }
 
@@ -209,6 +215,11 @@ function stamp(cells: Uint8Array, w: number, h: number, t: Terrain, s: PathingSt
     const r = s.rgba[o], g = s.rgba[o + 1], b = s.rgba[o + 2];
     if (s.clear) {
       if (r > 127 || g > 127 || b > 127) cells[cy * w + cx] = 0;
+      return;
+    }
+    if (s.cliffDoodad && r <= 127 && b > 127) {
+      const c = cells[cy * w + cx];
+      cells[cy * w + cx] = c & NO_WATER ? (c & BLIGHT) | NO_BUILD | (g > 127 ? NO_FLY : 0) : c | NO_BUILD;
       return;
     }
     let f = 0;

@@ -9,7 +9,7 @@ import { parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes } from "../../lib/terrain/w3etext";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { buildMinimap, buildMinimapIcons, graphicsMode, minimapSettings } from "./minimapgen";
-import { buildPathingMap, readMapJson } from "./pathmap";
+import { buildPathingMap, readMapJson, specialsOf, type SpecialDoodad } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile } from "./placement";
@@ -51,6 +51,8 @@ export interface DeriveSources {
   /** The terrain and doodads to derive from. */
   now: Terrain;
   doodads: Placed[];
+  /** The doodad file's special doodads (caves, collapsed cliffs), stamped into the pathing. */
+  specials: SpecialDoodad[];
   /** What the stored shadow map was made from: only cells whose prediction changed since are updated. */
   baseTerrain: Terrain;
   baseDoodads: Placed[];
@@ -75,7 +77,7 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const gone = () => s.stillOpen?.() === false;
   if (cfg<boolean>("pathing.regenerate")) try {
-    const { wpm, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"));
+    const { wpm, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"), s.specials);
     await s.filterPathing(wpm);
     if (gone()) return;
     await w3.workspace.writeBytes("map/war3map.wpm", wpm);
@@ -158,7 +160,7 @@ export async function deriveFromProject(w3: W3Api, opts: {
   ]);
   const doodads = dooFile?.list ?? [];
   await writeDerived(w3, {
-    now, doodads,
+    now, doodads, specials: specialsOf(dooFile?.doc),
     baseTerrain: opts.from.terrain ?? now,
     baseDoodads: opts.from.doodads,
     units: unitsFile?.list ?? null,

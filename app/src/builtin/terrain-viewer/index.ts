@@ -40,7 +40,7 @@ import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
-import { buildPathingMap, loadPathingData, objectMods, type PathingData } from "./pathmap";
+import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
@@ -88,7 +88,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -3756,6 +3756,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const flags = flagsOf(p);
                 if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
               }
+              // Special doodads are placed by tile: they move with their ground.
+              if (Array.isArray(f.doc.specials)) {
+                const moved = resizeSpecials(f.doc.specials as unknown[], terrain, change);
+                f.doc.specials = moved.kept;
+                removed += moved.removed;
+              }
             }
             await savePlacedFile(w3, f);
           }
@@ -3787,7 +3793,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // since the editor reopens on the new size only afterwards.
           const rf = (p: string) => readFile(w3, doc, p);
           const doodads = dooFile?.list ?? [];
-          const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"));
+          const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"), specialsOf(dooFile?.doc));
           // Same size: the tool groups' own filters, as everywhere else.
           if (change.every((c) => c === 0)) filterPathing(wpm);
           const pathingText = applyResizePathing(wpm, plan, next, change);
@@ -3968,7 +3974,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           pathing: async (opts) => {
             const doodads = dooFile?.list ?? [];
-            const { wpm } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p), w3.settings.get<number>("terrain.pathing.deepWater"));
+            const { wpm } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p), w3.settings.get<number>("terrain.pathing.deepWater"), specialsOf(dooFile?.doc));
             if (opts?.filtered !== false) filterPathing(wpm);
             const v = new DataView(wpm.buffer, wpm.byteOffset);
             return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
@@ -5024,7 +5030,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take()) => {
           const icons = units ?? unitsFile?.list;
           await writeDerived(w3, {
-            now, doodads, baseTerrain, baseDoodads,
+            now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
             units: unitsFile && icons ? icons : null,
             skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
             read: (p) => readFile(w3, doc, p),

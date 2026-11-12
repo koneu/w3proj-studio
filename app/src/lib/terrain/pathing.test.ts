@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BLOCKED, generatePathing, NO_BUILD, NO_WALK, NO_WATER } from "./pathing";
+import { BLOCKED, generatePathing, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "./pathing";
 import type { Corner, Terrain } from "./w3e";
 
 /** Flat dry ground of 4 × 4 tiles at layer 2, no ramps. */
@@ -87,6 +87,40 @@ test("the water's depth is measured from the tileset's own surface", () => {
   assert.equal(cell(89.6), NO_BUILD, "the usual surface is the default");
   assert.equal(cell(76.8), NO_BUILD | NO_WALK, "57.8 deep on Ashenvale: past the 52 of deep water");
   assert.equal(cell(96), NO_BUILD, "38.6 deep on Dalaran");
+});
+
+test("a cliff doodad's blue opens the cliff and dry ground under it, leaves water, and its red blocks", () => {
+  // Tile (0, 0) a cliff, (1, 0) dry, (2, 0) deep water; one texture 12 × 4 pixels, all blue, over the three, bottom
+  // left on tile (0, 0) and unturned, as a special doodad is placed.
+  const t = ground();
+  corner(t, 0, 0).layer = 3;
+  for (let x = 2; x <= 3; x++) for (let y = 0; y <= 1; y++) { corner(t, x, y).hasWater = true; corner(t, x, y).water = 60; }
+  const paint = (w: number, h: number, rgb: [number, number, number]) => {
+    const rgba: number[] = [];
+    for (let i = 0; i < w * h; i++) rgba.push(...rgb, 255);
+    return { x: w * 16, y: h * 16, angle: -Math.PI / 2, width: w, height: h, rgba };
+  };
+  const cells = (cliffDoodad: boolean, margins: [number, number, number, number] = [0, 0, 0, 0]) => {
+    const p = generatePathing({ terrain: t, margins, tileRules: new Map(), stamps: [{ ...paint(12, 4, [0, 0, 255]), cliffDoodad }] });
+    return (tx: number) => p[16 + tx * 4];
+  };
+  const cave = cells(true);
+  assert.equal(cave(0), NO_BUILD, "the cliff is open ground");
+  assert.equal(cave(1), NO_BUILD, "dry ground can't be built on");
+  assert.equal(cave(2), NO_BUILD | NO_WALK, "deep water stays");
+  // Control: a regular doodad's blue only adds no-build.
+  const plain = cells(false);
+  assert.equal(plain(0), CLIFF);
+  assert.equal(plain(1), NO_WATER | NO_BUILD);
+  assert.equal(plain(2), NO_BUILD | NO_WALK);
+  // The map's unplayable border is written over it.
+  assert.equal(cells(true, [1, 0, 0, 0])(0), BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK);
+  // Red blocks, as anywhere.
+  // On tile (1, 2):
+  const red = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map(), stamps: [{ ...paint(4, 4, [255, 0, 0]), x: 192, y: 320, cliffDoodad: true }] });
+  assert.equal(red[16 + 8 * 16 + 4], NO_WATER | BLOCKED | NO_WALK);
+  assert.equal(red[16 + 11 * 16 + 7], NO_WATER | BLOCKED | NO_WALK);
+  assert.equal(red[16 + 12 * 16 + 4], NO_WATER, "control: the tile above is open");
 });
 
 test("a ramp side piece's flat tile is blocked beside a ramp or a cliff, walkable beside stray ramp flags", () => {

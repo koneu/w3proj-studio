@@ -69,6 +69,22 @@ export function resizeTerrain(t: Terrain, change: Sides, random: () => number = 
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };
 }
 
+/** The doodad file's special doodads (caves, collapsed cliffs: placed by tile from the map's bottom left) after
+ *  `change`: they stay on their ground, so their tiles shift by what was added or cut on the left and bottom; those whose
+ *  tile is no longer on the map go, as the regular doodads outside do. Entries that aren't specials are kept as they
+ *  are. */
+export function resizeSpecials<T>(list: readonly T[], t: Terrain, change: Sides): { kept: T[]; removed: number } {
+  const [w, h] = resizedSize(t, change);
+  const kept: T[] = [];
+  for (const s of list) {
+    const e = s as { x?: unknown; y?: unknown };
+    if (!Number.isInteger(e?.x) || !Number.isInteger(e?.y)) { kept.push(s); continue; }
+    const x = (e.x as number) + change[0], y = (e.y as number) + change[2];
+    if (x >= 0 && y >= 0 && x < w && y < h) kept.push({ ...s, x, y });
+  }
+  return { kept, removed: list.length - kept.length };
+}
+
 /** A grid of `cells` per tile (shadows: 4) resized like the terrain; new cells get `fill`. */
 export function resizeGrid(grid: Uint8Array, t: Terrain, change: Sides, cells: number, fill = 0): Uint8Array {
   const ow = (t.width - 1) * cells, oh = (t.height - 1) * cells;
