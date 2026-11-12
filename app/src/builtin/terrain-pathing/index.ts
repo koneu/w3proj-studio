@@ -9,7 +9,7 @@ import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type Te
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { overridesForSize, pathingOverridesText } from "../../lib/terrain/resize";
 import { backupPath, importWpmDifferences, mayPaint, readPathingFile, replaceQuestion, type PathingFile } from "./file";
-import { brushCells } from "./brush";
+import { brushCells, brushOutline } from "./brush";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -247,7 +247,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return true;
     },
     pointerMove(p) {
-      if (p.ground) ed.setBrush({ x: p.ground[0], y: p.ground[1], r: radius * 32, square, rgb: mode === "block" ? [255, 90, 90] : mode === "allow" ? [120, 255, 140] : [220, 220, 220] });
+      if (p.ground) ed.setBrush({ ...brushOutline(Math.floor((p.ground[0] - t.offsetX) / 32), Math.floor((p.ground[1] - t.offsetY) / 32), radius, t.offsetX, t.offsetY), square, rgb: mode === "block" ? [255, 90, 90] : mode === "allow" ? [120, 255, 140] : [220, 220, 220] });
       if (p.down && stroke && p.ground) paint(p.ground);
     },
     pointerUp() {

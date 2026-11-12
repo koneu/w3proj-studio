@@ -52,3 +52,30 @@ test("control: the hunks of 18k lines with many scattered edits are found", () =
   const a = Array.from({ length: 18000 }, (_, i) => `l${i}`), b = a.map((l, i) => (i % 100 === 50 ? `${l}!` : l));
   assert.equal(lineHunks(a, b).length, 180);
 });
+
+const lines = (n: number, tag = "l") => Array.from({ length: n }, (_, i) => `${tag}${i}`);
+test("a big block only one text has is one hunk of its own; the small edits before it stay separate", () => {
+  const base = lines(4000);
+  const a = [...base]; a[10] = "X"; a[3400] = "Y";
+  const b = [...base, ...lines(14700, "tail")];
+  const h = lineHunks(a, b);
+  assert.deepEqual(h.map((x) => [x.fromA, x.toA]), [[10, 11], [3400, 3401]].concat([[4000, 4000]]).map(([f, t]) => [f, t]));
+  assert.deepEqual(h[2], { fromA: 4000, toA: 4000, fromB: 4000, toB: 18700 });
+  // The tail instead of the end of the other text (both sides differ there): still the two edits, then one gap.
+  const c = [...base, ...lines(500, "other")];
+  const h2 = lineHunks(a.concat(lines(300, "gen")), c);
+  assert.equal(h2.length, 3);
+  assert.deepEqual([h2[0].fromA, h2[1].fromA], [10, 3400]);
+});
+test("20,000 lines with 3 edits are fast", () => {
+  const base = lines(20000);
+  const b = [...base]; b[5] = "a"; b[9000] = "b"; b[19990] = "c";
+  const t = Date.now();
+  const h = lineHunks(base, b);
+  assert.equal(h.length, 3);
+  assert.ok(Date.now() - t < 500, `took ${Date.now() - t} ms`);
+});
+test("repeated lines still give a valid edit script", () => {
+  const a = ["x", "y", "x", "y", "z", "x"], b = ["y", "x", "y", "x", "z", "z", "x"];
+  assert.equal(apply(a.join("\n"), b.join("\n")), a.join("\n"));
+});

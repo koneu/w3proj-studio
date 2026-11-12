@@ -408,7 +408,7 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .techtree-position { white-space: nowrap; }
 .techtree-position select { width: auto; display: inline-block; }
 .techtree-warn { color: var(--warning, #d7a03a); }
-.techtree-random.form-input { width: 76px; display: inline-block; }
+.techtree-random.form-input { width: 120px; display: inline-block; }
 .techtree-view { display: inline-flex; gap: 2px; margin-left: 16px; }
 .techtree-view button.active { background: var(--accent-2); border-color: var(--accent-2); color: white; }
 .techtree-grid th.techtree-grid-player, .techtree-grid td.techtree-grid-cell { text-align: center; padding: 2px 3px; }

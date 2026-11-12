@@ -15,3 +15,11 @@ export function brushCells(cx: number, cy: number, radius: number, square: boole
   }
   return out;
 }
+
+/**
+ * The outline the brush draws for a stamp on cell (cx, cy): centred on that cell, reaching to the far edge of the
+ * outermost cells brushCells paints (a square of 2 * radius - 1 cells across), in world units.
+ */
+export function brushOutline(cx: number, cy: number, radius: number, offsetX: number, offsetY: number): { x: number; y: number; r: number } {
+  return { x: offsetX + (cx + 0.5) * 32, y: offsetY + (cy + 0.5) * 32, r: (radius - 0.5) * 32 };
+}

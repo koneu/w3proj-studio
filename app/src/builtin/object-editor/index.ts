@@ -23,7 +23,7 @@ import { ABILITY_ART, abilityArt, previewTeam, previewTextures } from "./preview
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { isCampaignFiles, registerObjectTools } from "./tools";
@@ -1440,8 +1440,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 : `${id} isn't in this map's object data, its campaign's or the game's.`;
               return;
             }
-            const std: Obj = file.version >= 3 ? { base: id, mods: [] } : { base: id, end: id, mods: [] };
-            file.original.push(std);
+            // Another focus (the same object asked for twice) may have added it while the game data loaded.
+            const std = objectToEdit(file as unknown as EditFile, id, true) as Obj;
             select(std);
             status.textContent = `${k.names.get(id)} (${id}): game object, unchanged in this map — edits change it for this map.`;
             renderList();

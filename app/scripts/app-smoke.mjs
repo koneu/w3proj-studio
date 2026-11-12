@@ -7766,6 +7766,17 @@ async function scriptGuard(page, found) {
     await settle();
     await saveRegion("Fifth Region");
     if (!/gg_rct_Fifth_Region/.test(script()) || (await warnings()).length) fail(`the first save of a script in another placing order didn't regenerate quietly: ${JSON.stringify(await warnings())}`);
+
+    // ---- Only the line endings differ: the difference says so (not "0 changes") and still offers Replace, labelled for it ----
+    const now = script();
+    const flipped = now.includes("\r\n") ? now.replace(/\r\n/g, "\n") : now.replace(/\n/g, "\r\n");
+    writeFileSync(join(k.root, "map", "war3map.j"), flipped);
+    await settled(page);
+    await page.evaluate(`w3.editors.open("w3:script-diff:map/war3map.j", "w3.scriptDiff")`);
+    await until("the line-ending difference", () => page.evaluate(`!!document.querySelector(".editor-pane:not([hidden]) .script-diff-replace")`), 30000)
+      .catch(() => fail("the difference of a script that differs only in line endings offers no Replace"));
+    const endings = await page.evaluate(`({ head: document.querySelector(".editor-pane:not([hidden]) .diff-head")?.innerText ?? "", button: document.querySelector(".editor-pane:not([hidden]) .script-diff-replace")?.textContent ?? "" })`);
+    if (!/only line endings differ/.test(endings.head) || /\b0 changes/.test(endings.head) || !/line endings/.test(endings.button)) fail(`the line-ending difference: ${JSON.stringify(endings)}`);
   } finally {
     await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.notify = window.__sg.notify; })()`);
     await page.evaluate(`w3.editors.closeAll()`);

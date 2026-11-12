@@ -42,3 +42,17 @@ test("cells outside the map are clipped, for both shapes", () => {
   assert.equal(brushCells(-1, 3, 1, true, W, H).length, 0);
   assert.equal(brushCells(W - 1, H - 1, 2, true, W, H).length, 4);
 });
+
+test("the outline spans exactly the cells a click paints, centred on the clicked cell", async () => {
+  const { brushOutline } = await import("./brush");
+  for (const radius of [1, 2, 3, 5]) {
+    const cells = brushCells(10, 7, radius, true, 64, 64);
+    const xs = cells.map((i) => i % 64), ys = cells.map((i) => Math.floor(i / 64));
+    const o = brushOutline(10, 7, radius, -1024, -512);
+    // The painted square in world units: from the left edge of the first cell to the right edge of the last.
+    assert.equal(o.x - o.r, -1024 + Math.min(...xs) * 32);
+    assert.equal(o.x + o.r, -1024 + (Math.max(...xs) + 1) * 32);
+    assert.equal(o.y - o.r, -512 + Math.min(...ys) * 32);
+    assert.equal(o.y + o.r, -512 + (Math.max(...ys) + 1) * 32);
+  }
+});

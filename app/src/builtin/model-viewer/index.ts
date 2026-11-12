@@ -196,7 +196,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const side = h("div.model-side", {},
           h("h3", {}, model.name || doc.path.split(/[/:]/).pop()),
           h("div.model-facts", {},
-            h("div", {}, `MDX v${model.version} · ${formatBytes(bytes.length)}`),
+            h("div", {}, `${/\.mdl$/i.test(doc.path) ? "MDL" : "MDX"} v${model.version} · ${formatBytes(bytes.length)}`),
             h("div", {}, `${st.vertices.toLocaleString()} vertices · ${st.triangles.toLocaleString()} triangles`),
             h("div", {}, `${st.geosets} geosets · ${model.materials.length} materials · ${st.nodes} nodes`),
             h("div", {}, `${model.sequences.length} animations`),

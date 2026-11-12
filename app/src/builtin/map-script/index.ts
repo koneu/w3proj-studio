@@ -472,8 +472,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           view.reconfigure({ collapseUnchanged: { margin: 3, minSize: 6 } });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };
+          const onlyEndings = current !== made.text && !chunks.length;
           head.append(
-            h("small.muted", {}, current === made.text ? "  the same" : `  ${chunks.length} change${chunks.length === 1 ? "" : "s"}`),
+            h("small.muted", {}, current === made.text ? "  the same" : onlyEndings ? "  only line endings differ" : `  ${chunks.length} change${chunks.length === 1 ? "" : "s"}`),
             h("span.diff-actions", {},
               h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
               h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
@@ -481,7 +482,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               current === made.text ? null : h("button.script-diff-replace", {
                 title: "Write what the map's data makes over the script (a checkpoint keeps the script first)",
                 onclick: () => void replaceScript(root, file).then(() => render()).catch((e) => w3.window.showError(String(e))),
-              }, "Replace the script")));
+              }, onlyEndings ? "Replace the script (line endings)" : "Replace the script")));
           el.replaceChildren(head, box);
         };
         await render();
