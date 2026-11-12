@@ -870,6 +870,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-editor:focus { outline: none; }
 .imp-preview { margin-top: 10px; }
 .imp-preview canvas { display: block; max-width: 100%; max-height: 320px; background: repeating-conic-gradient(#2a2a2a 0 25%, #3a3a3a 0 50%) 0 0 / 16px 16px; }
+.imp-preview .obj-preview { float: none; margin: 0; width: 100%; max-width: 360px; height: 220px; }
+.imp-preview .obj-preview canvas { max-height: none; background: none; }
 .imp-warn { color: #cca700; }
 
 /* Map Size tab (terrain editor) */

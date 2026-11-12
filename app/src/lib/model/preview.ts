@@ -26,7 +26,7 @@ export class ModelPreview {
   /** Bumped by every show and setPrefer: a load that finishes under an older number is dropped. */
   private token = 0;
 
-  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd" } = {}) {
+  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd"; onFail?: (e: unknown) => void } = {}) {
     this.canvas = this.newCanvas();
     this.note = div("obj-preview-note muted");
     this.el = div("obj-preview");
@@ -74,7 +74,9 @@ export class ModelPreview {
     this.note.title = mdx ?? "";
     if (!mdx) return;
     void this.load(mdx, token).catch((e) => {
-      if (this.token === token) this.note.textContent = `Can't show ${mdx.split(/[\\/]/).pop()}: ${(e as Error).message ?? e}`;
+      if (this.token !== token) return;
+      this.note.textContent = `Can't show ${mdx.split(/[\\/]/).pop()}: ${(e as Error).message ?? e}`;
+      this.opts.onFail?.(e);
     });
   }
 
