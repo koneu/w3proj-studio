@@ -1015,3 +1015,89 @@ test("a Lua map gets war3map.lua, with its own code left alone", () => {
   assert.ok(lua.includes("function main()"));
   hasNot(lua, "takes nothing");
 });
+
+// What the World Editor's war3map.lua writes differently from a word-for-word translation (we-drive on HumanX02,
+// UndeadX03, NightElfX03 and a synthetic map, 2026-11-12).
+const luaData = parseTriggerData(`
+[TriggerTypes]
+integer=0,1,1,Integer
+real=0,1,1,Real
+string=0,1,1,String
+skymodelstring=0,0,0,Sky,string
+[TriggerParams]
+OperatorEqualENE=0,ComparisonOperator,==,Equal
+SkyModelNone=0,skymodelstring,null,None
+[TriggerEvents]
+MapInitializationEvent=0,nothing
+[TriggerConditions]
+OperatorCompareInteger=0,integer,ComparisonOperator,integer
+OrMultiple=0,nothing
+[TriggerActions]
+SetSkyModel=0,skymodelstring
+ReturnAction=0,nothing
+`);
+const luaScript = (triggers: TriggerFile, extra: Partial<ScriptInput> = {}) =>
+  generateScript(input({ data: luaData, info: info({ scriptType: 1 }), triggers, ...extra }));
+const jassScript = (triggers: TriggerFile, extra: Partial<ScriptInput> = {}) => generateScript(input({ data: luaData, triggers, ...extra }));
+
+test("Lua: reals start at 0.0 and strings at \"\", in the declaration and InitGlobals", () => {
+  const triggers = { ...wtg([]), variables: [variable("R", "real"), variable("S", "string"), variable("T", "string", { initialized: true, initialValue: "a" }), variable("N", "integer")] };
+  const lua = luaScript(triggers);
+  const decl = lua.slice(0, lua.indexOf("function InitGlobals")), init = lua.slice(lua.indexOf("function InitGlobals"));
+  has(decl, "udg_R = 0.0");
+  has(decl, 'udg_S = ""');
+  has(decl, 'udg_T = ""');
+  has(decl, "udg_N = 0");
+  has(init, "udg_R = 0.0");
+  has(init, 'udg_S = ""');
+  has(init, 'udg_T = "a"');
+  // war3map.j keeps 0 and declares the string without a value (the game's 326 JASS maps).
+  const jass = jassScript(triggers);
+  has(jass, `    ${"real".padEnd(24)}${"udg_R".padEnd(26)} = 0`);
+  has(jass, `    ${"string".padEnd(24)}udg_S`);
+  has(jass, "    set udg_R = 0");
+});
+
+test("Lua: a string preset of null is \"\" (SetSkyModel(\"\"))", () => {
+  const t = trigger("Sky", [eca(2, "SetSkyModel", [{ type: 0, value: "SkyModelNone" }])]);
+  has(luaScript(wtg([t])), 'SetSkyModel("")');
+  has(jassScript(wtg([t])), "    call SetSkyModel( null )");
+});
+
+test("Lua: an Or condition's comparison has one pair of parentheses", () => {
+  const cmp = (v: string) => eca(1, "OperatorCompareInteger", [{ type: 3, value: v }, { type: 0, value: "OperatorEqualENE" }, { type: 3, value: "2" }], { group: 0 });
+  const t = trigger("Or", [eca(1, "OrMultiple", [], { children: [cmp("1"), cmp("3")] }), eca(1, "OperatorCompareInteger", [{ type: 3, value: "4" }, { type: 0, value: "OperatorEqualENE" }, { type: 3, value: "5" }])]);
+  const lua = luaScript(wtg([t]));
+  has(lua, "if (1 == 2) then");
+  has(lua, "if (3 == 2) then");
+  // The And form keeps its not ( … ).
+  has(lua, "if (not (4 == 5)) then");
+  has(jassScript(wtg([t])), "    if ( ( 1 == 2 ) ) then");
+});
+
+test("Lua: Skip Remaining Actions is \"return \", with the World Editor's space", () => {
+  const lua = luaScript(wtg([trigger("Skip", [eca(2, "ReturnAction")])]));
+  has(lua, "return ");
+  assert.ok(!lua.split(EOL).includes("return"), lua);
+  has(jassScript(wtg([trigger("Skip", [eca(2, "ReturnAction")])])), "    return");
+});
+
+test("an initially off trigger with Run on Map Initialization isn't run at the start either", () => {
+  const items = [trigger("On", [eca(0, "MapInitializationEvent")], { runOnInit: true }), trigger("Off", [eca(0, "MapInitializationEvent")], { initiallyOff: true, runOnInit: true, id: 1 })];
+  for (const s of [jassScript(wtg(items)), luaScript(wtg(items))]) {
+    assert.ok(/ConditionalTriggerExecute\( ?gg_trg_On ?\)/.test(s), s);
+    hasNot(s, "ConditionalTriggerExecute( gg_trg_Off )");
+    hasNot(s, "ConditionalTriggerExecute(gg_trg_Off)");
+  }
+});
+
+test("a header of only spaces is kept as a line; one of only line breaks makes nothing", () => {
+  const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });
+  const regions = [{ name: "R", index: 0, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" }];
+  const lua = luaScript(wtg([trigger("T", [])]), { custom: custom("   "), regions });
+  // After the objects, before the triggers (R3A, World Editor 2026-11-12).
+  const lines = lua.split(EOL), at = lines.indexOf("   ");
+  assert.ok(at > lines.indexOf("function CreateRegions()") && at < lines.indexOf("function Trig_T_Actions()"), lua);
+  assert.equal(jassScript(wtg([]), { custom: custom("   "), regions }).split("//*  Custom Script Code").length, 3);
+  assert.equal(jassScript(wtg([]), { custom: custom("\r\n"), regions }).split("//*  Custom Script Code").length, 2);
+});

@@ -113,8 +113,8 @@ for (const m of maps) {
   };
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
   const whole = J.generateScript(input), file = read(scriptFile);
-  // SCRIPT_CHECK_DUMP=<folder>: both scripts per map, to go through the differences.
-  if (process.env.SCRIPT_CHECK_DUMP && scriptFile.endsWith(".j")) writeFileSync(`${process.env.SCRIPT_CHECK_DUMP}/${m}.json`, JSON.stringify([norm(whole), norm(file)]));
+  // SCRIPT_CHECK_DUMP=<folder>: both scripts per map, to go through the differences (JASS and Lua).
+  if (process.env.SCRIPT_CHECK_DUMP) writeFileSync(`${process.env.SCRIPT_CHECK_DUMP}/${m}.json`, JSON.stringify([norm(whole), norm(file)]));
   const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
   const units = json(d, "war3mapUnits.doo")?.units ?? [], doodads = json(d, "war3map.doo")?.doodads ?? [];
   const known = new Set<string>([
@@ -127,8 +127,11 @@ for (const m of maps) {
   const lost = G.lostFunctions(file, whole);
   if (lost.length) guarded.push([m, lost]);
   checked++;
-  // Sections are compared for JASS only (the World Editor's Lua comes with other spacing).
-  if (scriptFile.endsWith(".lua")) continue;
+  // Sections are compared for JASS only (war3map.lua has no banners); a Lua script counts as a whole file.
+  if (scriptFile.endsWith(".lua")) {
+    const fl = (stats["(whole file, Lua)"] ??= [0, 0]); fl[1]++; if (norm(whole) === norm(file)) fl[0]++;
+    continue;
+  }
   // A fresh import's first regeneration (no stamp yet): which World Editor scripts it would ask about.
   if (G.scriptDecision(norm(file), norm(whole), null).action === "keep") asked.push(m);
   const gen = J.generateSections(input), orig = J.splitSections(file);

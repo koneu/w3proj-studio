@@ -314,6 +314,9 @@ export interface W3Api {
     showInfo(message: string, ...actions: string[]): Promise<string | undefined>;
     showWarning(message: string, ...actions: string[]): Promise<string | undefined>;
     showError(message: string, ...actions: string[]): Promise<string | undefined>;
+    /** Like showInfo/showWarning/showError; aborting `signal` closes it, answered with nothing (e.g. a question about
+     *  one project, when another opens). */
+    notify(severity: "info" | "warning" | "error", message: string, actions: string[], opts?: { signal?: AbortSignal }): Promise<string | undefined>;
     /** Asks with buttons `yes` and Cancel. After `expires` ms the question disappears, so nobody
      *  can answer one that's no longer being waited for. True only if `yes` was pressed. */
     confirm(message: string, yes: string, expires: number): Promise<boolean>;
