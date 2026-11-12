@@ -4313,6 +4313,16 @@ async function testMapWithoutGame(page, found) {
  *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
  *  by hand. */
 async function moduleFunctions(page, found) {
+  // The check answers the system's dialogs and quick picks itself: the later checks of a full run get the real ones.
+  await page.evaluate(`window.__modKept = { pickSaveFile: w3.window.pickSaveFile, pickFile: w3.window.pickFile, confirm: w3.window.confirm, quickPick: w3.window.quickPick }`);
+  try {
+    await moduleFunctionsChecks(page, found);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__modKept; if (k) Object.assign(w3.window, k); delete window.__modKept; })()`).catch(() => {});
+  }
+}
+
+async function moduleFunctionsChecks(page, found) {
   const fail = (what) => found.push(`module functions: ${what}`);
   const dir = join(work, "module-functions");
   rmSync(dir, { recursive: true, force: true });
