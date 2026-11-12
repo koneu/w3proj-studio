@@ -5413,7 +5413,48 @@ async function objectLayout(page, found, root) {
     if (!(m.gap < 12)) fail(`the first field table starts ${Math.round(m.gap)} px under its heading`);
     if (Math.max(...m.valueLefts) - Math.min(...m.valueLefts) > 1) fail(`the Value columns of the sections start at ${[...new Set(m.valueLefts)].join(", ")} px`);
     if (m.overlaps) fail(`the model preview lies over ${m.overlaps} field tables`);
+
+    // A small window: 800 px (the window's minimum) and 900 px wide, the side bar at its default 280 px. The page's root
+    // is narrowed to that (the window itself can't be resized from here); one hidden or of another width is made up for.
+    for (const [width, minDetail] of [[800, 270], [900, 360]]) {
+      const n = await page.evaluate(`(async () => {
+        const side = [...document.querySelectorAll(".sidebar")].find((e) => e.offsetParent !== null)?.getBoundingClientRect().width ?? 0;
+        document.getElementById("app").style.width = (${width} - 280 + side) + "px";
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const r = (e) => e.getBoundingClientRect();
+        const shown = (e) => e.offsetParent !== null && r(e).width > 0;
+        const detail = [...document.querySelectorAll(".obj-detail")].find(shown);
+        const list = [...document.querySelectorAll(".obj-sidebar")].find(shown);
+        const d = r(detail), l = r(list);
+        const lineHeight = parseFloat(getComputedStyle(detail.querySelector(".obj-field-label")).lineHeight) || 18;
+        const labels = [...detail.querySelectorAll(".obj-field-label")].filter(shown);
+        const values = [...detail.querySelectorAll(".obj-table .obj-value")].filter(shown);
+        const bar = detail.querySelector(".obj-detail-toolbar");
+        const out = (e, box) => r(e).right > box.right + 1 || r(e).left < box.left - 1;
+        return {
+          detail: Math.round(d.width),
+          // A field name on more than two lines was broken inside its words ("Upgra" / "de").
+          tallLabels: labels.filter((e) => r(e).height > lineHeight * 2 + 2).map((e) => e.textContent).slice(0, 5),
+          labels: labels.length,
+          narrowValues: values.filter((e) => r(e).width < 150).length,
+          values: values.length,
+          // The filter row inside the pane, its check boxes' labels on one line each.
+          clipped: [...bar.children].filter((e) => out(e, d)).map((e) => e.textContent.trim() || e.className),
+          wrappedChecks: [...bar.querySelectorAll("label")].filter((e) => r(e).height > lineHeight * 1.6).map((e) => e.textContent.trim()),
+          listClipped: [...list.querySelectorAll(".obj-toolbar button, .obj-toolbar-buttons > *")].filter((e) => out(e, l)).map((e) => e.textContent.trim()),
+        };
+      })()`);
+      const at = `at a ${width} px window`;
+      if (!n.labels || !n.values) { fail(`${at}: no field names (${n.labels}) or values (${n.values}) shown (control)`); continue; }
+      if (n.detail < minDetail) fail(`${at} the fields pane is ${n.detail} px wide (wanted ${minDetail} px or more)`);
+      if (n.tallLabels.length) fail(`${at} field names wrap over more than two lines: ${n.tallLabels.join(", ")}`);
+      if (n.narrowValues) fail(`${at} ${n.narrowValues} of ${n.values} value fields are under 150 px wide`);
+      if (n.clipped.length) fail(`${at} the filter row sticks out of the pane: ${n.clipped.join(", ")}`);
+      if (n.wrappedChecks.length) fail(`${at} the filter row's check boxes wrap their labels: ${n.wrappedChecks.join(", ")}`);
+      if (n.listClipped.length) fail(`${at} the object list's buttons stick out of it: ${n.listClipped.join(", ")}`);
+    }
   } finally {
+    await page.evaluate(`document.getElementById("app").style.width = ""`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
