@@ -200,6 +200,12 @@ export interface ModelLight {
   /** World units from the light: full strength up to the start, nothing past the end. */
   attenuationStart: number;
   attenuationEnd: number;
+  /** Its colour (0–1 each, in the file's order) and intensity: the fixed values (an animated one's first key), and
+   *  the tracks that animate them (KLAC, KLAI) when it has them. How bright it is sets how far the World Editor's Light Ranges ring reaches (viewmodes.ts lightRangeRadius). */
+  color: [number, number, number];
+  intensity: number;
+  colorTrack?: Track;
+  intensityTrack?: Track;
 }
 
 export interface Model {
@@ -337,16 +343,34 @@ function readNode(r: Reader, kind: string): Node {
  *  game's version 1800 models). Told apart by what follows the classic part: a track's tag, or the end, is classic.
  *  Null when the values aren't readable or make no sense. */
 function readLight(r: Reader, node: Node, end: number): ModelLight | null {
-  const left = end - r.p;
+  const start = r.p, left = end - start;
   if (left < 48) return null;
   const trackAt = (at: number) => at + 4 <= end && /^K[A-Z]{3}$/.test(String.fromCharCode(r.u8[at], r.u8[at + 1], r.u8[at + 2], r.u8[at + 3]));
   const classic = left < 72 || r.p + 48 === end || trackAt(r.p + 48);
   const type = r.u32();
   if (!classic) r.u32();
   const attenuationStart = r.f32(), attenuationEnd = r.f32();
+  const color: [number, number, number] = [r.f32(), r.f32(), r.f32()];
+  const intensity = r.f32();
   const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
   if (!ok(attenuationStart) || !ok(attenuationEnd) || type > 2) return null;
-  return { node, type, attenuationStart, attenuationEnd };
+  const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
+  // The tracks after the fixed values; damaged ones are left out (the light keeps its fixed values).
+  r.p = start + (classic ? 48 : 72);
+  try {
+    const tracks = readTracks(r, end);
+    // An animated value's fixed one isn't used: its first key stands in, as mdl.ts reads it.
+    const first = (t: Track, k: number) => (t.values.length > k && Number.isFinite(t.values[k]) ? t.values[k] : null);
+    if (tracks.KLAC?.size === 3) {
+      light.colorTrack = tracks.KLAC;
+      light.color = light.color.map((c, k) => first(tracks.KLAC, k) ?? c) as [number, number, number];
+    }
+    if (tracks.KLAI?.size === 1) {
+      light.intensityTrack = tracks.KLAI;
+      light.intensity = first(tracks.KLAI, 0) ?? light.intensity;
+    }
+  } catch { /* no tracks */ }
+  return light;
 }
 
 function readParticleEmitter2(r: Reader, end: number): ParticleEmitter2 {
