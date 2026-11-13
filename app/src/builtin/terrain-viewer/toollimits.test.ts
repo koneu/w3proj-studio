@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OUTSIDE_BOUNDS, insideBounds, pasteSkipText, refusedOutsideText, stoppedAtBoundsText } from "./limits";
+import { OUTSIDE_BOUNDS, insideBounds, snappedInside, pasteSkipText, refusedOutsideText, stoppedAtBoundsText } from "./limits";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN } from "../../lib/terrain/w3e";
 
@@ -54,4 +54,13 @@ test("the editor's camera-bounds warnings are built from OUTSIDE_BOUNDS", () => 
   assert.match(stoppedAtBoundsText(1), /^1 object stopped at the camera bounds/);
   assert.match(stoppedAtBoundsText(3), /^3 objects stopped/);
   assert.match(stoppedAtBoundsText(2), /turn off Enforce Camera Bounds/);
+});
+
+test("a building near the bound that its grid snap pushes outside is refused", async () => {
+  const box = { left: -1000, bottom: -800, right: 1000, top: 800 };
+  const snap = async (x: number, y: number): Promise<[number, number]> => [Math.ceil(x / 64) * 64, y];
+  assert.ok(insideBounds(box, 990, 0), "the spot as given is inside");
+  assert.equal(await snappedInside(box, snap, 990, 0), null, "snapped to 1024 it is outside");
+  assert.deepEqual(await snappedInside(box, snap, 900, 0), [960, 0]);
+  assert.deepEqual(await snappedInside(null, snap, 990, 0), [1024, 0], "no bounds, no refusal");
 });
