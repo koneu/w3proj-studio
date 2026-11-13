@@ -29,7 +29,7 @@ test("the loader draws objects whose model doesn't load (or whose id is unknown)
   assert.deepEqual(cubes.instances.map((i) => i.pick?.placed), [unknown, rock], "picked like a model (unknown ids are found first)");
   assert.equal(cubes.gpu.model.name, "Placeholder");
   assert.deepEqual(out.unresolved, [start], "only the start location stays a marker");
-  assert.deepEqual(out.strays, []);
+  assert.deepEqual(out.strays.map((s) => s.inst.pick?.placed), [start], "the start is still clickable, but gets no cube (game view leaves it out)");
   assert.equal(out.problems.length, 2, "both are still reported");
   const previews = await loader.load("units", [rock], skins, () => 0, undefined, undefined, false);
   assert.equal(previews.batches.length, 0, "a start building that doesn't load is left out");

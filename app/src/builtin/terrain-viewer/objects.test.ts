@@ -69,7 +69,7 @@ test("an object without a model gets a stand-in that a selection box can pick, l
   const list = [unknown, failed, start];
   const skins = new Map([["hfoo", skin("footman")]]);
   const strays = strayInstances("units", list, [unknown, failed, start], skins, () => 0);
-  assert.deepEqual(strays.map((s) => s.inst.pick!.id), ["zzzz", "hfoo"], "start locations stay markers");
+  assert.deepEqual(strays.map((s) => s.inst.pick!.id), ["zzzz", "hfoo", "sloc"], "a start location without a model gets a stand-in too");
   assert.equal(strays[0].inst.pick!.kind, "w3u");
   assert.equal(strays[1].inst.pick!.kind, "w3u", "a known type keeps its kind");
   assert.equal(strays[0].inst.pick!.index, 0);
@@ -78,7 +78,8 @@ test("an object without a model gets a stand-in that a selection box can pick, l
   // The projection: world x/y straight to pixels.
   const project = (p: [number, number, number]): [number, number] => [p[0], p[1]];
   const hidden = new Set<string>(), kinds = new Set(["w3u", "w3d"]);
-  assert.deepEqual(objectsInRect(strays, project, hidden, kinds, 0, 0, 200, 200), [unknown]);
+  assert.deepEqual(objectsInRect(strays, project, hidden, kinds, 0, 0, 200, 200), [unknown, start], "the box takes the start without a model");
+  assert.deepEqual(selectableObjects(strays, new Set()).map((o) => o.p), [unknown, failed, start], "Select All includes it");
   assert.deepEqual(objectsInRect(strays, project, hidden, kinds, 200, 200, 400, 400), [failed], "corners in any order");
   assert.deepEqual(objectsInRect(strays, project, new Set(["units"]), kinds, 0, 0, 400, 400), [], "a hidden group");
   assert.deepEqual(objectsInRect(strays, project, hidden, new Set(["w3t"]), 0, 0, 400, 400), [], "kinds not wanted");
@@ -114,6 +115,15 @@ test("a click picks an object without a model through its stand-in, as a selecti
   assert.equal(pick(110, 95)?.pick?.placed, unknown, "within its click radius");
   assert.equal(pick(300, 300), null, "the ground beside it");
   assert.equal(pick(100, 100, new Set(["units"])), null, "units hidden");
+});
+
+test("a click picks a start location without a model through its stand-in", () => {
+  const start = placed("sloc", 500, 500, { player: 0 });
+  const strays = strayInstances("units", [start], [start], new Map(), () => 0);
+  const pick = (showEditorOnly: boolean) => TerrainRenderer.prototype.pickObject.call(
+    { batches: [], hiddenGroups: new Set<string>(), showEditorOnly } as unknown as TerrainRenderer, { origin: [500, 500, 2000], dir: [0, 0, -1] }, () => 24, strays);
+  assert.equal(pick(true)?.pick?.placed, start);
+  assert.equal(pick(false), null, "not in game view");
 });
 
 test("an object whose model doesn't load is the editor's cube: picked over the cube's height, scaled and placed as the object", () => {
