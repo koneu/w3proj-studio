@@ -29,6 +29,16 @@ export const waterLimitText = (corners: number) =>
 /** Where Enforce Camera Bounds keeps an object from going, as a paste and the AI tools say it. */
 export const OUTSIDE_BOUNDS = "outside the camera bounds (turn off Enforce Camera Bounds to allow it)";
 
+/**
+ * Where a unit ends up once `snap` (a building's grid snap) has moved it, if that is still inside the bounds;
+ * null if the snap pushed it out. The bounds are checked on the spot as given before the snap, and a spot
+ * near the edge can leave them by a few units when it is snapped.
+ */
+export async function snappedInside(b: Bounds | null, snap: (x: number, y: number) => Promise<readonly [number, number]>, x: number, y: number): Promise<[number, number] | null> {
+  const [sx, sy] = await snap(x, y);
+  return insideBounds(b, sx, sy) ? [sx, sy] : null;
+}
+
 /** The warning for an edit Enforce Camera Bounds refused: `what` is the subject and verb, e.g. "that is". */
 export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE_BOUNDS}.`;
 

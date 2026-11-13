@@ -20,7 +20,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { WHEEL_PIVOT_ROW, wheelPivot, wheelZoomDistance, wheelZoomTarget } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, snappedInside, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -1131,10 +1131,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
           // Both sides or neither, or a skipped object would break the symmetry unseen.
+          // A unit is snapped when placed (a building to its grid): the bounds apply where it lands.
+          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
+          if (!(await snappedInside(held, snap, spot[0], spot[1]))) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
           if (paired && !insideBounds(held, twin[0], twin[1])) {
+            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
+            continue;
+          }
+          if (paired && !(await snappedInside(held, snap, twin[0], twin[1]))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
             continue;
           }
