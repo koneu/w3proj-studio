@@ -8,6 +8,8 @@ const backend = new Map<string, F[]>();
 const calls = { projectFiles: 0 };
 let gate: Promise<void> | null = null;
 let filesGate: Promise<void> | null = null;
+/** The directory reads fail. */
+let failFiles = false;
 let normalizeGate: Promise<void> | null = null;
 /** Answers for a file written at once: what the listing then has. */
 const holds = new Map<string, Promise<void>>();
@@ -44,6 +46,7 @@ g.__TAURI_INTERNALS__ = {
         // What the disk holds when the read starts; a held read answers with that, later.
         const seen = (backend.get(String(args.root)) ?? []).map((f) => ({ ...f, ...listingLag.get(f.path) }));
         if (filesGate) await filesGate;
+        if (failFiles) throw "the folder can't be read";
         return seen;
       }
       case "project_folders": return [];
@@ -214,6 +217,92 @@ test("a write during the read doesn't hide someone else's change from the same r
   await ws.writeText("map/Scripts/x.ai", "// ai");
   release();
   assert.deepEqual([...(await checking)], ["by-git.txt"]);
+});
+
+test("right after an open the project is there before its file list: filesReady waits for the list, files() is never the last project's", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(B);
+  const release = holdReads();
+  const opening = ws.open(A);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ws.project()?.root, A, "the project is there");
+  assert.equal(ws.filesComplete(), false);
+  assert.deepEqual(ws.files(), [], "not B's files under A");
+  let ready = false;
+  const waiting = ws.filesReady().then(() => { ready = true; });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ready, false, "waits while the list is read");
+  release();
+  await waiting;
+  assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j"], "every file listed once it resolves");
+  assert.equal(ws.filesComplete(), true);
+  await opening;
+  await ws.filesReady(); // at once now
+});
+
+test("filesReady: a switch while the list is read waits for the new project's; a list that can't be read rejects; none open rejects", async () => {
+  reset();
+  const { ws } = make();
+  const release = holdReads();
+  const first = ws.open(A);
+  await new Promise((r) => setTimeout(r, 5));
+  const waiting = ws.filesReady();
+  const second = ws.open(B);
+  release();
+  await waiting;
+  assert.equal(ws.project()?.root, B);
+  assert.deepEqual(ws.files().map((f) => f.path), ["other.txt"], "B's list, not A's late one");
+  await Promise.all([first, second]);
+  assert.deepEqual(ws.files().map((f) => f.path), ["other.txt"], "A's late list doesn't land on B");
+  failFiles = true;
+  try {
+    await assert.rejects(ws.open(A));
+    assert.equal(ws.filesComplete(), false);
+    await assert.rejects(ws.filesReady(), /file list couldn't be read/);
+  } finally {
+    failFiles = false;
+  }
+  ws.close();
+  await assert.rejects(ws.filesReady(), /No project is open/);
+});
+
+test("externalChanges while the first list after an open is read: it waits for it, and nothing is reported as changed", async () => {
+  reset();
+  const { ws } = make();
+  backend.get(A)!.push({ path: "map/war3map.w3i", size: 9, modified: 9 });
+  const release = holdReads();
+  const opening = ws.open(A);
+  await new Promise((r) => setTimeout(r, 5));
+  let fired = 0;
+  ws.onDidChange.on(() => fired++);
+  const check = ws.externalChanges();
+  await new Promise((r) => setTimeout(r, 5));
+  release();
+  assert.deepEqual([...(await check)], [], "the files the open is reading are no outside changes");
+  await opening;
+  assert.deepEqual(ws.files().map((f) => f.path).sort(), ["map/war3map.w3i", "war3map.j"]);
+  // A real change afterwards still is one.
+  backend.get(A)!.push({ path: "by-git.txt", size: 5, modified: 3 });
+  assert.deepEqual([...(await ws.externalChanges())], ["by-git.txt"]);
+  assert.ok(fired >= 1);
+});
+
+test("externalChanges after an open whose list couldn't be read: no \"before\", so nothing is reported; the list is read", async () => {
+  reset();
+  const { ws } = make();
+  failFiles = true;
+  try {
+    await assert.rejects(ws.open(A));
+  } finally {
+    failFiles = false;
+  }
+  let fired = 0;
+  ws.onDidChange.on(() => fired++);
+  assert.deepEqual([...(await ws.externalChanges())], []);
+  assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j"]);
+  assert.equal(ws.filesComplete(), true);
+  assert.equal(fired, 1, "the Explorer is told the list is there");
 });
 
 const OFFLINE = "//offline/share/p";

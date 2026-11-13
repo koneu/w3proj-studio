@@ -18,7 +18,7 @@ import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { askWtsCuts, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
-import { stringNumbersTaken } from "../../lib/formats/mapdoc";
+import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
@@ -116,7 +116,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.sounds.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // The JSON form, else the raw file (decoded by the format engine); a map without sounds
-      // opens an empty list, and the file is created on the first save.
+      // opens an empty list, and the file is created on the first save. From the whole file list, not one still read.
+      await projectWithFiles(w3);
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
       await w3.editors.open(FILE, "w3.soundEditor");
@@ -203,7 +204,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
         // The TRIGSTR numbers the map's files refer to and those a pack dropped and recorded (new dialogue keys go after
         // them, as Move Texts numbers), read in the background; the sounds' own keys come from the live list.
-        const otherRefs = strings && !doc.readOnly ? stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path)) : null;
+        // Taken from the whole file list (right after an open it may still be read): a file not listed yet isn't none.
+        const otherRefs = strings && !doc.readOnly ? w3.workspace.filesReady().then(() => {
+          if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
+          return stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path));
+        }) : null;
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
@@ -277,6 +282,10 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
   const added = strings.added();
   const locales: { path: string; text: string }[] = [];
   if (added.length) {
+    // Every language's table, so the file list must have them all (a table not listed yet would miss the strings).
+    const root = w3.workspace.project()?.root;
+    await w3.workspace.filesReady();
+    if (w3.workspace.project()?.root !== root) throw new Error("Not saved: the project changed meanwhile.");
     for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
       const text = await w3.workspace.readText(path).catch((e) => {
         throw new Error(`Not saved: ${path} can't be read (${errorText(e)}), so the new dialogue strings can't be added to it.`);

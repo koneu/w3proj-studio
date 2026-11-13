@@ -5,7 +5,7 @@ import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/f
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
-import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, projectWithFiles, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
@@ -223,6 +223,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Opens Map Properties (or shows the open one) at `section`, scrolled to `anchor` (a `data-anchor` in it). */
   const openAt = async (section?: SectionId, anchor?: string) => {
     if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+    // Right after an open the list may not have the file yet: that isn't "no war3map.w3i".
+    await projectWithFiles(w3);
     if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) {
       const raw = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.w3i");
       throw new Error(raw

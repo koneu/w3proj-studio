@@ -29,9 +29,12 @@ function project() {
   } as Record<string, string>;
 }
 
-function fakeW3(files: Record<string, string>, opts: { unsaved?: string[]; editLog?: boolean; root?: () => string } = {}) {
+/** `unlisted`: files the workspace doesn't list yet, as right after an open, until `listing` ends (filesReady). */
+function fakeW3(files: Record<string, string>, opts: { unsaved?: string[]; editLog?: boolean; root?: () => string; unlisted?: string[]; listing?: Promise<void> } = {}) {
   const writes: string[] = [];
   const unsaved = () => opts.unsaved ?? [];
+  const listed = { pending: !!opts.listing };
+  opts.listing?.then(() => { listed.pending = false; }, () => {});
   const readText = async (p: string) => {
     if (!(p in files)) throw new Error(`${p}: No such file or directory (os error 2)`);
     if (files[p] === "\u0000unreadable") throw new Error(`can't read ${p}`);
@@ -59,7 +62,8 @@ function fakeW3(files: Record<string, string>, opts: { unsaved?: string[]; editL
   const w3 = {
     workspace: {
       project: () => ({ root: opts.root?.() ?? "/p" }),
-      files: () => Object.keys(files).map((path) => ({ path })),
+      files: () => Object.keys(files).filter((path) => !listed.pending || !opts.unlisted?.includes(path)).map((path) => ({ path })),
+      filesReady: async () => { await opts.listing; },
       readText,
       readBytes: async (p: string) => new TextEncoder().encode(await readText(p)),
       writeText: async (p: string, t: string) => { writes.push(p); files[p] = t; },
@@ -129,7 +133,7 @@ test("war3map.wts there but unreadable throws; absent is nothing to do", async (
 test("the project changes while the files are read: nothing written", async () => {
   const files = project();
   let calls = 0;
-  const { w3, writes } = fakeW3(files, { root: () => (calls++ === 0 ? "/p" : "/other") });
+  const { w3, writes } = fakeW3(files, { root: () => (calls++ < 2 ? "/p" : "/other") });
   await assert.rejects(dropUnusedStrings(w3), /project changed/);
   assert.deepEqual(writes, []);
 });
@@ -202,4 +206,24 @@ test("a record that is there but can't be read: nothing restored, nothing droppe
   await assert.rejects(dropUnusedStrings(w3), /pruned-strings\.json is there but can't be read/);
   assert.deepEqual(writes, []);
   assert.equal(files["map/war3map.wts"], WTS);
+});
+
+test("right after an open, while the file list is still read: the drop waits for it, a file not listed yet isn't absent", async () => {
+  const files = project();
+  let done!: () => void;
+  const listing = new Promise<void>((r) => { done = r; });
+  const { w3 } = fakeW3(files, { listing, unlisted: ["map/war3map.wct.txt", "map/war3map.w3r.json"] });
+  // The control: the list as it is before the listing ends lacks the files that refer to 4 and 5.
+  assert.ok(!w3.workspace.files().some((f) => f.path === "map/war3map.wct.txt"));
+  const run = dropUnusedStrings(w3);
+  setTimeout(done, 20);
+  assert.deepEqual((await run).dropped, [3, 9]);
+  assert.deepEqual(nums(files["map/war3map.wts"]), [1, 2, 4, 5, 6, 7, 8]);
+});
+
+test("a file list that can't be read: nothing dropped", async () => {
+  const files = project();
+  const { w3, writes } = fakeW3(files, { listing: Promise.reject(new Error("The project's file list couldn't be read")), unlisted: ["map/war3map.wct.txt"] });
+  await assert.rejects(dropUnusedStrings(w3), /file list couldn't be read/);
+  assert.deepEqual(writes, []);
 });

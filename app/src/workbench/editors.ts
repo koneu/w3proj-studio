@@ -66,6 +66,9 @@ export interface DocumentIO {
   /** The key a file is known by (the workspace's `key`: lower case only where the file system ignores case);
    *  without it, lower case. Saved and changed files are matched to tabs by it. */
   key?(path: string): string;
+  /** Resolves once the project's whole file list is read (at once when no project is open), so that an editor
+   *  deciding by it whether its file is there (new and empty, or read) never takes "not listed yet" for absent. */
+  filesReady?(path: string): Promise<void>;
 }
 
 /** Tabbed editor area. Picks an editor provider per file from the
@@ -383,6 +386,10 @@ export class EditorService {
     tab.failed = false;
     tab.missed = new Set();
     try {
+      // Right after an open the file list may still be read: an editor that started empty for a file not listed yet
+      // would write its empty document over the real one.
+      await this.io.filesReady?.(tab.path);
+      if (!this.tabs.includes(tab)) return;
       tab.stamp = await this.stampOf(tab.path);
       const instance = await tab.provider!.resolve(tab.el, tab.doc!);
       // The tab was closed while its editor loaded: nobody would dispose it (GPU buffers, timers, listeners).

@@ -44,7 +44,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const out = w3.output.channel("MCP");
   const log = new EditLog({
-    read: (path) => w3.workspace.readText(path).catch((e) => {
+    read: (path) => w3.workspace.readText(path).catch(async (e) => {
+      // Absent only when the whole list lacks it: a file not listed yet (right after an open) that can't be read
+      // isn't a new one, and would be written over.
+      await w3.workspace.filesReady();
       if (w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) throw e;
       return null;
     }),
