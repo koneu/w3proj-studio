@@ -507,6 +507,13 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   each by its own amount: the editor's HD shading of the materials (normal and ORM maps, which Studio's model shader
   doesn't use for light) is the likelier cause.
 
+- **Special doodads** (branch special-doodads-we, 2026-11-13, AutumnLeaves_S2, look -6208,-5376,1200; we-drive SD and HD
+  give the same picture): to see which patches of Studio's picture are the specials, rewrite war3map.doo.json with
+  `specials: []` (app-drive `--eval` with `w3.workspace.writeText`) and `pic-compare` the two shots. At the first YCl2 the
+  editor draws a cliff hollow exactly there, so the position fits; Studio's model shows as a hard-edged flat grass
+  square with tan rock on it (lowprio-bugs). Not compared: facing and height of other types. The editor's picture is
+  dark on its left half there (outside the camera bounds), Studio's isn't.
+
 ## Process
 
 **Every change.** Run the gate. Fixing a bug starts with a test that fails because of it.
