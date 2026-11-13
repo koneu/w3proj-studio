@@ -7391,6 +7391,79 @@ async function moveTextsToTable(page, found) {
     await settled(page);
     if (again.e || again.r?.moved !== 0 || again.r?.dropped !== 0) fail(`the second run: ${again.e ?? JSON.stringify(again.r)}`);
     for (const [f, h] of snapshot(mapDir)) if (files1.get(f) !== h) fail(`the second run changed ${f}`);
+
+    // Triggers (lib/formats/movetexts, "Triggers"): a GUI trigger with literals, written in the codec's layout (the
+    // command leaves a file laid out otherwise alone). Its StringExt texts move, after the strings there are; a string
+    // comparison's text and a file path stay; the generated script refers to the new strings. The smoke app unpacks
+    // with made-up trigger data (tests/fixtures/TriggerData.txt), which leaves cliff.w3m's war3map.wtg raw: its JSON
+    // comes from the CLI with the game's.
+    const cliDir = join(work, "move-texts-cli");
+    rmSync(cliDir, { recursive: true, force: true });
+    spawnSync(cli, ["unpack", map, cliDir, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) { console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (no game?)"); return; }
+    const wtgPath = "map/war3map.wtg.json", wctPath = "map/war3map.wct.txt";
+    const wtgBefore = readFileSync(join(cliDir, "map", "war3map.wtg.json"), "utf8"), wctBefore = readFileSync(join(cliDir, "map", "war3map.wct.txt"), "utf8");
+    const call = (name, params = []) => ({ type: 2, value: name, call: { kind: 3, name, hasParams: true, params, trailer: 0 } });
+    const lit = (value) => ({ type: 3, value }), pre = (value) => ({ type: 0, value });
+    const eca = (kind, name, params) => [
+      "        {", `          "kind": ${kind},`, `          "name": ${JSON.stringify(name)},`, `          "enabled": true,`,
+      params.length ? `          "params": [\n${params.map((p) => `            ${JSON.stringify(p)}`).join(",\n")}\n          ],` : `          "params": [],`,
+      `          "children": []`, "        }",
+    ].join("\n");
+    const trigger = [
+      "    {", `      "type": 8,`, `      "name": "Lit Trigger",`, `      "description": "",`, `      "isComment": 0,`, `      "id": 50331649,`,
+      `      "enabled": true,`, `      "isCustom": false,`, `      "initiallyOff": false,`, `      "runOnInit": false,`, `      "parent": 33554432,`,
+      `      "ecas": [`,
+      [
+        eca(0, "MapInitializationEvent", []),
+        eca(1, "OperatorCompareString", [call("GetPlayerName", [pre("Player00")]), pre("OperatorEqualENE"), lit("lit cond")]),
+        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), lit("Lit Message")]),
+        eca(2, "CreateQuestBJ", [pre("QuestTypeReqDiscovered"), lit("Lit Quest"), lit("Lit Quest Text"), lit("ReplaceableTextures\\CommandButtons\\BTNFootman.blp")]),
+        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), call("StringCase", [lit("Lit Case"), pre("StringCaseUpper")])]),
+      ].join(",\n"),
+      "      ]", "    }",
+    ].join("\n");
+    if (!wtgBefore.endsWith("\n    }\n  ]\n}\n") || !/"count":1,/.test(wtgBefore)) return fail(`cliff.w3m's war3map.wtg.json isn't laid out as the test knows it (control): ${JSON.stringify(wtgBefore.slice(-40))}`);
+    // One more trigger in the counts (the fourth entry), one more custom text slot.
+    let nth = 0;
+    const wtgLit = wtgBefore.replace(/\{"count":(\d+),/g, (m, n) => (++nth === 4 ? `{"count":${Number(n) + 1},` : m))
+      .replace(/\n  \]\n\}\n$/, `,\n${trigger}\n  ]\n}\n`);
+    const eol = wctBefore.includes("\r\n") ? "\r\n" : "\n";
+    await page.evaluate(`(async () => {
+      await w3.workspace.writeText(${JSON.stringify(wtgPath)}, ${JSON.stringify(wtgLit)});
+      await w3.workspace.delete("map/war3map.wtg").catch(() => {});
+      await w3.workspace.writeText(${JSON.stringify(wctPath)}, ${JSON.stringify(wctBefore + `//== trigger 1 (no text): Lit Trigger ==${eol}`)});
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    if (!/DisplayTextToForce\( GetPlayersAll\(\), "Lit Message" \)/.test(readFileSync(file("war3map.j"), "utf8"))) fail("the script made from the trigger doesn't show its literal (control)");
+    const files3 = snapshot(mapDir);
+    const trig = await run("w3.strings.moveToTable");
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    if (trig.e || trig.r?.moved !== 4 || trig.r?.dropped !== 0 || trig.r?.triggers) fail(`the command on the trigger: ${trig.e ?? JSON.stringify(trig.r)}`);
+    const trigBlocks = [[15, "Lit Message"], [16, "Lit Quest"], [17, "Lit Quest Text"], [18, "Lit Case"]].map(([n, t]) => `STRING ${n}\r\n{\r\n${t}\r\n}\r\n\r\n`).join("");
+    if (readFileSync(file("war3map.wts"), "utf8") !== weWts + trigBlocks) fail(`war3map.wts after the trigger's move: ${JSON.stringify(readFileSync(file("war3map.wts"), "utf8").slice(-200))}`);
+    if (readFileSync(join(dir, DE), "utf8") !== deWts + trigBlocks) fail("the German table didn't get the trigger's strings");
+    const lits = [];
+    const walk = (p) => { if (p.type === 3) lits.push(p.value); p.call?.params.forEach(walk); };
+    const wtgAfter = readFileSync(file("war3map.wtg.json"), "utf8");
+    JSON.parse(wtgAfter).items.find((i) => i.name === "Lit Trigger")?.ecas.forEach((e) => e.params.forEach(walk));
+    if (JSON.stringify(lits) !== JSON.stringify(["lit cond", "TRIGSTR_015", "TRIGSTR_016", "TRIGSTR_017", "ReplaceableTextures\\CommandButtons\\BTNFootman.blp", "TRIGSTR_018"])) fail(`the trigger's literals after the move: ${JSON.stringify(lits)}`);
+    // Nothing else in war3map.wtg.json changed: with the four values put back it is the file written.
+    const back = wtgAfter.replace('"TRIGSTR_015"', '"Lit Message"').replace('"TRIGSTR_016"', '"Lit Quest"').replace('"TRIGSTR_017"', '"Lit Quest Text"').replace('"TRIGSTR_018"', '"Lit Case"');
+    if (back !== wtgLit) fail("the move changed more of war3map.wtg.json than the four texts");
+    const script = readFileSync(file("war3map.j"), "utf8");
+    for (const line of ['DisplayTextToForce( GetPlayersAll(), "TRIGSTR_015" )', 'CreateQuestBJ( bj_QUESTTYPE_REQ_DISCOVERED, "TRIGSTR_016", "TRIGSTR_017", "ReplaceableTextures\\\\CommandButtons\\\\BTNFootman.blp" )',
+      'StringCase("TRIGSTR_018", true)', 'GetPlayerName(Player(0)) == "lit cond"']) {
+      if (!script.includes(line)) fail(`the script after the trigger's move lacks ${line}`);
+    }
+    // One undo puts the trigger and the tables back.
+    await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    const files4 = snapshot(mapDir);
+    for (const [f, h] of files3) if (files4.get(f) !== h) fail(`the undo of the trigger's move left ${f} changed`);
   } finally {
     await page.evaluate(`if (window.__mttWarn) { w3.window.notify = window.__mttWarn; delete window.__mttWarn; }`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});

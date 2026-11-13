@@ -4,7 +4,8 @@ import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type Rgb } from "./minimap";
-import { minimapObjects, modelTextureColor, smallestMipColor } from "./minimapgen";
+import { minimapBase, minimapObjects, modelTextureColor, smallestMipColor } from "./minimapgen";
+import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
 
 /** A made-up 33×25 corner map: two ground tiles in stripes, a lake in the middle, hills. */
@@ -47,8 +48,9 @@ test("minimapFrame: a unit drawn at a world point is at its pixel, and the pixel
 test("war3mapMap.blp's picture: what the map's minimap was before the export options came", () => {
   // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them. Taken
   // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11), and when the water did
-  // (2026-11-12: its minimap colour at mmAlpha, twice where deep).
-  assert.equal(digest(renderMinimap(base())), "9625d8fa570b02e8");
+  // (2026-11-12: its minimap colour at mmAlpha, twice where deep), and when the drawn area, the sampling, one softening
+  // pass, bigger dots and cut values came from the editor's exports of seven maps (2026-11-13).
+  assert.equal(digest(renderMinimap(base())), "0240a7468d4120dc");
 });
 
 test("groundColors: a tile point colours its tile, a point next to a cliff its cliff type, no cliff type its ground", () => {
@@ -110,8 +112,45 @@ test("water: its minimap colour a quarter (mmAlpha) over the ground, twice where
   const a = 64 / 255, once = [100, 120, 80].map((g, k) => g * (1 - a) + [0, 0, 192][k] * a);
   const twice = once.map((g, k) => g * (1 - a) + [0, 0, 192][k] * a);
   assert.deepEqual(at(1), [100, 120, 80]);
-  assert.deepEqual(at(7), once.map(Math.round));
-  assert.deepEqual(at(14), twice.map(Math.round));
+  // Cut to whole values, as the editor's.
+  assert.deepEqual(at(7), once.map(Math.floor));
+  assert.deepEqual(at(14), twice.map(Math.floor));
+});
+
+/** A flat map of `pw` × `ph` tiles, no margins: texture 1 where `second(x, y)` says (corner coordinates), else 0. */
+function flat(pw: number, ph: number, second: (x: number, y: number) => boolean = () => false): Terrain {
+  const width = pw + 1, height = ph + 1;
+  const corners = Array.from({ length: width * height }, (_, i) => ({ texture: second(i % width, Math.floor(i / width)) ? 1 : 0, layer: 2, height: 0, water: 0, hasWater: false }));
+  return { width, height, offsetX: 0, offsetY: 0, corners, groundTiles: ["Ldrt", "Lgrs"], tileset: "L" } as unknown as Terrain;
+}
+const plain = (terrain: Terrain, params: MinimapInput["params"] = { blurPasses: 0, groundNoise: 0 }) => renderMinimap({
+  terrain, margins: [0, 0, 0, 0], tileColor: (id) => (id === "Ldrt" ? [100, 100, 100] : [200, 200, 200]), waterColor: [0, 0, 192], objects: [], params,
+});
+const pixel = (rgba: Uint8ClampedArray, x: number, y: number) => rgba[(y * 256 + x) * 4];
+
+test("the drawn area as the World Editor's: whole pixels, the larger side filling the picture, the other centred", () => {
+  // Measured on the editor's exports (2026-11-13): SnowareBay's 130 × 136 playable tiles fill columns 6–249 (244 px of
+  // 244.7), NorthernIsles' 108 × 86 rows 26–228 (203 of 203.9); the rest is black.
+  for (const [pw, ph, axis, first, last] of [[130, 136, "x", 6, 249], [108, 86, "y", 26, 228]] as const) {
+    const rgba = plain(flat(pw, ph));
+    const lit = [...Array(256).keys()].filter((i) => (axis === "x" ? pixel(rgba, i, 128) : pixel(rgba, 128, i)) > 0);
+    assert.deepEqual([lit[0], lit.at(-1), lit.length], [first, last, last - first + 1], `${pw} × ${ph}`);
+    const f = minimapFrame(flat(pw, ph), [0, 0, 0, 0], 256);
+    assert.deepEqual(axis === "x" ? [f.box[0], f.box[2]] : [f.box[1], f.box[3]], [first, last - first + 1]);
+  }
+  // Softening stays inside: the black band's edge is sharp, the first drawn column keeps the ground's colour.
+  const soft = plain(flat(130, 136), { blurPasses: 1, groundNoise: 0 });
+  assert.deepEqual([pixel(soft, 5, 128), pixel(soft, 6, 128), pixel(soft, 249, 128), pixel(soft, 250, 128)], [0, 100, 100, 0]);
+});
+
+test("a pixel shows the tile under its bottom-left corner: tile edges half a pixel right of and above the centre's", () => {
+  // cliff.w3m's 52 playable tiles (4.92 px each): its plateau starting at tile 20 begins at pixel 99 in the editor's
+  // export (column 98 is 13 % plateau, softened; 99 is 84 %), where a centre-sampled pixel 98 already is in tile 20.
+  const east = plain(flat(52, 52, (x) => x >= 20));
+  assert.deepEqual([pixel(east, 98, 100), pixel(east, 99, 100)], [100, 200]);
+  // Rows count from the south: tile row 20 begins 98.46 px up, so pixel row 156 (from the top) is its last.
+  const north = plain(flat(52, 52, (_x, y) => y >= 20));
+  assert.deepEqual([pixel(north, 100, 156), pixel(north, 100, 157)], [200, 100]);
 });
 
 test("minimapObjects: shown types in their minimap colour or their model's, as big as their pathing texture", async () => {
@@ -152,6 +191,17 @@ test("minimapObjects: shown types in their minimap colour or their model's, as b
     return n;
   };
   assert.ok(dots(3) > 6 * dots(1) && dots(1) > 0, `${dots(3)} vs ${dots(1)}`);
+});
+
+test("minimapObjects: a destructable placed dead (life 0) isn't drawn, as on the editor's minimap", async () => {
+  // SnowareBay's 205 Northrend tree walls are placed dead: the editor's export shows none of the 54 standing alone.
+  const rows = new Map([["NTtw", { showInMM: "1", useMMColor: "1", MMRed: "32", MMGreen: "48", MMBlue: "32", pathTex: "PathTextures\\4x4Default.tga" }]]);
+  const objects = await minimapObjects([
+    { id: "NTtw", position: [0, 0, 0], life: 0 },
+    { id: "NTtw", position: [128, 0, 0], life: 100 },
+    { id: "NTtw", position: [256, 0, 0] },
+  ], { rows, bases: new Map(), modelColor: async () => null, footprint: async () => 1 });
+  assert.deepEqual(objects.map((o) => o.x), [128, 256]);
 });
 
 /** An MDX model holding nothing but these textures (replaceable id, path). */
@@ -195,6 +245,36 @@ test("modelTextureColor: the model's first texture, its replaceable one where it
   assert.deepEqual(await modelTextureColor(skin("Doodads\\Tree\\Tree", 2, 31, "ReplaceableTextures\\Trees\\Bark"), read), [110, 60, 10]);
   assert.equal(await modelTextureColor(skin("Doodads\\Bad\\Bad", 1), read), null);
   assert.equal(await modelTextureColor(skin("Doodads\\None\\None", 1), read), null);
+});
+
+test("minimapBase: in HD and DE the ground and cliff colours are the Reforged _Diffuse textures', in SD the classic ones", async () => {
+  // Measured (we-drive 2026-11-13): the World Editor's HD export of HillsbradCreek colours its grass 23, 119, 16
+  // (Lords_Grass_Diffuse's smallest mip), its SD export 44, 108, 27 (Lords_Grass's).
+  const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
+  const tables: Record<string, string> = {
+    "TerrainArt\\Terrain.slk": slk([["tileID", "dir", "file"], ["Hgrs", "TerrainArt\\Test", "Test_Grass"], ["Hdrt", "TerrainArt\\Test", "Test_Dirt"]]),
+    "TerrainArt\\CliffTypes.slk": slk([["cliffID", "texDir", "texFile"], ["CHgr", "TerrainArt\\Test", "Test_Cliff"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height", "mmAlpha", "mmRed", "mmGreen", "mmBlue"], ["HSha", "-0.7", "64", "0", "0", "192"]]),
+    "Doodads\\Doodads.slk": slk([["doodID"]]),
+    "Units\\DestructableData.slk": slk([["DestructableID"]]),
+  };
+  const files = new Map<string, Uint8Array>([
+    ["TerrainArt\\Test\\Test_Grass.blp", tgaOf([44, 108, 27])], ["TerrainArt\\Test\\Test_Grass_Diffuse.blp", tgaOf([23, 119, 16])],
+    ["TerrainArt\\Test\\Test_Cliff.blp", tgaOf([96, 124, 66])], ["TerrainArt\\Test\\Test_Cliff_Diffuse.blp", tgaOf([80, 90, 70])],
+    // No Reforged dirt: the classic one stands in.
+    ["TerrainArt\\Test\\Test_Dirt.blp", tgaOf([145, 104, 60])],
+  ]);
+  const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
+  const t = { ...flat(2, 2), tileset: "H", groundTiles: ["Hgrs", "Hdrt"], cliffTiles: ["CHgr"] } as unknown as Terrain;
+  const colours = async (mode: string) => {
+    const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? mode : undefined) },
+      game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
+    const b = await minimapBase(w3, t, [], async (p) => (p.includes("_Diffuse") && mode === "sd" ? assert.fail(`SD read ${p}`) : read(p)));
+    return [b.tileColor("Hgrs"), b.tileColor("Hdrt"), b.cliffColor?.("CHgr")];
+  };
+  assert.deepEqual(await colours("hd"), [[23, 119, 16], [145, 104, 60], [80, 90, 70]]);
+  assert.deepEqual(await colours("de"), [[23, 119, 16], [145, 104, 60], [80, 90, 70]]);
+  assert.deepEqual(await colours("sd"), [[44, 108, 27], [145, 104, 60], [96, 124, 66]]);
 });
 
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {

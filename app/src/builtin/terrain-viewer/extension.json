@@ -309,8 +309,8 @@
         "terrain.minimap.regenerate": { "type": "string", "default": "afterEdits", "enum": ["afterEdits", "always", "never"], "enumDescriptions": ["After edits", "On every save", "Never"], "description": "When to redraw the minimap (war3mapMap.blp). \"After edits\" keeps the World Editor's image until something changes." },
         "terrain.minimap.groundBrightness": { "type": "number", "default": 1, "minimum": 0, "maximum": 3, "description": "Ground colour relative to its texture's smallest mip level (the colour the World Editor gives it)." },
         "terrain.minimap.groundNoise": { "type": "number", "default": 0.1, "minimum": 0, "maximum": 1, "description": "Grain: how far each pixel's brightness is scattered (0.1: ±10 %, as the World Editor's minimaps), 0 for flat colours." },
-        "terrain.minimap.objectRadius": { "type": "number", "default": 0.6, "minimum": 0, "maximum": 8, "description": "Radius (in tiles) of the dot of a tree or doodad with a 4×4 pathing texture; bigger pathing textures make bigger dots." },
-        "terrain.minimap.blurPasses": { "type": "integer", "default": 2, "minimum": 0, "maximum": 10, "description": "Softening passes (the World Editor's minimaps are soft)." },
+        "terrain.minimap.objectRadius": { "type": "number", "default": 0.7, "minimum": 0, "maximum": 8, "description": "Radius (in tiles) of the dot of a tree or doodad with a 4×4 pathing texture; bigger pathing textures make bigger dots." },
+        "terrain.minimap.blurPasses": { "type": "integer", "default": 1, "minimum": 0, "maximum": 10, "description": "Softening passes, each a 3×3 tent filter (the World Editor's minimaps are as soft as one)." },
         "terrain.minimap.jpegQuality": { "type": "integer", "default": 80, "minimum": 10, "maximum": 100, "description": "JPEG quality of the minimap file." }
       }
     }
