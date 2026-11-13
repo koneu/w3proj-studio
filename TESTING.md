@@ -157,7 +157,9 @@ It never starts the game itself.
   0.35 GB). The farm is made again only for another game build (`.build.info`), `--clean` removes it all. The editor
   runs in bubblewrap with the user's whole Steam prefix and every hardlink mounted read-only; the editor opens the
   CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
-  at a time (`target/we/lock`; a second run waits and says so). `we-setup.mjs --snapshot` and `--compare` show the
+  at a time, machine-wide: the lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
+  every worktree and every `W3PROJ_WE_DIR`; a second run says once who holds it and since when, and waits
+  (`takeLock`'s timeout; a dead pid is taken over). `we-setup.mjs --snapshot` and `--compare` show the
   install and the user's `Documents/Warcraft III` unchanged; the user's own Battle.net app writes elsewhere in that
   prefix while it runs (and touches the install's `shmem` files when it checks the game), which `--compare` lists.
 - **Nothing on the screen, no sound.** A display of its own (Xvfb, 1600x1000), Vulkan through lavapipe. Wine's audio
