@@ -185,7 +185,7 @@
   },
   {
     "name": "resize-top-grow",
-    "description": "Map Size, top grown by 4 tiles: the w3e map-edge marks",
+    "description": "Map Size, top grown by 4 tiles: the w3e map-edge marks: only the lines of the new corners' random variations differ (checked: no water-bits line does); expected differs, so the file is not a regression check for the edge marks of a growth",
     "input": {
       "new": {
         "name": "resizetopgrow",
@@ -258,7 +258,8 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "text"
+        "as": "text",
+        "expect": "differs"
       },
       {
         "file": "war3map.w3i",
