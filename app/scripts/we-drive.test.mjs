@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addCamerasToMap, classify, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
-import { compare, isCopied, takeLock, userCompatData } from "./we-setup.mjs";
+import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
 const PREFS = ["[Misc]", "assetMode=-1", "Has Been Run=false", "hd=1", "Undo Limit=0", "", "[Test Map]", "hd=0", "teen=0", ""].join("\r\n");
 
@@ -199,25 +199,44 @@ test("compare fails only on changes under the guarded paths", () => {
 
 test("the lock: a second run waits and gives up; a lock whose process is gone is taken over", async () => {
   const dir = mkdtempSync(join(tmpdir(), "we-lock-"));
-  const before = process.env.W3PROJ_WE_DIR;
-  process.env.W3PROJ_WE_DIR = dir;
+  const lock = join(dir, "machine.lock");
+  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
+  process.env.W3PROJ_WE_LOCK = lock;
   try {
+    // Two holders with different farm folders: the lock is the same one.
+    process.env.W3PROJ_WE_DIR = join(dir, "farm-a");
     const release = await takeLock(() => {});
-    assert.ok(existsSync(join(dir, "lock", "owner.json")));
+    assert.ok(existsSync(join(lock, "owner.json")));
+    process.env.W3PROJ_WE_DIR = join(dir, "farm-b");
     const said = [];
     await assert.rejects(takeLock((m) => said.push(m), 1500), /still holds/);
-    assert.match(said.join("\n"), /waiting for the World Editor run/);
+    assert.equal(said.length, 1, "said once");
+    assert.match(said[0], /waiting for the World Editor run of .*process \d+, since \d{4}-/);
     release();
-    assert.ok(!existsSync(join(dir, "lock")));
+    assert.ok(!existsSync(lock));
     // A process id that can't be running.
-    mkdirSync(join(dir, "lock"));
-    writeFileSync(join(dir, "lock", "owner.json"), JSON.stringify({ pid: 2 ** 22 + 12345, repo: "elsewhere", since: "then" }));
+    mkdirSync(lock);
+    writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2 ** 22 + 12345, repo: "elsewhere", since: "then" }));
     const took = [];
     const again = await takeLock((m) => took.push(m), 5000);
     assert.match(took.join("\n"), /took over the World Editor lock of elsewhere/);
     again();
   } finally {
-    if (before === undefined) delete process.env.W3PROJ_WE_DIR; else process.env.W3PROJ_WE_DIR = before;
+    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the lock's place is per user, outside every farm", () => {
+  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
+  delete process.env.W3PROJ_WE_LOCK;
+  try {
+    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-x");
+    const a = lockPath();
+    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-y");
+    assert.equal(lockPath(), a);
+    assert.ok(!a.startsWith(join(tmpdir(), "farm-")));
+  } finally {
+    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 });
