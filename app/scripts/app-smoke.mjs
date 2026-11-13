@@ -3986,6 +3986,11 @@ async function viewCommands(page, fail, shots, size) {
   for (let i = 0; i < 60 && (await state()).camera.distance > 900; i++) await run("w3.terrain.camera.zoomIn");
   const closeDistance = (await state()).camera.distance;
   if (closeDistance > 900) bad(`zooming in didn't get close: ${closeDistance}`);
+  // The zoom keeps the World Editor's camera target above the middle in place (wheelzoom.ts zoomStep), so the footman
+  // drifts down and out of the view on the way in: View Selection brings it back, the distance kept.
+  const reframe = await run("w3.terrain.viewSelection");
+  if (reframe) bad(`View Selection after zooming in: ${reframe}`);
+  await settled(page);
   const close = await settle("selection");
   await trial(close.plain, close.noise, "w3.terrain.toggleCameraObjects", "cameras", "cameras", 150);
   await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
