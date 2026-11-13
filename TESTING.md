@@ -199,6 +199,12 @@ It never starts the game itself.
   packed again), one row each, then two parking cameras at the terrain's corners; after View Selected Camera the
   parking camera farther away is selected, which takes the selected camera's green circle out of the picture
   without moving the view. `--look center` on cliff.w3m (SD) gives the opening picture exactly (difference 0).
+- **The Camera Objects layer** (`--view "Camera Objects=on"`, Ctrl+M; branch camera-layer, 2026-11-13, a copy of
+  cliff.w3m with flat cameras of distance 500, 1000 and 2000, and 12b_RoC_Orc04Interlude's 28): one blue model per
+  camera, a small movie camera with an arrow whose tip is the target, pointing along the camera's view and scaled by
+  its distance (the camera's back 0.365 of it from the target; world-sized, so it grows as the view comes closer). No
+  footprint or field of view on the ground. Lit by the map's light (blue under 12b's, light cyan on cliff.w3m's day).
+  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view.
 - **Saving** (`--save FILE`, branch save-parity, 2026-11-09): variants of a map made with the release CLI (unpack, JSON,
   pack), saved by the editor and unpacked again, show what its save works out by itself. Found so: the ally priorities
   (lib/terrain/startlocations.ts `editorAllyPriorities`), hit points and mana of 0 saved as -1 (lib/terrain/owner.ts

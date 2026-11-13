@@ -24,7 +24,7 @@ import { cameraRect, clampPoint, insideBounds, snappedInside, limitTo, OUTSIDE_B
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
-import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
+import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
@@ -4491,11 +4491,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
           const failed = await runLayerJobs(() => {
             const on = groundLayersOn();
+            // The cameras aren't on the ground: one marker each, as the World Editor's (cameraMarkers).
+            if (!on.cameras) renderer.setShapes("cameras", null);
             if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
-            // Bottom to top: regions, ground pathing, heights, naval pathing, cameras.
-            const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null, null];
+            // Bottom to top: regions, ground pathing, heights, naval pathing.
+            const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
             const show = () => {
               if (!latest()) return;
               const rgba = composeLayers(parts);
@@ -4514,7 +4516,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 show();
               }));
             }
-            if (on.cameras) late.push(camerasNow().then((cams) => { parts[4] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (on.cameras) {
+              late.push(camerasNow().then((cams) => {
+                if (!latest()) return;
+                renderer.setShapes("cameras", cameraMarkers(cams, (x, y) => heightAt(terrain, x, y)));
+                redraw();
+              }));
+            }
             return late;
           }, latest, (busy) => { layerBusy.hidden = !busy; });
           if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
@@ -4693,7 +4701,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state(), shapes: renderer.shapeCounts() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4797,7 +4805,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
               layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
-              layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
+              layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
               layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
               layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
               layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
