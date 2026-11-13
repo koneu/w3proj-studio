@@ -62,6 +62,9 @@
 //   --sleep MS          wait
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
+//   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
+//                       Area Only); the TGA it writes is copied to FILE. Another dialog is reported, not answered
+//   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it
 //   --close             quit without saving: closes the main window and answers "don't save" questions
 //                       (a crash-report dialog is never answered: the editor is killed, "crashed": true, nothing sent)
 //
@@ -102,6 +105,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VIEW_INSET = { x: 152, y: 49, w: 168, h: 93 };
 // The View menu: its title in the menu bar, and the check mark of "Lock to Game View Settings" in the open menu.
 const VIEW_MENU = { x: 78, y: 11 };
+/** File > Export Minimap… (from the main window's corner), and in its dialog (from the dialog's corner) the Image File
+ *  button and OK (measured 2026-11-13). The dialog opens with the editor's defaults: 256, terrain, water, doodads,
+ *  Playable Area Only. */
+const EXPORT_MINIMAP = { file: { x: 14, y: 11 }, item: { x: 61, y: 168 }, imageFile: { x: 39, y: 20 }, ok: { x: 225, y: 291 } };
 /** The check-mark column of the open View menu, from the menu's corner, and a row's half height. */
 const VIEW_CHECK = { x: 2, w: 18, half: 8 };
 /**
@@ -148,7 +155,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
@@ -710,6 +717,58 @@ class Session {
     return { saved: false, timeout: this.opts.timeout, screen: this.dialogShot("save") };
   }
 
+  /**
+   * File > Export Minimap… with the dialog's defaults: Image File names a file in the work folder (typed into the
+   * "Save As" box), OK writes it, and the TGA is copied to `dest`. Done when the file stood still for 2 s and the
+   * dialog has closed; another dialog is reported with a picture of the screen, not answered.
+   */
+  async exportMinimap(dest) {
+    const { main } = this.mainOrThrow();
+    const waitFor = async (title) => {
+      for (let i = 0; i < 40; i++) {
+        await sleep(250);
+        const d = this.windows().dialogs.find((w) => w.title === title);
+        if (d) return d;
+      }
+      return null;
+    };
+    const at = (rect, p) => `${rect[0] + p.x},${rect[1] + p.y}`;
+    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.file));
+    await sleep(600);
+    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.item));
+    const dialog = await waitFor("Export Minimap");
+    if (!dialog) return { exported: false, error: "the Export Minimap dialog didn't open", screen: this.dialogShot("export") };
+    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.imageFile));
+    const saveAs = await waitFor("Save As");
+    if (!saveAs) return { exported: false, error: "the Save As box didn't open", screen: this.dialogShot("export") };
+    const file = join(resolve(this.opts.work), `minimap-${Date.now()}.tga`);
+    await sleep(300);
+    x11(this.display, "type", "--window", saveAs.id, winePath(file));
+    x11(this.display, "key", "--window", saveAs.id, "Return");
+    for (let i = 0; i < 20 && this.windows().dialogs.some((w) => w.title === "Save As"); i++) await sleep(250);
+    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.ok));
+    const deadline = Date.now() + this.opts.timeout * 1000;
+    let last = null, stillSince = 0;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      if (this.editorExited) throw new Error(`the editor exited while exporting (see ${this.log})`);
+      const others = questionDialogs(this.windows().dialogs).filter((d) => d.title !== "Export Minimap");
+      if (others.length) return { exported: false, dialogs: others.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("export") };
+      let now = null;
+      try { const s = statSync(file); now = `${s.mtimeMs}:${s.size}`; } catch { /* not yet */ }
+      if (now !== last) { last = now; stillSince = 0; continue; }
+      if (now && !this.windows().dialogs.some((d) => d.title === "Export Minimap")) {
+        stillSince ||= Date.now();
+        if (Date.now() - stillSince >= 2000) {
+          mkdirSync(dirname(resolve(dest)), { recursive: true });
+          copyFileSync(file, resolve(dest));
+          return { exported: true, file: resolve(dest), bytes: statSync(file).size };
+        }
+      }
+    }
+    return { exported: false, timeout: this.opts.timeout, screen: this.dialogShot("export") };
+  }
+
   mainOrThrow() {
     const w = this.windows();
     if (!w.main) throw new Error("no main window of the editor");
@@ -954,6 +1013,17 @@ async function main() {
           x11(s.display, "key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
           await sleep(300);
           out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--type") {
+          // Into the open dialog if there is one, else the main window, as --key.
+          const w = s.windows();
+          const to = w.dialogs.at(-1) ?? w.main;
+          x11(s.display, "type", ...(to ? ["--window", to.id] : []), arg);
+          await sleep(300);
+          out({ step, typed: arg.length, dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--export-minimap") {
+          const r = await s.exportMinimap(arg);
+          out({ step, ...r });
+          if (!r.exported) { failed = true; break; }
         } else if (step === "--click") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--click wants X,Y");
           x11(s.display, "click", arg);
