@@ -121,6 +121,7 @@ async function settled(page, timeout = 60000) {
 
 /** Creates maps as a user would, through the app, and holds what comes out against the tools. */
 async function newMaps(page, found) {
+  try {
   const folder = join(work, "new");
   mkdirSync(folder, { recursive: true });
   const tool = mcpTool(page);
@@ -219,6 +220,9 @@ async function newMaps(page, found) {
     join(app, "scripts", "script-check", "check-scripts.mts"), join(app, "src", "lib"), common, blizzard, ...scripts], { encoding: "utf8" });
   if (check.status !== 0 || !check.stdout.includes(`${NEW_MAPS.length} scripts checked`)) found.push(`generated scripts: ${(check.stderr + check.stdout).trim().slice(0, 500)}`);
   return scripts.length;
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Lets a project file's writes be held by the test: `hold` stops them where they begin, `release` lets them
@@ -250,6 +254,7 @@ async function gateWrites(page, path) {
 /** The terrain editor's wiring around its saves and reloads, which no unit test can reach: tools that
  *  follow each other at once, footprints read again, and saves that run one at a time. */
 async function terrainWiring(page, found) {
+  try {
   const fail = (what) => found.push(`terrain wiring: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "wiring");
@@ -382,12 +387,16 @@ async function terrainWiring(page, found) {
   } finally {
     await gated.release();
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** place_objects on a new map: a dry run refuses the overlaps among its own objects that the real run refuses,
  *  and the placing itself takes the Melee flag off (not the map script's regeneration a moment after a save,
  *  which is off here, as it is with script.generateOnSave unset or a project closed right after). */
 async function placeObjects(page, found) {
+  try {
   const fail = (what) => found.push(`place objects: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "placing");
@@ -415,6 +424,9 @@ async function placeObjects(page, found) {
   } finally {
     await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Melee flag follows edits that aren't place_objects, with script.generateOnSave off (lib/terrain/meleesave):
@@ -422,6 +434,7 @@ async function placeObjects(page, found) {
  *  itself (its message says so); on a second map a tool moving the start location into a lake takes it off in the
  *  same edit (the file says so before the map script's run after the save could). Both maps pack and verify. */
 async function meleeByHand(page, found) {
+  try {
   const fail = (what) => found.push(`melee by hand: ${what}`);
   await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
   try {
@@ -456,12 +469,16 @@ async function meleeByHand(page, found) {
   } finally {
     await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The MCP panel's GUIDES list shows a guide another program put into the guides folder (outside the project: no file
  *  event tells) once the panel is shown again, and while it's showing, once the window gets the focus back. The guide
  *  files are written and removed here, in the smoke app's own settings folder. */
 async function mcpGuides(page, found) {
+  try {
   const fail = (what) => found.push(`MCP guides: ${what}`);
   const folder = (await page.evaluate(`w3.backend.invoke("app_paths")`)).user_guides;
   const topics = ["smoke dropped shown", "smoke dropped focus"];
@@ -492,11 +509,15 @@ async function mcpGuides(page, found) {
     await page.evaluate(`window.dispatchEvent(new Event("focus"))`).catch(() => {});
     if (before) await page.evaluate(`w3.views.show(${JSON.stringify(before)})`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** move_object on a start location moves the player's start in war3map.w3i too, in the same edit: one undo takes both
  *  back. (The terrain editor's own save does this for its moves; a tool's edit reloads the editor, so its save never did.) */
 async function mcpStartMove(page, found) {
+  try {
   const fail = (what) => found.push(`start location moved by a tool: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "start-move");
@@ -526,10 +547,14 @@ async function mcpStartMove(page, found) {
   } finally {
     await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** set_sky and set_weather: the w3i and w3r after a save, one undo step each, names refused with the choices. */
 async function atmosphereTools(page, found) {
+  try {
   const fail = (what) => found.push(`sky and weather tools: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "atmosphere");
@@ -578,12 +603,16 @@ async function atmosphereTools(page, found) {
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
   if (read("war3map.w3i.json").weather !== "0x00000000" || !existsSync(join(root, "map", "war3map.w3r.json")) === false && read("war3map.w3r.json").regions.length) fail("the undos didn't bring back the map as it was");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
 async function waterPathing(page, found) {
+  try {
   const fail = (what) => found.push(`water pathing: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "water");
@@ -659,11 +688,15 @@ async function waterPathing(page, found) {
   const left = git("status", "--porcelain").stdout.trim();
   if (left) fail(`a commit straight after a tool's edit left changes uncommitted: ${left.split(/[\r\n]+/).slice(0, 4).join(" | ")}`);
   if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Object data saved while the terrain editor opens (a tool writing then) reaches it: the first load of the placed
  *  objects is held after it read the units file, a new unit type is made meanwhile, and the editor knows it afterwards. */
 async function objectsWhileOpening(page, found) {
+  try {
   const fail = (what) => found.push(`objects while opening: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "opening");
@@ -700,11 +733,15 @@ async function objectsWhileOpening(page, found) {
   } finally {
     await page.evaluate(`(() => { window.__heldRead?.release(); const s = w3Workbench.workspace; if (s.__read) s.readText = s.__read; })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The terrain painter's tile templates (Tiles…, Template, Use its tiles): another tileset's tiles make the w3e's
  *  list custom, and the tileset's own tiles again clear the flag, as the World Editor writes it. */
 async function tileTemplate(page, found) {
+  try {
   const fail = (what) => found.push(`tile template: ${what}`);
   const tool = mcpTool(page);
   const folder = join(work, "template");
@@ -739,6 +776,9 @@ async function tileTemplate(page, found) {
   await use(own);
   if (header("custom-tilesets") !== "0") fail(`the tileset's own tiles again left the custom tiles flag at ${header("custom-tilesets")}`);
   if (header("tileset") !== own) fail(`a template changed the tileset to ${header("tileset")}`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A new map for a terrain check, with its terrain editor open on the Terrain tab, and a tool group of the check's own that
@@ -782,6 +822,7 @@ async function terrainMap(page, name) {
 /** An AI tool's edit that adds a ground tile is taken by the open terrain editor in place, as its other edits are; a map
  *  size change opens the editor again, with the camera and the selected object as they were. */
 async function tilesInPlace(page, found) {
+  try {
   const fail = (what) => found.push(`terrain in place: ${what}`);
   const k = await terrainMap(page, "InPlace");
   try {
@@ -818,11 +859,15 @@ async function tilesInPlace(page, found) {
   } finally {
     await k.done();
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Tiles…: Remove unused takes out the tiles no corner or cliff uses, Clean up removes a used one too with the tile chosen
  *  in its place, and Remove Unused Tiles on Save does it on save (off unless chosen). One undo step each. */
 async function tileCleanup(page, found) {
+  try {
   const fail = (what) => found.push(`tile cleanup: ${what}`);
   const k = await terrainMap(page, "Cleanup");
   try {
@@ -902,6 +947,9 @@ async function tileCleanup(page, found) {
   } finally {
     await k.done();
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** What the checks of the terrain viewer's height tools share: a new map opened in the editor, and the ways a person
@@ -969,6 +1017,7 @@ async function heightKit(page, name) {
  *  twice at the same kind of spot, first with the setting on and then off. The two pastes differ only by the setting,
  *  which is what shows it made the difference. The toolbar box and the command are the same setting. */
 async function heightsPreserve(page, found) {
+  try {
   const fail = (what) => found.push(`height tools (preserve): ${what}`);
   const k = await heightKit(page, "Preserve");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }], ignoreRoom: true });
@@ -1034,12 +1083,16 @@ async function heightsPreserve(page, found) {
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
   await k.reset();
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Set Uniform Doodad Heights and Reset Fixed Object Heights, by command on a selection made with Ctrl+A: the height is
  *  asked for (a word that isn't a number changes nothing), the doodads take it and hold it, a unit in the selection is
  *  left alone, and each is one undo step. A reset with nothing fixed makes no change at all. */
 async function heightsUniform(page, found) {
+  try {
   const fail = (what) => found.push(`height tools (uniform): ${what}`);
   const k = await heightKit(page, "Uniform");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }, { id: "LTlt", x: 0, y: 512 }], ignoreRoom: true });
@@ -1127,6 +1180,9 @@ async function heightsUniform(page, found) {
   await k.save();
   await k.verify(fail);
   await k.reset();
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Three things of the terrain viewer that only the real app shows:
@@ -1135,6 +1191,7 @@ async function heightsUniform(page, found) {
  *  - terrain_screenshot, in a project with two terrain files, takes the tab in front and doesn't switch to the other;
  *  - a click on an object without a model (drawn as the World Editor's checkered cube) selects it, as a selection box does. */
 async function terrainSelectCameras(page, found) {
+  try {
   const fail = (what) => found.push(`terrain select and cameras: ${what}`);
   const k = await heightKit(page, "SelectCameras");
   const TXT = "map/war3map.w3e.txt", BIN = "map/war3map.w3e";
@@ -1269,6 +1326,9 @@ async function terrainSelectCameras(page, found) {
     return p && Math.abs(p[0] - 512) <= 32 && Math.abs(p[1] - 512) <= 32 && (await page.evaluate(name)) === "Zzzz";
   }, 20000).catch(async (e) => fail(`${e.message} (the selection: ${JSON.stringify(await page.evaluate(at))} "${await page.evaluate(name)}")`));
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The World Editor's View items in the terrain view (viewmodes.ts), by their keys in the map: game view (V) hides the
@@ -1291,6 +1351,7 @@ async function plainGridView(page) {
 }
 
 async function viewModes(page, found) {
+  try {
   const fail = (what) => found.push(`view modes: ${what}`);
   const k = await heightKit(page, "ViewModes");
   const TXT = "map/war3map.w3e.txt";
@@ -1584,6 +1645,9 @@ async function viewModes(page, found) {
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the View keys left unsaved changes");
   await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Unit Properties in the Selection panel (propspanel.ts), typed and chosen in the hidden window: a hero's hit points,
@@ -1593,6 +1657,7 @@ async function viewModes(page, found) {
  *  and the packed map verifies. The unit file gets the layout with hero attributes and item tables (subversion 11, as
  *  the World Editor saves an 8/11 map), the map an item table and a region. */
 async function unitProperties(page, found) {
+  try {
   const fail = (what) => found.push(`unit properties: ${what}`);
   const k = await heightKit(page, "UnitProps");
   const TXT = "map/war3map.w3e.txt";
@@ -1865,6 +1930,9 @@ async function unitProperties(page, found) {
   // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
   // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
   await page.evaluate(`w3Workbench.game.reload()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Problems view's ignore, on a new map with three triggers nothing runs (two of the bonus campaigns' quest library's
@@ -1873,6 +1941,7 @@ async function unitProperties(page, found) {
  *  third; list_problems leaves them out and counts them; saved and opened again they are still ignored; Un-ignore reports
  *  one again and empties the file's entry. */
 async function problemsIgnore(page, found) {
+  try {
   const fail = (what) => found.push(`problems ignore: ${what}`);
   const k = await heightKit(page, "ProblemsIgnore");
   const FILE = join(k.root, ".w3proj", "problems-ignore.json");
@@ -1943,6 +2012,9 @@ async function problemsIgnore(page, found) {
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Map Properties › Techtree & Tables: a random group's positions get random objects by level from their Random… choice
@@ -1950,6 +2022,7 @@ async function problemsIgnore(page, found) {
  *  the per-player grid makes an object available again to player 1. Saved: war3map.w3i holds the ids, the script picks
  *  them (ChooseRandomCreep), the packed map verifies, and Map Properties opened again shows them by the editor's names. */
 async function techtreeRandomLevels(page, found) {
+  try {
   const fail = (what) => found.push(`techtree random levels: ${what}`);
   const k = await heightKit(page, "TechRandom");
   const W3I = "map/war3map.w3i.json";
@@ -2025,6 +2098,9 @@ async function techtreeRandomLevels(page, found) {
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Item tables for unit drops, reached from where they're used: the unit file's older layout (no item table field) offers
@@ -2033,6 +2109,7 @@ async function techtreeRandomLevels(page, found) {
  *  the terrain editor). "Edit item tables…", "or use a map item table…" and the command Item Tables… open Map Properties
  *  at the item tables. */
 async function itemTablesAccess(page, found) {
+  try {
   const fail = (what) => found.push(`item tables: ${what}`);
   const k = await heightKit(page, "ItemTables");
   const TXT = "map/war3map.w3e.txt", W3I = "map/war3map.w3i.json";
@@ -2190,6 +2267,9 @@ async function itemTablesAccess(page, found) {
   if (footman().itemTable !== -1 || footman().itemSets.length) fail(`the undo of the table's choice: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Item drops (dropsedit.ts, dropstab.ts), by mouse and keyboard in the hidden window: the Selection panel shows a creep's
@@ -2202,6 +2282,7 @@ async function itemTablesAccess(page, found) {
  *  tab then saves that table with the drops changed there. Show selects the
  *  creep in the terrain editor. Everything stays unsaved until saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
 async function itemDrops(page, found) {
+  try {
   const fail = (what) => found.push(`item drops: ${what}`);
   const k = await heightKit(page, "ItemDrops");
   const TXT = "map/war3map.w3e.txt", TAB = "w3:item-drops";
@@ -2388,6 +2469,9 @@ async function itemDrops(page, found) {
   if (!/RandomDistAddItem\( 'ankh', 30 \)/.test(script)) fail("war3map.j doesn't drop the ankh the troll was given");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Units are drawn by their type, as the World Editor draws them: a gryphon at its flying height (UnitData moveHeight
@@ -2396,6 +2480,7 @@ async function itemDrops(page, found) {
  *  In HD a naga swimming in a lake goes into the water's depth picture of the models (it shows through), a gryphon
  *  over the lake doesn't. */
 async function flyingHeights(page, found) {
+  try {
   const fail = (what) => found.push(`flying heights: ${what}`);
   const k = await heightKit(page, "Flying");
   await k.tool("place_objects", { objects: [{ id: "hgry", x: 0, y: 0, player: 1 }, { id: "hfoo", x: 512, y: 0, player: 1 }], ignoreRoom: true });
@@ -2463,12 +2548,16 @@ async function flyingHeights(page, found) {
   }
   await k.save();
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The doodad file's special doodads (cliff and cave models placed by tile) are drawn in the terrain view, on their
  *  tiles, and only drawn: an id with no model is left out, the map isn't marked as changed, and saving after only
  *  looking leaves the doodad file as it was. */
 async function specialDoodads(page, found) {
+  try {
   const fail = (what) => found.push(`special doodads: ${what}`);
   const k = await heightKit(page, "Specials");
   await k.save();
@@ -2503,6 +2592,9 @@ async function specialDoodads(page, found) {
   }
   await k.save();
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
@@ -2510,6 +2602,7 @@ async function specialDoodads(page, found) {
  *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
  *  editor with unsaved edits stays as it is and offers to save first; Save and Reopen does both. */
 async function artModeReload(page, found) {
+  try {
   const fail = (what) => found.push(`art mode reload: ${what}`);
   const k = await heightKit(page, "ArtMode");
   const original = await k.setting("game.graphicsMode");
@@ -2570,12 +2663,16 @@ async function artModeReload(page, found) {
     await setMode(original ?? "hd");
   }
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
 async function cameraEditing(page, found) {
+  try {
   const fail = (what) => found.push(`camera editing: ${what}`);
   const k = await heightKit(page, "CameraEditing");
   const TXT = "map/war3map.w3e.txt", SHIFT = 8;
@@ -2683,12 +2780,16 @@ async function cameraEditing(page, found) {
   await k.save();
   if (cameras()[0].distance !== a.distance) fail(`the undo gave the distance ${cameras()[0].distance}, not ${a.distance}`);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past level 0 stops every
  *  corner there (as the World Editor does), and undoing gives every file back byte for byte. */
 async function wholeMapGround(page, found) {
+  try {
   const fail = (what) => found.push(`whole-map ground: ${what}`);
   const k = await heightKit(page, "WholeGround");
   const TXT = "map/war3map.w3e.txt";
@@ -2758,7 +2859,7 @@ async function wholeMapGround(page, found) {
   if (hashes() !== original) fail(`one undo of the shift to level 0 didn't give the files back as they were: ${hashes()}`);
 
   // Reset Height Field: flat over the levels, the tree back on the (now flat) ground, then undone.
-  err = await k.run("w3.terrain.resetHeightField");
+  err = await k.run("w3.terrain.resetHeightField", { random: false });
   if (err) fail(`Reset Height Field: ${err}`);
   await k.save();
   if (!/^\[height\] all 0$/m.test(text())) fail(`after Reset Height Field the heights are ${section("height").slice(0, 80)}`);
@@ -2768,13 +2869,30 @@ async function wholeMapGround(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
   if (hashes() !== original) fail(`one undo of Reset Height Field didn't give the files back as they were: ${hashes()}`);
+
+  // Random, at the dialog's settings: noise on the ground as it is (not flat, not as it was), the levels as they were,
+  // the tree on the new ground; one undo gives the files back.
+  const heightsBefore = section("height");
+  err = await k.run("w3.terrain.resetHeightField", { random: true });
+  if (err) fail(`Reset Height Field with Random: ${err}`);
+  await k.save();
+  if (/^\[height\] all 0$/m.test(text()) || section("height") === heightsBefore) fail(`Random left the heights as ${section("height").slice(0, 80)}`);
+  if (levels().join("") !== before.levels.join("")) fail(`Random changed the cliff levels: ${levels().slice(0, 8).join("")}…`);
+  if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("Random moved the tree with a height of its own");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (hashes() !== original) fail(`one undo of Reset Height Field with Random didn't give the files back as they were: ${hashes()}`);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
 async function heightsLimits(page, found) {
+  try {
   const fail = (what) => found.push(`height tools (limits): ${what}`);
   const k = await heightKit(page, "Limits");
   const { hands } = k;
@@ -2972,6 +3090,9 @@ async function heightsLimits(page, found) {
   await k.tab("Select");
   await k.verify(fail);
   await k.reset();
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts): each call is made with its
@@ -2979,6 +3100,7 @@ async function heightsLimits(page, found) {
  *  skips what lands outside them, scatter_objects leaves those spots out and move_object refuses the place; water:
  *  set_water on ground raised so high that the surface would pass the limit of the stored level is refused whole. */
 async function mcpLimits(page, found) {
+  try {
   const fail = (what) => found.push(`mcp limits: ${what}`);
   const k = await heightKit(page, "McpLimits");
   const refusal = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
@@ -3037,11 +3159,20 @@ async function mcpLimits(page, found) {
   } finally {
     await k.reset();
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
  *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
  *  would, and fails the run naming the check, so the one that left it answers it itself. */
+/** Puts every w3.window function back as it was at the start of the run (the checks that replace some answer
+ *  dialogs, and call this in a `finally`). */
+async function restoreWindow(page) {
+  await page.evaluate(`(() => { for (const [name, fn] of Object.entries(window.__w3WindowOrig ?? {})) w3.window[name] = fn; })()`).catch(() => {});
+}
+
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
 let checkEnded = Date.now();
 async function leftOpen(page, check, found) {
@@ -3054,11 +3185,24 @@ async function leftOpen(page, check, found) {
     console.log(`  left open after ${check}: ${text}`);
     found.push(`${check} left a question open: ${text}`);
   }
+  // A check that replaced a w3.window function (confirm, inputBox...) and didn't put it back would answer the next
+  // checks' dialogs: put them back, and fail the run naming the check.
+  const replaced = await page.evaluate(`(() => {
+    const orig = window.__w3WindowOrig, out = [];
+    if (!orig) return out;
+    for (const [name, fn] of Object.entries(orig)) if (w3.window[name] !== fn) { out.push(name); w3.window[name] = fn; }
+    return out;
+  })()`).catch(() => []);
+  if (replaced.length) {
+    console.log(`  w3.window left replaced after ${check}: ${replaced.join(", ")}`);
+    found.push(`${check} left w3.window.${replaced.join(", w3.window.")} replaced`);
+  }
 }
 
 /** The Pathing Editor's "Import differences from war3map.wpm": a wpm edited outside the app (bytes changed in a scratch
  *  map) becomes overrides, one undo step; a second import changes nothing; the wpm itself isn't written by it. */
 async function pathingImport(page, found) {
+  try {
   const fail = (what) => found.push(`pathing import: ${what}`);
   const k = await heightKit(page, "PathingImport");
   const wpmFile = join(k.root, "map", "war3map.wpm");
@@ -3118,11 +3262,15 @@ async function pathingImport(page, found) {
   await settled(page);
   await k.save();
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the check left the terrain editor with unsaved changes");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Pathing brush's Square shape, through the real tool: one stroke with Square at size 3 makes the 5 × 5 cells around
  *  the click (a Round brush of that size leaves out the corners), and the saved overrides hold exactly those. */
 async function pathingSquare(page, found) {
+  try {
   const fail = (what) => found.push(`pathing square: ${what}`);
   const k = await heightKit(page, "PathingSquare");
   await k.save();
@@ -3154,18 +3302,25 @@ async function pathingSquare(page, found) {
   if (cells.length !== 25 || x1 - x0 !== 4 || y1 - y0 !== 4) fail(`${cells.length} cells in ${x1 - x0 + 1} × ${y1 - y0 + 1}`);
   if (new Set(cells.map((c) => c[1] * 4096 + c[0])).size !== 25) fail("cells repeat");
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the check left the terrain editor with unsaved changes");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
  *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
  *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
 async function resizeUndo(page, found) {
+  try {
   // Every warning is answered "Apply" for this check only: the later checks of a full run get the real questions.
   await page.evaluate(`(() => { window.__resizeKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; window.__warned = []; w3.window.showWarning = async (m) => { window.__warned.push(m); return "Apply"; }; })()`);
   try {
     await resizeUndoChecks(page, found);
   } finally {
     await page.evaluate(`(() => { const k = window.__resizeKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__resizeKept; })()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
   }
 }
 
@@ -3332,6 +3487,7 @@ async function resizeUndoChecks(page, found) {
  *     differs from what is there stays). Checkpoints go to build/checkpoints/recovered, which the next checkpoint's
  *     pruning leaves alone. */
 async function dataSafety(page, found) {
+  try {
   const fail = (what) => found.push(`data safety: ${what}`);
   const k = await heightKit(page, "DataSafety");
   const { hands, root } = k;
@@ -3496,6 +3652,9 @@ async function dataSafety(page, found) {
     if (existsSync(locked)) { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
     await page.evaluate(`(() => { if (window.__dataSafetyWarn) w3.window.showWarning = window.__dataSafetyWarn; window.__dataSafetyWarn = null; })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The workbench's own state (branch workbench-polish):
@@ -3505,6 +3664,7 @@ async function dataSafety(page, found) {
  *     click puts the default back.
  *  3. Another graphics mode opens the model viewer again (its tab, in place), not the text editor beside it. */
 async function workbenchState(page, found) {
+  try {
   const fail = (what) => found.push(`workbench state: ${what}`);
   const k = await heightKit(page, "WorkbenchState");
   const original = await k.setting("game.graphicsMode");
@@ -3607,6 +3767,9 @@ async function workbenchState(page, found) {
     await page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(original ?? "hd")})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** What a sync from a map (Sync Project from .w3x, a World Editor save) must not cost (sync-safety), through the command:
@@ -3615,6 +3778,7 @@ async function workbenchState(page, found) {
  *  3. On Linux a file with a `\` in its name (left by an older version) is never deleted by the sync, isn't among what
  *     the question says goes, and the stray question is asked after the sync. */
 async function syncSafety(page, found) {
+  try {
   const fail = (what) => found.push(`sync safety: ${what}`);
   const { root } = await heightKit(page, "SyncSafety");
   const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
@@ -3677,6 +3841,9 @@ async function syncSafety(page, found) {
   } finally {
     await page.evaluate(`(() => { if (window.__syncSafetyWarn) w3.window.showWarning = window.__syncSafetyWarn; window.__syncSafetyWarn = null; })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Files the app reads and then writes again, and paths it must never take for others:
@@ -3686,6 +3853,7 @@ async function syncSafety(page, found) {
  *     name looks like.
  *  3. On Linux two projects whose folders differ only in case are two entries of the recent list. */
 async function configSafety(page, found) {
+  try {
   const fail = (what) => found.push(`config safety: ${what}`);
   const k = await heightKit(page, "ConfigSafety");
   const { root } = k;
@@ -3758,6 +3926,9 @@ async function configSafety(page, found) {
     // The user's file as it was (the smoke test's own settings folder).
     if (had === null) rmSync(userFile, { force: true }); else writeFileSync(userFile, had);
     await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
   }
 }
 
@@ -4165,6 +4336,7 @@ async function viewCommands(page, fail, shots, size) {
 
 /** The New Map dialog and the terrain painter, by mouse and keyboard. */
 async function byHand(page, found) {
+  try {
   const hands = new Hands(page), folder = join(work, "by-hand");
   mkdirSync(folder, { recursive: true });
   const fail = (what) => found.push(`by hand: ${what}`);
@@ -4274,6 +4446,9 @@ async function byHand(page, found) {
 
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Replaces all of a text field's text, as selecting it and typing does; Tab commits. Returns once the focus has left
@@ -4443,6 +4618,7 @@ async function triggerByHand(page, hands, root, fail) {
  *  without the text, and the tab stayed saved too until the field was left. The Object Editor (a value cell), Map
  *  Properties (a number field), Gameplay Constants and the Sound Editor (the workbench's step before a save, EditorService.commitField). */
 async function typedFieldSave(page, found) {
+  try {
   const fail = (what) => found.push(`typed field save: ${what}`);
   // The buffs' game data is held back from the start (the Object Manager loads every kind as a project opens) until
   // released below, so that "+ New" comes while it loads. A run that loaded it before can't hold it.
@@ -4697,11 +4873,15 @@ async function typedFieldSave(page, found) {
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Test Map when the game can't start: the user is told why, whichever way it was asked for, and
  *  nothing is left uncaught in the page (the run's `problems` list would show it). */
 async function testMapWithoutGame(page, found) {
+  try {
   const hands = new Hands(page);
   await page.evaluate(`w3.settings.set("game.path", "C:/no/such/Warcraft III.exe")`);
   const ways = {
@@ -4728,6 +4908,9 @@ async function testMapWithoutGame(page, found) {
   if (!/isn't a Test Map option/.test(flag ?? "")) found.push(`test map: the backend let ${JSON.stringify(flag)} through for -loadfile`);
   const good = await invoke(["-windowmode", "windowed", "-hd", "0", "-mapdiff", "2", "-testmapprofile", "WorldEdit", "-fixedseed", "1"]);
   if (/isn't a Test Map option/.test(good ?? "")) found.push(`test map: the backend refused the World Editor's own flags: ${good}`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Delete Invalid Objects changes war3map.doo without a terrain editor: pathing, shadows and the minimap follow at once
@@ -4737,6 +4920,7 @@ async function testMapWithoutGame(page, found) {
  *  what a rebuild makes (and lacks the rocks), the map verifies, and restoring the checkpoint
  *  made before (the way back) packs again without --force-stale, with the pathing from before. */
 async function derivedAfterDeletes(page, found) {
+  try {
   const fail = (what) => found.push(`derived after deletes: ${what}`);
   const tool = mcpTool(page);
   const dir = join(work, "derived-after-deletes");
@@ -4810,6 +4994,9 @@ async function derivedAfterDeletes(page, found) {
   } finally {
     await page.evaluate(`(async () => { if (window.__derivedKept) w3.window.confirm = window.__derivedKept; delete window.__derivedKept; delete window.__derivedAsked; await w3.editors.closeAll(); })()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
@@ -4817,12 +5004,16 @@ async function derivedAfterDeletes(page, found) {
  *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
  *  by hand. */
 async function moduleFunctions(page, found) {
+  try {
   // The check answers the system's dialogs and quick picks itself: the later checks of a full run get the real ones.
   await page.evaluate(`window.__modKept = { pickSaveFile: w3.window.pickSaveFile, pickFile: w3.window.pickFile, confirm: w3.window.confirm, quickPick: w3.window.quickPick }`);
   try {
     await moduleFunctionsChecks(page, found);
   } finally {
     await page.evaluate(`(() => { const k = window.__modKept; if (k) Object.assign(w3.window, k); delete window.__modKept; })()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
   }
 }
 
@@ -5353,6 +5544,7 @@ const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replace
  *  B's buff. Last, placed units copied in the terrain view (Ctrl+C, Ctrl+V) bring their types into a third map. Every
  *  project is packed and verified by the CLI. */
 async function objectCopy(page, found) {
+  try {
   const fail = (what) => found.push(`object copy: ${what}`);
   const tool = mcpTool(page), hands = new Hands(page);
   const folder = join(work, "object-copy");
@@ -5607,6 +5799,9 @@ async function objectCopy(page, found) {
   if (customs(c, "w3u").length !== 2) fail(`a second click added another copy of the types: ${customs(c, "w3u").length} units`);
   if (placed.length !== 2 || placed.some((u) => u.id !== terrainHero?.id || (u.skinId !== undefined && u.skinId !== terrainHero?.id))) fail(`the placed heroes in map C: ${JSON.stringify(placed.map((u) => [u.id, u.skinId]))}`);
   await verify(c, "CopyTerrain");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Problems view's "Graphics modes" fixes on made-up maps (the mini map plus Reforged-only
@@ -5615,6 +5810,7 @@ async function objectCopy(page, found) {
  *  and the packed map verifies against the game. Also: error toasts carry a Copy button, and the
  *  found problems of one project don't show in the next. Needs the game (W3PROJ_GAME). */
 async function graphicsModes(page, found) {
+  try {
   const fail = (what) => found.push(`graphics modes: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   const dir = join(work, "graphics-modes");
@@ -5797,6 +5993,9 @@ async function graphicsModes(page, found) {
   await page.evaluate(`void w3.window.showError("Smoke error to copy")`);
   const copy = await until("the toast", () => page.evaluate(`!!document.querySelector(".toast.error button.copy-error")`)).catch(() => false);
   if (!copy) fail("an error toast has no Copy button");
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Chords the webview can't name reach their command: on Linux WebKitGTK gives Ctrl+Alt with the number pad's + - * /
@@ -5805,6 +6004,7 @@ async function graphicsModes(page, found) {
  *  number pad's operators; Ctrl+Shift+Tab and Ctrl+Alt+F5 are there so no Unidentified chord the list names goes
  *  unchecked. A command for each is put in for the check and taken out after; on Windows all of them come named. */
 async function keyChords(page, found) {
+  try {
   const fail = (what) => found.push(`key chords: ${what}`);
   const hands = new Hands(page);
   const chords = [["Ctrl+Alt+NumpadAdd", "ctrl+alt++"], ["Ctrl+Alt+NumpadSubtract", "ctrl+alt+-"], ["Ctrl+Shift+Tab", "ctrl+shift+tab"], ["Ctrl+Alt+F5", "ctrl+alt+f5"]];
@@ -5831,6 +6031,9 @@ async function keyChords(page, found) {
   } finally {
     await page.evaluate(`(() => { for (const off of window.__smokeChordOff ?? []) off(); window.__smokeChordOff = null; })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Keyboard Shortcuts (builtin/keybindings-editor, lib/keybindings.ts), the World Editor's Configure Controls: Ctrl+K
@@ -5839,6 +6042,7 @@ async function keyChords(page, found) {
  *  J, and keybindings.json says so; Reset puts G back; keybindings.json edited outside the app applies when the window
  *  comes back. The file (in the smoke app's own settings folder) is put back as it was. */
 async function keybindings(page, found) {
+  try {
   const fail = (what) => found.push(`keybindings: ${what}`);
   const k = await heightKit(page, "Keybindings");
   const TXT = "map/war3map.w3e.txt";
@@ -6028,12 +6232,16 @@ async function keybindings(page, found) {
   } finally {
     await writeFile(original ?? "[]\n").catch((e) => fail(`putting keybindings.json back: ${e.message}`));
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The command palette (Ctrl+Shift+P) and quick picks by mouse, as VS Code's: the entry under the pointer is
  *  highlighted, the wheel scrolls the list, a click picks the entry. The user found it unusable with the mouse
  *  (2026-11-10, Linux). The mouse goes in as WebDriver's pointer on Linux, so WebKitGTK's own events come out. */
 async function paletteMouse(page, found) {
+  try {
   const fail = (what) => found.push(`palette mouse: ${what}`);
   const hands = new Hands(page);
   const shown = `!document.querySelector(".quick-input").hidden`;
@@ -6093,6 +6301,9 @@ async function paletteMouse(page, found) {
   await hands.chord("Escape");
   await until("the palette closed", async () => !(await page.evaluate(shown)), 3000).catch(() => fail("Escape didn't close the palette opened from the title bar"));
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
@@ -6108,6 +6319,7 @@ async function paletteMouse(page, found) {
 const GAME_READS_RECORDED = { reads: 115, asked: 158, textures: 140 };
 
 async function gameReadsOnce(page, found) {
+  try {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   // The default state: the minimap panel on (a new view has it), its own game reads counted in the numbers below.
@@ -6222,6 +6434,9 @@ async function gameReadsOnce(page, found) {
   if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
   await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Map Properties ▸ Players: Start X and Y can be typed for a player without a start location, and only
@@ -6286,6 +6501,7 @@ function linesNotIn(a, b) {
 }
 
 async function realMapSave(page, found) {
+  try {
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
   if (!existsSync(map)) { console.log(`real map save: skipped, ${map} isn't there`); return; }
   await realMapSaveRound(page, found, map, "cliff", null);
@@ -6299,6 +6515,9 @@ async function realMapSave(page, found) {
     writeFileSync(infoFile, JSON.stringify(i, null, 2));
     writeFileSync(unitsFile, JSON.stringify(u, null, 2));
   });
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** One round of realMapSave: `prepare` changes the unpacked project before it's opened (null: the map as it is). */
@@ -6391,6 +6610,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
  *  war3map.wts, byte for byte, and the references; reopened, the texts are there; a second run changes nothing; undo
  *  puts every file back. */
 async function moveTextsToTable(page, found) {
+  try {
   const fail = (what) => found.push(`move texts to string table: ${what}`);
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
   if (!existsSync(map)) { console.log(`move texts to string table: skipped, ${map} isn't there`); return; }
@@ -6506,9 +6726,13 @@ async function moveTextsToTable(page, found) {
     await page.evaluate(`if (window.__mttWarn) { w3.window.notify = window.__mttWarn; delete window.__mttWarn; }`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 async function playerStarts(page, found, root) {
+  try {
   const fail = (what) => found.push(`player starts: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
@@ -6577,11 +6801,15 @@ async function playerStarts(page, found, root) {
       } finally { w3.window.notify = ask; }
     })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Object Editor's model preview takes a player colour, a replaceable texture (destructables) and an ability's art
  *  field: read off the preview's data-state, which holds what it shows. */
 async function objectPreview(page, found, root) {
+  try {
   const fail = (what) => found.push(`object preview: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
@@ -6652,11 +6880,15 @@ async function objectPreview(page, found, root) {
   } finally {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); })()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
  *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
 async function objectLayout(page, found, root) {
+  try {
   const fail = (what) => found.push(`object editor layout: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
@@ -6724,12 +6956,16 @@ async function objectLayout(page, found, root) {
     await page.evaluate(`document.getElementById("app").style.width = ""`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
 async function editorTabRaces(page, found, root) {
+  try {
   const fail = (what) => found.push(`editor tabs: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
@@ -6805,12 +7041,16 @@ async function editorTabRaces(page, found, root) {
   if (r.cancelled.length !== 1) fail(`${r.path} opened in ${r.one} while it came back in ${r.other} (closing it cancelled): ${r.cancelled.length} tabs (${r.cancelled.join(", ")})`);
   if (!r.afterDoubleClose.includes(r.second)) fail(`closing ${r.path} twice at once closed ${r.second} too (left: ${r.afterDoubleClose.join(", ") || "nothing"})`);
   if (r.disposed !== 1) fail(`an editor whose tab closed while it loaded was disposed ${r.disposed} times`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Drawing many objects costs no more draw calls than drawing a few: the copies of a model are drawn
  *  together, one call per layer (and player colour where it shows), and what's out of view isn't drawn.
  *  Counted on the terrain canvas's WebGL calls of one frame, not timed, so it isn't flaky. Needs the game. */
 async function drawCalls(page, found) {
+  try {
   const fail = (what) => found.push(`draw calls: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   const base = {
@@ -6881,18 +7121,25 @@ async function drawCalls(page, found) {
   if (b.elements !== a.elements) fail(`${placed} objects more took ${b.elements - a.elements} more draw calls (${a.elements}, then ${b.elements})`);
   if (b.worldUploads !== a.worldUploads) fail(`${placed} objects more uploaded ${b.worldUploads - a.worldUploads} more matrices (${a.worldUploads}, then ${b.worldUploads})`);
   if (away.instances >= b.instances / 4) fail(`looking away from the objects still drew ${away.instances} of ${b.instances} instances`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A lost WebGL context (a GPU reset, a driver hiccup), made with WEBGL_lose_context. The terrain viewer stops drawing,
  *  says so, keeps the unsaved edit, saves it, and opens again only once nothing is unsaved; the model viewer draws
  *  again once the context is given back. */
 async function contextLoss(page, found) {
+  try {
   // The mini map's script isn't one Studio wrote, so a terrain edit saved here asks about it: "Keep it" for this check only.
   await page.evaluate(`(() => { const ask = w3.window.notify; window.__clKept = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Keep it") : ask(s, m, a, o)); })()`);
   try {
     await contextLossChecks(page, found);
   } finally {
     await page.evaluate(`if (window.__clKept) { w3.window.notify = window.__clKept; delete window.__clKept; }`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
   }
 }
 
@@ -7022,6 +7269,7 @@ async function contextLossChecks(page, found) {
  *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a line that is just } is
  *  changed to " }" when the save asks, and not saved when the answer is no. */
 async function shouldHaves(page, found) {
+  try {
   const fail = (what) => found.push(`should-haves: ${what}`);
   const k = await heightKit(page, "ShouldHaves");
   const TXT = "map/war3map.w3e.txt";
@@ -7191,6 +7439,9 @@ async function shouldHaves(page, found) {
   if (picked.hasSkin && after[0].hudSkin !== 2) fail(`player 1's HUD skin is ${after[0].hudSkin}, not 2 (Orc)`);
   await page.evaluate(`w3.editors.closeAll()`);
   await k.reset();
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The placer's per-placement look (a chosen variation, random rotation, asymmetric random scale) and random objects
@@ -7198,6 +7449,7 @@ async function shouldHaves(page, found) {
  *  through the codec and come out in the packed script. Cycle Random Groups; the campaign's Gameplay Constants and
  *  Game Interface, with its own string table, from the commands and from the Campaign Editor. */
 async function placerAndCampaign(page, found) {
+  try {
   const fail = (what) => found.push(`placer and campaign: ${what}`);
   const k = await heightKit(page, "Placer");
   const settings = ["terrain.placement.randomVariation", "terrain.placement.randomRotation", "terrain.placement.randomScale", "terrain.placement.autoCycleRandomGroups"];
@@ -7415,11 +7667,15 @@ async function placerAndCampaign(page, found) {
     }
   }
   await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The Campaign Editor's Background and Ambient Sound are named presets from the game: picking one stores its number
  *  (the file as the World Editor keeps it), saved and reopened it shows the same preset; -1 is "Custom file". */
 async function campaignPresets(page, found) {
+  try {
   const fail = (what) => found.push(`campaign presets: ${what}`);
   const camp = join(work, "campaign-presets");
   rmSync(camp, { recursive: true, force: true });
@@ -7471,6 +7727,9 @@ async function campaignPresets(page, found) {
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A chapter map's campaign objects (war3campaign.w3u in the campaign project two folders up) outside the terrain view:
@@ -7481,6 +7740,7 @@ async function campaignPresets(page, found) {
  *  reaches the chapter's script when the chapter opens again. W3_SMOKE_CHAPTER ("campaign|maps/Chapter.w3x") also
  *  checks a real chapter's generated script for its campaign units' SetUnitColor lines against the script it has. */
 async function chapterObjects(page, found) {
+  try {
   const fail = (what) => found.push(`chapter objects: ${what}`);
   const dir = join(work, "chapter-objects");
   rmSync(dir, { recursive: true, force: true });
@@ -7642,6 +7902,9 @@ async function chapterObjects(page, found) {
     else if (missing.length || extra.length) fail(`real chapter's SetUnitColor lines differ: missing ${missing.slice(0, 5).join(", ")}; extra ${extra.slice(0, 5).join(", ")}`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Validate Map Triggers, renaming what triggers refer to, the AI Editor's Add To Map and custom data, and the Problems'
@@ -7654,6 +7917,7 @@ async function chapterObjects(page, found) {
  *  import entry, the map packs and verifies; custom data goes in from a unit file, comes out as a .w3o, and undo takes it
  *  out again; a missing loading screen model opens Map Properties at Loading Screen. */
 async function triggersAndAi(page, found) {
+  try {
   const fail = (what) => found.push(`triggers and AI: ${what}`);
   const k = await heightKit(page, "TriggersAi");
   const dir = join(work, "triggers-ai");
@@ -7948,6 +8212,9 @@ async function triggersAndAi(page, found) {
     await page.evaluate(`(() => { const k = window.__kept; if (k) { w3.window.showWarning = k.warn; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; } })()`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A map script changed by hand inside the functions the generator writes (main) isn't overwritten by the next save: it
@@ -7956,6 +8223,7 @@ async function triggersAndAi(page, found) {
  *  the data makes gets the stamp when it opens, so its saves regenerate the script without a question; also one that
  *  differs only in the order of its placed units (the World Editor's order), when that first save changes the data. */
 async function scriptGuard(page, found) {
+  try {
   const fail = (what) => found.push(`script guard: ${what}`);
   const k = await heightKit(page, "ScriptGuard");
   const script = () => readFileSync(join(k.root, "map", "war3map.j"), "utf8");
@@ -8080,12 +8348,16 @@ async function scriptGuard(page, found) {
     await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.notify = window.__sg.notify; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** A project's question about its kept script ("war3map.j has 1 function that the map's triggers don't make … Replace the
  *  script / Show Difference / Keep it") goes when another project opens: it stayed on screen, about a project no longer
  *  open (answering it was safe, but only said so). The real toast, not a stand-in: the question is there before the switch. */
 async function scriptQuestionsOnSwitch(page, found) {
+  try {
   const fail = (what) => found.push(`script questions on switch: ${what}`);
   const k = await heightKit(page, "ScriptQuestions");
   const asking = () => page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].filter((t) => /function that the map's triggers don't make/.test(t.textContent) && t.textContent.includes("Replace the script")).length`);
@@ -8111,6 +8383,9 @@ async function scriptQuestionsOnSwitch(page, found) {
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** An editor doesn't save over what was saved after it read the file. Round 4 lost a trigger that way: an AI tool created
@@ -8120,6 +8395,7 @@ async function scriptQuestionsOnSwitch(page, found) {
  *  hearing of it: saving asks, Cancel writes nothing. 4. A tab that couldn't open (its file wasn't there yet, a tab of
  *  the last session) opens once the file is written (the AI Editor's New), and Add To Map works. */
 async function staleEditors(page, found) {
+  try {
   const fail = (what) => found.push(`stale editors: ${what}`);
   const k = await heightKit(page, "StaleEditors");
   const WTG = "map/war3map.wtg.json";
@@ -8258,6 +8534,9 @@ async function staleEditors(page, found) {
       ed.memory = kept.memory; delete ed.resolveTab; ed.confirm = kept.confirm; w3.window.showWarning = kept.warn; w3.window.pickSaveFile = kept.save; window.__open?.(); })()`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
@@ -8312,6 +8591,7 @@ const SMOKE_MDL = [
 ].join("\r\n") + "\r\n";
 
 async function importWarnings(page, found) {
+  try {
   const fail = (what) => found.push(`import warnings: ${what}`);
   const k = await heightKit(page, "ImportWarnings");
   const MODEL = "map/war3mapimported/smokecase.mdx", HALL = "map/Buildings/Human/TownHall/TownHall.mdx";
@@ -8436,7 +8716,7 @@ async function importWarnings(page, found) {
     await settled(page);
     why = await remove("Remove and delete file");
     if (why) fail(why);
-    else if (onDisk(MODEL) || listed().some((p) => /smokecase/i.test(p))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
+    else if (!(await soon(() => !onDisk(MODEL) && !listed().some((p) => /smokecase/i.test(p)), 10000))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
 
     // ---- A model per graphics mode (branch import-graphics-mode): imported "Reforged only" it goes below _HD.w3mod\,
     // "Add Classic Version…" stores the Classic one at the plain path, the list shows the two as one row with both
@@ -8445,6 +8725,9 @@ async function importWarnings(page, found) {
   } finally {
     await page.evaluate(`(() => { const k = window.__impKept; if (k) { w3.window.askDelete = k.ask; w3.window.showWarning = k.warn; } window.__impGroup?.dispose(); })()`);
     await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } finally {
+    await restoreWindow(page);
   }
 }
 
@@ -8546,6 +8829,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
  *  the editors' commands), with undo and redo, and back to the saved files when the editor closes without saving. While
  *  a filter is on, a click on a group row doesn't open or close it behind the filter. */
 async function objectManagerLive(page, found) {
+  try {
   const fail = (what) => found.push(`object manager live: ${what}`);
   const k = await heightKit(page, "OmLive");
   const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
@@ -8739,9 +9023,13 @@ async function objectManagerLive(page, found) {
     await page.evaluate(`(() => { const k = window.__omLiveKept; if (k) { w3.window.inputBox = k.input; w3.window.askDelete = k.ask; } })()`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 async function editorExtras(page, found) {
+  try {
   const fail = (what) => found.push(`editor extras: ${what}`);
   const k = await heightKit(page, "Extras");
   const dir = join(work, "extras");
@@ -9156,6 +9444,9 @@ async function editorExtras(page, found) {
     await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", undefined)`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 /** The World Editor's smaller items, through the app's own commands, keys and menus: a map saved as a folder imported
@@ -9166,6 +9457,7 @@ async function editorExtras(page, found) {
  *  (Ctrl+Tab, Ctrl+Shift+Tab) and Move Down in List on the Regions tab; the minimap panel (a click moves the camera, the view's outline is drawn); Calculate Shadows (a second
  *  run changes nothing). */
 async function niceToHaves(page, found) {
+  try {
   const fail = (what) => found.push(`nice-to-haves: ${what}`);
   const dir = join(work, "nice");
   rmSync(dir, { recursive: true, force: true });
@@ -9660,6 +9952,9 @@ async function niceToHaves(page, found) {
     await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+  } finally {
+    await restoreWindow(page);
+  }
 }
 
 async function run() {
@@ -9736,6 +10031,8 @@ async function run() {
     const settingsAt = (await page.evaluate(`w3.backend.invoke("app_paths")`)).config_dir;
     if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
     const found = [];
+    // The window's functions as they are now, for `leftOpen` to compare each check's end against.
+    await page.evaluate(`window.__w3WindowOrig = Object.fromEntries(Object.entries(w3.window).filter(([, v]) => typeof v === "function"))`);
     // --only=<check> runs one of the checks below on its own, for working on it. Every check of the full run below is
     // named here too (`npm run check` holds the two lists against each other: scripts/check-scripts.mjs).
     // --only=graphics is graphicsModes after the project checks.
