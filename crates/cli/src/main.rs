@@ -333,11 +333,18 @@ enum Cmd {
         trigger_data: Option<PathBuf>,
     },
     /// Pack a project folder into a .w3x (the release step).
+    ///
+    /// Strings nothing refers to are left out of war3map.wts, as the World Editor's save and the
+    /// app's packing drop them (the project's files stay as they are; chapter maps and
+    /// war3campaign.wts aren't pruned).
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Pack war3map.wts as it is, unused strings included.
+        #[arg(long)]
+        keep_unused_strings: bool,
     },
     /// Check that maps survive unpack → pack unchanged (in memory).
     Verify {
@@ -502,10 +509,23 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
         }
-        Cmd::Pack { project, output } => {
+        Cmd::Pack { project, output, keep_unused_strings } => {
             let codecs = Registry::for_project(&project, &extra)?;
-            let r = w3proj::pack(&project, output.as_deref(), &codecs)
+            let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
+            let r = pack(&project, output.as_deref(), &codecs)
                 .with_context(|| format!("packing {}", project.display()))?;
+            if let Some(s) = &r.strings {
+                let list = |v: &[w3proj::wts::StringNum]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+                if let Some(why) = &s.kept {
+                    println!("unused strings kept in war3map.wts: {why}");
+                }
+                if !s.restored.is_empty() {
+                    println!("restored {} string(s) an earlier pack dropped and the map refers to again: {}", s.restored.len(), list(&s.restored));
+                }
+                if !s.dropped.is_empty() {
+                    println!("left {} unused string(s) out of war3map.wts: {}", s.dropped.len(), list(&s.dropped));
+                }
+            }
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, baseline, update_baseline, quiet, game, trigger_data } => {

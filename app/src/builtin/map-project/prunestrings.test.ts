@@ -3,6 +3,8 @@
 // can't be read, and the same without the edit log.
 
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { dropUnusedStrings } from "./prunestrings";
 import { StringTable } from "../../lib/formats/wts";
@@ -159,6 +161,31 @@ test("undo after a pack: a dropped string that is referred to again comes back o
   files["map/war3map.w3u.json"] = project()["map/war3map.w3u.json"];
   assert.deepEqual((await dropUnusedStrings(w3)).dropped, [3]);
   assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[3, "text 3"], [9, "text 9"]]);
+});
+
+/** tests/fixtures/wts-prune, found from where the tests run (app/ or the repository). */
+function twinFixture(): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const p = join(dir, "tests", "fixtures", "wts-prune");
+    if (existsSync(p)) return p;
+    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-prune not found");
+  }
+}
+
+test("the fixture the CLI's Rust prunes too (crates/w3proj/tests/wts_prune.rs): the same table", async () => {
+  const root = twinFixture();
+  const files: Record<string, string> = {};
+  const walk = (dir: string, rel: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(dir, e.name), `${rel}${e.name}/`);
+      else files[`${rel}${e.name}`] = readFileSync(join(dir, e.name), "latin1");
+    }
+  };
+  walk(join(root, "map"), "map/");
+  files[PRUNED_STRINGS_FILE] = readFileSync(join(root, PRUNED_STRINGS_FILE), "utf8");
+  const { w3 } = fakeW3(files);
+  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [3, 5, 9, 12], restored: [20], kept: null });
+  assert.equal(files["map/war3map.wts"], readFileSync(join(root, "expected.wts"), "utf8"));
 });
 
 test("a record that is there but can't be read: nothing restored, nothing dropped", async () => {
