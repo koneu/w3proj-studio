@@ -1891,6 +1891,32 @@ async function unitProperties(page, found) {
   await k.save();
   const tree = k.doodads().find((d) => d.id === "LTlt");
   if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
+  // Its Skin (only where the doo version stores one): another type's look, drawn as that, one undo back, byte-exact
+  // while unchanged.
+  if (!tree || !("skinId" in tree)) fail(`the placed tree has no skinId, so the Skin row can't be tried: ${JSON.stringify(tree)}`);
+  else {
+    if (!(await shown("skin"))) fail("the destructable has no Skin row");
+    else {
+      const drawnTree = () => page.evaluate(`window.__propsEd?.drawnUnits("doodads").find((u) => Math.round(u.x) === -768 && Math.round(u.y) === 0)?.model ?? ""`);
+      const before = await drawnTree();
+      await k.hands.click(at("skin"));
+      await until("the destructable browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+      await k.hands.click("input.picker-search");
+      await k.hands.type("LTe1");
+      const row = `[...document.querySelectorAll(".picker-rows > .picker-row")].find((r) => r.querySelector("code")?.textContent === "LTe1")`;
+      await until("the other destructable in the browser", () => page.evaluate(`!!${row}`), 10000).catch((e) => fail(e.message));
+      await page.evaluate(`${row}?.setAttribute("data-smoke-pick", "")`);
+      await k.hands.click("[data-smoke-pick]");
+      await redrawn();
+      await k.save();
+      if (k.doodads().find((d) => d.id === "LTlt")?.skinId !== "LTe1") fail(`the tree's skin: ${k.doodads().find((d) => d.id === "LTlt")?.skinId}`);
+      await until("the tree drawn with the other skin", async () => { const m = await drawnTree(); return m !== "" && m !== before; }, 20000)
+        .catch(async (e) => fail(`${e.message}: ${before} -> ${await drawnTree()}`));
+      await undo();
+      await k.save();
+      if (k.doodads().find((d) => d.id === "LTlt")?.skinId !== "LTlt") fail("one undo didn't put the tree's skin back");
+    }
+  }
 
   // A footman's Defend placed switched on (the World Editor's Active box): a level-0 entry with autocast 1, and one undo
   // takes it off again. The Paladin's skills have no box (its inventory can't be switched on).

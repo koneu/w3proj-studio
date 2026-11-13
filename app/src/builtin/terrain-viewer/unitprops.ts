@@ -149,10 +149,13 @@ export function fieldsFor(entry: Placed, facts: TypeFacts): PropField[] {
     if (randomWhatOf(e.id) && has(e, "randomType")) out.push("random");
   } else if (facts.kind === "w3b") {
     if (has(e, "life")) out.push("life");
+    // Only a doo version that stores a skin (12 and up, 8 with skin ids) has the row.
+    if (has(e, "skinId")) out.push("skin");
     if (has(e, "itemSets")) out.push("drops");
-  } else if (facts.kind === "w3d" && has(e, "itemSets") && dropsOf(e).mode !== "none") {
+  } else if (facts.kind === "w3d") {
+    if (has(e, "skinId")) out.push("skin");
     // A plain doodad can't die; drops it has anyway can be taken off.
-    out.push("drops");
+    if (has(e, "itemSets") && dropsOf(e).mode !== "none") out.push("drops");
   }
   return out;
 }

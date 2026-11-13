@@ -221,7 +221,7 @@ export interface TerrainEditorHandle {
   /** The see-through start buildings drawn now (melee maps), where they stand. For tests. */
   drawnStartBuildings(): { x: number; y: number }[];
   drawnSpecials(): { id: string; x: number; y: number; z: number; model: string }[];
-  drawnUnits(): { id: string; x: number; y: number; z: number; team: number; model: string }[];
+  drawnUnits(group?: "units" | "doodads"): { id: string; x: number; y: number; z: number; team: number; model: string }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
