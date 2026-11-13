@@ -46,7 +46,7 @@ import { specialFootprints, specialPlacements, type Footprint } from "./specials
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
-import { doodadNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
+import { doodadNudgeSteps, GRID_NUDGE_STEPS, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -3022,10 +3022,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ("rotate" in key) rotateSelected(key.rotate);
           else if ("nudge" in key) {
             const before = entries.map(poseOf);
-            // The building grid is twice as fine as a nudge: half a step would round back one way. The bounds
+            // A building and a doodad on a grid nudge a whole 64 (eight nudges): less would round back. The bounds
             // are applied to the nudge as it will be moved, steps and all.
             const rules = doodadRules();
-            const steps = entries.map((p) => (buildingCells.get(p.id) ? 2 : isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : 1));
+            const steps = entries.map((p) => (buildingCells.get(p.id) ? GRID_NUDGE_STEPS : isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : 1));
             const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), steps, key.nudge);
             for (const [i, p] of entries.entries()) {
               const at = ruledPose(p.id, p.position[0] + moves[i][0], p.position[1] + moves[i][1], p.angle);

@@ -155,6 +155,10 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   first click must hit the model: a footman's feet miss, 10 px higher hits); Alt+drag moves a unit's centre to the
   pointer. The nudge is Edit > Nudge Selection: the number pad (`--key Num_Lock` once, then `--key KP_6`; without Num
   Lock the keys arrive as arrows and do nothing), 64 a step for a tree, 8 for a doodad without pathing and a footman.
+  Measured again in nudge-turn-we (target/evidence/nudge-turn-we): the nudge is 64 for a tree (LTlt) and a farm (hhou), 8
+  for a doodad without pathing (LPcr) and a footman; the diagonals KP_7 9 1 3 move both axes the whole step (a tree:
+  -64/+64, +64/+64, -64/-64, +64/-64); KP_Divide turns a selection 5 degrees left, KP_Multiply 5 right. Studio:
+  selectionkeys.ts (NUDGE 8, TURN 5), doodadedit.ts GRID_NUDGE_STEPS.
   The editor takes the drag's second-to-last motion step (a footman dragged 576 in 20 steps moved 547). Found: with
   Enforce Camera Bounds on (and off alike) drags and nudges go past the camera bounds; a unit stops with its collision
   size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
