@@ -68,7 +68,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let tool: Tool = "paint", size = 2, strength = 16, paintTex = 0, square = false;
   /** Tile type chosen for painting (may not be in the map yet). */
   let paintTile = terrain.groundTiles[0] ?? "";
-  let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; height?: HeightStroke } | null = null;
+  /** `px`: where on the page the pointer was at the last dab (clientX, clientY). */
+  let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; height?: HeightStroke; px?: [number, number] } | null = null;
 
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number, amount = strength): boolean => {
@@ -358,7 +359,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         // Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game maps).
         const step = ({ cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 } as Partial<Record<Tool, number>>)[tool] ?? 0;
         const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET) } : { layer: 2 };
-        stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
+        stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g);
         else applyAt(g);
       };
@@ -376,9 +377,13 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         }
         return;
       }
-      // Re-apply while held, a few times per second.
+      // Re-apply while held, a few times per second, where the pointer went. Not for a move that stays on the same
+      // pixel (a pointer held still can still send them: app-smoke's clicks on Linux did): the ground under it has just risen or sunk, so
+      // it would land on the next corner (a +1 click of size 3 took 18 corners, not the World Editor's 13).
+      const px: [number, number] = [p.event.clientX, p.event.clientY];
+      const still = !!stroke?.px && stroke.px[0] === px[0] && stroke.px[1] === px[1];
       if (p.down && stroke?.height && p.ground) stroke.height.moveTo([p.ground[0], p.ground[1]]);
-      else if (p.down && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) applyAt(p.ground);
+      else if (p.down && stroke && p.ground && !still && performance.now() - stroke.last > HEIGHT_TICK) { stroke.px = px; applyAt(p.ground); }
     },
     pointerUp() {
       endStroke();
