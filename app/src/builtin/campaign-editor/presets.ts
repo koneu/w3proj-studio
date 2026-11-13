@@ -21,6 +21,30 @@ export function parsePresets(section: ReadonlyMap<string, string> | undefined, w
   return out;
 }
 
+/** A campaign picture the game offers: the file stored in the campaign, named by the game. */
+export interface ImagePreset { path: string; name: string }
+
+/** The entries of [CampaignImages] ("NN=WESTRING_NAME,path"). */
+export function parseImagePresets(section: ReadonlyMap<string, string> | undefined, we: ReadonlyMap<string, string>): ImagePreset[] {
+  const out: ImagePreset[] = [];
+  for (const [k, v] of section ?? []) {
+    if (!/^\d+$/.test(k)) continue;
+    const i = v.indexOf(",");
+    if (i < 0) continue;
+    const name = westring(we, v.slice(0, i)).trim();
+    const path = v.slice(i + 1).trim();
+    if (name && path) out.push({ path, name });
+  }
+  return out;
+}
+
+/** The preset a stored picture path is: the same file, ignoring case, slash direction and a texture extension; undefined for a custom file. */
+export function imagePresetOf(presets: readonly ImagePreset[], stored: string): ImagePreset | undefined {
+  const norm = (p: string) => p.trim().replaceAll("/", String.fromCharCode(92)).replace(/[.](blp|tga)$/i, "").toLowerCase();
+  const s = norm(stored);
+  return s ? presets.find((p) => norm(p.path) === s) : undefined;
+}
+
 /** The label of a number that is not in the list. */
 const unknownName = (n: number) => `Preset ${n}`;
 const CUSTOM_NAME = "Custom file";
