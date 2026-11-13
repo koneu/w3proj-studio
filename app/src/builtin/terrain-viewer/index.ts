@@ -298,11 +298,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await runRebuild();
       if (w3.workspace.project()?.root !== root) return null;
       const doc = { path } as EditorDocument;
-      const { shd, stored } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
+      const { shd, stored, write, leftOut, problem } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
         terrainPath: path,
         objects: () => savedObjects(w3),
         read: (p) => readFile(w3, doc, p),
       }));
+      if (!write) throw new Error(`Shadows not calculated: ${problem}. The stored war3map.shd is kept.`);
+      if (leftOut) w3.window.showWarning(`${leftOut} doodad${leftOut === 1 ? "" : "s"} left out of the shadows: their models couldn't be read.`);
       const changed = stored && stored.length === shd.length ? shd.reduce((n, v, i) => n + (v !== stored[i] ? 1 : 0), 0) : shd.length;
       if (changed) {
         // Outside the rebuilds' turn: making a checkpoint waits for them (w3.terrain.settle).
