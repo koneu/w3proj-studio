@@ -89,7 +89,7 @@ struct Reader<'a> {
     runs: HashMap<usize, usize>,
 }
 
-/// A header `STRING <digits> [// …\n]* {` + `\r?\n`: where it starts, its number, where its text starts.
+/// A header `STRING <digits> [// …\n]* {` + `\r*\n`: where it starts, its number, where its text starts.
 struct Header {
     at: usize,
     num: StringNum,
@@ -144,15 +144,15 @@ impl<'a> Reader<'a> {
         if b.get(p) != Some(&b'{') {
             return None;
         }
-        let p = p + 1;
-        let end = if b.get(p) == Some(&b'\r') && b.get(p + 1) == Some(&b'\n') {
-            p + 2
-        } else if b.get(p) == Some(&b'\n') {
-            p + 1
-        } else {
+        // `\r*\n`: a stray carriage return before the line feed (`{\r\r\n`) still ends the header line, as the game reads it
+        let mut p = p + 1;
+        while b.get(p) == Some(&b'\r') {
+            p += 1;
+        }
+        if b.get(p) != Some(&b'\n') {
             return None;
-        };
-        Some(Header { at, num, end })
+        }
+        Some(Header { at, num, end: p + 1 })
     }
 
     /// The first header from `from` (HEADER.exec).
@@ -606,6 +606,22 @@ mod tests {
         assert_eq!(out, cut(&cut(&text, "STRING 2", "STRING 3"), "STRING 4", "STRING 5"));
         // Nothing to drop: the file's own bytes.
         assert_eq!(prune_strings(&text, &nums(&[1, 2, 3, 4, 5, 6])).unwrap().0, text);
+    }
+
+    #[test]
+    fn a_header_with_a_stray_carriage_return_is_a_header() {
+        // `{\r\r\n` ends the header line (wts.test.ts, "a header written {\r\r\n"): its string is read, and dropping the
+        // string before it doesn't take it along.
+        let wts = format!("{}STRING 2\r\n{{\r\r\nsecond\r\n}}\r\n\r\n{}", block(1, "orphan"), block(3, "third"));
+        let read: Vec<(f64, String)> = strings(&wts).into_iter().map(|(n, v)| (n.value(), v)).collect();
+        assert_eq!(read, [(1.0, "orphan".into()), (2.0, "second".into()), (3.0, "third".into())]);
+        let (out, dropped) = prune_strings(&wts, &nums(&[2, 3])).unwrap();
+        assert_eq!(list(&dropped), [1.0]);
+        assert_eq!(out, format!("STRING 2\r\n{{\r\r\nsecond\r\n}}\r\n\r\n{}", block(3, "third")));
+        // Any run of them, and none on an LF line; anything else after the `{` is no header.
+        assert_eq!(strings("STRING 4\n{\r\r\r\nfour\n}\n").get(&StringNum::from_u64(4)).map(String::as_str), Some("four"));
+        assert!(strings("STRING 4\n{\r x\nfour\n}\n").is_empty());
+        assert!(strings("STRING 4\n{\r").is_empty());
     }
 
     #[test]
