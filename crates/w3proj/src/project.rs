@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::Registry;
 use crate::header::MapHeader;
-use crate::{names, paths, Error, Result};
+use crate::{names, paths, wts, Error, Result};
 
 pub const MANIFEST: &str = "w3proj.toml";
 pub const MAP_DIR: &str = "map";
@@ -918,6 +918,9 @@ pub struct PackReport {
     pub output: PathBuf,
     pub files: usize,
     pub bytes: usize,
+    /// What `pack_pruned` did to war3map.wts; `None` for `pack`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strings: Option<wts::PruneOutcome>,
 }
 
 /// Project files (relative to `map/`) → archive files.
@@ -1068,7 +1071,28 @@ fn chapter_for<'a>(
 
 /// Builds a project's archive (chapter maps under `maps/` are packed into it first).
 fn pack_bytes(project: &Path, codecs: &Registry) -> Result<(Vec<u8>, usize)> {
-    let (manifest, prefix, files) = read_project(project)?;
+    pack_bytes_with(project, codecs, None)
+}
+
+/// The app's record of dropped strings: `None` when it isn't there, `Err` (why) when it is there
+/// and can't be read.
+fn read_pruned_record(project: &Path) -> std::result::Result<Option<String>, String> {
+    let path = project.join(wts::PRUNED_STRINGS_FILE);
+    match fs::read(&path) {
+        Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| format!("{} isn't UTF-8 text", wts::PRUNED_STRINGS_FILE)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{} is there but can't be read ({e})", wts::PRUNED_STRINGS_FILE)),
+    }
+}
+
+/// `prune`: the map's war3map.wts goes into the archive without the strings nothing refers to
+/// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
+/// Chapter maps are packed as they are.
+fn pack_bytes_with(project: &Path, codecs: &Registry, prune: Option<&mut wts::PruneOutcome>) -> Result<(Vec<u8>, usize)> {
+    let (manifest, prefix, mut files) = read_project(project)?;
+    if let Some(outcome) = prune {
+        *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
+    }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
     let maps_dir = project.join(MAPS_DIR);
     for dir in nested_projects(&maps_dir)? {
@@ -1101,9 +1125,36 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+/// Packs the project's files as they are (the app drops unused strings in the project first).
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
+    pack_to(project, output, codecs, false)
+}
+
+/// Packs with the strings nothing refers to left out of war3map.wts, as the World Editor's save
+/// and the app's packing drop them (`wts`); the project's files stay as they are. Chapter maps
+/// and war3campaign.wts aren't pruned.
+pub fn pack_pruned(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
+    pack_to(project, output, codecs, true)
+}
+
+/// Whether `project` is a chapter map of a campaign project (`<campaign>/maps/<chapter>`).
+fn is_chapter_project(project: &Path) -> bool {
+    let abs = project.canonicalize().unwrap_or_else(|_| project.to_path_buf());
+    abs.parent()
+        .filter(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(MAPS_DIR)))
+        .and_then(Path::parent)
+        .is_some_and(|campaign| campaign.join(MANIFEST).is_file())
+}
+
+fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool) -> Result<PackReport> {
     let manifest = Manifest::load(project)?;
-    let (bytes, count) = pack_bytes(project, codecs)?;
+    let mut outcome = wts::PruneOutcome::default();
+    // A chapter map packed on its own comes out as the campaign packs it (and the app exports it).
+    let chapter = prune && is_chapter_project(project);
+    if chapter {
+        outcome.kept = Some("a campaign's chapter maps aren't pruned".into());
+    }
+    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome))?;
     let output = match output {
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
@@ -1118,6 +1169,7 @@ pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<
         output,
         files: count,
         bytes: bytes.len(),
+        strings: prune.then_some(outcome),
     })
 }
 

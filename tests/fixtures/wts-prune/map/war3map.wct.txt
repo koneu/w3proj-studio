@@ -1,0 +1,3 @@
+function F takes nothing returns string
+    return "TRIGSTR_0004" + "TRIGSTR_00013"
+endfunction

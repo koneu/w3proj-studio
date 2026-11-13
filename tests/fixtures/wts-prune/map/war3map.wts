@@ -1,0 +1,60 @@
+STRING 1
+{
+Map name
+}
+
+STRING 2
+// Units: h000 (Footman), Name (Name)
+{
+Footman
+}
+
+STRING 3
+// an orphan with a comment
+{
+nobody's
+}
+
+STRING 4
+{
+custom script text
+}
+
+STRING 5
+{
+an orphan whose end sits on its last line}
+STRING 6
+{
+dialogue text
+line two
+}
+
+STRING 7
+{
+speaker
+}
+
+STRING 8
+{
+in a raw trigger file
+}
+
+STRING 9
+{
+only named in an image, which doesn't count
+}
+
+STRING 10
+{
+in an imported text file
+}
+
+STRING 0012
+{
+an orphan with a padded number
+}
+
+STRING 13
+{
+named with a padded reference
+}

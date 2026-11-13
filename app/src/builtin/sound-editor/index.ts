@@ -18,7 +18,7 @@ import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { askWtsCuts, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
-import { stringRefsInMap } from "../../lib/formats/mapdoc";
+import { stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
@@ -200,9 +200,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (current === editor) edits.fire();
         });
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
-        // The TRIGSTR numbers the map's files refer to (new dialogue keys go after them, as Move Texts numbers), read in
-        // the background; the sounds' own keys come from the live list.
-        const otherRefs = strings && !doc.readOnly ? stringRefsInMap(w3, w3.workspace.files().map((f) => f.path)) : null;
+        // The TRIGSTR numbers the map's files refer to and those a pack dropped and recorded (new dialogue keys go after
+        // them, as Move Texts numbers), read in the background; the sounds' own keys come from the live list.
+        const otherRefs = strings && !doc.readOnly ? stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path)) : null;
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;

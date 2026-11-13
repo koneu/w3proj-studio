@@ -135,8 +135,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     try {
       const pruned = await dropUnusedStrings(w3);
       if (pruned.kept) out.append(`unused strings kept in war3map.wts: ${pruned.kept}`);
-      if (pruned.dropped.length) {
-        out.append(`dropped ${pruned.dropped.length} unused string${pruned.dropped.length === 1 ? "" : "s"} from war3map.wts (${pruned.dropped.join(", ")}); "MCP: Undo Last AI Edit" puts them back`);
+      if (pruned.restored.length) {
+        out.append(`restored ${pruned.restored.length} string${pruned.restored.length === 1 ? "" : "s"} an earlier pack had dropped and the map refers to again (${pruned.restored.join(", ")})`);
+      }
+      if (pruned.dropped.length || pruned.restored.length) {
+        if (pruned.dropped.length) out.append(`dropped ${pruned.dropped.length} unused string${pruned.dropped.length === 1 ? "" : "s"} from war3map.wts (${pruned.dropped.join(", ")}); "MCP: Undo Last AI Edit" puts them back`);
         // The table is one of the script's inputs.
         await w3.commands.execute("w3.script.settle").catch(() => {});
       }

@@ -3,6 +3,7 @@
 import type { W3Api } from "../../extensions/api";
 import { StringTable } from "./wts";
 import { refsIn } from "./movetexts";
+import { readPrunedStrings } from "./prunedstrings";
 import { parseW3e } from "../terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../terrain/w3etext";
 
@@ -76,6 +77,14 @@ export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: 
     }
   }
   return into;
+}
+
+/** The string numbers a new string must go after: those the map's files refer to (stringRefsInMap) and those an earlier
+ *  drop recorded (lib/formats/prunedstrings), which come back when a reference does. Throws when either can't be read. */
+export async function stringNumbersTaken(w3: W3Api, paths: Iterable<string>): Promise<Set<number>> {
+  const [refs, record] = await Promise.all([stringRefsInMap(w3, paths), readPrunedStrings(w3)]);
+  for (const n of record.keys()) refs.add(n);
+  return refs;
 }
 
 /** Turns "TRIGSTR_012" into the text in war3map.wts (`path`: another string table, such as a campaign's
