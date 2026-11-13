@@ -1202,7 +1202,13 @@ async function terrainSelectCameras(page, found) {
   const err = await k.run("w3.terrain.toggleCameraObjects");
   if (err) fail(`Toggle Camera Objects: ${err}`);
   const shown = await pixelsApart(page, plain, await mapPicture(page));
+  // As the World Editor's: a solid marker per camera (an arrow from a small camera model), not a picture on the ground.
+  const marks = async () => (await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().shapes ?? null)()`))?.cameras ?? 0;
+  const markCorners = await marks();
+  if (!markCorners) fail("the Camera Objects layer draws no camera marker");
   await k.run("w3.terrain.toggleCameraObjects");
+  await settled(page);
+  if (await marks()) fail("the Camera Objects layer switched off leaves its camera markers drawn");
   if (cameras().length) fail("the camera was saved before the picture, so the picture proves nothing");
   else if (shown < 150 + noise) fail(`the Camera Objects layer doesn't show the unsaved camera (${shown} pixels changed, noise ${noise})`);
   // On the Cameras tab, which draws the cameras itself, the layer adds nothing: else its picture of a camera being
@@ -1210,6 +1216,7 @@ async function terrainSelectCameras(page, found) {
   await k.run("w3.terrain.toggleCameraObjects");
   await k.tab("Cameras");
   const tabWithLayer = await mapPicture(page);
+  if (await marks()) fail("on the Cameras tab, the Camera Objects layer's markers stay drawn over the tab's own cameras");
   await k.tab("Select");
   await k.run("w3.terrain.toggleCameraObjects");
   await k.tab("Cameras");

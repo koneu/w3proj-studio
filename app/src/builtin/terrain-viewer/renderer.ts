@@ -535,6 +535,8 @@ export class TerrainRenderer {
   sky: { gpu: ModelGpu; radius: number } | null = null;
   showSky = true;
   private markers = new Map<string, Mesh>();
+  /** Named sets of solid editor marks (the Camera Objects layer's cameras): coloured triangles, see setShapes. */
+  private shapes = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
   /** The map's day/night lighting at the chosen hour: terrain (ground, cliffs, doodads) and
@@ -1164,6 +1166,20 @@ export class TerrainRenderer {
     this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
   }
 
+  /** Replaces a named set of solid marks: triangles, 7 floats per corner (x, y, z, r, g, b, a in 0..1), drawn with
+   *  depth over the ground and models; null or [] removes it. Like the view layer, left out of showEverything's picture. */
+  setShapes(name: string, triangles: readonly number[] | null) {
+    const old = this.shapes.get(name);
+    if (old) this.freeVao(old.vao);
+    this.shapes.delete(name);
+    if (triangles?.length) this.shapes.set(name, this.colorMesh([...triangles]));
+  }
+
+  /** How many corners each set of shapes has (for tests and the app's state). */
+  shapeCounts(): Record<string, number> {
+    return Object.fromEntries([...this.shapes].map(([name, m]) => [name, m.count]));
+  }
+
   setGroundTexture(i: number, img: DecodedImage) {
     // Deeper mip levels would blend neighbouring cells together.
     const tex = createTexture(this.gl, img, { repeat: [false, false], maxLevel: Math.max(0, Math.log2(img.height / 4) - 3) });
@@ -1661,6 +1677,15 @@ export class TerrainRenderer {
       if (this.hiddenGroups.has(name) || (name === "starts" && (this.hiddenGroups.has("units") || !this.showEditorOnly))) continue;
       gl.bindVertexArray(m.vao);
       gl.drawArrays(gl.POINTS, 0, m.count);
+    }
+    // Solid marks (camera objects): both sides of each face; not in a picture taken by showEverything.
+    if (this.shapes.size && !this.held) {
+      gl.disable(gl.CULL_FACE);
+      for (const m of this.shapes.values()) {
+        gl.bindVertexArray(m.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, m.count);
+      }
+      gl.enable(gl.CULL_FACE);
     }
     if (this.showWater && this.water.count) {
       const look = this.waterLook, frame = this.waterFrame();

@@ -50,7 +50,9 @@ export interface ViewCommands {
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
   state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number; pitch: number; fov: number; aspect: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
     /** The minimap panel: shown, its picture in, the view's outline on it (picture pixels). */
-    minimap: ReturnType<MinimapPanel["state"]> };
+    minimap: ReturnType<MinimapPanel["state"]>;
+    /** Corners of the solid marks drawn per set (the Camera Objects layer's "cameras"). */
+    shapes: Record<string, number> };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
