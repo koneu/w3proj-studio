@@ -2140,6 +2140,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  draws a footman with a knight's skin as the knight: we-drive, 2026-11-10), else its own type. */
         const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined)
           ?? (skinOfEntry(p) !== p.id ? skinOfEntry(p) : undefined);
+        /** A placed doodad or destructable is drawn as its skin's type (when it names another). */
+        const skinShown = (p: Placed) => (skinOfEntry(p) !== p.id ? skinOfEntry(p) : undefined);
         const marker =(p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
@@ -2334,7 +2336,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (gen !== rebuildGen) return;
           const specialPlaced = specialPlacements(specialList, skins, (id) => specialSizes.get(id) ?? undefined,
             { x: terrain.offsetX, y: terrain.offsetY }, (x, y) => heightAt(terrain, x, y));
-          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
+          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces, previewMelee(units)), skins, team, undefined, undefined, false),
@@ -4275,7 +4277,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
           drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
-          drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
+          drawnUnits: (group = "units") => renderer.batches.filter((b) => b.group === group).flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
           })),
