@@ -126,6 +126,19 @@ test("runChecked (Build/pack) leaves ignored reports out, rules included, and co
   assert.equal(r.ignoreError, null);
 });
 
+test("runChecked by check (w3proj check): each check's own reports and ignored count, and a failed check's reason", async () => {
+  const h = harness({ [IGNORE_FILE]: serializeIgnore(withIgnored(emptyIgnore(), "mine", ["Other"])) }, [P("Other"), P("Kept")]);
+  h.service.registerCheck({ id: "broken", title: "Broken", run: async () => { throw new Error("can't read it"); } });
+  const r = await h.service.runChecked();
+  const mine = r.checks.find((c) => c.id === "mine")!;
+  assert.deepEqual(mine.problems.map((p) => p.location), ["Kept"]);
+  assert.equal(mine.ignored, 1);
+  assert.equal(mine.title, "Mine");
+  assert.equal(mine.error, undefined, "control: a check that ran has no error");
+  const broken = r.checks.find((c) => c.id === "broken")!;
+  assert.deepEqual([broken.problems.length, broken.error], [0, "can't read it"]);
+});
+
 test("control: runChecked with a broken ignore file hides nothing and says why", async () => {
   const h = harness({ [IGNORE_FILE]: "{ broken" }, [P("A"), P("B")]);
   const r = await h.service.runChecked();

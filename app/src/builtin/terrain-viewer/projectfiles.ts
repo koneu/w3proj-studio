@@ -10,8 +10,9 @@ import { loadSkins, withObjectArt, type ObjectArt } from "./objects";
 
 /** The object data the terrain view needs (units, items, destructables, doodads): the bases
  *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
- *  the map's own, then its Skin files (Reforged keeps art changes there). */
-export async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[] }> {
+ *  the map's own, then its Skin files (Reforged keeps art changes there). `unread`: the map's own files that are
+ *  there but couldn't be read or parsed (left out of `art`). */
+export async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[]; unread: string[] }> {
   const kinds = ["w3u", "w3t", "w3b", "w3d"];
   const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
     try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
@@ -21,17 +22,19 @@ export async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, str
   const campaign = campaignRoot(w3);
   if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const unread: string[] = [];
   for (const prefix of ["war3map", "war3mapSkin"]) {
     for (const k of kinds) {
       const path = `map/${prefix}.${k}.json`;
       if (!files.has(path.toLowerCase())) continue;
       const f = await read(path, k);
       if (f) art.push(f);
+      else unread.push(path);
     }
   }
   const bases = new Map<string, string>();
   for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return { bases, art };
+  return { bases, art, unread };
 }
 
 /** The skins (the game's object data with the map's art changes) and custom ids' bases the derived files are made
