@@ -1274,11 +1274,27 @@ async function terrainSelectCameras(page, found) {
   await k.tab("Cameras");
   const tabWithLayer = await mapPicture(page);
   if (await marks()) fail("on the Cameras tab, the Camera Objects layer's markers stay drawn over the tab's own cameras");
+  // The tab's own: the World Editor's camera mode, a camera model each and a green circle round the selected one's
+  // target (the camera made from the view is selected).
+  const drawn = () => page.evaluate(`(async () => { const s = (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state(); return s ? { shapes: s.shapes.tab ?? 0, rings: s.rings.tab ?? 0 } : null; })()`);
+  const onTab = await drawn();
+  if (!onTab?.shapes || onTab.shapes !== markCorners) fail(`the Cameras tab doesn't draw the camera's model as the layer does: ${onTab?.shapes} corners, the layer's ${markCorners}`);
+  if (onTab?.rings !== 1) fail(`the Cameras tab draws ${onTab?.rings} circles for the one camera selected`);
   await k.tab("Select");
+  if ((await drawn())?.shapes || (await drawn())?.rings) fail(`the Select tab keeps the Cameras tab's models or circle: ${JSON.stringify(await drawn())}`);
   await k.run("w3.terrain.toggleCameraObjects");
   await k.tab("Cameras");
   const twice = await pixelsApart(page, tabWithLayer, await mapPicture(page));
   if (twice > 100 + noise) fail(`on the Cameras tab, the Camera Objects layer draws the cameras a second time (${twice} pixels apart, noise ${noise})`);
+  // The circle: in the picture, and gone with the selection (Escape).
+  await k.focusMap();
+  await k.hands.key("Escape", "Escape", 27);
+  await settled(page);
+  if ((await drawn())?.rings !== 0) fail("the selected camera's circle stays after Escape took the selection away");
+  else {
+    const circle = await pixelsApart(page, tabWithLayer, await mapPicture(page));
+    if (circle < 100 + noise) fail(`the selected camera's circle doesn't show: ${circle} pixels changed without it (noise ${noise})`);
+  }
   await k.tab("Select");
   await k.save();
   if (cameras().length !== 1) fail(`saved, the map has ${cameras().length} cameras`);
@@ -2779,6 +2795,38 @@ async function cameraEditing(page, found) {
   await userView("after a save and an undo while a value was being typed");
   await k.save();
   if (cameras()[0].distance !== a.distance) fail(`the undo gave the distance ${cameras()[0].distance}, not ${a.distance}`);
+
+  // Aiming by the model, as the World Editor's camera mode shows it: the camera's box (seen from the side, the view
+  // turned a quarter round its target) dragged turns the camera round its target, which stays; one undo step.
+  const was = cameras()[0];
+  await k.look(was.targetX, was.targetY);
+  // The editor's handle, through a tool group of the smoke's own (made for the open editor at once).
+  await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__camGroup = s.registerToolGroup({ id: "smoke-cam", title: "SmokeCam", order: 998, create: (ed) => { window.__camEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+  if (!(await page.evaluate(`!!window.__camEd`))) return fail("no handle of the terrain editor (control)");
+  await page.evaluate(`(() => { const v = window.__camEd.view(); window.__camEd.setView({ yaw: v.yaw + Math.PI / 2 }); })()`);
+  await settled(page);
+  // The box's middle: a third of the distance back from the target toward the eye (lib/terrain/cameras.ts MARKER).
+  const R = Math.PI / 180, f = [Math.cos(was.angleOfAttack * R) * Math.cos(was.rotation * R), Math.cos(was.angleOfAttack * R) * Math.sin(was.rotation * R), Math.sin(was.angleOfAttack * R)];
+  const ground = (await view()).target[2] + (was.zOffset ?? 0);
+  const box = [0, 1, 2].map((i) => [was.targetX, was.targetY, ground][i] - f[i] * 0.33 * was.distance);
+  const at = await page.evaluate(`window.__camEd.project(${JSON.stringify(box)})`);
+  const hint = async () => page.evaluate(`[...document.querySelectorAll(".terrain-group-tools .terrain-place-hint")].map((e) => e.textContent).join("")`);
+  if (!at) fail("the selected camera's box isn't in the view (control)");
+  else {
+    await k.hands.mouse("mouseMoved", at[0], at[1]);
+    await settled(page);
+    if (!/\(camera/.test(await hint())) fail(`the pointer over the camera's box offers "${await hint()}", not to aim it`);
+    await k.hands.drag({ x: at[0], y: at[1] }, { x: at[0] + 40, y: at[1] + 120 });
+    await k.save();
+    const now = cameras()[0];
+    const turned = Math.abs(((now.rotation - was.rotation + 540) % 360) - 180);
+    if (now.targetX !== was.targetX || now.targetY !== was.targetY) fail(`dragging the camera's box moved its target: ${was.targetX},${was.targetY} to ${now.targetX},${now.targetY}`);
+    else if (turned < 2) fail(`dragging the camera's box didn't turn it: rotation ${was.rotation} to ${now.rotation}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (JSON.stringify(cameras()[0]) !== JSON.stringify(was)) fail(`one undo of the aiming drag left ${JSON.stringify(cameras()[0])}`);
+  }
+  await page.evaluate(`window.__camGroup?.dispose(); window.__camGroup = window.__camEd = null;`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
     await restoreWindow(page);

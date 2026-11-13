@@ -1626,8 +1626,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const openedMode = artMode();
         try {
           renderer = new TerrainRenderer(canvas, terrain);
-          renderer.tone = toneOf(openedMode);
-        } catch (e) {
+          renderer.tone = toneOf(openedMode);        } catch (e) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
@@ -4103,6 +4102,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
+          setShapes: (triangles) => { renderer.setShapes("tab", triangles); redraw(); },
+          setRings: (rings) => { renderer.setRings("tab", rings ?? []); redraw(); },
+          project: (p) => {
+            const at = renderer.project(p), rect = canvas.getBoundingClientRect();
+            return at && [rect.left + at[0], rect.top + at[1]];
+          },
           setLabels: (list) => {
             labels = (list ?? []).map(({ x, y, text, rgb }) => ({ x, y, el: h("span.terrain-label", { style: rgb ? { color: `rgb(${rgb.join(",")})` } : {} }, text) }));
             labelLayer.replaceChildren(...labels.map((l) => l.el));
@@ -4586,7 +4591,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }
             }
           }
-          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)}`).join(";");
+          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)},${r.rgb.join(",")}`).join(";");
           if (key === lightsKey) return;
           lightsKey = key;
           renderer.setRings("lights", rings);
@@ -4712,7 +4717,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state(), shapes: renderer.shapeCounts() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4817,7 +4822,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
               layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
-              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
+              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
               layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
               layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,

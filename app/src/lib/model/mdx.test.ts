@@ -95,6 +95,11 @@ test("lights: how far each reaches, in the Reforged layout and the classic one, 
   const m = parseMdx(lightModel([{ words: 18, start: 80, end: 200 }, { words: 18, start: 0, end: 10, track: true }, { words: 12, start: 50, end: 300 }, { words: 12, start: 5, end: 60, track: true }]));
   assert.deepEqual(m.lights?.map((l) => [l.attenuationStart, l.attenuationEnd]), [[80, 200], [0, 10], [50, 300], [5, 60]]);
   assert.deepEqual(m.lights?.map((l) => l.node.objectId), [0, 1, 2, 3]);
+  // Colour and intensity (the helper writes 1 for every value after the attenuation; an animated one's first key, 10,
+  // stands in for it), and the intensity's track.
+  assert.deepEqual(m.lights?.map((l) => [...l.color, l.intensity]), [[1, 1, 1, 1], [1, 1, 1, 10], [1, 1, 1, 1], [1, 1, 1, 10]]);
+  assert.deepEqual(m.lights?.map((l) => (l.intensityTrack ? [...l.intensityTrack.values] : null)), [null, [10], null, [10]]);
+  assert.equal(m.lights?.some((l) => l.colorTrack), false);
   assert.deepEqual(m.warnings, []);
   assert.equal(parseMdx(model(["a.blp"])).lights, undefined, "a model without lights has none");
 });

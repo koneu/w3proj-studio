@@ -221,7 +221,12 @@ It never starts the game itself.
   camera, a small movie camera with an arrow whose tip is the target, pointing along the camera's view and scaled by
   its distance (the camera's back 0.365 of it from the target; world-sized, so it grows as the view comes closer). No
   footprint or field of view on the ground. Lit by the map's light (blue under 12b's, light cyan on cliff.w3m's day).
-  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view.
+  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view. The colour (branch
+  camera-tab-markers) fits one colour lit by the units' light as the lighting model gives it, without HD's response
+  to it (renderer `setShapes`); with that response no one colour fits both maps. The camera layer (`m`) shows no
+  models by itself (View > Camera Objects does), but a selected camera (its palette row) gets a pure green circle
+  round its target on the ground (following hills), radius 0.096 of its distance; on cliff.w3m's bright grass it is
+  hard to see by eye (find it by difference).
 - **Saving** (`--save FILE`, branch save-parity, 2026-11-09): variants of a map made with the release CLI (unpack, JSON,
   pack), saved by the editor and unpacked again, show what its save works out by itself. Found so: the ally priorities
   (lib/terrain/startlocations.ts `editorAllyPriorities`), hit points and mana of 0 saved as -1 (lib/terrain/owner.ts
@@ -267,6 +272,12 @@ It never starts the game itself.
   column's point at row 325.0 of an 844 high view, 222.6 of 592, 220.2 of 585 and 211.7 of 565, whatever the width:
   0.4057 h - 17.4 (within 0.3 px), not a share of the height (325.5 / 844 misses the small views by 6). Studio uses
   that row for wheel and keys (wheelzoom.ts `zoomPivotRow`).
+- **Light Ranges** (branch light-radius, 2026-11-13, HD, `--look X,Y,3000,270,70,90` straight down, copies of the
+  empty map with imported copies of the Ruins Brazier's HD model, one light value changed each; numbers in
+  `target/evidence/light-radius/` of the main checkout): one ring per light on the ground under it, in the light's
+  colour, its radius set by the brightness alone (intensity times the colour's length; not the attenuation, not the
+  object's scale), animated with the intensity track. Studio's fit: viewmodes.ts `lightRangeRadius`. In SD no rings
+  were drawn. Closing the editor with Light Ranges on ended in its crash dialog each time (`--close` times out).
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and

@@ -52,8 +52,10 @@ export interface ViewCommands {
   state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number; pitch: number; fov: number; aspect: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
     /** The minimap panel: shown, its picture in, the view's outline on it (picture pixels). */
     minimap: ReturnType<MinimapPanel["state"]>;
-    /** Corners of the solid marks drawn per set (the Camera Objects layer's "cameras"). */
-    shapes: Record<string, number> };
+    /** Corners of the solid marks drawn per set (the Camera Objects layer's "cameras", the open tab's "tab"). */
+    shapes: Record<string, number>;
+    /** Rings drawn per named set (the light ranges' "lights", the open tab's "tab": the selected cameras' circles). */
+    rings: Record<string, number> };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
