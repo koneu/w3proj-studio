@@ -16,7 +16,7 @@
 //                       editor sizes its main window by the display, the terrain view following it, which gives
 //                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
-//   --mode sd|hd        the editor's graphics (default hd): written into its preferences before the start
+//   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
@@ -374,18 +374,19 @@ const ASSET_KINDS = ["Buildings", "Environment", "EnvOld", "Heroes", "Icons", "T
 
 /**
  * The [Misc] keys we-drive sets in WorldEditPreferences.txt: no first-start questions, no interface sounds, the
- * graphics mode (`sd` or `hd`: assetMode, hd and the per-kind switches; see TESTING.md for how that was told apart),
+ * graphics mode (`sd`, `hd` or `de`: assetMode 0, 1, 2 decides, hd and the per-kind switches follow; see TESTING.md),
  * and whether the editor's day and night turn (`cycle`) or stand still (`fixed`).
  */
 export function editorPrefs(mode, dayNight) {
-  if (mode !== "sd" && mode !== "hd") throw new Error("--mode wants sd or hd");
+  if (!["sd", "hd", "de"].includes(mode)) throw new Error("--mode wants sd, hd or de");
   if (dayNight !== "cycle" && dayNight !== "fixed") throw new Error("--day-night wants cycle or fixed");
-  const on = mode === "hd" ? "1" : "0";
+  const on = mode === "sd" ? "0" : "1";
+  const am = mode === "de" ? "2" : on;
   return {
     "Has Been Run": "true",
     "Editor User Interface Sound": "0",
     "Play Splash Sound": "0",
-    assetMode: on,
+    assetMode: am,
     hd: on,
     ...Object.fromEntries(ASSET_KINDS.map((k) => [k, on])),
     "Fixed Day Night Cycle": dayNight === "fixed" ? "1" : "0",
@@ -821,7 +822,7 @@ class Session {
       const menu = await this.openViewMenu();
       x11(this.display, "click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
       clicks++;
-      await sleep(this.opts.mode === "hd" ? 3000 : 1000);
+      await sleep(this.opts.mode !== "sd" ? 3000 : 1000);
       on = await state();
     }
     return { item: spec.item, state: on ? "on" : "off", clicks };
@@ -874,7 +875,7 @@ class Session {
       row(this.looks.length + parked);
     }
     // The view draws about 14 frames a second in SD and 2 in HD.
-    await sleep(this.opts.mode === "hd" ? 4000 : 1500);
+    await sleep(this.opts.mode !== "sd" ? 4000 : 1500);
     let studio = null;
     try { studio = studioCamera(look); } catch { /* not fitted for this angle or field of view */ }
     const camera = studio && Object.entries(studio).map(([k, v]) => `${k}=${v}`).join(",");
