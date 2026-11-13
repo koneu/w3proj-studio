@@ -7,7 +7,9 @@
 // A sound that has no key yet gets both when its text or speaker name is first typed, as the game's campaign maps have
 // them (3,207 of 3,519 dialogue sounds with both keys: speaker name n, text n + 1; no map has a sound with only one):
 // the next free numbers after the highest string of the table, the highest key of the map's sounds and the highest
-// TRIGSTR reference in the map's other files.
+// TRIGSTR reference in the map's other files, and every number of the languages' tables (`_Locales\xxXX.w3mod\war3map.wts`).
+// A save adds its new strings to those tables too, with the same text, as Move Texts does (lib/formats/localewts); a
+// text changed later changes war3map.wts only (the languages' copies are theirs to translate).
 
 import { appendStrings, StringTable, WtsCutError, wtsCuts, wtsSafeText, type NewString, type WtsCut } from "../../lib/formats/wts";
 import type { Sound } from "./sounds";
@@ -69,6 +71,12 @@ export class DialogueStrings {
     return out;
   }
 
+  /** The strings a save adds (pending, and not in the table as read or last saved here), by number: what the languages'
+   *  tables get too (lib/formats/localewts addLocaleStrings). */
+  added(): NewString[] {
+    return [...this.pending()].filter(([n]) => !this.base?.has(n)).map(([num, v]) => ({ num, text: norm(v)! })).sort((a, b) => a.num - b.num);
+  }
+
   /** The strings to write that the game would cut (a line starting with "}"). */
   cuts(): WtsCut[] {
     return wtsCuts(this.pending());
@@ -81,8 +89,8 @@ export class DialogueStrings {
   }
 
   /** The number for a new string: after the highest of the table, of the strings set here, of the sounds' keys and of
-   *  `otherRefs` (the TRIGSTR numbers the map's other files refer to: lib/formats/mapdoc stringRefsInMap, as Move Texts
-   *  numbers), so a reference to a string the table lacks doesn't come to show a dialogue text. */
+   *  `otherRefs` (the TRIGSTR numbers the map's other files refer to and the languages' tables have: lib/formats/mapdoc
+   *  stringNumbersTaken, as Move Texts numbers), so a reference to a string the table lacks doesn't come to show a dialogue text. */
   nextKey(sounds: readonly Sound[], otherRefs: Iterable<number>): number {
     let max = 0;
     for (const n of otherRefs) max = Math.max(max, n);

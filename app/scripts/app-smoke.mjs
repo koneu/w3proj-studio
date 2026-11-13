@@ -5936,6 +5936,12 @@ async function moduleFunctionsChecks(page, found) {
     const top = Math.max(...[...wtsBefore.matchAll(/^STRING (\d+)/gm)].map((m) => Number(m[1])), 0) + 40;
     const scriptFile = join(dl, "map", "war3map.j");
     writeFileSync(scriptFile, `${readFileSync(scriptFile, "utf8")}\n// TRIGSTR_${String(top).padStart(3, "0")}\n`);
+    // A German table (CRLF) whose own string is 10 past that: the new keys go after it, and the new strings go into it.
+    // A French one (LF) gets them too, in its line ends. (lib/formats/localewts)
+    const deFile = join(dl, "map", "_Locales", "deDE.w3mod", "war3map.wts"), frFile = join(dl, "map", "_Locales", "frFR.w3mod", "war3map.wts");
+    const deBefore = `STRING ${top + 10}\r\n{\r\nnur deutsch\r\n}\r\n`, frBefore = "STRING 1\n{\nfrançais\n}\n\n";
+    for (const [f, t] of [[deFile, deBefore], [frFile, frBefore]]) { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, t); }
+    const k1 = top + 11, k2 = top + 12;
     put(w3sFile, {
       format: "w3proj.sounds/1", version: 3,
       sounds: [{
@@ -5954,11 +5960,15 @@ async function moduleFunctionsChecks(page, found) {
     await until("the dialogue text unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a dialogue text left the Sound Editor without unsaved changes"));
     await saveAndSettle("the dialogue texts saved");
     const keys = () => { const x = json(w3sFile).sounds[0]; return [x.speakerNameKey, x.dialogueTextKey]; };
-    if (keys().join() !== `${top + 1},${top + 2}`) fail(`the new dialogue keys: ${keys().join()}, not ${top + 1},${top + 2}`);
+    if (keys().join() !== `${k1},${k2}`) fail(`the new dialogue keys: ${keys().join()}, not ${k1},${k2} (past the German table's ${top + 10})`);
     const wtsAfter = readFileSync(wtsFile, "utf8");
     const block = (n, text) => `STRING ${n}\n{\n${text}\n}\n`;
     if (!wtsAfter.startsWith(wtsBefore)) fail("war3map.wts's old strings didn't stay as they were");
-    if (!wtsAfter.includes(block(top + 1, "Jaina Proudmoore")) || !wtsAfter.includes(block(top + 2, "We must hurry.\nThe dead are coming."))) fail(`the dialogue strings in war3map.wts: ${JSON.stringify(wtsAfter.slice(wtsBefore.length))}`);
+    if (!wtsAfter.includes(block(k1, "Jaina Proudmoore")) || !wtsAfter.includes(block(k2, "We must hurry.\nThe dead are coming."))) fail(`the dialogue strings in war3map.wts: ${JSON.stringify(wtsAfter.slice(wtsBefore.length))}`);
+    const added = (eol) => `STRING ${k1}${eol}{${eol}Jaina Proudmoore${eol}}${eol}${eol}STRING ${k2}${eol}{${eol}We must hurry.${eol}The dead are coming.${eol}}${eol}${eol}`;
+    const deAfter = readFileSync(deFile, "utf8"), frAfter = readFileSync(frFile, "utf8");
+    if (deAfter !== `${deBefore}\r\n${added("\r\n")}`) fail(`the German table after the dialogue's save: ${JSON.stringify(deAfter)}`);
+    if (frAfter !== `${frBefore}${added("\n")}`) fail(`the French table after the dialogue's save: ${JSON.stringify(frAfter)}`);
     await openDialogue("gg_snd_Jaina01");
     const shown = await dialogueFields();
     if (shown.join("|") !== "Jaina Proudmoore|We must hurry.\nThe dead are coming.") fail(`opened again, the dialogue fields show ${JSON.stringify(shown)}`);
@@ -5966,8 +5976,10 @@ async function moduleFunctionsChecks(page, found) {
     await setField("textarea.snd-dialogue-text", "Hurry!");
     await saveAndSettle("the changed dialogue text saved");
     const wtsThen = readFileSync(wtsFile, "utf8");
-    if (wtsThen !== wtsAfter.replace(block(top + 2, "We must hurry.\nThe dead are coming."), block(top + 2, "Hurry!"))) fail(`the changed text's war3map.wts: ${JSON.stringify(wtsThen.slice(wtsBefore.length))}`);
-    if (keys().join() !== `${top + 1},${top + 2}`) fail(`editing the text changed the keys to ${keys().join()}`);
+    if (wtsThen !== wtsAfter.replace(block(k2, "We must hurry.\nThe dead are coming."), block(k2, "Hurry!"))) fail(`the changed text's war3map.wts: ${JSON.stringify(wtsThen.slice(wtsBefore.length))}`);
+    if (keys().join() !== `${k1},${k2}`) fail(`editing the text changed the keys to ${keys().join()}`);
+    // The languages' copies are theirs to translate: a later change leaves them.
+    if (readFileSync(deFile, "utf8") !== deAfter || readFileSync(frFile, "utf8") !== frAfter) fail("changing the dialogue text changed a language's table");
     await openDialogue("gg_snd_Jaina01");
     const again = await dialogueFields();
     if (again.join("|") !== "Jaina Proudmoore|Hurry!") fail(`opened again after the change, the dialogue fields show ${JSON.stringify(again)}`);
@@ -10339,6 +10351,40 @@ async function niceToHaves(page, found) {
     await settled(page);
     const files1 = snapshot(mapDir);
     for (const [f, h] of files0) if (files1.get(f) !== h) fail(`the undo of Adjust Map String IDs left ${f} changed`);
+
+    // ---- Adjust Map String IDs and the languages' tables (_Locales): they follow, their own numbers aren't given away ---
+    // A German table (LF, no BOM) with string 1 and a German-only 40, a French one (CRLF) with none of the moved numbers.
+    // 1 onto 40 is refused, nothing written; 1 onto 41 renumbers war3map.wts and the German table (its header's digits
+    // only), leaves the French one byte for byte, and one undo puts all of it back.
+    if (existsSync(join(mapDir, "_Locales"))) fail("the map has languages' tables of its own: the _Locales step would change them (control)");
+    else {
+      const deFile = join(mapDir, "_Locales", "deDE.w3mod", "war3map.wts"), frFile = join(mapDir, "_Locales", "frFR.w3mod", "war3map.wts");
+      const de = "STRING 1\n{\nDeutsch eins\n}\n\nSTRING 40\n{\nnur deutsch\n}\n", fr = "STRING 2\r\n{\r\nFrançais deux\r\n}\r\n";
+      try {
+        if (!/STRING 0*1\r?\n/.test(readFileSync(join(mapDir, "war3map.wts"), "utf8"))) fail("war3map.wts has no string 1 for the languages' step (control)");
+        for (const [f, t] of [[deFile, de], [frFile, fr]]) { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, t); }
+        await page.evaluate(`w3.workspace.refresh()`);
+        await settled(page);
+        const held = snapshot(mapDir);
+        const onGerman = await run("w3.triggers.adjustStringIds", [[1, 40]]);
+        if (!/String 40 is in map\/_Locales\/deDE\.w3mod\/war3map\.wts but not in war3map\.wts/.test(onGerman.e ?? "")) fail(`Adjust onto a German-only number: ${JSON.stringify(onGerman)}`);
+        for (const [f, h] of snapshot(mapDir)) if (held.get(f) !== h) fail(`the refused Adjust onto a German-only number changed ${f}`);
+        const moved = await run("w3.triggers.adjustStringIds", [[1, 41]]);
+        if (moved.e || moved.r !== 1) fail(`Adjust Map String IDs with languages' tables: ${moved.e ?? JSON.stringify(moved.r)}`);
+        await settled(page);
+        const main = readFileSync(join(mapDir, "war3map.wts"), "utf8");
+        if (!/STRING 0*41\r?\n/.test(main) || /STRING 0*1\r?\n/.test(main)) fail("Adjust didn't move war3map.wts's string 1 to 41 (control)");
+        if (readFileSync(deFile, "utf8") !== de.replace("STRING 1\n", "STRING 41\n")) fail(`the German table after Adjust: ${JSON.stringify(readFileSync(deFile, "utf8"))}`);
+        if (readFileSync(frFile, "utf8") !== fr) fail("Adjust changed the French table, which has none of the moved numbers");
+        await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
+        await settled(page);
+        for (const [f, h] of snapshot(mapDir)) if (held.get(f) !== h) fail(`the undo of Adjust with languages' tables left ${f} changed`);
+      } finally {
+        rmSync(join(mapDir, "_Locales"), { recursive: true, force: true });
+        await page.evaluate(`w3.workspace.refresh()`);
+        await settled(page);
+      }
+    }
 
     // ---- Adjust Map String IDs with the Object Editor as the other editor of war3map.wts ------------------------------------
     // A unit's name is string 7. Adjust refuses while the Object Editor holds an unsaved name; with it saved, the string

@@ -16,9 +16,10 @@ import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
-import { askWtsCuts, WtsCutError } from "../../lib/formats/wts";
+import { askWtsCuts, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
 import { stringNumbersTaken } from "../../lib/formats/mapdoc";
+import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
@@ -271,6 +272,23 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
   }
   const merged = strings.merge(current);
   if (merged === null) return;
+  // The new strings go into the languages' tables too (lib/formats/localewts), all worked out before anything is
+  // written, and written first: a save that stops between leaves an unused string there, not a missing one.
+  const added = strings.added();
+  const locales: { path: string; text: string }[] = [];
+  if (added.length) {
+    for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
+      const text = await w3.workspace.readText(path).catch((e) => {
+        throw new Error(`Not saved: ${path} can't be read (${errorText(e)}), so the new dialogue strings can't be added to it.`);
+      });
+      // A number the table has already came from an earlier save of these strings that stopped before war3map.wts was
+      // written (the numbers went past the table's when they were given): that copy stays.
+      const has = new StringTable(text);
+      const out = addLocaleStrings(path, text, added.filter((b) => !has.has(b.num)));
+      if (out !== text) locales.push({ path, text: out });
+    }
+  }
+  for (const l of locales) await w3.workspace.writeText(l.path, l.text);
   if (merged !== current) {
     await w3.workspace.writeText(WTS, merged);
     if (current === null) await w3.workspace.refresh();

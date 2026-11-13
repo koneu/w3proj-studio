@@ -64,3 +64,23 @@ test("the numbers new strings go after: the references and the strings a drop re
   files[PRUNED_STRINGS_FILE] = "{ not json";
   await assert.rejects(stringNumbersTaken(fakeW3(files), paths), /pruned-strings\.json isn't valid JSON/);
 });
+
+test("the numbers new strings go after: every number of the languages' tables too; one that can't be read throws", async () => {
+  const de = "map/_Locales/deDE.w3mod/war3map.wts";
+  const files: Record<string, string> = {
+    "map/war3map.w3i.json": JSON.stringify({ players: [{ name: "TRIGSTR_001" }] }),
+    "map/war3map.wts": "STRING 1\n{\nPlayer\n}\n\nSTRING 60\n{\nmain only, not referred to\n}\n",
+    [de]: "STRING 1\n{\nSpieler\n}\n\nSTRING 50\n{\nnur deutsch\n}\n",
+  };
+  // The control: without the German table only the reference counts (war3map.wts itself is the caller's to count).
+  assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), ["map/war3map.w3i.json", "map/war3map.wts"])), [1]);
+  assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), Object.keys(files))), [1, 50]);
+  const w3 = fakeW3(files);
+  const ws = w3.workspace as { readText: (p: string) => Promise<string> };
+  const plain = ws.readText;
+  ws.readText = async (p) => {
+    if (p === de) throw Object.assign(new Error("stream did not contain valid UTF-8"), { name: "NotUtf8Error" });
+    return plain(p);
+  };
+  await assert.rejects(stringNumbersTaken(w3, Object.keys(files)), /deDE\.w3mod\/war3map\.wts is there but can't be read/);
+});

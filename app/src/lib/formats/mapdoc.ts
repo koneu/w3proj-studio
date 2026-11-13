@@ -4,6 +4,8 @@ import type { W3Api } from "../../extensions/api";
 import { StringTable } from "./wts";
 import { refsIn } from "./movetexts";
 import { readPrunedStrings } from "./prunedstrings";
+import { isLocaleWts, localeNumbers } from "./localewts";
+import { errorText } from "../oserror";
 import { parseW3e } from "../terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../terrain/w3etext";
 
@@ -79,11 +81,16 @@ export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: 
   return into;
 }
 
-/** The string numbers a new string must go after: those the map's files refer to (stringRefsInMap) and those an earlier
- *  drop recorded (lib/formats/prunedstrings), which come back when a reference does. Throws when either can't be read. */
+/** The string numbers a new string must go after: those the map's files refer to (stringRefsInMap), those an earlier
+ *  drop recorded (lib/formats/prunedstrings), which come back when a reference does, and every number of the languages'
+ *  tables (lib/formats/localewts), whose own strings would show in place of a new one. Throws when any can't be read. */
 export async function stringNumbersTaken(w3: W3Api, paths: Iterable<string>): Promise<Set<number>> {
-  const [refs, record] = await Promise.all([stringRefsInMap(w3, paths), readPrunedStrings(w3)]);
+  const list = [...paths];
+  const locales = list.filter(isLocaleWts).map((path) => w3.workspace.readText(path)
+    .catch((e) => { throw new Error(`${path} is there but can't be read (${errorText(e)}), so the string numbers it uses can't be told.`); }));
+  const [refs, record, tables] = await Promise.all([stringRefsInMap(w3, list), readPrunedStrings(w3), Promise.all(locales)]);
   for (const n of record.keys()) refs.add(n);
+  localeNumbers(tables, refs);
   return refs;
 }
 

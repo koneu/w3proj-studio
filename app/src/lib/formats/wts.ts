@@ -337,13 +337,19 @@ export class StringTable {
 /** The World Editor's Adjust Map String IDs: `ids` maps a string's number to its new one. Every number that stays or
  *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why.
  *  `reserved`: numbers no string may take, those an earlier drop recorded that the table doesn't have
- *  (lib/formats/prunedstrings): a reference to one can come back, and must not show another string's text. */
-export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>, reserved: ReadonlySet<number> = new Set()) {
+ *  (lib/formats/prunedstrings): a reference to one can come back, and must not show another string's text.
+ *  `localeOnly`: the numbers only a language's table has (lib/formats/localewts localeOnlyNumbers), with its path: no
+ *  string may take one either, or that language would show its string in place of the renumbered one. */
+export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>, reserved: ReadonlySet<number> = new Set(),
+  localeOnly: ReadonlyMap<number, string> = new Map()) {
   for (const [from, to] of ids) {
     if (!table.has(from)) throw new Error(`There's no string ${from}.`);
     if (!Number.isSafeInteger(to) || to < 0) throw new Error(`${to} isn't a string ID (a whole number from 0).`);
     if (to !== from && reserved.has(to)) {
       throw new Error(`String ${to} was dropped as unused when the map was packed, and comes back if something refers to it again, so another string can't take its ID.`);
+    }
+    if (to !== from && localeOnly.has(to)) {
+      throw new Error(`String ${to} is in ${localeOnly.get(to)} but not in war3map.wts (a language's own string), so another string can't take its ID.`);
     }
   }
   const seen = new Map<number, number>();
@@ -356,7 +362,8 @@ export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, numb
 }
 
 /** The IDs from `start` up in the order of the current numbers (Adjust's renumbering of the whole table): only the
- *  strings whose number changes. The `reserved` numbers (see checkStringIds) are stepped over. */
+ *  strings whose number changes. The `reserved` numbers (see checkStringIds; the languages' own numbers too) are
+ *  stepped over. */
 export function compactStringIds(table: StringTable, start = 1, reserved: ReadonlySet<number> = new Set()): Map<number, number> {
   const nums = [...table.entries()].map(([n]) => n).sort((a, b) => a - b);
   const out = new Map<number, number>();

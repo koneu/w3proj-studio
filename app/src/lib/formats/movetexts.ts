@@ -30,6 +30,9 @@
 // its numbers stay taken.
 
 import { StringTable, appendStrings, removeStrings, wtsCutLines } from "./wts";
+import { addLocaleStrings, localeNumbers, wtsEol } from "./localewts";
+
+export { LOCALE_WTS } from "./localewts";
 
 /** The object fields whose literal texts move. */
 export const MOVED_FIELDS: ReadonlySet<string> = new Set([
@@ -161,11 +164,6 @@ export function refsIn(text: string, into = new Set<number>()): Set<number> {
 const modsOf = (o: TextObject): TextMod[] => (o.sets ? o.sets.flatMap((s) => s.mods ?? []) : (o.mods ?? []));
 const keyOf = (o: TextObject) => o.id || o.base;
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
-/** The line ends new blocks get: the table's own, CRLF for a new table or one of a single line (as the editor writes). */
-const eolOf = (wts: string | null) => (wts === null || wts.includes("\r\n") || !wts.includes("\n") ? "\r\n" : "\n");
-
-/** A language's string table in the project (`map/_Locales/deDE.w3mod/war3map.wts`), any case. */
-export const LOCALE_WTS = /^map\/_locales\/[^/]+\.w3mod\/war3map\.wts$/i;
 
 /** See the top. Pure: the inputs are left as they are; the result holds what changed. Throws rather than give a
  *  table that wouldn't read back as written. */
@@ -185,8 +183,8 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   for (const n of input.reserved ?? []) next = Math.max(next, n + 1);
   // And after every number of the languages' tables: a string only one of them has would otherwise show there in place
   // of the new one.
-  const locales = (input.locales ?? []).map((l) => ({ ...l, table: new StringTable(l.wts) }));
-  for (const l of locales) for (const [n] of l.table.entries()) next = Math.max(next, n + 1);
+  const locales = input.locales ?? [];
+  for (const n of localeNumbers(locales.map((l) => l.wts))) next = Math.max(next, n + 1);
   const blocks: { num: number; text: string; comment: string | null }[] = [];
   const kept: KeptText[] = [];
   /** The text's new reference, or null when it stays literal. */
@@ -263,7 +261,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   let wts: string | null = null;
   if (blocks.length || dropped.length) {
     const base = input.wts ?? "﻿";
-    const out = appendStrings(removeStrings(base, droppedSet), blocks, eolOf(input.wts));
+    const out = appendStrings(removeStrings(base, droppedSet), blocks, wtsEol(input.wts));
     // Read back: every new string whole, every old one but the dropped as it was.
     const back = new StringTable(out);
     for (const b of blocks) {
@@ -279,17 +277,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   // The languages' tables: the new strings added, nothing dropped (each keeps its translations).
   const localeOut: { path: string; wts: string }[] = [];
   if (blocks.length) {
-    for (const l of locales) {
-      const out = appendStrings(l.wts, blocks, eolOf(l.wts));
-      const back = new StringTable(out);
-      for (const b of blocks) {
-        if (back.get(b.num)?.replace(/\r\n/g, "\n") !== b.text) throw new Error(`string ${b.num} wouldn't read back as written in ${l.path}; nothing was changed.`);
-      }
-      for (const [n, v] of l.table.entries()) {
-        if (back.get(n) !== v) throw new Error(`string ${n} of ${l.path} wouldn't stay as it is; nothing was changed.`);
-      }
-      localeOut.push({ path: l.path, wts: out });
-    }
+    for (const l of locales) localeOut.push({ path: l.path, wts: addLocaleStrings(l.path, l.wts, blocks) });
   }
   return {
     wts, locales: localeOut, info,

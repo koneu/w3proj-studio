@@ -7,7 +7,8 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
-import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
+import { checkStringIds, compactStringIds, renumberStringRefs, StringTable } from "../../lib/formats/wts";
+import { adjustStringTables, isLocaleWts, localeOnlyNumbers } from "../../lib/formats/localewts";
 import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
@@ -306,7 +307,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return true;
     }),
     // Adjust Map String IDs: a string of war3map.wts gets another number (`ids` [[from, to], …], else asked), or all are
-    // numbered from 1 in order; every TRIGSTR_ reference in the map's text files follows. One edit of all the files (Undo
+    // numbered from 1 in order; every TRIGSTR_ reference in the map's text files follows, and so do the languages' tables
+    // (_Locales, lib/formats/localewts: their own numbers stay, and no string takes one). One edit of all the files (Undo
     // in the message, or the MCP edits' undo); refused while anything is unsaved. How many strings changed number.
     w3.commands.register("w3.triggers.adjustStringIds", async (ids?: unknown) => adjustStringIds(w3, ids)),
     w3.editors.registerProvider("w3.triggerEditor", {
@@ -506,6 +508,15 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const table = new StringTable(await w3.workspace.readText(WTS));
   // Numbers an earlier drop recorded stay free: a reference to one can come back (a record that can't be read refuses).
   const reserved = reservedStringIds(await readPrunedStrings(w3), table);
+  // The languages' tables follow the same numbers (lib/formats/localewts); their own numbers stay, and stay free. One
+  // that is there but can't be read refuses: its numbers can't be told.
+  const localePaths = w3.workspace.files().map((f) => f.path).filter(isLocaleWts);
+  const locales: { path: string; wts: string }[] = [];
+  for (const path of localePaths) {
+    const wts = await w3.workspace.readText(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+    locales.push({ path, wts });
+  }
+  const localeOnly = localeOnlyNumbers(table, locales);
   let ids: Map<number, number>;
   if (given !== undefined) {
     if (!Array.isArray(given) || !given.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) {
@@ -521,7 +532,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
       ...nums.map((n) => ({ label: `STRING ${n}`, description: (table.get(n) ?? "").split(/\r?\n/)[0].slice(0, 80), value: n })),
     ], { placeholder: "Adjust Map String IDs: which string gets a new ID?" });
     if (picked?.value === undefined) return 0;
-    if (picked.value === ALL) ids = compactStringIds(table, 1, reserved);
+    if (picked.value === ALL) ids = compactStringIds(table, 1, new Set([...reserved, ...localeOnly.keys()]));
     else {
       const typed = await w3.window.inputBox({ prompt: `New ID for string ${picked.value} (its references in the map follow)`, value: String(picked.value) });
       if (typed === undefined) return 0;
@@ -530,7 +541,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
     }
   }
   for (const [from, to] of [...ids]) if (from === to) ids.delete(from);
-  checkStringIds(table, ids, reserved);
+  checkStringIds(table, ids, reserved, localeOnly);
   if (!ids.size) { void w3.window.showInfo("Nothing to change: the strings keep their IDs."); return 0; }
   // A raw map file can't be changed as text: a reference in it would be left pointing at another string.
   const raw: string[] = [];
@@ -543,27 +554,36 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const texts = w3.workspace.files().map((f) => f.path).filter((p) => TEXT_FILE.test(p));
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
   const root = w3.workspace.project()?.root;
-  let files = 0;
+  let files = 0, languages = 0;
   const done = await edits.edit("Adjust Map String IDs", async (read) => {
     const wts = await read(WTS);
     if (wts === null) throw new Error("The map's string table (war3map.wts) is gone.");
-    // Read again: what was asked is checked against the table and the record as they are now.
+    // Read again: what was asked is checked against the tables and the record as they are now (a language's table gone
+    // meanwhile has nothing to follow).
     const now = new StringTable(wts);
-    checkStringIds(now, ids, reservedStringIds(await readPrunedStrings(w3), now));
-    const out = [{ path: WTS, text: renumberWts(wts, ids) }];
+    const localesNow: { path: string; wts: string }[] = [];
+    for (const path of localePaths) {
+      const text = await read(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+      if (text !== null) localesNow.push({ path, wts: text });
+    }
+    const adjusted = adjustStringTables(wts, localesNow, ids, reservedStringIds(await readPrunedStrings(w3), now));
+    const renumbered = adjusted.locales;
+    const out = [{ path: WTS, text: adjusted.wts }, ...renumbered.map((l) => ({ path: l.path, text: l.wts }))];
     for (const path of texts) {
       const text = await read(path);
       const next = text === null ? null : renumberStringRefs(text, ids);
       if (next !== null) out.push({ path, text: next });
     }
-    files = out.length;
+    languages = renumbered.length;
+    files = out.length - 1 - languages;
     return out;
   }, async () => {
     // After the edit and after its undo: the numbers changed under the editors' undo history.
     if (w3.workspace.project()?.root === root) await forgetStringHistory(w3);
   });
   if (done) {
-    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts and ${files - 1} file${files === 2 ? "" : "s"} that refer to them. Open editors of the map's texts start a new undo history.`, "Undo")
+    const tables = languages ? `, ${languages} language${languages === 1 ? "'s table" : "s' tables"}` : "";
+    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts${tables} and ${files} file${files === 1 ? "" : "s"} that refer to them. Open editors of the map's texts start a new undo history.`, "Undo")
       .then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
   }
   return done ? ids.size : 0;
