@@ -32,6 +32,27 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// As [`write`], with the contents written by `fill` into the temporary file. An error from `fill`
 /// leaves the target as it was and removes the temporary file.
 pub fn write_with(path: &Path, fill: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
+    replace(path, fill, Flush::Always)
+}
+
+/// As [`write`], but a new file (none at `path` yet) isn't flushed to disk before it is named: for
+/// the many files a sync or unpack writes, where flushing each costs more than the writing (an unpack
+/// of 1,700 files took three times as long). A file replaced is still flushed first, so its old
+/// contents are never lost; a new one cut short by a power loss is written again by the next sync from
+/// the map that still holds it. A write failing partway (a full disk, the program ending) leaves no
+/// part of a file in either case.
+pub fn write_lazily(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, |f| f.write_all(bytes), Flush::Replacing)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Flush {
+    Always,
+    /// Only when there is a file to replace.
+    Replacing,
+}
+
+fn replace(path: &Path, fill: impl FnOnce(&mut fs::File) -> io::Result<()>, flush: Flush) -> io::Result<()> {
     let path = follow_links(path)?;
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     fs::create_dir_all(dir)?;
@@ -58,7 +79,9 @@ pub fn write_with(path: &Path, fill: impl FnOnce(&mut fs::File) -> io::Result<()
     let done = (|| -> io::Result<()> {
         let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         fill(&mut f)?;
-        f.sync_all()?;
+        if flush == Flush::Always || old.is_some() {
+            f.sync_all()?;
+        }
         drop(f);
         // The new file is made with default permissions: the old file's go over to it (a file the
         // user made private stays private).

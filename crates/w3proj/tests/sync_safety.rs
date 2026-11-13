@@ -286,6 +286,68 @@ fn a_sync_never_deletes_a_file_with_a_backslash_in_its_name() {
     assert!(!map.join("added.txt").exists(), "a file the map doesn't have goes on a sync");
 }
 
+/// The map files a sync writes are replaced in one step too, not written over in place (seen through a
+/// hard link to the old file, as above).
+#[test]
+fn a_sync_replaces_map_files_in_one_step() {
+    let dir = workdir("map-file-atomic");
+    let root = new_project(&dir);
+    let file = root.join("map").join("war3map.j");
+    let link = dir.join("old-script");
+    fs::hard_link(&file, &link).unwrap();
+    let report = project::write_files(&root, extracted(&root, "Map", &[("war3map.j", b"new script")])).unwrap();
+    assert_eq!(report.written, 1);
+    assert_eq!(fs::read(&file).unwrap(), b"new script");
+    assert_eq!(fs::read(&link).unwrap(), SCRIPT, "the old file was written over in place");
+    let names: Vec<String> =
+        fs::read_dir(root.join("map")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["war3map.j"], "a temporary file was left");
+}
+
+/// A sync whose write of a map file fails partway (here: the file grows past the size limit `ulimit -f`
+/// sets, as a full disk would stop it) leaves the old file whole, and no temporary file. The sync runs in
+/// a child process (this test binary again, running only this test), as the limit holds for a whole
+/// process.
+#[cfg(unix)]
+#[test]
+fn a_sync_failing_partway_leaves_the_old_map_file_whole() {
+    const CHILD: &str = "W3PROJ_TEST_SYNC_FSIZE_ROOT";
+    const NAME: &str = "a_sync_failing_partway_leaves_the_old_map_file_whole";
+    // Far beyond the limit (8 blocks: 4 KiB or 8 KiB, by the shell).
+    let big = vec![b'x'; 256 * 1024];
+    if let Some(root) = std::env::var_os(CHILD) {
+        let root = std::path::PathBuf::from(root);
+        match project::write_files(&root, extracted(&root, "Map", &[("war3map.j", &big)])) {
+            Ok(_) => println!("sync succeeded"),
+            Err(e) => println!("sync failed: {e}"),
+        }
+        return;
+    }
+    let dir = workdir("map-file-partway");
+    let root = new_project(&dir);
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        // An ignored SIGXFSZ stays ignored in the program exec'd: the write then fails with EFBIG
+        // instead of ending the process.
+        .arg("trap '' XFSZ; ulimit -f 8 && exec \"$0\" \"$@\"")
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+        .env(CHILD, &root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(stdout.contains("sync failed:"), "the write didn't fail: {stdout}");
+    let now = fs::read(root.join("map").join("war3map.j")).unwrap();
+    assert!(now == SCRIPT, "the old file was cut: {} bytes now", now.len());
+    let names: Vec<String> =
+        fs::read_dir(root.join("map")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["war3map.j"], "a temporary file was left");
+    // Without the limit the same sync goes through.
+    project::write_files(&root, extracted(&root, "Map", &[("war3map.j", &big)])).unwrap();
+    assert_eq!(fs::read(root.join("map").join("war3map.j")).unwrap(), big);
+}
+
 /// A save's temporary file (`w3proj::atomic`), there while it runs or left by a crash, is no project
 /// file: it isn't packed, and a sync neither deletes it (another program's save may be running) nor
 /// asks about it. The project's .gitignore leaves it out of git.
