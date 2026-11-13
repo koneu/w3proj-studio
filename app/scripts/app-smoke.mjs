@@ -9856,13 +9856,13 @@ async function editorExtras(page, found) {
       };
       try {
         await page.evaluate(`window.__errors.length = 0`);
-        await answer(NEW);
+        await answer("inputBox", NEW);
         let why = await menuItem(IMP, "Change Import Path…");
         if (why) fail(why);
         else if (!(await soon(() => existsSync(newDisk) && !existsSync(onDisk) && listNow().join() === NEW, 10000))) fail(`Change Import Path: the file is ${existsSync(newDisk) ? "moved" : "not moved"}, the list holds ${JSON.stringify(listNow())}`);
         else {
           await settled(page);
-          if (!(await rows("smoke2", NEW, true, "the Object Manager doesn't show the new import path"))) { /* reported */ }
+          if (!(await soon(() => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(NEW)})`), 10000))) fail("the Object Manager doesn't show the new import path");
           if (readFileSync(refDisk, "utf8") === refOld) fail("Change Import Path didn't update the reference in a script");
           const undoRename = async (dir) => {
             await page.evaluate(`w3.commands.execute("workbench.${dir}")`);
