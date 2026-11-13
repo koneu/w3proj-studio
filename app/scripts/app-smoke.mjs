@@ -1152,20 +1152,21 @@ async function terrainSelectCameras(page, found) {
   await settled(page);
   const camera = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().camera ?? null)()`);
   const from = await camera(), looks = [];
-  for (const id of ["w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelectionPrevious"]) {
+  // Ctrl+A selects the start location too (as the World Editor's does): three stops, the fourth press stays at the third.
+  for (const id of ["w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelectionPrevious"]) {
     const err = await k.run(id);
     if (err) fail(`${id}: ${err}`);
     looks.push(await camera());
   }
   const spot = (c) => c ? c.target.slice(0, 2).map(Math.round).join(",") : "none";
   const spots = looks.map(spot);
-  if (new Set(spots.slice(0, 2)).size !== 2 || !spots.slice(0, 2).every((s) => s === "-512,0" || s === "-1024,-512")) fail(`View Selection twice didn't go to the two doodads in turn: ${spots.join(" | ")}`);
-  else if (spots[2] !== spots[1] || spots[3] !== spots[0]) fail(`View Selection didn't stay at the selection's end, or Previous didn't go back: ${spots.join(" | ")}`);
+  if (new Set(spots.slice(0, 3)).size !== 3 || !["-512,0", "-1024,-512"].every((s) => spots.slice(0, 3).includes(s))) fail(`View Selection three times didn't go to the two doodads and the start location in turn: ${spots.join(" | ")}`);
+  else if (spots[3] !== spots[2] || spots[4] !== spots[1]) fail(`View Selection didn't stay at the selection's end, or Previous didn't go back: ${spots.join(" | ")}`);
   const moved = looks.filter((c) => !c || ["distance", "yaw", "pitch", "fov"].some((key) => Math.abs(c[key] - from[key]) > 1e-6));
   if (moved.length) fail(`View Selection changed the camera's distance or angles: from ${JSON.stringify(from)} to ${JSON.stringify(moved[0])}`);
   // By key, as the World Editor's ~ (the key left of 1) and Shift+~: the US characters typed, then the German ^ (a dead
-  // key: key "Dead", code "Backquote") and its Shift+^ "°" as the webview gives them. From the first doodad (Previous
-  // went back to it) each press goes to the other one, at the same distance.
+  // key: key "Dead", code "Backquote") and its Shift+^ "°" as the webview gives them. From the second stop (Previous
+  // went back to it) the next key goes to the third, the previous one back to the second, at the same distance.
   const byKey = [
     ["`", () => k.hands.chord("`")],
     ["Shift+`", () => k.hands.chord("Shift+`")],
@@ -1176,7 +1177,7 @@ async function terrainSelectCameras(page, found) {
     await k.focusMap();
     await press();
     await settled(page);
-    const c = await camera(), want = spots[i % 2 ? 0 : 1];
+    const c = await camera(), want = spots[i % 2 ? 1 : 2];
     if (spot(c) !== want) fail(`${what} in the terrain view didn't pan to ${want}: it looks at ${spot(c)}`);
     else if (Math.abs(c.distance - from.distance) > 1e-6) fail(`${what} changed the distance: ${from.distance} to ${c.distance}`);
   }
@@ -5437,7 +5438,9 @@ async function objectCopy(page, found) {
   await until("the hero, selected by Ctrl+A", async () => {
     await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
     await hands.key("a", "KeyA", 65, 2);
-    return (await selectionText()).includes(`· ${hero}`);
+    // The start location is selected too: with two objects the text lists the types ("1 ×Paladin"), with one it names the id.
+    const text = await selectionText();
+    return text.includes(`· ${hero}`) || /×Paladin/.test(text);
   }, 30000).catch(async (e) => { throw new Error(`${e.message} (the selection says "${await selectionText()}")`); });
   await hands.key("c", "KeyC", 67, 2);
   // The copy whole before another map opens: the custom types it takes along read (settleViews waits for them).
