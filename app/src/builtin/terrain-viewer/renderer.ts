@@ -378,17 +378,21 @@ void main() { vW = aPos.xy; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth
 const GRID_FS = `#version 300 es
 precision highp float; in vec2 vW; uniform vec2 uOrigin; uniform float uSteps[3]; uniform int uLevels; uniform vec4 uColors[3]; out vec4 outColor;
 ${FOG_FS}
-float lineAt(float step) {
-  vec2 g = (vW - uOrigin) / step, w = max(fwidth(g), vec2(1e-6));
+// p: the point from the grid's origin; fw: fwidth(p), taken once in main. A derivative inside the loop below (it ends
+// on a uniform) is undefined on Direct3D, where Windows' WebGL runs (ANGLE): the lines came out faded to nothing there.
+// fwidth(p / step) is fwidth(p) / step, the step being the same for the whole draw.
+float lineAt(vec2 p, vec2 fw, float step) {
+  vec2 g = p / step, w = max(fw / step, vec2(1e-6));
   vec2 d = abs(fract(g - 0.5) - 0.5) / w;
   // About a pixel wide and solid, as the World Editor's lines (solid within 0.4 of a pixel, gone at 0.9).
   return clamp(2.0 * (0.9 - min(d.x, d.y)), 0.0, 1.0) * (1.0 - smoothstep(0.2, 0.45, max(w.x, w.y)));
 }
 void main() {
   vec3 rgb = vec3(0.0); float a = 0.0;
+  vec2 p = vW - uOrigin, fw = fwidth(p);
   for (int i = 0; i < 3; i++) {
     if (i >= uLevels) break;
-    float ai = uColors[i].a * lineAt(uSteps[i]);
+    float ai = uColors[i].a * lineAt(p, fw, uSteps[i]);
     rgb = uColors[i].rgb * ai + rgb * (1.0 - ai);
     a = ai + a * (1.0 - ai);
   }

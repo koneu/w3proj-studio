@@ -278,6 +278,55 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Opens `p` as another program would, sharing reading and writing, and deletion only if `share_delete`.
+    #[cfg(windows)]
+    fn held(p: &Path, share_delete: bool) -> fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        const READ: u32 = 1;
+        const WRITE: u32 = 2;
+        const DELETE: u32 = 4;
+        fs::File::options().read(true).share_mode(READ | WRITE | if share_delete { DELETE } else { 0 }).open(p).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_held_open_without_delete_sharing_is_refused_whole_and_one_sharing_it_is_replaced() {
+        let dir = scratch("held");
+        let p = dir.join("war3map.w3x");
+        fs::write(&p, b"old").unwrap();
+        // As the World Editor or a viewer may hold a map: the replace is refused, the old bytes stay, no temp file.
+        let h = held(&p, false);
+        assert!(write(&p, b"new").is_err(), "a file held without delete sharing was replaced");
+        assert_eq!(fs::read(&p).unwrap(), b"old");
+        assert_eq!(names(&dir), ["war3map.w3x"], "the temporary file is removed");
+        drop(h);
+        // A program that shares deletion (as POSIX programs see it) doesn't stand in the way.
+        let h = held(&p, true);
+        write(&p, b"new").unwrap();
+        drop(h);
+        assert_eq!(fs::read(&p).unwrap(), b"new");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_refusal_for_a_moment_is_tried_again() {
+        // A scanner or indexer holding the file for 50 ms: the rename is tried again (10 + 20 + 40 + … ms) and goes through.
+        let dir = scratch("moment");
+        let p = dir.join("war3map.w3e");
+        fs::write(&p, b"old").unwrap();
+        let h = held(&p, false);
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(h);
+        });
+        write(&p, b"new").unwrap();
+        t.join().unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"new");
+        assert_eq!(names(&dir), ["war3map.w3e"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn permissions_are_kept_and_links_written_through() {

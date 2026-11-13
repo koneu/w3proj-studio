@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
-import { mapObjectData } from "./projectfiles";
+import { mapObjectData, typeName } from "./projectfiles";
 
 test("a chapter map's object data: the campaign's main and Skin files, then the map's own", async () => {
   // Curse of the Forsaken's war3campaignSkin.w3b frees IOt0's fixed rotation (bfxr -1): left out, the doodad rules
@@ -25,4 +25,16 @@ test("a chapter map's object data: the campaign's main and Skin files, then the 
   const { art, unread } = await mapObjectData(w3);
   assert.deepEqual(art.map((a) => [a.kind, a.original?.[0]?.base]), [["w3b", "ITtg"], ["w3b", "IOt0"], ["w3b", "LTlt"]]);
   assert.deepEqual(unread, []);
+});
+
+test("typeName: a custom id by its base, never by a game entry of the same id (German [H000] is \"Waldläuferin\")", () => {
+  // The German install's names: NeutralUnitStrings.txt has an [H000] of its own; the map's H000 is a custom Paladin.
+  const names = new Map([["Hpal", "Paladin"], ["H000", "Waldläuferin"], ["hfoo", "Fußsoldat"]]);
+  const bases = new Map([["H000", "Hpal"]]);
+  assert.equal(typeName(names, bases, "H000"), "Paladin");
+  assert.equal(typeName(names, bases, "hfoo"), "Fußsoldat");
+  // Without the map's custom ids (not loaded yet), the game's entry is all there is.
+  assert.equal(typeName(names, undefined, "H000"), "Waldläuferin");
+  // A custom id whose base the game doesn't name: nothing (the caller keeps the id), not the game's same-id entry.
+  assert.equal(typeName(names, new Map([["H000", "Xbad"]]), "H000"), undefined);
 });

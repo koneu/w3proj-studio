@@ -864,15 +864,16 @@ async function tilesInPlace(page, found) {
     await k.tool("save_project");
     await page.evaluate(`w3.commands.execute("w3.terrain.showPoint", 256, 256, { id: "hfoo" })`);
     const selName = () => page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent ?? null`);
-    // The side panel names the selected object (the Footman).
-    await until("the unit selected", async () => (await selName()) === "Footman", 10000).catch(async () => fail(`the unit wasn't selected (control): ${await selName()}`));
+    // The side panel names the selected object (the Footman, in the install's language).
+    const footman = await gameName(page, "hfoo");
+    await until("the unit selected", async () => (await selName()) === footman, 10000).catch(async () => fail(`the unit wasn't selected (control): ${await selName()}`));
     await page.evaluate(`window.__smokeEd.setView({ target: [300, 200, 0], yaw: 1.1, pitch: 0.9, distance: 2345 })`);
     const view = await page.evaluate(`window.__smokeEd.view()`);
     const madeBefore = await k.made();
     await k.tool("resize_map", { right: 32 });
     await until("the editor on the new size", () => page.evaluate(`window.__editorsMade > ${madeBefore} && !!document.querySelector(".model-stage canvas")`), 30000)
       .catch(() => fail("the resize didn't open the editor again (control)"));
-    await until("the unit selected again", async () => (await selName()) === "Footman", 15000).catch(async () => fail(`after the resize the selection is ${await selName()}, not the unit`));
+    await until("the unit selected again", async () => (await selName()) === footman, 15000).catch(async () => fail(`after the resize the selection is ${await selName()}, not the unit`));
     const after = await page.evaluate(`window.__smokeEd.view()`);
     const near = (a, b) => Math.abs(a - b) < 1e-3;
     if (!near(after.target[0], view.target[0]) || !near(after.target[1], view.target[1]) || !near(after.yaw, view.yaw) || !near(after.pitch, view.pitch) || !near(after.distance, view.distance)) {
@@ -2591,6 +2592,8 @@ async function itemDrops(page, found) {
   const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
   const troll = (x, y) => k.units().find((u) => u.id === "nftt" && u.position[0] === x && u.position[1] === y);
   const ogre = (x) => k.units().find((u) => u.id === "nogr" && u.position[0] === x);
+  // The game's names in the install's language: the forest troll (trapper) and Claws of Attack.
+  const trollName = await gameName(page, "nftt"), clawsName = await gameName(page, "ratf");
   const T = (sel) => `.drops-tab ${sel}`;
   const text = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
   const has = (sel) => page.evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
@@ -2615,7 +2618,7 @@ async function itemDrops(page, found) {
   await k.hands.click(".terrain-drops [data-prop=\"edit-drops\"]");
   await until("the Item Drops tab", async () => (await active()) === TAB, 20000).catch(() => fail("Edit drops… didn't open the Item Drops tab"));
   await until("the tab's drops", () => has(T(".drops-pane .drops-editor")), 20000).catch(() => fail("the tab doesn't show the troll's drops"));
-  if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the tab edits ${await text(T("[data-prop=\"pane-title\"]"))}, not the troll`);
+  if (!(await text(T("[data-prop=\"pane-title\"]")) ?? "").includes(trollName)) fail(`the tab edits ${await text(T("[data-prop=\"pane-title\"]"))}, not the troll`);
   if (!(await has(T(".drops-obj.on[data-entry=\"nftt@0,0\"]")))) fail("the troll isn't marked in the tab's list");
   const camps = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-group")].map((g) => [g.querySelector("strong").textContent, g.querySelectorAll(".drops-obj").length])`);
   if (JSON.stringify(camps) !== JSON.stringify([["Camp 1", 2], ["Camp 2", 3]])) fail(`the camps: ${JSON.stringify(camps)} (the ogres are north of the trolls)`);
@@ -2624,7 +2627,7 @@ async function itemDrops(page, found) {
   if (JSON.stringify(levels) !== JSON.stringify(["Level 6 (weak)", "Level 9 (weak)"])) fail(`the camps' levels: ${JSON.stringify(levels)}`);
   if (!/2 objects drop items · 1 map item table/.test(await text(T("[data-prop=\"drops-count\"]")) ?? "")) fail(`the count: ${await text(T("[data-prop=\"drops-count\"]"))}`);
   const card = await text(T("[data-table-card=\"3\"]")) ?? "";
-  if (!/Smoke Loot/.test(card) || !/used by 1/.test(card) || !/Claws of Attack/.test(card) || !/Random item, charged, level 2/.test(card) || !/60%/.test(card)) fail(`the table's card: ${card}`);
+  if (!/Smoke Loot/.test(card) || !/used by 1/.test(card) || !card.includes(clawsName) || !/Random item, charged, level 2/.test(card) || !/60%/.test(card)) fail(`the table's card: ${card}`);
 
   // An item from the item browser, then its chance typed: each one undo step.
   await k.hands.click(T("[data-prop=\"add-item-0\"]"));
@@ -2709,8 +2712,8 @@ async function itemDrops(page, found) {
   // A drop changed in the tab while it shows those tables: Ctrl+S there saves the terrain editor and Map Properties together.
   await k.hands.click(T("[data-entry=\"nftt@192,0\"] .drops-obj-name"));
   await redrawn();
-  await soon(async () => /Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? ""), 5000);
-  if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the click on the second troll edits ${await text(T("[data-prop=\"pane-title\"]"))}`);
+  await soon(async () => (await text(T("[data-prop=\"pane-title\"]")) ?? "").includes(trollName), 5000);
+  if (!(await text(T("[data-prop=\"pane-title\"]")) ?? "").includes(trollName)) fail(`the click on the second troll edits ${await text(T("[data-prop=\"pane-title\"]"))}`);
   await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(T(".drops-pane [data-prop=\"drops-mode\"]"))}); s.value = "table"; s.dispatchEvent(new Event("change")); })()`);
   await redrawn();
   if (!(await dirty())) fail("giving the troll the table in the tab didn't mark the terrain changed");
@@ -2732,7 +2735,7 @@ async function itemDrops(page, found) {
   }, 20000).catch(() => fail("Show didn't select the ogre"));
   // The panel shows the table by name and what it drops, not only its name.
   const ogreBlock = await text(".terrain-drops") ?? "";
-  if (!/Ogre Loot \(#3\)/.test(ogreBlock) || !/Claws of Attack/.test(ogreBlock) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
+  if (!/Ogre Loot \(#3\)/.test(ogreBlock) || !ogreBlock.includes(clawsName) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
 
   // The script: the trolls' own drop function with both items, the table's function.
   await k.save();
@@ -3107,7 +3110,12 @@ async function artModeReload(page, found) {
     const after = await page.evaluate(view);
     if (Math.abs(after.target[0] - before.target[0]) > 1 || Math.abs(after.distance - before.distance) > 1) fail(`the camera moved with the reopen: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
     if ((await page.evaluate(`w3.editors.activePath()`)) !== "map/war3map.w3e.txt") fail("the terrain editor isn't the active tab after the reopen");
+    // The reopen for DE waited for, as SD's above: an edit made before it lands on the editor it then replaces (seen in a
+    // full run on Windows: "the editor with unsaved edits was opened again").
+    const beforeDe = await editors();
     await setMode("de");
+    await until("the terrain editor opened again for DE", async () => (await editors()) !== beforeDe, 20000)
+      .catch(() => fail("switching to DE didn't open the terrain editor again"));
     await waitModel("DE's Ogre Lord", "nogl", /OgreLord\\OgreLord\.mdx$/i);
 
     // Unsaved edits: the editor stays, and says so.
@@ -3813,6 +3821,12 @@ async function mcpLimits(page, found) {
 /** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
  *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
  *  would, and fails the run naming the check, so the one that left it answers it itself. */
+/** The name the app gives a game object type, in the install's language (a German install says Fußsoldat, not Footman):
+ *  what a check compares a game object's name with, so it holds for every language. */
+async function gameName(page, id) {
+  return page.evaluate(`w3.services.get("w3.objects").then((o) => o.name(${JSON.stringify(id)}))`);
+}
+
 /** Puts every w3.window function back as it was at the start of the run (the checks that replace some answer
  *  dialogs, and call this in a `finally`). */
 async function restoreWindow(page) {
@@ -3853,8 +3867,24 @@ async function pathingImport(page, found) {
   const k = await heightKit(page, "PathingImport");
   const wpmFile = join(k.root, "map", "war3map.wpm");
   const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
+  // The import reads war3map.wpm and derives the pathing before it answers (an info, a warning or an error): waited for,
+  // as settled() can come first (seen on Windows: the count read "0 cells", then "Imported 2 cells" came).
   const importNow = async () => {
-    await page.evaluate(`[...document.querySelectorAll(".pathing-bar button")].find((b) => b.textContent === "Import differences from war3map.wpm").click()`);
+    await page.evaluate(`(() => {
+      window.__importAnswered = false;
+      window.__importOrig = {};
+      for (const name of ["showInfo", "showWarning", "showError"]) {
+        const f = w3.window[name];
+        window.__importOrig[name] = f;
+        w3.window[name] = (...a) => { window.__importAnswered = true; return f(...a); };
+      }
+    })()`);
+    try {
+      await page.evaluate(`[...document.querySelectorAll(".pathing-bar button")].find((b) => b.textContent === "Import differences from war3map.wpm").click()`);
+      await until("the import's answer", () => page.evaluate(`window.__importAnswered`), 20000);
+    } finally {
+      await page.evaluate(`Object.assign(w3.window, window.__importOrig ?? {})`);
+    }
     await settled(page);
   };
   await k.save();
@@ -4508,7 +4538,9 @@ async function configSafety(page, found) {
   const had = existsSync(userFile) ? readFileSync(userFile, "utf8") : null;
   const projectFile = join(root, ".w3proj", "settings.json");
   const strayFile = join(root, "map", `sub${BS}x.txt`);
+  // Another folder only where names keep their case (Linux): on Windows it's the project's own folder.
   const twin = join(dirname(root), basename(root).toLowerCase());
+  let twinMade = false;
   const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
   const openProject = async (p) => {
     await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(p)})`);
@@ -4561,6 +4593,7 @@ async function configSafety(page, found) {
     // ---- 3. Two projects whose folders differ only in case ----
     rmSync(twin, { recursive: true, force: true });
     cpSync(root, twin, { recursive: true });
+    twinMade = true;
     await openProject(twin);
     await openProject(root);
     await page.evaluate(`w3Workbench.workspace.recentsTidied()`);
@@ -4568,7 +4601,8 @@ async function configSafety(page, found) {
     if (!recent?.includes(root) || !recent.includes(twin)) fail(`after opening ${basename(twin)} and ${basename(root)} the recent list is ${JSON.stringify(recent)}`);
   } finally {
     rmSync(strayFile, { force: true });
-    if (twin !== root) rmSync(twin, { recursive: true, force: true });
+    // Only the twin this check made: on Windows the name in lower case is the open project itself (deleting it was EBUSY).
+    if (twinMade && twin !== root) rmSync(twin, { recursive: true, force: true });
     // The user's file as it was (the smoke test's own settings folder).
     if (had === null) rmSync(userFile, { force: true }); else writeFileSync(userFile, had);
     await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`).catch(() => {});
@@ -5341,6 +5375,8 @@ async function typedFieldSave(page, found) {
       await settled(page);
       return page.evaluate(`w3Workbench.game.readsPending === 0 && (${expr})?.dataset.smoke === "typed"`);
     }, 20000);
+    // A toast of an earlier check can cover the field (seen on Windows: "Packed 17 files …" over the Object Editor's cell).
+    await k.clearToasts();
     await hands.click("[data-smoke=typed]");
     await hands.chord("Ctrl+A");
     await hands.type(text);
@@ -6907,6 +6943,7 @@ async function objectCopy(page, found) {
   /** The placed objects the open terrain editor holds, start locations left out. */
   const placedLive = () => page.evaluate(`(async () => ((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).filter((u) => u.id !== "sloc").length)()`);
   await terrainKeys();
+  const paladin = await gameName(page, "Hpal");
   // Ctrl+A selects the objects the view has drawn. Until the hero is drawn it selects nothing, and Ctrl+C would leave
   // the clipboard of an earlier check: pressed again until the hero is the selection.
   await until("the hero, selected by Ctrl+A", async () => {
@@ -6914,7 +6951,7 @@ async function objectCopy(page, found) {
     await hands.key("a", "KeyA", 65, 2);
     // The start location is selected too: with two objects the text lists the types ("1 ×Paladin"), with one it names the id.
     const text = await selectionText();
-    return text.includes(`· ${hero}`) || /×Paladin/.test(text);
+    return text.includes(`· ${hero}`) || text.includes(`×${paladin}`);
   }, 30000).catch(async (e) => { throw new Error(`${e.message} (the selection says "${await selectionText()}")`); });
   await hands.key("c", "KeyC", 67, 2);
   // The copy whole before another map opens: the custom types it takes along read (settleViews waits for them).
