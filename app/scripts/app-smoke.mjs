@@ -9829,8 +9829,12 @@ async function editorExtras(page, found) {
     {
       const NEW = "war3mapImported\\smoke2.txt", newDisk = join(k.root, "map", "war3mapImported", "smoke2.txt");
       const listNow = () => JSON.parse(readFileSync(impFile, "utf8")).files.map((f) => f.path);
-      await page.evaluate(`window.__omImpKept = { info: w3.window.showInfo, warn: w3.window.showWarning }; w3.window.showInfo = async () => "Keep them";
+      await page.evaluate(`window.__omImpKept = { info: w3.window.showInfo, warn: w3.window.showWarning }; w3.window.showInfo = async (m, ...a) => a.includes("Update references") ? "Update references" : "Keep them";
         w3.window.showWarning = async (m, ...a) => a.find((x) => /delete file/i.test(x)) ?? "Cancel"`);
+      // A script naming the import: Change Import Path updates it, its undo and redo move it back and forth.
+      const refDisk = join(k.root, "map", "omref.j"), refOld = 'call Foo("war3mapImported\\\\smoke.txt")\n';
+      writeFileSync(refDisk, refOld);
+      await page.evaluate(`w3.workspace.refresh()`);
       const menuItem = async (label, item) => {
         await page.evaluate(`(async () => {
           await w3.views.show("objectManager");
@@ -9852,6 +9856,15 @@ async function editorExtras(page, found) {
         else {
           await settled(page);
           if (!(await rows("smoke2", NEW, true, "the Object Manager doesn't show the new import path"))) { /* reported */ }
+          if (readFileSync(refDisk, "utf8") === refOld) fail("Change Import Path didn't update the reference in a script");
+          const undoRename = async (dir) => {
+            await page.evaluate(`w3.commands.execute("workbench.${dir}")`);
+            return soon(() => (dir === "undo" ? existsSync(onDisk) && !existsSync(newDisk) && listNow().join() === IMP && readFileSync(refDisk, "utf8") === refOld
+              : existsSync(newDisk) && !existsSync(onDisk) && listNow().join() === NEW && readFileSync(refDisk, "utf8") !== refOld), 10000);
+          };
+          if (!(await undoRename("undo"))) fail(`undo of Change Import Path: file ${existsSync(onDisk) ? "back" : "not back"}, list ${JSON.stringify(listNow())}, reference ${JSON.stringify(readFileSync(refDisk, "utf8"))}`);
+          else if (!(await undoRename("redo"))) fail(`redo of Change Import Path: file ${existsSync(newDisk) ? "moved" : "not moved"}, list ${JSON.stringify(listNow())}`);
+          await settled(page);
           why = await menuItem(NEW, "Remove Import");
           if (why) fail(why);
           else if (!(await soon(() => !existsSync(newDisk) && listNow().length === 0, 10000))) fail(`Remove Import left the file (${existsSync(newDisk)}) or the list ${JSON.stringify(listNow())}`);
@@ -9866,6 +9879,8 @@ async function editorExtras(page, found) {
         if (errors.length) fail(`an import's menu in the Object Manager showed ${JSON.stringify(errors)}`);
       } finally {
         await page.evaluate(`(() => { const k = window.__omImpKept; if (k) { w3.window.showInfo = k.info; w3.window.showWarning = k.warn; } })()`);
+        rmSync(refDisk, { force: true });
+        await page.evaluate(`w3.workspace.refresh()`);
       }
     }
     await page.evaluate(`w3.editors.closeAll()`);

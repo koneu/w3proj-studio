@@ -19,6 +19,7 @@ import { ModelPreview } from "../../lib/model/preview";
 import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
+import { stepPath, type PathFs, type PathStep } from "./path";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -176,8 +177,8 @@ class ImportView {
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
   /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
   private modelPreview: { key: string; view: ModelPreview; failed: boolean } | null = null;
-  /** Replace File and Remove steps, for undo and redo; `at` of them are done. */
-  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> })[] = [];
+  /** Replace File, Remove and Change path steps, for undo and redo; `at` of them are done. */
+  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> } | { path: PathStep<ImportEntry> })[] = [];
   private at = 0;
   /** A replace, undo or redo is writing: another replace is refused meanwhile, undo and redo wait for it (in order;
    *  dropped when the editor closes or another project opens). */
@@ -407,18 +408,25 @@ class ImportView {
       const clash = moves.find((m) => !own.has(m.to.toLowerCase()) && this.taken(m.to));
       if (clash) throw new Error(`${clash.to} is already in the map.`);
       let changed = false;
+      const step: PathStep<ImportEntry> = { moves: [], refs: [] };
       try {
         for (const m of moves) {
           const f = this.fileOf(m.entry, files);
+          const before = { path: m.entry.path, flags: m.entry.flags };
           if (f) await this.w3.workspace.rename(f.path, projectPath(m.to));
           // A standard-path entry (name inside the import folder) now has a path of its own.
           if (m.entry.path !== m.from) m.entry.flags = CUSTOM_PATH_FLAGS;
           m.entry.path = m.to;
+          step.moves.push({ entry: m.entry, before, after: { path: m.entry.path, flags: m.entry.flags }, file: f ? { from: f.path, to: projectPath(m.to) } : undefined });
           changed = true;
         }
       } finally {
         // Also after a failed second move: the list says where the first file went.
-        if (changed) await this.write();
+        if (changed) {
+          this.history.splice(this.at, this.history.length, { path: step });
+          this.at = this.history.length;
+          await this.write();
+        }
       }
       // The data names the plain path, whichever versions moved.
       const from = classicPathOf(moves[0].from);
@@ -436,7 +444,10 @@ class ImportView {
       const list = refs.files.map((r) => `${r.path.slice(4)} (${r.count})`).join(", ");
       const pick = await this.w3.window.showInfo(`Moved. ${count} reference${count === 1 ? "" : "s"} to the old path in ${list}.${raw}`, "Update references", "Keep them");
       if (pick !== "Update references") return;
+      // The files as they were, for undo (bytes: exactly, whatever the editors would make of them).
+      const olds = await Promise.all(refs.files.map((r) => this.w3.workspace.readBytes(r.path)));
       await updatePathRefs(this.w3, refs, from, to);
+      for (const [i, r] of refs.files.entries()) step.refs.push({ path: r.path, before: olds[i], after: await this.w3.workspace.readBytes(r.path) });
       void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
@@ -506,6 +517,9 @@ class ImportView {
       this.select([]);
       if (error) throw new Error(`${count} of ${total} removed, then: ${error}`);
     });
+  }
+  private pathFs(): PathFs {
+    return { ...this.replaceFs(), rename: (a, b) => this.w3.workspace.rename(a, b), isDirty: (p) => this.w3.editors.isDirty(p) };
   }
   /** The workspace as a replace uses it. */
   private replaceFs(): ReplaceFs {
@@ -588,13 +602,17 @@ class ImportView {
       void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
     });
   }
-  /** Undo (-1) or redo (1) of Replace File and Remove; pressed while a replace (or another step) is writing, it runs after that. */
+  /** Undo (-1) or redo (1) of Replace File, Remove and Change path; pressed while a replace (or another step) is writing, it runs after that. */
   step(dir: -1 | 1) {
     this.queue.step(() => {
       const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
       if (!step) return;
-      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "Replace File"}`, async () => {
-        if ("remove" in step) {
+      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "path" in step ? "Change path" : "Replace File"}`, async () => {
+        if ("path" in step) {
+          await stepPath(this.pathFs(), this.list, step.path, dir);
+          await this.write();
+          this.select(step.path.moves.length ? [classicPathOf((dir < 0 ? step.path.moves[0].before : step.path.moves[0].after).path)] : []);
+        } else if ("remove" in step) {
           await stepRemove(this.replaceFs(), this.list, step.remove, dir);
           await this.write();
         } else await stepReplace(this.replaceFs(), step.replace, dir);
