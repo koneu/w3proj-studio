@@ -337,39 +337,49 @@ function readNode(r: Reader, kind: string): Node {
   return { name, objectId, parentId, flags, kind, translation: tracks.KGTR, rotation: tracks.KGRT, scaling: tracks.KGSC };
 }
 
-/** A light's fixed values after its node, up to `end` (the light's end). Two layouts: the classic one (type,
- *  attenuation start and end, colour, intensity, ambient colour and intensity: 48 bytes) and the Reforged one, which
- *  has a word after the type and shadow and falloff values after the ambient intensity (72 bytes; every light of the
- *  game's version 1800 models). Told apart by what follows the classic part: a track's tag, or the end, is classic.
- *  Null when the values aren't readable or make no sense. */
-function readLight(r: Reader, node: Node, end: number): ModelLight | null {
-  const start = r.p, left = end - start;
-  if (left < 48) return null;
-  const trackAt = (at: number) => at + 4 <= end && /^K[A-Z]{3}$/.test(String.fromCharCode(r.u8[at], r.u8[at + 1], r.u8[at + 2], r.u8[at + 3]));
-  const classic = left < 72 || r.p + 48 === end || trackAt(r.p + 48);
+/** A light's fixed values after its node, up to `end` (the light's end). Three layouts, measured on the game's
+ *  models (versions 1600–1800) and on custom ones (800–1800): 44 bytes up to version 1100 (type, attenuation start
+ *  and end, colour, intensity, ambient colour and intensity), 48 in version 1200 (a shadow intensity after those) and
+ *  72 from 1600 on (a word after the type; shadow intensity, shadow casting start and end, two falloffs and a damping
+ *  after the ambient intensity: dnclight.ts). 1300–1500 weren't seen with lights. The version's layout is tried
+ *  first, then the others: the first after which the rest reads as tracks up to the light's end, exactly, is it; when
+ *  none does, the version's one is read without its tracks. Null when the values aren't readable or make no sense. */
+function readLight(r: Reader, node: Node, end: number, version: number): ModelLight | null {
+  const start = r.p;
+  const order = version < 1200 ? [44, 48, 72] : version < 1600 ? [48, 72, 44] : [72, 48, 44];
+  let size = 0;
+  let tracks: Record<string, Track> = {};
+  for (const n of order) {
+    if (start + n > end) continue;
+    r.p = start + n;
+    try {
+      tracks = readTracks(r, end);
+      size = n;
+      break;
+    } catch { /* not this layout */ }
+  }
+  if (!size) size = order.find((n) => start + n <= end) ?? 0;
+  if (!size) return null;
+  r.p = start;
   const type = r.u32();
-  if (!classic) r.u32();
+  if (size === 72) r.u32();
   const attenuationStart = r.f32(), attenuationEnd = r.f32();
   const color: [number, number, number] = [r.f32(), r.f32(), r.f32()];
   const intensity = r.f32();
   const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
   if (!ok(attenuationStart) || !ok(attenuationEnd) || type > 2) return null;
   const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
-  // The tracks after the fixed values; damaged ones are left out (the light keeps its fixed values).
-  r.p = start + (classic ? 48 : 72);
-  try {
-    const tracks = readTracks(r, end);
-    // An animated value's fixed one isn't used: its first key stands in, as mdl.ts reads it.
-    const first = (t: Track, k: number) => (t.values.length > k && Number.isFinite(t.values[k]) ? t.values[k] : null);
-    if (tracks.KLAC?.size === 3) {
-      light.colorTrack = tracks.KLAC;
-      light.color = light.color.map((c, k) => first(tracks.KLAC, k) ?? c) as [number, number, number];
-    }
-    if (tracks.KLAI?.size === 1) {
-      light.intensityTrack = tracks.KLAI;
-      light.intensity = first(tracks.KLAI, 0) ?? light.intensity;
-    }
-  } catch { /* no tracks */ }
+  // The tracks after the fixed values (none when they're damaged: the light keeps its fixed values). An animated
+  // value's fixed one isn't used: its first key stands in, as mdl.ts reads it.
+  const first = (t: Track, k: number) => (t.values.length > k && Number.isFinite(t.values[k]) ? t.values[k] : null);
+  if (tracks.KLAC?.size === 3) {
+    light.colorTrack = tracks.KLAC;
+    light.color = light.color.map((c, k) => first(tracks.KLAC, k) ?? c) as [number, number, number];
+  }
+  if (tracks.KLAI?.size === 1) {
+    light.intensityTrack = tracks.KLAI;
+    light.intensity = first(tracks.KLAI, 0) ?? light.intensity;
+  }
   return light;
 }
 
@@ -604,7 +614,7 @@ export function parseMdx(buf: Uint8Array): Model {
             const n = readNode(r, "lite");
             node(n);
             // A light whose values can't be read is left out; its node stays, as the other objects' do.
-            const light = readLight(r, n, oEnd);
+            const light = readLight(r, n, oEnd, model.version);
             if (light) (model.lights ??= []).push(light);
             r.p = oEnd;
           }
