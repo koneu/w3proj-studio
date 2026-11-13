@@ -22,7 +22,11 @@ export function findMaps(args) {
   const walk = (p, top) => {
     if (statSync(p).isDirectory()) {
       if (!top && existsSync(join(p, MANIFEST))) return;
-      for (const n of readdirSync(p).sort()) walk(join(p, n), false);
+      for (const n of readdirSync(p).sort()) {
+        // A folder named build holds what packing wrote, not maps of the corpus (as `w3proj verify`).
+        if (n.toLowerCase() === "build" && statSync(join(p, n)).isDirectory()) continue;
+        walk(join(p, n), false);
+      }
     } else if (/\.w3[xm]$/i.test(p) && !misnamedProjectOutput(p)) maps.push(p);
   };
   args.forEach((p) => (statSync(p).isDirectory() ? walk(p, true) : maps.push(p)));

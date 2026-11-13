@@ -502,21 +502,30 @@ fn verify_on_a_folder_leaves_out_the_projects_outputs() {
         let o = w3proj(&["verify", s(path), "--game", "none"]);
         (o.status.code(), text(&o))
     };
-    // Control: without its manifest the folder is no project, and its maps are read (and fail).
-    let (code, out) = verify(&maps);
-    assert_eq!(code, Some(1), "{out}");
-    assert!(outputs.iter().all(|o| out.contains(&*o.to_string_lossy())), "{out}");
+    // A folder named build is left out with or without a manifest; the same file elsewhere is read (and fails).
+    let (_, out) = verify(&maps);
+    assert!(outputs.iter().all(|o| !out.contains(&*o.to_string_lossy())), "{out}");
+    let other = project.join("other");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("proj.w3x"), b"this is not an archive").unwrap();
+    let (code2, out2) = verify(&maps);
+    assert_eq!(code2, Some(1), "{out2}");
+    assert!(out2.contains(&*other.join("proj.w3x").to_string_lossy()), "{out2}");
     if cfg!(unix) {
-        assert!(out.contains("07-11-21"), "{out}");
+        assert!(out2.contains("07-11-21"), "{out2}");
     }
+    fs::remove_dir_all(&other).unwrap();
     fs::write(project.join("w3proj.toml"), "").unwrap();
     let (code, out) = verify(&maps);
     assert_eq!(code, Some(0), "{out}");
     assert!(out.contains("real.w3x") && out.contains("1 ok"), "{out}");
-    // Given directly, a project's folder is searched.
+    // Given directly, a project's folder is searched, but its build folder is still left out.
+    fs::create_dir_all(project.join("other")).unwrap();
+    fs::write(project.join("other").join("x.w3x"), b"this is not an archive").unwrap();
     let (code, out) = verify(&project);
     assert_eq!(code, Some(1), "{out}");
-    assert!(out.contains("0 ok") && out.contains("2 failed"), "{out}");
+    assert!(out.contains("0 ok") && out.contains("1 failed"), "{out}");
+    assert!(outputs.iter().all(|o| !out.contains(&*o.to_string_lossy())), "{out}");
 }
 
 /// `verify` on all cores prints what one map after the other prints, in the same order, with the

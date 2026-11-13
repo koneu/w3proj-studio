@@ -1,0 +1,17 @@
+{
+  "format": "w3proj.minimap/1",
+  "version": 0,
+  "icons": [
+    {
+      "type": 2,
+      "x": 128,
+      "y": 128,
+      "color": {
+        "blue": 3,
+        "green": 3,
+        "red": 255,
+        "alpha": 255
+      }
+    }
+  ]
+}

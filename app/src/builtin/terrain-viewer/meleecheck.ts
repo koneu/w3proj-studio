@@ -113,6 +113,8 @@ export function unitLevels(balance: readonly Record<string, string>[], mods: Rea
   };
 }
 
+/** The acquisition range of a creep on Camp mode (acquireRange -2), as the user stated it. */
+export const CAMP_SIGHT = 200;
 interface Camp { centre: [number, number]; creeps: MeleeUnit[]; level: number; strongest: number }
 
 /** Neutral hostile units in groups: each within reach of another of the group. */
@@ -272,13 +274,13 @@ export function checkMelee(f: MeleeFacts) {
       if (r.points.length && near(c.centre, [r.points[0]]) < 900) continue;
       let wakes = 0, soft = 0, closest = Infinity;
       for (const u of c.creeps) {
-        const gap = toPath([u.x, u.y], r.points), sight = u.acquisition > 0 ? u.acquisition : f.sight(u.id) ?? 600;
+        const gap = toPath([u.x, u.y], r.points), sight = u.acquisition > 0 ? u.acquisition : u.acquisition === -2 ? CAMP_SIGHT : f.sight(u.id) ?? 600;
         closest = Math.min(closest, gap);
         if (gap > sight) continue;
         if (u.acquisition === -2) soft++; else wakes++;
       }
       if (wakes) add("aggro", "error", `${r.name} passes ${Math.round(closest)} from a level ${c.level} camp with ${wakes} creep${wakes === 1 ? "" : "s"} not on Camp mode, inside their sight. They'll attack.`, c.centre);
-      else if (soft) { camped++; add("aggro", "warning", `${r.name} passes ${Math.round(closest)} from a level ${c.level} camp, within the normal sight of ${soft} creep${soft === 1 ? "" : "s"}. They're on Camp mode, so they may well stay put: see accuracy.`, c.centre); }
+      else if (soft) { camped++; add("aggro", "warning", `${r.name} passes ${Math.round(closest)} from a level ${c.level} camp, within the Camp mode sight (${CAMP_SIGHT}) of ${soft} creep${soft === 1 ? "" : "s"}. They're on Camp mode, which may leave them in place: see accuracy.`, c.centre); }
     }
   }
 
@@ -290,7 +292,7 @@ export function checkMelee(f: MeleeFacts) {
   }
 
   notes.push(
-    "Normal sight comes from the game data, per creep. How far Camp mode shortens it isn't in the game's files, so a route within normal sight of a camped creep is a warning: it's the worst case, and the true range is shorter. Ladder maps pass this close too.",
+    `Normal sight comes from the game data, per creep. Camp mode counts as ${CAMP_SIGHT} (a stated value, not read from the game's files), so a route within that of a camped creep is a warning. Ladder maps pass this close too.`,
     "A route inside the sight of creeps not on Camp mode is reported as a sure thing, which holds by day: nearly all creeps sleep at night, though some never do, and wake the others.",
     "Numbers from ladder maps describe six maps, and aren't laws of the game: a warning asks for a reason, not always for a change. Game facts in here come from the game's files.",
     "Camps are judged by levels, Camp mode and distance, not by their creeps' spells, damage or experience. Whether they're fair to fight only a match can show.",

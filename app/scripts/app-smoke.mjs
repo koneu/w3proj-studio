@@ -2007,6 +2007,10 @@ async function problemsIgnore(page, found) {
     const text = JSON.stringify(listed);
     if (names.some((n) => text.includes(`"${n}"`)) || !/3 reports are ignored/.test(text)) fail(`list_problems: ${text.slice(0, 500)}`);
 
+    // What Build/pack asks for (runChecked) leaves them out too and counts them.
+    const packed = await page.evaluate(`(async () => { const r = await (await w3.services.get("w3.problems")).runChecked(); return { ignored: r.ignored, left: r.problems.filter((p) => p.message.includes("has no events")).map((p) => p.about ?? p.location ?? "") }; })()`);
+    if (packed.ignored !== 3 || names.some((n) => packed.left.includes(n))) fail(`the check before packing: ${JSON.stringify(packed)}`);
+
     // Saved and opened again: still ignored.
     await k.save();
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(k.root)}); })()`);
@@ -8669,7 +8673,7 @@ async function importWarnings(page, found) {
     window.__impKept = { ask: w3.window.askDelete, warn: w3.window.showWarning };
     window.__impWarned = []; window.__impAnswer = "Cancel";
     w3.window.askDelete = async () => true;
-    w3.window.showWarning = async (m, ...actions) => { window.__impWarned.push({ m, actions }); return window.__impAnswer; };
+    w3.window.showWarning = async (m, ...actions) => { window.__impWarned.push({ m, actions }); return window.__impWarnPick?.(actions) ?? window.__impAnswer; };
     window.__impGroup?.dispose();
   })()`);
   try {
@@ -8732,10 +8736,12 @@ async function importWarnings(page, found) {
       const entry = `[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.toLowerCase().includes(${JSON.stringify(name.toLowerCase())}))`;
       if (!(await soon(() => page.evaluate(`!!${entry}`), 20000))) return "the Import Manager doesn't show the entry";
       await page.evaluate(`${entry}.click()`);
-      const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".imp-detail .imp-actions button")].find((x) => x.textContent === "Remove"); if (!b) return false; b.click(); return true; })()`);
+      const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".imp-detail .imp-actions button")].find((x) => x.textContent === "Remove" || x.textContent === "Remove…"); if (!b) return false; b.click(); return true; })()`);
       if (!clicked) return "no Remove button";
-      if (!(await soon(() => page.evaluate(`window.__impWarned.length > 0`), 10000))) return "Remove asked nothing about the file";
-      const asked = (await page.evaluate(`window.__impWarned[0]`));
+      // A row with several versions asks which go first; the file question follows.
+      const want = (await page.evaluate(`document.querySelector(".imp-detail .imp-remove")?.textContent`)) === "Remove…" ? 2 : 1;
+      if (!(await soon(() => page.evaluate(`window.__impWarned.length >= ${want}`), 10000))) return "Remove asked nothing about the file";
+      const asked = (await page.evaluate(`window.__impWarned[${want - 1}]`));
       if (asked.actions.join() !== "Remove from list,Remove and delete file,Cancel") return `Remove offered ${JSON.stringify(asked)}`;
       await settled(page);
       return null;
@@ -8876,12 +8882,27 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
       else if (!bytes.equals(readFileSync(file))) fail(`the packed ${p} isn't the file imported for it (${bytes.length} bytes, ${readFileSync(file).length} imported)`);
     }
 
-    // Remove on the row: one question, both entries and files gone.
+    // Remove 3.0 alone (its own button): the other two stay as one row. (Remove has no undo, as before.)
+    await page.evaluate(`window.__impWarned.length = 0; window.__impAnswer = "Remove and delete file"; window.__impWarnPick = undefined`);
+    await page.evaluate(`${row}[0]?.click()`);
+    if (!(await page.evaluate(`(() => { const b = document.querySelector(".imp-detail .imp-remove-de"); if (!b) return false; b.click(); return true; })()`))) fail("a row with three versions has no Remove 3.0 button");
+    else {
+      if (!(await soon(() => !entry(DE), 10000))) fail(`Remove 3.0 left ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}`);
+      else {
+        if (!entry(HD) || !entry(SD)) fail("Remove 3.0 took the other versions along");
+        if (!(await soon(() => !onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx"), 10000))) fail("Remove and delete file left the 3.0 file");
+        if (!onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") || !onDisk("map/war3mapImported/PairHero.mdx")) fail("Remove 3.0 deleted the other versions' files");
+        await settled(page);
+        { const b = await badgesAre("Classic+Reforged"); if (!b.ok) fail(`after Remove 3.0 the row shows ${JSON.stringify(b.last)}`); }
+      }
+    }
+    // Remove on the remaining pair asks which versions go (Remove both); then the file question.
+    await page.evaluate(`window.__impWarnPick = (a) => a.find((x) => x === "Remove all" || x === "Remove both")`);
     const why = await remove("Remove and delete file", "PairHero");
     if (why) fail(`removing the pair: ${why}`);
     else {
       const asked = await page.evaluate(`window.__impWarned.map((w) => w.m)`);
-      if (asked.length !== 1 || !/its Classic, Reforged and 3\.0 versions/.test(asked[0])) fail(`Remove on the pair asked ${JSON.stringify(asked)}`);
+      if (asked.length !== 2 || !/has Classic and Reforged versions/.test(asked[0]) || !/its Classic and Reforged versions/.test(asked[1])) fail(`Remove on the pair asked ${JSON.stringify(asked)}`);
       if (!(await soon(() => !entry(HD) && !entry(SD) && !entry(DE) && !onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/war3mapImported/PairHero.mdx"), 10000))) {
         fail(`Remove and delete file on the pair left ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}`);
       }

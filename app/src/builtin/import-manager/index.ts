@@ -418,12 +418,22 @@ class ImportView {
   /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
    *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
    *  of it), so that is never done without saying so. */
-  private remove(rows: ImportRow[]) {
+  private remove(rows: ImportRow[], only?: typeof SIDES[number][]) {
     void this.run("Remove", async () => {
-      // A row's versions go together (the question says so).
-      let entries = rows.flatMap(rowEntries);
       const versions = rows.length === 1 ? SIDES.filter((s) => rows[0][s]) : [];
-      const what = versions.length > 1 ? `${rows[0].path} (its ${versions.slice(0, -1).map((s) => SIDE_NAME[s]).join(", ")} and ${SIDE_NAME[versions[versions.length - 1]]} versions)` : entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
+      // A row with several versions asks which of them go (Remove both / one side / Cancel); the buttons of the
+      // detail pane name the side up front. Removing one leaves the other as a row of its own.
+      let chosen = only;
+      if (!chosen && versions.length > 1) {
+        const all = versions.length === 2 ? "Remove both" : "Remove all";
+        const answer = await this.w3.window.showWarning(`${rows[0].path} has ${versions.slice(0, -1).map((s) => SIDE_NAME[s]).join(", ")} and ${SIDE_NAME[versions[versions.length - 1]]} versions. Which should be removed from the import list?`,
+          all, ...versions.map((s) => `Remove ${SIDE_NAME[s]} only`), "Cancel");
+        if (answer === all) chosen = versions;
+        else { const side = versions.find((s) => answer === `Remove ${SIDE_NAME[s]} only`); if (!side) return; chosen = [side]; }
+      }
+      let entries = chosen ? chosen.flatMap((s) => rows[0][s] ?? []) : rows.flatMap(rowEntries);
+      const picked = chosen ?? versions;
+      const what = versions.length > 1 ? (picked.length === 1 ? `the ${SIDE_NAME[picked[0]]} version of ${rows[0].path}` : `${rows[0].path} (its ${picked.slice(0, -1).map((s) => SIDE_NAME[s]).join(", ")} and ${SIDE_NAME[picked[picked.length - 1]]} versions)`) : entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
       const asked = [...new Set(entries.flatMap((e) => this.fileOf(e)?.path ?? []))];
       let withFiles = false;
       if (!asked.length) {
@@ -693,7 +703,9 @@ class ImportView {
         ...(this.editable ? [
           ...versions.map((v) => h("button.imp-replace", { disabled: !v.f, title: "Another file's content under this path (Ctrl+Z takes it back)",
             onclick: () => v.f && this.replace(v.e, v.f.path) }, several ? `Replace ${v.mode}…` : "Replace…")),
-          h("button", { onclick: () => this.remove([row]) }, "Remove")] : [])),
+          ...(several ? [h("button.imp-remove", { onclick: () => this.remove([row]) }, "Remove…"),
+            ...versions.map((v) => h(`button.imp-remove-${SIDES.find((s) => row[s] === v.e)}`, { title: "Leaves the other versions as they are", onclick: () => this.remove([row], [SIDES.find((s) => row[s] === v.e)!]) }, `Remove ${v.mode}`))]
+            : [h("button.imp-remove", { onclick: () => this.remove([row]) }, "Remove")])] : [])),
       adds.length ? h("div.imp-actions", {}, ...adds.map((add) => h("button.imp-add-version", {
         title: add.side === "reforged" ? `A file for Reforged, stored as ${add.path}: Reforged reads it instead of the plain one`
           : add.side === "de" ? `A file for 3.0, stored as ${add.path}: 3.0 reads it before the Reforged and the plain one`

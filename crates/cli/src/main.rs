@@ -152,7 +152,8 @@ fn is_misnamed_project_output(path: &std::path::Path) -> bool {
 /// its baseline key: the path below the given folder (`/`-separated), or the file name. Projects
 /// found below a given folder (folders holding `w3proj.toml`) are left out, with their outputs
 /// under other names (`is_misnamed_project_output`): their `build/` maps and checkpoints are made
-/// by packing, not maps of their own. A project folder given directly is searched.
+/// by packing, not maps of their own. Any folder named `build` below a given folder is left out too (the
+/// user's rebuilt maps would make the baseline stale). A folder given directly is searched, even one named `build`.
 fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>, top: bool) -> Result<()> {
         if !top && dir.join(w3proj::project::MANIFEST).is_file() {
@@ -165,6 +166,10 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
         entries.sort();
         for p in entries {
             if p.is_dir() {
+                // A folder named `build` holds what packing wrote (the user's rebuilt maps), not maps of the corpus.
+                if p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("build")) {
+                    continue;
+                }
                 walk(&p, out, false)?;
             } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["w3x", "w3m", "w3n"].contains(&e.to_ascii_lowercase().as_str()))
                 && !is_misnamed_project_output(&p)

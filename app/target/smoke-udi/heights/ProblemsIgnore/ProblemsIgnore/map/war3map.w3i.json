@@ -1,0 +1,130 @@
+{
+  "format": "w3proj.mapinfo/1",
+  "version": 39,
+  "saves": 1,
+  "editorVersion": 7003,
+  "gameVersion": [
+    3,
+    0,
+    1,
+    24371
+  ],
+  "name": "ProblemsIgnore",
+  "author": "Unknown",
+  "description": "Nondescript",
+  "suggestedPlayers": "Any",
+  "cameraBounds": [
+    -2816.0,
+    -3328.0,
+    2816.0,
+    2816.0,
+    -2816.0,
+    2816.0,
+    2816.0,
+    -3328.0
+  ],
+  "cameraComplements": [
+    6,
+    6,
+    4,
+    8
+  ],
+  "playableWidth": 52,
+  "playableHeight": 52,
+  "flags": 39956,
+  "tileset": "L",
+  "loadingScreen": {
+    "number": -1,
+    "crestRace": 64,
+    "model": "",
+    "text": "",
+    "title": "",
+    "subtitle": ""
+  },
+  "gameDataSet": 4294967295,
+  "prologue": {
+    "path": "",
+    "text": "",
+    "title": "",
+    "subtitle": ""
+  },
+  "fog": {
+    "style": 0,
+    "start": 3000.0,
+    "end": 5000.0,
+    "density": 0.5,
+    "color": [
+      0,
+      0,
+      0,
+      255
+    ]
+  },
+  "terrainFog": {
+    "style": 0,
+    "overSky": 0,
+    "linearStart": 10000.0,
+    "linearEnd": 10000.0,
+    "maxOpacity": 1.0,
+    "height": 0.0
+  },
+  "weather": "0x00000000",
+  "soundEnvironment": "",
+  "lightEnvironment": "",
+  "waterTint": [
+    255,
+    255,
+    255,
+    255
+  ],
+  "scriptType": 0,
+  "supportedModes": 3,
+  "gameDataVersion": 2,
+  "cameraZoom": {
+    "default": 0,
+    "max": 0,
+    "min": 0
+  },
+  "water": {
+    "minOpacity": 0,
+    "maxOpacity": 100,
+    "reflectivity": 10,
+    "emissivity": 0,
+    "edgeSoftness": 50,
+    "wavesVertexDisplacement": 20,
+    "wavesNormalMapStrength": 100,
+    "overrideColor": 0,
+    "environmentMapReflectivity": 100,
+    "unknown": -1
+  },
+  "playerHudSkins": true,
+  "players": [
+    {
+      "id": 0,
+      "controller": 1,
+      "race": 1,
+      "hudSkin": 32759,
+      "fixedStart": 0,
+      "name": "TRIGSTR_001",
+      "start": [
+        0.0,
+        -256.0
+      ],
+      "allyLow": 0,
+      "allyHigh": 0,
+      "enemyLow": 0,
+      "enemyHigh": 0
+    }
+  ],
+  "forces": [
+    {
+      "flags": 0,
+      "players": 4294967295,
+      "name": "TRIGSTR_002"
+    }
+  ],
+  "upgrades": [],
+  "techs": [],
+  "unitTables": [],
+  "itemTables": []
+}
