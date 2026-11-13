@@ -5,7 +5,6 @@
 // view doesn't change from one opening to the next. The previews are only drawn: not placed,
 // not saved, not selectable.
 
-import { MELEE_MAP } from "../../lib/terrain/owner";
 import type { Placed } from "./objects";
 
 /** Town halls by race as war3map.w3i stores it: 1 Human, 2 Orc, 3 Undead, 4 Night Elf. */
@@ -22,10 +21,12 @@ export function startBuilding(player: number, race: number | undefined): string 
 }
 
 /** One preview per start location of a player: its race's town hall where the start location
- *  stands, facing as buildings do (270°). `races`: player id → race, from war3map.w3i. */
-export function startPreviews(units: readonly Placed[], races: ReadonlyMap<number, number>, melee = true): Placed[] {
+ *  stands, facing as buildings do (270°). `races`: player id → race, from war3map.w3i. Whatever
+ *  the map's Melee flag: the World Editor drew them on fresh opens of maps with the flag off (also
+ *  with custom forces and fixed player settings, and for a computer player) and kept them after a
+ *  player's unit was pasted (we-drive, 2026-11-13; the user's decision the same day). */
+export function startPreviews(units: readonly Placed[], races: ReadonlyMap<number, number>): Placed[] {
   const out: Placed[] = [];
-  if (!melee) return out;
   for (const u of units) {
     if (u.id !== "sloc" || u.player === undefined) continue;
     out.push({ id: startBuilding(u.player, races.get(u.player)), variation: 0, position: [...u.position], angle: (3 * Math.PI) / 2, scale: [1, 1, 1], player: u.player });
@@ -42,12 +43,7 @@ export function playerRaces(info: { players?: { id?: unknown; race?: unknown }[]
   return out;
 }
 
-/** war3map.w3i flag: a melee map. The editor shows the start buildings on those only. */
-export function isMeleeMap(info: { flags?: unknown } | null | undefined): boolean {
-  return typeof info?.flags === "number" && (info.flags & MELEE_MAP) !== 0;
-}
-
 /** What the previews are made from: equal keys draw the same previews. */
-export function startPreviewKey(units: readonly Placed[], races: ReadonlyMap<number, number>, melee: boolean): string {
-  return JSON.stringify(startPreviews(units, races, melee).map((p) => [p.id, p.position[0], p.position[1], p.position[2]]));
+export function startPreviewKey(units: readonly Placed[], races: ReadonlyMap<number, number>): string {
+  return JSON.stringify(startPreviews(units, races).map((p) => [p.id, p.position[0], p.position[1], p.position[2]]));
 }

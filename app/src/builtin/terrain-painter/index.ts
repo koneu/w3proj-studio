@@ -9,13 +9,11 @@ import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strok
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, toggleRamp, waterBrush, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, toggleRamp, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
 const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
-/** Shallow and Deep Water: their brush is the World Editor's (waterBrush). */
-const isWaterTool = (t: Tool) => t === "shallow" || t === "deep";
 
 /** World units between brush stamps per step of the brush size (half its radius). */
 const BRUSH_SPACING = 64;
@@ -75,7 +73,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number, amount = strength): boolean => {
     if (!stroke) return false;
-    const brush = isWaterTool(tool) ? waterBrush(terrain, x, y, size, square) : { x, y, radius: size, square };
+    const brush = brushOf(tool, terrain, x, y, size, square);
     return tool === "paint"
       ? paintTexture(terrain, brush, paintTex, stroke.s)
       : tool === "blight" || tool === "unblight"
@@ -321,7 +319,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         buttons.set(t, b);
         return b;
       }))))),
-    h("div.painter-options", {}, h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
+    h("div.painter-options", {}, h("label.terrain-tool-opt", { title: "Brush size, as the World Editor's: centred on the corner nearest the pointer, it reaches Size − 1 tiles from it (Size 1: that corner)" }, "Size ",
       h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
     h("label.terrain-tool-opt", { title: "Brush shape (not for ramps)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
@@ -368,9 +366,9 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       return true;
     },
     pointerMove(p) {
-      // The water brush shows where it acts: round the nearest corner, half a tile past the corners it takes.
-      const shown = p.ground && isWaterTool(tool) ? waterBrush(terrain, p.ground[0], p.ground[1], size, square) : null;
-      ed.setBrush(p.ground ? { x: shown?.x ?? p.ground[0], y: shown?.y ?? p.ground[1], r: shown ? (shown.radius + 0.5) * 128 : size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
+      // The corner brush shows where it acts: round the nearest corner, half a tile past the corners it takes.
+      const shown = p.ground && tool !== "ramp" ? brushOf(tool, terrain, p.ground[0], p.ground[1], size, square) : null;
+      ed.setBrush(p.ground ? { x: shown?.x ?? p.ground[0], y: shown?.y ?? p.ground[1], r: shown ? brushReach(shown) : size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       if (tool === "ramp") {
         if (p.down && rampDrag && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) {
           stroke.last = performance.now();
