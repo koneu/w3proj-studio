@@ -475,14 +475,13 @@ fn scan_nested_map(bytes: Vec<u8>, out: &mut BTreeSet<String>) {
     }
 }
 
+/// Replaces `path` with `bytes` in one step (`crate::atomic::write_lazily`: a file replaced is flushed
+/// to disk first, a new one isn't) unless it holds them already.
 fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     if fs::read(path).ok().as_deref() == Some(bytes) {
         return Ok(false);
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, bytes)?;
+    crate::atomic::write_lazily(path, bytes)?;
     Ok(true)
 }
 
@@ -1137,12 +1136,9 @@ fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
     };
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = output.with_extension("w3x.tmp");
-    fs::write(&tmp, &bytes)?;
-    fs::rename(&tmp, &output)?;
+    // Flushed to disk before it takes the old archive's place, under a hidden temporary name
+    // (`crate::atomic`).
+    write_atomic(&output, &bytes)?;
     Ok(PackReport {
         output,
         files: count,
