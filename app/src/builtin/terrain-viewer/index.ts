@@ -48,7 +48,7 @@ import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { isUprooted, meleeFlagsAfter, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -2337,7 +2337,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces, startMelee), skins, team, undefined, undefined, false),
+            loader.load("units", startPreviews(units, startRaces, previewMelee(units)), skins, team, undefined, undefined, false),
             loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -2351,7 +2351,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
           previewBatches = s.batches.map(lookOfPreview);
-          previewKey = startPreviewKey(units, startRaces, startMelee);
+          previewKey = startPreviewKey(units, startRaces, previewMelee(units));
           renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
@@ -2459,6 +2459,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let startRaces = new Map<number, number>();
         /** The map's Melee flag (war3map.w3i): the editor shows the start buildings on melee maps only. */
         let startMelee = false;
+        /** war3map.w3i as last read: what the save's Melee rules (meleeFlagsAfter) are worked out from. */
+        let startInfo: MeleeInfo | null = null;
         /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
         let previewKey = "";
         let previewBatches: ObjectBatch[] = [];
@@ -2467,16 +2469,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const inst of b.instances) delete inst.pick;
           return { ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true };
         }
+        const previewMelee = (units: readonly Placed[]) => startMelee && (!startInfo || (meleeFlagsAfter(startInfo, units) & MELEE_MAP) !== 0);
         /** Makes only the start buildings again when the start locations, the races or the Melee flag changed
          *  (checked on each drawn frame: every edit, undo, paste and MCP call asks for one). */
         function refreshStartPreviews() {
           const ctx = nextCtx ?? objCtx;
           if (!ctx || !unitsFile) return;
-          const units = unitsFile.list, key = startPreviewKey(units, startRaces, startMelee);
+          // Shown exactly when a save would leave the map melee: placing, pasting or moving a player's unit takes the
+          // flag off at once here (the file gets it at the save, or from the MCP tools in their edit).
+          const units = unitsFile.list, melee = previewMelee(units);
+          const key = startPreviewKey(units, startRaces, melee);
           if (key === previewKey) return;
           previewKey = key;
           const gen = ++previewGen, rebuilt = rebuildGen;
-          void viewWork.track(loader.load("units", startPreviews(units, startRaces, startMelee), ctx.skins, team, undefined, undefined, false).then((s) => {
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces, melee), ctx.skins, team, undefined, undefined, false).then((s) => {
             // A full rebuild in between made them itself; a newer change makes them again.
             if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
             const fresh = s.batches.map(lookOfPreview);
@@ -2501,9 +2507,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
-        const readRaces = async (): Promise<{ races: Map<number, number>; melee: boolean } | null> => {
-          const info = await readMapDoc<Parameters<typeof playerRaces>[0] & Parameters<typeof isMeleeMap>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          return info ? { races: playerRaces(info), melee: isMeleeMap(info) } : null;
+        const readRaces = async (): Promise<{ races: Map<number, number>; melee: boolean; info: MeleeInfo } | null> => {
+          const info = await readMapDoc<Parameters<typeof playerRaces>[0] & Parameters<typeof isMeleeMap>[0] & MeleeInfo>(w3, "map/war3map.w3i.json").catch(() => null);
+          return info ? { races: playerRaces(info), melee: isMeleeMap(info), info } : null;
         };
         /** After the map's players were saved (Map Properties): the start buildings follow their races. */
         const reloadRaces = async () => {
@@ -2512,6 +2518,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!info || disposed) return;
           startRaces = info.races;
           startMelee = info.melee;
+          startInfo = info.info;
           refreshStartPreviews();
         };
         let objectsPlaced: Promise<void> = Promise.resolve();
@@ -2525,7 +2532,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             mapObjectData(w3),
             readRaces(),
           ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
-            if (races) { startRaces = races.races; startMelee = races.melee; }
+            if (races) { startRaces = races.races; startMelee = races.melee; startInfo = races.info; }
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
