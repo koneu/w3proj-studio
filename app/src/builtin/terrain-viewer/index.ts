@@ -2705,9 +2705,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The Properties part of the selection panel for `entries`, filled in once the types' facts are read. Nothing
          *  is shown if the selection has moved on by then. */
-        const propsSlot = (entries: Placed[]) => {
+        const propsSlot = (selected: Placed[]) => {
+          // A start location has no properties: what the other objects share is shown (Ctrl+A selects it too).
+          const entries = selected.filter((p) => p.id !== "sloc");
           const slot = h("div.terrain-props-slot");
-          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(selected.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown()) return;
             const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
@@ -2778,9 +2780,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The Selection panel's Drops block for `entries` (when they all can drop items), filled in once the types' facts
          *  are read; nothing if the selection has moved on by then. */
-        const dropsSlot = (entries: Placed[]) => {
+        const dropsSlot = (selected: Placed[]) => {
+          // A start location has no properties: what the other objects share is shown (Ctrl+A selects it too).
+          const entries = selected.filter((p) => p.id !== "sloc");
           const slot = h("div.terrain-drops-slot");
-          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(selected.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown() || !commonFields(items).includes("drops")) return;
             const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
