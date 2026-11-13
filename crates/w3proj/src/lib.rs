@@ -2,6 +2,7 @@
 //! pack it back as a release step.
 
 pub mod codec;
+pub mod derived;
 pub mod format;
 pub mod header;
 pub mod lossless;

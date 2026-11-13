@@ -22,7 +22,7 @@ const never = async (): Promise<boolean> => { throw new Error("must not ask"); }
 
 test("candidates: the map's own files at its root, the editor's file and the overrides; nothing deeper or foreign", () => {
   const got = resizeCandidates(["map/war3map.w3i.json", "map/War3mapUnits.doo", "map/war3mapMap.blp", "map/war3mapImported/x.mdx", "map/units.txt", "src/war3map.j", "map\\war3map.shd"], "map/war3map.w3e").sort();
-  assert.deepEqual(got, [".w3proj/generated-script", ".w3proj/pathing.json", "map/War3mapUnits.doo", "map/war3map.shd", "map/war3map.w3e", "map/war3map.w3i.json", "map/war3mapMap.blp"].sort());
+  assert.deepEqual(got, [".w3proj/derived-from.json", ".w3proj/generated-script", ".w3proj/pathing.json", "map/War3mapUnits.doo", "map/war3map.shd", "map/war3map.w3e", "map/war3map.w3i.json", "map/war3mapMap.blp"].sort());
 });
 
 test("changedFiles keeps only what differs; a file on one side counts as missing on the other", () => {

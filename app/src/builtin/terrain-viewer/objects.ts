@@ -617,13 +617,15 @@ export class ObjectLoader {
     const helpers = await this.clickHelpers(group, batches, (inst) => !!inst.pick && !!skinFor(inst.pick.id)?.clickHelper);
     if (helpers) batches.push(helpers);
     const strays = strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf);
-    if (!placeholders || !strays.length) return { batches, unresolved, strays, problems };
+    // A start location stays a marker and a stray (the game view leaves it out): no cube for it.
+    const starts = strays.filter((s) => s.inst.pick?.id === "sloc"), cubed = strays.filter((s) => s.inst.pick?.id !== "sloc");
+    if (!placeholders || !cubed.length) return { batches, unresolved, strays, problems };
     let gpu: ModelGpu;
     // A lost context can't compile the model shader: the objects stay markers (the view is reopened anyway).
     try { gpu = this.placeholder(); } catch { return { batches, unresolved, strays, problems }; }
-    const instances = placeholderInstances(strays, bounds(gpu.model));
+    const instances = placeholderInstances(cubed, bounds(gpu.model));
     const cubes = new Set(instances.map((inst) => inst.pick?.placed));
-    return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: [], problems };
+    return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: starts, problems };
   }
 
   /** The click helpers (CLICK_HELPER) of the batches' instances that `wanted` says have one: a batch of their own,
@@ -663,8 +665,8 @@ export function placeholderInstances(strays: readonly Stray[], box: { min: reado
  *  shows it, so selection works on this stand-in instance: its position and a small sphere. */
 export interface Stray { group: string; inst: ObjectInstance }
 
-/** Stand-ins for the unresolved objects of one group. Start locations are left out: they stay
- *  markers that can't be moved or deleted (a player needs one). */
+/** Stand-ins for the unresolved objects of one group, start locations too: a click, a box and Select All take them
+ *  (the game view leaves them out, see shownInstances in index.ts). */
 /**
  * The kind of a war3mapUnits.doo entry: its type's when known (`known`: "w3t" an item, any other a unit), else what the
  * record tells. The World Editor writes an item with hero level 0 and target acquisition 0, a unit with level 1 or more
@@ -680,7 +682,7 @@ export function unitsEntryKind(p: Placed & { level?: unknown; targetAcquisition?
 export function strayInstances(group: string, placed: readonly Placed[], unresolved: readonly Placed[], skins: Map<string, Skin>,
   teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Stray[] {
   const index = new Map(placed.map((p, i) => [p, i]));
-  return unresolved.filter((p) => p.id !== "sloc").map((p) => {
+  return unresolved.map((p) => {
     const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
     // A known type whose model didn't load stands where its model would (a ship on the water).
     const [x, y] = p.position, z = skin && heightOf ? heightOf(p, skin) : p.position[2];

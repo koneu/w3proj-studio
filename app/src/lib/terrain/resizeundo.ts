@@ -30,10 +30,11 @@ export interface ResizeRecord {
 }
 
 /** The project files a resize may rewrite: the map's own files at its root (war3map*), the
- *  terrain editor's file, the Pathing Editor's overrides and the stamp of the generated script
- *  (which says whether war3map.j / .lua is still the generated one). Case doesn't matter. */
+ *  terrain editor's file, the Pathing Editor's overrides, the stamp of the generated script
+ *  (which says whether war3map.j / .lua is still the generated one) and the record of what pathing, shadows and
+ *  the minimap were made from (w3proj::derived). Case doesn't matter. */
 export function resizeCandidates(projectFiles: readonly string[], editor: string): string[] {
-  const out = new Set<string>([editor, ".w3proj/pathing.json", ".w3proj/generated-script"]);
+  const out = new Set<string>([editor, ".w3proj/pathing.json", ".w3proj/generated-script", ".w3proj/derived-from.json"]);
   for (const f of projectFiles) {
     const p = f.replace(/\\/g, "/");
     const m = /^map\/([^/]+)$/i.exec(p);
