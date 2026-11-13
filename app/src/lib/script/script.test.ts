@@ -519,6 +519,22 @@ test("newer editors colour every item, whatever its stored colour; World Editor 
   has(classic(2), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
 });
 
+test("on game data version 2 the item colour is the item type's teamColor, as the map's object data changes it", () => {
+  // we-drive, verification round 3 package 6: ItemData teamColor ecgh 8, ehhi 3, erhe 6, erpb 1, eymo 5, ratf 24.
+  const game = gameTeamColors([{ itemID: "ecgh", teamColor: "8" }, { itemID: "ehhi", teamColor: "3" }, { itemID: "ratf", teamColor: "24" }], "itemID");
+  const itco = (value: number) => [{ field: "itco", value }];
+  const colors = teamColors([{ original: [{ base: "ehhi", mods: itco(11) }], custom: [{ id: "I000", base: "ecgh" }, { id: "I001", base: "ratf", mods: itco(2) }] }, null], game, "itco");
+  const placed = (id: string, gameDataVersion = 2) => itemsSection({ units: [unit({ id, color: -1, player: 27 })], kindOf: () => "item", referenced: new Set(), editorVersion: 7003, gameBuild: 24371, gameDataVersion, itemColor: (t) => colors.get(t) });
+  has(placed("ecgh"), "    call BlzSetItemColor( i, ConvertPlayerColor(8) )");
+  has(placed("ratf"), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
+  has(placed("ehhi"), "    call BlzSetItemColor( i, ConvertPlayerColor(11) )");
+  has(placed("I000"), "    call BlzSetItemColor( i, ConvertPlayerColor(8) )");
+  has(placed("I001"), "    call BlzSetItemColor( i, ConvertPlayerColor(2) )");
+  // A type the tables don't know gets 24; the classic tables have no colour (0).
+  has(placed("zzzz"), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
+  has(placed("ecgh", 1), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+});
+
 test("newer editors declare the item local even when every item has its global", () => {
   // OrcX01_05 (editor 7003): all ten items named by triggers, "local item i" all the same.
   const named = (editorVersion: number) => itemsSection({ units: [unit({ id: "shwd" })], kindOf: () => "item", referenced: new Set(["gg_item_shwd_0001"]), editorVersion });

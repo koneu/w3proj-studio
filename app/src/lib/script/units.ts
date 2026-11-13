@@ -45,6 +45,9 @@ export interface UnitsInput {
   customColor?: (id: string) => boolean;
   /** Team colour a unit type has in the map's object data (lib/script/objects). */
   teamColor?: (id: string) => number | undefined;
+  /** Team colour an item type has: ItemData's teamColor changed by the map's object data (itco; lib/script/objects
+   *  teamColors). Without it (or for a type it doesn't know) items get 24. */
+  itemColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off, if it has one. */
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Whether an ability is a hero ability (lib/script/objects heroAbilities): unlearned ones get no autocast order. */
@@ -170,10 +173,12 @@ export function itemsSection(i: UnitsInput): string {
   // Random items get none from it, but are still created into the local.
   const ev = i.editorVersion ?? 0;
   const colorFn = ev >= 7003 ? "BlzSetItemColor" : ev >= 7000 ? "SetItemColor" : null;
-  // The 24 is the item tables' teamColor: on game data version 1 the classic tables (_Balance's ItemData.slk) have no
-  // such column, and that editor writes 0 (NightElfX03 saved as Lua, round 3; Forsaken07x of build 24371).
+  // The colour is the item type's teamColor (ItemData.slk, changed by the map's itco): 24 for most, ecgh 8, ehhi 3,
+  // erhe 6, erpb 1, eymo 5 (we-drive, verification round 3 package 6). On game data version 1 the classic tables
+  // (_Balance's ItemData.slk) have no such column, and that editor writes 0 (NightElfX03 saved as Lua, round 3;
+  // Forsaken07x of build 24371).
   const neutral = (i.gameBuild ?? 0) >= 24371 && i.gameDataVersion !== 1;
-  const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : neutral ? 24 : 0);
+  const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : neutral ? i.itemColor?.(it.id) ?? 24 : 0);
   const local = (it: UnitJson) => (colorFn || colorOf(it) !== -1 ? "i" : null);
   // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call. Editors from
   // 7000 on declare the local even when every item has its global (OrcX01_05 of editor 7003).
