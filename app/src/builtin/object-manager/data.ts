@@ -46,7 +46,7 @@ export interface NodeActions { edit: boolean; rename: boolean; remove: boolean; 
 export function nodeActions(n: Node): NodeActions {
   const t = n.target;
   const own = !!n.item || (!!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name)));
-  return { edit: !!t, rename: own, remove: own, play: t?.kind === "sounds" && !!t.file };
+  return { edit: !!t, rename: own, remove: own || n.placed === true, play: t?.kind === "sounds" && !!t.file };
 }
 
 /** What Edit Object Properties runs for an entry: a region or camera is selected in its tab of the terrain editor (and
@@ -86,6 +86,8 @@ export interface Node {
   unused?: boolean;
   /** A region or camera (renamed and deleted in its terrain tab). */
   item?: ListItem;
+  /** A placed unit, item, doodad or destructable: deleted in the terrain editor (no rename: its gg_ name follows from its place in the list). */
+  placed?: boolean;
   /** A group: the editor that holds its entries. */
   opens?: GroupOpen;
 }
@@ -215,7 +217,7 @@ export function buildTree(c: MapContents): Node[] {
       label: `${c.nameOf(id)} (${ps.length})`, detail: id, ref: id, target: { kind: "object", ext, id },
       children: ps.map((p): Node => {
         const g = placedName(p, prefix);
-        return { label: `${c.nameOf(id)} ${g.slice(-4)}`, detail: `${owner(p.player)} ${at(p)}`.trim(), ref: g, target: { kind: "point", x: p.position[0], y: p.position[1], id, editorId: typeof p.editorId === "number" ? p.editorId : undefined } };
+        return { label: `${c.nameOf(id)} ${g.slice(-4)}`, detail: `${owner(p.player)} ${at(p)}`.trim(), ref: g, placed: true, target: { kind: "point", x: p.position[0], y: p.position[1], id, editorId: typeof p.editorId === "number" ? p.editorId : undefined } };
       }),
     })).sort((a, b) => a.label.localeCompare(b.label));
     return { label: `${title} (${list.length})`, children, opens: OBJECT_EDITOR(ext) };

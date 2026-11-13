@@ -1339,6 +1339,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await view.groupItemAction(group, named ? name : null, action, typeof to === "string" ? to.trim() : undefined);
       if (why) throw new Error(why);
     }),
+    // A placed unit, item, doodad or destructable, for the Object Manager: deleted in the project's terrain editor
+    // (opened first) as its Delete key does, one undo step there.
+    w3.commands.register("w3.terrain.deletePlaced", async (x?: number, y?: number, ref?: { id?: string; editorId?: number }) => {
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("w3.terrain.deletePlaced takes the object's x and y and optionally { id, editorId }.");
+      const root = w3.workspace.project()?.root;
+      await w3.commands.execute("w3.terrain.open");
+      if (w3.workspace.project()?.root !== root) return;
+      const view = toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("The terrain editor didn't open.");
+      const why = view.deletePlaced({ id: typeof ref?.id === "string" ? ref.id : undefined, editorId: typeof ref?.editorId === "number" ? ref.editorId : undefined, x, y });
+      if (why) throw new Error(why);
+    }),
     // The View commands act on the terrain editor in front: another tab's would change what no one sees.
     ...viewCommandList.map(([id, run]) => w3.commands.register(id, async () => {
       const path = w3.editors.activePath();
@@ -4601,6 +4613,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!g?.itemAction) return `The terrain editor has no ${group} tab.`;
             showTab(group);
             return name === null ? null : g.itemAction(name, action, to);
+          },
+          deletePlaced: (ref) => {
+            if (!editable) return "This terrain editor is read-only.";
+            if (refuseLost()) return "The terrain view was lost.";
+            const files = [dooFile, unitsFile].filter((f): f is PlacedFile => !!f);
+            for (const f of files) {
+              const at = matchPlaced(f.list as unknown as PlacedLike[], ref);
+              if (at >= 0) { deleteEntries([f.list[at]]); return null; }
+            }
+            return "That placed object isn't in the open terrain editor any more.";
           },
           toggleSetting: async (which) => {
             const no = refusedInGameView();

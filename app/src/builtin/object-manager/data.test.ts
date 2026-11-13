@@ -129,6 +129,10 @@ test("Object Manager actions: rename and delete where the owning editor can, pla
   // A standard object's type: only going to it. A region: renamed and deleted in the terrain editor's Regions tab.
   assert.deepEqual(nodeActions(placedType), { edit: true, rename: false, remove: false, play: false });
   assert.deepEqual(nodeActions(region), { edit: true, rename: true, remove: true, play: false });
+  // A placed object: deleted in the terrain editor, not renamed (the World Editor has no rename for gg_unit_… names).
+  const placedOne = placedType.children![0];
+  assert.deepEqual(nodeActions(placedOne), { edit: true, rename: false, remove: true, play: false });
+  assert.equal(placedOne.placed, true);
   assert.deepEqual(region.item, { group: "regions", name: "Gate" });
   assert.deepEqual(nodeActions(trigger), { edit: true, rename: true, remove: true, play: false });
   assert.deepEqual(nodeActions(sound), { edit: true, rename: true, remove: true, play: true });
