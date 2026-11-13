@@ -44,7 +44,9 @@
 //   --shot-screen FILE  picture of the whole display (dialogs included)
 //   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
 //                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"//   --click X,Y         click at a position of the display (fixed size, so positions stay put)
-//   --drag X,Y:X,Y      press the left button at the first position, move to the second and let go (a box select)
+//   --drag X,Y:X,Y[@MS] press the left button at the first position, move to the second in 20 steps over MS (400) and
+//                       let go (a box select, a doodad move)
+//   --drag-mod MOD      hold alt, shift or ctrl during the next --drag (e.g. Alt-move on the Select tab)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
 //   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
 //                       positive zooms in
@@ -146,7 +148,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--drag", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
@@ -226,6 +228,17 @@ function programOfPid(w) {
   try { return programName(readFileSync(`/proc/${w.pid}/cmdline`, "utf8")); } catch { return ""; }
 }
 
+/** "X,Y:X,Y[@MS]" of --drag into { from, to, ms }; the pointer positions are whole numbers of the display. */
+export function parseDrag(arg) {
+  const m = /^(\d+),(\d+):(\d+),(\d+)(?:@(\d+))?$/.exec(arg ?? "");
+  if (!m) throw new Error("--drag wants X,Y:X,Y[@MS]");
+  const ms = m[5] === undefined ? 400 : Number(m[5]);
+  if (ms < 20 || ms > 60000) throw new Error("--drag: MS must be 20 to 60000");
+  return { from: `${m[1]},${m[2]}`, to: `${m[3]},${m[4]}`, ms };
+}
+
+export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
+
 export function parseArgs(argv) {
   const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed" };
   let dayNightGiven = false;
@@ -254,6 +267,20 @@ export function parseArgs(argv) {
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
     throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
   }
+  // --drag-mod belongs to the next --drag; each --drag is parsed (and refused) here.
+  let pendingMod = null;
+  for (let i = 0; i < steps.length; i++) {
+    const [step, v] = steps[i];
+    if (step === "--drag-mod") {
+      if (!DRAG_MODS.includes(v)) throw new Error(`--drag-mod wants ${DRAG_MODS.join(", ")}`);
+      pendingMod = v;
+      steps.splice(i--, 1);
+    } else if (step === "--drag") {
+      steps[i] = [step, { ...parseDrag(v), ...(pendingMod ? { mod: pendingMod } : {}) }];
+      pendingMod = null;
+    }
+  }
+  if (pendingMod) throw new Error("--drag-mod needs a --drag after it");
   // Every look's camera goes into the map before the editor starts: parsed (and refused) here, numbered by order.
   const looks = steps.filter(([s]) => s === "--look").map(([, v]) => parseLook(v));
   if (looks.length > MAX_LOOKS) throw new Error(`at most ${MAX_LOOKS} --look steps in one run`);
@@ -933,11 +960,9 @@ async function main() {
           await sleep(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {
-          const m = /^(\d+,\d+):(\d+,\d+)$/.exec(arg);
-          if (!m) throw new Error("--drag wants X,Y:X,Y");
-          x11(s.display, "drag", m[1], m[2]);
+          x11(s.display, "drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []));
           await sleep(300);
-          out({ step, from: m[1], to: m[2], dialogs: s.windows().dialogs.map((d) => d.title) });
+          out({ step, from: arg.from, to: arg.to, ms: arg.ms, ...(arg.mod ? { mod: arg.mod } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--move") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
           x11(s.display, "move", arg);
