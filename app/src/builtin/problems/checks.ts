@@ -20,7 +20,7 @@ import { type ModeChoices, pickClassicModel } from "./modelpick";
 import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
 import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
-import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
+import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
@@ -643,9 +643,17 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
   return capped(out, "objects with a missing model");
 }
 
-/** Deletes every placed object of a type from a placement file (JSON form or raw). */
-const removePlaced = (w3: W3Api, file: string, key: string, id: string) =>
-  editPlacedFile(w3, file, (doc) => { doc[key] = (doc[key] ?? []).filter((p) => p.id !== id); });
+/** Deletes every placed object of a type from a placement file (JSON form or raw); pathing, shadows and the minimap
+ *  follow. */
+const removePlaced = async (w3: W3Api, file: string, key: string, id: string) => {
+  let before: unknown[] | null = null;
+  const root = w3.workspace.project()!.root;
+  await editPlacedFile(w3, file, (doc) => {
+    if (key === "doodads") before = doc[key] ?? [];
+    doc[key] = (doc[key] ?? []).filter((p) => p.id !== id);
+  });
+  await rebuildDerived(w3, before, root);
+};
 
 /** Fixes run one at a time: each reads and writes war3map.imp and the object data. */
 const serial = serialQueue();

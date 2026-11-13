@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "3D view of a map's terrain (war3map.w3e): ground textures, heights, water, and where doodads and units are placed.",
   "extensionDependencies": ["w3.objectEditor"],
+  "activationEvents": ["onCommand:w3.terrain.rebuildFromFiles"],
   "contributes": {
     "mcpTools": [
       {"name":"replace_objects","description":"Swaps placed objects for other types where they stand, as one edit, such as one tileset's trees for another's: find fitting ones with list_objects, scope game, trees true, tileset map. Needs the setting mcp.writeTools; undo_last_edit takes it all back.","inputSchema":{"type":"object","required":["swaps"],"properties":{"kind":{"type":"string","enum":["units","doodads"],"description":"Default doodads, which also means destructables."},"swaps":{"type":"object","description":"Old id to new id: {\"LTlt\": \"FTtw\"}."},"region":{"type":"string","description":"A region of the map, by name."},"left":{"type":"number"},"bottom":{"type":"number"},"right":{"type":"number"},"top":{"type":"number"}}}},
