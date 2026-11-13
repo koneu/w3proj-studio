@@ -115,6 +115,16 @@ test("new numbers go on after the highest string, and after the highest referenc
   assert.equal(r.wts, "STRING 7\n{\nKept\n}\n\nSTRING 8\n{\nLit Player\n}\n\nSTRING 9\n{\nLit Force\n}\n\n");
 });
 
+test("new numbers go on after the strings an earlier drop recorded, which nothing refers to now", () => {
+  const wts = "STRING 7\n{\nKept\n}\n";
+  const kept = [`call SetPlayerName(Player(0), "TRIGSTR_7")`];
+  // The control: without the record, 8 and 9 are free.
+  assert.deepEqual(moveTexts(input({ wts, objects: [], otherTexts: kept })).added, [8, 9]);
+  const r = moveTexts(input({ wts, objects: [], otherTexts: kept, reserved: [3, 12] }));
+  assert.deepEqual(r.added, [13, 14]);
+  assert.deepEqual(r.dropped, [], "a recorded number isn't a string of the table to drop");
+});
+
 test("strings something still refers to stay; the others go", () => {
   const wts = "STRING 1\r\n{\r\nIn the script\r\n}\r\n\r\nSTRING 2\r\n{\r\nIn a raw file\r\n}\r\n\r\nSTRING 3\r\n{\r\nNobody's\r\n}\r\n\r\nSTRING 4\r\n// Units: h001 (x), Name (Name)\r\n{\r\nIn object data\r\n}\r\n";
   const objects = [{ path: "map/war3mapSkin.w3u.json", kind: "w3u", skin: true, doc: { original: [], custom: [{ base: "hfoo", id: "h001", mods: [{ field: "unam", type: "string", value: "TRIGSTR_004" }] }] } }];

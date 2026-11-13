@@ -58,6 +58,9 @@ export interface MoveTextsInput {
   otherTexts: Iterable<string>;
   /** Strings referred to from files that can't be read as text (raw map files). */
   otherRefs?: Iterable<number>;
+  /** Numbers no new string may take, though nothing refers to them now: the strings an earlier drop recorded
+   *  (lib/formats/prunedstrings), which come back with their old texts when a reference does. */
+  reserved?: Iterable<number>;
   /** A field's metadata column and label (the game's metadata); FALLBACK_FIELDS where it gives none. */
   describe?(kind: string, field: string): { field: string; label: string } | undefined;
   /** A game object's name, for a comment on an object that doesn't name itself. */
@@ -101,8 +104,8 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   const table = input.wts === null ? null : new StringTable(input.wts);
   const resolve = (v: string) => (table ? table.resolve(v) : v);
   const otherTexts = [...input.otherTexts];
-  // New numbers go on after the highest string, and after the highest reference too: a reference to a string the table
-  // lacks would otherwise come to show a new text.
+  // New numbers go on after the highest string, and after the highest reference and recorded dropped string too: a
+  // reference to a string the table lacks would otherwise come to show a new text.
   let next = 1;
   if (table) for (const [n] of table.entries()) next = Math.max(next, n + 1);
   const before = new Set<number>(input.otherRefs ?? []);
@@ -110,6 +113,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   refsIn(JSON.stringify(input.info ?? null), before);
   for (const f of input.objects) refsIn(JSON.stringify(f.doc), before);
   for (const n of before) next = Math.max(next, n + 1);
+  for (const n of input.reserved ?? []) next = Math.max(next, n + 1);
   const blocks: { num: number; text: string; comment: string | null }[] = [];
   const kept: KeptText[] = [];
   /** The text's new reference, or null when it stays literal. */

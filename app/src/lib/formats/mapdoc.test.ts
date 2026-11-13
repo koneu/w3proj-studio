@@ -4,7 +4,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { stringRefsInMap } from "./mapdoc";
+import { stringNumbersTaken, stringRefsInMap } from "./mapdoc";
+import { PRUNED_STRINGS_FILE, serializePrunedStrings } from "./prunedstrings";
 import type { W3Api } from "../../extensions/api";
 
 const sounds = (keys: [number, number][]) => JSON.stringify({ format: "w3proj.sounds/1", version: 3,
@@ -14,6 +15,10 @@ function fakeW3(files: Record<string, string>, decode?: (path: string) => string
   return {
     workspace: {
       readBytes: async (p: string) => new TextEncoder().encode(files[p]),
+      readText: async (p: string) => {
+        if (!(p in files)) throw new Error(`${p}: No such file or directory (os error 2)`);
+        return files[p];
+      },
       project: () => ({ root: "/p" }),
     },
     backend: {
@@ -47,4 +52,15 @@ test("a raw sounds file is read through its codec; one the codec can't read thro
 test("a sounds document that isn't JSON throws rather than count as no keys", async () => {
   const files = { "map/war3map.w3s.json": "{ not json" };
   await assert.rejects(stringRefsInMap(fakeW3(files), Object.keys(files)), /war3map\.w3s\.json is there but can't be read/);
+});
+
+test("the numbers new strings go after: the references and the strings a drop recorded (the Sound Editor's keys)", async () => {
+  const files: Record<string, string> = { "map/war3map.w3i.json": JSON.stringify({ players: [{ name: "TRIGSTR_001" }] }) };
+  const paths = Object.keys(files);
+  // The control: no record, only the references.
+  assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), paths)), [1]);
+  files[PRUNED_STRINGS_FILE] = serializePrunedStrings(new Map([[40, "gone"], [3, "also gone"]]));
+  assert.deepEqual(sorted(await stringNumbersTaken(fakeW3(files), paths)), [1, 3, 40]);
+  files[PRUNED_STRINGS_FILE] = "{ not json";
+  await assert.rejects(stringNumbersTaken(fakeW3(files), paths), /pruned-strings\.json isn't valid JSON/);
 });

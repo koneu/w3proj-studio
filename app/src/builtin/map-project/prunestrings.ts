@@ -12,41 +12,55 @@
 //
 // One undoable edit (the MCP edit log, like Move Texts), after every editor is saved and the map script settled;
 // refused while anything is still unsaved, as an unsaved editor may hold references the files don't have yet.
+//
+// What goes is recorded (.w3proj/pruned-strings.json, lib/formats/prunedstrings): an editor's undo can bring a reference
+// back, and the next pack restores such a string with its old number and text before it drops anything.
 
 import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { stringRefsInMap } from "../../lib/formats/mapdoc";
+import { readPrunedStrings, recordPrunedStrings, restorePrunedStrings } from "../../lib/formats/prunedstrings";
 import { pruneStrings } from "../../lib/formats/wts";
 
 const WTS = "map/war3map.wts";
 
-/** `dropped`: the string numbers that went; `kept`: why nothing was looked at (unsaved editors), else null. */
-export interface PruneOutcome { dropped: number[]; kept: string | null }
+/** `dropped`: the string numbers that went; `restored`: dropped ones put back because something refers to them again
+ *  (lib/formats/prunedstrings); `kept`: why nothing was looked at (unsaved editors), else null. */
+export interface PruneOutcome { dropped: number[]; restored: number[]; kept: string | null }
 
 /** See the top. Throws when a file can't be read (war3map.wts, or one that may refer to strings): nothing is dropped. */
 export async function dropUnusedStrings(w3: W3Api): Promise<PruneOutcome> {
   const root = w3.workspace.project()?.root;
-  if (!root) return { dropped: [], kept: "no project is open" };
+  if (!root) return { dropped: [], restored: [], kept: "no project is open" };
   const listed = () => w3.workspace.files().map((f) => f.path);
-  if (!listed().some((p) => p.toLowerCase() === WTS)) return { dropped: [], kept: null };
+  if (!listed().some((p) => p.toLowerCase() === WTS)) return { dropped: [], restored: [], kept: null };
   const unsaved = w3.editors.unsavedPaths();
-  if (unsaved.length) return { dropped: [], kept: `${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes` };
-  let dropped: number[] = [];
+  if (unsaved.length) return { dropped: [], restored: [], kept: `${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes` };
+  let dropped: number[] = [], restored: number[] = [];
   const change = async (read: (path: string) => Promise<string | null>) => {
     if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
     dropped = [];
+    restored = [];
     // Absent is no table; there but unreadable throws (never taken for empty).
     const wts = await read(WTS);
     if (wts === null) return [];
     const refs = await stringRefsInMap(w3, listed());
-    const r = pruneStrings(wts, refs);
+    // What earlier drops took that something refers to again comes back first, with its number and text; a record
+    // that can't be read throws (nothing restored, nothing dropped).
+    const record = await readPrunedStrings(w3);
+    if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
+    const back = restorePrunedStrings(wts, record, refs);
+    const r = pruneStrings(back.text, refs);
+    // The record before the table: a string is never gone without it.
+    await recordPrunedStrings(w3, back.text, r.dropped, r.text, record);
     dropped = r.dropped;
-    return r.dropped.length ? [{ path: WTS, text: r.text }] : [];
+    restored = back.restored;
+    return r.text !== wts ? [{ path: WTS, text: r.text }] : [];
   };
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE).catch(() => null);
   if (edits) {
     const done = await edits.edit("Drop Unused Strings", change);
-    return { dropped: done ? dropped : [], kept: null };
+    return { dropped: done ? dropped : [], restored: done ? restored : [], kept: null };
   }
   // Without the edit log (the MCP extension off): the same, written only when the table is still as it was read.
   const read = (path: string) => w3.workspace.readText(path).catch((e) => {
@@ -55,8 +69,8 @@ export async function dropUnusedStrings(w3: W3Api): Promise<PruneOutcome> {
   });
   const before = await read(WTS);
   const out = await change(async (p) => (p === WTS ? before : read(p)));
-  if (!out.length) return { dropped: [], kept: null };
+  if (!out.length) return { dropped: [], restored: [], kept: null };
   if ((await read(WTS)) !== before || w3.editors.unsavedPaths().length) throw new Error("war3map.wts changed meanwhile");
   await w3.workspace.writeText(WTS, out[0].text);
-  return { dropped, kept: null };
+  return { dropped, restored, kept: null };
 }

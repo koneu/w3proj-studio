@@ -5,6 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { requireProject, STRING_REF_TEXT_FILE, stringRefsInMap } from "../../lib/formats/mapdoc";
+import { readPrunedStrings, recordPrunedStrings } from "../../lib/formats/prunedstrings";
 import { moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 
@@ -67,8 +68,11 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       if (edited.has(lower) || STRING_REF_TEXT_FILE.test(path) || edited.has(`${lower}.json`)) continue;
       if (lower === INFO || objectFiles.some((f) => f.path.toLowerCase() === lower)) raw.push(path);
     }
+    // Numbers an earlier drop took stay taken (a reference may come back); a record that can't be read stops here.
+    const record = await readPrunedStrings(w3);
+    if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
     result = moveTexts({
-      wts, info, objects, otherTexts: [], otherRefs,
+      wts, info, objects, otherTexts: [], otherRefs, reserved: record.keys(),
       describe: (kind, field) => {
         const f = data.get(kind)?.fieldById.get(field);
         return f && f.field && f.label ? { field: f.field, label: f.label } : undefined;
@@ -82,8 +86,12 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     if (result.info) {
       out.push({ path: `${INFO}.json`, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${INFO}.json`, text: JSON.stringify(result.info) }) });
     }
-    // The table last: written after the files that refer to its new strings.
-    if (result.wts !== null) out.push({ path: WTS, text: result.wts });
+    // The table last: written after the files that refer to its new strings. What it drops is recorded first, so an
+    // undo that brings a reference back gets the string back on the next pack.
+    if (result.wts !== null) {
+      if (wts !== null && result.dropped.length) await recordPrunedStrings(w3, wts, result.dropped, result.wts, record);
+      out.push({ path: WTS, text: result.wts });
+    }
     return out;
   });
   const r = result as MoveTextsResult | null;

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { dropUnusedStrings } from "./prunestrings";
 import { StringTable } from "../../lib/formats/wts";
+import { PRUNED_STRINGS_FILE, parsePrunedStrings } from "../../lib/formats/prunedstrings";
 import type { W3Api } from "../../extensions/api";
 
 const block = (n: number, text: string) => `STRING ${n}\r\n{\r\n${text}\r\n}\r\n\r\n`;
@@ -30,7 +31,7 @@ function fakeW3(files: Record<string, string>, opts: { unsaved?: string[]; editL
   const writes: string[] = [];
   const unsaved = () => opts.unsaved ?? [];
   const readText = async (p: string) => {
-    if (!(p in files)) throw Object.assign(new Error(`not found: ${p}`), { code: "ENOENT" });
+    if (!(p in files)) throw new Error(`${p}: No such file or directory (os error 2)`);
     if (files[p] === "\u0000unreadable") throw new Error(`can't read ${p}`);
     return files[p];
   };
@@ -74,15 +75,16 @@ test("unused strings leave the table; every file's references keep theirs, the d
   const files = project();
   const { w3, writes, log } = fakeW3(files);
   const r = await dropUnusedStrings(w3);
-  assert.deepEqual(r, { dropped: [3, 9], kept: null });
+  assert.deepEqual(r, { dropped: [3, 9], restored: [], kept: null });
   assert.deepEqual(nums(files["map/war3map.wts"]), [1, 2, 4, 5, 6, 7, 8]);
   assert.equal(files["map/war3map.wts"], WTS.replace(block(3, "text 3"), "").replace(block(9, "text 9"), ""), "the rest byte for byte");
-  assert.deepEqual(writes, ["map/war3map.wts"]);
+  assert.deepEqual(writes, [PRUNED_STRINGS_FILE, "map/war3map.wts"], "the record before the table");
+  assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[3, "text 3"], [9, "text 9"]]);
   assert.equal(log.list().length, 1, "one undoable edit");
   // Undone in one step: the file as it was.
   assert.equal(log.list()[0].files[0].before, WTS);
   // Nothing left to drop: no edit.
-  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [], kept: null });
+  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [], restored: [], kept: null });
   assert.equal(log.list().length, 1);
 });
 
@@ -118,7 +120,7 @@ test("war3map.wts there but unreadable throws; absent is nothing to do", async (
   const none = project();
   delete none["map/war3map.wts"];
   const { w3, writes } = fakeW3(none);
-  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [], kept: null });
+  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [], restored: [], kept: null });
   assert.deepEqual(writes, []);
 });
 
@@ -133,7 +135,40 @@ test("the project changes while the files are read: nothing written", async () =
 test("without the edit log: the same strings go, written once", async () => {
   const files = project();
   const { w3, writes } = fakeW3(files, { editLog: false });
-  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [3, 9], kept: null });
+  assert.deepEqual(await dropUnusedStrings(w3), { dropped: [3, 9], restored: [], kept: null });
   assert.deepEqual(nums(files["map/war3map.wts"]), [1, 2, 4, 5, 6, 7, 8]);
-  assert.deepEqual(writes, ["map/war3map.wts"]);
+  assert.deepEqual(writes, [PRUNED_STRINGS_FILE, "map/war3map.wts"]);
+});
+
+test("undo after a pack: a dropped string that is referred to again comes back on the next pack, number and text", async () => {
+  const files = project();
+  const { w3, log } = fakeW3(files);
+  assert.deepEqual((await dropUnusedStrings(w3)).dropped, [3, 9]);
+  // The Object Editor's undo brings back an object naming string 3, and is saved.
+  files["map/war3map.w3u.json"] = JSON.stringify({ custom: [
+    { id: "h000", mods: [{ field: "unam", value: "TRIGSTR_002" }] }, { id: "h001", mods: [{ field: "unam", value: "TRIGSTR_003" }] }] });
+  const r = await dropUnusedStrings(w3);
+  assert.deepEqual(r, { dropped: [], restored: [3], kept: null });
+  const table = new StringTable(files["map/war3map.wts"]);
+  assert.equal(table.get(3), "text 3", "its old text, under its old number");
+  assert.deepEqual(nums(files["map/war3map.wts"]), [1, 2, 4, 5, 6, 7, 8, 3]);
+  assert.ok(files["map/war3map.wts"].startsWith(WTS.replace(block(3, "text 3"), "").replace(block(9, "text 9"), "")), "the rest byte for byte");
+  assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[9, "text 9"]], "a string that is back leaves the record");
+  assert.equal(log.list().length, 2, "the restore is an undoable edit of its own");
+  // Unreferenced again: dropped and recorded again.
+  files["map/war3map.w3u.json"] = project()["map/war3map.w3u.json"];
+  assert.deepEqual((await dropUnusedStrings(w3)).dropped, [3]);
+  assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[3, "text 3"], [9, "text 9"]]);
+});
+
+test("a record that is there but can't be read: nothing restored, nothing dropped", async () => {
+  const files = project();
+  files[PRUNED_STRINGS_FILE] = "{ not json";
+  const { w3, writes } = fakeW3(files);
+  await assert.rejects(dropUnusedStrings(w3), /pruned-strings\.json isn't valid JSON/);
+  assert.deepEqual(writes, []);
+  files[PRUNED_STRINGS_FILE] = "\u0000unreadable";
+  await assert.rejects(dropUnusedStrings(w3), /pruned-strings\.json is there but can't be read/);
+  assert.deepEqual(writes, []);
+  assert.equal(files["map/war3map.wts"], WTS);
 });
