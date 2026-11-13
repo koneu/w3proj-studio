@@ -123,6 +123,8 @@ function decodeBlp1(b: Uint8Array): DecodedImage {
         jpeg.set(header);
         jpeg.set(b.subarray(l.offset, l.offset + l.size), header.length);
         const img = decodeJpeg(jpeg);
+        // The level's size is the header's word; the picture's is the JPEG's. A level far larger than its picture is a lie.
+        if (l.width * l.height > img.width * img.height * 64) throw new Error(`BLP1 JPEG level of ${l.width}×${l.height} over a ${img.width}×${img.height} picture`);
         // Channels are stored as B, G, R, A without colour conversion.
         const n = l.width * l.height;
         const out = new Uint8ClampedArray(n * 4);
