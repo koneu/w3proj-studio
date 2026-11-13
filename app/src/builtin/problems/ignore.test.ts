@@ -113,3 +113,23 @@ test("an ignore file that is there but broken hides nothing and is not written o
   assert.deepEqual(h.mine(listed).map((p) => p.location), ["Quest A Completed"]);
   assert.deepEqual(h.writes, []);
 });
+
+test("runChecked (Build/pack) leaves ignored reports out, rules included, and counts them", async () => {
+  const f = withIgnored(emptyIgnore(), "mine", ["Other"]);
+  const text = serializeIgnore({ ...f, rules: ["bonusQuestLibrary"] });
+  const h = harness({ [IGNORE_FILE]: text }, [P("Other"), P("Kept")]);
+  h.service.registerCheck({ id: "triggerNoEvents", title: "T", run: async () => [P("Quest A Completed"), P("Quest B Update1"), P("Plain")] });
+  const r = await h.service.runChecked();
+  assert.deepEqual(h.mine(r.problems).map((p) => p.location), ["Kept"]);
+  assert.deepEqual(r.problems.filter((p) => /Quest|Plain/.test(p.location ?? "")).map((p) => p.location), ["Plain"]);
+  assert.equal(r.ignored, 3);
+  assert.equal(r.ignoreError, null);
+});
+
+test("control: runChecked with a broken ignore file hides nothing and says why", async () => {
+  const h = harness({ [IGNORE_FILE]: "{ broken" }, [P("A"), P("B")]);
+  const r = await h.service.runChecked();
+  assert.equal(h.mine(r.problems).length, 2);
+  assert.equal(r.ignored, 0);
+  assert.match(r.ignoreError ?? "", /can't be used/);
+});

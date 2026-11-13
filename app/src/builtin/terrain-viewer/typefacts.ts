@@ -7,7 +7,9 @@ import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { ABILITY_FUNC_FILES, abilityOrders, specialUnits, type ObjectFile } from "../../lib/script/objects";
+import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { objectMods, readMapJson } from "./pathmap";
+import { startGoldOf, type GoldObjectFile } from "./placement";
 import type { SkillInfo, TypeFacts } from "./unitprops";
 
 /** Field values of units and abilities, the map's first; "" when nothing says. Level is 1-based for fields
@@ -120,6 +122,19 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
     goldMines: special.goldMines, waygates: special.waygates, toggleable: new Set(orders.keys()),
     ...heroConstants(gameMisc, mapMisc),
   };
+}
+
+/** The gold of new placed units (placement.ts startGoldOf) from the open map's ability data, a chapter map's campaign's
+ *  under it. Throws when a file is there but can't be read (it may set the gold), or the campaign can't be told. */
+export async function loadStartGold(w3: W3Api): Promise<number> {
+  const campaign = await findCampaign(w3);
+  const files = await Promise.all([
+    campaign ? readCampaignObjects<GoldObjectFile>(w3, campaign, "w3a") : null,
+    campaign ? readCampaignObjects<GoldObjectFile>(w3, campaign, "w3a", true) : null,
+    readMapJson<GoldObjectFile>(w3, "war3map.w3a"),
+    readMapJson<GoldObjectFile>(w3, "war3mapSkin.w3a"),
+  ]);
+  return startGoldOf(files);
 }
 
 type Mods = Map<string, { base: string; mods: Map<string, unknown> }>;

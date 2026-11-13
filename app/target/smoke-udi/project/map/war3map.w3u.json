@@ -1,0 +1,18 @@
+{
+  "format": "w3proj.objects/1",
+  "version": 3,
+  "original": [
+    {
+      "base": "hfoo",
+      "end": "hfoo",
+      "mods": [
+        {
+          "field": "ua1p",
+          "type": "string",
+          "value": "ground,enemies"
+        }
+      ]
+    }
+  ],
+  "custom": []
+}

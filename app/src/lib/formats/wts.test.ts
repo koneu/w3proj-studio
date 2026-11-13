@@ -361,3 +361,43 @@ test("stray carriage returns: read as part of the text, kept byte for byte outsi
   assert.equal(dropped.text, cut(cut(text, "STRING 2", "STRING 3"), "STRING 4", "STRING 5"));
   assert.equal(renumberWts(text, new Map([[5, 50]])), text.replace(`STRING 5${CRCRLF}`, `STRING 50${CRCRLF}`));
 });
+
+test("a header written {\\r\\r\\n is a header: its string is read and a dropped neighbour doesn't take it along", () => {
+  // The Rust port reads it the same (crates/w3proj/src/wts.rs, a_header_with_a_stray_carriage_return_is_a_header).
+  const block = (n: number, s: string) => `STRING ${n}\r\n{\r\n${s}\r\n}\r\n\r\n`;
+  const second = "STRING 2\r\n{\r\r\nsecond\r\n}\r\n\r\n";
+  const text = block(1, "orphan") + second + block(3, "third");
+  const t = new StringTable(text);
+  assert.deepEqual([...t.entries()], [[1, "orphan"], [2, "second"], [3, "third"]]);
+  assert.equal(t.serialize(), text, "no change: the file's own bytes");
+  t.set(2, "Second\nline");
+  assert.equal(t.serialize(), text.replace("second", "Second\r\nline"), "an edit keeps the header's bytes");
+  const pruned = pruneStrings(text, new Set([2, 3]));
+  assert.deepEqual(pruned.dropped, [1]);
+  assert.equal(pruned.text, second + block(3, "third"));
+  assert.equal(removeStrings(text, new Set([1])), second + block(3, "third"));
+  assert.equal(renumberWts(text, new Map([[2, 20]])), text.replace("STRING 2\r\n", "STRING 20\r\n"));
+  // Any run of them, also on an LF line; anything else after the `{` is no header.
+  assert.equal(new StringTable("STRING 4\n{\r\r\r\nfour\n}\n").get(4), "four");
+  assert.equal(new StringTable("STRING 4\n{\r x\nfour\n}\n").has(4), false);
+  assert.equal(new StringTable("STRING 4\n{\r").has(4), false);
+});
+
+test("a text ending in a lone \\r can be saved: nothing in it is cut", () => {
+  assert.deepEqual(wtsCutLines("ends in one\r"), []);
+  assert.deepEqual(wtsCutLines("two\nlines\r"), []);
+  assert.deepEqual(wtsCuts([[4, "ends in one\r"]]), []);
+  // A CRLF file keeps the `\r` (the close is the file's `\r\n}`); an LF file loses only that `\r`.
+  const crlf = new StringTable("STRING 4\r\n{\r\nold\r\n}\r\n");
+  crlf.set(4, "ends in one\r");
+  const saved = crlf.serialize();
+  assert.equal(saved, "STRING 4\r\n{\r\nends in one\r\r\n}\r\n");
+  assert.equal(new StringTable(saved).get(4), "ends in one\r");
+  const lf = new StringTable("STRING 4\n{\nold\n}\n");
+  lf.set(4, "ends in one\r");
+  assert.equal(new StringTable(lf.serialize()).get(4), "ends in one");
+  // Control: a real cut is still refused, with either line end.
+  assert.deepEqual(wtsCutLines("a\n}b\r"), [2]);
+  assert.deepEqual(wtsCutLines("a}\r\nSTRING 2\r\n{\r\nb"), [1]);
+  assert.deepEqual(wtsCutLines("a}\nSTRING 2\n{\r\r\nb"), [1]);
+});

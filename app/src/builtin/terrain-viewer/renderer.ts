@@ -140,9 +140,8 @@ in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
 // colour fading in over the last tile there; uEdgeDark 0 when the border isn't shown.
 uniform float uEdgeDark;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
-// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
-// texture gives only its brightness (tinted water).
-uniform vec3 uLight; uniform float uGrey;
+// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp).
+uniform vec3 uLight;
 // HD (uTone 2): the colour the editor shows (hdWaterColor), the texture only rippling it.
 uniform vec3 uHdWater; uniform float uWaterBrightness;
 // HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
@@ -185,7 +184,6 @@ void main() {
     outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - vDark * uEdgeDark)), a);
     return;
   }
-  t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
   vec4 w = t * c;
   outColor = vec4(fogged(toned(w.rgb, uLight) * (1.0 - vDark * uEdgeDark)), w.a);
 }`;
@@ -257,17 +255,17 @@ export interface WaterLook {
 
 type WaterRamp = Pick<WaterLook, "shallowMin" | "shallowMax" | "deepMin" | "deepMax">;
 
-/** The colour ramp the water is drawn with (the shader multiplies the texture by it), and whether the
- *  texture gives only its brightness (`grey`). The map's water tint (war3map.w3i, stored blue, green,
- *  red, alpha; null when its tinting is off) takes the place of the colour, as the game's
- *  SetWaterBaseColor does: 03b_Water_Tint's red tint is plainly red in the game, not the ramp's blue
- *  darkened, nor the (blue) texture's colour under red. Its alpha scales the ramp's, so the shallows
- *  still fade out at the shore. */
-export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & { grey: boolean } {
-  if (!tint) return { shallowMin: look.shallowMin, shallowMax: look.shallowMax, deepMin: look.deepMin, deepMax: look.deepMax, grey: false };
+/** The colour ramp the water is drawn with (the shader multiplies the texture by it). The map's water tint
+ *  (war3map.w3i, stored blue, green, red, alpha; null when its tinting is off) multiplies the ramp, as the World
+ *  Editor draws it in SD: 03b_Water_Tint's red tint (255, 100, 100) over Lordaeron's blue ramp and texture is a dark
+ *  purple there (we-drive, SD, 2026-11-13: deep water 39, 19, 53 unlit; ramp times tint times the texture's mean
+ *  gives 39, 17, 54). The game draws it plainly red instead; the user chose the editor's look. Its alpha scales the
+ *  ramp's, so the shallows still fade out at the shore. */
+export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp {
+  if (!tint) return { shallowMin: look.shallowMin, shallowMax: look.shallowMax, deepMin: look.deepMin, deepMax: look.deepMax };
   const [b, g, r, a = 255] = tint;
-  const apply = (c: number[]) => [r / 255, g / 255, b / 255, c[3] * (a / 255)];
-  return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax), grey: true };
+  const apply = (c: number[]) => [c[0] * (r / 255), c[1] * (g / 255), c[2] * (b / 255), c[3] * (a / 255)];
+  return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax) };
 }
 
 /**
@@ -1746,7 +1744,6 @@ export class TerrainRenderer {
       for (const [name, v] of [["uShallowMin", ramp.shallowMin], ["uShallowMax", ramp.shallowMax], ["uDeepMin", ramp.deepMin], ["uDeepMax", ramp.deepMax]] as const) {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
-      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uGrey"), ramp.grey ? 1 : 0);
       setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);

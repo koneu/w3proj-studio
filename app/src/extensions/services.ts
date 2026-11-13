@@ -562,6 +562,9 @@ export interface ProblemsService {
   registerCheck(check: ProblemCheck): { dispose(): void };
   /** Runs every check; the view shows the result. Resolves with all problems found. */
   run(): Promise<Problem[]>;
+  /** Like `run`, and says how many reports the project's ignore file (.w3proj/problems-ignore.json) left out of
+   *  the result, and why it was not applied if that file is there but can't be read (then nothing is left out). */
+  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null }>;
   /** The result of the last run. */
   problems(): Problem[];
 }
