@@ -423,3 +423,128 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+/// The same cases on Windows, where the tool and what it starts are in a job that is closed (and so ended) with it
+/// (job.rs). PowerShell stands for the tool; `ping -n 60` for what it starts and leaves running.
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("w3proj-toolrun-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Runs `script` with PowerShell in `cwd`, in its own thread; None when it hasn't returned within `limit`.
+    fn ps(script: &str, cwd: &Path, guard: Option<Guard>, limit: Duration) -> Option<(Result<ToolResult, String>, Duration)> {
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]).current_dir(cwd);
+        let (tx, rx) = mpsc::channel();
+        let cwd = cwd.to_path_buf();
+        std::thread::spawn(move || {
+            let t = Instant::now();
+            let r = run(cmd, "powershell", &cwd, None, guard.as_ref());
+            let _ = tx.send((r, t.elapsed()));
+        });
+        rx.recv_timeout(limit).ok()
+    }
+
+    fn alive(pid: u32) -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        // SAFETY: plain calls on a process id; the handle is closed.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return false;
+            }
+            let mut code = 0u32;
+            let ok = GetExitCodeProcess(h, &mut code) != 0;
+            CloseHandle(h);
+            ok && code == 259 // STILL_ACTIVE
+        }
+    }
+
+    fn pid_in(file: &Path) -> u32 {
+        let t = Instant::now();
+        loop {
+            if let Some(p) = std::fs::read_to_string(file).ok().and_then(|s| s.trim().parse().ok()) {
+                return p;
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "no pid in {}", file.display());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Waits up to `limit` for the process to be gone; ends it if it isn't, and says whether it had gone by itself.
+    fn gone_within(pid: u32, limit: Duration) -> bool {
+        let t = Instant::now();
+        while alive(pid) && t.elapsed() < limit {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let left = alive(pid);
+        if left {
+            let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
+        }
+        !left
+    }
+
+    /// Starts `ping -n 60` hidden and writes its id to child.pid (PowerShell).
+    const START_CHILD: &str = "$c = Start-Process ping -ArgumentList '-n','60','127.0.0.1' -WindowStyle Hidden -PassThru; Set-Content child.pid $c.Id";
+
+    #[test]
+    fn a_tool_that_exits_gives_its_output_and_code() {
+        let dir = scratch("plain");
+        let guard = Guard { idle_ms: 10000, result_files: vec![], settle_ms: 3000 };
+        let (r, _) = ps("Write-Output out; [Console]::Error.WriteLine('err'); exit 3", &dir, Some(guard), Duration::from_secs(30)).unwrap();
+        let r = r.unwrap();
+        assert_eq!((r.code, r.stdout.trim(), r.stderr.trim(), r.killed.is_none()), (3, "out", "err", true));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// JassHelper's error window: started by the tool and left waiting for a click. Ended once the tool has exited.
+    #[test]
+    fn what_the_tool_starts_and_leaves_running_is_ended_after_it() {
+        let dir = scratch("window");
+        let (r, _) = ps(&format!("{START_CHILD}; Write-Output errors; exit 1"), &dir, None, Duration::from_secs(30)).expect("waited for what the tool left running");
+        assert_eq!(r.unwrap().code, 1);
+        let child = pid_in(&dir.join("child.pid"));
+        assert!(gone_within(child, Duration::from_secs(5)), "what the tool started was left running");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A tool that never exits and does nothing is ended after the time without progress, with what it started.
+    #[test]
+    fn a_tool_that_hangs_without_progress_is_ended_with_its_children() {
+        let dir = scratch("hang");
+        let guard = Guard { idle_ms: 3000, result_files: vec!["output.j".into()], settle_ms: 500 };
+        let (r, took) = ps(&format!("{START_CHILD}; Write-Output started; Start-Sleep 60"), &dir, Some(guard), Duration::from_secs(40))
+            .expect("a tool that never exits wasn't ended");
+        let r = r.unwrap();
+        assert_eq!(r.code, -1);
+        assert!(r.killed.as_deref().is_some_and(|k| k.contains("nothing happened")), "{:?}", r.killed);
+        assert_eq!(r.stdout.trim(), "started");
+        assert!(took >= Duration::from_millis(3000) && took < Duration::from_secs(30), "{took:?}");
+        let child = pid_in(&dir.join("child.pid"));
+        assert!(gone_within(child, Duration::from_secs(3)), "the hung tool's child was left running");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Progress keeps a slow tool going past the time without progress; its result there and no exit ends it soon after.
+    #[test]
+    fn a_tool_making_progress_runs_on_and_one_that_wrote_its_result_but_doesnt_exit_is_ended() {
+        let dir = scratch("result");
+        let guard = Guard { idle_ms: 3000, result_files: vec!["output.j".into(), "logs/compileerrors.txt".into()], settle_ms: 1000 };
+        // 4 s of work in steps of 0.5 s (longer than the time without progress), then the result, then no exit.
+        let script = "New-Item -ItemType Directory logs | Out-Null; 1..8 | ForEach-Object { Add-Content logs/step.txt $_; Start-Sleep -Milliseconds 500 }; Set-Content output.j done; Start-Sleep 60";
+        let (r, took) = ps(script, &dir, Some(guard), Duration::from_secs(40)).expect("a tool that wrote its result but didn't exit wasn't ended");
+        let r = r.unwrap();
+        assert!(r.killed.as_deref().is_some_and(|k| k.contains("wrote output.j")), "{:?}", r.killed);
+        assert!(took >= Duration::from_secs(4) && took < Duration::from_secs(30), "{took:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("output.j")).unwrap().trim(), "done");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
