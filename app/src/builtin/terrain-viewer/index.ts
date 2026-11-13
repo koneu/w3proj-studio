@@ -2665,15 +2665,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!scales) return null;
             const skin = skins.get(id), range = skin ? savedScaleRange(skin) : undefined;
             return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
-          }, edge ? (x, y) => !inArea(x, y, edge) : null);
-          for (const { entry, scale, flags } of fixes) {
+          }, edge ? (x, y) => !inArea(x, y, edge) : null, undefined, (id) => skins.get(id)?.kind);
+          for (const { entry, scale, flags, life } of fixes) {
             entry.scale = scale;
+            if (life !== undefined) (entry as Placed & { life?: number }).life = life;
             if (flags !== undefined) entry.flags = flags;
           }
           if (!fixes.length) return;
           objectsTouched = true;
           const n = fixes.length;
-          void w3.window.showInfo(`Set the scale or flags of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
+          void w3.window.showInfo(`Set the scale, flags or life of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the

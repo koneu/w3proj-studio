@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { doodadFixes, savedFlags, savedScale, type RuledDoodad, type ScaleRule } from "./doodadrules";
+import { doodadFixes, savedFlags, savedLife, savedScale, type RuledDoodad, type ScaleRule } from "./doodadrules";
 import { inArea } from "../../lib/terrain/area";
 
 /** tests/fixtures/doodad-grid-we/<name>, found from where the tests run (app/ or the repository). */
@@ -118,4 +118,22 @@ test("doodadFixes lists only what changes, and leaves the list as it is", () => 
   assert.deepEqual(list[1].scale, [1, 1, 1], "the list itself isn't changed");
   // Without the playable area the flags stay.
   assert.deepEqual(doodadFixes([list[2], list[4]], (id) => rules[id] ?? null, null, never), []);
+});
+
+test("savedLife: a destructable's is held to 100, a doodad's is 255 (we-drive, doodad-life spec)", () => {
+  for (const [stored, saved] of [[0, 0], [1, 1], [50, 50], [100, 100], [101, 100], [200, 100], [255, 100]]) assert.equal(savedLife(stored, "w3b"), saved, `w3b ${stored}`);
+  for (const stored of [0, 50, 100, 255]) assert.equal(savedLife(stored, "w3d"), 255, `w3d ${stored}`);
+  assert.equal(savedLife(77, undefined), 77, "an unknown type keeps its life");
+  assert.equal(savedLife(77, "w3u"), 77);
+});
+
+test("doodadFixes sets the life; a list that already fits has no fix", () => {
+  const kinds: Record<string, string> = { LTbr: "w3b", LOch: "w3d" };
+  const at = (id: string, life: number | undefined): RuledDoodad => ({ id, position: [0, 0, 0], scale: [1, 1, 1], ...(life === undefined ? {} : { life }) });
+  const list = [at("LTbr", 255), at("LTbr", 100), at("LTbr", 0), at("LOch", 100), at("LOch", 255), at("XXxx", 7), at("LOch", undefined)];
+  const fixes = doodadFixes(list, () => null, null, never, (id) => kinds[id]);
+  assert.deepEqual(fixes.map((f) => [list.indexOf(f.entry), f.life]), [[0, 100], [3, 255]]);
+  assert.deepEqual(doodadFixes([list[1], list[2], list[4], list[5]], () => null, null, never, (id) => kinds[id]), []);
+  assert.equal(list[0].life, 255, "the list itself isn't changed");
+  assert.deepEqual(doodadFixes([list[0]], () => null, null, never), [], "without kinds the life stays");
 });
