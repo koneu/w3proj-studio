@@ -435,18 +435,8 @@ fn ui_show_cursor(app: AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
-/// A file path inside `root` (the open project); deleting and renaming go
-/// nowhere else.
-fn inside(root: &str, path: &str) -> CmdResult<PathBuf> {
-    let root = std::fs::canonicalize(root).map_err(|e| format!("{root}: {e}"))?;
-    let p = PathBuf::from(path);
-    let parent = p.parent().ok_or("no parent folder")?;
-    let parent = std::fs::canonicalize(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    if !parent.starts_with(&root) {
-        return Err(format!("{path} is outside the project"));
-    }
-    Ok(parent.join(p.file_name().ok_or("no file name")?))
-}
+// A file path inside `root` (the open project); deleting and renaming go nowhere else.
+use backend::inside;
 
 /// The project's folders (forward slashes), the ones without files too; what `project_files`
 /// leaves out is left out here.

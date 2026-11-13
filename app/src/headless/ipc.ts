@@ -48,7 +48,22 @@ export function frame(msg: Record<string, unknown>, body?: Uint8Array): Uint8Arr
 }
 
 let next = 1;
-const pending = new Map<number, Pending>();
+const pending = new Map<number, Pending & { cmd: string }>();
+
+/** The watchdog: a job that sends and gets nothing for this long (W3PROJ_REBUILD_IDLE_SECS, which the CLI sets) waits
+ *  for something that won't come, a promise nothing settles; it ends with an error saying what it waited for, rather
+ *  than holding the CLI. Every frame either way starts the time again. */
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+let idleMs = 300_000;
+function alive() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    const waiting = [...pending.values()].map((p) => p.cmd);
+    void finish({ error: `nothing happened for ${Math.round(idleMs / 1000)} s${waiting.length ? `, waiting for the CLI's answer to ${waiting.join(", ")}` : " (the job waits for something that never comes)"}` });
+  }, idleMs);
+  // The timer alone doesn't keep the process alive: a job that ended without finishing exits, and the CLI says so.
+  idleTimer.unref?.();
+}
 
 /** Sends a command to the CLI; resolves with its answer (an ArrayBuffer for binary ones), rejects with its error text,
  *  as Tauri's invoke does. */
@@ -64,19 +79,38 @@ export function call(cmd: string, args: unknown, options?: { headers?: Record<st
     msg = { id, cmd, args: args ?? {} };
   }
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, cmd });
+    alive();
     process.stdout.write(frame(msg, body));
   });
 }
 
-/** The job's report to the CLI; the process ends once it is written. */
+let finished = false;
+/** The job's report to the CLI; the process ends once it is written (with 1, said on stderr, when it couldn't be). */
 export function finish(report: unknown): Promise<never> {
-  return new Promise(() => process.stdout.write(frame({ done: report }), () => process.exit(0)));
+  return new Promise(() => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(idleTimer);
+    process.stdout.write(frame({ done: report }), (e) => {
+      if (e) process.stderr.write(`w3proj rebuild: the report couldn't be sent to the CLI: ${e.message}\n`);
+      process.exit(e ? 1 : 0);
+    });
+  });
 }
 
 /** Takes over Tauri's IPC and stdout. Before anything calls the backend. */
 export function install() {
+  const secs = Number(process.env.W3PROJ_REBUILD_IDLE_SECS);
+  if (Number.isFinite(secs) && secs > 0) idleMs = secs * 1000;
+  alive();
+  // The CLI gone (a closed pipe): nothing can be told any more.
+  process.stdout.on("error", (e: Error) => {
+    process.stderr.write(`w3proj rebuild: the pipe to the CLI broke: ${e.message}\n`);
+    process.exit(1);
+  });
   const reader = new FrameReader((msg, body) => {
+    alive();
     const p = pending.get(Number(msg.id));
     if (!p) return;
     pending.delete(Number(msg.id));

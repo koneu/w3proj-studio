@@ -61,7 +61,6 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
   const output = new Map<string, string[]>();
   const commands = new Map<string, (...a: unknown[]) => unknown>();
   const services = new Map<string, unknown>();
-  const waiting = new Map<string, ((v: unknown) => void)[]>();
   const say = (severity: Message["severity"]) => async (text: string) => { messages.push({ severity, text }); return undefined; };
   const subscriptions: Disposable[] = [];
 
@@ -159,12 +158,11 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
     services: {
       provide: (id: string, impl: unknown) => {
         services.set(id, impl);
-        for (const give of waiting.get(id) ?? []) give(impl);
-        waiting.delete(id);
         return { dispose: () => services.delete(id) };
       },
-      // Only what this host's extensions provide; asked for before it's there, it comes when provided.
-      get: (id: string) => (services.has(id) ? Promise.resolve(services.get(id)) : new Promise((give) => waiting.set(id, [...(waiting.get(id) ?? []), give]))),
+      // Only what this host provided before activating the extensions that ask; anything else is refused, as the app
+      // refuses a service no enabled extension provides (a promise that never settled would hold the job).
+      get: (id: string) => (services.has(id) ? Promise.resolve(services.get(id)) : Promise.reject(new Error(`no extension provides ${id} when w3proj runs without the app`))),
     },
   } as unknown as W3Api;
 

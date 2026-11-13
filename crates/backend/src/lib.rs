@@ -225,6 +225,40 @@ pub fn write_file(path: &Path, fill: impl FnOnce(&mut std::fs::File) -> std::io:
     stamp_of(path)
 }
 
+/// A file path inside `root` (the open project), for deleting and renaming: its folder is resolved (links, `..`,
+/// short names), the file name itself isn't, so a link is deleted or moved, not what it points to.
+pub fn inside(root: &str, path: &str) -> CmdResult<PathBuf> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("{root}: {e}"))?;
+    let p = PathBuf::from(path);
+    let parent = p.parent().ok_or("no parent folder")?;
+    let parent = std::fs::canonicalize(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    if !parent.starts_with(&root) {
+        return Err(format!("{path} is outside the project"));
+    }
+    Ok(parent.join(p.file_name().ok_or("no file name")?))
+}
+
+/// Whether a write to `path` lands inside `root`, through any link on the way: the file itself when it is there (a
+/// link is written through to its file), else the deepest folder above it that is there, resolved, must be under the
+/// resolved root. Resolved paths compare in one spelling (case and short names on Windows, links everywhere).
+pub fn write_lands_inside(root: &Path, path: &Path) -> CmdResult<()> {
+    let outside = || format!("{} is outside the project", path.display());
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(outside());
+    }
+    let root = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let mut at = path;
+    loop {
+        match std::fs::canonicalize(at) {
+            Ok(real) => return if real.starts_with(&root) { Ok(()) } else { Err(outside()) },
+            // A link whose target isn't there: a write would make the target, wherever it is.
+            Err(_) if at.symlink_metadata().is_ok() => return Err(outside()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => at = at.parent().ok_or_else(outside)?,
+            Err(e) => return Err(format!("{}: can't be checked: {e}", at.display())),
+        }
+    }
+}
+
 /// A text file; `NOT_UTF8` when it is there but isn't UTF-8 (the workspace tells binary files by it).
 pub fn read_text(path: &Path) -> CmdResult<String> {
     let bytes = std::fs::read(path).map_err(err)?;

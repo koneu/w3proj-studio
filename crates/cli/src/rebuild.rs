@@ -12,6 +12,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -147,32 +149,63 @@ fn due(o: &Options, root: &Path) -> Result<Due> {
 
 // ---------------------------------------------------------------- the host
 
-/// Where the app's code for Node is: a bundle named by W3PROJ_HEADLESS, the one next to this program
-/// (a release), else the checkout this was built from, which bundles its code as it is now.
+/// The bundle's file name, as a release ships it.
+const BUNDLE: &str = "w3proj-headless.mjs";
+
+/// Where a release puts the bundle, seen from this program's folder `exe_dir`: beside it (Windows installers, the
+/// loose download, macOS beside the program), Tauri's resource folder of the installed app (Linux packages and the
+/// AppImage: the program in usr/bin, resources in usr/lib/<the app>/; macOS: ../Resources).
+fn bundle_places(exe_dir: &Path) -> Vec<PathBuf> {
+    let mut out = vec![exe_dir.join(BUNDLE), exe_dir.join("../Resources").join(BUNDLE)];
+    // The app's folder under lib is named by Tauri after the app (its product or program name): every folder there
+    // that holds the bundle counts, so a renamed product still finds it.
+    for name in ["w3proj-studio", "W3Proj Studio"] {
+        out.push(exe_dir.join("../lib").join(name).join(BUNDLE));
+    }
+    if let Ok(entries) = std::fs::read_dir(exe_dir.join("../lib")) {
+        let mut more: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path().join(BUNDLE)).collect();
+        more.sort();
+        out.extend(more);
+    }
+    out
+}
+
+/// Where the app's code for Node is: a bundle named by W3PROJ_HEADLESS, the one a release installs with this
+/// program (`bundle_places`), else the checkout this was built from, which bundles its code as it is now.
 fn host_command(job: &Value) -> Result<Command> {
     let node = std::env::var_os("W3PROJ_NODE").unwrap_or_else(|| "node".into());
     let mut cmd = Command::new(&node);
-    let next_to_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("w3proj-headless.mjs")));
+    let shipped = std::env::current_exe().ok().and_then(|e| e.parent().map(bundle_places)).unwrap_or_default();
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app");
     if let Some(file) = std::env::var_os("W3PROJ_HEADLESS") {
         cmd.arg(file);
-    } else if let Some(file) = next_to_exe.filter(|f| f.is_file()) {
+    } else if let Some(file) = shipped.iter().find(|f| f.is_file()) {
         cmd.arg(file);
     } else if checkout.join("scripts/headless.mjs").is_file() && checkout.join("node_modules/esbuild").is_dir() {
         cmd.arg(checkout.join("scripts/headless.mjs"));
     } else {
         bail!(
-            "w3proj rebuild runs W3Proj Studio's own code in Node.js, and found none of it: put w3proj-headless.mjs next to \
-             this program (node app/scripts/headless.mjs --out <file> makes it), or set W3PROJ_HEADLESS to it"
+            "w3proj rebuild runs W3Proj Studio's own code in Node.js, and found none of it: {BUNDLE} isn't beside this \
+             program or in the installed app's resources. Put it there (node app/scripts/headless.mjs --out <file> makes \
+             it), or set W3PROJ_HEADLESS to it"
         );
     }
     cmd.arg(job.to_string());
     Ok(cmd)
 }
 
+/// How long the host may send nothing before it counts as stuck (W3PROJ_REBUILD_IDLE_SECS changes it). Its own
+/// watchdog (ipc.ts) says sooner what it waited for; this one also catches a host stuck in a loop.
+fn idle_limit() -> Duration {
+    let secs = std::env::var("W3PROJ_REBUILD_IDLE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    Duration::from_secs(secs)
+}
+
 /// Runs the host with `job`, answering its commands until it reports; its report.
 fn run_host(job: &Value, server: &Server) -> Result<Value> {
     let mut cmd = host_command(job)?;
+    let idle = idle_limit();
+    cmd.env("W3PROJ_REBUILD_IDLE_SECS", (idle.as_secs() / 2).max(1).to_string());
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -183,8 +216,8 @@ fn run_host(job: &Value, server: &Server) -> Result<Value> {
             anyhow::anyhow!("can't start {node} ({e}): w3proj rebuild needs Node.js 22 or newer (or W3PROJ_NODE naming it)")
         })?;
     let mut to = child.stdin.take().expect("piped stdin");
-    let mut from = BufReader::new(child.stdout.take().expect("piped stdout"));
-    let report = serve(&mut from, &mut to, server);
+    let frames = read_frames(BufReader::new(child.stdout.take().expect("piped stdout")));
+    let report = serve(&frames, &mut to, server, idle);
     drop(to);
     // Nothing more is answered: a host still running would wait for answers that never come.
     if !matches!(report, Ok(Some(_))) {
@@ -198,27 +231,55 @@ fn run_host(job: &Value, server: &Server) -> Result<Value> {
     }
 }
 
-/// Answers frames from `from` until the report comes (Some) or the pipe ends (None). The frames are
-/// app/src/headless/ipc.ts's.
-fn serve(from: &mut impl BufRead, to: &mut impl Write, server: &Server) -> Result<Option<Value>> {
+/// One frame of app/src/headless/ipc.ts: a JSON line, and the raw bytes its `len` counts.
+type Frame = (Value, Option<Vec<u8>>);
+
+fn read_frame(from: &mut impl BufRead) -> Result<Option<Frame>> {
     let mut line = Vec::new();
-    loop {
-        line.clear();
-        if from.read_until(b'\n', &mut line)? == 0 {
-            return Ok(None);
+    if from.read_until(b'\n', &mut line)? == 0 {
+        return Ok(None);
+    }
+    let msg: Value = serde_json::from_slice(&line).context("a message from Node that isn't JSON")?;
+    let body = match msg.get("len").and_then(Value::as_u64) {
+        Some(n) => {
+            let mut b = vec![0; usize::try_from(n)?];
+            from.read_exact(&mut b)?;
+            Some(b)
         }
-        let msg: Value = serde_json::from_slice(&line).context("a message from Node that isn't JSON")?;
+        None => None,
+    };
+    Ok(Some((msg, body)))
+}
+
+/// The frames from `from`, read on a thread of their own (so waiting for the next has a time limit); the channel
+/// ends after the pipe's end or a broken frame.
+fn read_frames(mut from: impl BufRead + Send + 'static) -> Receiver<Result<Option<Frame>>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || loop {
+        let frame = read_frame(&mut from);
+        let last = !matches!(frame, Ok(Some(_)));
+        if tx.send(frame).is_err() || last {
+            return;
+        }
+    });
+    rx
+}
+
+/// Answers the frames until the report comes (Some) or the pipe ends (None); an error when the host sends nothing
+/// for `idle`.
+fn serve(frames: &Receiver<Result<Option<Frame>>>, to: &mut impl Write, server: &Server, idle: Duration) -> Result<Option<Value>> {
+    loop {
+        let (msg, body) = match frames.recv_timeout(idle) {
+            Ok(frame) => match frame? {
+                Some(f) => f,
+                None => return Ok(None),
+            },
+            Err(RecvTimeoutError::Timeout) => bail!("the rebuild in Node sent nothing for {} s: stopped", idle.as_secs()),
+            Err(RecvTimeoutError::Disconnected) => return Ok(None),
+        };
         if let Some(report) = msg.get("done") {
             return Ok(Some(report.clone()));
         }
-        let body = match msg.get("len").and_then(Value::as_u64) {
-            Some(n) => {
-                let mut b = vec![0; usize::try_from(n)?];
-                from.read_exact(&mut b)?;
-                Some(b)
-            }
-            None => None,
-        };
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let cmd = msg.get("cmd").and_then(Value::as_str).unwrap_or("");
         let args = msg.get("args").cloned().unwrap_or(Value::Null);
@@ -265,8 +326,8 @@ impl Server {
     /// outside it is refused rather than written where nobody asked for a change.
     fn writable(&self, path: &str) -> Result<PathBuf, String> {
         let p = PathBuf::from(path);
-        let inside = p.is_absolute() && p.starts_with(&self.root) && !p.components().any(|c| matches!(c, std::path::Component::ParentDir));
-        if inside { Ok(p) } else { Err(format!("{path} is outside the project: w3proj rebuild writes only the project's files")) }
+        backend::write_lands_inside(&self.root, &p).map_err(|e| format!("{e}: w3proj rebuild writes only the project's files"))?;
+        Ok(p)
     }
 
     pub fn answer(&self, cmd: &str, args: &Value, body: Option<Vec<u8>>) -> Result<Answer, String> {
@@ -353,7 +414,7 @@ mod tests {
         input.extend(format!("{}\n", json!({ "id": 3, "cmd": "no_such_command", "args": {} })).as_bytes());
         input.extend(format!("{}\n", json!({ "done": { "parts": [] } })).as_bytes());
         let mut out = Vec::new();
-        let report = serve(&mut &input[..], &mut out, &server(&dir)).unwrap();
+        let report = serve(&read_frames(std::io::Cursor::new(input)), &mut out, &server(&dir), Duration::from_secs(10)).unwrap();
         assert_eq!(report, Some(json!({ "parts": [] })));
         assert_eq!(std::fs::read(&file).unwrap(), [0, 10, 255]);
         // Answer 1: the stamp; answer 2: the bytes after a line with their length; answer 3: an error.
@@ -398,7 +459,62 @@ mod tests {
     fn a_pipe_that_ends_without_a_report_is_none() {
         let dir = scratch("eof");
         let mut out = Vec::new();
-        assert_eq!(serve(&mut &b""[..], &mut out, &server(&dir)).unwrap(), None);
+        assert_eq!(serve(&read_frames(std::io::Cursor::new(Vec::new())), &mut out, &server(&dir), Duration::from_secs(10)).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A host that sends nothing (stuck on a promise that never settles, or in a loop) stops the job after the
+    /// idle limit instead of holding it for good.
+    #[test]
+    fn a_host_that_sends_nothing_is_stopped() {
+        let dir = scratch("idle");
+        let (_tx, rx) = mpsc::channel::<Result<Option<Frame>>>();
+        let started = std::time::Instant::now();
+        let e = serve(&rx, &mut Vec::new(), &server(&dir), Duration::from_millis(200)).unwrap_err();
+        assert!(e.to_string().contains("sent nothing"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bundle of an installed app is found beside the program and in Tauri's resource folder (Linux packages:
+    /// usr/bin and usr/lib/<app>/), whatever the app's folder there is called.
+    #[test]
+    fn the_shipped_bundle_is_found_beside_the_program_and_in_the_resources() {
+        let dir = scratch("places");
+        let bin = dir.join("usr").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(dir.join("usr/lib/Some App")).unwrap();
+        std::fs::write(dir.join("usr/lib/Some App").join(BUNDLE), "").unwrap();
+        let found: Vec<_> = bundle_places(&bin).into_iter().filter(|p| p.is_file()).collect();
+        assert_eq!(found.len(), 1, "{found:?}");
+        std::fs::write(bin.join(BUNDLE), "").unwrap();
+        assert_eq!(bundle_places(&bin).into_iter().find(|p| p.is_file()), Some(bin.join(BUNDLE)), "beside the program wins");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A link inside the project to a file or folder outside it doesn't let a write land outside.
+    #[cfg(unix)]
+    #[test]
+    fn writes_through_links_out_of_the_project_are_refused() {
+        let dir = scratch("links");
+        let away = std::env::temp_dir().join(format!("w3proj-rebuild-away-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::create_dir_all(&away).unwrap();
+        std::fs::write(away.join("victim.shd"), "keep").unwrap();
+        std::os::unix::fs::symlink(away.join("victim.shd"), dir.join("map/war3map.shd")).unwrap();
+        std::os::unix::fs::symlink(&away, dir.join("linked")).unwrap();
+        std::os::unix::fs::symlink(away.join("missing.txt"), dir.join("map/dangling.txt")).unwrap();
+        let s = server(&dir);
+        for p in [dir.join("map/war3map.shd"), dir.join("linked/new.txt"), dir.join("linked/deeper/new.txt"), dir.join("map/dangling.txt")] {
+            let e = s.answer("fs_write_text", &json!({ "path": p.to_string_lossy(), "text": "x" }), None).err();
+            assert!(e.as_deref().is_some_and(|e| e.contains("outside the project")), "{} was written: {e:?}", p.display());
+        }
+        assert_eq!(std::fs::read_to_string(away.join("victim.shd")).unwrap(), "keep");
+        assert!(!away.join("new.txt").exists() && !away.join("deeper").exists() && !away.join("missing.txt").exists());
+        // Control: a new file in a new folder inside the project is written.
+        let fresh = dir.join(".w3proj/new/ok.txt");
+        assert!(s.answer("fs_write_text", &json!({ "path": fresh.to_string_lossy(), "text": "x" }), None).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&away);
     }
 }

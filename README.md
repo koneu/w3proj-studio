@@ -479,8 +479,8 @@ w3proj game cat Units/UnitMetaData.slk
 files again, so `w3proj pack` takes them. It runs the app's own generators, not a copy of them: the TypeScript in
 `app/src/headless` runs in Node.js 22 or newer and asks the CLI for files, codecs and game data over a pipe, which the
 CLI answers with the same Rust as the app (`crates/backend`). In a checkout the CLI bundles that code itself
-(`app/scripts/headless.mjs`, needs `npm ci` in `app/`); elsewhere it runs `w3proj-headless.mjs` next to the program
-(made by `node app/scripts/headless.mjs --out w3proj-headless.mjs`) or the file `W3PROJ_HEADLESS` names; `W3PROJ_NODE`
+(`app/scripts/headless.mjs`, needs `npm ci` in `app/`); elsewhere it runs `w3proj-headless.mjs` next to the program or in the installed app's resources (the
+installers ship it; made by `node app/scripts/headless.mjs --out w3proj-headless.mjs`) or the file `W3PROJ_HEADLESS` names; `W3PROJ_NODE`
 names another node. Shadows are calculated in whole (as Calculate Shadows does); a script that isn't the one Studio
 wrote last is kept, and vJASS isn't compiled. A rebuild is recorded in `.w3proj/derived-from.json` only when pathing,
 shadows and the minimap all follow the terrain and doodads.
