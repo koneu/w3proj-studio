@@ -15,6 +15,8 @@
 // so the scale is held to the most first, then to the least. The game's tree bridges (LTt0, LTt1, ATt0, …) list
 // minScale and maxScale twice in DestructableSkin.txt (0.8 and 1, then 1 and 0.8): the editor takes the first of
 // each, 0.8 to 1 (0.5 to 0.8, 2 and 1.5 to 1, 0.8 and 0.9 kept; objects.ts parses the skin tables so).
+// - the life byte (we-drive, verification round 3 package 8b, doodad-life spec): a destructable's is held to 100
+//   (0, 1, 50, 100 kept; 101, 200, 255 saved as 100), every doodad's is saved as 255 (100, 50, 0 too).
 // Not tried: only one axis 0; a 0 of a type whose range is the wrong way round.
 
 /** A placed type's scale rule: its object data file (w3d doodads, w3b destructables) and its range. */
@@ -51,20 +53,30 @@ export function savedScale(scale: readonly [number, number, number], rule: Scale
   return [one(scale[0]), one(scale[1]), one(scale[2])];
 }
 
+/** The life byte the World Editor writes for a doodad (`kind` w3d) or destructable (w3b) stored with `life`; other
+ *  kinds keep theirs. */
+export function savedLife(life: number, kind: string | undefined): number {
+  if (kind === "w3d") return 255;
+  if (kind === "w3b") return Math.min(life, 100);
+  return life;
+}
+
 /** A doodad as the rules read it. */
-export interface RuledDoodad { id: string; position: readonly number[]; scale: [number, number, number]; flags?: number }
+export interface RuledDoodad { id: string; position: readonly number[]; scale: [number, number, number]; flags?: number; life?: number }
 
 /** The doodads of a list whose scale or flags the World Editor would write otherwise, with what it writes. `ruleOf`:
  *  an id's scale rule (null: the type has none, the scale stays); `outside`: whether a place is outside the playable
- *  area (null: not known, the flags stay). */
+ *  area (null: not known, the flags stay); `kindOf`: an id's object kind for the life rule (absent or undefined: the
+ *  life stays). */
 export function doodadFixes<T extends RuledDoodad>(list: readonly T[], ruleOf: (id: string) => ScaleRule | null,
-  outside: ((x: number, y: number) => boolean) | null, random: () => number = Math.random): { entry: T; scale: [number, number, number]; flags: number | undefined }[] {
-  const out: { entry: T; scale: [number, number, number]; flags: number | undefined }[] = [];
+  outside: ((x: number, y: number) => boolean) | null, random: () => number = Math.random, kindOf?: (id: string) => string | undefined): { entry: T; scale: [number, number, number]; flags: number | undefined; life: number | undefined }[] {
+  const out: { entry: T; scale: [number, number, number]; flags: number | undefined; life: number | undefined }[] = [];
   for (const entry of list) {
     const rule = ruleOf(entry.id);
     const scale = rule ? savedScale(entry.scale, rule, random) : entry.scale;
     const flags = entry.flags !== undefined && outside ? savedFlags(entry.flags, outside(entry.position[0], entry.position[1])) : entry.flags;
-    if (flags !== entry.flags || scale.some((v, i) => v !== entry.scale[i])) out.push({ entry, scale, flags });
+    const life = entry.life !== undefined && kindOf ? savedLife(entry.life, kindOf(entry.id)) : entry.life;
+    if (flags !== entry.flags || life !== entry.life || scale.some((v, i) => v !== entry.scale[i])) out.push({ entry, scale, flags, life });
   }
   return out;
 }

@@ -1,0 +1,33 @@
+{
+  "name": "doodad-life",
+  "description": "p8b item 6: life byte of destructables (LTbr, LTt0) and doodads (LOch) with 0,1,50,100,101,200,255; WE saves destructables at min(life,100), doodads at 255; Studio's Fix Doodads on Load does the same on open (doodadrules.ts savedLife); expected MATCH",
+  "input": {
+    "map": "${REPO}/tests/fixtures/doodad-life-we/L.w3x"
+  },
+  "studio": {
+    "steps": [
+      {
+        "setting": [
+          "script.generateOnSave",
+          false
+        ]
+      },
+      {
+        "terrain": true
+      },
+      {
+        "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+      },
+      {
+        "sleep": 2000
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3map.doo",
+      "as": "parsed"
+    }
+  ],
+  "limit": 30
+}

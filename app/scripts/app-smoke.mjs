@@ -5707,7 +5707,7 @@ async function doodadSnapOnLoad(page, found) {
     if (!same(storedFixes.LOtr, [f(0.75), f(0.75), f(1.25), 2]) || storedFixes.LOfl?.[3] !== 1) fail(`the stored scales and flags aren't the test's (control): ${JSON.stringify(storedFixes)}`);
     const fixedLive = scaleFlags(await live());
     for (const [id, want] of Object.entries(FIXED)) if (!same(fixedLive[id], want)) fail(`fix on load: ${id} has scale and flags ${JSON.stringify(fixedLive[id])}, not ${JSON.stringify(want)}`);
-    if (!/Set the scale or flags of 8 doodads/.test(await toasts())) fail(`no note of the 8 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
+    if (!/Set the scale, flags or life of 8 doodads/.test(await toasts())) fail(`no note of the 8 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("saving with nothing changed wrote the doodad file");
