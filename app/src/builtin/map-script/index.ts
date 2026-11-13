@@ -8,7 +8,7 @@ import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPl
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { changesToA } from "./linediff";
+import { changesToA, eachChangeLastFirst } from "./linediff";
 import { getChunks, goToNextChunk, goToPreviousChunk, MergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -471,7 +471,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // each of which it diffs inside; the unchanged lines are folded once the chunks are known.
           view = new MergeView({ a: { doc: made.text, extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, gutter: true });
           const edits = changesToA(current ?? "", made.text);
-          if (edits.length) view.a.dispatch({ changes: edits });
+          // One transaction per hunk: many in one are merged by the merge view into a single chunk.
+          const typed = view;
+          eachChangeLastFirst(edits, (c) => typed.a.dispatch({ changes: c }));
           view.reconfigure({ collapseUnchanged: { margin: 3, minSize: 6 } });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };

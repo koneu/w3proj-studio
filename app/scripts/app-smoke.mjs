@@ -9908,6 +9908,25 @@ async function objectManagerLive(page, found) {
     await rows("omlive", "omlive", true, "after the Sound Editor closed unsaved the Object Manager doesn't show the saved sound");
     if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail(`closing the editors left unsaved files: ${await page.evaluate(`w3.editors.unsavedPaths().join(", ")`)}`);
 
+    // ---- Two Sound Editors (the json file, a raw w3s): the Object Manager lists the sounds of the one that is shown. ----
+    {
+      const raw = { ...sound, name: "gg_snd_omraw", variableName: "gg_snd_omraw", file: "war3mapImported\\omraw.wav" };
+      await page.evaluate(`w3.backend.invoke("codec_write", { root: ${JSON.stringify(k.root)}, path: "map/war3map.w3s", text: ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [raw] }))} }).then(() => w3.workspace.refresh())`);
+      const show = (path) => page.evaluate(`w3.editors.open(${JSON.stringify(path)}, "w3.soundEditor")`);
+      await show("map/war3map.w3s");
+      await until("the raw sound editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3s"`), 20000).catch(() => fail("the raw Sound Editor didn't open"));
+      await show("map/war3map.w3s.json");
+      await until("the json sound editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3s.json"`), 20000).catch(() => fail("the json Sound Editor didn't open"));
+      await rows("omlive", "omlive", true, "two Sound Editors open, the json one shown: the Object Manager doesn't list its sound");
+      await rows("omraw", "omraw", false, "two Sound Editors open, the json one shown: the Object Manager lists the other one's sound");
+      await show("map/war3map.w3s");
+      await rows("omraw", "omraw", true, "switched to the raw Sound Editor: the Object Manager doesn't list its sound");
+      await rows("omlive", "omlive", false, "switched to the raw Sound Editor: the Object Manager still lists the json editor's sound");
+      await show("map/war3map.w3s.json");
+      await rows("omlive", "omlive", true, "switched back to the json Sound Editor: the Object Manager doesn't list its sound");
+      await page.evaluate(`w3.editors.close("map/war3map.w3s"); w3.editors.close("map/war3map.w3s.json")`);
+    }
+
     // ---- While filtering, a click on a group row leaves it as it was: closed once the filter is cleared. -----------------
     await omHas("Om Live", "Om Live Trigger");
     const clicked = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".om-row")].find((e) => e.querySelector(".tree-label")?.textContent.startsWith("Triggers (")); if (!r) return false; r.click(); return true; })()`);
