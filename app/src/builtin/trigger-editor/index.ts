@@ -323,8 +323,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const game = doc.path.startsWith("game:");
         const custom = game ? null : await readWctFile(w3.workspace, textTriggers(file).length);
-        const wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
-        const strings = wtsText !== null ? new StringTable(wtsText) : null;
+        let wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
         // Ids that show up later (new parameters) are looked up on demand; the view redraws once.
         const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
@@ -387,7 +387,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           save,
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
-          watches: game ? [] : [WCT_TEXT, WCT_RAW],
+          // The string table gives the texts of TRIGSTR_ parameters: saved by another editor, they are shown again
+          // in place (nothing is edited, selection and scroll stay). A table that can't be read keeps the old texts.
+          watches: game ? [] : [WCT_TEXT, WCT_RAW, WTS],
+          reloadFile: async (path: string) => {
+            if (path !== WTS) return false;
+            const text = await w3.workspace.readText(WTS).catch(() => null);
+            if (view.closed) return true;
+            if (text === null || text === wtsText) return true;
+            wtsText = text;
+            strings = new StringTable(text);
+            view.refresh();
+            return true;
+          },
           dispose: () => {
             view.dispose();
             if (openView === view) { openView = null; kinds.edits.fire(); }
@@ -992,7 +1004,11 @@ class TriggerView {
   }
 
   /** Redraws the selected item (e.g. after names were looked up). */
-  refresh() { this.renderDetail(); }
+  refresh() {
+    const top = this.detail.scrollTop;
+    this.renderDetail();
+    this.detail.scrollTop = top;
+  }
 
   // ---- undo -------------------------------------------------------------------------
   // A snapshot holds the tree's open and closed categories as they were. Undo and redo keep the tree as it is, except
