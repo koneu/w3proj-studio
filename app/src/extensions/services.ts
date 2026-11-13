@@ -556,6 +556,10 @@ export interface TriggerGuiService {
 
 export const TRIGGER_GUI_SERVICE = "w3.triggers.gui";
 
+/** One check's part of a Problems run: what it reported (without the ignored), how many the ignore file left out,
+ *  and why it failed if it did. */
+export interface CheckedGroup { id: string; title: string; problems: Problem[]; ignored: number; error?: string }
+
 /** "w3.problems", provided by the Problems view: checks of the open project (like compiler
  *  errors), shown in a list and run before packing. Extensions add their own checks. */
 export interface ProblemsService {
@@ -563,8 +567,10 @@ export interface ProblemsService {
   /** Runs every check; the view shows the result. Resolves with all problems found. */
   run(): Promise<Problem[]>;
   /** Like `run`, and says how many reports the project's ignore file (.w3proj/problems-ignore.json) left out of
-   *  the result, and why it was not applied if that file is there but can't be read (then nothing is left out). */
-  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null }>;
+   *  the result, and why it was not applied if that file is there but can't be read (then nothing is left out).
+   *  `checks`: the same by check, with the reason of a check that failed (it found nothing, which isn't "no
+   *  problems"); `w3proj check` prints them. Empty when the run's results weren't the open project's. */
+  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[] }>;
   /** The result of the last run. */
   problems(): Problem[];
 }
