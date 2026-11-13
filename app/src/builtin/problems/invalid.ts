@@ -4,6 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "../../lib/objects/metadata";
+import { parseRandomId } from "../../lib/objects/randomids";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
 
@@ -16,9 +17,9 @@ interface PlacedEntry { id: string; position: number[] }
 /** The placement files: where each kind of object lives. */
 export const PLACEMENT_FILES = [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const;
 
-/** Random units/items/buildings ("uDNR", "iDNR", "bDNR") and random items by level ("YiI1"): no type
- *  of their own, the game makes the choice. */
-export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.test(id);
+/** Random units/items/buildings ("uDNR", "iDNR", "bDNR") and the random-by-level ids `parseRandomId`
+ *  knows ("YYU3", "YYB/", "YiI1"): no type of their own, the game makes the choice. */
+export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || parseRandomId(id) !== undefined;
 
 /** Every type id placed objects may have, and which placement file each belongs in. `gameOk` is
  *  false when the game's object data could not be read: then "unknown" only means "not loaded". */
