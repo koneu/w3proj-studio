@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type Rgb } from "./minimap";
-import { minimapBase, minimapObjects, modelTextureColor, smallestMipColor } from "./minimapgen";
+import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type PathMask, type Rgb } from "./minimap";
+import { minimapBase, minimapObjects, modelTextureColor, smallestMipColor, textureOrder } from "./minimapgen";
 import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
 
@@ -193,8 +193,63 @@ test("minimapObjects: shown types in their minimap colour or their model's, as b
   assert.ok(dots(3) > 6 * dots(1) && dots(1) > 0, `${dots(3)} vs ${dots(1)}`);
 });
 
+/** A pathing texture from rows of "#" (a non-black cell) and "." (black), row 0 north. */
+const maskOf = (rows: string[]): PathMask => ({ width: rows[0].length, height: rows.length, cells: Uint8Array.from(rows.join(""), (c) => (c === "#" ? 1 : 0)) });
+/** PathTextures\Gate1Path.tga (20 × 4, all cells) and StoneWall2Path.tga (10 × 10, a diagonal from the north-west). */
+const GATE1 = maskOf(Array(4).fill("#".repeat(20)));
+const WALL2 = maskOf(Array.from({ length: 10 }, (_, r) => ".".repeat(r - (r % 2)) + "##" + ".".repeat(8 - (r - (r % 2)))));
+
+test("minimapObjects: a gate or wall texture is drawn as its cells, a texture of one full square as a dot", async () => {
+  const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "1", MMRed: "9", MMGreen: "8", MMBlue: "7", pathTex });
+  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["odd", row("PathTextures\\Gone.tga")]]);
+  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
+  const objects = await minimapObjects(
+    ["gate", "tree", "odd"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number], angle: 4.5 })),
+    { rows, bases: new Map(), modelColor: async () => null, footprint: async (path) => (path.includes("Gate") ? 2.2 : 1), pathMask: async (path) => masks[path] ?? null });
+  assert.deepEqual(objects, [
+    { x: 0, y: 64, rgb: [9, 8, 7], mask: GATE1, angle: 4.5 },
+    { x: 128, y: 64, rgb: [9, 8, 7], size: 1 },
+    { x: 256, y: 64, rgb: [9, 8, 7], size: 1 },
+  ]);
+});
+
+test("a gate is a strip of its texture's cells, turned by the angle (the textures are drawn for 270 degrees)", () => {
+  // SnowareBay's ITx1 gates (20 × 4 cells, angle 270 degrees) are strips 5 tiles wide and one tall in the editor's
+  // export, 18 × 2 pixels for two of them side by side at 1.88 px per tile; a grey disc was drawn before.
+  const t = flat(20, 20);
+  const draw = (object: { size?: number; mask?: PathMask; angle?: number }) => {
+    const rgba = renderMinimap({ terrain: t, margins: [0, 0, 0, 0], tileColor: () => [100, 100, 100], waterColor: [0, 0, 192], params: { blurPasses: 0, groundNoise: 0 }, objects: [{ x: 1280, y: 1280, rgb: [255, 0, 255], ...object }] });
+    const lit: [number, number][] = [];
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) if (rgba[(y * 256 + x) * 4 + 1] === 0 && rgba[(y * 256 + x) * 4] === 255) lit.push([x, y]);
+    const xs = lit.map((p) => p[0]), ys = lit.map((p) => p[1]);
+    return { n: lit.length, w: Math.max(...xs) - Math.min(...xs) + 1, h: Math.max(...ys) - Math.min(...ys) + 1, lit };
+  };
+  // 12.8 px per tile: 64 × 13 pixels at 270 degrees, 13 × 64 turned a quarter.
+  const flatStrip = draw({ mask: GATE1, angle: (3 * Math.PI) / 2 });
+  assert.deepEqual([flatStrip.w, flatStrip.h, flatStrip.n], [64, 13, 64 * 13]);
+  const turned = draw({ mask: GATE1, angle: Math.PI });
+  assert.deepEqual([turned.w, turned.h], [13, 64]);
+  // Control: the dot a texture of that size gave before is no strip.
+  const dot = draw({ size: 2.2 });
+  assert.ok(Math.abs(dot.w - dot.h) <= 1, `${dot.w} × ${dot.h}`);
+  // A diagonal wall (StoneWall2Path: the north-west and the south-east corners): at 270 degrees the picture's top left.
+  const wall = draw({ mask: WALL2, angle: (3 * Math.PI) / 2 }).lit;
+  const [cx, cy] = [128, 128];
+  const in_ = (dx: number, dy: number) => wall.some(([x, y]) => x === cx + dx && y === cy + dy);
+  assert.deepEqual([in_(-12, -12), in_(12, 12), in_(12, -12), in_(-12, 12)], [true, true, false, false]);
+});
+
+test("textureOrder: a model's colour comes from the texture its geosets' materials show, not a particle texture first", () => {
+  // IceGate.mdx: texture 0 is Clouds8x8 (its particles), texture 1 the walls', which its one material's layer shows.
+  const gate = { textures: [{}, {}], geosets: [{ materialId: 0 }], materials: [{ layers: [{ textureIds: [1] }] }] };
+  assert.deepEqual(textureOrder(gate), [1, 0]);
+  assert.deepEqual(textureOrder({ ...gate, geosets: [] }), [0, 1], "no geoset: the file's order");
+  assert.deepEqual(textureOrder({ textures: [{}, {}, {}], geosets: [{ materialId: 0 }, { materialId: 3 }], materials: [{ layers: [{ textureIds: [2] }, { textureIds: [2] }] }] }), [2, 0, 1], "once each; a missing material counts for none");
+});
+
 test("minimapObjects: a destructable placed dead (life 0) isn't drawn, as on the editor's minimap", async () => {
-  // SnowareBay's 205 Northrend tree walls are placed dead: the editor's export shows none of the 54 standing alone.
+  // SnowareBay's 205 Northrend tree walls are placed dead: the editor's export shows 77 of them, none of the 54
+  // standing alone beside each other (why isn't known: minimapgen.ts).
   const rows = new Map([["NTtw", { showInMM: "1", useMMColor: "1", MMRed: "32", MMGreen: "48", MMBlue: "32", pathTex: "PathTextures\\4x4Default.tga" }]]);
   const objects = await minimapObjects([
     { id: "NTtw", position: [0, 0, 0], life: 0 },

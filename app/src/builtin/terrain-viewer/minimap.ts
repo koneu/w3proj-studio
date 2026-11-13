@@ -19,7 +19,11 @@
 // - a doodad or destructable shown on the minimap (showInMM) is a dot in its
 //   minimap colour (useMMColor), else in its model's texture's smallest mip
 //   colour (the Lordaeron rocks grey, the Ruins rocks green), as big as its
-//   pathing texture (a 4×4 one, trees: about a tile; rock spires 12×12: three).
+//   pathing texture (a 4×4 one, trees: about a tile; rock spires 12×12: three);
+// - a gate, a wall or a rock spire (a pathing texture that isn't one full square) is drawn as its texture's cells
+//   (non-black ones, 4 per tile), turned by its angle (the textures are drawn for 270°): SnowareBay's gates are strips
+//   5 tiles by 1 and 22×22 diagonals in the editor's export (we-drive 2026-11-13, and on a probe map of isolated
+//   objects), in the colour of the gate model's wall texture, not a grey disc.
 // Where and how sharp, measured on the editor's Export Minimap of seven maps (2026-11-13: HillsbradCreek, TurtleRock,
 // MurgulOasis, Deadlock, SnowareBay, NorthernIsles, cliff.w3m; we-drive --export-minimap):
 // - the drawn area is whole pixels: the larger side fills the picture, the other is rounded down and centred;
@@ -71,7 +75,12 @@ export interface MinimapInput {
   icons?: { x: number; y: number; image: { width: number; height: number; rgba: ArrayLike<number> }; tint?: Rgb }[];
 }
 
-export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number }
+/** A pathing texture's cells (4 per tile; row 0 north) that block something. */
+export interface PathMask { width: number; height: number; cells: Uint8Array }
+
+/** `mask` (the object's pathing texture) is drawn as it is, turned by `angle` (radians, as placed: the textures
+ *  are drawn for 270°); without it a dot of `size` tiles stands for the object. */
+export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number; mask?: PathMask; angle?: number }
 
 /** How big a preview icon is on a 256 pixel minimap. */
 export const ICON_SIZE = 16;
@@ -214,6 +223,24 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const rad = P.objectRadius * scale;
   for (const o of input.objects) {
     const [cx, cy] = at(o.x, o.y);
+    const m = o.mask;
+    if (m) {
+      // The pathing texture's cells, each pixel by its sample point (its bottom-left corner), turned back by the angle.
+      const turn = o.angle === undefined ? 0 : o.angle + Math.PI / 2, cos = Math.cos(turn), sin = Math.sin(turn);
+      const reach = Math.hypot(m.width, m.height) / 8, rx = reach * frame.scale[0] + 1, ry = reach * frame.scale[1] + 1;
+      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+        for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+          if (x < 0 || y < 0 || x >= N || y >= N || !drawn(x, y)) continue;
+          const dx = (x - cx) / frame.scale[0], dy = (cy - (y + 1)) / frame.scale[1];
+          const lx = dx * cos + dy * sin, ly = dy * cos - dx * sin;
+          const col = Math.floor(lx * 4 + m.width / 2), row = Math.floor(m.height / 2 - ly * 4);
+          if (col < 0 || row < 0 || col >= m.width || row >= m.height || !m.cells[row * m.width + col]) continue;
+          img.set(o.rgb, (y * N + x) * 3);
+          grain[y * N + x] = 0;
+        }
+      }
+      continue;
+    }
     const rad = P.objectRadius * scale * (o.size ?? 1);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
