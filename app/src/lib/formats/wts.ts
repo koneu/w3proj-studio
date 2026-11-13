@@ -2,7 +2,7 @@
 // Edits replace only the text of changed blocks, so the rest of the file
 // (comments, order, line endings) stays byte-identical.
 
-/** A header `STRING <digits> [// …\n]* {` + `\r?\n`: where it starts, where its digits are, its number, where its
+/** A header `STRING <digits> [// …\n]* {` + `\r*\n`: where it starts, where its digits are, its number, where its
  *  text starts. */
 interface Header { at: number; digits: number; digitsEnd: number; num: number; end: number }
 
@@ -14,7 +14,7 @@ function isSpace(c: number): boolean {
 
 /** The parser's searches over one text, read by hand rather than by regex: they match exactly what these did
  *  (each is deterministic, nothing to backtrack into)
- *    header:   /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/
+ *    header:   /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r*\n/
  *    close:    /\r?\n\}/
  *    unclosed: /\}(?=\r?\n(?:[ \t]*\r?\n)*<header>)/  (a `}` ending a text line, the next header right after it)
  *  but a run of `//` lines is read once however many header searches meet it (every `STRING` inside the run starts
@@ -61,9 +61,11 @@ export class WtsReader {
     if (digitsEnd === digits) return null;
     const p = this.comments(this.skipSpace(digitsEnd));
     if (t.charCodeAt(p) !== 0x7b) return null; // {
-    const end = t.startsWith("\r\n", p + 1) ? p + 3 : t.charCodeAt(p + 1) === 0x0a ? p + 2 : -1;
-    if (end < 0) return null;
-    return { at, digits, digitsEnd, num: Number(t.slice(digits, digitsEnd)), end };
+    // `\r*\n`: a stray carriage return before the line feed (`{\r\r\n`) still ends the header line, as the game reads it
+    let q = p + 1;
+    while (t.charCodeAt(q) === 0x0d) q++;
+    if (t.charCodeAt(q) !== 0x0a) return null;
+    return { at, digits, digitsEnd, num: Number(t.slice(digits, digitsEnd)), end: q + 1 };
   }
 
   /** The first header from `from`. */
@@ -151,9 +153,15 @@ export function wtsCutLines(value: string): number[] {
   lines.forEach((l, i) => { if (l.startsWith("}")) out.push(i + 1); });
   if (out.length) return out;
   const norm = value.replace(/\r\n/g, "\n");
-  const back = new StringTable(`STRING 1\n{\n${norm}\n}\n`).get(1);
-  if (back === norm) return [];
-  return [Math.min(lines.length, (back ?? "").split("\n").length)];
+  // Read back as a file with either line end writes it. A text ending in a lone `\r` loses that `\r` to the `\r\n}` of
+  // a file with `\n` line ends (the close takes it): nothing is cut, so that isn't refused.
+  for (const eol of ["\n", "\r\n"]) {
+    const want = norm.replace(/\n/g, eol);
+    const back = new StringTable(`STRING 1${eol}{${eol}${want}${eol}}${eol}`).get(1);
+    if (back === want || (eol === "\n" && back !== undefined && `${back}\r` === want)) continue;
+    return [Math.min(lines.length, (back ?? "").split("\n").length)];
+  }
+  return [];
 }
 
 /** The text changed so it is read back whole: a space before every line that starts with `}`, and after a
