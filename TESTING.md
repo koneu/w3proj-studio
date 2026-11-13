@@ -513,6 +513,21 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   editor draws a cliff hollow exactly there, so the position fits; Studio's model shows as a hard-edged flat grass
   square with tan rock on it (lowprio-bugs). Not compared: facing and height of other types. The editor's picture is
   dark on its left half there (outside the camera bounds), Studio's isn't.
+- **Border shade** (branch border-shade-models, 2026-11-13; copies of empty_map_on_newest_world_editor.w3m made with
+  app-drive's MCP tools and packed with the CLI: a tree, a hay cart, a footman, claws of attack, a start location and a
+  YCl2 three tiles inside (x -2944) and three tiles past the west edge (x -3712), a raised plateau and a lake across the
+  edge; a second copy with trees, footmen every 64, a farm and a hay cart across the corner line x -3328; a bare copy for
+  the models' masks; `--look x,y,1200,270,70,90` from above, SD and HD, game view on and off). Past the edge the share of
+  its brightness a model keeps (the median over its pixels): the SD ground 0.149, the HD ground 0.088; a cliff fades
+  across the edge as the ground does, per pixel; a special doodad 0.146 (as the ground); units, items, start locations
+  0 (black) in both modes; SD doodads and trees black, HD ones about as the ground (a tree 0.107, a hay cart 0.071).
+  Whole models, not per pixel: a footman or SD tree on the corner line is lit, one 64 further out black; an HD tree on
+  the line is shaded whole, an HD hay cart 32 inside lit; a farm on the line is lit, its ground texture too. The water
+  past the edge is black. Studio: renderer.ts `edgeMode`, lib/model/renderer.ts EdgeShade; app-smoke specialDoodads
+  holds it. AutumnLeaves_S2's left edge (`--look -6272,-5248,1200`, game view; pic-compare region 200,0,380,700, past the
+  edge): the editor's mean colour (10, 10, 8) SD and (7, 6, 4) HD; Studio's before (59, 55, 34) and (71, 66, 39), after
+  (9, 8, 5) and (13, 12, 6), mean absolute differences 42.9 to 6.8 (SD) and 53.7 to 6.7 (HD); inside the playable part
+  unchanged (0.1 and 1.7, animation). Studio's HD border ground keeps more than the editor's (0.20 against 0.088; open).
 
 ## Process
 

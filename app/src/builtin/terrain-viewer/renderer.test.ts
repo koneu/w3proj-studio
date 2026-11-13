@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
-import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
+import { borderShade } from "../../lib/terrain/area";
+import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
+import { castsSunShadow, edgeMode, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -12,6 +14,36 @@ test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline 
   assert.equal(castsSunShadow({ group: "shoreline", instances: one }), false);
   assert.equal(castsSunShadow({ group: "units", instances: one, tint: [1, 1, 1, 0.5] }), false, "a start building's see-through look");
   assert.equal(castsSunShadow({ group: "units", instances: [] }), false);
+});
+
+test("past the playable map cliffs and specials shade as the ground, placed models go black (doodads as the ground in HD)", () => {
+  for (const tone of [1, 2] as const) {
+    assert.equal(edgeMode({ group: "cliffs", followGround: true }, tone), "pixel", `cliffs, tone ${tone}`);
+    // The special doodads: drawn with the doodads, standing on the ground's height map.
+    assert.equal(edgeMode({ group: "doodads", followGround: true }, tone), "pixel", `specials, tone ${tone}`);
+    assert.equal(edgeMode({ group: "units" }, tone), "tile", `units, items and start locations, tone ${tone}`);
+    assert.equal(edgeMode({ group: "shoreline" }, tone), "tile", `the shore's waves, tone ${tone}`);
+  }
+  assert.equal(edgeMode({ group: "doodads" }, 1), "tile", "SD doodads and trees");
+  assert.equal(edgeMode({ group: "doodads" }, 2), "object", "HD doodads and trees");
+});
+
+test("the border shade's texel in a tile's middle is shaded exactly where the tile lies past the playable map", () => {
+  // The "tile" mode reads it (lib/model/renderer.ts instanceEdge): 4 texels a tile, the middle one at 4 t + 2.
+  const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [2, 1, 1, 2]);
+  const marks = mapEdgeTiles(t), { rgba, width } = borderShade(t);
+  let past = 0;
+  for (let ty = 0; ty < 6; ty++) for (let tx = 0; tx < 8; tx++) {
+    const shaded = rgba[((4 * ty + 2) * width + 4 * tx + 2) * 4 + 3] > 0;
+    assert.equal(shaded, marks[ty * 8 + tx] === 1, `tile ${tx}, ${ty}`);
+    if (shaded) past++;
+  }
+  // The marks round the playable 5 by 3 tiles.
+  assert.equal(past, 48 - 15);
+  // A tile's edge texel is shaded beside a marked tile (the fade over the first playable cell), its middle not.
+  assert.ok(rgba[((4 * 3 + 2) * width + 4 * 2) * 4 + 3] > 0);
+  assert.equal(rgba[((4 * 3 + 2) * width + 4 * 2 + 2) * 4 + 3], 0);
 });
 
 const b = (group: string, name: string) => ({ group, name });

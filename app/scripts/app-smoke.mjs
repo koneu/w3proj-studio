@@ -2657,6 +2657,7 @@ async function specialDoodads(page, found) {
     const before = hash(join(k.root, "map", "war3map.doo.json"));
     await k.save();
     if (hash(join(k.root, "map", "war3map.doo.json")) !== before) fail("saving after only looking changed the doodad file");
+    await borderShadeOfModels(page, k, doo, offset, fail);
   } finally {
     await page.evaluate(`window.__spGroup?.dispose(); window.__spGroup = null; window.__spEd = null;`);
   }
@@ -2665,6 +2666,94 @@ async function specialDoodads(page, found) {
   } finally {
     await restoreWindow(page);
   }
+}
+
+/** The border's shade over the models past the playable map (renderer.ts edgeStrength, as the World Editor's): a
+ *  special doodad there darkens as the ground under it, a footman goes black, and the same two inside the playable map
+ *  don't change. Each is looked at from above, with the Boundary switch on, off, and off with its group hidden (which
+ *  pixels are the model's); the ratio of the model's pixels with and without the shade is set against the ground's. */
+async function borderShadeOfModels(page, k, doo, offset, fail) {
+  const ed = "window.__spEd";
+  const tile = (n) => n * 128;
+  // The new map's playable part starts 6 tiles in from the west (newmap.ts MARGINS).
+  const edgeX = offset[0] + tile(6);
+  doo.specials = [{ id: "YCl2", z: 0, x: 1, y: 24 }, { id: "YCl2", z: 0, x: 20, y: 24 }];
+  await page.evaluate(`w3.workspace.writeText("map/war3map.doo.json", ${JSON.stringify(JSON.stringify(doo, null, 2))})`);
+  await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
+  const feet = [[offset[0] + tile(3), offset[1] + tile(40)], [offset[0] + tile(20), offset[1] + tile(40)]];
+  await k.tool("place_objects", { objects: feet.map(([x, y]) => ({ id: "hfoo", x, y, player: 1 })), ignoreRoom: true });
+  const animate = await k.setting("terrain.animate");
+  await page.evaluate(`w3.settings.set("terrain.animate", false)`);
+  const toggle = (layer) => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer(${JSON.stringify(layer)}))()`);
+  const boundary = (on) => page.evaluate(`w3.settings.set("terrain.boundary", ${on})`);
+  try {
+    let specials = [];
+    await until("the two specials across the edge drawn", async () => {
+      specials = await page.evaluate(`${ed}?.drawnSpecials() ?? []`);
+      return specials.length === 2 && specials.some((s) => s.x < edgeX) && specials.some((s) => s.x > edgeX);
+    }, 30000).catch(() => { throw new Error(`the specials across the edge aren't drawn: ${JSON.stringify(specials)}`); });
+    await until("both footmen drawn", async () => (await page.evaluate(`${ed}.drawnUnits().filter((u) => u.id === "hfoo").length`)) === 2, 30000);
+    const looks = [
+      ...specials.map((s) => ({ what: `the special at ${Math.round(s.x)}`, x: s.x, y: s.y, z: s.z, group: "doodads", past: s.x < edgeX, black: false, distance: 1100 })),
+      ...feet.map(([x, y]) => ({ what: `the footman at ${x}`, x, y, z: 0, group: "units", past: x < edgeX, black: true, distance: 600 })),
+    ];
+    for (const l of looks) {
+      await page.evaluate(`${ed}.setView({ target: [${l.x}, ${l.y}, ${l.z}], yaw: -Math.PI / 2, pitch: Math.PI / 2 - 0.001, distance: ${l.distance} })`);
+      await boundary(true);
+      const shaded = await settledMapPicture(page);
+      await boundary(false);
+      const plain = await settledMapPicture(page);
+      await toggle(l.group);
+      const without = await settledMapPicture(page);
+      await toggle(l.group);
+      const r = await shadeRatios(page, shaded, plain, without);
+      if (r.pixels < 200) { fail(`${l.what}: only ${r.pixels} of its pixels found`); continue; }
+      const got = `the model keeps ${r.model.toFixed(3)} of its colour under the shade, the ground ${r.ground.toFixed(3)} (${r.pixels} pixels)`;      if (!l.past) { if (r.model < 0.95) fail(`${l.what}, inside the playable map, changed with the border's shade: ${got}`); continue; }
+      if (!(r.ground < 0.3)) fail(`${l.what}: the ground past the edge isn't shaded: ${got}`);
+      if (l.black ? r.model > 0.06 : Math.abs(r.model - r.ground) > 0.06) fail(`${l.what}, past the playable map, isn't ${l.black ? "black" : "shaded as the ground"}: ${got}`);
+    }
+  } finally {
+    await boundary(true);
+    await page.evaluate(`w3.settings.set("terrain.animate", ${JSON.stringify(animate ?? true)})`);
+    await k.reset();
+  }
+}
+
+/** Under the border's shade (pictures with the Boundary switch on and off, and off without the model's group): the
+ *  median share of its brightness a model's pixel keeps (pixels the group changes, not those it only darkens: its
+ *  shadow), and the ground's (pixels it leaves alone). */
+function shadeRatios(page, shaded, plain, without) {
+  return page.evaluate(`(async () => {
+    const pixels = async (data) => {
+      const i = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + data; });
+      const c = document.createElement("canvas"); c.width = i.width; c.height = i.height;
+      const g = c.getContext("2d"); g.drawImage(i, 0, 0);
+      return g.getImageData(0, 0, i.width, i.height).data;
+    };
+    const [a, b, c] = await Promise.all([${JSON.stringify(shaded)}, ${JSON.stringify(plain)}, ${JSON.stringify(without)}].map(pixels));
+    const w = (await new Promise((ok) => { const i = new Image(); i.onload = () => ok(i.width); i.src = "data:image/png;base64," + ${JSON.stringify(plain)}; }));
+    const lum = (p, k) => 0.299 * p[k] + 0.587 * p[k + 1] + 0.114 * p[k + 2];
+    const model = [], box = [Infinity, Infinity, -Infinity, -Infinity];
+    const diff = (k) => Math.abs(b[k] - c[k]) + Math.abs(b[k + 1] - c[k + 1]) + Math.abs(b[k + 2] - c[k + 2]);
+    for (let k = 0; k < b.length; k += 4) {
+      const darker = b[k] <= c[k] + 4 && b[k + 1] <= c[k + 1] + 4 && b[k + 2] <= c[k + 2] + 4;
+      if (diff(k) <= 60 || darker || lum(b, k) <= 25) continue;
+      model.push(lum(a, k) / lum(b, k));
+      const x = (k / 4) % w, y = Math.floor(k / 4 / w);
+      box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+    }
+    // The ground round the model (its box and 24 pixels more), which the group leaves alone: not the view's far parts,
+    // which can lie inside the playable map or off the terrain.
+    const ground = [];
+    for (let y = Math.max(0, box[1] - 24); y <= box[3] + 24 && y < b.length / 4 / w; y++) {
+      for (let x = Math.max(0, box[0] - 24); x <= box[2] + 24 && x < w; x++) {
+        const k = (y * w + x) * 4;
+        if (diff(k) < 10 && lum(b, k) > 25) ground.push(lum(a, k) / lum(b, k));
+      }
+    }
+    const median = (list) => (list.sort((x, y) => x - y), list.length ? list[list.length >> 1] : NaN);
+    return { pixels: model.length, model: median(model), ground: median(ground) };
+  })()`);
 }
 
 /** The see-through town hall at a start location follows it (move by MCP, undo) and shows on melee maps only

@@ -6,7 +6,7 @@ import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -468,6 +468,19 @@ export interface ObjectBatch {
  *  with View > Shadows on and off (we-drive, 2026-11-09). */
 export function castsSunShadow(b: Pick<ObjectBatch, "group" | "instances" | "tint" | "followGround">): boolean {
   return b.instances.length > 0 && !b.tint && !b.followGround && b.group !== "cliffs" && b.group !== "shoreline";
+}
+
+/** How a batch's models take the border's shade past the playable map (EdgeShade's mode). The World Editor (we-drive,
+ *  game view on and off, branch border-shade-models, 2026-11-13; TESTING.md "Border shade"): the cliffs and the special
+ *  doodads, which are the ground's, as the ground and per pixel ("pixel": a cliff fades across the edge as the ground,
+ *  three tiles past it a hollow keeps 0.146 of its colour, the SD ground 0.149); units, items and start locations black,
+ *  whole, when the tile under them lies past the edge ("tile": a footman at the edge's corner line is lit, one 64
+ *  further out black, in both modes); doodads and trees so in SD, and in HD the whole model as the ground at its origin
+ *  ("object": a tree on the corner line is shaded whole, a hay cart 32 inside lit; three tiles out a tree keeps 0.107,
+ *  a hay cart 0.071, the HD ground 0.088). The shore's waves lie on the border's black water: black. */
+export function edgeMode(b: Pick<ObjectBatch, "group" | "followGround">, tone: Tone): EdgeShade["mode"] {
+  if (b.group === "cliffs" || b.followGround) return "pixel";
+  return b.group === "doodads" && tone === 2 ? "object" : "tile";
 }
 
 interface Mesh {
@@ -1098,6 +1111,23 @@ export class TerrainRenderer {
   /** The marks the border's shade was made from. */
   private borderMarks: Uint8Array | null = null;
 
+  /** Where the border's texture lies in the world (x, y, width, height): its texels sit on the pathing cells' corners
+   *  (borderShade), half a cell past the terrain's rim. */
+  private borderRect(): [number, number, number, number] {
+    const t = this.terrain, half = 16;
+    return [t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half];
+  }
+
+  /** The border's shade for the placed models (EdgeShade: cliffs, doodads, specials, units, items, start locations,
+   *  the shore's waves), from the ground's own texture, so what's shaded as the ground fades out over the same first
+   *  playable cell; each batch takes it as edgeMode says. Null when the ground's shade isn't drawn (Boundary off, or
+   *  no textured ground). */
+  private edgeShade(textured: boolean): EdgeShade | null {
+    if (!textured || !this.showBorder || !this.border) return null;
+    // Four texels a tile (borderShade: one per pathing cell's corner).
+    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel" };
+  }
+
   /** The overlay program, compiled the first time; null once the context is gone (the editor closed
    *  while a file was still being read for a layer): a shader can't compile then, and nothing is drawn anyway. */
   private overlayProgram(): WebGLProgram | null {
@@ -1598,9 +1628,9 @@ export class TerrainRenderer {
       // The border is part of the map, and fades with it. What a tool shows has to stay readable.
       setFog(gl, (name) => gl.getUniformLocation(this.overlayProg as WebGLProgram, name), layer === this.border ? fog : null);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
-      // The border's texels sit on the pathing cells' corners (borderShade), the layers' on the cells.
-      const half = layer === this.border ? 16 : 0;
-      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half);
+      // The border's texels sit on the pathing cells' corners (borderRect), the layers' on the cells.
+      const rect = layer === this.border ? this.borderRect() : [t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128];
+      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), rect[0], rect[1], rect[2], rect[3]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
@@ -1671,13 +1701,17 @@ export class TerrainRenderer {
     }
 
     // Placed objects (gathered and posed above): every opaque layer, then every blended one; each model once per layer
-    // for all its instances in view.
+    // for all its instances in view. Past the playable map they're shaded as the ground there, by the same texture.
+    const edge = this.edgeShade(textured);
+    const edges = new Map<EdgeShade["mode"], EdgeShade>();
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
         const light = (b.group === "units" ? unitLight : terrainLight) ?? undefined;
         // A see-through batch is blended whole, after everything opaque (which then shows through it).
         if (b.tint && pass === "opaque") continue;
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun });
+        const mode = edgeMode(b, this.tone);
+        const shade = edge && (edges.get(mode) ?? edges.set(mode, { ...edge, mode }).get(mode));
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun, edge: shade });
       }
     }
     if (this.showEffects || this.showWeather) {
