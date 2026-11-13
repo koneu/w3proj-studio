@@ -8,6 +8,7 @@
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
 import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
+import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -473,6 +474,8 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   if (!listed) throw new Error("This map has no string table (war3map.wts).");
   // There but unreadable is an error, not an empty table.
   const table = new StringTable(await w3.workspace.readText(WTS));
+  // Numbers an earlier drop recorded stay free: a reference to one can come back (a record that can't be read refuses).
+  const reserved = reservedStringIds(await readPrunedStrings(w3), table);
   let ids: Map<number, number>;
   if (given !== undefined) {
     if (!Array.isArray(given) || !given.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) {
@@ -488,7 +491,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
       ...nums.map((n) => ({ label: `STRING ${n}`, description: (table.get(n) ?? "").split(/\r?\n/)[0].slice(0, 80), value: n })),
     ], { placeholder: "Adjust Map String IDs: which string gets a new ID?" });
     if (picked?.value === undefined) return 0;
-    if (picked.value === ALL) ids = compactStringIds(table);
+    if (picked.value === ALL) ids = compactStringIds(table, 1, reserved);
     else {
       const typed = await w3.window.inputBox({ prompt: `New ID for string ${picked.value} (its references in the map follow)`, value: String(picked.value) });
       if (typed === undefined) return 0;
@@ -497,7 +500,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
     }
   }
   for (const [from, to] of [...ids]) if (from === to) ids.delete(from);
-  checkStringIds(table, ids);
+  checkStringIds(table, ids, reserved);
   if (!ids.size) { void w3.window.showInfo("Nothing to change: the strings keep their IDs."); return 0; }
   // A raw map file can't be changed as text: a reference in it would be left pointing at another string.
   const raw: string[] = [];
@@ -513,8 +516,9 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   const done = await edits.edit("Adjust Map String IDs", async (read) => {
     const wts = await read(WTS);
     if (wts === null) throw new Error("The map's string table (war3map.wts) is gone.");
-    // Read again: what was asked is checked against the table as it is now.
-    checkStringIds(new StringTable(wts), ids);
+    // Read again: what was asked is checked against the table and the record as they are now.
+    const now = new StringTable(wts);
+    checkStringIds(now, ids, reservedStringIds(await readPrunedStrings(w3), now));
     const out = [{ path: WTS, text: renumberWts(wts, ids) }];
     for (const path of texts) {
       const text = await read(path);
