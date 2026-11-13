@@ -5370,12 +5370,13 @@ async function testMapWithoutGame(page, found) {
  *  doodads on their grids as the World Editor does, without marking the map as changed or writing anything; the next
  *  save writes them so. With the setting off nothing moves and the save keeps the stored places. On copies of the mini
  *  map with a barrel (2×2) off its grid, a hay cart (4×2) at 10°, mushrooms (no pathing texture) off any grid; the
- *  mini map's own LOtr (4×2 at 0°, at -64, 32) goes to -32, 64 and its tree ATtr (4×4, on its grid) stays.
+ *  mini map's own LOtr (4×2 at 0°, at -64, 32) goes to -32, 64 and its tree ATtr (4×4, on its grid) stays there, turned from 1.5 rad to its fixed 270°.
  *  Fix Doodads on Load (terrain.doodads.fixOnLoad, doodadrules.ts) the same way: the barrel (1.1 to 1.5) stored at
  *  scale 1 gets 1.1, LOtr (0.8 to 1.2) at 0.75, 0.75, 1.25 gets 0.8, 0.8, 1.2, every doodad outside the mini map's
  *  playable area (x 0 to 128, y 64) gets flag 3, a flower bed (LOfl) inside it stored with flag 1 gets 2, the hay
- *  cart on its edge keeps 2. Both off:
- *  scales and flags stay as stored, opened and saved. */
+ *  cart on its edge keeps 2. The facing: a tree LTlt (fixedRot 270) at 30° turns to 270° (not with the map's object
+ *  data unreadable), wheel ruts LOrb at -90° to 270°; an LTex whose range the map's w3b turns round (1.5 to 1.1) at
+ *  scale 2 gets 1.5. Both off: scales, flags and facings stay as stored, opened and saved. */
 async function doodadSnapOnLoad(page, found) {
   const fail = (what) => found.push(`doodad snap on load: ${what}`);
   const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad", TXT = "map/war3map.w3e.txt";
@@ -5393,15 +5394,26 @@ async function doodadSnapOnLoad(page, found) {
     add("LOch", [32, 64, 0], ten, 51);
     add("APms", [13.5, 7.25, 0], 0.5, 52);
     add("LOfl", [96, 64, 0], 0.5, 53, 1);
+    // The facing (verification round 3 package 6): a tree (fixedRot 270) at 30° turns to 270, wheel ruts (no texture)
+    // at -90° to 270; both on their grid. An LTex whose range the map turns round (1.5 to 1.1) at scale 2 gets 1.5.
+    add("LTlt", [-128, -128, 0], f32((30 * Math.PI) / 180), 54);
+    add("LOrb", [-200, -200, 0], f32(-Math.PI / 2), 55);
+    add("LTex", [-96, -96, 0], 4.712389, 56);
+    doo.doodads.at(-1).scale = [2, 2, 2];
     writeFileSync(file, JSON.stringify(doo, null, 2));
+    writeFileSync(join(root, "map", "war3map.w3b.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [
+      { base: "LTex", end: "LTex", mods: [{ field: "bmis", type: "unreal", value: 1.5 }, { field: "bmas", type: "unreal", value: 1.1 }] }], custom: [] }, null, 2));
     return root;
   };
+  const f32 = Math.fround;
+  const TURNED = f32((3 * Math.PI) / 2);
   const xyAngle = (list) => Object.fromEntries((list ?? []).map((d) => [d.id, [d.position[0], d.position[1], d.angle]]));
   const scaleFlags = (list) => Object.fromEntries((list ?? []).map((d) => [d.id, [...d.scale.map((v) => Math.fround(v)), d.flags]]));
   const f = Math.fround;
   /** Fix Doodads on Load's scales and flags (single precision, as stored). */
   // The hay cart at 32, 64 is on the playable area's edge (y 64): inside, flag 2 stays.
-  const FIXED = { LTbr: [f(1.1), f(1.1), f(1.1), 3], LOtr: [f(0.8), f(0.8), f(1.2), 3], LOch: [1, 1, 1, 2], APms: [1, 1, 1, 3], ATtr: [1, 1, 1, 3], LOfl: [1, 1, 1, 2] };
+  const FIXED = { LTbr: [f(1.1), f(1.1), f(1.1), 3], LOtr: [f(0.8), f(0.8), f(1.2), 3], LOch: [1, 1, 1, 2], APms: [1, 1, 1, 3], ATtr: [1, 1, 1, 3], LOfl: [1, 1, 1, 2],
+    LTlt: [1, 1, 1, 3], LOrb: [1, 1, 1, 3], LTex: [f(1.5), f(1.5), f(1.5), 3] };
   const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
   const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
@@ -5441,22 +5453,27 @@ async function doodadSnapOnLoad(page, found) {
     if (!same(snapped.LOtr?.slice(0, 2), [-32, 64])) fail(`LOtr (4×2 at 0°) is at ${JSON.stringify(snapped.LOtr)}, not -32, 64`);
     if (!same(snapped.LOch, [32, 64, 0])) fail(`the hay cart at 10° is at ${JSON.stringify(snapped.LOch)}, not 32, 64 turned to 0`);
     if (!same(snapped.APms, stored.APms)) fail(`the mushrooms (no pathing texture) moved: ${JSON.stringify(snapped.APms)}`);
-    if (!same(snapped.ATtr, stored.ATtr)) fail(`the tree on its grid moved: ${JSON.stringify(snapped.ATtr)}`);
+    // The mini map's tree (fixedRot 270) stands on its grid at 1.5 rad: it only turns.
+    if (!same(snapped.ATtr, [...stored.ATtr.slice(0, 2), TURNED])) fail(`the tree on its grid (fixedRot 270, at 1.5 rad) is at ${JSON.stringify(snapped.ATtr)}, not turned to 270°`);
+    if (!same(snapped.LTlt, [-128, -128, TURNED])) fail(`the tree LTlt (fixedRot 270) stored at 30° is at ${JSON.stringify(snapped.LTlt)}, not turned to 270°`);
+    if (!same(snapped.LOrb, [-200, -200, TURNED])) fail(`the wheel ruts stored at -90° are at ${JSON.stringify(snapped.LOrb)}, not at 270°`);
     if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the snap marked the map as changed");
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("opening wrote the doodad file");
-    if (!/Put 3 doodads on their grid/.test(await toasts())) fail(`no note of the 3 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
+    if (!/Put 6 doodads on their grid/.test(await toasts())) fail(`no note of the 6 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
     const storedFixes = scaleFlagsOnDisk(on);
     if (!same(storedFixes.LOtr, [f(0.75), f(0.75), f(1.25), 2]) || storedFixes.LOfl?.[3] !== 1) fail(`the stored scales and flags aren't the test's (control): ${JSON.stringify(storedFixes)}`);
     const fixedLive = scaleFlags(await live());
     for (const [id, want] of Object.entries(FIXED)) if (!same(fixedLive[id], want)) fail(`fix on load: ${id} has scale and flags ${JSON.stringify(fixedLive[id])}, not ${JSON.stringify(want)}`);
-    if (!/Set the scale or flags of 5 doodads/.test(await toasts())) fail(`no note of the 5 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
+    if (!/Set the scale or flags of 8 doodads/.test(await toasts())) fail(`no note of the 8 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("saving with nothing changed wrote the doodad file");
     await saveAfterEdit();
     const written = onDisk(on);
-    for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(written[id], snapped[id])) fail(`the save after an edit wrote ${id} at ${JSON.stringify(written[id])}, not where it was put ${JSON.stringify(snapped[id])}`);
-    for (const id of ["APms", "ATtr"]) if (!same(written[id], stored[id])) fail(`the save moved ${id} to ${JSON.stringify(written[id])}`);
+    // Angles as the file stores them (single precision): the JSON writes 4.712389 for the 4.71238899230957 held.
+    const asStored = (p) => p && [p[0], p[1], f(p[2])];
+    for (const id of ["LTbr", "LOtr", "LOch", "LTlt", "LOrb", "ATtr"]) if (!same(asStored(written[id]), asStored(snapped[id]))) fail(`the save after an edit wrote ${id} at ${JSON.stringify(written[id])}, not where it was put ${JSON.stringify(snapped[id])}`);
+    for (const id of ["APms"]) if (!same(written[id], stored[id])) fail(`the save moved ${id} to ${JSON.stringify(written[id])}`);
     const writtenFixes = scaleFlagsOnDisk(on);
     for (const [id, want] of Object.entries(FIXED)) if (!same(writtenFixes[id], want)) fail(`the save after an edit wrote ${id} with scale and flags ${JSON.stringify(writtenFixes[id])}, not ${JSON.stringify(want)}`);
 
@@ -5468,6 +5485,10 @@ async function doodadSnapOnLoad(page, found) {
     const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
     for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${JSON.stringify(brokenLive[id])}, not the map's ${JSON.stringify(brokenStored[id])}`);
     for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
+    // The map's own data may change a fixed rotation too: the tree keeps its 30°; other angles still come into 0..360.
+    const brokenAt = xyAngle(await live());
+    if (brokenAt.LTlt?.[2] !== onDisk(broken).LTlt[2]) fail(`with the map's object data unreadable the tree LTlt turned to ${brokenAt.LTlt?.[2]}`);
+    if (brokenAt.LOrb?.[2] !== TURNED) fail(`with the map's object data unreadable the wheel ruts at -90° are at ${brokenAt.LOrb?.[2]}, not 270°`);
 
     // ---- off ----
     await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, false); w3.settings.set(${JSON.stringify(FIX)}, false)`);
@@ -5477,7 +5498,7 @@ async function doodadSnapOnLoad(page, found) {
     await settled(page);
     await sleep(1500);
     const shown = xyAngle(await live());
-    for (const id of ["LTbr", "LOtr", "LOch", "APms", "ATtr"]) if (!same(shown[id], kept[id])) fail(`with the setting off ${id} is at ${JSON.stringify(shown[id])}, not where the map has it ${JSON.stringify(kept[id])}`);
+    for (const id of ["LTbr", "LOtr", "LOch", "APms", "ATtr", "LTlt", "LOrb"]) if (!same(shown[id], kept[id])) fail(`with the setting off ${id} is at ${JSON.stringify(shown[id])}, not where the map has it ${JSON.stringify(kept[id])}`);
     if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("with the setting off the map is marked as changed");
     if (/on their grid/.test(await toasts())) fail(`with the setting off it still says it put doodads on their grid: ${(await toasts()).slice(0, 300)}`);
     if (/scale or flags/.test(await toasts())) fail(`with Fix Doodads on Load off it still says it set scales or flags: ${(await toasts()).slice(0, 300)}`);
@@ -5501,7 +5522,7 @@ async function doodadSnapOnLoad(page, found) {
  *  10° at 480, 320 facing 0; Number pad 6 nudges the barrel a grid step (96; off: 48); a Position X typed 40 further
  *  goes to the grid point next to it; a Scale X typed 1.25 gives all three axes 1.25 (a destructable's x for all;
  *  off: only x), then 2 gives 1.5, and one undo takes that back to 1.25; move_object to 100, 100 with scale 0.5 lands
- *  at 96, 96 with 1.1. Each edit is checked in the saved file. */
+ *  at 96, 96 with 1.1; wheel ruts placed facing -90° face 270° (off: -90°). Each edit is checked in the saved file. */
 async function doodadRulesEdit(page, found) {
   const fail = (what) => found.push(`doodad rules on edit: ${what}`);
   const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad";
@@ -5515,9 +5536,11 @@ async function doodadRulesEdit(page, found) {
       await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, ${on ? "undefined" : "false"}); w3.settings.set(${JSON.stringify(FIX)}, ${on ? "undefined" : "false"})`);
       const k = await heightKit(page, on ? "RulesOn" : "RulesOff");
       const find = (id) => k.doodads().find((d) => d.id === id);
-      await k.tool("place_objects", { objects: [{ id: "LTbr", x: 40, y: 40, scale: 3 }, { id: "LOch", x: 500, y: 300, facing: 10 }], ignoreRoom: true });
+      await k.tool("place_objects", { objects: [{ id: "LTbr", x: 40, y: 40, scale: 3 }, { id: "LOch", x: 500, y: 300, facing: 10 }, { id: "LOrb", x: 900, y: 900, facing: -90 }], ignoreRoom: true });
       await k.save();
-      const barrel = find("LTbr"), cart = find("LOch");
+      const barrel = find("LTbr"), cart = find("LOch"), ruts = find("LOrb");
+      // The facing comes into 0..360 as the World Editor saves it (doodadgrid.ts): wheel ruts at -90° face 270°.
+      if (f(ruts?.angle) !== (on ? f((3 * Math.PI) / 2) : f(-Math.PI / 2))) say(`the wheel ruts placed facing -90° face ${ruts?.angle}`);
       if (!same(xy(barrel), on ? [32, 32] : [40, 40]) || !same(sc(barrel), on ? [1.5, 1.5, 1.5] : [3, 3, 3])) say(`the placed barrel is at ${JSON.stringify(xy(barrel))} with scale ${JSON.stringify(barrel?.scale)}`);
       if (!same(xy(cart), on ? [480, 320] : [500, 300]) || f(cart?.angle) !== (on ? 0 : f((10 * Math.PI) / 180))) say(`the placed hay cart is at ${JSON.stringify(xy(cart))} facing ${cart?.angle}`);
       if (!barrel) return;
@@ -9247,6 +9270,9 @@ async function triggersAndAi(page, found) {
     await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
     await until("the AI Editor", () => page.evaluate(`!!document.querySelector(".ai-tabs")`), 20000).catch((e) => fail(e.message));
     await settled(page);
+    // The World Editor's saved new AI is 1312 bytes, with two test players (verification round 3 package 6).
+    const newBytes = existsSync(wai) ? readFileSync(wai) : Buffer.alloc(0);
+    if (newBytes.length !== 1312) fail(`the new AI file is ${newBytes.length} bytes, the World Editor's new AI 1312`);
     const addErr = await k.run("w3.ai.addToMap");
     if (addErr) fail(`Add To Map: ${addErr}`);
     const script = join(k.root, "map", "Scripts", "Smoke Raider.ai");

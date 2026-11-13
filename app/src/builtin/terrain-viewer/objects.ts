@@ -211,7 +211,11 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   const rowsOf = new Map<string, Record<string, string>[]>();
   const rows = (table: string) => rowsOf.get(table) ?? rowsOf.set(table, parseSlk(tables.get(table) ?? "")).get(table)!;
   for (const [f, kind] of SKIN_FILES) {
-    const sections = parseIni(tables.get(f) ?? "");
+    // In the doodad and destructable tables a key given twice keeps its first value, as the World Editor reads them:
+    // the tree bridges' minScale and maxScale (0.8 and 1, then 1 and 0.8) are 0.8 to 1 (doodadrules.ts). Their only
+    // other twice-given key is DoodadSkins.txt's defScale, unused here. UnitSkin.txt's twice-given modelScales weren't
+    // compared with the editor: they keep the last.
+    const sections = parseIni(tables.get(f) ?? "", { firstWins: kind === "w3d" || kind === "w3b" });
     const own = new Map<string, Skin>();
     for (const [id, sec] of sections) {
       const get = (k: string) => artValue((key) => sec.get(key), k, mode);
@@ -343,6 +347,15 @@ export function scaleRange(skin: Pick<Skin, "kind" | "minScale" | "maxScale">): 
   if (skin.kind !== "w3d" && skin.kind !== "w3b") return undefined;
   const { minScale: lo, maxScale: hi } = skin;
   return Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi >= lo ? [lo, hi] : undefined;
+}
+
+/** The range a doodad's or destructable's scale is saved within (doodadrules.ts ScaleRule), its type's minScale and
+ *  maxScale, also the wrong way round (then the least wins); undefined for units, items and ranges that aren't two
+ *  positive numbers. */
+export function savedScaleRange(skin: Pick<Skin, "kind" | "minScale" | "maxScale">): readonly [number, number] | undefined {
+  if (skin.kind !== "w3d" && skin.kind !== "w3b") return undefined;
+  const { minScale: lo, maxScale: hi } = skin;
+  return Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi > 0 ? [lo, hi] : undefined;
 }
 
 /** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than

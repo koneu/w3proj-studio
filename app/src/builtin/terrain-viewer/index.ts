@@ -31,7 +31,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -2586,6 +2586,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
         const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
+        /** A destructable type's fixed rotation (degrees; the map's bfxr on top), which the World Editor turns its
+         *  destructables to; null for none and for doodads, whose own it doesn't enforce (doodadgrid.ts). */
+        const destructableFixedRot = (id: string): number | null => { const s = skinById(id); return s?.kind === "w3b" ? s.fixedRot : null; };
         /** The World Editor's rules for a doodad being placed, moved, turned or scaled (doodadedit.ts), as the settings
          *  have them now. A type whose pathing size isn't read yet stays where it is asked to be. */
         const doodadRules = (): DoodadRuleSource => ({
@@ -2593,9 +2596,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           fix: fixesDoodads() && scalesKnown,
           size: (id) => (isDoodadType(id) ? doodadCells.get(id) : null),
           scaleRule: (id) => {
-            const skin = skinById(id), range = skin ? scaleRange(skin) : undefined;
+            const skin = skinById(id), range = skin ? savedScaleRange(skin) : undefined;
             return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
           },
+          fixedRot: (id) => (scalesKnown ? destructableFixedRot(id) : null),
         });
         /** Where a doodad moved or turned to (x, y, angle) goes by the rules; units and items as asked. */
         const ruledPose = (id: string, x: number, y: number, angle: number) => (isDoodadType(id) ? doodadPose(doodadRules(), id, x, y, angle) : { x, y, angle });
@@ -2612,8 +2616,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return changed;
         };
-        /** Puts the doodads of the map just opened on their grids, as the World Editor does when it opens a map
-         *  (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
+        /** Puts the doodads of the map just opened on their grids and facings (a destructable's fixed rotation, angles
+         *  into 0..360), as the World Editor does when it opens a map (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
          *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
          *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
         async function snapOnOpen(f: PlacedFile) {
@@ -2625,7 +2629,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
           if (disposed || dooFile !== f) return;
-          const snaps = doodadSnaps(f.list, (id) => doodadCells.get(id) ?? null);
+          // A fixed rotation the map's own data may change isn't known while that data can't be read: angles only
+          // come into 0..360 then.
+          const snaps = doodadSnaps(f.list, (id) => doodadCells.get(id) ?? null, scalesKnown ? destructableFixedRot : () => null);
           for (const { entry, x, y, angle } of snaps) {
             const moved = x !== entry.position[0] || y !== entry.position[1];
             if (moved) {
@@ -2637,7 +2643,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!snaps.length) return;
           objectsTouched = true;
           const n = snaps.length;
-          void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
+          void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid and facing, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
         }
         /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
          *  (doodadrules.ts; setting terrain.doodads.fixOnLoad): the scale in its type's range, the outside flag from
@@ -2655,7 +2661,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
           const fixes = doodadFixes(f.list as (Placed & { flags?: number })[], (id) => {
             if (!scales) return null;
-            const skin = skins.get(id), range = skin ? scaleRange(skin) : undefined;
+            const skin = skins.get(id), range = skin ? savedScaleRange(skin) : undefined;
             return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
           }, edge ? (x, y) => !inArea(x, y, edge) : null);
           for (const { entry, scale, flags } of fixes) {

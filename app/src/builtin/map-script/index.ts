@@ -69,6 +69,8 @@ interface GameTables {
   heroAbilities: Set<string>;
   orders: Map<string, AbilityOrders>;
   unitColors: Map<string, number>;
+  /** The game's item types' team colours (ItemData teamColor). */
+  itemColors: Map<string, number>;
   /** The game's unit types that allow a custom team colour (lib/script/objects gameCustomColors). */
   customColors: Set<string>;
   worldEdit: Map<string, Map<string, string>>;
@@ -95,10 +97,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const orders = abilityOrders(await Promise.all(ABILITY_FUNC_FILES.map(async (f) => parseIni(await text(f)))));
       const abilityRows = parseSlk(await text("Units\\AbilityData.slk"));
       const unitUI = parseSlk(await text("Units\\unitUI.slk"));
+      const itemRows = parseSlk(await text("Units\\ItemData.slk"));
       return {
         data: parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")),
         buildings: new Set(balance.filter((r) => r.isbldg === "1").map((r) => r.unitBalanceID)),
-        items: new Set(parseSlk(await text("Units\\ItemData.slk")).map((r) => r.itemID)),
+        items: new Set(itemRows.map((r) => r.itemID)),
+        itemColors: gameTeamColors(itemRows, "itemID"),
         abilities: new Set(abilityRows.map((r) => r.alias)),
         heroAbilities: new Set(abilityRows.filter((r) => r.hero === "1").map((r) => r.alias)),
         orders,
@@ -189,6 +193,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       : json<ObjectFile>(`map/war3map${skin ? "Skin" : ""}.${kind}`)), campaign !== undefined);
     const unitFiles = objectFiles.w3u;
     const colors = teamColors(unitFiles, g.unitColors), special = specialUnits(unitFiles);
+    const itemColors = teamColors(objectFiles.w3t, g.itemColors, "itco");
     const isBuilding = buildingTypes(unitFiles, g.buildings);
     const customAbilities = customIdsOf(objectFiles.w3a), customItems = customIdsOf(objectFiles.w3t);
     const heroAbility = heroAbilities(objectFiles.w3a, g.heroAbilities);
@@ -217,7 +222,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const soundDuration = await soundDurations(sounds.map((s) => s.file), path, campaign);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), itemColor: (id) => itemColors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
       customColor: customColorTypes(unitFiles, g.customColors),
       lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,

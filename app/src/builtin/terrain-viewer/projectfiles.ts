@@ -18,9 +18,14 @@ export async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, str
     try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
   };
   const art: ObjectArt[] = [];
-  // A campaign's chapter map also uses the campaign's custom objects.
+  // A campaign's chapter map also uses the campaign's custom objects, and its Skin files' changes (Curse of the
+  // Forsaken's war3campaignSkin.w3b frees IOt0's fixed rotation, which the doodad rules turn destructables to).
   const campaign = campaignRoot(w3);
-  if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
+  if (campaign) {
+    for (const prefix of ["war3campaign", "war3campaignSkin"]) {
+      for (const k of kinds) { const f = await read(joinPath(campaign, "map", `${prefix}.${k}.json`), k); if (f) art.push(f); }
+    }
+  }
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   const unread: string[] = [];
   for (const prefix of ["war3map", "war3mapSkin"]) {

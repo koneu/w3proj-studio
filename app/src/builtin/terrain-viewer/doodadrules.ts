@@ -10,8 +10,12 @@
 // - the flags: bit 0 is set outside the playable area (the edge itself is inside: x 3328 of a playable -3328..3328
 //   isn't outside, 3328.5 is), cleared inside; bit 1 is always set (0 and 1 are saved as 2, 4 and 5 as 6); bit 2
 //   (a height of its own) stays. Higher bits weren't tried and are left as they are.
-// Not tried: a type whose minScale is above its maxScale (the game's tree bridges LTt0 have both orders), so no
-// range is taken from one (objects.ts scaleRange); only one axis 0.
+// A type whose minScale is above its maxScale (we-drive, verification round 3 package 6): the least wins, every scale
+// is saved at it (a map's LTex at 1.5 to 1.1: 1, 1.3, 2 and 1.1 all to 1.5; a doodad LPfp at 1.4 to 0.9 likewise),
+// so the scale is held to the most first, then to the least. The game's tree bridges (LTt0, LTt1, ATt0, …) list
+// minScale and maxScale twice in DestructableSkin.txt (0.8 and 1, then 1 and 0.8): the editor takes the first of
+// each, 0.8 to 1 (0.5 to 0.8, 2 and 1.5 to 1, 0.8 and 0.9 kept; objects.ts parses the skin tables so).
+// Not tried: only one axis 0; a 0 of a type whose range is the wrong way round.
 
 /** A placed type's scale rule: its object data file (w3d doodads, w3b destructables) and its range. */
 export interface ScaleRule { kind: string; min: number; max: number }
@@ -34,8 +38,10 @@ export function savedScale(scale: readonly [number, number, number], rule: Scale
   const one = (v: number): number => {
     if (Number.isNaN(v)) return min;
     if (v === 0) return min + random() * (max - min);
+    // Held to the most, then to the least: a range the wrong way round saves everything at its least.
     const f = Math.fround(v);
-    return f < lo ? min : f > hi ? max : v;
+    const held = f > hi ? max : v;
+    return Math.fround(held) < lo ? min : held;
   };
   if (rule.kind === "w3b") {
     const s = one(scale[0]);

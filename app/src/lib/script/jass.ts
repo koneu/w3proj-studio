@@ -63,6 +63,8 @@ export interface ScriptInput {
   kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | "ability" | undefined;
   /** Team colour a unit type has in the map's object data (lib/script/objects). */
   teamColor?: (id: string) => number | undefined;
+  /** Team colour an item type has: ItemData's teamColor changed by the map's object data (lib/script/objects, itco). */
+  itemColor?: (id: string) => number | undefined;
   /** Whether a custom unit type is a gold mine or a waygate (lib/script/objects). */
   goldMine?: (id: string) => boolean;
   waygate?: (id: string) => boolean;
@@ -477,7 +479,7 @@ function destructableObjects(i: ScriptInput): string {
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), gameDataVersion: i.info.gameDataVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), gameDataVersion: i.info.gameDataVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), itemColor: i.itemColor });
   return body ? banner("Items") + body : "";
 }
 

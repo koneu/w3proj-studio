@@ -292,6 +292,13 @@ It never starts the game itself.
   grid of 270°). Ctrl+arrows moved nothing, wheat included, and `]` turned nothing: not the editor's keys in this
   build. A `--click` on the wheat or the log may miss; a `--drag` box from bare ground round it selects it (a box
   starting on a doodad drags it). doodadedit.ts follows this.
+- **Doodad facings and turned ranges on load** (branch verify3-p6-diffs, 2026-11-13, SD, the 212-doodad map of
+  verification round 3 package 6 with 26 more, opened and saved): a destructable's fixed rotation is enforced (LTlt
+  fixedRot 270 at 30, -90, 400 saved 270; LTt0 0 and ATt0 90 likewise, before the quarter turn of their 24×12
+  texture), a doodad's isn't (YZef 270 at 30 stays 30); every other angle comes into 0..360 by whole turns in single
+  precision, doodads and destructables, with or without a texture (1080 and 720 to 360, -720 to 0); a range the wrong
+  way round saves every scale at its least (the map's LTex 1.5 to 1.1, LPfp 1.4 to 0.9); the tree bridges' doubled
+  minScale/maxScale lines count by their first. doodadgrid.test.ts and doodadrules.test.ts hold the cases.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list

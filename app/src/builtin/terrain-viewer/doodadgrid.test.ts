@@ -91,3 +91,71 @@ test("a quarter turn as the JSON writes it (shortest single precision) is the fi
   // HillsbradCreek's VOfs (4×2) at 180°, as read: on its grid and turned, so it isn't listed.
   assert.deepEqual(doodadSnaps([{ id: "VOfs", variation: 0, position: [-3744, 576, 0], angle: 3.1415927, scale: [1, 1, 1] }], () => SIZES.LOch), []);
 });
+
+/** The World Editor's saved facings (we-drive, verification round 3 package 6, 2026-11-13: a copy of the 200-doodad
+ *  test map with these added, opened and saved by the editor): type, its pathing size, a destructable's fixed rotation,
+ *  the stored angle (degrees) and the saved one as the file's single precision bytes (little-endian hex). */
+const FACINGS: [string, PathSize | null, number | null, number, string][] = [
+  // Trees: fixedRot 270, a square texture.
+  ["LTlt", { width: 4, height: 4 }, 270, 30, "e4cb9640"], ["LTlt", { width: 4, height: 4 }, 270, 270, "e4cb9640"],
+  ["LTlt", { width: 4, height: 4 }, 270, -90, "e4cb9640"], ["LTlt", { width: 4, height: 4 }, 270, 400, "e4cb9640"],
+  // Tree bridges: fixedRot 0 (LTt0) and 90 (ATt0), a 24×12 texture: the fixed rotation, not the stored angle's quarter.
+  ["LTt0", { width: 24, height: 12 }, 0, -30, "00000000"], ["LTt0", { width: 24, height: 12 }, 0, 450, "00000000"],
+  ["LTt0", { width: 24, height: 12 }, 0, -90, "00000000"], ["LTt0", { width: 24, height: 12 }, 0, 0, "00000000"],
+  ["ATt0", { width: 24, height: 12 }, 90, 0, "db0fc93f"], ["ATt0", { width: 24, height: 12 }, 90, 200, "db0fc93f"],
+  // The barrel: no fixed rotation, a square texture: whole turns.
+  ["LTbr", { width: 2, height: 2 }, null, -90, "e4cb9640"], ["LTbr", { width: 2, height: 2 }, null, -270, "dc0fc93f"],
+  ["LTbr", { width: 2, height: 2 }, null, 450, "d80fc93f"], ["LTbr", { width: 2, height: 2 }, null, 720, "db0fc940"],
+  ["LTbr", { width: 2, height: 2 }, null, 1080, "d90fc940"], ["LTbr", { width: 2, height: 2 }, null, -720, "00000000"],
+  ["LTbr", { width: 2, height: 2 }, null, 360, "db0fc940"], ["LTbr", { width: 2, height: 2 }, null, 28.6479, "0300003f"],
+  ["LTbr", { width: 2, height: 2 }, null, -5.7296, "a7dcc540"],
+  // Doodads without a texture: whole turns too; YZef's fixedRot 270 isn't enforced.
+  ["LOrb", null, null, 400, "c0b8323f"], ["LOrb", null, null, -90, "e4cb9640"], ["LOrb", null, null, 720, "db0fc940"],
+  ["YZef", null, null, 30, "920a063f"], ["YZef", null, null, 400, "c0b8323f"],
+  // The hay cart (4×2): a quarter turn of the stored angle (-45 to 0, where 315 would go to 270).
+  ["LOch", { width: 4, height: 2 }, null, -45, "00000000"], ["LOch", { width: 4, height: 2 }, null, 400, "00000000"],
+  ["LOch", { width: 4, height: 2 }, null, -360, "00000000"], ["LOch", { width: 4, height: 2 }, null, 90, "db0fc93f"],
+];
+const f32hex = (v: number) => { const b = Buffer.alloc(4); b.writeFloatLE(v); return b.toString("hex"); };
+
+test("every measured facing is what the World Editor saved: a destructable's fixed rotation, else whole turns (28 cases)", () => {
+  const wrong: string[] = [];
+  for (const [id, size, fixed, deg, saved] of FACINGS) {
+    const got = doodadOnGrid(0, 0, stored(deg), size, fixed).angle;
+    if (f32hex(got) !== saved) wrong.push(`${id} ${deg}: got ${f32hex(got)} (${(got * 180) / Math.PI}), saved ${saved}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Controls: without the fixed rotation the tree keeps its 30 and the bridge turns to a quarter of 450 (90); a turn
+  // by remainder would take 720 to 0.
+  assert.notEqual(f32hex(doodadOnGrid(0, 0, stored(30), { width: 4, height: 4 }).angle), "e4cb9640");
+  assert.equal(doodadOnGrid(0, 0, stored(450), { width: 24, height: 12 }).angle, stored(90));
+  assert.notEqual(f32hex(stored(720) % Math.fround(2 * Math.PI)), "db0fc940");
+});
+
+test("the tree bridges stand on the grid of their fixed rotation (measured places)", () => {
+  // LTt0 (fixedRot 0) and ATt0 (90), 24×12, stored facing 0 and 200.
+  assert.deepEqual(doodadOnGrid(-1952, 1920, 0, { width: 24, height: 12 }, 0), { x: -1920, y: 1920, angle: 0 });
+  const bridge = doodadOnGrid(-1184, 1920, stored(200), { width: 24, height: 12 }, 90);
+  assert.deepEqual([bridge.x, bridge.y, f32hex(bridge.angle)], [-1152, 1920, "db0fc93f"]);
+});
+
+test("whole turns: in range as stored, huge or broken angles don't hang", () => {
+  const facing = (a: number) => doodadOnGrid(0, 0, a, null).angle;
+  assert.equal(facing(0.3), 0.3, "an angle in range is kept as written");
+  assert.equal(facing(stored(-90)), stored(270));
+  for (const a of [1e30, -1e30, 3.4e38, -3.4e38]) {
+    const w = facing(a);
+    assert.ok(w >= 0 && w <= Math.fround(2 * Math.PI), `${a}: ${w}`);
+  }
+  // A doodad with a broken angle stays as it is.
+  assert.deepEqual(doodadOnGrid(5, 6, Number.NaN, null), { x: 5, y: 6, angle: Number.NaN });
+  assert.equal(facing(Infinity), Infinity);
+});
+
+test("doodadSnaps turns a destructable to its type's fixed rotation and lists it", () => {
+  const tree: Placed = { id: "LTlt", variation: 0, position: [0, 0, 0], angle: stored(30), scale: [1, 1, 1] };
+  assert.deepEqual(doodadSnaps([tree], () => ({ width: 4, height: 4 })), [], "control: without the fixed rotation the tree stays");
+  const snaps = doodadSnaps([tree], () => ({ width: 4, height: 4 }), (id) => (id === "LTlt" ? 270 : null));
+  assert.equal(snaps.length, 1);
+  assert.equal(f32hex(snaps[0].angle), "e4cb9640");
+});

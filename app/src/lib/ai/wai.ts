@@ -360,8 +360,13 @@ export function newWai(): AiFile {
     groups: [{ index: 0, name: "All Units", units: units.map((id) => ({ id, quantity: 0xffffffff, max: 0xffffffff, condIndex: -1, cond: none() })) }],
     waves: [{ group: 0, delay: 0 }], wavesUnknown: 1,
     gameOptions: 2, gameSpeed: 1, mapPath: "Maps\\(2)PlunderIsle.w3m",
-    // User, Random, Observer, Red, 100 %, Standard, Normal (control and observer in aiType, as the game's AI files' first player).
-    players: [{ index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" }],
+    // User, Random, Observer, Red, 100 %, Standard, Normal (control and observer in aiType, as the game's AI files' first player),
+    // and a second one the editor's saved new AI has (we-drive, verification round 3 package 6: 1312 bytes, the last
+    // 66 these two): slot 2, team 0, Human, colour 0, 100 %, aiType 12, Normal.
+    players: [
+      { index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" },
+      { index: 1, team: 0, race: 1, color: 0, handicap: 100, aiType: 12, difficulty: 1, script: "" },
+    ],
     trailer: 0, extra: new Uint8Array(),
   };
 }
