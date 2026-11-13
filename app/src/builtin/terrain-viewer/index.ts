@@ -17,7 +17,7 @@ import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
-import { WHEEL_PIVOT_ROW, wheelPivot, wheelZoomDistance, wheelZoomTarget } from "./wheelzoom";
+import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
@@ -4368,6 +4368,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const GAME_VIEW_NOTE = "Game view is on (V): the view shows the map as the game does. Turn it off to change what the view shows.";
         viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = viewState[name]; box.disabled = gameViewOn(); }));
         const maxDistance = () => terrain.width * 300;
+        /** One step of the World Editor's zoom (a wheel notch, Ctrl+Up or Ctrl+Down): about its camera target, the point
+         *  at wheelzoom.ts zoomPivotRow, wherever the pointer is. */
+        const zoomView = (out: boolean) => {
+          const next = zoomStep({ width: canvas.clientWidth, height: canvas.clientHeight, target: renderer.target, distance: renderer.distance, ray: (x, y) => renderer.ray(x, y) }, out, 200, maxDistance());
+          renderer.target = next.target;
+          renderer.distance = next.distance;
+          redraw();
+        };
         const cornerHeights = (x0: number, y0: number, x1: number, y1: number) => {
           const zs: number[] = [];
           for (let y = Math.max(0, y0); y <= Math.min(terrain.height - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(terrain.width - 1, x1); x++) zs.push(terrain.corners[y * terrain.width + x].height);
@@ -4991,7 +4999,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const move = cameraMoveOf(ids);
           if (!move) return false;
           if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
-          else if ("zoom" in move) { renderer.distance = Math.max(200, Math.min(maxDistance(), renderer.distance * move.zoom)); redraw(); }
+          else if ("zoom" in move) zoomView(move.zoom > 1);
           else { renderer.yaw += move.turn; redraw(); }
           return true;
         };
@@ -5069,12 +5077,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ids = w3.keybindings.mouseCommandsFor(e);
           const move = cameraMoveOf(ids);
           if (move && "zoom" in move) {
-            // About the World Editor's camera target (wheelzoom.ts WHEEL_PIVOT_ROW), wherever the pointer is.
-            const next = wheelZoomDistance(renderer.distance, move.zoom > 1, 200, renderer.terrain.width * 300);
-            const pivot = wheelPivot(renderer.ray(canvas.clientWidth / 2, canvas.clientHeight * WHEEL_PIVOT_ROW), renderer.target, renderer.distance * 20);
-            renderer.target = wheelZoomTarget(renderer.target, pivot, renderer.distance, next);
-            renderer.distance = next;
-            redraw();
+            // About the World Editor's camera target, wherever the pointer is (zoomView).
+            zoomView(move.zoom > 1);
             return;
           }
           const others = ids.filter((id) => !HELD_COMMANDS.has(id));

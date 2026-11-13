@@ -1438,6 +1438,8 @@ async function viewModes(page, found) {
     if (at) {
       await k.look(at[0], at[1]);
       while ((await state()).camera.distance > ZOOMED_IN && zooms < 30) { await key("ArrowUp", "ArrowUp", 38, CTRL); zooms++; }
+      // The keys zoom about the World Editor's camera target, above the middle, so the object drifts down: back to it.
+      await k.look(at[0], at[1]);
       plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
@@ -1467,12 +1469,25 @@ async function viewModes(page, found) {
   await key("ArrowUp", "ArrowUp", 38, SHIFT);
   const c2 = await cam();
   if (!(c2.target[1] - c1.target[1] > 3 * step)) fail(`Shift+Up moved ${c2.target[1] - c1.target[1]}, Up ${step}`);
+  // Ctrl+Up is a wheel notch exactly (the World Editor's, wheelzoom.ts zoomStep): the distance over 1.1 and the target
+  // towards the point above the middle that stays put; Ctrl+Down undoes it.
   c0 = await cam();
   await key("ArrowUp", "ArrowUp", 38, CTRL);
   c1 = await cam();
-  if (!(c1.distance < c0.distance) || Math.hypot(c1.target[0] - c0.target[0], c1.target[1] - c0.target[1]) > 1) fail(`Ctrl+Up: distance ${c0.distance} → ${c1.distance}`);
+  const towards = c1.target[1] - c0.target[1];
+  if (Math.abs(c1.distance * 1.1 - c0.distance) > 1e-6 * c0.distance || !(towards > 1) || Math.abs(c1.target[0] - c0.target[0]) > 1) fail(`Ctrl+Up: distance ${c0.distance} → ${c1.distance}, target ${c0.target} → ${c1.target}`);
   await key("ArrowDown", "ArrowDown", 40, CTRL);
-  if (Math.abs((await cam()).distance - c0.distance) > 1e-6 * c0.distance) fail("Ctrl+Down didn't undo Ctrl+Up's zoom");
+  const back = await cam();
+  if (Math.abs(back.distance - c0.distance) > 1e-6 * c0.distance || Math.hypot(back.target[0] - c0.target[0], back.target[1] - c0.target[1]) > 0.01) fail(`Ctrl+Down didn't undo Ctrl+Up's zoom: ${JSON.stringify(back)} vs ${JSON.stringify(c0)}`);
+  {
+    const where = await k.hands.where(".model-stage canvas");
+    await k.focusMap();
+    await k.hands.wheel(where.x + 50, where.y + 50, -120);
+    await settled(page);
+    const wheeled = await cam();
+    if (Math.abs(wheeled.distance - c1.distance) > 1e-6 * c1.distance || Math.hypot(wheeled.target[0] - c1.target[0], wheeled.target[1] - c1.target[1]) > 0.01) fail(`a wheel notch in isn't Ctrl+Up: ${JSON.stringify(wheeled)} vs ${JSON.stringify(c1)}`);
+    await key("ArrowDown", "ArrowDown", 40, CTRL);
+  }
   await key("ArrowLeft", "ArrowLeft", 37, CTRL);
   if (!((await cam()).yaw > c0.yaw)) fail("Ctrl+Left didn't turn the view");
   await key("ArrowRight", "ArrowRight", 39, CTRL);

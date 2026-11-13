@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Vec3 } from "../../lib/model/renderer";
 import { TerrainRenderer } from "./renderer";
-import { WHEEL_PIVOT_ROW, wheelPivot, wheelZoomDistance, wheelZoomTarget } from "./wheelzoom";
+import { wheelPivot, wheelZoomDistance, wheelZoomTarget, zoomPivotRow, zoomStep } from "./wheelzoom";
 
 test("one wheel notch changes the distance by 1.1", () => {
   assert.ok(Math.abs(wheelZoomDistance(1000, true, 200, 1e6) - 1100) < 1e-9);
@@ -36,17 +36,44 @@ const camera = (target: Vec3, distance: number) => {
 const WE_D = 3000;
 const start: Vec3 = [0, -0.0993 * WE_D, 0];
 const startD = 0.9127 * WE_D;
-/** One wheel notch the way the view's wheel handler does it. */
+/** One wheel notch (or zoom key) the way the view does it (zoomStep), and the point it kept in place. */
 const notch = (target: Vec3, distance: number, out: boolean) => {
-  const next = wheelZoomDistance(distance, out, 200, 1e6);
-  const pivot = wheelPivot(camera(target, distance).ray(W / 2, H * WHEEL_PIVOT_ROW), target, distance * 20);
-  return { target: wheelZoomTarget(target, pivot, distance, next), distance: next, pivot };
+  const ray = camera(target, distance).ray;
+  const pivot = wheelPivot(ray(W / 2, zoomPivotRow(H)), target, distance * 20);
+  return { ...zoomStep({ width: W, height: H, target, distance, ray }, out, 200, 1e6), pivot };
 };
 const px = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
-test("the wheel zooms about the World Editor's camera target: the point at row 325.5 of 844 stays put", () => {
+test("the zoom's row is the World Editor's at every view height we-drive measured, not a share of the height", () => {
+  // [height, row]: the focus of expansion of a notch or key press at views of 1184, 1184, 1036 and 784 wide.
+  for (const [h, row] of [[844, 325.0], [592, 222.6], [585, 220.2], [565, 211.7]]) {
+    assert.ok(Math.abs(zoomPivotRow(h) - row) < 0.5, `row ${zoomPivotRow(h)} of ${h}, the editor's ${row}`);
+  }
+  // Control: the share of the height measured at 844 alone misses the small view by 6 pixels.
+  assert.ok(Math.abs((325.5 / 844) * 565 - 211.7) > 5);
+  // Within the view, however small.
+  assert.equal(zoomPivotRow(10), 0);
+  assert.ok(zoomPivotRow(2000) < 2000);
+});
+
+test("the view's zoom step keeps the point at the middle column's zoom row in place, at another view size too", () => {
+  for (const [w, h] of [[784, 565], [1600, 900]]) {
+    const cam = (target: Vec3, distance: number) => {
+      const c = { canvas: { clientWidth: w, clientHeight: h }, target, distance, yaw: -Math.PI / 2, pitch: (57.2 * Math.PI) / 180, fov: (41.06 * Math.PI) / 180, eye: TerrainRenderer.prototype.eye } as unknown as TerrainRenderer;
+      return { ray: (x: number, y: number) => TerrainRenderer.prototype.ray.call(c, x, y), project: (p: Vec3) => TerrainRenderer.prototype.project.call(c, p)! };
+    };
+    const t0: Vec3 = [100, -300, 0];
+    const fixed: [number, number] = [w / 2, zoomPivotRow(h)];
+    const ground = wheelPivot(cam(t0, 2500).ray(...fixed), t0, 1e5);
+    const next = zoomStep({ width: w, height: h, target: t0, distance: 2500, ray: cam(t0, 2500).ray }, false, 200, 1e6);
+    assert.ok(Math.abs(next.distance - 2500 / 1.1) < 1e-9);
+    assert.ok(px(cam(next.target, next.distance).project(ground), fixed) < 0.01, `${w}x${h}: the zoom's point moved on the view`);
+  }
+});
+
+test("the wheel zooms about the World Editor's camera target: the point at its row of the 844 high view stays put", () => {
   const { target, distance, pivot } = notch(start, startD, false);
-  const fixed: [number, number] = [W / 2, H * WHEEL_PIVOT_ROW];
+  const fixed: [number, number] = [W / 2, zoomPivotRow(H)];
   assert.ok(px(camera(start, startD).project(pivot), fixed) < 0.01);
   assert.ok(px(camera(target, distance).project(pivot), fixed) < 0.01, "the pivot moved on the view");
   // Control: the old zoom about the middle of the view (target kept) moves that point by pixels (it's 97 above it).

@@ -137,7 +137,7 @@ falls short, rather than copying their insides into a scratch file.
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
 | see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines), writes `openpoints/openpoints.json` (every point with file, section, text, a stable id), adds an entry to `openpoints/burndown.json` and writes `openpoints/burndown.html` (the chart, data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--drag X,Y:X,Y`, `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--drag X,Y:X,Y`, `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
@@ -234,7 +234,16 @@ It never starts the game itself.
   and keeps the camera target fixed, the eye sliding along the ray to it, wherever the pointer is: three notches in
   with the pointer at the view's middle, top left and bottom right all expand about (593, 325.5) of the 1184x844
   view, the target's place in the off-centre projection (focus of expansion of matched patches, residual 1.5 px).
-  Studio zooms about the same point (wheelzoom.ts `WHEEL_PIVOT_ROW`).
+  Studio zooms about the same point (wheelzoom.ts `zoomStep`).
+- **Keyboard zoom and the zoom's row** (branch key-zoom, 2026-11-13, cliff.w3m, SD; numbers and the patch matcher in
+  `target/evidence/key-zoom/` of that worktree): Ctrl+Up and Ctrl+Down are a wheel notch exactly (Ctrl+Up then a notch
+  out gives the opening picture back to the pixel, a notch in after Ctrl+Up's undo the Ctrl+Up picture), wherever the
+  pointer is. Held, they step once per key repeat (400 ms: one step; 1500 ms: 22, the display's repeat starting after
+  660 ms at 25 a second). Page Up and Down, the number pad's + and -, and Ctrl+Page Up don't zoom. `--screen` gave
+  other view sizes (moving the window by X doesn't: the editor doesn't lay it out again): the zoom keeps the middle
+  column's point at row 325.0 of an 844 high view, 222.6 of 592, 220.2 of 585 and 211.7 of 565, whatever the width:
+  0.4057 h - 17.4 (within 0.3 px), not a share of the height (325.5 / 844 misses the small views by 6). Studio uses
+  that row for wheel and keys (wheelzoom.ts `zoomPivotRow`).
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and

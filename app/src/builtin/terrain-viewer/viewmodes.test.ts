@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
+import { WHEEL_ZOOM } from "./wheelzoom";
 import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
@@ -141,6 +142,9 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
   const zoomIn = cameraKey(key("ArrowUp", { ctrlKey: true })) as { zoom: number };
   const zoomOut = cameraKey(key("ArrowDown", { ctrlKey: true })) as { zoom: number };
   assert.ok(zoomIn.zoom < 1 && zoomOut.zoom > 1 && Math.abs(zoomIn.zoom * zoomOut.zoom - 1) < 1e-12, "in and out undo each other");
+  // The World Editor's zoom keys step as its wheel does (we-drive, branch key-zoom): 1.1, not about 11%.
+  assert.equal(zoomOut.zoom, WHEEL_ZOOM);
+  assert.ok(Math.abs(zoomIn.zoom * 1.1 - 1) < 1e-12, `Ctrl+Up zooms by ${1 / zoomIn.zoom}`);
   const left = cameraKey(key("ArrowLeft", { ctrlKey: true })) as { turn: number }, right = cameraKey(key("ArrowRight", { metaKey: true })) as { turn: number };
   assert.ok(left.turn > 0 && right.turn === -left.turn);
   for (const k of [key("ArrowUp", { altKey: true }), key("PageUp"), key("PageDown"), key("Home"), key("End"), key("Insert"), key("Delete")]) assert.equal(cameraKey(k), null, k.key);
