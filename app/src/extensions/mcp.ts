@@ -14,7 +14,8 @@ export interface McpHostHooks {
   /** Activates the extensions answering an event ("onMcpTool:<name>"). */
   activate(event: string): Promise<void>;
   /** What every call waits for before its tool runs (the open project's whole file list: tools decide by it whether
-   *  a file is there, and right after an open it may still be read). A rejection is the call's error. */
+   *  a file is there, and right after an open it may still be read). A rejection is the call's error, so a host lets
+   *  tools run that don't need what it waits for (the workbench's never rejects). */
   ready?(): Promise<void>;
   /** Whether a tool may be used now (settings: project extensions' tools, writing tools). */
   allowed(declared: { source: string; readOnly: boolean; needs?: string }): boolean;

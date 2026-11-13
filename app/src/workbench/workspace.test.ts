@@ -305,6 +305,26 @@ test("externalChanges after an open whose list couldn't be read: no \"before\", 
   assert.equal(fired, 1, "the Explorer is told the list is there");
 });
 
+test("an open whose list can't be read still opens the project (told, recent list), rejects with why, and a refresh reads it again", async () => {
+  reset();
+  const { ws, saved } = make();
+  let fired = 0;
+  ws.onDidChange.on(() => fired++);
+  failFiles = true;
+  try {
+    await assert.rejects(ws.open(A), /can't be read/);
+  } finally {
+    failFiles = false;
+  }
+  assert.equal(ws.project()?.root, A);
+  assert.equal(fired, 1, "tabs and extensions are told of the project");
+  assert.deepEqual(saved.recentProjects, [A]);
+  await assert.rejects(ws.filesReady(), /couldn't be read/);
+  await ws.refresh();
+  await ws.filesReady();
+  assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j"]);
+});
+
 const OFFLINE = "//offline/share/p";
 
 test("opening a project doesn't wait for the recent list's paths to be resolved", async () => {

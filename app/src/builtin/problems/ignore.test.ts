@@ -66,6 +66,7 @@ function harness(files: Record<string, string>, problems: Problem[]) {
     workspace: {
       project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }),
       files: () => [],
+      filesReady: async () => {},
       resolve: (p: string) => `/p/${p}`,
       readText: async (p: string) => { if (p in files) return files[p]; throw new Error(`no ${p}`); },
       writeText: async (p: string, t: string) => { writes.push(p); files[p] = t; },

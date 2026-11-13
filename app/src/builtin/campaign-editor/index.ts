@@ -12,6 +12,7 @@ import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { BusyQueue } from "../../lib/busyqueue";
 import { joinPath } from "../../lib/paths";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
@@ -421,8 +422,10 @@ class CampaignView {
     const src = await this.w3.window.pickFile({ title: "Add a map to the campaign", filters: [{ name: "Warcraft III map", extensions: ["w3x", "w3m"] }] });
     if (!src) return;
     const name = src.split(/[\\/]/).pop()!;
+    // "Already in the campaign" is told from the whole file list, not one still being read.
+    const { root } = await projectWithFiles(this.w3);
     if (this.campaignMaps().some((m) => m.name.toLowerCase() === name.toLowerCase())) throw new Error(`${name} is already in the campaign.`);
-    const dir = joinPath(this.w3.workspace.project()!.root, "maps", toProjectPath(name));
+    const dir = joinPath(root, "maps", toProjectPath(name));
     // A folder of that name left under maps/ (not a chapter: no w3proj.toml) isn't written over.
     await this.w3.window.withProgress(`Adding ${name}`, () => this.w3.backend.invoke("project_unpack", {
       map: src, dir, allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir"), refuseDeletes: true,

@@ -88,6 +88,7 @@ function fakeApp(more: { overlay?: Record<string, string>; game?: Record<string,
     workspace: {
       project: () => ({ root, name: "mini", manifest: {}, default_output: "" }),
       files: () => files,
+      filesReady: async () => {},
       resolve: (p: string) => join(root, p),
       readText: async (p: string) => { count(`readText ${p}`); return text(p); },
       readBytes: async (p: string) => { count(`readBytes ${p}`); return new TextEncoder().encode(text(p)); },

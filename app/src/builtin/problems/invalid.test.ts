@@ -23,6 +23,7 @@ function setup(files: Record<string, string>, opts: { answer?: boolean; unsaved?
   const w3 = {
     workspace: {
       project: () => ({ root: opts.root ?? "C:\\p" }),
+      filesReady: async () => {},
       resolve: (p: string) => p,
       readText: async (p: string) => { if (raw.has(p) || !fs.has(p)) throw new Error("no such file"); return fs.get(p)!; },
       writeText: async (p: string, t: string) => { log.push(`write ${p}`); fs.set(p, t); },

@@ -47,7 +47,12 @@ export class Workbench {
   readonly game = new GameService(this.settings);
   readonly mcp = new McpTools({
     activate: (event) => this.host.fire(event),
-    ready: async () => { if (this.workspace.project()) await this.workspace.filesReady(); },
+    // A list that couldn't be read is read once more; failing again, the tool runs all the same (project info, opening
+    // another project, reads): what decides by the list (projectWithFiles, the edit log's "absent") refuses on its own.
+    ready: async () => {
+      if (!this.workspace.project()) return;
+      await this.workspace.filesReady().catch(() => this.workspace.refresh().catch(() => {}));
+    },
     note: (name) => (name === "begin_edit" && this.settings.get<boolean>("mcp.ignoreUndoSteps", false) === true ? UNDO_NOTE : undefined),
     allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
       && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)

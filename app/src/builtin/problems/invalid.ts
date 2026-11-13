@@ -5,7 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "../../lib/objects/metadata";
 import { parseRandomId } from "../../lib/objects/randomids";
-import { readMapDocStrict } from "../../lib/formats/mapdoc";
+import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
 
@@ -139,6 +139,8 @@ export function describePlan(plan: InvalidPlan): string {
  *  save its own copy over the result. */
 export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Promise<number> {
   if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+  // The map's own object types come from files found by the list: one not listed yet would make its objects "invalid".
+  await projectWithFiles(w3);
   const unsaved = w3.editors.unsavedPaths();
   if (unsaved.length) throw new Error(`Save or discard the changes of ${unsaved.join(", ")} first: Delete Invalid Objects works on the saved files.`);
   const plan = await planInvalid(w3, load);

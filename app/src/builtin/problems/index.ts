@@ -76,6 +76,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     running ??= (async () => {
       const root = w3.workspace.project()?.root ?? null;
       if (!root) { groups = []; return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] }; }
+      // The checks judge by the file list (an import whose file isn't there, files nothing lists): only once it has
+      // every file. Right after an open each listed import would pass for missing, and a fix would drop it.
+      await w3.workspace.filesReady();
+      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] };
       const result: Group[] = [];
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);

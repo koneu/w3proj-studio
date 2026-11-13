@@ -143,6 +143,9 @@ async function addToList(w3: W3Api, paths: string[]): Promise<void> {
   if (!root) throw new Error("Open or import a project first.");
   if (!Array.isArray(paths) || !paths.length || paths.some((p) => typeof p !== "string" || !p)) throw new Error("No archive paths to add.");
   if (openView?.isListOf(root)) { await openView.add(paths); return; }
+  // A list not listed yet (right after an open) would be written anew, without its entries.
+  await projectWithFiles(w3, root);
+  if (openView?.isListOf(root)) { await openView.add(paths); return; }
   const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
   const { RAW, FILE } = lists(files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f"));
   const raw = !files.has(FILE) && files.has(RAW);

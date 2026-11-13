@@ -81,7 +81,10 @@ export class WorkspaceService {
     this.listedRoot = null;
     this.setList([]);
     this.folderList = [];
-    await this.refresh(false);
+    // A list that can't be read doesn't stop the open: the project is open all the same (settings, recent list, tabs
+    // and extensions told), the next refresh or focus check reads it again, and the open rejects at the end with why.
+    let listFailed: unknown = null;
+    await this.refresh(false).catch((e) => { listFailed = e ?? new Error("The project's file list couldn't be read."); });
     await this.settings.loadProject(this.info.root);
     // The list first, as the entries were saved; then, off the open's way, the entries under another
     // spelling of a folder (8.3 short name) are merged (see tidyRecents).
@@ -91,6 +94,7 @@ export class WorkspaceService {
     await this.settings.set("recentProjects", [root, ...others].slice(0, 10));
     this.tidying = this.tidyRecents(root, ++this.openGen);
     this.onDidChange.fire();
+    if (listFailed) throw listFailed;
   }
 
   private tidying: Promise<void> = Promise.resolve();

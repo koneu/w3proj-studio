@@ -55,6 +55,7 @@ function chapter(opts: Options = {}) {
     workspace: {
       project: () => (open ? { root: open.root, name: "ch", manifest: {}, default_output: "" } : null),
       files: () => [{ path: "map/war3map.imp.json", size: 1, modified: 1 }, ...Object.keys(opts.own ?? {}).map((path) => ({ path, size: 1, modified: 1 }))],
+      filesReady: async () => {},
       resolve: (p: string) => `${open?.root}/${p}`,
       readText: async (p: string) => { if (p in docs) return docs[p]; throw new Error(`no ${p}`); },
       readBytes: async (p: string) => { const b = opts.own?.[p]; if (b) return b; throw new Error(`no ${p}`); },
