@@ -37,11 +37,25 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
   })().catch(() => null));
 }
 
+/** What a prediction could not use: `wanted` doodads whose model should cast a shadow, `unreadable` of those whose model
+ *  (or its texture data) couldn't be read. `skins` is how many object entries the game's tables gave. */
+export type ShadowStats = { wanted: number; unreadable: number };
+
+/** Whether a calculated shadow map may replace the stored one. Nothing wanted from models, or all of them readable:
+ *  write. Every wanted model unreadable (the game's files can't be opened): refuse, the result would be cliffs only.
+ *  Some unreadable: write, and say how many objects were left out. */
+export function shadowVerdict(stats: ShadowStats, doodads: number, skins: number): { write: boolean; leftOut: number; problem?: string } {
+  if (doodads > 0 && skins === 0) return { write: false, leftOut: doodads, problem: "the game's object tables couldn't be read (is the game folder set?)" };
+  if (stats.wanted > 0 && stats.unreadable === stats.wanted) return { write: false, leftOut: stats.unreadable, problem: `none of the ${stats.wanted} doodad models could be read (is the game folder set?)` };
+  return { write: true, leftOut: stats.unreadable };
+}
+
 /** `pause`: the terrain's part is done a few rows at a time, waiting for it in between (the terrain view, where it
  *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects).
  *  `artMode`: the graphics mode `readFile` reads in (game.graphicsMode), which the models' meshes are kept by. */
 export async function predictShadows(terrain: Terrain, doodads: Placed[], skins: Skins, baseOf: (id: string) => string | undefined,
-  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>, artMode: () => string = () => ""): Promise<Uint8Array> {
+  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>, artMode: () => string = () => "",
+  stats?: ShadowStats): Promise<Uint8Array> {
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause) : terrainShadows(terrain, sun);
   let since = performance.now();
   for (const d of doodads) {
@@ -54,6 +68,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
     const mesh = await modelMesh(path, readFile, artMode);
+    if (stats) { stats.wanted++; if (!mesh) stats.unreadable++; }
     if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
   }
   return out;

@@ -138,7 +138,7 @@ falls short, rather than copying their insides into a scratch file.
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
 | see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines), writes `openpoints/openpoints.json` (every point with file, section, text, a stable id), adds an entry to `openpoints/burndown.json` and writes `openpoints/burndown.html` (the chart, data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--drag X,Y:X,Y`, `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` before it), `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
@@ -147,6 +147,23 @@ runs in two worktrees don't share settings; none of these tools starts the game 
 `we-drive.mjs`, which starts the World Editor only.
 
 ### The real World Editor: we-drive.mjs
+
+- **Dragging**: `--drag X,Y:X,Y[@MS]` presses the left button, moves in 20 steps over MS (400) and lets go; `--drag-mod alt` holds a key during the next drag. Measured (TerenasStand_LV, doodad layer `--key d`, a tree clicked, 800 ms): a plain drag of the selected tree changes nothing in war3map.doo (it is a box select), Alt+drag moves it (editor id 1224, (320, -576) to (576, -768)), the only change in 1680 doodads.
+- **Moving objects at the edges** (branch we-drag-checks, 2026-11-13, SD, copies of the empty 64x64 map: camera bounds
+  right at 2816, playable part 3328, map 4096; scripts and saves in `target/evidence/we-drag-checks/` of the main
+  checkout). A plain drag that starts on a selected object moves it (a doodad by `--key d`, a unit by `--key u`; the
+  first click must hit the model: a footman's feet miss, 10 px higher hits); Alt+drag moves a unit's centre to the
+  pointer. The nudge is Edit > Nudge Selection: the number pad (`--key Num_Lock` once, then `--key KP_6`; without Num
+  Lock the keys arrive as arrows and do nothing), 64 a step for a tree, 8 for a doodad without pathing and a footman.
+  The editor takes the drag's second-to-last motion step (a footman dragged 576 in 20 steps moved 547). Found: with
+  Enforce Camera Bounds on (and off alike) drags and nudges go past the camera bounds; a unit stops with its collision
+  size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
+  goes past the playable part and stops with its centre strictly inside the map (tree and a 12x12 LZth 4032 on 64
+  steps, a pathless LPcr 4088 on 8 steps). The camera too scrolls past the camera bounds with the switch on. Studio:
+  limits.ts `insetBy`, terrain-viewer `moveBounds`; app-smoke heightsLimits.
+- **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
+  through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
+  the view at 156,79): the status bar read (3713.9, 515.4) where (3712, 512) was aimed (`proj.py` in that folder).
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
@@ -254,6 +271,16 @@ It never starts the game itself.
   (the bottom left of `--shot-window`) gives its world position; at the opening camera the ground maps to the display
   by a plane homography (fitted from six such readings to the pixel). The editor moves each doodad onto its own grid
   when the map loads (a barrel to 64n + 32, a crate to 64n), so the copied positions are read from its save.
+- **Doodad rules while editing** (branch doodad-rules-edit, 2026-11-13, HD, empty_map_on_newest_world_editor.w3m with a
+  barrel LTbr at 32, 32 scale 1.2, a log AOlg (12x6 texture) at 1056, 0 facing 0, wheat LPwh (no texture); saved after
+  each step): an 8 px drag of the barrel (about 20 units at the opening camera) didn't move it, an 18 px one put it at
+  96, 32: dragged doodads stay on their grid (whether it jumps during the drag or at the release a picture can't tell
+  with one `--drag`). `+` (`KP_Add`) ten times then `-` three times took the barrel's 1.2 to 1.35, not 1.55: the scale
+  is held to the type's range (1.1 to 1.5) at once. The numpad `/` turned the barrel and the wheat freely (by 5° to 15°
+  per press, depending on how long it was held) but the log a quarter per press (three: 0° to 270°, its place on the
+  grid of 270°). Ctrl+arrows moved nothing, wheat included, and `]` turned nothing: not the editor's keys in this
+  build. A `--click` on the wheat or the log may miss; a `--drag` box from bare ground round it selects it (a box
+  starting on a doodad drags it). doodadedit.ts follows this.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list

@@ -2901,11 +2901,14 @@ async function areaLevelsSteps(page, found) {
   await k.save();
   const file = join(k.root, "map", "war3map.w3e.txt");
   const text = () => readFileSync(file, "utf8");
-  /** The file without its [layer] section, which is all a level change may touch. */
-  const rest = () => text().replace(/^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "");
+  /** The file without its [layer] and [water] sections, which are all a level change may touch (the water word moves
+   *  512 per level with its corner, as in the World Editor). */
+  const rest = () => text().replace(/^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "").replace(/^\[water\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "");
   const layerSection = () => /^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m.exec(text())?.[0] ?? "";
-  const original = text(), originalRest = rest();
+  const waterSection = () => /^\[water\][^\n]*\n(?:[^[\n][^\n]*\n)*/m.exec(text())?.[0] ?? "";
+  const original = text(), originalRest = rest(), originalWater = waterSection();
   if (!layerSection()) return fail(`no [layer] section to read (control): ${original.slice(0, 200)}`);
+  if (!originalWater) return fail(`no [water] section to read (control): ${original.slice(0, 200)}`);
   await k.tab("Select");
   await k.hands.click(".chip", "Area");
   await k.look(0, 0);
@@ -2921,8 +2924,16 @@ async function areaLevelsSteps(page, found) {
   await press(1);
   const up = text();
   if (up === original) return fail("Level +1 changed nothing");
-  if (rest() !== originalRest) fail("Level +1 changed more than the [layer] section");
+  if (rest() !== originalRest) fail("Level +1 changed more than the [layer] and [water] sections");
   if (/^\[layer\] all /m.test(up)) fail(`Level +1 moved the whole map, not the block: ${layerSection().slice(0, 80)}`);
+  // The block's water words one level (512) up, the rest as they were.
+  const waterValues = (s) => { const all = /^\[water\] all (\S+)/.exec(s); return all ? null : s.split("\n").slice(1).join(" ").trim().split(/\s+/); };
+  const was = /^\[water\] all (-?\d+)/.exec(originalWater)?.[1], nowWater = waterValues(waterSection());
+  if (was === undefined || !nowWater) fail(`the water words: ${originalWater.slice(0, 40)} → ${waterSection().slice(0, 80)} (one value before, the block's 512 higher after)`);
+  else {
+    const vals = new Set(nowWater.flatMap((v) => { const m = /^(-?\d+)(?:\*\d+)?$/.exec(v); return m ? [Number(m[1])] : [Number.NaN]; }));
+    if (vals.size !== 2 || !vals.has(Number(was)) || !vals.has(Number(was) + 512)) fail(`the water words after Level +1: ${[...vals].join(", ")} (want ${was} and ${Number(was) + 512})`);
+  }
   // One undo gives the file back; redo the step, then −1 gives it back too.
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
@@ -3067,6 +3078,8 @@ async function heightsLimits(page, found) {
   if ((await k.setting("terrain.enforceWaterLimits")) === false || (await k.box("Water limits")) !== true) fail("Enforce Water Height Limits isn't on by default");
   await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
   await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", false)`);
+  // The nudges and the paste below go by 32 to the bound: without the doodads' grid (doodadRulesEdit has it).
+  await page.evaluate(`w3.settings.set("terrain.doodads.snapOnLoad", false)`);
   const bounds = k.read("war3map.w3i.json").cameraBounds;
   const [bl, bb, br, bt] = bounds;
   if (!(bl < br && bb < bt)) return fail(`camera bounds ${bounds}`);
@@ -3079,18 +3092,37 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   await hands.key("c", "KeyC", 67, 2);
 
-  // A nudge: the doodad 40 inside the bound moves right.
+  // A nudge: the doodad 40 inside the bound moves right, past the bound with the switch on and off alike, as the
+  // World Editor's nudges and drags do (we-drive 2026-11-13).
   await k.look(br - 40, 0, { id: "LTlt", x: br - 40, y: 0 });
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
   for (let i = 0; i < 3; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (nearEdge()?.position[0] !== br) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, the bound is ${br}`);
+  if (nearEdge()?.position[0] !== br + 56) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 56} (past the bound ${br}, as in the World Editor)`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (nearEdge()?.position[0] !== br + 32) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 32}`);
+  if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
+
+  // A unit nudged at the playable part's edge stops with its collision size inside it (a footman, 31), the switch on.
+  const w3eHead = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
+  const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
+  if (!Number.isFinite(pr)) return fail(`no playable edge from the terrain's head and the w3i (${pr})`);
+  // Placed with the switch off (a placement past the camera bounds is refused with it on), nudged with it on.
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: pr - 100, y: 256, player: 1 }], ignoreRoom: true });
+  await k.save();
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  const footman = () => k.units().find((u) => u.id === "hfoo" && u.position[1] === 256);
+  const fx0 = footman()?.position[0];
+  await k.look(fx0, 256, { id: "hfoo", x: fx0, y: 256 });
+  await k.focusMap();
+  for (let i = 0; i < 8; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  await k.save();
+  if (footman()?.position[0] !== pr - 31) fail(`eight nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
 
   // A paste outside the bounds.
   await k.run("w3.terrain.toggleEnforceCameraBounds");
@@ -3257,6 +3289,7 @@ async function heightsLimits(page, found) {
   await k.verify(fail);
   await k.reset();
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.doodads.snapOnLoad", undefined)`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -5205,6 +5238,79 @@ async function doodadSnapOnLoad(page, found) {
     await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set(${JSON.stringify(FIX)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
     await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
+/** The World Editor's doodad rules while editing (doodadedit.ts), under the same settings as on load (Snap Doodads on
+ *  Load, Fix Doodads on Load), on a new map, both on and then both off: a barrel (2×2 texture, 1.1 to 1.5) placed by
+ *  place_objects at 40, 40 with scale 3 lands at 32, 32 with 1.5 (off: as asked), a hay cart (4×2) at 500, 300 facing
+ *  10° at 480, 320 facing 0; Ctrl+Right nudges the barrel a grid step (96; off: 72); a Position X typed 40 further
+ *  goes to the grid point next to it; a Scale X typed 1.25 gives all three axes 1.25 (a destructable's x for all;
+ *  off: only x), then 2 gives 1.5, and one undo takes that back to 1.25; move_object to 100, 100 with scale 0.5 lands
+ *  at 96, 96 with 1.1. Each edit is checked in the saved file. */
+async function doodadRulesEdit(page, found) {
+  const fail = (what) => found.push(`doodad rules on edit: ${what}`);
+  const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad";
+  const f = Math.fround;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const xy = (d) => [d?.position[0], d?.position[1]];
+  const sc = (d) => d?.scale.map(f);
+  try {
+    for (const on of [true, false]) {
+      const say = (what) => fail(`${on ? "on" : "off"}: ${what}`);
+      await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, ${on ? "undefined" : "false"}); w3.settings.set(${JSON.stringify(FIX)}, ${on ? "undefined" : "false"})`);
+      const k = await heightKit(page, on ? "RulesOn" : "RulesOff");
+      const find = (id) => k.doodads().find((d) => d.id === id);
+      await k.tool("place_objects", { objects: [{ id: "LTbr", x: 40, y: 40, scale: 3 }, { id: "LOch", x: 500, y: 300, facing: 10 }], ignoreRoom: true });
+      await k.save();
+      const barrel = find("LTbr"), cart = find("LOch");
+      if (!same(xy(barrel), on ? [32, 32] : [40, 40]) || !same(sc(barrel), on ? [1.5, 1.5, 1.5] : [3, 3, 3])) say(`the placed barrel is at ${JSON.stringify(xy(barrel))} with scale ${JSON.stringify(barrel?.scale)}`);
+      if (!same(xy(cart), on ? [480, 320] : [500, 300]) || f(cart?.angle) !== (on ? 0 : f((10 * Math.PI) / 180))) say(`the placed hay cart is at ${JSON.stringify(xy(cart))} facing ${cart?.angle}`);
+      if (!barrel) return;
+
+      // Ctrl+Right: a grid step of 64 (on), a nudge of 32 (off).
+      await k.tab("Select");
+      await k.look(barrel.position[0], barrel.position[1], { id: "LTbr", x: barrel.position[0], y: barrel.position[1] });
+      await k.focusMap();
+      await k.hands.key("ArrowRight", "ArrowRight", 39, 2);
+      await k.save();
+      const nudged = find("LTbr");
+      if (!same(xy(nudged), on ? [96, 32] : [72, 40])) say(`Ctrl+Right put the barrel at ${JSON.stringify(xy(nudged))}`);
+
+      /** Types a value into the selection's number box `i` (0 to 2 the position, 3 the facing... as the panel lists them). */
+      const typeInto = async (selector, i, value) => {
+        await k.look(find("LTbr").position[0], find("LTbr").position[1], { id: "LTbr", x: find("LTbr").position[0], y: find("LTbr").position[1] });
+        const done = await page.evaluate(`(() => { const e = document.querySelectorAll(${JSON.stringify(selector)})[${i}]; if (!e) return false; e.value = ${JSON.stringify(String(value))}; e.dispatchEvent(new Event("change")); return true; })()`);
+        if (!done) say(`no box ${selector} ${i} in the selection`);
+        await k.save();
+      };
+      const POS = ".terrain-selection .terrain-sel-triple input";
+      await typeInto(POS, 0, nudged.position[0] + 40);
+      const typed = find("LTbr");
+      if (!same(xy(typed), on ? [160, 32] : [112, 40])) say(`Position X typed ${nudged.position[0] + 40} put the barrel at ${JSON.stringify(xy(typed))}`);
+      // The scale triple follows the position's in the panel.
+      await typeInto(POS, 3, 1.25);
+      if (!same(sc(find("LTbr")), on ? [1.25, 1.25, 1.25] : [1.25, 3, 3])) say(`Scale X typed 1.25 gave ${JSON.stringify(find("LTbr")?.scale)}`);
+      await typeInto(POS, 3, 2);
+      if (!same(sc(find("LTbr")), on ? [1.5, 1.5, 1.5] : [2, 3, 3])) say(`Scale X typed 2 gave ${JSON.stringify(find("LTbr")?.scale)}`);
+      await k.focusMap();
+      await k.run("workbench.undo");
+      await k.save();
+      if (!same(sc(find("LTbr")), on ? [1.25, 1.25, 1.25] : [1.25, 3, 3])) say(`one undo after Scale X typed 2 left ${JSON.stringify(find("LTbr")?.scale)}`);
+
+      const index = k.doodads().findIndex((d) => d.id === "LTbr");
+      await k.tool("move_object", { kind: "doodads", index, id: "LTbr", x: 100, y: 100, scale: 0.5 });
+      await k.save();
+      const moved = find("LTbr");
+      if (!same(xy(moved), on ? [96, 96] : [100, 100]) || !same(sc(moved), on ? [f(1.1), f(1.1), f(1.1)] : [0.5, 0.5, 0.5])) say(`move_object to 100, 100 with scale 0.5 put the barrel at ${JSON.stringify(xy(moved))} with scale ${JSON.stringify(moved?.scale)}`);
+      await k.verify(say);
+      await page.evaluate(`w3.editors.closeAll()`);
+    }
+  } finally {
+    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set(${JSON.stringify(FIX)}, undefined)`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    // heightKit answers the confirmations itself.
+    await restoreWindow(page);
   }
 }
 
@@ -10562,6 +10668,7 @@ async function run() {
         contextLoss,
         dataSafety,
         derivedAfterDeletes,
+        doodadRulesEdit,
         doodadSnapOnLoad,
         drawCalls,
         editorExtras,
@@ -10866,6 +10973,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "cliCheck", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
+  await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
+  await leftOpen(page, "doodadRulesEdit", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));

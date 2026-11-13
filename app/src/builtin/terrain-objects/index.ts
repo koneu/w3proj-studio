@@ -76,9 +76,9 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!g || !placing || scatter) { ed.objects.setGhost(null); return; }
     const { kind, id } = placing;
     const type = ed.objects.type(id);
-    const angle = next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING));
+    // Where a click puts it: a building on its grid, a doodad on its own (turned by quarters if its footprint isn't square).
+    const { x, y, angle } = await ed.objects.placedSpot(kind, id, g[0], g[1], next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING)));
     let ok = true;
-    const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, g[0], g[1]) : g;
     if (respect()) {
       const occ = await ed.objects.occupancy();
       ok = ed.objects.backdrop(kind, x, y) || await occ.fits(kind, id, x, y, angle);
@@ -130,8 +130,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
-      const angle = look!.angle;
-      const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
+      const { x, y, angle } = await ed.objects.placedSpot(kind, id, pos[0], pos[1], look!.angle);
       if (!ed.objects.inBounds(x, y)) {
         w3.window.showWarning(ed.objects.refusedOutside("that is"));
         return;
@@ -150,9 +149,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         for (let gx = -radius; gx <= radius; gx += spacing) {
           const x = pos[0] + gx + (Math.random() - 0.5) * spacing * 0.6, y = pos[1] + gy + (Math.random() - 0.5) * spacing * 0.6;
           if (Math.hypot(x - pos[0], y - pos[1]) > radius) continue;
-          const angle = facing();
-          // Snap to the pathing grid like the World Editor (cell centres for trees).
-          const [sx, sy] = kind === "w3u" ? await ed.objects.buildingSpot(id, Math.round(x / 32) * 32, Math.round(y / 32) * 32) : [Math.round(x / 32) * 32, Math.round(y / 32) * 32];
+          // Snap to the pathing grid like the World Editor (cell centres for trees; a doodad's own grid, doodadedit.ts).
+          const { x: sx, y: sy, angle } = await ed.objects.placedSpot(kind, id, Math.round(x / 32) * 32, Math.round(y / 32) * 32, facing());
           if (!ed.objects.inBounds(sx, sy)) continue;
           if (fp) {
             if (respect()) {

@@ -5,7 +5,7 @@ import { toClassicMdx } from "../../lib/model/classic";
 import type { Model } from "../../lib/model/mdx";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { loadSkins, withObjectArt, type Placed } from "./objects";
-import { predictShadows } from "./shadowmap";
+import { predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { terrainShadows } from "./shadows";
 
 /** A model of one opaque box, 100 wide and 1000 high, standing on its origin. */
@@ -95,4 +95,30 @@ test("a model's casting triangles are kept per graphics mode: another mode reads
   const before = reads;
   assert.ok(shadowed(await predict()) > 10, "back in HD the tower casts again");
   assert.equal(reads, before, "from the kept mesh: the model isn't read again");
+});
+
+test("shadows are not written over the stored file when the game data can't be read; partial failures are counted", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOrk]\nfile=Doodads\\Rock\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const w3 = { settings: { get: () => "sd-unreadable-shadow-test" }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const terrain = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  const at = (): Placed => ({ id: "LOrk", variation: 0, position: [terrain.offsetX + 16 * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [1, 1, 1] });
+  const run = async (read: (p: string) => Promise<Uint8Array>, n: number, mode: string) => {
+    const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+    await predictShadows(terrain, Array.from({ length: n }, at), skins, () => undefined, read, undefined, undefined, () => mode, stats);
+    return shadowVerdict(stats, n, skins.size);
+  };
+  const tower = towerModel();
+  const none = await run(async () => { throw new Error("no game"); }, 3, "sd-unreadable-a");
+  assert.equal(none.write, false, "no model readable: refused");
+  assert.match(none.problem ?? "", /game folder/);
+  const ok = await run(async () => tower, 3, "sd-unreadable-b");
+  assert.deepEqual([ok.write, ok.leftOut], [true, 0], "the control: readable models write");
+  const half = shadowVerdict({ wanted: 4, unreadable: 1 }, 4, skins.size);
+  assert.deepEqual([half.write, half.leftOut], [true, 1], "some unreadable: written, counted");
+  assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 2, 0).write, false, "doodads but no object tables: refused");
+  assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 0, 0).write, true, "no doodads at all: cliffs-only is right");
 });

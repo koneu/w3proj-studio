@@ -308,6 +308,14 @@ export interface TerrainObjects {
   occupancy(): Promise<TerrainOccupancy>;
   /** Where a unit type lands near a point: buildings go on the building grid, others stay. */
   buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
+  /** Where an object of `kind`/`id` placed at (x, y) facing `angle` (radians) lands, and its facing then: a building
+   *  on the building grid, a doodad or destructable on its own grid and, with a texture that isn't square, at a
+   *  quarter turn (Snap Doodads on Load); anything else as asked. */
+  placedSpot(kind: string, id: string, x: number, y: number, angle: number): Promise<{ x: number; y: number; angle: number }>;
+  /** Gives doodads and destructables among `entries` (placed, moved or scaled by a tool) the place and facing
+   *  (`place`) and the scale (`scale`) the World Editor gives them, in place: on their grid (Snap Doodads on Load),
+   *  the scale within their type's range (Fix Doodads on Load). Part of the caller's edit; units are left alone. */
+  settleDoodads(entries: PlacedEntry[], what: { place?: boolean; scale?: boolean }): Promise<void>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
   /** Whether an object may stand here: false past the camera bounds while Enforce Camera Bounds is on. */
