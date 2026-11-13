@@ -34,6 +34,10 @@ async function gameData(w3: W3Api, kinds: string[]): Promise<Map<string, KindDat
 /** See the top. Gives what was done; nothing to do is no edit. */
 export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcome> {
   const root = requireProject(w3).root;
+  // Which strings are used and which tables there are come from the file list: only once it has every file (right
+  // after an open it may not yet; a string only an unlisted file refers to would be dropped).
+  await w3.workspace.filesReady();
+  if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
   const listed = () => new Map(w3.workspace.files().map((f) => [f.path.toLowerCase(), f.path] as [string, string]));
   const has = (path: string) => listed().has(path.toLowerCase());
   const objectFiles = OBJECT_KINDS.flatMap((kind) => [false, true].map((skin) => ({ kind, skin, path: `map/war3map${skin ? "Skin" : ""}.${kind}` })));

@@ -34,6 +34,10 @@ export interface PruneOutcome { dropped: number[]; restored: number[]; kept: str
 export async function dropUnusedStrings(w3: W3Api): Promise<PruneOutcome> {
   const root = w3.workspace.project()?.root;
   if (!root) return { dropped: [], restored: [], kept: "no project is open" };
+  // What refers to strings is searched in the listed files: only once every file is listed (a list still being read
+  // right after an open would drop what the files missing from it use).
+  await w3.workspace.filesReady();
+  if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
   const listed = () => w3.workspace.files().map((f) => f.path);
   if (!listed().some((p) => p.toLowerCase() === WTS)) return { dropped: [], restored: [], kept: null };
   const unsaved = w3.editors.unsavedPaths();

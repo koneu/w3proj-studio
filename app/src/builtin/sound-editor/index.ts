@@ -203,7 +203,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
         // The TRIGSTR numbers the map's files refer to and those a pack dropped and recorded (new dialogue keys go after
         // them, as Move Texts numbers), read in the background; the sounds' own keys come from the live list.
-        const otherRefs = strings && !doc.readOnly ? stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path)) : null;
+        // Taken from the whole file list (right after an open it may still be read): a file not listed yet isn't none.
+        const otherRefs = strings && !doc.readOnly ? w3.workspace.filesReady().then(() => {
+          if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
+          return stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path));
+        }) : null;
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
@@ -277,6 +281,10 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
   const added = strings.added();
   const locales: { path: string; text: string }[] = [];
   if (added.length) {
+    // Every language's table, so the file list must have them all (a table not listed yet would miss the strings).
+    const root = w3.workspace.project()?.root;
+    await w3.workspace.filesReady();
+    if (w3.workspace.project()?.root !== root) throw new Error("Not saved: the project changed meanwhile.");
     for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
       const text = await w3.workspace.readText(path).catch((e) => {
         throw new Error(`Not saved: ${path} can't be read (${errorText(e)}), so the new dialogue strings can't be added to it.`);

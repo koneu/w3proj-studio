@@ -7218,6 +7218,50 @@ async function realMapSaveRound(page, found, map, name, prepare) {
   }
 }
 
+/** Move Texts run right after a project opens, while its file list is still read (the listing held back here): the
+ *  command waits for the whole list, so a string only war3map.j refers to stays (openpoints bugs.md, movetexts-
+ *  triggers: war3map.wtg.json wasn't listed yet). Without the wait the list is empty and every string goes. */
+async function stringsBeforeListing(page, found) {
+  const fail = (what) => found.push(`strings before the file list: ${what}`);
+  const dir = join(work, "strings-before-listing"), wtsFile = join(dir, "map", "war3map.wts"), script = join(dir, "map", "war3map.j");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  writeFileSync(wtsFile, readFileSync(wtsFile, "utf8") + "\nSTRING 7\n{\nOnly the script\n}\n");
+  writeFileSync(script, readFileSync(script, "utf8") + "// TRIGSTR_007\n");
+  const wtsBefore = readFileSync(wtsFile, "utf8");
+  // The listing is held in the workspace (testListingHold): the backend's invoke can't be wrapped from the page.
+  await page.evaluate(`(async () => {
+    await w3.editors.closeAll();
+    w3.workspace.close();
+    w3Workbench.workspace.testListingHold = new Promise((r) => { window.__sblRelease = r; });
+  })()`);
+  try {
+    await page.evaluate(`void w3.workspace.open(${JSON.stringify(dir)}).catch(() => {})`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`), 20000);
+    // The control: the project is open and its list isn't read yet.
+    const listed = await page.evaluate(`w3.workspace.files().length`);
+    if (listed) return fail(`the project's files were listed (${listed}) though the listing was held (control)`);
+    await page.evaluate(`(() => { window.__sblDone = false; window.__sblRun = w3.commands.execute("w3.strings.moveToTable").then((r) => ({ r }), (e) => ({ e: String(e) })).finally(() => { window.__sblDone = true; }); })()`);
+    await sleep(1500);
+    if (await page.evaluate(`window.__sblDone`)) fail("Move Texts didn't wait for the file list");
+    await page.evaluate(`window.__sblRelease()`);
+    const moved = await page.evaluate(`window.__sblRun`);
+    await settled(page);
+    if (moved.e) fail(`the command: ${moved.e}`);
+    else if (moved.r?.dropped !== 0 || moved.r?.moved !== 0) fail(`the command dropped ${moved.r?.dropped} and moved ${moved.r?.moved} strings, nothing was due: ${JSON.stringify(moved.r)}`);
+    if (!readFileSync(script, "utf8").includes("// TRIGSTR_007")) fail("war3map.j lost its reference to string 7 (control)");
+    const wtsAfter = readFileSync(wtsFile, "utf8");
+    if (wtsAfter !== wtsBefore) fail(`war3map.wts changed: ${JSON.stringify(wtsAfter.slice(-80))}`);
+  } finally {
+    await page.evaluate(`(() => {
+      w3Workbench.workspace.testListingHold = null;
+      window.__sblRelease?.();
+      for (const k of ["__sblRelease", "__sblRun", "__sblDone"]) delete window[k];
+    })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Move Texts to String Table on a copy of cliff.w3m given literal texts, as the World Editor test had it (we-drive,
  *  2026-11-10): opened and saved without the command, the map packs as before; the command writes the World Editor's
  *  war3map.wts, byte for byte, and the references, and adds the new strings to the map's German table; reopened, the texts are there; a second run changes nothing; undo
@@ -10898,6 +10942,7 @@ async function run() {
         specialDoodads,
         staleEditors,
         startPreviewFollow,
+        stringsBeforeListing,
         syncSafety,
         techtreeRandomLevels,
         terrainSelectCameras,
@@ -11184,6 +11229,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "realMapSave", found);
   await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));
   await leftOpen(page, "moveTextsToTable", found);
+  await stringsBeforeListing(page, found).catch((e) => found.push(`strings before the file list: ${e.message}`));
+  await leftOpen(page, "stringsBeforeListing", found);
   await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
   await leftOpen(page, "drawCalls", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
