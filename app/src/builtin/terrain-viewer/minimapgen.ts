@@ -6,7 +6,7 @@ import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseMdx } from "../../lib/model/mdx";
-import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type Rgb } from "./minimap";
+import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type PathMask, type Rgb } from "./minimap";
 import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./objects";
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
@@ -54,6 +54,14 @@ function memo<T>(make: (key: string) => Promise<T>): (key: string) => Promise<T>
   };
 }
 
+/** The model's texture ids in the order the minimap colour looks at them: the textures its geosets' materials show
+ *  first (an ice gate's first texture is a cloud one, for its particles: the editor colours it by the walls' texture,
+ *  SnowareBay 2026-11-13), then the others in file order. */
+export function textureOrder(model: { textures: readonly unknown[]; geosets: readonly { materialId: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[] }[] }[] }): number[] {
+  const shown = model.geosets.flatMap((g) => model.materials[g.materialId]?.layers.map((l) => l.textureIds[0]) ?? []);
+  return [...new Set([...shown, ...model.textures.keys()])];
+}
+
 /** The minimap colour of a doodad or destructable without its own (useMMColor 0): the smallest mip colour of its
  *  model's first texture (its replaceable texture, trees' for example, where the model asks for one), null when the
  *  model or texture can't be read. The first variation's model stands for all. */
@@ -67,9 +75,11 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
     if (!plain) return null;
     try { model = parseMdx(await readFile(plain)); } catch { return null; }
   }
-  for (const tex of model.textures) {
-    const path = tex.replaceableId === 0 ? tex.path
-      : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";
+  const pathOf = (tex: { replaceableId: number; path: string }) => tex.replaceableId === 0 ? tex.path
+    : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";
+  for (const id of textureOrder(model)) {
+    const tex = model.textures[id];
+    const path = tex && pathOf(tex);
     if (!path) continue;
     try { return smallestMipColor(decodeImage(await readFile(path), path)); } catch { return null; }
   }
@@ -78,19 +88,23 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
 
 /** The doodads and destructables the minimap shows, and how (see minimap.ts): those whose type's row (Doodads.slk,
  *  DestructableData.slk; a custom type's base's) has showInMM, in their row's minimap colour (useMMColor) or else
- *  `modelColor`'s of the type (left out when that is null), as big as `footprint` says their pathing texture (the
- *  map's object data's first) is, in tiles; 1 without one. */
-export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "position"> & { life?: number })[], tables: {
+ *  `modelColor`'s of the type (left out when that is null), in the shape of their pathing texture (the map's object
+ *  data's first) turned by their angle when it isn't one full square (`pathMask`), else as big a dot as `footprint`
+ *  says the texture is, in tiles (1 without one). */
+export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "position"> & { life?: number; angle?: number })[], tables: {
   rows: ReadonlyMap<string, Record<string, string>>;
   bases: ReadonlyMap<string, { base: string; pathTex?: string }>;
   modelColor: (type: string) => Promise<Rgb | null>;
   footprint: (pathTex: string) => Promise<number>;
+  /** The cells of a pathing texture, drawn as they are; null (or left out): a dot of its `footprint` size. */
+  pathMask?: (pathTex: string) => Promise<PathMask | null>;
 }): Promise<MinimapObject[]> {
   const { rows, bases } = tables;
   const objects: MinimapObject[] = [];
   for (const d of doodads) {
-    // A destructable placed dead (life 0 %) isn't on the World Editor's minimap: of SnowareBay's 205 dead Northrend
-    // tree walls, 52 of the 54 standing alone show nothing in its export (2026-11-13).
+    // A destructable placed dead (life 0 %) is mostly left out of the World Editor's minimap: of SnowareBay's 205 dead
+    // Northrend tree walls the export shows 77, nearly all on higher ground (ground height 250 and up: 85 %; below
+    // 200: 8 %), where the others show nothing at all. What decides it isn't known (2026-11-13), so none are drawn.
     if (d.life === 0) continue;
     const type = rows.has(d.id) ? d.id : bases.get(d.id)?.base ?? "";
     const r = rows.get(type);
@@ -98,7 +112,12 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type);
     if (!rgb) continue;
     const pathTex = bases.get(d.id)?.pathTex ?? r.pathTex;
-    const size = pathTex && !/^(_|none)$/i.test(pathTex.trim()) ? await tables.footprint(/\.\w{3}$/i.test(pathTex) ? pathTex : `${pathTex}.tga`) : 1;
+    const file = pathTex && !/^(_|none)$/i.test(pathTex.trim()) ? (/\.\w{3}$/i.test(pathTex) ? pathTex : `${pathTex}.tga`) : "";
+    const mask = file ? await tables.pathMask?.(file) : null;
+    // Gates, walls and rock spires are drawn as their texture's cells; a texture that is one full square (trees,
+    // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
+    if (mask && !(mask.width === mask.height && mask.cells.every((c) => c))) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask, angle: d.angle }); continue; }
+    const size = file ? await tables.footprint(file) : 1;
     objects.push({ x: d.position[0], y: d.position[1], rgb, size });
   }
   return objects;
@@ -182,7 +201,13 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     const image = decodeImage(await readFile(path), path).mip(0);
     return Math.sqrt(image.width * image.height) / CELLS_PER_TILE;
   })().catch(() => 1));
-  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint });
+  const pathMask = memo((path: string) => (async () => {
+    const image = decodeImage(await readFile(path), path).mip(0);
+    const cells = new Uint8Array(image.width * image.height);
+    for (let i = 0; i < cells.length; i++) cells[i] = image.rgba[i * 4] | image.rgba[i * 4 + 1] | image.rgba[i * 4 + 2] ? 1 : 0;
+    return { width: image.width, height: image.height, cells };
+  })().catch(() => null));
+  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, pathMask });
 
   return {
     terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor,
