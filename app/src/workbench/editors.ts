@@ -227,6 +227,9 @@ export class EditorService {
     return this.active?.path ?? null;
   }
 
+  /** Whether the editor in front is the terrain editor (`when: "terrain"` commands act on it). */
+  terrainActive() { return this.active?.providerId === "w3.terrainViewer"; }
+
   /** What the active editor can do: the Welcome page is a tab, but has nothing to save. */
   canSave() { return !!this.active?.instance?.save; }
   canUndo() { return !!this.active?.instance?.undo; }

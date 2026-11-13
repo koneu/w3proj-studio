@@ -20,11 +20,12 @@ function place(menu: string) {
 }
 
 /** Why a command can't run now; undefined when it can. */
-export function whyBlocked(when: MenuEntry["when"], now: { project: boolean; editor: boolean; save: boolean; undo: boolean }): string | undefined {
+export function whyBlocked(when: MenuEntry["when"], now: { project: boolean; editor: boolean; save: boolean; undo: boolean; terrain: boolean }): string | undefined {
   if (when === "project" && !now.project) return "Open or import a project first.";
   if (when === "editor" && !now.editor) return "Nothing is open.";
   if (when === "save" && !now.save) return "This can't be saved.";
   if (when === "undo" && !now.undo) return "This editor has no undo.";
+  if (when === "terrain" && !now.terrain) return "Switch to a terrain editor first.";
   return undefined;
 }
 

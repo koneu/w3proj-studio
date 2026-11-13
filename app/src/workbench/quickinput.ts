@@ -64,15 +64,17 @@ export class QuickInput {
         this.list.replaceChildren(
           ...shown.slice(0, 200).map((it, i) =>
             h(
-              `div.quick-input-item${i === active ? ".active" : ""}`,
+              `div.quick-input-item${i === active ? ".active" : ""}${it.disabled ? ".disabled" : ""}`,
               {
                 // The keys stay in the input; the click picks (a press moved off the entry before letting go doesn't).
                 onmousedown: (e: MouseEvent) => e.preventDefault(),
-                onclick: () => finish(it),
+                onclick: () => { if (!it.disabled) finish(it); },
+                ...(it.disabled ? { title: it.disabled } : {}),
                 onmousemove: (e: MouseEvent) => hover(i, e),
               },
               h("span.label", {}, it.label),
               it.description ? h("span.description", {}, it.description) : null,
+              it.disabled ? h("span.description", {}, it.disabled) : null,
               it.detail ? h("div.detail", {}, it.detail) : null,
             ),
           ),
@@ -88,7 +90,7 @@ export class QuickInput {
         const key = keyOf(e);
         if (key === "ArrowDown") { active = Math.min(active + 1, shown.length - 1); render(); e.preventDefault(); }
         else if (key === "ArrowUp") { active = Math.max(active - 1, 0); render(); e.preventDefault(); }
-        else if (key === "Enter") { finish(shown[active]); e.preventDefault(); }
+        else if (key === "Enter") { if (!shown[active]?.disabled) finish(shown[active]); e.preventDefault(); }
         else if (key === "Escape") { finish(undefined); e.preventDefault(); }
       };
       // Typing starts again at the best match, wherever the pointer or the arrows had the highlight.

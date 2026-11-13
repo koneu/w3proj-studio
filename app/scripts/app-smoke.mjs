@@ -2099,6 +2099,7 @@ async function techtreeRandomLevels(page, found) {
     info.unitTables = [{ number: 0, name: "Smoke Random", positions: [0, 2], lines: [{ chance: 100, ids: ["hfoo", "ratc"] }] }];
     info.itemTables = [{ number: 0, name: "Smoke Table", sets: [[{ chance: 100, id: "ratf" }]] }];
     info.techs = [{ players: 1, id: "hkni" }];
+    info.upgrades = [{ players: 1, id: "Rhme", level: 0, availability: 2 }];
     await page.evaluate(`w3.workspace.writeText(${JSON.stringify(W3I)}, ${JSON.stringify(JSON.stringify(info, null, 2))})`);
     await settled(page);
     await open();
@@ -2120,6 +2121,22 @@ async function techtreeRandomLevels(page, found) {
     if (await page.evaluate(`document.querySelector(${JSON.stringify(GRID_CELL)})?.checked !== false`)) fail("the grid shows the knight available to player 1");
     await k.hands.click(GRID_CELL);
     await until("the cell ticked", () => page.evaluate(`document.querySelector(${JSON.stringify(GRID_CELL)})?.checked === true`), 5000).catch(() => fail("the click didn't tick the grid's cell"));
+
+    // The upgrades grid scrolls inside its own box instead of widening the pane; an upgrade is one line with its name as tooltip.
+    await k.hands.click("[data-switch=\"upgrades\"] .techtree-view-grid");
+    await until("the upgrades grid", () => has(".techtree-grid-upgrades tbody tr"), 10000).catch(() => fail("Per player didn't show the upgrades grid"));
+    const fit = await page.evaluate(`(() => {
+      const box = document.querySelector(".techtree-grid-upgrades").closest(".techtree-grid-scroll");
+      if (!box) return "the upgrades grid isn't in a scrolling box";
+      const label = document.querySelector(".techtree-grid-upgrades .techtree-grid-object");
+      let p = box.parentElement; while (p && p.scrollWidth <= p.clientWidth + 1 && p !== document.body) p = p.parentElement;
+      if (p && p !== document.body) return "the pane scrolls sideways: " + p.className + " " + p.scrollWidth + " > " + p.clientWidth;
+      if (getComputedStyle(box).overflowX !== "auto") return "the box doesn't scroll";
+      if (label.getBoundingClientRect().height > 1.6 * parseFloat(getComputedStyle(label).lineHeight || "20")) return "the upgrade's name wraps";
+      if (!label.title) return "the upgrade's name has no tooltip";
+      return "";
+    })()`);
+    if (fit) fail(fit);
 
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
@@ -6661,6 +6678,22 @@ async function keybindings(page, found) {
   try {
     await writeFile("[]\n");
     await until("the terrain view's state", async () => (await state()) !== null, 20000);
+    // The command palette greys out Reset Texture Variations (and its terrain siblings) unless a terrain editor is in front.
+    const paletteRow = async () => {
+      await page.evaluate(`void w3.commands.execute("workbench.commandPalette")`);
+      await until("the palette", () => page.evaluate(`!document.querySelector(".quick-input")?.hidden && document.querySelectorAll(".quick-input-item").length > 0`), 10000);
+      await page.evaluate(`(() => { const i = document.querySelector(".quick-input-box"); i.value = "Reset Texture Variations"; i.dispatchEvent(new Event("input")); })()`);
+      const row = await page.evaluate(`(() => { const e = [...document.querySelectorAll(".quick-input-item")].find((x) => x.textContent.includes("Reset Texture Variations")); return e ? { disabled: e.classList.contains("disabled"), text: e.textContent } : null; })()`);
+      await page.evaluate(`document.querySelector(".quick-input-box").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      return row;
+    };
+    const inFront = await paletteRow();
+    if (!inFront || inFront.disabled) fail(`Reset Texture Variations is greyed out with the terrain editor in front: ${JSON.stringify(inFront)}`);
+    await page.evaluate(`w3.commands.execute("w3.mapInfo.open")`);
+    await until("another editor in front", () => page.evaluate(`w3.editors.activePath() !== ${JSON.stringify(TXT)}`), 10000);
+    const away = await paletteRow();
+    if (!away?.disabled || !/terrain editor/.test(away.text)) fail(`Reset Texture Variations isn't greyed out with the reason without a terrain editor: ${JSON.stringify(away)}`);
+    await backToMap();
     await k.tab("Select");
     await plainGridView(page);
     // G as the World Editor's: no grid, then the large one.
@@ -9678,6 +9711,11 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     // Remove 3.0 alone (its own button): the other two stay as one row.
     await page.evaluate(`window.__impWarned.length = 0; window.__impAnswer = "Remove and delete file"; window.__impWarnPick = undefined`);
     await page.evaluate(`${row}[0]?.click()`);
+    // The detail's buttons wrap inside the pane instead of running past its edge.
+    const outside = await page.evaluate(`(() => { const d = document.querySelector(".imp-detail"); if (!d) return "no detail"; const r = d.getBoundingClientRect();
+      const bad = [...d.querySelectorAll(".imp-actions button")].filter((b) => b.getBoundingClientRect().right > r.right + 1).map((b) => b.textContent);
+      return (d.scrollWidth > d.clientWidth + 1 ? "the detail scrolls sideways; " : "") + bad.join(", "); })()`);
+    if (outside) fail(`the import detail's buttons run past its edge: ${outside}`);
     if (!(await page.evaluate(`(() => { const b = document.querySelector(".imp-detail .imp-remove-de"); if (!b) return false; b.click(); return true; })()`))) fail("a row with three versions has no Remove 3.0 button");
     else {
       if (!(await soon(() => !entry(DE), 10000))) fail(`Remove 3.0 left ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}`);

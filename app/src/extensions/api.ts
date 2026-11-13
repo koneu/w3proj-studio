@@ -18,7 +18,7 @@ export interface CommandContribution {
    *  not there yet is added. Without this it's in the command palette only. */
   menu?: string;
   /** What it needs to run; its menu entry is greyed out without it. */
-  when?: "project" | "editor" | "save" | "undo";
+  when?: "project" | "editor" | "save" | "undo" | "terrain";
 }
 
 export interface ViewContainerContribution {
@@ -204,6 +204,8 @@ export interface QuickPickItem<T = unknown> {
   description?: string;
   detail?: string;
   value?: T;
+  /** Greyed out with this reason; it can't be picked. */
+  disabled?: string;
 }
 
 export interface StatusBarItem extends Disposable {

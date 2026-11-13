@@ -56,14 +56,15 @@ test("what a user looks for first is in the menus of the built-in extensions", (
 });
 
 test("a menu entry says why it can't run, and only then", () => {
-  const none = { project: false, editor: false, save: false, undo: false };
+  const none = { project: false, editor: false, save: false, undo: false, terrain: false };
   assert.equal(whyBlocked(undefined, none), undefined);
   assert.equal(whyBlocked("project", { ...none, project: true }), undefined);
   assert.equal(whyBlocked("editor", { ...none, editor: true }), undefined);
   assert.equal(whyBlocked("save", { ...none, save: true }), undefined);
   assert.equal(whyBlocked("undo", { ...none, undo: true }), undefined);
   assert.match(whyBlocked("project", { ...none, editor: true }) ?? "", /project/);
-  for (const when of ["editor", "save", "undo"] as const) assert.ok(whyBlocked(when, { ...none, project: true }), when);
+  assert.equal(whyBlocked("terrain", { ...none, terrain: true }), undefined);
+  for (const when of ["editor", "save", "undo", "terrain"] as const) assert.ok(whyBlocked(when, { ...none, project: true }), when);
   const [file] = menuTree([{ ...cmd("a", "File"), when: "project" }]);
   assert.equal(file.groups[0][0].when, "project");
 });
