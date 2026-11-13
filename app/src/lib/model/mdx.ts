@@ -67,6 +67,9 @@ export interface Geoset {
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
+  /** The second texture coordinate set, when the geoset has one: layers with CoordId 1 use it (the classic cliff
+   *  doodads draw their rock overlay with it over the cliff texture). Further sets aren't kept. */
+  uvs2?: Float32Array;
   /** Triangle indices. */
   faces: Uint16Array;
   /** Per vertex: index into `groups` (classic skinning). */
@@ -468,17 +471,18 @@ function readGeoset(r: Reader, version: number): Geoset {
     r.p += wide ? n * 2 : n;
   }
   const sets = expect("UVAS");
-  let uvs = new Float32Array(0);
+  let uvs = new Float32Array(0), uvs2: Float32Array | undefined;
   for (let s = 0; s < sets; s++) {
     const n = expect("UVBS");
     const set = r.f32s(n * 2);
     if (s === 0) uvs = set;
+    else if (s === 1) uvs2 = set;
   }
   if (r.p !== end) throw new Error(`geoset: ${end - r.p} unread bytes`);
   const vertices = positions.length / 3;
   if (skin && skin.length !== vertices * 8) throw new Error("geoset: SKIN size mismatch");
   return {
-    positions, normals, uvs, faces: idx, materialId, lod, lodName, extent, groups, skin,
+    positions, normals, uvs, ...(uvs2 ? { uvs2 } : {}), faces: idx, materialId, lod, lodName, extent, groups, skin,
     vertexGroups: vertexGroups.length === vertices ? vertexGroups : new Uint8Array(vertices),
   };
 }

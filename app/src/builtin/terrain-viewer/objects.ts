@@ -12,7 +12,7 @@ import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
 import { skinTextures } from "../../lib/model/replaceable";
-import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
+import { bounds, hdSlots, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { artValue } from "../../lib/objects/artset";
 import { SKIN_KINDS, SkinIds } from "../../lib/objects/skinids";
@@ -365,8 +365,17 @@ export interface ModelRequest {
   instances: ObjectInstance[];
   /** The look to stand in (Animprops). */
   props?: readonly string[];
-  /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders). */
-  retexture?: (path: string) => string;
+  /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders); `slot`: the texture's place in the
+   *  model's HD layers (hdSlots), when it has one. */
+  retexture?: (path: string, slot?: string) => string;
+}
+
+/** Textures a placed object takes instead of its type's: replaceable id → path, and the swap of an HD model's
+ *  placeholder paths (a special doodad's cliff texture). `key` tells such looks of one model apart. */
+export interface PlacedTextures {
+  key: string;
+  replaceable: Record<number, string>;
+  retexture?: (path: string, slot?: string) => string;
 }
 
 export interface LoadResult {
@@ -507,9 +516,10 @@ export class ObjectLoader {
         gpu.props = req.props ?? [];
         gpu.pose(standClock(model, gpu.props));
         const drawn = drawnTextures(model);
+        const slots = req.retexture ? hdSlots(model) : undefined;
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
           if (!p || !drawn.has(i)) return;
-          const tex = req.retexture?.(p) ?? p;
+          const tex = req.retexture?.(p, slots?.get(i)) ?? p;
           let users = this.textureUsers.get(tex.toLowerCase());
           if (!users) this.textureUsers.set(tex.toLowerCase(), (users = new Set()));
           users.add(req.path.toLowerCase());
@@ -571,11 +581,13 @@ export class ObjectLoader {
    *  use their base object's model (`baseOf`, from the map's object data). An object whose model doesn't load
    *  (or whose id is unknown) is drawn as the World Editor's checkered cube, a batch of its own in the group, and
    *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray.
-   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim"). */
+   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim").
+   *  `texturesOf`: textures a placed object takes instead of its type's (a special doodad's cliff texture). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
     placeholders = true, shownAs?: (p: Placed) => string | undefined,
-    looksOf?: (p: Placed, skin: Skin) => readonly string[]): Promise<LoadResult> {
+    looksOf?: (p: Placed, skin: Skin) => readonly string[],
+    texturesOf?: (p: Placed, skin: Skin) => PlacedTextures | undefined): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -593,11 +605,12 @@ export class ObjectLoader {
       const path = modelPath(skin, p.variation);
       const more = looksOf?.(p, skin).filter((l) => !skin.animProps?.includes(l)) ?? [];
       const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
-      const key = `${path}|${skin.texFile}|${props ?? ""}`;
+      const own = texturesOf?.(p, skin);
+      const key = `${path}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
-        const replaceable = skinTextures(skin);
-        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [] }, items: [] };
+        const replaceable = own?.replaceable ?? skinTextures(skin);
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(own?.retexture ? { retexture: own.retexture } : {}) }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

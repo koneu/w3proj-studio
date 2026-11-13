@@ -478,7 +478,7 @@ class MdlReader {
 
   private geoset(): Geoset {
     const positions: number[] = [], normals: number[] = [], groupsFlat: number[][] = [], faces: number[] = [], vertexGroups: number[] = [];
-    const g: { materialId: number; lod: number; lodName: string; extent: Extent; uvs?: number[]; skin?: number[] } = { materialId: 0, lod: 0, lodName: "", extent: this.extent() };
+    const g: { materialId: number; lod: number; lodName: string; extent: Extent; uvs?: number[]; uvs2?: number[]; skin?: number[] } = { materialId: 0, lod: 0, lodName: "", extent: this.extent() };
     this.block("Geoset", (k) => {
       switch (k) {
         case "Vertices": this.counts(); this.numbers(positions, 3); break;
@@ -486,7 +486,8 @@ class MdlReader {
         case "TVertices": {
           this.counts();
           const set = this.numbers([], 2);
-          g.uvs ??= set;
+          if (g.uvs) g.uvs2 ??= set;
+          else g.uvs = set;
           break;
         }
         case "VertexGroup": this.counts(); this.numbers(vertexGroups); break;
@@ -526,6 +527,7 @@ class MdlReader {
     }
     return {
       positions: new Float32Array(positions), normals: new Float32Array(normals), uvs: new Float32Array(g.uvs ?? []),
+      ...(g.uvs2 ? { uvs2: new Float32Array(g.uvs2) } : {}),
       faces: Uint16Array.from(faces, toU16), groups: groupsFlat, skin: sk, materialId: g.materialId, lod: g.lod, lodName: g.lodName, extent: g.extent,
       vertexGroups: vertexGroups.length === vertices ? (big ? Uint16Array.from(vertexGroups, toU16) : Uint8Array.from(vertexGroups, (v) => (Number.isFinite(v) ? v & 0xff : 0))) : new Uint8Array(vertices),
     };

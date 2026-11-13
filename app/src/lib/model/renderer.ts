@@ -309,6 +309,16 @@ export const TEAM_COLORS: [string, Vec3][] = [
   ["Coal", [40, 40, 40]], ["Snow", [235, 240, 255]], ["Emerald", [0, 120, 30]], ["Peanut", [164, 111, 51]],
 ];
 
+/** The slot each texture fills in the model's HD layers (diffuse, normal, ORM: the first three of a layer's list), as
+ *  the suffix of its set's files. A texture in no HD layer isn't in the map. */
+export function hdSlots(model: Pick<Model, "materials">): Map<number, "_Diffuse" | "_Normal" | "_ORM"> {
+  const slot = new Map<number, "_Diffuse" | "_Normal" | "_ORM">();
+  for (const mat of model.materials) for (const l of mat.layers) {
+    if (l.textureIds.length >= 3) (["_Diffuse", "_Normal", "_ORM"] as const).forEach((s, k) => slot.set(l.textureIds[k], s));
+  }
+  return slot;
+}
+
 /** Textures for replaceable ids other than team colour/glow. */
 export const REPLACEABLE: Record<number, string> = {
   11: "ReplaceableTextures\\Cliff\\Cliff0.blp",
@@ -325,12 +335,14 @@ export const REPLACEABLE: Record<number, string> = {
 
 const VS = `#version 300 es
 precision highp float;
-in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
+in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec2 aUV2; in vec4 aBones; in vec4 aWeights;
 // The instance's world transform: one per instance, so every copy of a model in a batch is one draw.
 in mat4 aWorld;
 uniform mat4 uViewProj;
 // Texture animation (TXAN) of the layer: identity without one.
 uniform mat3 uTexMatrix;
+// The layer's texture coordinate set (CoordId): 1 takes aUV2 (the geoset's second set, else its first).
+uniform float uCoord;
 uniform highp sampler2D uBones;
 // Optional ground height map (R32F, one texel per terrain corner): cliff models
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
@@ -354,7 +366,7 @@ void main() {
   mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
   if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
   vNormal = mat3(aWorld) * mat3(m) * aNormal;
-  vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
+  vUV = (uTexMatrix * vec3(uCoord > 0.5 ? aUV2 : aUV, 1.0)).xy;
   vec4 world = aWorld * m * vec4(aPos, 1.0);
   if (uUseHeight > 0.5) {
     world.z += groundAt(world.xy);
@@ -484,7 +496,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -688,10 +700,7 @@ export class ModelGpu {
    *  `replaceable` first (e.g. a destructable's own tree texture). */
   texturePaths(replaceable: Record<number, string> = {}): (string | null)[] {
     // In HD layers a replaceable texture names a set: X_Diffuse, X_Normal, X_ORM.
-    const slot = new Map<number, string>();
-    for (const mat of this.model.materials) for (const l of mat.layers) {
-      if (l.textureIds.length >= 3) ["_Diffuse", "_Normal", "_ORM"].forEach((s, k) => slot.set(l.textureIds[k], s));
-    }
+    const slot = hdSlots(this.model);
     return this.model.textures.map((t, i) => {
       if (t.replaceableId === 0) return t.path;
       const p = replaceable[t.replaceableId] ?? REPLACEABLE[t.replaceableId];
@@ -716,26 +725,29 @@ export class ModelGpu {
       }
     }
     const prog = this.sh.prog;
-    const buffers = new Map<string, WebGLBuffer>();
+    // By data: a geoset without a second UV set gives its first to both attributes, in one buffer.
+    const buffers = new Map<Float32Array, WebGLBuffer>();
     const attr = (name: string, data: Float32Array, size: number) => {
       const loc = gl.getAttribLocation(prog, name);
       if (loc < 0) return;
-      let b = buffers.get(name);
+      let b = buffers.get(data);
       if (!b) {
         b = gl.createBuffer()!;
         gl.bindBuffer(gl.ARRAY_BUFFER, b);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-        buffers.set(name, b);
+        buffers.set(data, b);
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
     };
     const uvs = g.uvs.length ? g.uvs : new Float32Array(n * 2);
+    const uvs2 = g.uvs2 && g.uvs2.length >= n * 2 ? g.uvs2 : uvs;
     const attributes = () => {
       attr("aPos", g.positions, 3);
       attr("aNormal", g.normals, 3);
       attr("aUV", uvs, 2);
+      attr("aUV2", uvs2, 2);
       attr("aBones", bones, 4);
       attr("aWeights", weights, 4);
       // The world matrix, a column per location, steps once per instance; its buffer is set at the draw.
@@ -896,6 +908,7 @@ export class ModelGpu {
       if (alpha <= 0.01) continue;
       gl.uniform4f(u.uColor, color[0] * tint[0], color[1] * tint[1], color[2] * tint[2], alpha * tint[3]);
       gl.uniformMatrix3fv(u.uTexMatrix, false, texMatrix);
+      gl.uniform1f(u.uCoord, layer.coordId === 1 ? 1 : 0);
       const tex = m.textures[texIndex];
       // Team colour (1) and team glow (2) are textures of the player's colour.
       // (The shadow map takes the shape only: a team colour texture is opaque, and colours don't count.)

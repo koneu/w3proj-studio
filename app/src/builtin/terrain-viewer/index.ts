@@ -42,7 +42,8 @@ import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
-import { specialFootprints, specialPlacements, type Footprint } from "./specials";
+import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
+import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
@@ -2056,6 +2057,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cliffData: { types: Map<string, CliffType>; exists: (p: string) => boolean } | null = null;
         /** Bumped per re-plan so a slow older one can't overwrite a newer one. */
         let cliffGen = 0;
+        /** The special doodads as last drawn, the tiles they cover (same order), and their cliff textures and heights
+         *  then (specialLooks): a cliff re-plan that changes those (the cliff types once known, a cliff type painted,
+         *  a layer raised) draws the objects again. The cliff models leave the covered tiles to them. */
+        let specialsPlaced: Placed[] = [], specialRects: TileRect[] = [], specialsLook = "";
+        /** A special's textures: its cliff type's (specialTextures), unless its type names a texture of its own. */
+        const specialLook = (p: Placed, skin: Skin | undefined) => {
+          if (!cliffData || (skin && Object.keys(skinTextures(skin)).length)) return undefined;
+          const type = specialCliffType(terrain, cliffList(terrain, cliffData.types), p.position[0], p.position[1]);
+          return type ? specialTextures(type) : undefined;
+        };
+        const specialLooks = (placed: readonly Placed[], rects: readonly TileRect[]) =>
+          placed.map((p, i) => `${specialLook(p, undefined)?.key ?? ""}@${specialBase(terrain, rects[i])}`).join("|");
+        /** The tiles the cliffs were last planned without (specialCliffTiles), as a key. */
+        let cliffsHidden = "";
         /** The tileset's shoreline models (from Water.slk), once known. */
         let shoreModels: ShoreModels | null = null;
         let shoreGen = 0;
@@ -2075,12 +2090,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (shore) void replanShore();
           if (!cliffData) return;
           const gen = ++cliffGen;
-          const { requests, groundOverrides } = planCliffs(terrain, cliffData.types, cliffData.exists);
+          const hidden = specialCliffTiles(terrain, specialRects);
+          cliffsHidden = [...hidden].join();
+          const { requests, groundOverrides, hiddenTiles } = planCliffs(terrain, cliffData.types, cliffData.exists, hidden);
+          // The specials take the cliff texture and the layer of their ground.
+          if (specialsPlaced.length && specialLooks(specialsPlaced, specialRects) !== specialsLook) void rebuildObjects();
           const { batches, failed } = await loader.loadModels("cliffs", requests);
           if (gen !== cliffGen) return;
           const broken = new Set(failed.map((f) => f.index));
           renderer.setGroup("cliffs", batches.map((b) => ({ ...b, followGround: true })));
-          renderer.setCliffTiles(new Set(requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles))), groundOverrides);
+          renderer.setCliffTiles(new Set([...requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles)), ...hiddenTiles]), groundOverrides);
           const tiles = requests.reduce((n, r) => n + r.tiles.length, 0);
           cliffInfo.textContent = `${tiles.toLocaleString()} cliff tiles · ${requests.length} cliff models${failed.length ? ` · ${failed.length} failed` : ""}`;
           cliffInfo.title = failed.map((f) => f.error).join("\n");
@@ -2335,17 +2354,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (gen !== rebuildGen) return;
           const specialPlaced = specialPlacements(specialList, skins, (id) => specialSizes.get(id) ?? undefined,
-            { x: terrain.offsetX, y: terrain.offsetY }, (x, y) => heightAt(terrain, x, y));
+            { x: terrain.offsetX, y: terrain.offsetY }, (_x, _y, tiles) => specialBase(terrain, tiles));
+          const rects = specialList.filter((sp) => skins.has(sp.id)).map((sp) => specialTiles(sp, specialSizes.get(sp.id) ?? undefined));
+          const look = specialLooks(specialPlaced, rects);
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces, previewMelee(units)), skins, team, undefined, undefined, false),
-            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
+            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
+          specialsPlaced = specialPlaced;
+          specialRects = rects;
+          specialsLook = look;
+          // The cliff models leave the specials' tiles to them.
+          if ([...specialCliffTiles(terrain, rects)].join() !== cliffsHidden) void replanCliffs(false);
           drawnSpecials = sp.batches.flatMap((b) => b.instances.flatMap((i) => (i.pick ? [{ id: i.pick.id, x: i.world[12], y: i.world[13], z: i.world[14], model: i.pick.model }] : [])));
           for (const b of sp.batches) for (const inst of b.instances) delete inst.pick;
-          renderer.setGroup("doodads", [...d.batches, ...sp.batches]);
+          // Like the cliff models, they stand on a layer and follow the ground's height per vertex (specialBase).
+          renderer.setGroup("doodads", [...d.batches, ...sp.batches.map((b) => ({ ...b, followGround: true }))]);
           // The start buildings inside the start locations' rings: drawn see-through without their particles
           // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
           // the units; a town hall that doesn't load is just left out.
