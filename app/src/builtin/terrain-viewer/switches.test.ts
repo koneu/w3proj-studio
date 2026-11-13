@@ -25,6 +25,9 @@ const FRESH_WE: Record<string, boolean | string> = {
   "terrain.resetFixedHeights": true,
   // No menu item: opening a map always puts its doodads on their grids (we-drive 2026-11-13, doodadgrid.ts).
   "terrain.doodads.snapOnLoad": true,
+  // No menu item: its save puts every doodad's scale in its type's range and sets its flags (we-drive 2026-11-13,
+  // doodadrules.ts).
+  "terrain.doodads.fixOnLoad": true,
   // View > Lock to Game View Settings: unchecked.
   "terrain.gameView": false,
   // View > Fog Effects: unchecked.

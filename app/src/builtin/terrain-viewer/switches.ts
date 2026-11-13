@@ -5,7 +5,8 @@
 // Height Limits on ("Enforce Water Limits=1"), Enforce Camera Bounds on ("Enforce Camera Boundaries=1"), Reset Fixed
 // Object Heights on ("Reset Fixed Z When Moving Objects=1"). The editor keeps these in WorldEditPreferences.txt, so a
 // prefix shared by many runs shows what the last run left, not these (that is how Enforce Water Height Limits was
-// once taken as off). Snap Doodads on Load is no switch of the editor's: it always does it (doodadgrid.ts).
+// once taken as off). Snap Doodads on Load and Fix Doodads on Load are no switches of the editor's: it always does
+// them (doodadgrid.ts, doodadrules.ts).
 
 import type { Settings } from "../../extensions/api";
 
@@ -15,6 +16,7 @@ export const SWITCH_DEFAULTS = {
   "terrain.enforceCameraBounds": true,
   "terrain.resetFixedHeights": true,
   "terrain.doodads.snapOnLoad": true,
+  "terrain.doodads.fixOnLoad": true,
 } as const;
 
 export type SwitchKey = keyof typeof SWITCH_DEFAULTS;

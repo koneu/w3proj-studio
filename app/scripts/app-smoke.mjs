@@ -4969,10 +4969,15 @@ async function testMapWithoutGame(page, found) {
  *  doodads on their grids as the World Editor does, without marking the map as changed or writing anything; the next
  *  save writes them so. With the setting off nothing moves and the save keeps the stored places. On copies of the mini
  *  map with a barrel (2×2) off its grid, a hay cart (4×2) at 10°, mushrooms (no pathing texture) off any grid; the
- *  mini map's own LOtr (4×2 at 0°, at -64, 32) goes to -32, 64 and its tree ATtr (4×4, on its grid) stays. */
+ *  mini map's own LOtr (4×2 at 0°, at -64, 32) goes to -32, 64 and its tree ATtr (4×4, on its grid) stays.
+ *  Fix Doodads on Load (terrain.doodads.fixOnLoad, doodadrules.ts) the same way: the barrel (1.1 to 1.5) stored at
+ *  scale 1 gets 1.1, LOtr (0.8 to 1.2) at 0.75, 0.75, 1.25 gets 0.8, 0.8, 1.2, every doodad outside the mini map's
+ *  playable area (x 0 to 128, y 64) gets flag 3, a flower bed (LOfl) inside it stored with flag 1 gets 2, the hay
+ *  cart on its edge keeps 2. Both off:
+ *  scales and flags stay as stored, opened and saved. */
 async function doodadSnapOnLoad(page, found) {
   const fail = (what) => found.push(`doodad snap on load: ${what}`);
-  const KEY = "terrain.doodads.snapOnLoad", TXT = "map/war3map.w3e.txt";
+  const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad", TXT = "map/war3map.w3e.txt";
   const dir = join(work, "doodad-snap");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -4982,14 +4987,21 @@ async function doodadSnapOnLoad(page, found) {
     cpSync(FIXTURE, root, { recursive: true });
     const file = join(root, "map", "war3map.doo.json");
     const doo = JSON.parse(readFileSync(file, "utf8"));
-    const add = (id, position, angle, editorId) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position, angle, flags: 2, life: 255, editorId });
+    const add = (id, position, angle, editorId, flags = 2) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position, angle, flags, life: 255, editorId, scale: [1, 1, 1] });
     add("LTbr", [40, 40, 0], 4.712389, 50);
     add("LOch", [32, 64, 0], ten, 51);
     add("APms", [13.5, 7.25, 0], 0.5, 52);
+    add("LOfl", [96, 64, 0], 0.5, 53, 1);
     writeFileSync(file, JSON.stringify(doo, null, 2));
     return root;
   };
   const xyAngle = (list) => Object.fromEntries((list ?? []).map((d) => [d.id, [d.position[0], d.position[1], d.angle]]));
+  const scaleFlags = (list) => Object.fromEntries((list ?? []).map((d) => [d.id, [...d.scale.map((v) => Math.fround(v)), d.flags]]));
+  const f = Math.fround;
+  /** Fix Doodads on Load's scales and flags (single precision, as stored). */
+  // The hay cart at 32, 64 is on the playable area's edge (y 64): inside, flag 2 stays.
+  const FIXED = { LTbr: [f(1.1), f(1.1), f(1.1), 3], LOtr: [f(0.8), f(0.8), f(1.2), 3], LOch: [1, 1, 1, 2], APms: [1, 1, 1, 3], ATtr: [1, 1, 1, 3], LOfl: [1, 1, 1, 2] };
+  const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
   const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
@@ -5032,6 +5044,11 @@ async function doodadSnapOnLoad(page, found) {
     if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the snap marked the map as changed");
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("opening wrote the doodad file");
     if (!/Put 3 doodads on their grid/.test(await toasts())) fail(`no note of the 3 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
+    const storedFixes = scaleFlagsOnDisk(on);
+    if (!same(storedFixes.LOtr, [f(0.75), f(0.75), f(1.25), 2]) || storedFixes.LOfl?.[3] !== 1) fail(`the stored scales and flags aren't the test's (control): ${JSON.stringify(storedFixes)}`);
+    const fixedLive = scaleFlags(await live());
+    for (const [id, want] of Object.entries(FIXED)) if (!same(fixedLive[id], want)) fail(`fix on load: ${id} has scale and flags ${JSON.stringify(fixedLive[id])}, not ${JSON.stringify(want)}`);
+    if (!/Set the scale or flags of 5 doodads/.test(await toasts())) fail(`no note of the 5 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("saving with nothing changed wrote the doodad file");
@@ -5039,11 +5056,22 @@ async function doodadSnapOnLoad(page, found) {
     const written = onDisk(on);
     for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(written[id], snapped[id])) fail(`the save after an edit wrote ${id} at ${JSON.stringify(written[id])}, not where it was put ${JSON.stringify(snapped[id])}`);
     for (const id of ["APms", "ATtr"]) if (!same(written[id], stored[id])) fail(`the save moved ${id} to ${JSON.stringify(written[id])}`);
+    const writtenFixes = scaleFlagsOnDisk(on);
+    for (const [id, want] of Object.entries(FIXED)) if (!same(writtenFixes[id], want)) fail(`the save after an edit wrote ${id} with scale and flags ${JSON.stringify(writtenFixes[id])}, not ${JSON.stringify(want)}`);
+
+    // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
+    const broken = make("broken");
+    writeFileSync(join(broken, "map", "war3map.w3d.json"), "{ not json");
+    await open(broken);
+    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch(() => {});
+    const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
+    for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${JSON.stringify(brokenLive[id])}, not the map's ${JSON.stringify(brokenStored[id])}`);
+    for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
 
     // ---- off ----
-    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, false)`);
+    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, false); w3.settings.set(${JSON.stringify(FIX)}, false)`);
     const off = make("off");
-    const kept = onDisk(off);
+    const kept = onDisk(off), keptFixes = scaleFlagsOnDisk(off);
     await open(off);
     await settled(page);
     await sleep(1500);
@@ -5051,11 +5079,16 @@ async function doodadSnapOnLoad(page, found) {
     for (const id of ["LTbr", "LOtr", "LOch", "APms", "ATtr"]) if (!same(shown[id], kept[id])) fail(`with the setting off ${id} is at ${JSON.stringify(shown[id])}, not where the map has it ${JSON.stringify(kept[id])}`);
     if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("with the setting off the map is marked as changed");
     if (/on their grid/.test(await toasts())) fail(`with the setting off it still says it put doodads on their grid: ${(await toasts()).slice(0, 300)}`);
+    if (/scale or flags/.test(await toasts())) fail(`with Fix Doodads on Load off it still says it set scales or flags: ${(await toasts()).slice(0, 300)}`);
+    const shownFixes = scaleFlags(await live());
+    for (const id of Object.keys(FIXED)) if (!same(shownFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off ${id} has scale and flags ${JSON.stringify(shownFixes[id])}, not the map's ${JSON.stringify(keptFixes[id])}`);
     await saveAfterEdit();
     const after = onDisk(off);
     for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(after[id]?.slice(0, 2), kept[id].slice(0, 2)) || Math.fround(after[id][2]) !== Math.fround(kept[id][2])) fail(`with the setting off the save wrote ${id} at ${JSON.stringify(after[id])}, not ${JSON.stringify(kept[id])}`);
+    const afterFixes = scaleFlagsOnDisk(off);
+    for (const id of Object.keys(FIXED)) if (!same(afterFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off the save wrote ${id} with scale and flags ${JSON.stringify(afterFixes[id])}, not the map's ${JSON.stringify(keptFixes[id])}`);
   } finally {
-    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set(${JSON.stringify(FIX)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
     await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
