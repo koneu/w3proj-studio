@@ -8,37 +8,85 @@
 // races, target lists (umdl, urac, ua1p, atar), the map's name, author, description, suggested players, and the
 // loading-screen and prologue texts. Empty texts stay literal (Firebrand Exarchate Race, saved by it, has some).
 // Its new strings go on after the highest number; each object string gets a comment naming the kind, the object and
-// the field, as `// Units: h000 (Lit Unit), Tip (Tooltip - Basic)`; levels share it. Trigger strings aren't
-// covered (not checked in the World Editor yet).
+// the field, as `// Units: h000 (Lit Unit), Tip (Tooltip - Basic)`; levels share it. An upgrade's comment names the
+// game's upgrade it is based on (all its level names, "Iron Forged Swords,Steel Forged Swords,…"), even when the map
+// renames it. Trigger strings aren't covered (not checked in the World Editor yet).
+//
+// The full list of fields (we-drive, 2026-11-13, a literal in every text field of every kind, and in the art, tech
+// and data fields that take text; evidence in target/evidence/moveto-fields): the Text category of each kind, but
+// not the abilities' order strings (aord, aoru, aoro, aorf) nor the art one (uepa); and the upgrades' class and
+// effects (gcls, gef1-gef4), but not their codes (gco1-gco4). Icons, models, sounds, attachment points, tech lists,
+// tilesets, categories, races and an ability's data stay literal.
 
 import { StringTable, appendStrings, removeStrings, wtsCutLines } from "./wts";
 
 /** The object fields whose literal texts move. */
-export const MOVED_FIELDS: ReadonlySet<string> = new Set(["unam", "utip", "utub", "upro", "uhot", "anam", "atp1", "aub1", "ansf"]);
+export const MOVED_FIELDS: ReadonlySet<string> = new Set([
+  // Units and items.
+  "unam", "unsf", "utip", "utub", "ides", "upro", "uhot", "utpr", "uawt", "ucun", "ucut",
+  // Destructables, doodads.
+  "bnam", "bsuf", "dnam",
+  // Abilities.
+  "anam", "ansf", "atp1", "aub1", "aut1", "auu1", "aret", "arut", "ahky", "auhk", "arhk",
+  // Buffs/effects.
+  "fnam", "fnsf", "ftip", "fube",
+  // Upgrades.
+  "gnam", "gnsf", "gtp1", "gub1", "ghk1", "gcls", "gef1", "gef2", "gef3", "gef4",
+]);
 
 /** The object kinds in the order their strings are numbered (the World Editor's Object Editor tabs). */
 export const OBJECT_KINDS = ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"] as const;
 
 /** A kind as the World Editor's comments name it. */
 export const KIND_LABELS: Record<string, string> = {
-  w3u: "Units", w3t: "Items", w3b: "Destructables", w3d: "Doodads", w3a: "Abilities", w3h: "Buffs/Effects", w3q: "Upgrades",
+  w3u: "Units", w3t: "Items", w3b: "Destructibles", w3d: "Doodads", w3a: "Abilities", w3h: "Buffs/Effects", w3q: "Upgrades",
 };
 
-/** The name field of each kind, for the object's name in a comment. */
-const NAME_FIELD: Record<string, string> = { w3u: "unam", w3t: "unam", w3b: "bnam", w3d: "dnam", w3a: "anam", w3h: "fnam", w3q: "gnam" };
+/** The name field of each kind, for the object's name in a comment. Upgrades have none: theirs is the game's. */
+const NAME_FIELD: Record<string, string | undefined> = { w3u: "unam", w3t: "unam", w3b: "bnam", w3d: "dnam", w3a: "anam", w3h: "fnam" };
 
 /** A field's metadata column and label as the World Editor's comments give them (English game data): for when the
  *  game's metadata can't be read. */
 export const FALLBACK_FIELDS: Record<string, { field: string; label: string }> = {
   unam: { field: "Name", label: "Name" },
+  unsf: { field: "EditorSuffix", label: "Name - Editor Suffix" },
   utip: { field: "Tip", label: "Tooltip - Basic" },
   utub: { field: "Ubertip", label: "Tooltip - Extended" },
+  ides: { field: "Description", label: "Description" },
   upro: { field: "Propernames", label: "Proper Names" },
   uhot: { field: "Hotkey", label: "Hotkey" },
+  utpr: { field: "Revivetip", label: "Tooltip - Revive" },
+  uawt: { field: "Awakentip", label: "Tooltip - Awaken" },
+  ucun: { field: "Casterupgradename", label: "Caster Upgrade Names" },
+  ucut: { field: "Casterupgradetip", label: "Caster Upgrade Tips" },
+  bnam: { field: "Name", label: "Name" },
+  bsuf: { field: "EditorSuffix", label: "Editor Suffix" },
+  dnam: { field: "Name", label: "Name" },
   anam: { field: "Name", label: "Name" },
+  ansf: { field: "EditorSuffix", label: "Editor Suffix" },
   atp1: { field: "Tip", label: "Tooltip - Normal" },
   aub1: { field: "Ubertip", label: "Tooltip - Normal - Extended" },
-  ansf: { field: "EditorSuffix", label: "Editor Suffix" },
+  aut1: { field: "Untip", label: "Tooltip - Turn Off" },
+  auu1: { field: "Unubertip", label: "Tooltip - Turn Off - Extended" },
+  aret: { field: "Researchtip", label: "Tooltip - Learn" },
+  arut: { field: "Researchubertip", label: "Tooltip - Learn - Extended" },
+  ahky: { field: "Hotkey", label: "Hotkey - Normal" },
+  auhk: { field: "Unhotkey", label: "Hotkey - Turn Off" },
+  arhk: { field: "Researchhotkey", label: "Hotkey - Learn" },
+  fnam: { field: "EditorName", label: "Name (Editor Only)" },
+  fnsf: { field: "EditorSuffix", label: "Editor Suffix" },
+  ftip: { field: "Bufftip", label: "Tooltip" },
+  fube: { field: "Buffubertip", label: "Tooltip - Extended" },
+  gnam: { field: "Name", label: "Name" },
+  gnsf: { field: "EditorSuffix", label: "Editor Suffix" },
+  gtp1: { field: "Tip", label: "Tooltip" },
+  gub1: { field: "Ubertip", label: "Tooltip - Extended" },
+  ghk1: { field: "Hotkey", label: "Hotkey" },
+  gcls: { field: "class", label: "Class" },
+  gef1: { field: "effect1", label: "Effect 1" },
+  gef2: { field: "effect2", label: "Effect 2" },
+  gef3: { field: "effect3", label: "Effect 3" },
+  gef4: { field: "effect4", label: "Effect 4" },
 };
 
 export interface TextMod { field: string; type?: string; level?: number; data?: number; value: unknown }
@@ -163,7 +211,8 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
       for (const [k, parts] of byKey) {
         const nameField = NAME_FIELD[kind];
         // The Skin file's name is the one where both have it (as the World Editor reads them).
-        const named = [...parts].reverse().flatMap((p) => modsOf(p.o)).find((m) => m.field === nameField && typeof m.value === "string" && m.value !== "");
+        const named = nameField === undefined ? undefined
+          : [...parts].reverse().flatMap((p) => modsOf(p.o)).find((m) => m.field === nameField && typeof m.value === "string" && m.value !== "");
         const name = oneLine(named ? resolve(named.value as string) : (input.baseName?.(kind, parts[0].o.base) ?? parts[0].o.base));
         for (const { file, o } of parts) {
           for (const m of modsOf(o)) {
