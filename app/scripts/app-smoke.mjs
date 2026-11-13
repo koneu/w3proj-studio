@@ -8349,6 +8349,28 @@ async function campaignPresets(page, found) {
     await writeInfo({ ...stored(), background: 77 });
     await open();
     if (await shown("Background") !== "Preset 77") fail(`background 77 shows ${await shown("Background")}`);
+    // The campaign picture: the game's five named pictures; the stored value is the file; a file of the campaign's own is "Custom file".
+    const pics = await texts("Campaign picture");
+    if (pics[0] !== "Custom file" || pics.length !== 6 || pics[1] !== "Human" || pics[5] !== "Orc Campaign") fail(`Campaign picture offers ${JSON.stringify(pics)}`);
+    if (await shown("Campaign picture") !== "Custom file") fail(`an empty picture shows ${await shown("Campaign picture")}`);
+    await pick("Campaign picture", 2);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (stored().minimapPath !== "UI\\Widgets\\Glues\\Minimap-CustomCampaign-Orc") fail(`the Orc picture stored ${JSON.stringify(stored().minimapPath)}`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await writeInfo({ ...stored(), minimapPath: "ui/widgets/glues/minimap-campaign-orc.blp" });
+    await open();
+    if (await shown("Campaign picture") !== "Orc Campaign") fail(`a preset in other case and extension shows ${await shown("Campaign picture")}`);
+    if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(w3f)})`)) fail("showing the picture made the campaign unsaved");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await writeInfo({ ...stored(), minimapPath: "Custom\\mine.blp" });
+    await open();
+    if (await shown("Campaign picture") !== "Custom file") fail(`a custom picture shows ${await shown("Campaign picture")}`);
+    await pick("Campaign picture", 1);
+    await pick("Campaign picture", 0);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (stored().minimapPath !== "") fail(`Custom file after a preset stored ${JSON.stringify(stored().minimapPath)}`);
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }

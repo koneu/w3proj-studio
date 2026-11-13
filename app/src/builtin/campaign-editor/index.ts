@@ -18,7 +18,7 @@ import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { parseIni } from "../../lib/formats/text";
-import { parsePresets, presetOptions, type Preset } from "./presets";
+import { imagePresetOf, parseImagePresets, parsePresets, presetOptions, type ImagePreset, type Preset } from "./presets";
 import { FOG_UNSET_DENSITY, FOG_UNSET_Z, askNewCampaign, createCampaign } from "./newcampaign";
 
 const FILE = "map/war3campaign.w3f.json", WTS = "map/war3campaign.wts";
@@ -52,7 +52,7 @@ interface CampaignInfo {
 }
 
 /** The game's campaign screen and ambient sound presets (UI/WorldEditData.txt); empty lists when the game has none. */
-interface PresetLists { screens: Preset[]; sounds: Preset[] }
+interface PresetLists { screens: Preset[]; sounds: Preset[]; images: ImagePreset[] }
 let presetLists: Promise<PresetLists> | null = null;
 function loadPresets(w3: W3Api): Promise<PresetLists> {
   presetLists ??= (async () => {
@@ -61,7 +61,7 @@ function loadPresets(w3: W3Api): Promise<PresetLists> {
       for (const sec of parseIni(await w3.game.readText(f)).values()) for (const [k, v] of sec) we.set(k.toUpperCase(), v);
     }
     const data = parseIni(await w3.game.readText("UI\\WorldEditData.txt"));
-    return { screens: parsePresets(data.get("CampaignScreens"), we), sounds: parsePresets(data.get("AmbientSounds"), we) };
+    return { screens: parsePresets(data.get("CampaignScreens"), we), sounds: parsePresets(data.get("AmbientSounds"), we), images: parseImagePresets(data.get("CampaignImages"), we) };
   })();
   presetLists.catch(() => { presetLists = null; });
   return presetLists;
@@ -233,7 +233,7 @@ class CampaignView {
     addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => this.keyDown(e));
     this.render();
-    loadPresets(w3).then((p) => { if (!this.disposed && (p.screens.length || p.sounds.length)) { this.presets = p; this.render(); } }, () => {});
+    loadPresets(w3).then((p) => { if (!this.disposed && (p.screens.length || p.sounds.length || p.images.length)) { this.presets = p; this.render(); } }, () => {});
   }
 
   /** A number typed into its field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
@@ -378,6 +378,17 @@ class CampaignView {
   private preset(list: Preset[] | undefined, value: number, set: (n: number) => void) {
     if (!list?.length) return this.num(value, set, { int: true });
     return this.select(presetOptions(list, value), value, set);
+  }
+  /** The campaign picture: the game's pictures by name, or a custom file (the path stored as it is). */
+  private picture(): HTMLElement[] {
+    const c = this.info;
+    const field = () => this.text(() => c.minimapPath, (v) => { c.minimapPath = v; });
+    const list = this.presets?.images ?? [];
+    if (!list.length) return [this.row("Campaign picture", field(), "Shown in the campaign list")];
+    const options: [string, string][] = [["", "Custom file"], ...list.map((p): [string, string] => [p.path, p.name])];
+    const sel = this.select(options, imagePresetOf(list, c.minimapPath)?.path ?? "", (v) => { c.minimapPath = v; });
+    return [this.row("Campaign picture", sel, "Shown in the campaign list; Custom file: the file below"),
+      this.row("Custom picture", field(), "Image file in the campaign or the game")];
   }
   private check(label: string, on: boolean, set: (on: boolean) => void, title = "") {
     return h("label.form-check", { title }, h("input", { type: "checkbox", checked: on, disabled: !this.editable,
@@ -598,7 +609,7 @@ class CampaignView {
       h("div.form-section", {}, h("h3", {}, "Background"),
         this.row("Background", this.preset(this.presets?.screens, c.background, (v) => { c.background = v; }), "Custom file: the model or movie below, none when that is empty"),
         this.row("Custom background", this.text(() => c.backgroundPath, (v) => { c.backgroundPath = v; }), "Model (.mdx) or movie in the campaign or the game"),
-        this.row("Campaign picture", this.text(() => c.minimapPath, (v) => { c.minimapPath = v; }), "Shown in the campaign list")),
+        ...this.picture()),
       h("div.form-section", {}, h("h3", {}, "Ambient Sound"),
         this.row("Sound", this.preset(this.presets?.sounds, c.ambientSound, (v) => { c.ambientSound = v; }), "Custom file: the file below, none when that is empty"),
         this.row("Custom sound", this.text(() => c.ambientSoundPath, (v) => { c.ambientSoundPath = v; }))),
