@@ -13,6 +13,8 @@ path = "src/main.rs"
 mpq.workspace = true
 casc.workspace = true
 w3proj.workspace = true
+backend.workspace = true
 anyhow.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
+serde.workspace = true
 serde_json.workspace = true
