@@ -218,7 +218,7 @@ export interface TerrainEditorHandle {
    *  For tests and measuring. */
   /** The special doodads (cliff and cave models placed by tile) drawn now: type id, position and model. They can't be
    *  selected. For tests and measuring. */
-  /** The see-through start buildings drawn now (melee maps), where they stand. For tests. */
+  /** The see-through start buildings drawn now (one per start location), where they stand. For tests. */
   drawnStartBuildings(): { x: number; y: number }[];
   drawnSpecials(): { id: string; x: number; y: number; z: number; model: string }[];
   drawnUnits(group?: "units" | "doodads"): { id: string; x: number; y: number; z: number; team: number; model: string }[];

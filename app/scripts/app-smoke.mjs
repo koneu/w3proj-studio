@@ -2667,9 +2667,9 @@ async function specialDoodads(page, found) {
   }
 }
 
-/** The see-through town hall at a start location follows it (move by MCP, undo) and shows on melee maps only
- *  (war3map.w3i Melee flag, changed in the file as Scenario Properties does), by the flag the file holds: a player's
- *  unit placed doesn't hide it in the open editor (as in the World Editor), an editor opened after the save does. */
+/** The see-through town hall at a start location follows it (move by MCP, undo) and shows whatever the map's Melee
+ *  flag, as in the World Editor: with the flag taken off, after a player's unit is placed, after the save and in an
+ *  editor opened afterwards. */
 async function startPreviewFollow(page, found) {
   try {
   const fail = (what) => found.push(`start preview: ${what}`);
@@ -2702,29 +2702,31 @@ async function startPreviewFollow(page, found) {
     if (await near(was[0], was[1])) fail("a preview stayed at the old place");
     await k.tool("undo_last_edit");
     await until("the preview back after undo", () => near(was[0], was[1]), 10000).catch(async () => fail(`undo didn't move the preview back to ${was.slice(0, 2)}: ${JSON.stringify(await drawn())}, start now ${JSON.stringify(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.filter((u) => u.id === "sloc").map((u) => u.position))()`))}`));
+    // The Melee flag doesn't matter, as in the World Editor (we-drive 2026-11-13: fresh opens of maps with it off drew the
+    // town hall; a pasted player's footman left it drawn; the user's decision the same day). Taken off as Scenario
+    // Properties does: still drawn for the next 4 s. (The open editor's reading of the file isn't proven here; the reopen
+    // below is the step that fails under a flag rule.)
     await setMelee(false);
-    await until("no preview without the Melee flag", async () => (await drawn()).length === 0, 10000).catch(async () => fail(`still previews with Melee off: ${JSON.stringify(await drawn())}`));
-    await setMelee(true);
-    await until("previews again with Melee on", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after Melee went on"));
-    // A player's unit placed on the melee map breaks its Melee rules, but the previews stay, as in the World Editor
-    // (we-drive, verify round 3, 2026-11-13: a pasted footman left the see-through town hall drawn): they follow the
-    // flag war3map.w3i holds, not the live check. The editor's units hold the footman before the wait.
+    await settled(page);
+    for (const end = Date.now() + 4000; Date.now() < end; await sleep(200)) {
+      if ((await drawn()).length === 0) { fail("the Melee flag taken off in war3map.w3i hid the previews"); break; }
+    }
+    // A player's unit placed: the map isn't melee by its rules; still drawn, also after the save and in an editor opened
+    // afterwards. The editor's units hold the footman before the check.
     const footmen = () => page.evaluate(`window.__spEd2?.drawnUnits().filter((u) => u.id === "hfoo").length ?? 0`);
     await k.tool("place_objects", { objects: [{ id: "hfoo", x: was[0] + 1024, y: was[1] + 1024, player: 1 }], ignoreRoom: true });
     await until("the footman drawn", async () => (await footmen()) === 1, 10000).catch(() => fail("the placed footman isn't drawn (control)"));
     await settled(page);
-    if ((await drawn()).length === 0) fail("placing a player's unit hid the previews at once (the World Editor keeps them until the map is opened again)");
-    // Saved, the map is no longer melee (its flag off in the file); the open editor still draws them (the World Editor too,
-    // after Ctrl+S), and an editor opened on it now goes by the file: none.
+    if ((await drawn()).length === 0) fail("placing a player's unit hid the previews");
     await k.save();
-    if ((k.read("war3map.w3i.json").flags & 4) !== 0) fail("a player's footman left the saved map melee (control: the flag should go off)");
-    if ((await drawn()).length === 0) fail("the save that took the Melee flag off hid the previews in the open editor");
+    if ((k.read("war3map.w3i.json").flags & 4) !== 0) fail("the saved map is melee (control: the flag was taken off)");
+    if ((await drawn()).length === 0) fail("the save hid the previews in the open editor");
     await page.evaluate(`w3.editors.closeAll(); window.__spEd2 = null;`);
     await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
     await until("the terrain editor, opened again", async () => (await page.evaluate(`w3.editors.activePath()`)) === "map/war3map.w3e.txt" && await page.evaluate(`!!window.__spEd2`), 20000);
     await until("the footman in the reopened editor", async () => (await footmen()) === 1, 20000).catch(() => fail("the reopened editor draws no footman (control)"));
-    await settled(page);
-    if ((await drawn()).length !== 0) fail(`an editor opened on the saved map without its Melee flag draws previews: ${JSON.stringify(await drawn())}`);
+    await until("previews in the editor opened on the non-melee map", () => near(was[0], was[1]), 20000)
+      .catch(async () => fail(`an editor opened on the saved map without its Melee flag draws no preview at the start: ${JSON.stringify(await drawn())}`));
   } finally {
     await page.evaluate(`window.__spGroup2?.dispose(); window.__spGroup2 = null; window.__spEd2 = null;`);
   }
