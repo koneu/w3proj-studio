@@ -54,6 +54,11 @@ export async function readPrunedStrings(w3: W3Api): Promise<Map<number, string>>
   return parsePrunedStrings(text);
 }
 
+/** The recorded numbers `table` doesn't have: no other string may take one (Adjust Map String IDs, wts checkStringIds). */
+export function reservedStringIds(record: ReadonlyMap<number, string>, table: StringTable): Set<number> {
+  return new Set([...record.keys()].filter((n) => !table.has(n)));
+}
+
 /** `wts` with the recorded strings that `referenced` names again and the table lacks put back at the end, with their old
  *  numbers and texts (as the World Editor writes a block). `restored`: their numbers, ascending; none gives `wts`
  *  itself. Throws rather than give a table that doesn't read back as it should. */

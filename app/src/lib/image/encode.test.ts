@@ -29,3 +29,16 @@ test("defaults (minimaps): one level, opaque", () => {
   assert.equal(img.mipCount, 1);
   assert.ok(img.mip(0).rgba[7 * 4 + 3] > 240);
 });
+
+test("BLP1 JPEG whose header claims 16384×16384 over a 16×16 picture is refused, not allocated (1 GB)", () => {
+  const b = encodeBlp1Jpeg(16, 16, new Uint8Array(16 * 16 * 4).fill(128), 80, { alpha: true, mipmaps: true });
+  const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  d.setUint32(12, 16384, true);
+  d.setUint32(16, 16384, true);
+  const before = process.memoryUsage().arrayBuffers;
+  assert.throws(() => decodeImage(b).mip(0), /JPEG/);
+  assert.ok(process.memoryUsage().arrayBuffers - before < 64 << 20);
+  // Control: the honest file decodes.
+  const ok = encodeBlp1Jpeg(16, 16, new Uint8Array(16 * 16 * 4).fill(128), 80, { alpha: true, mipmaps: true });
+  assert.equal(decodeImage(ok).mip(0).width, 16);
+});

@@ -290,6 +290,20 @@ test("Adjust Map String IDs: references follow with their padding; clashes and u
   assert.deepEqual([...compactStringIds(table)], [], "already 1, 2, 3");
 });
 
+test("Adjust Map String IDs: a number a drop recorded (pruned-strings.json) isn't given to another string", () => {
+  // String 2 was dropped as unused and recorded: an editor's undo can bring a reference to it back, and the next pack
+  // restores it by that number. Another string must not take the number meanwhile.
+  const table = new StringTable("STRING 1\n{\na\n}\nSTRING 3\n{\nb\n}\nSTRING 7\n{\nc\n}\n");
+  const reserved = new Set([2, 5]);
+  assert.throws(() => checkStringIds(table, new Map([[3, 2]]), reserved), /2 .*dropped as unused/);
+  checkStringIds(table, new Map([[3, 2]])); // control: without the record it's allowed
+  checkStringIds(table, new Map([[3, 4]]), reserved);
+  // Renumbering all from 1 steps over the recorded numbers.
+  assert.deepEqual([...compactStringIds(table, 1, reserved)], [[7, 4]]);
+  assert.deepEqual([...compactStringIds(table)], [[3, 2], [7, 3]], "control: without the record 2 is taken");
+  checkStringIds(table, compactStringIds(table, 1, reserved), reserved);
+});
+
 // ---- Stray carriage returns (`\r\r\n`, `\r\r`) -------------------------------------------------
 
 /** tests/fixtures/wts-crcrlf/war3map.wts, found from where the tests run (app/ or the repository). The Rust port
