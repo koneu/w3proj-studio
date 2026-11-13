@@ -103,8 +103,12 @@ test("every measured flag is what the World Editor saved (72 cases)", () => {
   for (const outside of [false, true]) for (let f = 0; f < 8; f++) assert.ok(flags.some((c) => c.stored === f && inArea(c.x, c.y, PLAYABLE) !== outside), `${f} ${outside}`);
   assert.ok(flags.some((c) => c.x === 3328 && c.stored === 3 && c.saved === 2), "on the edge is inside");
   assert.ok(flags.some((c) => c.x === 3328.5 && c.stored === 2 && c.saved === 3), "half past it is outside");
-  // Higher bits stay as they are (not measured).
-  assert.equal(savedFlags(8, false), 10);
+  // Bit 3 stays, bits 4 to 7 are cleared (measured: tests/we-compare/doodads-and-units.json doodad-flag-bits, inside and outside).
+  for (const [stored, inside, outside] of [[0x08, 0x0a, 0x0b], [0x10, 2, 3], [0x20, 2, 3], [0x40, 2, 3], [0x80, 2, 3], [0x0e, 0x0e, 0x0f], [0x1e, 0x0e, 0x0f],
+    [0x7e, 0x0e, 0x0f], [0xfe, 0x0e, 0x0f], [0xff, 0x0e, 0x0f], [0xf8, 0x0a, 0x0b], [0x88, 0x0a, 0x0b]]) {
+    assert.equal(savedFlags(stored, false), inside, `0x${stored.toString(16)} inside`);
+    assert.equal(savedFlags(stored, true), outside, `0x${stored.toString(16)} outside`);
+  }
 });
 
 test("doodadFixes lists only what changes, and leaves the list as it is", () => {
