@@ -45,7 +45,7 @@ import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
-import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -86,7 +86,7 @@ import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
-import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
+import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
@@ -731,8 +731,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The seed a tool was given, or a new one: the answer says it, so any result can be repeated. */
   const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
 
-  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random) => {
-    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player, handle.objects.type(id)?.kind);
+  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random, startGold = DEFAULT_START_GOLD) => {
+    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player, handle.objects.type(id)?.kind, startGold);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
     return entry;
@@ -1191,10 +1191,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
       let placed = 0;
+      // The gold new units get, as the palette's (a map whose ability data can't be read: the game's).
+      const startGold = key === "units" ? await loadStartGold(w3).catch(() => DEFAULT_START_GOLD) : DEFAULT_START_GOLD;
       await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
         placed = await plan(async (o, i, x, y, facing) => {
           const [atX, atY] = key === "units" ? await handle.objects.buildingSpot(o.id as string, x, y) : [x, y];
-          const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
+          const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random, startGold);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
           else markBackdrop(entry, x, y, edge);
           giveProps(entry, i);
@@ -2201,6 +2203,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Doodads as last saved (shadow baseline, like savedW3e). */
         let savedDoodads: Placed[] | null = null;
         let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
+        /** The gold a new placed unit gets (typefacts.ts loadStartGold), read now and after the ability data is saved;
+         *  the last read started wins. One that fails leaves the game's 12500, said once. */
+        let startGold = DEFAULT_START_GOLD, startGoldRead = 0;
+        const readStartGold = () => {
+          const n = ++startGoldRead;
+          void loadStartGold(w3).then((g) => { if (n === startGoldRead) startGold = g; }, (e) => {
+            if (n !== startGoldRead) return;
+            startGold = DEFAULT_START_GOLD;
+            reportOnce(w3, `The map's ability data couldn't be read, so new units get ${DEFAULT_START_GOLD} gold`, e);
+          });
+        };
+        readStartGold();
         /** Set once an object was edited: the placement files are saved too. */
         let objectsTouched = false;
         /** An object to select once the placed objects have models (Object Manager double-click). */
@@ -2509,6 +2523,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The properties panel reads its lists and the types' facts anew.
           if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
           if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
+          if (/(^|\/)war3(map|campaign)(Skin)?\.w3a(\.json)?$/i.test(p)) readStartGold();
           const art = changesObjectData(p);
           const imported = changesImports(p);
           // Also before the first load is done (see objectReload): it may have read the file before this save.
@@ -4010,7 +4025,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
-              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player, kind);
+              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player, kind, startGold);
               entry.angle = at.angle;
               repositioned.add(entry);
               entryFile.set(entry, f);
