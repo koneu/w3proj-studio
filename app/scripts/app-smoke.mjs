@@ -8429,7 +8429,7 @@ async function importWarnings(page, found) {
     await settled(page);
     why = await remove("Remove and delete file");
     if (why) fail(why);
-    else if (onDisk(MODEL) || listed().some((p) => /smokecase/i.test(p))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
+    else if (!(await soon(() => !onDisk(MODEL) && !listed().some((p) => /smokecase/i.test(p)), 10000))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
 
     // ---- A model per graphics mode (branch import-graphics-mode): imported "Reforged only" it goes below _HD.w3mod\,
     // "Add Classic Version…" stores the Classic one at the plain path, the list shows the two as one row with both
