@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { fogOf } from "../model/fog";
 import { applySky, NO_WEATHER, resolveChoice, resolveWeather } from "./atmosphere";
 
 const tilesets: [string, string][] = [["A", "Ashenvale"], ["L", "Lordaeron Summer"]];
@@ -9,6 +10,14 @@ const doc = () => ({
   fog: { style: 0, start: 3000, end: 5000, density: 0.5, color: [255, 255, 255, 255] },
   terrainFog: { style: 0, overSky: 0, linearStart: 0, linearEnd: 0, maxOpacity: 0, height: 0 },
   waterTint: [128, 255, 255, 255],
+});
+
+test("set_sky's fogColor is the colour the view draws, as \"#rrggbb\" and as [red, green, blue]", () => {
+  for (const fogColor of ["#dc5028", [220, 80, 40]]) {
+    const d = doc();
+    applySky(d, { fogColor }, { tilesets });
+    assert.deepEqual(fogOf(d)?.color.map((c) => Math.round(c * 255)), [220, 80, 40], JSON.stringify(fogColor));
+  }
 });
 
 test("a name is an id or a label in any case; an unknown one lists the choices", () => {

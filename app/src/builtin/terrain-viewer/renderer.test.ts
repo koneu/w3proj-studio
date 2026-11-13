@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { applySky } from "../../lib/terrain/atmosphere";
 import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
@@ -118,6 +119,14 @@ test("the map's water tint replaces the ramp's colour, stored blue first, and ke
   // The tint's alpha makes all of it more see-through, the shore still fading out.
   const half = waterRamp(LORDAERON, [100, 100, 255, 51]);
   near([half.shallowMin[3], half.deepMax[3]], [(10 / 255) * 0.2, (250 / 255) * 0.2]);
+});
+
+test("set_sky's waterTint is the colour the water takes, as \"#rrggbb\" and as [red, green, blue]", () => {
+  for (const waterTint of ["#dc5028", [220, 80, 40]]) {
+    const doc: Record<string, any> = { version: 31, flags: 0 };
+    applySky(doc, { waterTint }, { tilesets: [] });
+    assert.deepEqual(waterRamp(LORDAERON, doc.waterTint).shallowMin.slice(0, 3).map((c) => Math.round(c * 255)), [220, 80, 40], JSON.stringify(waterTint));
+  }
 });
 
 test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-drive, 2026-11-08)", () => {
