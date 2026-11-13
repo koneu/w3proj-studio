@@ -1542,7 +1542,8 @@ export class TerrainRenderer {
     // What lies on the ground goes with it when the terrain is hidden.
     const onGround = this.groundLook !== "hidden";
     // The border's dark first: the View layers and the tools' marks go over it, as the World Editor's naval view
-    // lies over the map's edge.
+    // lies over the map's edge. They lie under the water, which is drawn later: the World Editor's Pathing - Ground
+    // vanishes under deep water too (viewcmds.ts groundPathingColors).
     for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer, this.overlay] : []) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;

@@ -179,7 +179,10 @@ export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): 
 }
 
 /** Pathing - Ground (per pathing cell, rows from the south), in the World Editor's colours: magenta where nothing
- *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). */
+ *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). Deep
+ *  water's cells are magenta too, but the editor lays the layer on the ground, under the water: deep water hides it
+ *  in SD and HD alike, shallow water lets it show through faintly, and View > Water off shows it all (we-drive, a copy of
+ *  (2)EchoIsles' south shore, 2026-11-13). The renderer draws the view layer before the water, so Studio does the same. */
 export function groundPathingColors(cells: ArrayLike<number>): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {
