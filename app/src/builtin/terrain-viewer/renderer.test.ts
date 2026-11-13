@@ -104,24 +104,28 @@ const near = (a: number[], b: number[]) => assert.ok(a.every((v, k) => Math.abs(
 test("without water tinting the water keeps the tileset's colour ramp", () => {
   const ramp = waterRamp(LORDAERON, null);
   for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) near(ramp[k], LORDAERON[k]);
-  assert.equal(ramp.grey, false, "the texture keeps its own colour");
 });
 
-test("the map's water tint replaces the ramp's colour, stored blue first, and keeps its depth fade", () => {
+test("the map's water tint multiplies the ramp's colour, stored blue first, as the World Editor draws SD water", () => {
   // 03b_Water_Tint: war3map.w3i holds 100, 100, 255, 255; its script says SetWaterBaseColor( 255, 100, 100, 255 ):
-  // red. In the game that water is plainly red, not the ramp's blue darkened.
+  // red. The World Editor (we-drive, SD, unlit, 2026-11-13) draws its deep water dark purple, 39, 19, 53: the red
+  // tint times Lordaeron's blue ramp times the (blue) water texture, whose colour is kept.
   const ramp = waterRamp(LORDAERON, [100, 100, 255, 255]);
   const red = [1, 100 / 255, 100 / 255];
-  for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) near(ramp[k], [...red, LORDAERON[k][3]]);
-  // The water texture is blue itself (Lordaeron's Water00 averages 104, 117, 183): under red it would stay a
-  // dull mauve. Tinted, only its brightness is kept, so the water is the tint's colour.
-  assert.equal(ramp.grey, true);
+  for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) {
+    near(ramp[k], [LORDAERON[k][0] * red[0], LORDAERON[k][1] * red[1], LORDAERON[k][2] * red[2], LORDAERON[k][3]]);
+  }
+  // Lordaeron's Water00 averages 104, 117, 183: the deep water the shader gives (ramp times texture, alpha 250/255
+  // over the bed) comes within a few levels of the editor's.
+  const texture = [104, 117, 183], editor = [39, 19, 53];
+  const deep = ramp.deepMax.slice(0, 3).map((c, k) => c * texture[k]);
+  deep.forEach((v, k) => assert.ok(Math.abs(v - editor[k]) <= 4, `deep water ${deep.map(Math.round)} against the editor's ${editor}`));
   // The tint's alpha makes all of it more see-through, the shore still fading out.
   const half = waterRamp(LORDAERON, [100, 100, 255, 51]);
   near([half.shallowMin[3], half.deepMax[3]], [(10 / 255) * 0.2, (250 / 255) * 0.2]);
 });
 
-test("set_sky's waterTint is the colour the water takes, as \"#rrggbb\" and as [red, green, blue]", () => {
+test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and as [red, green, blue]", () => {
   for (const waterTint of ["#dc5028", [220, 80, 40]]) {
     const doc: Record<string, any> = { version: 31, flags: 0 };
     applySky(doc, { waterTint }, { tilesets: [] });
