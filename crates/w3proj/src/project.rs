@@ -768,6 +768,8 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
     }
     let mut report = ex.report;
     sync_dir(&project.join(MAP_DIR), MAP_DIR, &ex.files, &mut report)?;
+    // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
+    crate::derived::record_now(project)?;
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
     // in one: then it stays as it is).
     let maps_dir = project.join(MAPS_DIR);

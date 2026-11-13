@@ -488,12 +488,15 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", script);
   // Written here, so it's this app's: the generator below replaces it without asking (lib/script/guard).
   await w3.workspace.writeText(SCRIPT_STAMP, `${scriptHash(script)}\n`);
+  // What pathing, shadows and the minimap below are made from (w3proj::derived: `w3proj pack` checks it).
+  const sources = await w3.backend.invoke<Record<string, string>>("derived_sources", { root: w3.workspace.project()!.root }).catch(() => null);
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
   await w3.workspace.refresh();
   const read = (p: string) => w3.game.read(p);
   const { wpm } = await buildPathingMap(w3, t, [], read, w3.settings.get<number>("terrain.pathing.deepWater"));
   await w3.workspace.writeBytes("map/war3map.wpm", wpm);
   await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, t, [], read, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
+  if (sources) await w3.backend.invoke("derived_record", { root: w3.workspace.project()!.root, sources }).catch(() => {});
   await w3.workspace.refresh();
   // The map script from the files above, by the same generator as on save (the simple script
   // written above stays if the Map Script extension is off).

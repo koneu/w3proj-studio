@@ -377,6 +377,27 @@ async fn project_pack(app: AppHandle, root: String, output: Option<String>) -> C
     .map_err(err)?
 }
 
+/// The project's terrain and doodad files as they are now (`w3proj::derived`), taken before pathing, shadows and the
+/// minimap are made from them.
+#[tauri::command]
+async fn derived_sources(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = w3proj::derived::sources(Path::new(&root)).map_err(err)?;
+        serde_json::to_value(&s).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Records that pathing, shadows and the minimap were made from `sources` (`derived_sources`): a pack outside the app
+/// (`w3proj pack`) refuses them once the terrain or doodads change again.
+#[tauri::command]
+async fn derived_record(root: String, sources: std::collections::BTreeMap<String, String>) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || w3proj::derived::record(Path::new(&root), &sources).map_err(err))
+        .await
+        .map_err(err)?
+}
+
 /// Validates object-data JSON by encoding it, and returns it in canonical
 /// formatting so edits from the UI produce minimal diffs.
 #[tauri::command]
@@ -1352,6 +1373,8 @@ pub fn run() {
             project_create,
             ui_show_cursor,
             project_pack,
+            derived_sources,
+            derived_record,
             objects_canonicalize,
             objects_export,
             objects_import,
