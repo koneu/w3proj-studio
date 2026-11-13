@@ -6476,6 +6476,10 @@ async function objectPreview(page, found, root) {
       await until("the type's own texture back", async () => (await state())?.replaceable[idOf] === own[0], 5000).catch(() => fail("the type's own texture doesn't come back"));
     }
 
+    // Switching to another object puts the colour and texture back to its defaults.
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3b", "LTlt")`);
+    await until("the other tree's preview", async () => { const st = await state(); return st?.ready === true && st.team === 0; }, 30000)
+      .catch(() => fail(`the player colour stays ${first.team} .. Yellow after switching to another object`));
     await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3a", "AHre")`);
     await until("the ability's preview", async () => (await state())?.ready === true && (await state()).path !== null, 30000);
     const art = await state();
