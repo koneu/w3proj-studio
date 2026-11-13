@@ -3,7 +3,9 @@
 // line that starts `}` ends a block). Lists every file whose result differs and checks that each
 // difference is a recovered block: a string the reference swallowed into its neighbour, with the
 // text of every other string unchanged and no string lost. It also checks that a table which was
-// not edited serializes to the file's own bytes, and that editing one string keeps every other.
+// not edited serializes to the file's own bytes, and that editing one string keeps every other. In a file
+// with stray carriage returns (`\r\r\n`, `\r\r`), an edit of a string holding them or of its neighbour
+// must change that string's bytes and no other byte.
 //
 //   W3PROJ_GAME=<install> node scripts/wts-corpus.mjs [corpus-folder]
 //
@@ -88,7 +90,7 @@ await build({ entryPoints: [join(app, "src/lib/formats/wts.ts")], bundle: true, 
 const { StringTable } = await import(pathToFileURL(out).href + "?" + Date.now());
 
 const files = readdirSync(cache).filter((f) => f.endsWith(".wts")).sort();
-let same = 0, changed = 0, bad = 0, recovered = 0, lost = 0, strings = 0, notIdentical = 0, editLost = 0;
+let same = 0, changed = 0, bad = 0, recovered = 0, lost = 0, strings = 0, notIdentical = 0, editLost = 0, crFiles = 0, crEdits = 0, crEditBad = 0;
 const lines = [];
 for (const f of files) {
   const id = readFileSync(join(cache, f.replace(/wts$/, "id")), "utf8");
@@ -123,6 +125,25 @@ for (const f of files) {
     for (const [n, v] of b) if (back.get(n) !== v + "!") { editLost++; diff.push(`EDIT ${n}`); }
     if (back.size !== b.size) { editLost++; diff.push("EDIT size"); }
   }
+  // a file with stray carriage returns (`\r\r\n`, `\r\r`): an edit of a string that has them, or of its neighbour,
+  // changes that string's bytes and nothing else
+  if (text.includes(CR + CR)) {
+    crFiles++;
+    const nums = [...b.keys()];
+    const pick = new Set();
+    nums.forEach((n, i) => { if (b.get(n).includes(CR + CR)) for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < nums.length) pick.add(nums[k]); });
+    for (const n of pick) {
+      const t = new StringTable(text);
+      t.set(n, b.get(n) + "!");
+      const edited = t.serialize();
+      let p = 0;
+      while (p < text.length && edited[p] === text[p]) p++;
+      const back = new Map(new StringTable(edited).entries());
+      const others = [...b].every(([k, v]) => k === n || back.get(k) === v);
+      if (edited !== text.slice(0, p) + "!" + text.slice(p) || back.get(n) !== b.get(n) + "!" || !others) { crEditBad++; diff.push(`CR-EDIT ${n}`); }
+      crEdits++;
+    }
+  }
   if (!diff.length) { same++; continue; }
   changed++;
   const cuts = diff.filter((d) => d.startsWith("cut")).length, news = diff.filter((d) => d.startsWith("new")).length;
@@ -134,4 +155,5 @@ console.log(lines.join(LF));
 console.log(`${LF}${files.length} wts files, ${strings} strings in the reference reading`);
 console.log(`unchanged ${same}, changed ${changed} (${bad} not a plain recovered block), recovered strings ${recovered}, lost strings ${lost}`);
 console.log(`untouched table not byte-identical: ${notIdentical}; strings lost after editing every string: ${editLost}`);
-process.exit(bad || lost || notIdentical || editLost ? 1 : 0);
+console.log(`files with stray carriage returns: ${crFiles}; edits next to them ${crEdits}, changing more than their string: ${crEditBad}`);
+process.exit(bad || lost || notIdentical || editLost || crEditBad ? 1 : 0);

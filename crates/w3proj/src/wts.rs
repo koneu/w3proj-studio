@@ -583,6 +583,32 @@ mod tests {
     }
 
     #[test]
+    fn stray_carriage_returns_stay_where_they_are() {
+        // The fixture the app's TypeScript reads too (wts.test.ts, "stray carriage returns"): `\r\r\n` and `\r\r`
+        // inside texts, after a comment, before and after a `}` line, after a header. They read as part of the text;
+        // a drop keeps every other byte.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/wts-crcrlf/war3map.wts");
+        let text = std::fs::read_to_string(path).unwrap();
+        assert_eq!(text.matches("\r\r\n").count(), 6);
+        let table = strings(&text);
+        let read: Vec<(f64, &str)> = table.iter().map(|(n, v)| (n.value(), v.as_str())).collect();
+        assert_eq!(read, [
+            (1.0, "The bounces does half the \r\r\ndamage of the original explosion."),
+            (2.0, "To edit"),
+            (3.0, "for the first time in years. \r\rIn the quiet calm of..."),
+            (4.0, "ends in one\r"),
+            (5.0, "after a header"),
+            (6.0, "last"),
+        ]);
+        let cut = |s: &str, a: &str, b: &str| format!("{}{}", &s[..s.find(a).unwrap()], &s[s.find(b).unwrap()..]);
+        let (out, dropped) = prune_strings(&text, &nums(&[1, 3, 5, 6])).unwrap();
+        assert_eq!(list(&dropped), [2.0, 4.0]);
+        assert_eq!(out, cut(&cut(&text, "STRING 2", "STRING 3"), "STRING 4", "STRING 5"));
+        // Nothing to drop: the file's own bytes.
+        assert_eq!(prune_strings(&text, &nums(&[1, 2, 3, 4, 5, 6])).unwrap().0, text);
+    }
+
+    #[test]
     fn a_long_run_of_comment_lines_is_read_once() {
         // Every comment line starts a header search; the run is read once, not once per line.
         let mut wts = String::from("STRING 1\n");

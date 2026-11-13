@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StringTable, askWtsCuts, checkStringIds, compactStringIds, WtsReader, importStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { StringTable, askWtsCuts, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
 
 /** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
 const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
@@ -286,4 +288,62 @@ test("Adjust Map String IDs: references follow with their padding; clashes and u
   checkStringIds(table, new Map([[1, 2], [2, 1]]));
   assert.deepEqual([...compactStringIds(new StringTable("STRING 4\n{\na\n}\nSTRING 9\n{\nb\n}\nSTRING 1\n{\nc\n}\n"))], [[4, 2], [9, 3]]);
   assert.deepEqual([...compactStringIds(table)], [], "already 1, 2, 3");
+});
+
+// ---- Stray carriage returns (`\r\r\n`, `\r\r`) -------------------------------------------------
+
+/** tests/fixtures/wts-crcrlf/war3map.wts, found from where the tests run (app/ or the repository). The Rust port
+ *  reads the same file (crates/w3proj/src/wts.rs, `stray_carriage_returns_stay_where_they_are`). */
+function crcrlfFixture(): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const p = join(dir, "tests", "fixtures", "wts-crcrlf", "war3map.wts");
+    if (existsSync(p)) return readFileSync(p, "utf8");
+    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-crcrlf not found");
+  }
+}
+
+test("stray carriage returns: read as part of the text, kept byte for byte outside an edited string", () => {
+  // The four Chosen Ones campaigns' war3campaign.wts have `\r\r\n` inside a text, the Forsaken06/11Finale war3map.wts
+  // `\r\r` mid-line; the fixture has those, and one after a comment, before and after a `}` line, after a header.
+  const text = crcrlfFixture();
+  const CRCRLF = "\r\r\n";
+  assert.equal(text.split(CRCRLF).length - 1, 6, "the fixture has its six \\r\\r\\n");
+  const t = new StringTable(text);
+  assert.deepEqual([...t.entries()], [
+    [1, `The bounces does half the ${CRCRLF}damage of the original explosion.`],
+    [2, "To edit"],
+    [3, "for the first time in years. \r\rIn the quiet calm of..."],
+    [4, "ends in one\r"],
+    [5, "after a header"],
+    [6, "last"],
+  ]);
+  assert.equal(t.serialize(), text, "no change: the file's own bytes");
+  assert.deepEqual(wtsStrayLines(text), [], "the blank lines with a stray CR between blocks are no stray text");
+
+  // An edit of another string changes only that string's bytes.
+  const at = text.indexOf("To edit");
+  t.set(2, "Edited\ntwo lines");
+  assert.equal(t.serialize(), text.slice(0, at) + "Edited\r\ntwo lines" + text.slice(at + "To edit".length));
+  t.markSaved();
+  assert.equal(t.get(1), `The bounces does half the ${CRCRLF}damage of the original explosion.`, "the neighbours read the same");
+
+  // An edit of the string itself: what stays of the CRs is what the new text has. A text that still has them
+  // keeps them; plain line breaks (what a text box gives back) become the file's line ends.
+  const one = new StringTable(text);
+  const from = text.indexOf("The bounces"), to = text.indexOf("explosion.") + "explosion.".length;
+  one.set(1, `${one.get(1)!} More.`);
+  assert.equal(one.serialize(), text.slice(0, to) + " More." + text.slice(to));
+  one.set(1, "The bounces does half the \n\ndamage of the original explosion.");
+  assert.equal(one.serialize(), text.slice(0, from) + "The bounces does half the \r\n\r\ndamage of the original explosion." + text.slice(to));
+
+  // Merging another editor's change onto the file, importing a translation, dropping and renumbering keep them too.
+  const edited = new StringTable(text);
+  edited.set(6, "LAST");
+  assert.equal(StringTable.merge(text, edited, text), text.replace("last\r\n}", "LAST\r\n}"));
+  assert.equal(importStrings(text, "STRING 5\n{\nnach einem Kopf\n}\n").text, text.replace("after a header", "nach einem Kopf"));
+  const dropped = pruneStrings(text, new Set([1, 3, 5, 6]));
+  assert.deepEqual(dropped.dropped, [2, 4]);
+  const cut = (s: string, a: string, b: string) => s.slice(0, s.indexOf(a)) + s.slice(s.indexOf(b));
+  assert.equal(dropped.text, cut(cut(text, "STRING 2", "STRING 3"), "STRING 4", "STRING 5"));
+  assert.equal(renumberWts(text, new Map([[5, 50]])), text.replace(`STRING 5${CRCRLF}`, `STRING 50${CRCRLF}`));
 });
