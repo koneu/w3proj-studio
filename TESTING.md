@@ -348,6 +348,38 @@ It never starts the game itself.
   brighter than the editor's light (green about 233 against 123). The rest of the colour difference to Studio was
   the HD picture's tone (`lib/model/tone.ts`).
 
+### Verification rounds: one build, many testers, one World Editor session
+
+**One build per round**: `node scripts/verify-build.mjs [--commit REV] [--tester NAME] [--json] [--no-cli] [--force]` (in `app/`)
+`git archive`s the commit into `target/verify/<short-sha>/` of the main checkout, runs `npm ci`, builds the smoke app
+(`appctl.mjs buildApp`, debug, sccache through the main checkout's `.cargo/config.toml`) and the release CLI, and writes
+`verify.json`. A commit already built is not built again (the second caller prints at once); two callers at once take
+turns (a lock folder next to it). It prints the binary, the CLI and the command lines for a tester named NAME:
+
+- app-drive: `node scripts/app-drive.mjs --app <binary> --work <own folder> <steps>`
+- app-smoke: `W3_APP_BIN=<binary> W3PROJ_BIN=<cli> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>`
+- we-compare: `node scripts/we-compare.mjs --app <binary> --work <own folder> <spec.json>`
+
+`W3_APP_BIN` (or `--app`) makes `appctl.mjs`, app-drive, app-smoke and we-compare run that binary and build nothing.
+Settings (`W3PROJ_CONFIG_DIR`, default `<work>/config`) and the webview's storage (`XDG_DATA_HOME`/`XDG_CACHE_HOME`
+under the work folder, Linux) are per run, so testers sharing a binary share nothing. The identifier of the build is
+the same for all (`W3_SMOKE_ID` only names the build). Proven with two `app-drive` and two `app-smoke --only=byHand` runs
+at once on one binary. Costs (this machine, sccache warm): archive 0 s, `npm ci` 3 s, app build 142 s, CLI about 10 s more.
+
+**we-compare** (`node scripts/we-compare.mjs [--app P] [--work D] [--json F] [--no-we] <spec.json…>`, local only like
+we-drive): the common check "do the same in the World Editor and in Studio, save both, diff the saved files". A spec
+(the list of fields is at the top of the script; `tests/we-compare/examples/` has three from verification round 3
+package 6) names the input map (copied; `${MAIN}` is the main checkout), the World Editor's steps (we-drive's steps
+between "map ready" and the save), Studio's steps (`mcp`, `eval`, `sleep`, `open`, `terrain`, `setting`, `command`; the
+project is the input unpacked, or a `new_map` made by steps), and the files to compare. All specs of one mode go to
+**one we-drive process**: one display, one setup, one lock, the editor started once per map (we-drive takes another
+`--map` after a `--close`). Both saves are unpacked with the release CLI's codecs and compared per file: `parsed`
+(the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
+entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect": "differs"` marks a known difference
+(not a failure). Exit 0 as expected, 1 not, 2 something couldn't run; the JSON report is `<work>/report.json`. Unit
+tests: `we-compare.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
+`W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
+
 ### Comparing pictures with Studio
 
 Both sides at the same size, camera and lighting, then `pic-compare.mjs`:
