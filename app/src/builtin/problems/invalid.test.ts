@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { deleteInvalid, describePlan, planInvalid, splitInvalid, type KindLoader } from "./invalid";
+import { deleteInvalid, isRandomId, describePlan, planInvalid, splitInvalid, type KindLoader } from "./invalid";
 import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
 
@@ -54,6 +54,15 @@ test("splitInvalid keeps known types, start locations, random objects and entrie
   assert.deepEqual(removed.map((p) => p.id), ["zzzz", "Qqqq"]);
   assert.equal(keep.length, 6);
   assert.deepEqual(splitInvalid([], known), { keep: [], removed: [] });
+});
+
+test("random-by-level ids are kept by splitInvalid and are no unknown type for the Problems check (which asks isRandomId)", () => {
+  const ids = ["YYU3", "YYU/", "YYB/", "YiI2", "YiI/", "uDNR", "iDNR", "bDNR", "sloc"];
+  const { keep, removed } = splitInvalid([...ids, "zzzz"].map((id) => ({ id })), new Set());
+  assert.deepEqual(keep.map((p) => p.id), ids);
+  assert.deepEqual(removed.map((p) => p.id), ["zzzz"]);
+  for (const id of ids.filter((x) => x !== "sloc")) assert.ok(isRandomId(id), id);
+  for (const id of ["zzzz", "YYU ", "Y?I3", "uDNRx", ""]) assert.ok(!isRandomId(id), id);
 });
 
 test("the plan counts the unknown types per file, and only those", async () => {
