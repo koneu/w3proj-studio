@@ -43,7 +43,9 @@
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
 //   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
-//                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"//   --click X,Y         click at a position of the display (fixed size, so positions stay put)
+//                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"
+//   --click X,Y         click at a position of the display (fixed size, so positions stay put)
+//   --double-click X,Y  the same, twice in a row (a list row's own dialog: Advanced > Adjust Map String IDs)
 //   --drag X,Y:X,Y[@MS] press the left button at the first position, move to the second in 20 steps over MS (400) and
 //                       let go (a box select, a doodad move)
 //   --drag-mod MOD      hold alt, shift or ctrl during the next --drag (e.g. Alt-move on the Select tab)
@@ -148,7 +150,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--double-click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
@@ -954,9 +956,9 @@ async function main() {
           x11(s.display, "key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
           await sleep(300);
           out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
-        } else if (step === "--click") {
-          if (!/^\d+,\d+$/.test(arg)) throw new Error("--click wants X,Y");
-          x11(s.display, "click", arg);
+        } else if (step === "--click" || step === "--double-click") {
+          if (!/^\d+,\d+$/.test(arg)) throw new Error(`${step} wants X,Y`);
+          x11(s.display, "click", arg, ...(step === "--double-click" ? ["--double"] : []));
           await sleep(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {

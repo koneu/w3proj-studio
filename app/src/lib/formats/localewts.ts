@@ -8,7 +8,11 @@
 // - a renumbered string gets its new number in every table that has it, and no string takes a number only a language
 //   has (those strings keep their numbers: something may name them, and a translation is never thrown away);
 // - a table's own bytes stay as they are (its line ends included), so a table nothing changes is written byte for byte.
-// The World Editor does none of it: its save leaves a listed table byte for byte (see movetexts.ts's header).
+// The World Editor does none of it: its save leaves a listed table byte for byte (see movetexts.ts's header), and so
+// does its Advanced > Adjust Map String IDs (we-drive, 2026-11-13, a copy of lit.w3m with war3map.wts 1-3 and a German
+// table 1-3 plus a German-only 50, listed in war3map.imp; 1 moved to 4 and 2 to 50, saved): the German table was byte
+// for byte the same, so the player's name (now TRIGSTR_004) had no German string and the force's (TRIGSTR_050) showed
+// the German-only "nur deutsch". Its dialog lists war3map.wts's strings only and let 2 take the German-only 50.
 
 import { appendStrings, checkStringIds, renumberWts, StringTable, type NewString } from "./wts";
 
