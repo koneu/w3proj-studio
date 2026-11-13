@@ -76,7 +76,10 @@ const STATES = [[0, "–", "Unavailable"], [1, "✓", "Available"], [2, "R", "Re
 function objectLabel(ctx: TechContext, id: string, extra = ""): HTMLElement {
   const name = h("span.muted");
   void ctx.name(id).then((n) => { if (n) name.textContent = ` ${n}`; });
-  return h("span.techtree-grid-object", {}, h("code", {}, id), extra, name);
+  const label = h("span.techtree-grid-object", {}, h("code", {}, id), extra, name);
+  const tip = () => { label.title = `${id}${extra}${name.textContent ?? ""}`; };
+  tip(); void ctx.name(id).then(tip);
+  return label;
 }
 
 const head = (ctx: TechContext, first: string) =>
@@ -84,7 +87,7 @@ const head = (ctx: TechContext, first: string) =>
 
 /** The unavailable objects × players: a cell is ticked where the player can use the object. */
 export function techGrid(info: TechInfo, ctx: TechContext): HTMLElement {
-  return h("table.form-table.techtree-grid.techtree-grid-techs", {}, head(ctx, "Object"),
+  return h("div.techtree-grid-scroll", {}, h("table.form-table.techtree-grid.techtree-grid-techs", {}, head(ctx, "Object"),
     h("tbody", {}, ...techRows(info.techs).map((id) => h("tr", { "data-object": id },
       h("td", {}, objectLabel(ctx, id)),
       ...ctx.players.map((p) => {
@@ -95,12 +98,12 @@ export function techGrid(info: TechInfo, ctx: TechContext): HTMLElement {
             ctx.changed(!box.checked && ctx.setFlag(CUSTOM_TECHTREE) === true);
           } });
         return h("td.techtree-grid-cell", { "data-player": String(p.id) }, box);
-      })))));
+      }))))));
 }
 
 /** The upgrade levels × players: each cell the player's state of the level. */
 export function upgradeGrid(info: TechInfo, ctx: TechContext): HTMLElement {
-  return h("table.form-table.techtree-grid.techtree-grid-upgrades", {}, head(ctx, "Upgrade, level"),
+  return h("div.techtree-grid-scroll", {}, h("table.form-table.techtree-grid.techtree-grid-upgrades", {}, head(ctx, "Upgrade, level"),
     h("tbody", {}, ...upgradeRows(info.upgrades).map(({ id, level }) => h("tr", { "data-object": id, "data-level": String(level + 1) },
       h("td", {}, objectLabel(ctx, id, ` ${level + 1}`)),
       ...ctx.players.map((p) => {
@@ -114,5 +117,5 @@ export function upgradeGrid(info: TechInfo, ctx: TechContext): HTMLElement {
           ctx.changed(state !== DEFAULT_AVAILABILITY && ctx.setFlag(CUSTOM_UPGRADES) === true);
         });
         return h("td.techtree-grid-cell", { "data-player": String(p.id) }, sel);
-      })))));
+      }))))));
 }

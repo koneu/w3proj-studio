@@ -115,7 +115,7 @@ export class Workbench {
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
     // The menus show each command's key in effect (the user's, else its default).
     this.menuBar = new MenuBar(() => menuTree(this.commands.all().map((c) => ({ ...c, keybinding: this.keybindings.primaryKey(c.id) }))), (c) => this.run(c),
-      (when) => whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo() }));
+      (when) => this.blockedNow(when));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
     this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking(), () => this.editors.remember());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
@@ -413,6 +413,11 @@ export class Workbench {
     };
   }
 
+  /** Why a command with this `when` can't run now (menus and the palette); undefined when it can. */
+  private blockedNow(when: CommandContribution["when"]) {
+    return whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo(), terrain: this.editors.terrainActive() });
+  }
+
   private registerCoreCommands() {
     const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: Partial<Pick<CommandContribution, "keybinding" | "category" | "hidden" | "menu" | "when">> = {}) => {
       this.commands.contribute("core", { id, title, category: extra.category ?? "View", ...extra });
@@ -421,7 +426,8 @@ export class Workbench {
     c("workbench.commandPalette", "Show All Commands", async () => {
       const items = this.commands.all().map((cmd) => {
         const key = this.keybindings.primaryKey(cmd.id);
-        return { label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title, description: key ? keyLabel(key) : undefined, value: cmd.id };
+        const why = this.blockedNow(cmd.when);
+        return { label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title, description: key ? keyLabel(key) : undefined, value: cmd.id, ...(why ? { disabled: why } : {}) };
       });
       items.sort((a, b) => a.label.localeCompare(b.label));
       const pick = await this.quickInput.pick(items, { placeholder: "Type a command" });

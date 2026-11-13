@@ -151,6 +151,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .quick-input-item.active { background: #37414f; }
 .quick-input-item .description { color: var(--fg-muted); font-size: 12px; margin-left: auto; }
 .quick-input-item .detail { width: 100%; color: var(--fg-muted); font-size: 12px; }
+.quick-input-item.disabled { opacity: 0.5; cursor: default; }
 
 /* Notifications */
 .notifications { position: absolute; right: 12px; bottom: 32px; display: flex; flex-direction: column; gap: 8px; z-index: 90; width: min(440px, 90vw); }
@@ -412,8 +413,12 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .techtree-view { display: inline-flex; gap: 2px; margin-left: 16px; }
 .techtree-view button.active { background: var(--accent-2); border-color: var(--accent-2); color: white; }
 .techtree-grid th.techtree-grid-player, .techtree-grid td.techtree-grid-cell { text-align: center; padding: 2px 3px; }
+.techtree-grid-scroll { overflow-x: auto; max-width: 100%; }
+.techtree-grid-scroll > .techtree-grid { width: auto; }
+.techtree-grid td:first-child, .techtree-grid th:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg); max-width: 220px; }
+.techtree-grid-object { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .techtree-grid-object code { font-family: var(--mono, monospace); }
-.techtree-grid select.techtree-grid-state { width: auto; padding: 0 2px; }
+.techtree-grid select.techtree-grid-state { width: 3.2em; min-width: 0; padding: 0; }
 .force { border-top: 1px solid #2a2c30; padding: 6px 0; }
 input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var(--bg); }
 .ext-item.is-disabled { opacity: 0.55; }
@@ -878,7 +883,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
 .imp-field label { width: 100%; color: var(--fg-muted); }
 .imp-path-edit { flex: 1; font-family: var(--mono); font-size: 12px; min-width: 0; }
-.imp-actions { display: flex; gap: 6px; margin-top: 10px; }
+.imp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .imp-editor:focus { outline: none; }
 .imp-preview { margin-top: 10px; }
 .imp-preview canvas { display: block; max-width: 100%; max-height: 320px; background: repeating-conic-gradient(#2a2a2a 0 25%, #3a3a3a 0 50%) 0 0 / 16px 16px; }
