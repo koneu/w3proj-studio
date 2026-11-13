@@ -3,7 +3,8 @@
 its own), through python-xlib and its XTest extension. Every command prints one JSON line.
 
   we-x11.py --display :N windows                       mapped top-level windows: id, title, class, rect, pid, transient
-  we-x11.py --display :N key KEY [--window ID]         press and release a key ("v", "Escape", "ctrl+s", "alt+F4", "Return")
+  we-x11.py --display :N key KEY [--window ID] [--hold MS]  press and release a key ("v", "Escape", "ctrl+s", "alt+F4",
+                                                       "Return"), held MS (default 50)
   we-x11.py --display :N click X,Y [--button 1|3] [--double]   click at a screen position
   we-x11.py --display :N move X,Y                      move the pointer
   we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3]  press at one point, move to the other, release
@@ -116,7 +117,7 @@ def keycode(d, name):
     return code
 
 
-def press_key(d, spec):
+def press_key(d, spec, hold_ms=50):
     from Xlib import X
     from Xlib.ext import xtest
     import time
@@ -128,7 +129,7 @@ def press_key(d, spec):
     d.sync()
     xtest.fake_input(d, X.KeyPress, key)
     d.sync()
-    time.sleep(0.05)
+    time.sleep(hold_ms / 1000)
     xtest.fake_input(d, X.KeyRelease, key)
     for m in reversed(mods):
         xtest.fake_input(d, X.KeyRelease, m)
@@ -280,8 +281,9 @@ def main(argv):
         win = opt("--window")
         if win:
             focus(d, int(win, 0))
-        press_key(d, rest[0])
-        out({"key": rest[0]})
+        hold = int(opt("--hold", "50"))
+        press_key(d, rest[0], hold)
+        out({"key": rest[0], "holdMs": hold})
     elif cmd == "click":
         button = int(opt("--button", "1"))
         double = flag("--double")

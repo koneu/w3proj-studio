@@ -98,6 +98,13 @@ test("parseArgs: --drag takes its two positions as one value", () => {
   assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", "375,200:570,255"], ["--key", "ctrl+c"]]);
 });
 
+test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
+  assert.equal(parseArgs(["--start"]).opts.screen, undefined);
+  assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
+  assert.throws(() => parseArgs(["--screen", "1200,700", "--start"]), /WxH/);
+  assert.deepEqual(parseArgs(["--start", "--key", "ctrl+Up@1500"]).steps, [["--start", null], ["--key", "ctrl+Up@1500"]]);
+});
+
 test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {
   const { looks, steps } = parseArgs(["--map", "m.w3x", "--wait-ready", "--look", "center", "--shot", "a.png", "--look", "100,200,2000"]);
   assert.deepEqual(looks.map((l) => [l.center, l.x, l.y, l.distance]), [[true, null, null, 3000], [false, 100, 200, 2000]]);

@@ -12,6 +12,10 @@
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path)
 //   --work DIR          scratch folder (default: target/we-drive of this checkout): map copies, the editor's log
 //   --timeout S         how long --wait-ready and --close wait (default 300)
+//   --screen WxH        the hidden display's size (default 1600x1000; the positions below are measured there). The
+//                       editor sizes its main window by the display, the terrain view following it, which gives
+//                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
+//                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
 //   --mode sd|hd        the editor's graphics (default hd): written into its preferences before the start
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
@@ -38,8 +42,8 @@
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
-//   --key KEY           press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names)
-//   --click X,Y         click at a position of the display (fixed size, so positions stay put)
+//   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
+//                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"//   --click X,Y         click at a position of the display (fixed size, so positions stay put)
 //   --drag X,Y:X,Y      press the left button at the first position, move to the second and let go (a box select)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
 //   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
@@ -169,6 +173,11 @@ export function parseArgs(argv) {
     else if (a === "--work") opts.work = resolve(value());
     else if (a === "--timeout") opts.timeout = Number(value());
     else if (a === "--mode") opts.mode = value();
+    else if (a === "--screen") {
+      const m = /^(\d+)x(\d+)$/.exec(value());
+      if (!m) throw new Error("--screen wants WxH");
+      opts.screen = [Number(m[1]), Number(m[2])];
+    }
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
@@ -337,7 +346,8 @@ class Session {
   }
 
   async startDisplay() {
-    const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${SIZE[0]}x${SIZE[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+    const size = this.opts.screen ?? SIZE;
+    const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${size[0]}x${size[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
     this.xvfb = xvfb;
     const n = await new Promise((ok, fail) => {
       let got = "";
@@ -808,11 +818,13 @@ async function main() {
         } else if (step === "--key") {
           // To the open dialog if there is one, else to the main window (without a window manager the keyboard
           // stays with whatever was clicked last, e.g. the tool palette).
+          // KEY@MS holds it down MS (the X server's autorepeat runs meanwhile).
+          const m = /^(.+?)(?:@(\d+))?$/.exec(arg);
           const w = s.windows();
           const to = w.dialogs.at(-1) ?? w.main;
-          x11(s.display, "key", ...(to ? ["--window", to.id] : []), arg);
+          x11(s.display, "key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
           await sleep(300);
-          out({ step, key: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
+          out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--click") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--click wants X,Y");
           x11(s.display, "click", arg);
