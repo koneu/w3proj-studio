@@ -96,7 +96,9 @@ export const MOUSE_CONTROLS = {
 } as const;
 export type MouseControl = keyof typeof MOUSE_CONTROLS;
 
-/** Held with the left button, a drag selects an area of ground instead of drawing a box (A by default). */
+/** Held with the left button, a drag selects an area of ground instead of drawing a box. No key by default: in the World
+ *  Editor a drag with A held is the plain box select of objects (we-drive, verify round 3, 2026-11-13), and Studio's A
+ *  did the area there; the Select tab's Area button does it without a key. */
 export const AREA_COMMAND = "w3.terrain.selection.area";
 
 /** Controls that are held, not run: a mouse button's, and the area key's. As commands they only say how they're used. */

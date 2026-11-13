@@ -267,8 +267,6 @@
       { "key": "ctrl+a", "command": "w3.terrain.selectAll", "when": "terrainFocus" },
       { "key": "ctrl+shift+a", "command": "w3.terrain.selectAll", "when": "terrainFocus" },
       { "key": "escape", "command": "w3.terrain.cancel", "when": "terrainFocus" },
-      { "key": "a", "command": "w3.terrain.selection.area", "when": "terrainFocus" },
-      { "key": "shift+a", "command": "w3.terrain.selection.area", "when": "terrainFocus" },
       { "key": "ctrl+tab", "command": "w3.terrain.selectNextInList", "when": "terrainFocus" },
       { "key": "ctrl+shift+tab", "command": "w3.terrain.selectPreviousInList", "when": "terrainFocus" },
       { "key": "ctrl+pageup", "command": "w3.terrain.moveUpInList", "when": "terrainFocus" },
