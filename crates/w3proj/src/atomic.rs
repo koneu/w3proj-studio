@@ -91,7 +91,7 @@ fn replace(path: &Path, fill: impl FnOnce(&mut fs::File) -> io::Result<()>, flus
         }
         #[cfg(not(unix))]
         let _ = &old;
-        rename_over(&tmp, &path)
+        rename_over(&tmp, &on_disk_name(&path, old.is_some()))
     })();
     if let Err(e) = done {
         let _ = fs::remove_file(&tmp);
@@ -158,6 +158,22 @@ fn remove_stale(dir: &Path, name: &str) {
             let _ = fs::remove_file(entry.path());
         }
     }
+}
+
+/// The name to rename onto: on a file system that ignores case (Windows, macOS), a file that is
+/// already there under another case keeps its name, as writing into it would have kept it (a rename
+/// onto `foo.txt` would otherwise turn `Foo.txt` into `foo.txt`).
+fn on_disk_name(path: &Path, exists: bool) -> PathBuf {
+    #[cfg(any(windows, target_os = "macos"))]
+    if exists {
+        if let (Ok(real), Some(dir)) = (fs::canonicalize(path), path.parent()) {
+            if let Some(name) = real.file_name() {
+                return dir.join(name);
+            }
+        }
+    }
+    let _ = exists;
+    path.to_path_buf()
 }
 
 /// Renames `from` over `to`. On Windows a refusal (access denied, sharing violation) is tried again a
