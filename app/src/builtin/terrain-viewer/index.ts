@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, snappedInside, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -1072,10 +1072,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let spot: [number, number] | null = [x, y];
           // At a corner a line runs into the end of the last one, of the same fence: that's meant.
           const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
-          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await room.fits(kindOf, id, x, y, angle))) {
+          // A unit is snapped when placed (a building to its grid): room is checked where it lands.
+          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
+          const fitsAt = (px: number, py: number, ang: number) => fitsSnapped(snap, (sx, sy) => room!.fits(kindOf, id, sx, sy, ang), px, py);
+          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
             spot = null;
             if (nearest === true) {
-              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
+              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await fitsAt(s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
               skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
@@ -1084,8 +1087,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
           // Both sides or neither, or a skipped object would break the symmetry unseen.
-          // A unit is snapped when placed (a building to its grid): the bounds apply where it lands.
-          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
           if (!(await snappedInside(held, snap, spot[0], spot[1]))) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
@@ -1098,16 +1099,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
             continue;
           }
-          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await room.fits(kindOf, id, twin[0], twin[1], twinAngle))) {
+          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await fitsAt(twin[0], twin[1], twinAngle))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
           }
           await place?.(o, i, spot[0], spot[1], facing);
           // A line's pieces touch each other on purpose.
-          if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+          if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(spot[0], spot[1]), angle);
           if (paired) {
             await place?.(o, i, twin[0], twin[1], twinFacing);
-            if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
+            if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(twin[0], twin[1]), twinAngle);
           }
           placed += paired ? 2 : 1;
         }

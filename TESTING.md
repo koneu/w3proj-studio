@@ -245,6 +245,9 @@ It never starts the game itself.
 - **Dialogs that don't draw at once**: Scenario > Player Properties (window "Scenario Properties") draws about 3 s
   after the click; before that it is a blank white rectangle in the hidden display. Take pictures at least 3 s after
   a click. A menu left open at `--close` can't be answered by it: never leave one open.
+- **Testers' hygiene**: a number field needs Enter (`\r`) or a blur, or `change` never fires and no edit happens (a
+  hidden-app dirty-flag reading looked wrong for this reason). Kill processes by PID, never by pattern: a `pkill` by
+  pattern once hit another display's Proton services.
 - **Copy and paste of objects** (branch paste-anchor-we, 2026-11-12, SD, a flat 64x64 map): `--key d` (doodads layer),
   `--click` on a doodad or `--drag` a box round several, `--key ctrl+c`, `--key ctrl+v`, `--move` to a spot, `--click`
   there, `--key Escape`; the clipboard stays for another `ctrl+v`. The status bar's "Point: (x, y, z)" at the pointer
@@ -569,8 +572,9 @@ In order of what I'd do next.
    maps, places objects, saves, builds and unpacks. The New Map dialog, painting terrain, changing a
    unit's field and renaming a trigger go by mouse and keyboard, sent over DevTools into the hidden
    window (on Linux over WebDriver, in Xvfb: `app/scripts/webdriver.mjs`). Building a trigger's events and actions, and placing with the mouse, are still GUI rounds.
-2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
-   read map files too. They can't corrupt memory, but they can freeze the app.
+2. **Hostile input on the TypeScript side.** Covered by `lib/hostile.test.ts` (terrain, AI, model and image
+   parsers; hidden app PASS 2026-11-11, see `openpoints/test.md`). Unproven: textures in other people's maps
+   (the limits were checked on the game's own 1,658).
 3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is
    at 37%. A small made-up TriggerData fixes that.
 4. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist

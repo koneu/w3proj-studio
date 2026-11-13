@@ -48,7 +48,8 @@ function extract() {
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
+      // A folder named build holds what packing wrote, not maps of the corpus (as `w3proj verify`).
+      if (e.isDirectory()) { if (e.name.toLowerCase() !== "build") walk(p); }
       else if (/\.w3[xmn]$/i.test(e.name)) maps.push([`corpus/${relative(corpus, p)}`, p]);
       else if (/\.wts$/i.test(e.name)) maps.push([`corpus/${relative(corpus, p)}`, null, readFileSync(p)]);
     }
