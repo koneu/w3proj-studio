@@ -1,6 +1,7 @@
 // Move Texts to String Table (w3.strings.moveToTable): lib/formats/movetexts.ts on the open project, as one undoable edit
 // (the MCP edit log, like Adjust Map String IDs): refused while anything is unsaved, every file read again inside the
-// edit, undone in one step.
+// edit, undone in one step. The triggers (war3map.wtg.json) take part with the game's TriggerData.txt, and only when the
+// file is laid out as Studio writes it (writeWtgJson), so the moved texts are all that changes in it.
 
 import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -8,6 +9,8 @@ import { requireProject, STRING_REF_TEXT_FILE, stringRefsInMap } from "../../lib
 import { readPrunedStrings, recordPrunedStrings } from "../../lib/formats/prunedstrings";
 import { LOCALE_WTS, moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
+import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
+import { parseWtgJson, writeWtgJson, WTG_JSON, WTG_RAW, type TriggerFile } from "../../lib/triggers/wtg";
 
 /** What reading a string table (war3map.wts, or `path`) failing says: a file that isn't UTF-8 text gets a plain
  *  sentence, anything else stays. */
@@ -19,7 +22,9 @@ export function wtsReadError(e: unknown, path = "war3map.wts"): unknown {
 const WTS = "map/war3map.wts";
 const INFO = "map/war3map.w3i";
 
-export interface MoveTextsOutcome { moved: number; dropped: number; kept: string[]; raw: string[]; locales: string[] }
+/** `triggers`: why the triggers' texts weren't looked at, if they weren't (no game data, a file the codec's writer
+ *  wouldn't give back byte for byte). */
+export interface MoveTextsOutcome { moved: number; dropped: number; kept: string[]; raw: string[]; locales: string[]; triggers?: string }
 
 /** The game's metadata of the kinds whose fields move, for the comments; a kind it can't read (no game) gives none. */
 async function gameData(w3: W3Api, kinds: string[]): Promise<Map<string, KindData>> {
@@ -38,6 +43,9 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
   const has = (path: string) => listed().has(path.toLowerCase());
   const objectFiles = OBJECT_KINDS.flatMap((kind) => [false, true].map((skin) => ({ kind, skin, path: `map/war3map${skin ? "Skin" : ""}.${kind}` })));
   const data = await gameData(w3, [...new Set(objectFiles.filter((f) => has(`${f.path}.json`)).map((f) => f.kind))]);
+  // The triggers' parameter types; without them the triggers stay as they are (their references still count). Read
+  // whether or not the file list names war3map.wtg.json yet: right after a project opens it may not.
+  const trigData: TriggerData | null = await w3.game.readText("UI\\TriggerData.txt").then((t) => parseTriggerData(t), () => null);
   // A map script still due from the last save is written first: the references it holds are searched below, and it's
   // what the map's data makes (a script that isn't, kept by the Map Script extension, counts as it is).
   await w3.commands.execute("w3.script.settle").catch(() => {});
@@ -45,6 +53,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
   let result: MoveTextsResult | null = null;
   let raw: string[] = [];
+  let triggersSkipped: string | undefined;
   const done = await edits.edit("Move Texts to String Table", async (read) => {
     if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
     const files = listed();
@@ -68,19 +77,31 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       const doc = await readJson<TextObjectFile>(`${f.path}.json`);
       if (doc) objects.push({ path: `${f.path}.json`, kind: f.kind, skin: f.skin, doc });
     }
-    const edited = new Set([WTS, `${INFO}.json`, ...objects.map((o) => o.path)].map((p) => p.toLowerCase()));
+    // The triggers: only with the game's parameter types, and only a file the codec's writer gives back as it is (so
+    // nothing but the moved texts changes in it).
+    let triggers: { path: string; doc: TriggerFile; data: TriggerData } | null = null;
+    triggersSkipped = undefined;
+    const wtgText = await read(WTG_JSON);
+    if (wtgText !== null) {
+      let doc: TriggerFile;
+      try { doc = parseWtgJson(wtgText); } catch { throw new Error(`${WTG_JSON} is there but can't be read; nothing was changed.`); }
+      if (!trigData) triggersSkipped = "the game's TriggerData.txt can't be read, so the triggers' texts weren't moved";
+      else if (writeWtgJson(doc) !== wtgText) triggersSkipped = `${WTG_JSON} isn't laid out as Studio writes it, so the triggers' texts weren't moved`;
+      else triggers = { path: WTG_JSON, doc, data: trigData };
+    }
+    const edited = new Set([WTS, `${INFO}.json`, ...objects.map((o) => o.path), ...(triggers ? [WTG_JSON] : [])].map((p) => p.toLowerCase()));
     // What else refers to strings: every text file of the map, and the map's own files kept raw (as bytes).
     const otherRefs = await stringRefsInMap(w3, files.values(), (lower) => edited.has(lower));
     raw = [];
     for (const [lower, path] of files) {
       if (edited.has(lower) || STRING_REF_TEXT_FILE.test(path) || edited.has(`${lower}.json`)) continue;
-      if (lower === INFO || objectFiles.some((f) => f.path.toLowerCase() === lower)) raw.push(path);
+      if (lower === INFO || lower === WTG_RAW || objectFiles.some((f) => f.path.toLowerCase() === lower)) raw.push(path);
     }
     // Numbers an earlier drop took stay taken (a reference may come back); a record that can't be read stops here.
     const record = await readPrunedStrings(w3);
     if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
     result = moveTexts({
-      wts, locales, info, objects, otherTexts: [], otherRefs, reserved: record.keys(),
+      wts, locales, info, objects, triggers, otherTexts: [], otherRefs, reserved: record.keys(),
       describe: (kind, field) => {
         const f = data.get(kind)?.fieldById.get(field);
         return f && f.field && f.label ? { field: f.field, label: f.label } : undefined;
@@ -88,6 +109,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       baseName: (kind, base) => data.get(kind)?.names.get(base),
     });
     const out: { path: string; text: string }[] = [];
+    if (result.triggers) out.push({ path: result.triggers.path, text: writeWtgJson(result.triggers.doc) });
     for (const o of result.objects) {
       out.push({ path: o.path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: o.path, text: JSON.stringify(o.doc) }) });
     }
@@ -108,11 +130,12 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
   const r = result as MoveTextsResult | null;
   const kept = r ? r.kept.map((k) => `${k.where}: ${k.why}`) : [];
   const outcome: MoveTextsOutcome = { moved: done && r ? r.added.length : 0, dropped: done && r ? r.dropped.length : 0, kept, raw,
-    locales: done && r ? r.locales.map((l) => l.path) : [] };
+    locales: done && r ? r.locales.map((l) => l.path) : [], ...(triggersSkipped ? { triggers: triggersSkipped } : {}) };
   const plural = (n: number, one: string, more = `${one}s`) => `${n} ${n === 1 ? one : more}`;
   const notes = [
     kept.length ? ` ${plural(kept.length, "text")} stay${kept.length === 1 ? "s" : ""} literal: ${kept.slice(0, 3).join("; ")}${kept.length > 3 ? "; …" : ""}.` : "",
     raw.length ? ` ${raw.join(", ")} ${raw.length === 1 ? "is" : "are"} kept raw, so ${raw.length === 1 ? "its" : "their"} texts weren't moved.` : "",
+    triggersSkipped ? ` ${triggersSkipped[0].toUpperCase()}${triggersSkipped.slice(1)}.` : "",
   ].join("");
   if (!done) {
     void w3.window.showInfo(`No texts to move, and no strings to drop.${notes}`);
