@@ -9013,7 +9013,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
       else if (!bytes.equals(readFileSync(file))) fail(`the packed ${p} isn't the file imported for it (${bytes.length} bytes, ${readFileSync(file).length} imported)`);
     }
 
-    // Remove 3.0 alone (its own button): the other two stay as one row. (Remove has no undo, as before.)
+    // Remove 3.0 alone (its own button): the other two stay as one row.
     await page.evaluate(`window.__impWarned.length = 0; window.__impAnswer = "Remove and delete file"; window.__impWarnPick = undefined`);
     await page.evaluate(`${row}[0]?.click()`);
     if (!(await page.evaluate(`(() => { const b = document.querySelector(".imp-detail .imp-remove-de"); if (!b) return false; b.click(); return true; })()`))) fail("a row with three versions has no Remove 3.0 button");
@@ -9025,6 +9025,22 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
         if (!onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") || !onDisk("map/war3mapImported/PairHero.mdx")) fail("Remove 3.0 deleted the other versions' files");
         await settled(page);
         { const b = await badgesAre("Classic+Reforged"); if (!b.ok) fail(`after Remove 3.0 the row shows ${JSON.stringify(b.last)}`); }
+        // Undo brings the 3.0 version back (entry with its flags, file with its bytes); redo takes it away again.
+        const deFile = "map/_DE.w3mod/war3mapImported/PairHero.mdx";
+        const undo = async (cmd, want) => {
+          await page.evaluate(`w3.commands.execute(${JSON.stringify(cmd)})`);
+          return soon(async () => !!entry(DE) === want && onDisk(deFile) === want, 10000);
+        };
+        if (!(await undo("workbench.undo", true))) fail(`undo of Remove 3.0 left the list ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}, the file ${onDisk(deFile) ? "there" : "gone"}`);
+        else {
+          if (entry(DE).flags !== 13) fail(`undo of Remove 3.0 restored the entry with flags ${entry(DE).flags}`);
+          if (!readFileSync(join(k.root, ...deFile.split("/"))).equals(readFileSync(src("DE")))) fail("undo of Remove 3.0 wrote other bytes than the file had");
+          await settled(page);
+          { const b = await badgesAre("Classic+Reforged+3.0"); if (!b.ok) fail(`after undoing Remove 3.0 the row shows ${JSON.stringify(b.last)}`); }
+          if (!(await undo("workbench.redo", false))) fail("redo of Remove 3.0 didn't remove it again");
+          else if (!entry(HD) || !entry(SD)) fail("redo of Remove 3.0 took the other versions along");
+          await settled(page);
+        }
       }
     }
     // Remove on the remaining pair asks which versions go (Remove both); then the file question.
@@ -9416,6 +9432,34 @@ async function editorExtras(page, found) {
     }
     // One undo takes back the last of them only.
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), `run 9 words\n`))) fail(`undo after 10 replaces left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the 9th`);
+    // Remove and delete file, then Ctrl+Z / Ctrl+Y: the file and the entry (flags) come back and go again.
+    {
+      const bytesNow = readFileSync(onDisk), listNow = () => JSON.parse(readFileSync(impFile, "utf8")).files;
+      const listBefore = listNow();
+      await page.evaluate(`window.__rmKept = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => a.find((x) => /delete file/i.test(x)) ?? "Cancel"`);
+      try {
+        await page.evaluate(`window.__errors.length = 0`);
+        await page.evaluate(`[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.includes("smoke.txt"))?.click()`);
+        const rm = await page.evaluate(`(() => { const b = document.querySelector(".imp-detail .imp-remove"); if (!b) return false; b.click(); return true; })()`);
+        if (!rm) fail("no Remove button for the selected file");
+        else if (!(await soon(() => !existsSync(onDisk) && listNow().length === 0, 10000))) fail("Remove and delete file left the file or the entry");
+        else {
+          const back = async (act, what, present) => {
+            await act();
+            const ok = await soon(() => existsSync(onDisk) === present && listNow().length === (present ? listBefore.length : 0), 10000);
+            if (!ok) fail(`${what}: the file is ${existsSync(onDisk) ? "there" : "gone"}, the list holds ${JSON.stringify(listNow())}`);
+            else if (present && (!readFileSync(onDisk).equals(bytesNow) || JSON.stringify(listNow()) !== JSON.stringify(listBefore))) fail(`${what}: the file or the entry isn't as it was`);
+          };
+          await back(() => impKey("z", "KeyZ", 90, 2), "Ctrl+Z after Remove and delete file", true);
+          await back(() => impKey("y", "KeyY", 89, 2), "Ctrl+Y after that", false);
+          await back(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "the title bar's undo after Remove", true);
+          const errors = await page.evaluate(`window.__errors.slice()`);
+          if (errors.length) fail(`undo or redo of Remove showed ${JSON.stringify(errors)}`);
+        }
+      } finally {
+        await page.evaluate(`w3.window.showWarning = window.__rmKept`);
+      }
+    }
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
@@ -10379,6 +10423,8 @@ async function run() {
     // child.kill() ends it and the exit is heard a moment later. The retries cover a write still landing.
     if (appStarted && !LINUX) await until("the app to end", () => exited() !== null, 10000).catch(() => {});
     rmSync(configDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    // Linux: the app's data folder (WebKit storage) under this run's own identifier; 92 of them piled up.
+    if (LINUX && !part) rmSync(join(process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? "", ".local", "share"), IDENTIFIER), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
 

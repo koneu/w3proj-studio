@@ -461,7 +461,11 @@ if (process.env.W3_HOSTILE_FLOOD) {
   // To look at one failure: W3_HOSTILE_CASE="mdx: tree.mdx#2975", as the failure names it.
   const [name, round] = process.env.W3_HOSTILE_CASE.split("#");
   const seed = allSeeds().find((s) => `${s.target}: ${s.name}` === name)!;
-  TARGETS[seed.target](bytesOf(seed, Number(round)));
+  try {
+    TARGETS[seed.target](bytesOf(seed, Number(round)));
+  } catch (e) {
+    console.error(`refused (not a crash): ${(e as Error).message}`);
+  }
 } else if (process.env.W3_HOSTILE_START !== undefined) {
   work(Number(process.env.W3_HOSTILE_START));
 } else {
