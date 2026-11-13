@@ -6,7 +6,7 @@ import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { compile, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -109,6 +109,20 @@ void main() { vColor = aColor; gl_Position = uViewProj * vec4(aPos, 1.0); gl_Poi
 const COLOR_FS = `#version 300 es
 precision mediump float; in vec4 vColor; out vec4 outColor;
 void main() { outColor = vColor; }`;
+/** Solid editor marks (setShapes): a colour per corner lit by the scene's light and fogged as a placed model is
+ *  (objectLight, in the graphics mode's tone), with no texture. */
+const SHAPE_VS = `#version 300 es
+in vec3 aPos; in vec3 aNormal; in vec4 aColor;
+uniform mat4 uViewProj;
+out vec4 vColor; out vec3 vNormal;
+${FOG_VS}
+void main() { vColor = aColor; vNormal = aNormal; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+const SHAPE_FS = `#version 300 es
+precision mediump float; in vec4 vColor; in vec3 vNormal; out vec4 outColor;
+uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
+${TONE_FS}
+${FOG_FS}
+void main() { outColor = vec4(fogged(toned(vColor.rgb, objectLight(uAmbient, uDiffuse, vNormal, uLightDir, 1.0))), vColor.a); }`;
 
 // Water: the tileset's animated texture (one copy per tile) under a colour that goes from
 // "shallow min" to "shallow max" as the water deepens to 64/128 of a cliff layer (from 10/128),
@@ -478,6 +492,7 @@ export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
   private groundProg: WebGLProgram;
   private colorProg: WebGLProgram;
+  private shapeProg: WebGLProgram;
   private ground: WebGLVertexArrayObject;
   /** Index range per ground texture, in draw order. */
   private ranges: { texture: number; offset: number; count: number }[] = [];
@@ -691,6 +706,7 @@ export class TerrainRenderer {
     this.gl = gl;
     this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
     this.colorProg = compile(gl, COLOR_VS, COLOR_FS);
+    this.shapeProg = compile(gl, SHAPE_VS, SHAPE_FS);
     this.waterProg = compile(gl, WATER_VS, WATER_FS);
     this.splatProg = compile(gl, SPLAT_VS, SPLAT_FS);
     this.waterWhite = gl.createTexture()!;
@@ -1166,18 +1182,35 @@ export class TerrainRenderer {
     this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
   }
 
-  /** Replaces a named set of solid marks: triangles, 7 floats per corner (x, y, z, r, g, b, a in 0..1), drawn with
-   *  depth over the ground and models; null or [] removes it. Like the view layer, left out of showEverything's picture. */
+  /** Replaces a named set of solid marks: triangles, 10 floats per corner (x, y, z, the face's normal, then r, g, b, a
+   *  in 0..1: the colour before light), drawn with depth over the ground and models and lit as the units are
+   *  (SHAPE_FS); null or [] removes it. Like the view layer, left out of showEverything's picture. */
   setShapes(name: string, triangles: readonly number[] | null) {
     const old = this.shapes.get(name);
     if (old) this.freeVao(old.vao);
     this.shapes.delete(name);
-    if (triangles?.length) this.shapes.set(name, this.colorMesh([...triangles]));
+    if (!triangles?.length) return;
+    const gl = this.gl, vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf(vao));
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(triangles), gl.STATIC_DRAW);
+    for (const [attr, size, at] of [["aPos", 3, 0], ["aNormal", 3, 12], ["aColor", 4, 24]] as const) {
+      const loc = gl.getAttribLocation(this.shapeProg, attr);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 40, at);
+    }
+    gl.bindVertexArray(null);
+    this.shapes.set(name, { vao, count: Math.floor(triangles.length / 10) });
   }
 
   /** How many corners each set of shapes has (for tests and the app's state). */
   shapeCounts(): Record<string, number> {
     return Object.fromEntries([...this.shapes].map(([name, m]) => [name, m.count]));
+  }
+
+  /** How many rings each named set has (setRings; for tests and the app's state). */
+  ringCounts(): Record<string, number> {
+    return Object.fromEntries([...this.ringSets].map(([name, rings]) => [name, rings.length]));
   }
 
   setGroundTexture(i: number, img: DecodedImage) {
@@ -1680,12 +1713,26 @@ export class TerrainRenderer {
     }
     // Solid marks (camera objects): both sides of each face; not in a picture taken by showEverything.
     if (this.shapes.size && !this.held) {
+      // The units' light as the lighting model gives it, without the HD picture's response to it (hdLight), which
+      // placed models get: so the World Editor's camera models come out (we-drive, 2026-11-13, HD), blue under
+      // 12b_RoC_Orc04Interlude's night and light cyan under cliff.w3m's strong sun; with the response one colour
+      // couldn't match both (25 levels off at best, against 12 without).
+      const light = this.unitLight ?? DEFAULT_LIGHT;
+      gl.useProgram(this.shapeProg);
+      const where = (name: string) => gl.getUniformLocation(this.shapeProg, name);
+      gl.uniformMatrix4fv(where("uViewProj"), false, viewProj);
+      setTone(gl, where, this.tone, light);
+      setFog(gl, where, fog);
+      gl.uniform3fv(where("uLightDir"), light.dir);
+      gl.uniform3fv(where("uDiffuse"), light.diffuse);
+      gl.uniform3fv(where("uAmbient"), light.ambient);
       gl.disable(gl.CULL_FACE);
       for (const m of this.shapes.values()) {
         gl.bindVertexArray(m.vao);
         gl.drawArrays(gl.TRIANGLES, 0, m.count);
       }
       gl.enable(gl.CULL_FACE);
+      gl.useProgram(this.colorProg);
     }
     if (this.showWater && this.water.count) {
       const look = this.waterLook, frame = this.waterFrame();

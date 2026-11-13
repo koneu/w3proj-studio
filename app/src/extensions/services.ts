@@ -178,6 +178,15 @@ export interface TerrainEditorHandle {
   setBrush(ring: { x: number; y: number; r: number; rgb: [number, number, number]; square?: boolean } | null): void;
   /** RGBA texture over the whole map (rows from the south); null removes it. */
   setGroundOverlay(rgba: Uint8Array | null, width?: number, height?: number): void;
+  /** Solid marks in the view (the Cameras tab's camera models): triangles, 10 floats per corner (x, y, z, the face's
+   *  normal, r, g, b, a: the colour before light), lit as placed models are; null removes them. */
+  setShapes(triangles: readonly number[] | null): void;
+  /** Rings in the view, drawn over everything (the selected cameras' circles): `z` keeps a ring at that height, else
+   *  it follows the ground; null removes them. */
+  setRings(rings: { x: number; y: number; r: number; z?: number; rgb: [number, number, number] }[] | null): void;
+  /** Where a world point is on the screen (CSS pixels, as a mouse event's clientX and clientY), or null behind the
+   *  camera. */
+  project(p: [number, number, number]): [number, number] | null;
   /** Names drawn over the map at world points (regions, cameras); null removes them. */
   setLabels(labels: { x: number; y: number; text: string; rgb?: [number, number, number] }[] | null): void;
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */

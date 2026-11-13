@@ -206,7 +206,12 @@ It never starts the game itself.
   camera, a small movie camera with an arrow whose tip is the target, pointing along the camera's view and scaled by
   its distance (the camera's back 0.365 of it from the target; world-sized, so it grows as the view comes closer). No
   footprint or field of view on the ground. Lit by the map's light (blue under 12b's, light cyan on cliff.w3m's day).
-  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view.
+  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view. The colour (branch
+  camera-tab-markers) fits one colour lit by the units' light as the lighting model gives it, without HD's response
+  to it (renderer `setShapes`); with that response no one colour fits both maps. The camera layer (`m`) shows no
+  models by itself (View > Camera Objects does), but a selected camera (its palette row) gets a pure green circle
+  round its target on the ground (following hills), radius 0.096 of its distance; on cliff.w3m's bright grass it is
+  hard to see by eye (find it by difference).
 - **Saving** (`--save FILE`, branch save-parity, 2026-11-09): variants of a map made with the release CLI (unpack, JSON,
   pack), saved by the editor and unpacked again, show what its save works out by itself. Found so: the ally priorities
   (lib/terrain/startlocations.ts `editorAllyPriorities`), hit points and mana of 0 saved as -1 (lib/terrain/owner.ts
