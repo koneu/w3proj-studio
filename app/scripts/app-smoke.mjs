@@ -2662,6 +2662,13 @@ async function startPreviewFollow(page, found) {
     await until("no preview without the Melee flag", async () => (await drawn()).length === 0, 10000).catch(async () => fail(`still previews with Melee off: ${JSON.stringify(await drawn())}`));
     await setMelee(true);
     await until("previews again with Melee on", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after Melee went on"));
+    // A player's unit placed on the melee map takes the flag off (as a save would): the open editor drops the previews
+    // at once, without a save or a reopen.
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: was[0] + 1024, y: was[1] + 1024, player: 1 }], ignoreRoom: true });
+    await until("no preview after a player's footman was placed", async () => (await drawn()).length === 0, 10000)
+      .catch(async () => fail(`still previews after placing a player's unit: ${JSON.stringify(await drawn())}`));
+    await k.tool("undo_last_edit");
+    await until("previews back after undoing the placing", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after undoing the footman"));
   } finally {
     await page.evaluate(`window.__spGroup2?.dispose(); window.__spGroup2 = null; window.__spEd2 = null;`);
   }
