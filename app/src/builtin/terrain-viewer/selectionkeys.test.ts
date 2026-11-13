@@ -36,15 +36,20 @@ test("sizes: plus and minus all over, Home and End across, PageUp and PageDown u
 });
 
 test("slash and star turn", () => {
-  assert.deepEqual(press("/"), { rotate: 15 });
-  assert.deepEqual(press("*"), { rotate: -15 });
+  assert.deepEqual(press("/"), { rotate: 5 });
+  assert.deepEqual(press("*"), { rotate: -5 });
 });
 
 test("the number pad with NumLock on nudges (the World Editor's Edit > Nudge Selection, we-drive 2026-11-13)", () => {
-  assert.deepEqual(press("4", { code: "Numpad4" }), { nudge: [-32, 0] });
-  assert.deepEqual(press("6", { code: "Numpad6" }), { nudge: [32, 0] });
-  assert.deepEqual(press("8", { code: "Numpad8" }), { nudge: [0, 32] });
-  assert.deepEqual(press("2", { code: "Numpad2" }), { nudge: [0, -32] });
+  assert.deepEqual(press("4", { code: "Numpad4" }), { nudge: [-8, 0] });
+  assert.deepEqual(press("6", { code: "Numpad6" }), { nudge: [8, 0] });
+  assert.deepEqual(press("8", { code: "Numpad8" }), { nudge: [0, 8] });
+  assert.deepEqual(press("2", { code: "Numpad2" }), { nudge: [0, -8] });
+  // The diagonals nudge both ways by the whole step (we-drive 2026-11-13: a tree 64 and 64).
+  assert.deepEqual(press("7", { code: "Numpad7" }), { nudge: [-8, 8] });
+  assert.deepEqual(press("9", { code: "Numpad9" }), { nudge: [8, 8] });
+  assert.deepEqual(press("1", { code: "Numpad1" }), { nudge: [-8, -8] });
+  assert.deepEqual(press("3", { code: "Numpad3" }), { nudge: [8, -8] });
 });
 
 test("Ctrl and the arrows aren't the nudge: in the World Editor they zoom and turn the camera", () => {
@@ -123,7 +128,7 @@ test("H, V and R mirror and turn, but Ctrl+V is still paste", () => {
 
 test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {
   assert.deepEqual(press("Unidentified", { code: "NumpadAdd" }), { scale: [0.05, 0.05, 0.05] });
-  assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 15 });
+  assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 5 });
   assert.deepEqual(press("Unidentified", { code: "PageUp", ctrlKey: true }), { raise: 16 });
   const plain = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.equal(isRecallKey({ key: "Unidentified", code: "Space", ...plain }), true);

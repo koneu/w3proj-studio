@@ -3078,7 +3078,7 @@ async function heightsLimits(page, found) {
   if ((await k.setting("terrain.enforceWaterLimits")) === false || (await k.box("Water limits")) !== true) fail("Enforce Water Height Limits isn't on by default");
   await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
   await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", false)`);
-  // The nudges and the paste below go by 32 to the bound: without the doodads' grid (doodadRulesEdit has it).
+  // The nudges and the paste below go by 8 to the bound: without the doodads' grid (doodadRulesEdit has it).
   await page.evaluate(`w3.settings.set("terrain.doodads.snapOnLoad", false)`);
   const bounds = k.read("war3map.w3i.json").cameraBounds;
   const [bl, bb, br, bt] = bounds;
@@ -3098,11 +3098,11 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
-  for (let i = 0; i < 3; i++) await hands.key("6", "Numpad6", 102);
+  for (let i = 0; i < 12; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (nearEdge()?.position[0] !== br + 56) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 56} (past the bound ${br}, as in the World Editor)`);
+  if (nearEdge()?.position[0] !== br + 56) fail(`twelve nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 56} (past the bound ${br}, as in the World Editor)`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await hands.key("6", "Numpad6", 102);
+  for (let i = 0; i < 4; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
   if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
 
@@ -3119,9 +3119,9 @@ async function heightsLimits(page, found) {
   const fx0 = footman()?.position[0];
   await k.look(fx0, 256, { id: "hfoo", x: fx0, y: 256 });
   await k.focusMap();
-  for (let i = 0; i < 8; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  for (let i = 0; i < 10; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (footman()?.position[0] !== pr - 31) fail(`eight nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
+  if (footman()?.position[0] !== pr - 31) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
 
   // A paste outside the bounds.
@@ -5244,7 +5244,7 @@ async function doodadSnapOnLoad(page, found) {
 /** The World Editor's doodad rules while editing (doodadedit.ts), under the same settings as on load (Snap Doodads on
  *  Load, Fix Doodads on Load), on a new map, both on and then both off: a barrel (2×2 texture, 1.1 to 1.5) placed by
  *  place_objects at 40, 40 with scale 3 lands at 32, 32 with 1.5 (off: as asked), a hay cart (4×2) at 500, 300 facing
- *  10° at 480, 320 facing 0; Ctrl+Right nudges the barrel a grid step (96; off: 72); a Position X typed 40 further
+ *  10° at 480, 320 facing 0; Number pad 6 nudges the barrel a grid step (96; off: 48); a Position X typed 40 further
  *  goes to the grid point next to it; a Scale X typed 1.25 gives all three axes 1.25 (a destructable's x for all;
  *  off: only x), then 2 gives 1.5, and one undo takes that back to 1.25; move_object to 100, 100 with scale 0.5 lands
  *  at 96, 96 with 1.1. Each edit is checked in the saved file. */
@@ -5268,14 +5268,14 @@ async function doodadRulesEdit(page, found) {
       if (!same(xy(cart), on ? [480, 320] : [500, 300]) || f(cart?.angle) !== (on ? 0 : f((10 * Math.PI) / 180))) say(`the placed hay cart is at ${JSON.stringify(xy(cart))} facing ${cart?.angle}`);
       if (!barrel) return;
 
-      // Ctrl+Right: a grid step of 64 (on), a nudge of 32 (off).
+      // Number pad 6: a grid step of 64 (on), a nudge of 8 (off).
       await k.tab("Select");
       await k.look(barrel.position[0], barrel.position[1], { id: "LTbr", x: barrel.position[0], y: barrel.position[1] });
       await k.focusMap();
-      await k.hands.key("ArrowRight", "ArrowRight", 39, 2);
+      await k.hands.key("6", "Numpad6", 102);
       await k.save();
       const nudged = find("LTbr");
-      if (!same(xy(nudged), on ? [96, 32] : [72, 40])) say(`Ctrl+Right put the barrel at ${JSON.stringify(xy(nudged))}`);
+      if (!same(xy(nudged), on ? [96, 32] : [48, 40])) say(`Number pad 6 put the barrel at ${JSON.stringify(xy(nudged))}`);
 
       /** Types a value into the selection's number box `i` (0 to 2 the position, 3 the facing... as the panel lists them). */
       const typeInto = async (selector, i, value) => {
@@ -5287,7 +5287,7 @@ async function doodadRulesEdit(page, found) {
       const POS = ".terrain-selection .terrain-sel-triple input";
       await typeInto(POS, 0, nudged.position[0] + 40);
       const typed = find("LTbr");
-      if (!same(xy(typed), on ? [160, 32] : [112, 40])) say(`Position X typed ${nudged.position[0] + 40} put the barrel at ${JSON.stringify(xy(typed))}`);
+      if (!same(xy(typed), on ? [160, 32] : [88, 40])) say(`Position X typed ${nudged.position[0] + 40} put the barrel at ${JSON.stringify(xy(typed))}`);
       // The scale triple follows the position's in the panel.
       await typeInto(POS, 3, 1.25);
       if (!same(sc(find("LTbr")), on ? [1.25, 1.25, 1.25] : [1.25, 3, 3])) say(`Scale X typed 1.25 gave ${JSON.stringify(find("LTbr")?.scale)}`);

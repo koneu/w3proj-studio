@@ -63,9 +63,13 @@ export function doodadTurn(rules: DoodadRuleSource, id: string, angle: number, b
   return square || by === 0 ? angle + by : angle + Math.sign(by) * (Math.PI / 2);
 }
 
-/** How many nudges long a nudge of a doodad of type `id` is: its grid's step (64, two nudges of 32) when it snaps,
- *  so that half a step doesn't round back where it was. */
+/** How many nudges (selectionkeys.ts: 8) long a nudge is for something on a 64 grid: a building, and a doodad with a
+ *  pathing texture (we-drive 2026-11-13: tree and farm 64, footman and a doodad without pathing 8). */
+export const GRID_NUDGE_STEPS = 8;
+
+/** How many nudges long a nudge of a doodad of type `id` is: its grid's step (64) when it snaps, so that a smaller
+ *  one doesn't round back where it was. */
 export function doodadNudgeSteps(rules: DoodadRuleSource, id: string): number {
   const size = rules.snap ? rules.size(id) : null;
-  return size && size.width >= 1 && size.height >= 1 ? 2 : 1;
+  return size && size.width >= 1 && size.height >= 1 ? GRID_NUDGE_STEPS : 1;
 }

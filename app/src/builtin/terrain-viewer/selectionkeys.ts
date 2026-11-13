@@ -3,7 +3,7 @@
 // destructables: a unit stands on the ground, at the size its type says.
 //
 // The defaults: Page Up and Down scale the height (Ctrl: raise and lower), Home and End the width, + and - all of it,
-// / and [ turn left, * and ] right, the number pad's 8 2 4 6 (NumLock on) nudge (the World Editor's Edit > Nudge
+// / and [ turn left, * and ] right, the number pad's 8 2 4 6 and the diagonals 7 9 1 3 (NumLock on) nudge (the World Editor's Edit > Nudge
 // Selection; Ctrl and the arrows are its camera's, we-drive 2026-11-13: they moved no object); H and V mirror, R turns a quarter,
 // Shift+R back (the selection, or what's being pasted); T turns it toward the pointer (not F, the World Editor's Fog
 // Effects; T is none of its terrain view's keys: its View menu, read by we-drive --view-menu, 2026-11-10); Space
@@ -22,7 +22,7 @@ export type SelectionKey =
   | { scale: [number, number, number] }
   | { nudge: [number, number] };
 
-const HEIGHT = 16, TURN = 15, SIZE = 0.05, NUDGE = 32;
+const HEIGHT = 16, TURN = 5, SIZE = 0.05, NUDGE = 8;
 
 /** What each selection command does to the selection (with a selection, an editable map and no tab's tool open). */
 export const SELECTION_COMMANDS: Readonly<Record<string, SelectionKey>> = {
@@ -32,6 +32,10 @@ export const SELECTION_COMMANDS: Readonly<Record<string, SelectionKey>> = {
   "w3.terrain.selection.moveDown": { nudge: [0, -NUDGE] },
   "w3.terrain.selection.moveLeft": { nudge: [-NUDGE, 0] },
   "w3.terrain.selection.moveRight": { nudge: [NUDGE, 0] },
+  "w3.terrain.selection.moveUpLeft": { nudge: [-NUDGE, NUDGE] },
+  "w3.terrain.selection.moveUpRight": { nudge: [NUDGE, NUDGE] },
+  "w3.terrain.selection.moveDownLeft": { nudge: [-NUDGE, -NUDGE] },
+  "w3.terrain.selection.moveDownRight": { nudge: [NUDGE, -NUDGE] },
   "w3.terrain.selection.scaleUp": { scale: [SIZE, SIZE, SIZE] },
   "w3.terrain.selection.scaleDown": { scale: [-SIZE, -SIZE, -SIZE] },
   "w3.terrain.selection.scaleUpXY": { scale: [SIZE, SIZE, 0] },

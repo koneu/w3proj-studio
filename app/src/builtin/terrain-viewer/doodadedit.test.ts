@@ -61,20 +61,20 @@ test("settleDoodad: place and scale each only when asked, the ground under a mov
 
 test("doodadTurn: the log turns a whole quarter per key (the World Editor: 0° to 270° in three), the barrel by the step", () => {
   let angle = 0;
-  for (let i = 0; i < 3; i++) angle = doodadPose(rules(), "AOlg", 1056, 0, doodadTurn(rules(), "AOlg", angle, deg(15))).angle;
+  for (let i = 0; i < 3; i++) angle = doodadPose(rules(), "AOlg", 1056, 0, doodadTurn(rules(), "AOlg", angle, deg(5))).angle;
   assert.equal(Math.round((angle * 180) / Math.PI), 270);
-  assert.equal(doodadTurn(rules(), "AOlg", 0, deg(-15)), -Math.PI / 2);
-  assert.equal(doodadTurn(rules(), "LTbr", deg(270), deg(15)), deg(270) + deg(15));
-  assert.equal(doodadTurn(rules(), "LPwh", 1, deg(15)), 1 + deg(15));
+  assert.equal(doodadTurn(rules(), "AOlg", 0, deg(-5)), -Math.PI / 2);
+  assert.equal(doodadTurn(rules(), "LTbr", deg(270), deg(5)), deg(270) + deg(5));
+  assert.equal(doodadTurn(rules(), "LPwh", 1, deg(5)), 1 + deg(5));
   // Snapping off: the log turns by the step too.
-  assert.equal(doodadTurn(rules(false), "AOlg", 0, deg(15)), deg(15));
+  assert.equal(doodadTurn(rules(false), "AOlg", 0, deg(5)), deg(5));
 });
 
-test("doodadNudgeSteps: a doodad on a grid nudges a grid step (two nudges), so it doesn't round back", () => {
-  assert.equal(doodadNudgeSteps(rules(), "LTbr"), 2);
+test("doodadNudgeSteps: a doodad on a grid nudges a grid step (eight nudges of 8), so it doesn't round back", () => {
+  assert.equal(doodadNudgeSteps(rules(), "LTbr"), 8);
   assert.equal(doodadNudgeSteps(rules(), "LPwh"), 1);
   assert.equal(doodadNudgeSteps(rules(false), "LTbr"), 1);
-  // A nudge of 32 on the barrel's grid would round back to where it was; 64 doesn't.
-  assert.equal(doodadPose(rules(), "LTbr", 32 + 32 * doodadNudgeSteps(rules(), "LTbr"), 32, deg(270)).x, 96);
-  assert.equal(doodadPose(rules(), "LTbr", 96 - 32, 32, deg(270)).x, 96);
+  // A nudge of 8 on the barrel's grid would round back to where it was; 64 doesn't.
+  assert.equal(doodadPose(rules(), "LTbr", 32 + 8 * doodadNudgeSteps(rules(), "LTbr"), 32, deg(270)).x, 96);
+  assert.equal(doodadPose(rules(), "LTbr", 96 - 8, 32, deg(270)).x, 96);
 });
