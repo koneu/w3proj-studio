@@ -9294,6 +9294,50 @@ async function niceToHaves(page, found) {
         await retype(k.hands, nameInput, "Saved Name");
         await k.save();
         if (strings().get(7) !== "Saved Name") fail(`the Object Editor saved string 7 as ${JSON.stringify(strings().get(7))}`);
+        // The Trigger Editor, the second editor of war3map.wts, shows the string in a GUI action's text parameter. The Object
+        // Editor saves another text for it: the Trigger Editor shows that without reopening, stays saved and keeps its selection.
+        {
+          const wtgText = readFileSync(join(mapDir, "war3map.wtg.json"), "utf8");
+          const trigName = "Nice Text";
+          try {
+            await k.tool("create_script_trigger", { name: trigName, script: "" });
+            const wtg = k.read("war3map.wtg.json");
+            const t = wtg.items.find((i) => i.name === trigName);
+            t.isCustom = false;
+            t.ecas = [{ kind: 2, name: "DisplayTextToPlayer", enabled: true, children: [], params: [{ type: 0, value: "PlayerNA" },
+              { type: 3, value: "0" }, { type: 3, value: "0" }, { type: 3, value: "TRIGSTR_007" }] }];
+            await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(wtg, null, 2))})`);
+            await page.evaluate(`w3.workspace.refresh()`);
+            await run("w3.triggers.open");
+            await until("the trigger's row", () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].some((e) => e.textContent.trim() === ${JSON.stringify(trigName)})`), 20000);
+            await k.hands.click(".trig-tree-rows .trig-label", trigName);
+            await until("the trigger", () => page.evaluate(`document.querySelector("input.trig-name")?.value === ${JSON.stringify(trigName)}`), 5000);
+            const shown = () => page.evaluate(`document.querySelector(".trig-detail, .trig-editor")?.textContent ?? ""`);
+            if (!(await soon(async () => (await shown()).includes("Saved Name"), 5000))) fail("the Trigger Editor doesn't show string 7 in the action (control)");
+            else {
+              const tab = (p) => `w3.editors.isDirty(${JSON.stringify(p)})`;
+              // The Object Editor's tab still has its field filter: back on it, the name is the one field.
+              await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+              await until("the name field", () => page.evaluate(`document.querySelectorAll(${JSON.stringify(nameInput)}).length === 1`), 10000);
+              await retype(k.hands, nameInput, "Seen Elsewhere");
+              await k.save();
+              if (strings().get(7) !== "Seen Elsewhere") fail(`the Object Editor saved string 7 as ${JSON.stringify(strings().get(7))} (control)`);
+              if (!(await soon(async () => (await shown()).includes("Seen Elsewhere"), 8000))) fail("the Trigger Editor still shows the old text of string 7 after another editor saved it");
+              if (await page.evaluate(tab("map/war3map.wtg.json"))) fail("the Trigger Editor is unsaved after it showed a changed string");
+              if (await page.evaluate(`document.querySelector("input.trig-name")?.value`) !== trigName) fail("the Trigger Editor lost its selection when a string changed");
+              if (readFileSync(join(mapDir, "war3map.wtg.json"), "utf8") === wtgText) fail("(control) the trigger file wasn't changed by the test");
+            }
+          } finally {
+            await page.evaluate(`w3.editors.closeAll()`);
+            await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(wtgText)})`);
+            await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(keep.wts)})`);
+            await page.evaluate(`w3.workspace.refresh()`);
+          }
+          await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(`${keep.wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 7${eol}{${eol}Saved Name${eol}}${eol}`)})`);
+          await page.evaluate(`w3.workspace.refresh()`);
+          await settled(page);
+          if ((await showName()) !== "Saved Name") fail("after the Trigger Editor step the Object Editor doesn't show the name again");
+        }
         // Unsaved in the Object Editor: refused, nothing written.
         await retype(k.hands, nameInput, "Unsaved Name");
         if (!(await objectsDirty())) fail("a typed name left the Object Editor saved (control)");
