@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ABILITY_ART, abilityArt, firstModel, previewTeam, previewTextures } from "./previewart";
+import { ABILITY_ART, abilityArt, firstModel, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
 import { skinTextures } from "../../lib/model/replaceable";
 
 test("a tree's own texture is btxf under btxi, with .blp added when it has no extension", () => {
@@ -39,4 +39,26 @@ test("an ability's art: the chosen field with a model, else the first that has o
   assert.equal(abilityArt(() => ""), null);
   assert.equal(firstModel(" , x"), null);
   assert.equal(new Set(ABILITY_ART.map((a) => a.id)).size, 6);
+});
+
+test("a model field's comma list can be stepped through, the first being the default", () => {
+  assert.deepEqual(modelList("a.mdx, _ ,b.mdx,"), ["a.mdx", "b.mdx"]);
+  assert.equal(modelAt("a.mdx,b.mdx"), "a.mdx");
+  assert.equal(modelAt("a.mdx,b.mdx", 1), "b.mdx");
+  assert.equal(modelAt("a.mdx,b.mdx", 5), "a.mdx");
+  assert.equal(modelAt("_"), null);
+  const has = (id: string) => (id === "acat" ? "x.mdx,y.mdx" : "");
+  assert.deepEqual(abilityArt(has), { id: "acat", path: "x.mdx" });
+  assert.deepEqual(abilityArt(has, undefined, 1), { id: "acat", path: "y.mdx" });
+});
+
+test("the preview's choices reset when another object is shown, not for the same one", () => {
+  const picks = freshPicks();
+  assert.equal(syncPicks(picks, "o:hfoo"), true);
+  Object.assign(picks, { team: 4, texture: 33, art: "atat", model: 2 });
+  assert.equal(syncPicks(picks, "o:hfoo"), false);
+  assert.equal(picks.team, 4);
+  assert.equal(picks.model, 2);
+  assert.equal(syncPicks(picks, "o:hpea"), true);
+  assert.deepEqual(picks, { key: "o:hpea", team: null, texture: null, art: undefined, model: 0 });
 });

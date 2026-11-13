@@ -19,7 +19,7 @@ import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundErro
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { REPLACEABLE, TEAM_COLORS } from "../../lib/model/renderer";
-import { ABILITY_ART, abilityArt, previewTeam, previewTextures } from "./previewart";
+import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
@@ -974,16 +974,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const preview = MODEL_FIELD[kind] || kind === "w3a" ? new ModelPreview(w3) : null;
         // What the user chose to look at: a player colour, a replaceable texture (destructables), an ability's art field.
-        let teamPick: number | null = null, texturePick: number | null = null, artPick: string | undefined;
+        const picks = freshPicks();
         const fieldValue = (o: Obj, id: string): string => { const f = kd?.fieldById.get(id); return f ? effective(o, f, 0) : ""; };
-        const abilityModel = (o: Obj) => abilityArt((id) => fieldValue(o, id), artPick);
+        const abilityModel = (o: Obj) => abilityArt((id) => fieldValue(o, id), picks.art, picks.model);
         /** The model the object shows (its first variation). */
         const modelOf = (o: Obj): string | null => {
           if (kind === "w3a") return abilityModel(o)?.path ?? null;
           const mf = MODEL_FIELD[kind], f = kd?.fieldById.get(mf.model);
           if (!f) return null;
-          const path = effective(o, f, 0).split(",")[0]?.trim();
-          if (!path || path === "_") return null;
+          const path = modelAt(effective(o, f, 0), picks.model);
+          if (!path) return null;
           const vf = mf.variations ? kd!.fieldById.get(mf.variations) : undefined;
           const variations = vf ? Number(effective(o, vf, 0)) || 1 : 1;
           return variations > 1 ? `${path.replace(/\.(mdl|mdx)$/i, "")}0` : path;
@@ -996,31 +996,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Shows the object's model with the colour and textures chosen. */
         const showPreview = (o: Obj) => {
           if (!preview) return;
+          syncPicks(picks, objectKey(o));
           const num = (id: string) => { const v = fieldValue(o, id).trim(); return v === "" ? NaN : Number(v); };
-          preview.setTeamColor(previewTeam(teamPick, kind === "w3u" ? num("utco") : null));
-          const pick = texturePick !== null ? { id: num("btxi") > 0 ? num("btxi") : texturePick, path: REPLACEABLE[texturePick] } : undefined;
+          preview.setTeamColor(previewTeam(picks.team, kind === "w3u" ? num("utco") : null));
+          const pick = picks.texture !== null ? { id: num("btxi") > 0 ? num("btxi") : picks.texture, path: REPLACEABLE[picks.texture] } : undefined;
           preview.setReplaceable(kind === "w3b" ? previewTextures({ texId: num("btxi"), texFile: fieldValue(o, "btxf") }, pick) : {});
           preview.show(modelOf(o), looksOf(o));
         };
         /** The preview's choices: player colour, a tree texture (destructables), an ability's art field. */
         const previewControls = (o: Obj): HTMLElement => {
-          const team = h("select", { title: "Player colour of the team colour and glow textures", onchange: () => { teamPick = Number(team.value); showPreview(o); } },
+          const team = h("select", { title: "Player colour of the team colour and glow textures", onchange: () => { picks.team = Number(team.value); showPreview(o); } },
             ...TEAM_COLORS.map(([name], i) => h("option", { value: String(i) }, name))) as HTMLSelectElement;
-          team.value = String(previewTeam(teamPick, kind === "w3u" ? Number(fieldValue(o, "utco")) || 0 : null));
+          team.value = String(previewTeam(picks.team, kind === "w3u" ? Number(fieldValue(o, "utco")) || 0 : null));
           const out: HTMLElement[] = [team];
           if (kind === "w3b") {
-            const tex = h("select", { title: "Replaceable texture of the model", onchange: () => { texturePick = tex.value === "" ? null : Number(tex.value); showPreview(o); } },
+            const tex = h("select", { title: "Replaceable texture of the model", onchange: () => { picks.texture = tex.value === "" ? null : Number(tex.value); showPreview(o); } },
               h("option", { value: "" }, "Texture: the type's own"),
               ...Object.entries(REPLACEABLE).map(([id, path]) => h("option", { value: id }, path.split("\\").pop()!.replace(/\.blp$/i, "")))) as HTMLSelectElement;
-            tex.value = texturePick === null ? "" : String(texturePick);
+            tex.value = picks.texture === null ? "" : String(picks.texture);
             out.push(tex);
           }
           if (kind === "w3a") {
             const shown = abilityModel(o);
-            const art = h("select", { title: "Which of the ability's models to show", onchange: () => { artPick = art.value; showPreview(o); renderDetail(); } },
+            const art = h("select", { title: "Which of the ability's models to show", onchange: () => { picks.art = art.value; picks.model = 0; showPreview(o); renderDetail(); } },
               ...ABILITY_ART.map((a) => h("option", { value: a.id }, `${a.label}${abilityArt((id) => fieldValue(o, id), a.id)?.id === a.id ? "" : " (none)"}`))) as HTMLSelectElement;
-            art.value = shown?.id ?? artPick ?? ABILITY_ART[0].id;
+            art.value = shown?.id ?? picks.art ?? ABILITY_ART[0].id;
             out.push(art);
+          }
+          // A model field holding a comma list: choose among its models (the first is the default).
+          const listed = modelList(kind === "w3a" ? fieldValue(o, abilityModel(o)?.id ?? "") : fieldValue(o, MODEL_FIELD[kind]?.model ?? ""));
+          if (listed.length > 1) {
+            const model = h("select", { title: "Which model of the list to show", onchange: () => { picks.model = Number(model.value); showPreview(o); } },
+              ...listed.map((p, i) => h("option", { value: String(i) }, `${i + 1}. ${p.split("\\").pop()}`))) as HTMLSelectElement;
+            model.value = String(Math.min(picks.model, listed.length - 1));
+            out.push(model);
           }
           return h("div.obj-preview-controls", {}, ...out);
         };
