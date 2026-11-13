@@ -479,6 +479,24 @@ const TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc)$/i;
 /** The map's own files kept raw (no codec): binary, so a reference in them can't be renumbered as text. */
 const RAW_MAP_FILE = /^map\/war3(map|campaign)[^/]*$/i;
 
+/** The terrain editor's files: they hold no string references (its w3i changes edit the file as it is then). */
+const TERRAIN_FILE = /^map\/war3map\.w3e(\.txt)?$/i;
+
+/** Opens the editors of the map's files again, those that can hold string references (TRIGSTR_): their undo history
+ *  holds the numbers as they were, and an undo would bring back a reference that now names another string (or none).
+ *  Adjust refuses while anything is unsaved, so they're all saved; one changed meanwhile keeps its history, and is
+ *  named. Editors of a file Adjust changed or watching war3map.wts may have opened again already: once more is safe. */
+async function forgetStringHistory(w3: W3Api) {
+  const kept: string[] = [];
+  for (const f of w3.workspace.files()) {
+    if (!(TEXT_FILE.test(f.path) || RAW_MAP_FILE.test(f.path)) || TERRAIN_FILE.test(f.path)) continue;
+    if ((await w3.editors.reopen(f.path)) > 0) kept.push(f.path);
+  }
+  if (kept.length) {
+    void w3.window.showWarning(`${kept.join(", ")} ${kept.length === 1 ? "was" : "were"} changed during Adjust Map String IDs and kept ${kept.length === 1 ? "its" : "their"} undo history: an undo there can bring back a string ID that names another string now.`);
+  }
+}
+
 /** See w3.triggers.adjustStringIds. */
 async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   requireProject(w3);
@@ -524,6 +542,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   if (raw.length) throw new Error(`Not changed: ${raw.join(", ")} ${raw.length === 1 ? "is" : "are"} kept raw and refer${raw.length === 1 ? "s" : ""} to strings, which can't be renumbered there.`);
   const texts = w3.workspace.files().map((f) => f.path).filter((p) => TEXT_FILE.test(p));
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+  const root = w3.workspace.project()?.root;
   let files = 0;
   const done = await edits.edit("Adjust Map String IDs", async (read) => {
     const wts = await read(WTS);
@@ -539,9 +558,12 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
     }
     files = out.length;
     return out;
+  }, async () => {
+    // After the edit and after its undo: the numbers changed under the editors' undo history.
+    if (w3.workspace.project()?.root === root) await forgetStringHistory(w3);
   });
   if (done) {
-    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts and ${files - 1} file${files === 2 ? "" : "s"} that refer to them.`, "Undo")
+    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts and ${files - 1} file${files === 2 ? "" : "s"} that refer to them. Open editors of the map's texts start a new undo history.`, "Undo")
       .then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
   }
   return done ? ids.size : 0;
