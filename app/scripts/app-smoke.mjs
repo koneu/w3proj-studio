@@ -693,6 +693,23 @@ async function waterPathing(page, found) {
   const left = git("status", "--porcelain").stdout.trim();
   if (left) fail(`a commit straight after a tool's edit left changes uncommitted: ${left.split(/[\r\n]+/).slice(0, 4).join(" | ")}`);
   if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
+
+  // An external `w3proj pack` (the CLI, with the app only saving) after an edit and its save: the pathing map in the pack is
+  // the project's, and it is not the one from before the edit (verify round 3, package 2).
+  await settled(page);
+  const wpmBefore = readFileSync(wpmFile);
+  await tool("place_objects", { objects: [{ id: "LPwb", x: -1536, y: 1536 }], ignoreRoom: true });
+  await tool("set_water", { mode: "lake", left: -2560, bottom: 1536, right: -1536, top: 2560 });
+  await tool("save_project");
+  await settled(page);
+  const external = join(work, "water-external.w3x");
+  const packedBy = spawnSync(cli, ["pack", root, "-o", external], { encoding: "utf8" });
+  if (packedBy.status !== 0) return fail(`w3proj pack: ${(packedBy.stdout + packedBy.stderr).slice(-200)}`);
+  const catted = spawnSync(cli, ["cat", external, "war3map.wpm"], { maxBuffer: 1 << 26 });
+  if (catted.status !== 0) return fail("the CLI can't read war3map.wpm from the externally packed map");
+  if (!catted.stdout.equals(readFileSync(wpmFile))) fail("the pathing map in an external `w3proj pack` isn't the project's after the edit and its save");
+  if (catted.stdout.equals(wpmBefore)) fail("the external pack's pathing map is the one from before the edit (control)");
+  if (!(cell(catted.stdout, -64, 64) & 0x02)) fail("the lake made before the external pack isn't blocked in its pathing map");
   } finally {
     await restoreWindow(page);
   }
@@ -1092,6 +1109,120 @@ async function heightsPreserve(page, found) {
     await restoreWindow(page);
   }
 }
+
+/** Three things of verification round 3 that were proved by hand: "Don't care about undo" (the setting and what an AI
+ *  client reads of it), Reset Fixed Object Heights on a drag (flags 2 and 6, one undo), and the running day/night cycle
+ *  (the hour moves with time, waits while the view is hidden, goes back to the stored hour when switched off). The
+ *  cycle's clock is performance.now, which the page gets an offset on: a jump of it instead of twenty seconds' wait. */
+async function verify3Steps(page, found) {
+  const fail = (what) => found.push(`verify 3 steps: ${what}`);
+  const k = await heightKit(page, "Verify3");
+  const { hands } = k;
+  try {
+  // ---- mcp.ignoreUndoSteps: begin_edit's description and project_info follow it, and it goes back -----------------------
+  const rpc = async (method, params) => JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }))})`));
+  const beginEdit = async () => (await rpc("tools/list", {})).result?.tools?.find((t) => t.name === "begin_edit")?.description ?? "";
+  const info = async () => JSON.parse(JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "project_info", arguments: {} } }))})`)).result?.content?.[0]?.text ?? "{}");
+  const plain = await beginEdit();
+  if (!plain || /doesn't need undo/.test(plain) || (await info()).undo) fail(`undo steps are ignored by default: ${plain.slice(-80)}`);
+  try {
+    await page.evaluate(`w3.settings.set("mcp.ignoreUndoSteps", true)`);
+    const noted = await beginEdit();
+    if (!/doesn't need undo steps/.test(noted) || noted === plain) fail(`begin_edit's description doesn't say the user doesn't need undo steps: ${noted.slice(-120)}`);
+    if (!/undo steps/.test((await info()).undo ?? "")) fail("project_info has no undo hint with Don't care about undo on");
+  } finally {
+    await page.evaluate(`w3.settings.set("mcp.ignoreUndoSteps", undefined)`);
+  }
+  if ((await beginEdit()) !== plain || (await info()).undo) fail("begin_edit's description or project_info kept the undo note after the setting went back");
+
+  // ---- Reset Fixed Object Heights on a drag ---------------------------------------------------------------------------
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+  await k.save();
+  await k.tab("Select");
+  await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
+  await k.focusMap();
+  const ground = k.doodads()[0].position[2];
+  const fixUp = async () => {
+    await k.focusMap();
+    for (let i = 0; i < 4; i++) await hands.key("PageUp", "PageUp", 33, 2);
+    await k.save();
+  };
+  const tree = () => k.doodads()[0];
+  const dragTree = async () => {
+    // The view on the tree first (the drag takes hold of what it is on: the tree stands 64 over the ground it looks at,
+    // so its middle is a little above the centre), then a drag a few steps long.
+    const [x, y] = tree().position;
+    await k.look(x, y, { id: "LTlt", x, y });
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x, y: c.y - 15 }, { x: c.x + 20, y: c.y - 15 });
+    await k.save();
+  };
+  await fixUp();
+  if (tree().position[2] !== ground + 64 || !(tree().flags & k.FIXED)) return fail(`the tree with a height of its own (control): ${JSON.stringify([tree().position, tree().flags])}`);
+  if ((await k.setting("terrain.resetFixedHeights")) === false) fail("Reset Fixed Object Heights isn't on by default");
+  const x0 = tree().position[0];
+  await dragTree();
+  if (tree().position[0] === x0) fail("the drag didn't move the tree (control)");
+  else if (tree().position[2] !== ground || (tree().flags & k.FIXED)) fail(`a drag with Reset Fixed Object Heights on left the tree at ${JSON.stringify([tree().position[2], tree().flags])}; it should be on the ground without a height of its own`);
+  await fixUp();
+  await page.evaluate(`w3.settings.set("terrain.resetFixedHeights", false)`);
+  const beforeDrag = JSON.stringify(tree());
+  await dragTree();
+  if (JSON.stringify(tree()) === beforeDrag) fail("the drag with Reset Fixed Object Heights off didn't move the tree (control)");
+  else if (tree().position[2] !== ground + 64 || !(tree().flags & k.FIXED)) fail(`a drag with Reset Fixed Object Heights off changed the height: ${JSON.stringify([tree().position[2], tree().flags])}`);
+  await k.run("workbench.undo");
+  await k.save();
+  if (JSON.stringify(tree()) !== beforeDrag) fail(`one undo of the drag didn't give the tree back: ${JSON.stringify(tree())} vs ${beforeDrag}`);
+  await k.reset();
+
+  // ---- The running day/night cycle ----------------------------------------------------------------------------------------
+  const hourBox = `[...document.querySelectorAll("select")].find((s) => s.options.length === 24 && s.options[0].textContent === "0:00")`;
+  const shown = () => page.evaluate(`(() => { const s = ${hourBox}; return s ? { hour: Number(s.value), disabled: s.disabled } : null; })()`);
+  const jump = (ms) => page.evaluate(`(window.__smokeClock = (window.__smokeClock ?? 0) + ${ms})`);
+  await page.evaluate(`(() => {
+    if (window.__smokeNow) return;
+    window.__smokeNow = performance.now.bind(performance);
+    performance.now = () => window.__smokeNow() + (window.__smokeClock ?? 0);
+  })()`);
+  try {
+    await k.tab("Select");
+    await page.evaluate(`w3.settings.set("terrain.lighting.enabled", true); w3.settings.set("terrain.lighting.hour", 6)`);
+    await soon(async () => (await shown())?.hour === 6, 5000);
+    await page.evaluate(`w3.settings.set("terrain.lighting.dayNightCycle", true)`);
+    await soon(async () => (await shown())?.disabled === true, 5000);
+    if ((await shown())?.disabled !== true) fail("the hour select isn't disabled while the cycle runs");
+    // A tick at the new clock first, so the step is measured from it.
+    await sleepTicks(page);
+    await jump(21000);
+    if (!(await soon(async () => (await shown())?.hour === 7, 10000))) fail(`21 s into the cycle the hour is ${JSON.stringify(await shown())}, not 7`);
+    // Another tab in front hides the view: time that passes meanwhile doesn't count.
+    await page.evaluate(`w3.editors.open("map/war3map.w3i.json")`);
+    await until("the Map Info tab in front", async () => (await page.evaluate(`w3.editors.activePath()`)) === "map/war3map.w3i.json", 20000);
+    await sleepTicks(page);
+    await jump(60000);
+    await sleepTicks(page);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the terrain tab in front", async () => (await page.evaluate(`w3.editors.activePath()`)) === "map/war3map.w3e.txt", 20000);
+    await sleepTicks(page);
+    const back = (await shown())?.hour;
+    if (back !== 7) fail(`after 60 s with another tab in front the hour is ${back}, not the 7 it paused at`);
+    // Off: the stored hour comes back, the select takes input again.
+    await page.evaluate(`w3.settings.set("terrain.lighting.dayNightCycle", false)`);
+    if (!(await soon(async () => { const s = await shown(); return s?.hour === 6 && s.disabled === false; }, 5000))) fail(`with the cycle off the select is ${JSON.stringify(await shown())}, not hour 6 enabled`);
+  } finally {
+    await page.evaluate(`(() => { if (window.__smokeNow) { performance.now = window.__smokeNow; window.__smokeNow = null; window.__smokeClock = 0; } })()`);
+    for (const key of ["terrain.lighting.dayNightCycle", "terrain.lighting.hour", "terrain.lighting.enabled"]) await page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined)`);
+  }
+  await k.save();
+  await k.verify(fail);
+  } finally {
+    await k.reset().catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** The cycle steps twice a second: two ticks' time, in which the view has seen the clock it has now. */
+const sleepTicks = (page) => sleep(1100);
 
 /** Set Uniform Doodad Heights and Reset Fixed Object Heights, by command on a selection made with Ctrl+A: the height is
  *  asked for (a word that isn't a number changes nothing), the doodads take it and hold it, a unit in the selection is
@@ -11415,6 +11546,7 @@ async function run() {
         triggersAndAi,
         typedFieldSave,
         unitProperties,
+        verify3Steps,
         viewModes,
         waterPathing,
         wholeMapGround,
@@ -11660,6 +11792,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "doodadRulesEdit", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
+  await verify3Steps(page, found).catch((e) => found.push(`verify 3 steps: ${e.message}`));
+  await leftOpen(page, "verify3Steps", found);
   await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
   await leftOpen(page, "graphicsModes", found);
   await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
