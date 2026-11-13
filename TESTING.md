@@ -513,6 +513,7 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   editor draws a cliff hollow exactly there, so the position fits; Studio's model shows as a hard-edged flat grass
   square with tan rock on it (lowprio-bugs). Not compared: facing and height of other types. The editor's picture is
   dark on its left half there (outside the camera bounds), Studio's isn't.
+
 ## Process
 
 **Every change.** Run the gate. Fixing a bug starts with a test that fails because of it.
