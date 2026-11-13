@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StringTable, askWtsCuts, checkStringIds, compactStringIds, importStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+import { StringTable, askWtsCuts, checkStringIds, compactStringIds, WtsReader, importStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+
+/** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
+const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
 
 const map = "STRING 1\r\n// Name\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nA hero\r\n}\r\n\r\nSTRING 3\r\n{\r\nKept\r\n}\r\n";
 
@@ -140,14 +143,61 @@ test("many unclosed blocks are read in one pass, not one search to the end each"
   let text = "";
   for (let i = 1; i <= n; i++) text += `STRING ${i}\r\n{\r\nName ${i}}\r\n\r\n`;
   text += "STRING 0\r\n{\r\nEnd\r\n}\r\n";
-  const t0 = Date.now();
+  const t0 = cpuMs();
   const table = new StringTable(text);
   assert.equal(table.get(n), `Name ${n}`);
   assert.equal(table.get(0), "End");
   assert.equal([...table.entries()].length, n + 1);
   table.set(n, "x");
   assert.ok(table.serialize().includes("x\r\n}"));
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+  // A search to the end per block takes minutes here; one pass takes well under a tenth of the limit.
+  assert.ok(cpuMs() - t0 < 4000, `took ${cpuMs() - t0} ms of processor time`);
+});
+
+test("the reader finds what the header, close and unclosed patterns find, on random text", () => {
+  // The patterns the reader replaced, as the specification it must match exactly.
+  const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
+  const CLOSE = /\r?\n\}/g;
+  const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/g;
+  const parts = ["STRING", "STRING ", "STRING\t", " ", "\t", "\n", "\r\n", "\r", " ", "　", "﻿", "1", "07", "x",
+    "{", "}", "//", "// c", "/", "STRING 1\n{\n", "STRING 2 // c\n{\r\n", "\n}", "}\n\nSTRING 3\n{\n"];
+  let seed = 12345;
+  const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const exec = (re: RegExp, text: string, from: number) => { re.lastIndex = from; return re.exec(text); };
+  for (let round = 0; round < 3000; round++) {
+    let text = "";
+    for (let i = rand(30); i >= 0; i--) text += parts[rand(parts.length)];
+    const r = new WtsReader(text);
+    for (let from = 0; from <= text.length; from++) {
+      const h = exec(HEADER, text, from), got = r.findHeader(from);
+      assert.deepEqual(got && [got.at, got.num, text.slice(got.digits, got.digitsEnd), got.end],
+        h && [h.index, Number(h[1]), h[1], h.index + h[0].length], JSON.stringify([text, from]));
+      const c = exec(CLOSE, text, from), gotC = r.findClose(from);
+      assert.deepEqual(gotC, c && { index: c.index, end: c.index + c[0].length }, JSON.stringify([text, from]));
+      assert.equal(r.findUnclosed(from), exec(UNCLOSED, text, from)?.index ?? null, JSON.stringify([text, from]));
+    }
+  }
+});
+
+test("a long run of comment lines is read once, however many headers start in it", () => {
+  // Every line starts a header (`STRING 2`) whose comment group runs to the end of the file, and none has a `{`.
+  // Read once per line, 30,000 lines take seconds and 200,000 minutes; read once, both take milliseconds.
+  for (const n of [30_000, 200_000]) {
+    const text = "STRING 1\n" + "// STRING 2 \n".repeat(n);
+    const t0 = cpuMs();
+    assert.deepEqual([...new StringTable(text).entries()], []);
+    assert.ok(cpuMs() - t0 < 3000, `${n} lines took ${cpuMs() - t0} ms of processor time to read`);
+    assert.deepEqual(wtsStrayLines(text), []);
+    assert.equal(renumberWts(text, new Map([[1, 5]])), text);
+    // The same run inside a block's text, and between two blocks.
+    const framed = `STRING 3\n{\n${text}}\n\nSTRING 4\n// one\n{\nlast\n}\n`;
+    const table = new StringTable(framed);
+    assert.deepEqual([...table.entries()].map(([k, v]) => [k, v.length]), [[3, text.length - 1], [4, 4]]);
+    table.set(4, "x");
+    assert.equal(table.serialize(), framed.replace("last", "x"));
+    assert.equal(removeStrings(framed, new Set([3])), "STRING 4\n// one\n{\nlast\n}\n");
+    assert.ok(cpuMs() - t0 < 3000, `${n} lines took ${cpuMs() - t0} ms of processor time`);
+  }
 });
 
 // A line that is just `}` (or starts with it) inside a text: the game ends the string there and drops the
