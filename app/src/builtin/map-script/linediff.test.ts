@@ -79,3 +79,32 @@ test("repeated lines still give a valid edit script", () => {
   const a = ["x", "y", "x", "y", "z", "x"], b = ["y", "x", "y", "x", "z", "z", "x"];
   assert.equal(apply(a.join("\n"), b.join("\n")), a.join("\n"));
 });
+
+test("many separate hunks stay separate chunks in the merge view's state", async () => {
+  const { EditorState } = await import("@codemirror/state");
+  const { getChunks, unifiedMergeView } = await import("@codemirror/merge");
+  const { eachChangeLastFirst } = await import("./linediff");
+  const lines = Array.from({ length: 4143 }, (_, i) => `// filler line ${i}`);
+  const b = lines.join("\n");
+  for (const H of [13, 20, 60]) {
+    const l2 = lines.slice();
+    for (let c = 0; c < H; c++) l2[40 + c * 65] += " // EDITED";
+    const edits = changesToA(l2.join("\n"), b);
+    const typeAll = (one: boolean) => {
+      let s = EditorState.create({ doc: b, extensions: [unifiedMergeView({ original: b })] });
+      if (one) s = s.update({ changes: edits }).state;
+      else eachChangeLastFirst(edits, (c) => { s = s.update({ changes: c }).state; });
+      return getChunks(s)?.chunks.length;
+    };
+    assert.equal(typeAll(false), H);
+    if (H >= 20) assert.equal(typeAll(true), 1, "control: in one transaction CodeMirror merges them");
+  }
+});
+test("a 20000-line script with 200 hunks diffs fast", () => {
+  const lines = Array.from({ length: 20000 }, (_, i) => `// filler line ${i}`);
+  const l2 = lines.slice();
+  for (let c = 0; c < 200; c++) l2[40 + c * 90] += " // EDITED";
+  const t = Date.now();
+  assert.equal(changesToA(l2.join("\n"), lines.join("\n")).length, 200);
+  assert.ok(Date.now() - t < 2000);
+});

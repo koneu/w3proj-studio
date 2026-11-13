@@ -96,7 +96,7 @@ export function soundNameProblem(sounds: readonly Sound[], s: Sound, name: strin
 let playing: { audio: HTMLAudioElement; url: string } | null = null;
 const stopPlaying = () => { playing?.audio.pause(); if (playing) URL.revokeObjectURL(playing.url); playing = null; };
 
-/** The Sound Editor shown last, for the commands of the palette. */
+/** The Sound Editor shown (the active tab; the one opened last until a tab is switched), for the commands of the palette. */
 let current: SoundEditor | null = null;
 const needEditor = () => {
   if (!current) throw new Error("Open the Sound Editor and select a sound first.");
@@ -212,6 +212,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
+        // Switching tabs: the commands and the Object Manager follow the Sound Editor that is shown.
+        const activeSub = w3.editors.onDidChangeActive((a) => {
+          if (a?.editor !== "w3.soundEditor" || a.path !== doc.path || current === editor) return;
+          current = editor;
+          edits.fire();
+        });
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
@@ -245,6 +251,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dispose: () => {
             editor.dispose();
             unbindKeys();
+            activeSub.dispose();
             if (current === editor) { current = null; edits.fire(); }
           },
         };
