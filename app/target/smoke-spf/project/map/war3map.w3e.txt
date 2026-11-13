@@ -1,0 +1,40 @@
+W3E version 11
+tileset L
+custom-tilesets 1
+ground Ldrt Lgrs Lrok
+cliffs CLdi
+corners 5 3
+offset -128 -64
+
+[height]
+0*4 -12
+0 0 -12 0 0
+-12 0*4
+
+[water] all 100
+
+[water-bits]
+00000
+00000
+00010
+
+[texture]
+12012
+20120
+01201
+
+[variation]
+ins16
+pu38d
+05afk
+
+[cliff-variation] all 0
+
+[cliff-texture] all f
+
+[layer] all 2
+
+[flags]
+00000
+00000
+00005

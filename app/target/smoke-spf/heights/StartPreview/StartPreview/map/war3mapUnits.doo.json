@@ -1,0 +1,48 @@
+{
+  "format": "w3proj.units/1",
+  "magic": "W3do",
+  "version": 13,
+  "subversion": 9,
+  "units": [
+    {
+      "id": "sloc",
+      "variation": 0,
+      "position": [
+        0.0,
+        -256.0,
+        0.0
+      ],
+      "angle": 4.712389,
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "skinId": "sloc",
+      "preFlags": 4294967295,
+      "flags": 2,
+      "player": 0,
+      "unknown1": 0,
+      "unknown2": 0,
+      "hp": 0,
+      "mana": 0,
+      "itemSets": [],
+      "gold": 0,
+      "targetAcquisition": 0.0,
+      "level": 0,
+      "inventory": [],
+      "abilities": [],
+      "randomType": 0,
+      "randomLevel": "010000",
+      "randomClass": 0,
+      "color": -1,
+      "waygate": -1,
+      "editorId": 0,
+      "trailer": [
+        0,
+        0
+      ],
+      "extras": []
+    }
+  ]
+}

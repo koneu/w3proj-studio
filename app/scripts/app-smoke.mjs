@@ -2617,6 +2617,53 @@ async function specialDoodads(page, found) {
   }
 }
 
+/** The see-through town hall at a start location follows it (move by MCP, undo) and shows on melee maps only
+ *  (war3map.w3i Melee flag, changed in the file as Scenario Properties does). */
+async function startPreviewFollow(page, found) {
+  try {
+  const fail = (what) => found.push(`start preview: ${what}`);
+  const k = await heightKit(page, "StartPreview");
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__spEd2 = null;
+    window.__spGroup2?.dispose();
+    window.__spGroup2 = s.registerToolGroup({ id: "smoke-startprev", title: "smoke-startprev", order: 998, create: (ed) => { window.__spEd2 = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = () => page.evaluate(`window.__spEd2?.drawnStartBuildings() ?? []`);
+  const setMelee = async (on) => {
+    const info = k.read("war3map.w3i.json");
+    info.flags = on ? (info.flags | 4) : (info.flags & ~4);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))})`);
+  };
+  try {
+    await k.save();
+    await setMelee(true);
+    const starts = () => k.units().filter((u) => u.id === "sloc");
+    const i = k.units().findIndex((u) => u.id === "sloc" && u.player === 0);
+    await until("a preview at a start location of a melee map", async () => (await drawn()).length > 0, 30000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn())}`); });
+    const near = async (x, y) => (await drawn()).some((d) => Math.abs(d.x - x) < 1 && Math.abs(d.y - y) < 1);
+    const was = starts()[0].position;
+    if (!(await near(was[0], was[1]))) fail(`no preview at the start location ${was.slice(0, 2)}: ${JSON.stringify(await drawn())}`);
+    const to = [was[0] + 512, was[1] + 256];
+    await k.tool("move_object", { kind: "units", index: i, id: "sloc", x: to[0], y: to[1] });
+    await until("the preview at the moved start", () => near(to[0], to[1]), 10000).catch(async () => fail(`the preview didn't follow the start to ${to}: ${JSON.stringify(await drawn())}`));
+    if (await near(was[0], was[1])) fail("a preview stayed at the old place");
+    await k.tool("undo_last_edit");
+    await until("the preview back after undo", () => near(was[0], was[1]), 10000).catch(async () => fail(`undo didn't move the preview back to ${was.slice(0, 2)}: ${JSON.stringify(await drawn())}, start now ${JSON.stringify(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.filter((u) => u.id === "sloc").map((u) => u.position))()`))}`));
+    await setMelee(false);
+    await until("no preview without the Melee flag", async () => (await drawn()).length === 0, 10000).catch(async () => fail(`still previews with Melee off: ${JSON.stringify(await drawn())}`));
+    await setMelee(true);
+    await until("previews again with Melee on", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after Melee went on"));
+  } finally {
+    await page.evaluate(`window.__spGroup2?.dispose(); window.__spGroup2 = null; window.__spEd2 = null;`);
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
  *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
  *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
@@ -10323,6 +10370,7 @@ async function run() {
         scriptQuestionsOnSwitch,
         shouldHaves,
         specialDoodads,
+        startPreviewFollow,
         staleEditors,
         syncSafety,
         techtreeRandomLevels,
@@ -10500,6 +10548,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "flyingHeights", found);
   await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
   await leftOpen(page, "specialDoodads", found);
+  await startPreviewFollow(page, found).catch((e) => found.push(`start preview: ${e.message}`));
+  await leftOpen(page, "startPreviewFollow", found);
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
