@@ -1,0 +1,152 @@
+{
+  "name": "unit-on-playable-edge",
+  "description": "Map Size: units without a footprint from 2432 to 2600 near the new playable top edge (2560) after the top is cut by 4 tiles (WE: Scenario > Map Size and Camera Bounds, Modify Map Bounds, top arrow down once; Studio resize_map top -4): both keep exactly 2432, 2500, 2528 and drop 2540 and above, the edge (2560) included; the w3e water-bit row 0 differs (WE 1, Studio 0) after the resize only (a plain save of a new map matches, new-map-script); w3i names (TRIGSTR) ignored",
+  "input": {
+    "new": {
+      "name": "EdgeUnits",
+      "width": 64,
+      "height": 64
+    },
+    "steps": [
+      {
+        "mcp": "place_objects",
+        "args": {
+          "kind": "units",
+          "objects": [
+            {
+              "id": "hfoo",
+              "x": -1500,
+              "y": 2432
+            },
+            {
+              "id": "hfoo",
+              "x": -1250,
+              "y": 2500
+            },
+            {
+              "id": "hfoo",
+              "x": -1000,
+              "y": 2528
+            },
+            {
+              "id": "hfoo",
+              "x": -750,
+              "y": 2540
+            },
+            {
+              "id": "hfoo",
+              "x": -500,
+              "y": 2552
+            },
+            {
+              "id": "hfoo",
+              "x": -250,
+              "y": 2559
+            },
+            {
+              "id": "hfoo",
+              "x": 250,
+              "y": 2561
+            },
+            {
+              "id": "hfoo",
+              "x": 500,
+              "y": 2568
+            },
+            {
+              "id": "hfoo",
+              "x": 750,
+              "y": 2600
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "we": {
+    "steps": [
+      [
+        "--click",
+        "165,41"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "210,112"
+      ],
+      [
+        "--sleep",
+        "1500"
+      ],
+      [
+        "--click",
+        "444,536"
+      ],
+      [
+        "--sleep",
+        "300"
+      ],
+      [
+        "--click",
+        "608,216"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "819,831"
+      ],
+      [
+        "--sleep",
+        "1500"
+      ]
+    ]
+  },
+  "studio": {
+    "settings": {
+      "mcp.writeTools": true,
+      "mcp.confirmResize": false
+    },
+    "steps": [
+      {
+        "mcp": "save_project"
+      },
+      {
+        "mcp": "resize_map",
+        "args": {
+          "top": -4
+        }
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3mapUnits.doo",
+      "as": "parsed"
+    },
+    {
+      "file": "war3map.w3i",
+      "as": "parsed",
+      "ignore": [
+        "saves",
+        "name",
+        "author",
+        "description",
+        "suggestedPlayers",
+        "loadingScreen.crestRace",
+        "gameDataSet"
+      ]
+    },
+    {
+      "file": "war3map.w3e",
+      "as": "text",
+      "expect": "differs"
+    }
+  ],
+  "limit": 30
+}

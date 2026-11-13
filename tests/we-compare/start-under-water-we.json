@@ -1,0 +1,152 @@
+[
+  {
+    "name": "start-under-deep-water-we",
+    "description": "Start location under water after an edit made in the WE: Cliff brush Deep Water, size 8, one click on the start (0,-256), saved with the Warning about the melee flag answered; Studio's set_water deep over the same place; w3i melee flag (0x4) in both",
+    "input": {
+      "new": {
+        "name": "startunderdeep",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--click",
+          "1441,312"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1520,568"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "750,470"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "set_water",
+          "args": {
+            "mode": "deep",
+            "left": -512,
+            "bottom": -768,
+            "right": 512,
+            "top": 256
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "start-under-shallow-water-we",
+    "description": "Same with the Shallow Water cliff brush",
+    "input": {
+      "new": {
+        "name": "startundershal",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--click",
+          "1473,312"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1520,568"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "750,470"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "set_water",
+          "args": {
+            "mode": "shallow",
+            "left": -512,
+            "bottom": -768,
+            "right": 512,
+            "top": 256
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "name": "new-map-script",
+  "description": "round 3 package C: the script of a Studio new map 64x64, re-saved by the WE (which regenerates it), against Studio's own; only the lines that differ are listed",
+  "input": {
+    "new": {
+      "name": "NewScript",
+      "width": 64,
+      "height": 64
+    },
+    "steps": []
+  },
+  "compare": [
+    {
+      "file": "war3map.j",
+      "as": "text"
+    },
+    "war3map.w3i",
+    {
+      "file": "war3map.w3e",
+      "as": "text"
+    }
+  ],
+  "limit": 30
+}
