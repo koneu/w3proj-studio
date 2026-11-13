@@ -29,7 +29,7 @@ import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
-import { cliffList, planCliffs, type CliffType } from "./cliffs";
+import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
@@ -4313,6 +4313,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           pushEdit: (e) => pushEdit(e),
           cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
+          defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map())),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
           setShapes: (triangles) => { renderer.setShapes("tab", triangles); redraw(); },

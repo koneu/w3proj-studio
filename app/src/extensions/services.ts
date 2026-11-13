@@ -231,6 +231,8 @@ export interface TerrainEditorHandle {
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean;
   /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];
+  /** The cliff type number the World Editor's cliff palette starts on, for new cliffs and water (-1: none known). */
+  defaultCliffType(): number;
   /** The game's tilesets with their own ground tiles (the tile list New Map gives them). */
   tilesets(): Promise<{ id: string; name: string; tiles: string[] }[]>;
   /** Changes the terrain's tileset (water, lighting, blight follow); one undo step. */

@@ -116,9 +116,10 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!stroke) return;
     const s = stroke.s;
     stroke = null;
-    // Cliffs next to painted ground or new cliffs take the cliff type of their ground tile.
-    const chosen = isLayerTool(s.label as Tool) && cliffType >= 0 ? cliffType : undefined;
-    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && retypeCliffs(terrain, s, ed.cliffGroundTiles(), chosen);
+    // New cliffs and water take the chosen cliff type (or their ground tile's); painting ground re-types nothing.
+    const type = cliffType === "default" ? ed.defaultCliffType() : cliffType;
+    const chosen = isLayerTool(s.label as Tool) && type >= 0 ? type : undefined;
+    const retyped = retypeCliffs(terrain, s, ed.cliffGroundTiles(), chosen);
     if (!s.finish(terrain)) return;
     ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
   };
@@ -282,17 +283,18 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     void renderTiles();
   } }, "Tiles…");
   const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect, tilesButton);
-  // Cliff type for the cliff and water tools (the World Editor's cliff palette choice): a cliff
-  // type number, or -1 to match the ground under the cliff.
-  let cliffType = -1;
+  // Cliff type for the cliff and water tools (the World Editor's cliff palette choice): a cliff type number, -1 to
+  // match the ground under the cliff, or until one is chosen the one the World Editor's palette starts on.
+  let cliffType: number | "default" = "default";
   const cliffSelect = h("select", { onchange: () => { cliffType = Number(cliffSelect.value); ed.focus(); } });
   const fillCliffTypes = async () => {
     const names = await tileNames(w3);
     const grounds = ed.cliffGroundTiles();
-    if (cliffType >= grounds.length) cliffType = -1;
+    if (typeof cliffType === "number" && cliffType >= grounds.length) cliffType = "default";
+    const shown = cliffType === "default" ? ed.defaultCliffType() : cliffType;
     cliffSelect.replaceChildren(
-      h("option", { value: "-1", selected: cliffType < 0, title: "The cliff type of the ground tile under the cliff, where it has one" }, "Match the ground"),
-      ...grounds.map((g, i) => h("option", { value: String(i), selected: cliffType === i }, `${names.get(g) ?? g} cliff`)));
+      h("option", { value: "-1", selected: shown < 0, title: "The cliff type of the ground tile under the cliff, where it has one" }, "Match the ground"),
+      ...grounds.map((g, i) => h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff`)));
   };
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
   const strengthWrap = h("label.terrain-tool-opt", { title: "How fast the ground rises or sinks at the brush's centre, while the button is held" }, "Strength ",
@@ -358,7 +360,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         // it, with the surface the water offset (89.6) under its original ground, as the World
         // Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game maps).
         const step = ({ cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 } as Partial<Record<Tool, number>>)[tool] ?? 0;
-        const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET) } : { layer: 2 };
+        const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET), start: c.layer } : { layer: 2 };
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g);
         else applyAt(g);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hdSlots } from "../../lib/model/renderer";
-import { cliffRetexture } from "./cliffs";
+import { cliffList, cliffRetexture, weDefaultCliffType, type CliffType } from "./cliffs";
 
 const CITY = { texDir: "TerrainArt\\CityScape", texFile: "City_Cliff1" };
 
@@ -29,4 +29,18 @@ test("a placeholder takes the part of the set its slot in the HD layer asks for,
   assert.equal(cliffRetexture(names[0], CITY), "TerrainArt\\CityScape\\City_Cliff1_ORM.blp");
   // Other paths stay whatever their slot.
   assert.equal(cliffRetexture("Textures/Black32.blp", CITY, "_Diffuse"), "Textures/Black32.blp");
+});
+
+test("new cliffs and water start on the cliff type the World Editor's palette starts on", () => {
+  // CliffTypes.slk's rows for Lordaeron Summer and Ashenvale (w3proj game slk TerrainArt/CliffTypes.slk).
+  const row = (cliffID: string, dir: string, texFile: string, groundTile: string): CliffType =>
+    ({ cliffID, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: `TerrainArt\\${dir}`, texFile, groundTile });
+  const types = new Map([row("CLdi", "LordaeronSummer", "Lords_Cliff0", "Ldrt"), row("CLgr", "LordaeronSummer", "Lords_Cliff1", "Lgrs"),
+    row("CAgr", "Ashenvale", "Ashen_Cliff1", "Agrs"), row("CAdi", "Ashenvale", "Ashen_Cliff0", "Adrt")].map((c) => [c.cliffID, c]));
+  const terrain = (groundTiles: string[]) => ({ groundTiles }) as Parameters<typeof cliffList>[0];
+  // Lordaeron Summer: Grass Cliff, the second by the ground tiles (we-compare water-brush-*, 2026-11-13).
+  assert.equal(weDefaultCliffType(cliffList(terrain(["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"]), types)), 1);
+  // Ashenvale: CAgr, the first here (tests/fixtures/water-brush/ash-shallow.w3e).
+  assert.equal(weDefaultCliffType(cliffList(terrain(["Agrs", "Adrt"]), types)), 0);
+  assert.equal(weDefaultCliffType(cliffList(terrain(["Ldro"]), types)), -1, "no cliff on the map's tiles");
 });

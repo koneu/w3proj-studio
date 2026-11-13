@@ -1,7 +1,7 @@
 [
   {
     "name": "painted-cliff-type-grass",
-    "description": "test.md 'Painted cliff type: the WE's stroke with Apply Cliff on': a Grass patch (size 3), a cliff pit (Apply Cliff, Decrease Two, size 3: 13 corners down, 37 cliff corners typed 1 = Grass Cliff), then a Dirt stroke (size 5) over the pit with Apply Cliff still on (Decrease Two, Grass Cliff); Studio: Paint Lgrs size 3, -2 size 3, Paint Ldrt size 5 at the same screen position. KNOWN DIFFERENCE (2026-11-13): the editor re-types none of the 37 cliff corners (they stay 1); Studio re-types 36 of them to Dirt Cliff (0). Layers and heights match. Expected to differ until Studio leaves painted cliffs' type alone",
+    "description": "a Grass patch (size 3), a cliff pit (Apply Cliff, Decrease Two, size 3: 13 corners down; the 13 and the 24 round them on cliff tiles typed 1 = Grass Cliff, the palette's start), then a Dirt stroke (size 5) over the pit with Apply Cliff still on (Decrease Two, Grass Cliff); Studio: Paint Lgrs size 3, -2 size 3, Paint Ldrt size 5 at the same screen position. The editor re-types none of the 37 cliff corners (they stay 1), nor does Studio (2026-11-13; it used to re-type 36 to Dirt Cliff)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -27,12 +27,12 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
     "name": "painted-cliff-type-dirt",
-    "description": "the same with Dirt Cliff chosen as the cliff type before the Dirt stroke (Apply Cliff on, Decrease Two, Dirt Cliff): the editor still re-types none (37 stay 1); Studio re-types 36 to 0",
+    "description": "the same with Dirt Cliff chosen as the cliff type before the Dirt stroke (Apply Cliff on, Decrease Two, Dirt Cliff): the editor still re-types none (37 stay 1)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -59,12 +59,12 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
     "name": "painted-cliff-type-unticked",
-    "description": "the same with Apply Cliff unticked for the Dirt stroke (round 3's setup): the editor re-types none; Studio 36",
+    "description": "the same with Apply Cliff unticked for the Dirt stroke (round 3's setup): the editor re-types none",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -91,7 +91,7 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   }
 ]
