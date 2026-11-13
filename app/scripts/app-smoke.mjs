@@ -2758,7 +2758,7 @@ async function wholeMapGround(page, found) {
   if (hashes() !== original) fail(`one undo of the shift to level 0 didn't give the files back as they were: ${hashes()}`);
 
   // Reset Height Field: flat over the levels, the tree back on the (now flat) ground, then undone.
-  err = await k.run("w3.terrain.resetHeightField");
+  err = await k.run("w3.terrain.resetHeightField", { random: false });
   if (err) fail(`Reset Height Field: ${err}`);
   await k.save();
   if (!/^\[height\] all 0$/m.test(text())) fail(`after Reset Height Field the heights are ${section("height").slice(0, 80)}`);
@@ -2768,6 +2768,19 @@ async function wholeMapGround(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
   if (hashes() !== original) fail(`one undo of Reset Height Field didn't give the files back as they were: ${hashes()}`);
+
+  // Random, at the dialog's settings: noise on the ground as it is (not flat, not as it was), the levels as they were,
+  // the tree on the new ground; one undo gives the files back.
+  const heightsBefore = section("height");
+  err = await k.run("w3.terrain.resetHeightField", { random: true });
+  if (err) fail(`Reset Height Field with Random: ${err}`);
+  await k.save();
+  if (/^\[height\] all 0$/m.test(text()) || section("height") === heightsBefore) fail(`Random left the heights as ${section("height").slice(0, 80)}`);
+  if (levels().join("") !== before.levels.join("")) fail(`Random changed the cliff levels: ${levels().slice(0, 8).join("")}…`);
+  if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("Random moved the tree with a height of its own");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (hashes() !== original) fail(`one undo of Reset Height Field with Random didn't give the files back as they were: ${hashes()}`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 

@@ -56,7 +56,8 @@ import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
-import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
+import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField } from "../../lib/terrain/wholemap";
+import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
@@ -1456,15 +1457,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!reset()) void w3.window.showInfo("The map has no ground tiles to reset.");
     }),
     // Reset Height Field and Adjust Cliff Levels (the World Editor's Advanced menu): the terrain editor in front. Unlike
-    // the World Editor's, each is one undo step, so neither asks first.
-    w3.commands.register("w3.terrain.resetHeightField", async () => {
+    // the World Editor's, each is one undo step, so neither asks "cannot be undone" first. Reset Height Field shows its
+    // dialog (flat or Random), or does `given` as it is (scripts and tests).
+    w3.commands.register("w3.terrain.resetHeightField", async (given?: ResetHeightRequest) => {
       const path = w3.editors.activePath();
       const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
       if (!ground) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
-      const r = ground.resetHeightField();
+      let req = given && typeof given === "object" ? given : undefined;
+      if (!req) {
+        req = await askResetHeight() ?? undefined;
+        if (!req) return;
+        // The editor may have closed, or its view been lost, while the dialog was open.
+        if (toolGroups.wholeMapGround.get(path!) !== ground) return;
+        refuseLostView(path);
+      }
+      const random = randomSettings(req);
+      const r = ground.resetHeightField(random);
       if (typeof r === "string") void w3.window.showWarning(r);
-      else if (r === 0) void w3.window.showInfo("The ground is flat over its cliff levels already.");
+      else if (r === 0) void w3.window.showInfo(random ? "Nothing changed: the variation is 0 and the smoothing had nothing to smooth." : "The ground is flat over its cliff levels already.");
     }),
     w3.commands.register("w3.terrain.adjustCliffLevels", async (given?: number) => {
       const path = w3.editors.activePath();
@@ -4311,7 +4322,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return commitTerrain({ ...log.step(terrain), cliffs: true }) ? r : "Not done: the water would go past the game's limits.";
         };
         const wholeGroundCmds: WholeMapGround = {
-          resetHeightField: () => wholeGround((log) => resetHeightField(terrain, log)),
+          resetHeightField: (random) => wholeGround((log) => random ? randomizeHeightField(terrain, random, log) : resetHeightField(terrain, log)),
           adjustCliffLevels: (by) => wholeGround((log) => adjustCliffLevels(terrain, by, log)),
           range: () => cliffShiftRange(terrain),
         };
