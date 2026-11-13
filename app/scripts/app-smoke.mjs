@@ -6315,15 +6315,22 @@ async function paletteMouse(page, found) {
  *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
  *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
  *  without one. Measured with the minimap panel on, the default (branch small-fixes-48): six to ten more read and 14 to 20 more
- *  asked for the panel's own game files (it varies from run to run, so these are the highest seen). */
-const GAME_READS_RECORDED = { reads: 115, asked: 158, textures: 140 };
+ *  asked for the panel's own game files, which the old numbers
+ *  were the highest of (they varied from run to run). Now the scene starts from an emptied game cache (game.reload()) with the
+ *  minimap panel off, so the numbers don't depend on the checks before or on a timer: alone 114 reads, 139 asked, 139 textures
+ *  in every run; in the full part one fewer asked (a table another check was reading meanwhile), hence a limit. The panel is
+ *  turned on afterwards, its reads counted apart (PANEL_READS_MAX, alone 9 and 19; after other checks fewer: it keeps tile
+ *  colours in a cache of its own). Branch reads-order-free. */
+const GAME_READS_RECORDED = { reads: 114, asked: 139, textures: 139 };
+const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {
   try {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  // The default state: the minimap panel on (a new view has it), its own game reads counted in the numbers below.
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", true, "user")`);
+  // The minimap panel is off for the first opening: it keeps the colours of the tiles' textures it made before (in a cache
+  // of its own that the page can't empty), so what it reads depends on the checks before; its reads are counted apart below.
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
   const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
@@ -6368,16 +6375,29 @@ async function gameReadsOnce(page, found) {
   }, 30000);
   await readsSettled();
   // The picture waits until every model and texture is in.
+  // Nothing earlier checks read is kept: the scene's reads are the same alone as in the full run.
+  await page.evaluate(`w3Workbench.game.reload()`);
   const before = await reads(), missedBefore = await misses(), askedBefore = await asked();
   const texturesBefore = await page.evaluate(`window.__texturesMade`);
   await tool("terrain_screenshot", { maxSize: 64 });
+  await readsSettled();
+  await readsSettled();
   const first = (await reads()) - before;
   const askedFirst = (await asked()) - askedBefore;
   const texturesFirst = (await page.evaluate(`window.__texturesMade`)) - texturesBefore;
+  // The default state, the minimap panel on (a new view has it): it draws on a timer after the view is open, and reads the
+  // game files of its icons and the tiles' colours. What it reads is bounded, not counted: it depends on the checks before.
+  const panelAt = [await reads(), await asked()];
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", true, "user")`);
+  const terrainState = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  await until("the minimap's picture", async () => (await terrainState())?.minimap?.picture === true, 30000);
+  await readsSettled();
+  const panelReads = (await reads()) - panelAt[0], panelAsked = (await asked()) - panelAt[1];
+  console.log(`  game reads: the minimap panel read ${panelReads} game files, asked for ${panelAsked} (at most ${PANEL_READS_MAX.reads}, ${PANEL_READS_MAX.asked})`);
+  if (panelReads > PANEL_READS_MAX.reads || panelAsked > PANEL_READS_MAX.asked) fail(`the minimap panel read ${panelReads} game files and asked for ${panelAsked}, at most ${PANEL_READS_MAX.reads} and ${PANEL_READS_MAX.asked} when recorded`);
   // A fixed scene: a count past what it took when recorded is a regression (a file read that wasn't, a
   // texture decoded twice, a table asked once per model) that no timing in the gate would show reliably.
   // When a change reads less, lower the number; a game patch that changes the files can move them too.
-  // (The backend reads are fewer when checks before this one read some of the same files.)
   const RECORDED = GAME_READS_RECORDED;
   console.log(`  game reads: the first opening of the scene read ${first} game files, asked for ${askedFirst}, made ${texturesFirst} textures (recorded: ${RECORDED.reads}, ${RECORDED.asked}, ${RECORDED.textures})`);
   if (first > RECORDED.reads) fail(`the first opening read ${first} game files, ${RECORDED.reads} when recorded`);
