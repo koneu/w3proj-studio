@@ -1,0 +1,204 @@
+# Measured with we-drive, 2026-11-13 (branch doodad-save-rules): a copy of empty_map_on_newest_world_editor.w3m
+# (64x64, playable area x -3328..3328, y -3584..3072) with these doodads, opened and saved by the World Editor.
+# scale <id> <w3d|w3b> <minScale> <maxScale> <stored x,y,z> -> <saved x,y,z>   (0 is replaced by a random scale)
+# flags <id> <x> <y> <stored flags> -> <saved flags>
+scale LTbr w3b 1.1 1.5 1,1,1 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 0.5,0.5,0.5 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 1.1,1.1,1.1 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 1.3,1.3,1.3 -> 1.3,1.3,1.3
+scale LTbr w3b 1.1 1.5 1.5,1.5,1.5 -> 1.5,1.5,1.5
+scale LTbr w3b 1.1 1.5 1.6,1.6,1.6 -> 1.5,1.5,1.5
+scale LTbr w3b 1.1 1.5 3,3,3 -> 1.5,1.5,1.5
+scale LTbr w3b 1.1 1.5 0.79,0.79,0.79 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 1,1.3,2 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 2,1,1.3 -> 1.5,1.5,1.5
+scale LTbr w3b 1.1 1.5 1.3,1.3,0.5 -> 1.3,1.3,1.3
+scale LTbr w3b 1.1 1.5 -1,1,1 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 -2,-2,-2 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 0,0,0 -> 1.3003356,1.3003356,1.3003356
+scale LTbr w3b 1.1 1.5 1.0999,1.0999,1.0999 -> 1.1,1.1,1.1
+scale LTbr w3b 1.1 1.5 1.5001,1.5001,1.5001 -> 1.5,1.5,1.5
+scale LTcr w3b 0.8 1.2 1,1,1 -> 1,1,1
+scale LTcr w3b 0.8 1.2 0.5,0.5,0.5 -> 0.8,0.8,0.8
+scale LTcr w3b 0.8 1.2 1.1,1.1,1.1 -> 1.1,1.1,1.1
+scale LTcr w3b 0.8 1.2 1.3,1.3,1.3 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 1.5,1.5,1.5 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 1.6,1.6,1.6 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 3,3,3 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 0.79,0.79,0.79 -> 0.8,0.8,0.8
+scale LTcr w3b 0.8 1.2 1,1.3,2 -> 1,1,1
+scale LTcr w3b 0.8 1.2 2,1,1.3 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 1.3,1.3,0.5 -> 1.2,1.2,1.2
+scale LTcr w3b 0.8 1.2 -1,1,1 -> 0.8,0.8,0.8
+scale LTcr w3b 0.8 1.2 -2,-2,-2 -> 0.8,0.8,0.8
+scale LTcr w3b 0.8 1.2 0,0,0 -> 1.0800378,1.0800378,1.0800378
+scale LTcr w3b 0.8 1.2 1.0999,1.0999,1.0999 -> 1.0999,1.0999,1.0999
+scale LTcr w3b 0.8 1.2 1.5001,1.5001,1.5001 -> 1.2,1.2,1.2
+scale LOch w3d 0.8 1.2 1,1,1 -> 1,1,1
+scale LOch w3d 0.8 1.2 0.5,0.5,0.5 -> 0.8,0.8,0.8
+scale LOch w3d 0.8 1.2 1.1,1.1,1.1 -> 1.1,1.1,1.1
+scale LOch w3d 0.8 1.2 1.3,1.3,1.3 -> 1.2,1.2,1.2
+scale LOch w3d 0.8 1.2 1.5,1.5,1.5 -> 1.2,1.2,1.2
+scale LOch w3d 0.8 1.2 1.6,1.6,1.6 -> 1.2,1.2,1.2
+scale LOch w3d 0.8 1.2 3,3,3 -> 1.2,1.2,1.2
+scale LOch w3d 0.8 1.2 0.79,0.79,0.79 -> 0.8,0.8,0.8
+scale LOch w3d 0.8 1.2 1,1.3,2 -> 1,1.2,1.2
+scale LOch w3d 0.8 1.2 2,1,1.3 -> 1.2,1,1.2
+scale LOch w3d 0.8 1.2 1.3,1.3,0.5 -> 1.2,1.2,0.8
+scale LOch w3d 0.8 1.2 -1,1,1 -> 0.8,1,1
+scale LOch w3d 0.8 1.2 -2,-2,-2 -> 0.8,0.8,0.8
+scale LOch w3d 0.8 1.2 0,0,0 -> 1.1949462,1.0916959,0.9367596
+scale LOch w3d 0.8 1.2 1.0999,1.0999,1.0999 -> 1.0999,1.0999,1.0999
+scale LOch w3d 0.8 1.2 1.5001,1.5001,1.5001 -> 1.2,1.2,1.2
+scale LPcr w3d 0.8 1.2 1,1,1 -> 1,1,1
+scale LPcr w3d 0.8 1.2 0.5,0.5,0.5 -> 0.8,0.8,0.8
+scale LPcr w3d 0.8 1.2 1.1,1.1,1.1 -> 1.1,1.1,1.1
+scale LPcr w3d 0.8 1.2 1.3,1.3,1.3 -> 1.2,1.2,1.2
+scale LPcr w3d 0.8 1.2 1.5,1.5,1.5 -> 1.2,1.2,1.2
+scale LPcr w3d 0.8 1.2 1.6,1.6,1.6 -> 1.2,1.2,1.2
+scale LPcr w3d 0.8 1.2 3,3,3 -> 1.2,1.2,1.2
+scale LPcr w3d 0.8 1.2 0.79,0.79,0.79 -> 0.8,0.8,0.8
+scale LPcr w3d 0.8 1.2 1,1.3,2 -> 1,1.2,1.2
+scale LPcr w3d 0.8 1.2 2,1,1.3 -> 1.2,1,1.2
+scale LPcr w3d 0.8 1.2 1.3,1.3,0.5 -> 1.2,1.2,0.8
+scale LPcr w3d 0.8 1.2 -1,1,1 -> 0.8,1,1
+scale LPcr w3d 0.8 1.2 -2,-2,-2 -> 0.8,0.8,0.8
+scale LPcr w3d 0.8 1.2 0,0,0 -> 1.150084,0.80106205,0.9656911
+scale LPcr w3d 0.8 1.2 1.0999,1.0999,1.0999 -> 1.0999,1.0999,1.0999
+scale LPcr w3d 0.8 1.2 1.5001,1.5001,1.5001 -> 1.2,1.2,1.2
+scale ZZdt w3d 1 1 1,1,1 -> 1,1,1
+scale ZZdt w3d 1 1 0.5,0.5,0.5 -> 1,1,1
+scale ZZdt w3d 1 1 1.1,1.1,1.1 -> 1,1,1
+scale ZZdt w3d 1 1 1.3,1.3,1.3 -> 1,1,1
+scale ZZdt w3d 1 1 1.5,1.5,1.5 -> 1,1,1
+scale ZZdt w3d 1 1 1.6,1.6,1.6 -> 1,1,1
+scale ZZdt w3d 1 1 3,3,3 -> 1,1,1
+scale ZZdt w3d 1 1 0.79,0.79,0.79 -> 1,1,1
+scale ZZdt w3d 1 1 1,1.3,2 -> 1,1,1
+scale ZZdt w3d 1 1 2,1,1.3 -> 1,1,1
+scale ZZdt w3d 1 1 1.3,1.3,0.5 -> 1,1,1
+scale ZZdt w3d 1 1 -1,1,1 -> 1,1,1
+scale ZZdt w3d 1 1 -2,-2,-2 -> 1,1,1
+scale ZZdt w3d 1 1 0,0,0 -> 1,1,1
+scale ZZdt w3d 1 1 1.0999,1.0999,1.0999 -> 1,1,1
+scale ZZdt w3d 1 1 1.5001,1.5001,1.5001 -> 1,1,1
+scale LTg2 w3b 1 1 1,1,1 -> 1,1,1
+scale LTg2 w3b 1 1 0.5,0.5,0.5 -> 1,1,1
+scale LTg2 w3b 1 1 1.1,1.1,1.1 -> 1,1,1
+scale LTg2 w3b 1 1 1.3,1.3,1.3 -> 1,1,1
+scale LTg2 w3b 1 1 1.5,1.5,1.5 -> 1,1,1
+scale LTg2 w3b 1 1 1.6,1.6,1.6 -> 1,1,1
+scale LTg2 w3b 1 1 3,3,3 -> 1,1,1
+scale LTg2 w3b 1 1 0.79,0.79,0.79 -> 1,1,1
+scale LTg2 w3b 1 1 1,1.3,2 -> 1,1,1
+scale LTg2 w3b 1 1 2,1,1.3 -> 1,1,1
+scale LTg2 w3b 1 1 1.3,1.3,0.5 -> 1,1,1
+scale LTg2 w3b 1 1 -1,1,1 -> 1,1,1
+scale LTg2 w3b 1 1 -2,-2,-2 -> 1,1,1
+scale LTg2 w3b 1 1 0,0,0 -> 1,1,1
+scale LTg2 w3b 1 1 1.0999,1.0999,1.0999 -> 1,1,1
+scale LTg2 w3b 1 1 1.5001,1.5001,1.5001 -> 1,1,1
+scale LOfl w3d 0.5 3 1,1,1 -> 1,1,1
+scale LOfl w3d 0.5 3 0.5,0.5,0.5 -> 0.5,0.5,0.5
+scale LOfl w3d 0.5 3 1.1,1.1,1.1 -> 1.1,1.1,1.1
+scale LOfl w3d 0.5 3 1.3,1.3,1.3 -> 1.3,1.3,1.3
+scale LOfl w3d 0.5 3 1.5,1.5,1.5 -> 1.5,1.5,1.5
+scale LOfl w3d 0.5 3 1.6,1.6,1.6 -> 1.6,1.6,1.6
+scale LOfl w3d 0.5 3 3,3,3 -> 3,3,3
+scale LOfl w3d 0.5 3 0.79,0.79,0.79 -> 0.79,0.79,0.79
+scale LOfl w3d 0.5 3 1,1.3,2 -> 1,1.3,2
+scale LOfl w3d 0.5 3 2,1,1.3 -> 2,1,1.3
+scale LOfl w3d 0.5 3 1.3,1.3,0.5 -> 1.3,1.3,0.5
+scale LOfl w3d 0.5 3 -1,1,1 -> 0.5,1,1
+scale LOfl w3d 0.5 3 -2,-2,-2 -> 0.5,0.5,0.5
+scale LOfl w3d 0.5 3 0,0,0 -> 2.8047578,0.78756064,1.1693472
+scale LOfl w3d 0.5 3 1.0999,1.0999,1.0999 -> 1.0999,1.0999,1.0999
+scale LOfl w3d 0.5 3 1.5001,1.5001,1.5001 -> 1.5001,1.5001,1.5001
+scale LTbx w3b 2 2.5 1,1,1 -> 2,2,2
+scale LTbx w3b 2 2.5 0.5,0.5,0.5 -> 2,2,2
+scale LTbx w3b 2 2.5 1.1,1.1,1.1 -> 2,2,2
+scale LTbx w3b 2 2.5 1.3,1.3,1.3 -> 2,2,2
+scale LTbx w3b 2 2.5 1.5,1.5,1.5 -> 2,2,2
+scale LTbx w3b 2 2.5 1.6,1.6,1.6 -> 2,2,2
+scale LTbx w3b 2 2.5 3,3,3 -> 2.5,2.5,2.5
+scale LTbx w3b 2 2.5 0.79,0.79,0.79 -> 2,2,2
+scale LTbx w3b 2 2.5 1,1.3,2 -> 2,2,2
+scale LTbx w3b 2 2.5 2,1,1.3 -> 2,2,2
+scale LTbx w3b 2 2.5 1.3,1.3,0.5 -> 2,2,2
+scale LTbx w3b 2 2.5 -1,1,1 -> 2,2,2
+scale LTbx w3b 2 2.5 -2,-2,-2 -> 2,2,2
+scale LTbx w3b 2 2.5 0,0,0 -> 2.166219,2.166219,2.166219
+scale LTbx w3b 2 2.5 1.0999,1.0999,1.0999 -> 2,2,2
+scale LTbx w3b 2 2.5 1.5001,1.5001,1.5001 -> 2,2,2
+flags LTbr -2976 2016 0 -> 2
+flags LTbr -2720 2016 1 -> 2
+flags LTbr -2464 2016 2 -> 2
+flags LTbr -2208 2016 3 -> 2
+flags LTbr -1952 2016 4 -> 6
+flags LTbr -1696 2016 5 -> 6
+flags LTbr -1440 2016 6 -> 6
+flags LTbr -1184 2016 7 -> 6
+flags LPcr -2976 2272 0 -> 2
+flags LPcr -2720 2272 1 -> 2
+flags LPcr -2464 2272 2 -> 2
+flags LPcr -2208 2272 3 -> 2
+flags LPcr -1952 2272 4 -> 6
+flags LPcr -1696 2272 5 -> 6
+flags LPcr -1440 2272 6 -> 6
+flags LPcr -1184 2272 7 -> 6
+flags LTbr 3360 -2976 0 -> 3
+flags LPcr 3488 -2976 0 -> 3
+flags LTbr -2976 3104 0 -> 3
+flags LTbr -2976 -3616 0 -> 3
+flags LTbr 3360 -2720 1 -> 3
+flags LPcr 3488 -2720 1 -> 3
+flags LTbr -2720 3104 1 -> 3
+flags LTbr -2720 -3616 1 -> 3
+flags LTbr 3360 -2464 2 -> 3
+flags LPcr 3488 -2464 2 -> 3
+flags LTbr -2464 3104 2 -> 3
+flags LTbr -2464 -3616 2 -> 3
+flags LTbr 3360 -2208 3 -> 3
+flags LPcr 3488 -2208 3 -> 3
+flags LTbr -2208 3104 3 -> 3
+flags LTbr -2208 -3616 3 -> 3
+flags LTbr 3360 -1952 4 -> 7
+flags LPcr 3488 -1952 4 -> 7
+flags LTbr -1952 3104 4 -> 7
+flags LTbr -1952 -3616 4 -> 7
+flags LTbr 3360 -1696 5 -> 7
+flags LPcr 3488 -1696 5 -> 7
+flags LTbr -1696 3104 5 -> 7
+flags LTbr -1696 -3616 5 -> 7
+flags LTbr 3360 -1440 6 -> 7
+flags LPcr 3488 -1440 6 -> 7
+flags LTbr -1440 3104 6 -> 7
+flags LTbr -1440 -3616 6 -> 7
+flags LTbr 3360 -1184 7 -> 7
+flags LPcr 3488 -1184 7 -> 7
+flags LTbr -1184 3104 7 -> 7
+flags LTbr -1184 -3616 7 -> 7
+flags LPcr 3328 512 3 -> 2
+flags LPcr 3328 576 2 -> 2
+flags LPcr 3328.5 768 3 -> 3
+flags LPcr 3328.5 832 2 -> 3
+flags LPcr 3327.5 1024 3 -> 2
+flags LPcr 3391.5 1024 2 -> 3
+flags LPcr -3328 512 3 -> 2
+flags LPcr -3328 576 2 -> 2
+flags LPcr -3328.5 768 3 -> 3
+flags LPcr -3328.5 832 2 -> 3
+flags LPcr 1024 3072 3 -> 2
+flags LPcr 1088 3072 2 -> 2
+flags LPcr 1280 3072.5 3 -> 3
+flags LPcr 1344 3072.5 2 -> 3
+flags LPcr 1024 -3584 3 -> 2
+flags LPcr 1088 -3584 2 -> 2
+flags LPcr 1280 -3584.5 3 -> 3
+flags LPcr 1344 -3584.5 2 -> 3
+flags LPcr 3328 3072 3 -> 2
+flags LPcr 3328 3136 2 -> 3
+flags LPcr -3328 -3584 3 -> 2
+flags LPcr -3328 -3520 2 -> 2
+flags LPcr 3328.5 3072.5 3 -> 3
+flags LPcr 3328.5 3136.5 2 -> 3

@@ -1,6 +1,6 @@
 // Cliff types and ramps: what the terrain brushes and the AI tools share.
 
-import { setLayer, type Corner, type Terrain } from "./w3e";
+import type { Corner, Terrain } from "./w3e";
 
 /** What these functions report the corners they're about to change to. */
 export interface CornerLog {
@@ -17,36 +17,6 @@ export class CornerUndo implements CornerLog {
     const restore = (saved: Map<number, Corner>) => { for (const [i, c] of saved) t.corners[i] = { ...c }; };
     return { corners: [...before.keys()], undo: () => restore(before), redo: () => restore(after) };
   }
-}
-
-/** Moves a block of corners `by` cliff levels, so its shape stays: what's on it comes along. The water stays where it
- *  is (its stored level and flag untouched), as the World Editor's Adjust Cliff Levels leaves it (adjustCliffLevels):
- *  the depth follows from the new ground. A ramp the block cuts through is gone, as it needs the levels it was built on. */
-export function adjustLevels(t: Terrain, a: { x0: number; y0: number; x1: number; y1: number }, by: number, cliffGround: string[], log: CornerLog) {
-  const W = t.width;
-  const inside = (i: number) => { const x = i % W, y = Math.floor(i / W); return x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1; };
-  const block: number[] = [];
-  for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) block.push(y * W + x);
-  const seen = new Set<number>();
-  for (const start of block) {
-    if (!t.corners[start].ramp || seen.has(start)) continue;
-    const ramp = [start];
-    seen.add(start);
-    for (const i of ramp) {
-      const x = i % W;
-      for (const n of [...(x > 0 ? [i - 1] : []), ...(x < W - 1 ? [i + 1] : []), i - W, i + W]) {
-        if (t.corners[n]?.ramp && !seen.has(n)) { seen.add(n); ramp.push(n); }
-      }
-    }
-    if (ramp.every(inside)) continue;
-    for (const i of ramp) { log.touch(t, i); t.corners[i].ramp = false; }
-  }
-  for (const i of block) {
-    log.touch(t, i);
-    const c = t.corners[i];
-    setLayer(c, c.layer + by);
-  }
-  matchCliffTypes(t, block, cliffGround, log);
 }
 
 /** Corners of cliff tiles get the cliff type `fixed` (a cliff type number, as chosen in the World
