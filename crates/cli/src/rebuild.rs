@@ -60,7 +60,7 @@ pub fn run(o: Options) -> Result<ExitCode> {
             settings["game.graphicsMode"] = json!(mode);
         }
         let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "settings": settings });
-        let server = Server { root: root.clone(), formats: o.formats.clone(), game: backend::GameCache::default() };
+        let server = Server { root: root.clone(), formats: o.formats.clone(), game: backend::GameCache::default(), read_only: false };
         // Every part reads the game. Without it some still come out, wrong: shadows without the doodads' models
         // (the app's Calculate Shadows does the same), written over the good ones. So nothing is made at all.
         if let Err(e) = server.game.get(&o.game) {
@@ -171,7 +171,7 @@ fn host_command(job: &Value) -> Result<Command> {
 }
 
 /// Runs the host with `job`, answering its commands until it reports; its report.
-fn run_host(job: &Value, server: &Server) -> Result<Value> {
+pub(crate) fn run_host(job: &Value, server: &Server) -> Result<Value> {
     let mut cmd = host_command(job)?;
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -246,6 +246,8 @@ pub struct Server {
     pub root: PathBuf,
     pub formats: Vec<PathBuf>,
     pub game: backend::GameCache,
+    /// Every write refused (`w3proj check` only reads).
+    pub read_only: bool,
 }
 
 fn arg<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
@@ -264,6 +266,9 @@ impl Server {
     /// A file this job may write: inside the project. The app's code writes only the project's files here; one
     /// outside it is refused rather than written where nobody asked for a change.
     fn writable(&self, path: &str) -> Result<PathBuf, String> {
+        if self.read_only {
+            return Err(format!("{path} wasn't written: this job only reads the project"));
+        }
         let p = PathBuf::from(path);
         let inside = p.is_absolute() && p.starts_with(&self.root) && !p.components().any(|c| matches!(c, std::path::Component::ParentDir));
         if inside { Ok(p) } else { Err(format!("{path} is outside the project: w3proj rebuild writes only the project's files")) }
@@ -330,7 +335,7 @@ mod tests {
     use std::io::Read;
 
     fn server(root: &Path) -> Server {
-        Server { root: root.to_path_buf(), formats: Vec::new(), game: backend::GameCache::default() }
+        Server { root: root.to_path_buf(), formats: Vec::new(), game: backend::GameCache::default(), read_only: false }
     }
 
     fn scratch(name: &str) -> PathBuf {

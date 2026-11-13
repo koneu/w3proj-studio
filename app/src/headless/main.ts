@@ -3,10 +3,12 @@
 
 import { finish, install } from "./ipc";
 import { rebuild, type Job } from "./rebuild";
+import { check, type CheckJob } from "./check";
 
 const text = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 install();
-const job = JSON.parse(process.argv[2] ?? "{}") as Job & { task?: string };
-if (job.task !== "rebuild") void finish({ error: `the headless host has no task ${JSON.stringify(job.task)}` });
-else rebuild(job).then(finish, (e) => finish({ error: text(e) }));
+const job = JSON.parse(process.argv[2] ?? "{}") as { task?: string };
+if (job.task === "rebuild") rebuild(job as Job).then(finish, (e) => finish({ error: text(e) }));
+else if (job.task === "check") check(job as CheckJob).then(finish, (e) => finish({ error: text(e) }));
+else void finish({ error: `the headless host has no task ${JSON.stringify(job.task)}` });

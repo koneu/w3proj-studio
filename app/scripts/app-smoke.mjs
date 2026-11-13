@@ -5219,6 +5219,65 @@ async function rebuildCli(page, found) {
   }
 }
 
+/** `w3proj check` answers what the app answers for the same saved project: a new melee map with a second start, a mine
+ *  with creeps, a row of trees across the way check_path is asked about, two triggers nothing runs and one of them in
+ *  .w3proj/problems-ignore.json. list_problems (and its ignored count), check_melee and check_path in the app against
+ *  the CLI's --json report; the CLI wrote nothing. */
+async function cliCheck(page, found) {
+  const fail = (what) => found.push(`cli check: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "cli-check");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  await page.evaluate(`(() => { window.__cliCheckKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    await tool("new_map", { name: "CliCheck", width: 64, height: 64, folder: dir });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    await tool("place_objects", { objects: [{ id: "sloc", x: 2048, y: 2048, player: 2 }, { id: "ngol", x: -2048, y: 2048, player: 28 }, { id: "ngno", x: -1700, y: 1800, player: 25 }, { id: "ngno", x: -1800, y: 1700, player: 25 }], ignoreRoom: true });
+    await tool("place_line", { kind: "doodads", id: "LTlt", from: [-1024, -1024], to: [1024, -1024], ignoreRoom: true });
+    const trigger = (id, name) => ({ type: 8, name, description: "", isComment: 0, id, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0,
+      ecas: [{ kind: 2, name: "PauseGame", enabled: true, params: [{ type: 0, value: "ConvertBoolean" }], children: [] }] });
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify({
+      reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: [trigger(50331649, "Kept Smoke"), trigger(50331650, "Ignored Smoke")] }))});
+      await w3.workspace.writeText(".w3proj/problems-ignore.json", ${JSON.stringify(JSON.stringify({ version: 1, rules: [], items: [{ check: "triggerNoEvents", about: "Ignored Smoke" }] }))});
+      await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    const path = { from: [0, -1600], to: [0, -400] };
+    const app = {
+      problems: JSON.parse(await tool("list_problems", {})),
+      melee: JSON.parse(await tool("check_melee", {}, { timeout: 120000 })),
+      path: JSON.parse(await tool("check_path", path)),
+    };
+    const files = () => Object.fromEntries(readdirSync(join(root, "map")).filter((f) => statSync(join(root, "map", f)).isFile()).map((f) => [f, hash(join(root, "map", f))]));
+    const before = files();
+    const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
+    const r = spawnSync(cli, ["check", root, "--json", "--only=problems,melee,path", "--path", "0,-1600:0,-400"], { encoding: "utf8", env, timeout: 300000 });
+    let ours;
+    try { ours = JSON.parse(r.stdout); } catch { fail(`w3proj check gave no JSON (${r.status}): ${`${r.stdout}${r.stderr}`.slice(-600)}`); return; }
+    if (JSON.stringify(files()) !== JSON.stringify(before)) fail("w3proj check changed the project's files");
+    // The Problems checks: the same reports (a failed check as list_problems words it), the same ignored count.
+    const key = (p) => JSON.stringify([p.severity, p.message, p.location ?? null]);
+    const appRows = app.problems.filter((p) => p.ignored === undefined).map(key).sort();
+    const cliRows = ours.problems.flatMap((g) => [...(g.error ? [{ severity: "error", message: `The check failed: ${g.error}`, location: g.title }] : []), ...g.problems]).map(key).sort();
+    if (JSON.stringify(appRows) !== JSON.stringify(cliRows)) fail(`problems differ: the app ${JSON.stringify(appRows).slice(0, 600)}, the CLI ${JSON.stringify(cliRows).slice(0, 600)}`);
+    const appIgnored = app.problems.find((p) => p.ignored !== undefined)?.ignored ?? 0;
+    if (appIgnored !== 1 || ours.ignored !== 1) fail(`ignored: the app ${appIgnored}, the CLI ${ours.ignored} (1 expected)`);
+    if (!appRows.some((k) => k.includes("Kept Smoke"))) fail("no report of the trigger nothing runs: the comparison proves little (control)");
+    // check_melee and check_path: the MCP tools' answers, the same to the byte.
+    if (JSON.stringify(app.melee) !== JSON.stringify(ours.melee)) fail(`check_melee differs: the app ${JSON.stringify(app.melee.findings).slice(0, 500)}, the CLI ${JSON.stringify(ours.melee?.findings).slice(0, 500)}`);
+    if (JSON.stringify(app.path) !== JSON.stringify(ours.path)) fail(`check_path differs: the app ${JSON.stringify(app.path)}, the CLI ${JSON.stringify(ours.path)}`);
+    // The trees are in the way: the way squeezes between them (open ground is 1000s wide).
+    if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 200)) fail(`check_path didn't meet the trees (control): ${JSON.stringify(app.path).slice(0, 300)}`);
+    if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
+  } finally {
+    await page.evaluate(`(async () => { if (window.__cliCheckKept) w3.window.confirm = window.__cliCheckKept; delete window.__cliCheckKept; await w3.editors.closeAll(); })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
  *  replace, run through the app on scratch copies of the mini map; every project they change is
  *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
@@ -10350,6 +10409,7 @@ async function run() {
         cameraEditing,
         campaignPresets,
         chapterObjects,
+        cliCheck,
         configSafety,
         contextLoss,
         dataSafety,
@@ -10649,6 +10709,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "derivedAfterDeletes", found);
   await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
   await leftOpen(page, "rebuildCli", found);
+  await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
+  await leftOpen(page, "cliCheck", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
