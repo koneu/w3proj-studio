@@ -560,7 +560,7 @@ fn format_customize(root: String, name: String) -> CmdResult<String> {
     std::fs::create_dir_all(&dir).map_err(err)?;
     let path = dir.join(format!("{name}.json"));
     if !exists_checked(&path)? {
-        std::fs::write(&path, text).map_err(err)?;
+        w3proj::atomic::write(&path, text.as_bytes()).map_err(err)?;
     }
     Ok(path.to_string_lossy().into_owned())
 }
