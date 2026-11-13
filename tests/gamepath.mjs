@@ -1,8 +1,9 @@
 // Where the installed Warcraft III is, for the gate and the scripts that need the game's files.
 //
 //   1. W3PROJ_GAME, if set.
-//   2. `.game-path` at the root of the main checkout: one line, the game's folder. Git-ignored, written by
-//      scripts/setup-linux.sh (which finds Steam/Proton, Lutris and Wine installs), or by hand.
+//   2. `.game-path` at the root of the main checkout: the game's folder, one per line; the first that exists wins
+//      (a checkout shared by two machines lists each one's). Git-ignored, written by scripts/setup-linux.sh (which
+//      finds Steam/Proton, Lutris and Wine installs) and scripts/setup-windows.bat, or by hand.
 //   3. The folder above the main checkout: the Windows layout, where the repository sits inside the game's folder.
 
 import { execFileSync } from "node:child_process";
@@ -22,12 +23,23 @@ export function mainCheckout(from = process.cwd()) {
   }
 }
 
+/** The folders a `.game-path` lists, in order: one per line, `#` lines and blank lines left out. */
+export function listedGamePaths(text) {
+  return text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+}
+
+/** The folder of `.game-path` to use: the first listed one that exists (one file can serve a checkout shared by a
+ *  Windows and a Linux machine, a line for each), else the first listed. */
+export function pickGamePath(listed, exists = existsSync) {
+  return listed.find((p) => exists(p)) ?? listed[0] ?? null;
+}
+
 /** W3PROJ_GAME or `.game-path`; null when neither says (callers that have a default of their own keep it). */
 export function chosenGamePath(from = process.cwd()) {
   if (process.env.W3PROJ_GAME) return process.env.W3PROJ_GAME;
   const file = join(mainCheckout(from), ".game-path");
   if (!existsSync(file)) return null;
-  return readFileSync(file, "utf8").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("#")) ?? null;
+  return pickGamePath(listedGamePaths(readFileSync(file, "utf8")));
 }
 
 /** The game's folder: what was chosen, else the folder above the main checkout. */

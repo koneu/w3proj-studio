@@ -8,6 +8,14 @@ import { importedPath, modeNames } from "../../lib/imports";
 import { campaignCandidates } from "./chapterimports";
 import { loadSkins, withObjectArt, type ObjectArt } from "./objects";
 
+/** The name of an object type from the game's names (`names`, by id): a custom id of the map (in `bases`) by its base,
+ *  never by a game entry of the same id. The game's text files can have one: the German NeutralUnitStrings.txt has an
+ *  [H000] ("Waldläuferin"), and H000 is the first id a map's custom hero gets, which then showed under that name. */
+export function typeName(names: ReadonlyMap<string, string>, bases: ReadonlyMap<string, string> | undefined, id: string): string | undefined {
+  const base = bases?.get(id);
+  return base !== undefined ? names.get(base) : names.get(id);
+}
+
 /** The object data the terrain view needs (units, items, destructables, doodads): the bases
  *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
  *  the map's own, then its Skin files (Reforged keeps art changes there). `unread`: the map's own files that are

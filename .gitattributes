@@ -1,2 +1,5 @@
 # Byte-exact test data: no line-ending conversion on checkout.
 tests/fixtures/** -text
+
+# cmd.exe reads batch files with CRLF only.
+*.bat text eol=crlf

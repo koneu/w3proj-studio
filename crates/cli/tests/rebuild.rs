@@ -44,7 +44,9 @@ fn game() -> Option<String> {
         .ok()?;
     let main = Path::new(String::from_utf8_lossy(&common.stdout).trim()).parent()?.to_path_buf();
     let text = fs::read_to_string(main.join(".game-path")).ok()?;
-    text.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_string)
+    // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
+    let listed: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    listed.iter().find(|l| Path::new(l).exists()).or(listed.first()).map(|l| l.to_string())
 }
 
 fn w3proj(args: &[&str], game: &str) -> Output {

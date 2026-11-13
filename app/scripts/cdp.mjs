@@ -143,9 +143,16 @@ export class Hands {
     await this.mouse("mouseReleased", to.x, to.y);
     await sleep(100);
   }
-  type(text) { return this.page.send("Input.insertText", { text }); }
+  /** Inserts the text, then one round trip through the page: insertText answers once it's sent, so a check reading the
+   *  field right after could come before the page has the text. */
+  async type(text) {
+    await this.page.send("Input.insertText", { text });
+    await this.page.evaluate("0");
+  }
   async key(key, code, windowsVirtualKeyCode, modifiers = 0) {
-    const e = { key, code, windowsVirtualKeyCode, modifiers };
+    // Enter with its character, as a keyboard sends it: without `text` Chromium does no default action for it (a text
+    // box's change on Enter didn't fire, which WebDriver's real key presses on Linux always did).
+    const e = { key, code, windowsVirtualKeyCode, modifiers, ...(key === "Enter" && !(modifiers & ~8) ? { text: "\r", unmodifiedText: "\r" } : {}) };
     await this.page.send("Input.dispatchKeyEvent", { type: "keyDown", ...e });
     await this.page.send("Input.dispatchKeyEvent", { type: "keyUp", ...e });
     await sleep(50);
