@@ -5,6 +5,7 @@ its own), through python-xlib and its XTest extension. Every command prints one 
   we-x11.py --display :N windows                       mapped top-level windows: id, title, class, rect, pid, transient
   we-x11.py --display :N key KEY [--window ID] [--hold MS]  press and release a key ("v", "Escape", "ctrl+s", "alt+F4",
                                                        "Return"), held MS (default 50)
+  we-x11.py --display :N type TEXT [--window ID]       type TEXT, with Shift where a character needs it (a path)
   we-x11.py --display :N click X,Y [--button 1|3] [--double]   click at a screen position
   we-x11.py --display :N move X,Y                      move the pointer
   we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--dry]
@@ -137,6 +138,31 @@ def press_key(d, spec, hold_ms=50):
     for m in reversed(mods):
         xtest.fake_input(d, X.KeyRelease, m)
     d.sync()
+
+
+def type_text(d, text):
+    """Types `text` character by character, with Shift where the keyboard map has the character on the shifted level
+    (a Windows path's ':' and capitals, a file dialog's name field)."""
+    from Xlib import X, XK
+    from Xlib.ext import xtest
+    import time
+    shift = keycode(d, "Shift_L")
+    for ch in text:
+        sym = XK.string_to_keysym({"\\": "backslash", " ": "space"}.get(ch, ch))
+        if sym == 0:
+            sym = ord(ch)
+        codes = list(d.keysym_to_keycodes(sym))
+        if not codes:
+            raise SystemExit(f"no keycode for {ch!r}")
+        code, index = min(codes, key=lambda c: c[1])
+        if index & 1:
+            xtest.fake_input(d, X.KeyPress, shift)
+        xtest.fake_input(d, X.KeyPress, code)
+        xtest.fake_input(d, X.KeyRelease, code)
+        if index & 1:
+            xtest.fake_input(d, X.KeyRelease, shift)
+        d.sync()
+        time.sleep(0.02)
 
 
 def move(d, x, y):
@@ -319,6 +345,12 @@ def main(argv):
         hold = int(opt("--hold", "50"))
         press_key(d, rest[0], hold)
         out({"key": rest[0], "holdMs": hold})
+    elif cmd == "type":
+        win = opt("--window")
+        if win:
+            focus(d, int(win, 0))
+        type_text(d, rest[0])
+        out({"typed": len(rest[0])})
     elif cmd == "click":
         button = int(opt("--button", "1"))
         double = flag("--double")

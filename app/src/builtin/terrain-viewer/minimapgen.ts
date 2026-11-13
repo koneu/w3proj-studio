@@ -35,6 +35,12 @@ export function smallestMipColor(image: DecodedImage): Rgb | null {
   return weight > 0 ? sum.map((s) => s / weight) as Rgb : null;
 }
 
+/** The files a ground, cliff or blight texture's colour is read from, the first that can be: in HD and DE (`mode`
+ *  not "sd") its Reforged `_Diffuse` texture, then the plain (classic) one. */
+export function hdFirst(path: string, mode: string): string[] {
+  return mode === "sd" ? [path] : [path.replace(/\.\w+$/, "_Diffuse.blp"), path];
+}
+
 /** Pathing cells along a tile's side (a pathing texture has one pixel per cell). */
 const CELLS_PER_TILE = 4;
 
@@ -74,7 +80,7 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
  *  DestructableData.slk; a custom type's base's) has showInMM, in their row's minimap colour (useMMColor) or else
  *  `modelColor`'s of the type (left out when that is null), as big as `footprint` says their pathing texture (the
  *  map's object data's first) is, in tiles; 1 without one. */
-export async function minimapObjects(doodads: readonly Pick<Placed, "id" | "position">[], tables: {
+export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "position"> & { life?: number })[], tables: {
   rows: ReadonlyMap<string, Record<string, string>>;
   bases: ReadonlyMap<string, { base: string; pathTex?: string }>;
   modelColor: (type: string) => Promise<Rgb | null>;
@@ -83,6 +89,9 @@ export async function minimapObjects(doodads: readonly Pick<Placed, "id" | "posi
   const { rows, bases } = tables;
   const objects: MinimapObject[] = [];
   for (const d of doodads) {
+    // A destructable placed dead (life 0 %) isn't on the World Editor's minimap: of SnowareBay's 205 dead Northrend
+    // tree walls, 52 of the 54 standing alone show nothing in its export (2026-11-13).
+    if (d.life === 0) continue;
     const type = rows.has(d.id) ? d.id : bases.get(d.id)?.base ?? "";
     const r = rows.get(type);
     if (r?.showInMM !== "1") continue;
@@ -123,9 +132,15 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
 
-  /** A texture's colour, null when there is none or it can't be read. */
-  const textureColor = (key: string, path: string | null) => (path ? tileColors.get(() => graphicsMode(w3), key, () => (async () =>
-    smallestMipColor(decodeImage(await readFile(path), path)))().catch(() => null)) : Promise.resolve(null));
+  /** A texture's colour, null when there is none or it can't be read. In HD and DE the Reforged `_Diffuse` texture
+   *  first, as the terrain draws: the World Editor's HD export has its colours (HillsbradCreek's grass 23, 119, 16,
+   *  the classic one's 44, 108, 27; we-drive 2026-11-13). */
+  const textureColor = (key: string, path: string | null) => (path ? tileColors.get(() => graphicsMode(w3), key, () => (async () => {
+    for (const p of hdFirst(path, graphicsMode(w3))) {
+      try { return smallestMipColor(decodeImage(await readFile(p), p)); } catch { /* the next */ }
+    }
+    return null;
+  })()) : Promise.resolve(null));
   const tileRows = new Map(parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk")).map((r) => [r.tileID, r]));
   const colors = new Map<string, Rgb>();
   for (const id of terrain.groundTiles) {
