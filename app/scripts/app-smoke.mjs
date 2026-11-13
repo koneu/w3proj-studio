@@ -10247,6 +10247,8 @@ async function run() {
     // child.kill() ends it and the exit is heard a moment later. The retries cover a write still landing.
     if (appStarted && !LINUX) await until("the app to end", () => exited() !== null, 10000).catch(() => {});
     rmSync(configDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    // Linux: the app's data folder (WebKit storage) under this run's own identifier; 92 of them piled up.
+    if (LINUX && !part) rmSync(join(process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? "", ".local", "share"), IDENTIFIER), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
 
