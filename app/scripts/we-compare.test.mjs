@@ -12,8 +12,9 @@ const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.
 test("a minimal spec gets its defaults", () => {
   const s = parseSpec(good(), "/specs", {});
   assert.equal(s.input.map, resolve("/specs", "R.w3x"));
-  assert.deepEqual(s.compare, [{ file: "war3map.wpm", as: "auto", expect: "match" }]);
+  assert.deepEqual(s.compare, [{ file: "war3map.wpm", as: "auto", expect: "match", tolerance: 0, ignore: [] }]);
   assert.equal(s.we.mode, "sd");
+  assert.equal(s.we.from, "input");
   assert.equal(s.limit, 10);
 });
 
@@ -75,6 +76,38 @@ test("diffJson: lists of another length, missing fields, and the limit keeps the
   assert.match(d.diffs[0].text, /a\[1\]: WE 2, Studio \(absent\)/);
   assert.equal(diffJson({ x: NaN }, { x: NaN }).equal, true);
   assert.equal(diffJson({ x: 1 }, { x: "1" }).equal, false);
+});
+
+test("diffJson tolerance: numbers within it are equal, beyond it differ, strings never", () => {
+  const we = { units: [{ id: "hfoo", z: 0 }, { id: "hbar", z: 10 }] };
+  const st = { units: [{ id: "hfoo", z: 0.005 }, { id: "hbar", z: 17.5 }] };
+  assert.equal(diffJson(we, st).count, 2); // control: no tolerance, both differ
+  const d = diffJson(we, st, 10, 5);
+  assert.equal(d.count, 1);
+  assert.deepEqual(d.entries.units.indices, [1]);
+  assert.equal(diffJson(we, st, 10, 5).diffs[0].path, "units[1].z");
+  assert.equal(diffJson({ a: "x" }, { a: "y" }, 10, 100).equal, false);
+});
+
+test("diffJson ignore: a named path (with what is below it, [] for any index) doesn't count; entries follow", () => {
+  const we = { units: [{ id: "a", z: 1, hero: { str: 0 } }, { id: "b", z: 2 }], version: 11 };
+  const st = { units: [{ id: "a", z: 1 }, { id: "b", z: 3 }], version: 9 };
+  assert.equal(diffJson(we, st).count, 3); // control
+  const d = diffJson(we, st, 10, 0, ["version", "units[].hero"]);
+  assert.equal(d.count, 1);
+  assert.deepEqual(d.entries.units, { total: 2, differing: 1, indices: [1] });
+  assert.equal(diffJson(we, st, 10, 0, ["units[0].hero", "version", "units[1].z"]).equal, true);
+  assert.equal(diffJson(we, st, 10, 0, ["unit"]).count, 3); // a prefix of a name is not a path
+  assert.equal(diffJson(we, st, 10, 0, ["units[0].z"]).count, 3); // not the differing one
+});
+
+test("a spec's tolerance and from are checked", () => {
+  const s = parseSpec({ ...good(), we: { from: "studio" }, compare: [{ file: "a.doo", as: "parsed", tolerance: 0.5 }] }, "/specs", {});
+  assert.equal(s.we.from, "studio");
+  assert.equal(s.compare[0].tolerance, 0.5);
+  assert.throws(() => parseSpec({ ...good(), we: { from: "nowhere" } }, "/specs", {}), /we\.from/);
+  assert.throws(() => parseSpec({ ...good(), compare: [{ file: "a.doo", tolerance: -1 }] }, "/specs", {}), /tolerance/);
+  assert.throws(() => parseSpec({ ...good(), compare: [{ file: "a.doo", ignore: "z" }] }, "/specs", {}), /ignore/);
 });
 
 test("diffBytes: positions and the extra length", () => {

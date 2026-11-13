@@ -17,13 +17,14 @@
 //   input       { "map": "path.w3x" } (copied: the original isn't touched; ${MAIN} is the main checkout, ${REPO} this one,
 //               a relative path is the spec file's folder's) or { "new": { name, width, height }, "steps": [studio steps] }:
 //               Studio makes the map (new_map), runs the steps, packs it, and the World Editor opens that
-//   we          { "mode": "sd|hd|de", "saveAccept": ["Warning"] (dialog titles the save answers with Return), "steps": ["--key d", ["--click", "100,100"], ...] }: we-drive steps between the map being
+//   we          { "mode": "sd|hd|de", "from": "input|studio" (studio: the editor opens the map Studio saved and re-saves it), "saveAccept": ["Warning"] (dialog titles the save answers with Return), "steps": ["--key d", ["--click", "100,100"], ...] }: we-drive steps between the map being
 //               ready and the save (the save and the close are added); several specs of one mode share ONE we-drive
 //               process, so one display and one lock, and ONE editor: each next map is opened in it (File > Open)
 //   studio      { "settings": { key: value }, "steps": [ { "mcp": "tool", "args": {} }, { "eval": "js" }, { "sleep": ms },
 //               { "open": "map/war3map.w3e.txt" }, { "terrain": true }, { "setting": [key, value] }, { "command": id } ] }:
 //               the project (the input map unpacked, or the new map) is open; afterwards everything is saved and packed
-//   compare     files of the map: "war3map.w3i", or { "file": "war3map.wpm", "as": "wpm", "expect": "differs" }. "as": auto
+//   compare     files of the map: "war3map.w3i", or { "file": "war3map.wpm", "as": "wpm", "expect": "differs", "tolerance": 0.01 (parsed: numbers this close are equal),
+//               "ignore": ["doodads[3].scale", "units[].itemTable"] (parsed: paths whose differences are known and named; [] is any index) }. "as": auto
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
 //               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run.
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
@@ -176,7 +177,7 @@ async function runWorldEditor(specs, opts, game, mode, saveAccept) {
     // --restart-per-map (opts.restart) is the old way, an editor start per map, for timing the two.
     for (const s of rest) {
       const dir = join(opts.work, s.name);
-      args.push("--map", join(dir, "input.w3x"), "--wait-ready", ...s.we.steps.flat(), "--save", join(dir, "we.w3x"));
+      args.push("--map", join(dir, s.we.from === "studio" ? "studio.w3x" : "input.w3x"), "--wait-ready", ...s.we.steps.flat(), "--save", join(dir, "we.w3x"));
       if (opts.restart || s === rest.at(-1)) args.push("--close");
     }
     const t0 = Date.now();
@@ -259,7 +260,7 @@ function compareSpec(spec, cli, game, opts) {
     };
     let a, b;
     try { a = load(we); b = load(studio); } catch (e) { files.push({ file: c.file, kind, expect: c.expect, status: "DIFFERS", count: 1, diffs: [{ text: e.message }] }); continue; }
-    files.push({ expect: c.expect, ...compareFile(c.file, kind, a, b, limit) });
+    files.push({ expect: c.expect, ...compareFile(c.file, kind, a, b, limit, c.tolerance, c.ignore) });
   }
   return files;
 }

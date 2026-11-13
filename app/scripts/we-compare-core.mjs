@@ -76,6 +76,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
   const we = raw.we ?? {};
   if (!isObject(we)) throw new Error(`${where}: "we" is an object`);
   if (we.mode !== undefined && !["sd", "hd", "de"].includes(we.mode)) throw new Error(`${where}: we.mode is sd, hd or de`);
+  if (we.from !== undefined && !["input", "studio"].includes(we.from)) throw new Error(`${where}: we.from is input (the spec's map) or studio (the map Studio saved: does the editor open and re-save it unchanged?)`);
   if (we.saveAccept !== undefined && !(Array.isArray(we.saveAccept) && we.saveAccept.every((t) => typeof t === "string" && t && !t.includes(",")))) throw new Error(`${where}: we.saveAccept is a list of dialog titles`);
   const studio = raw.studio ?? {};
   if (!isObject(studio)) throw new Error(`${where}: "studio" is an object`);
@@ -85,7 +86,9 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
     if (!isObject(e) || typeof e.file !== "string" || !e.file || /[\\/]/.test(e.file)) throw new Error(`${where}: compare[${i}] is a file name of the map (no folders)`);
     if (e.as !== undefined && !KINDS.includes(e.as)) throw new Error(`${where}: compare[${i}].as is one of ${KINDS.join(", ")}`);
     if (e.expect !== undefined && !["match", "differs"].includes(e.expect)) throw new Error(`${where}: compare[${i}].expect is match or differs`);
-    return { file: e.file, as: e.as ?? "auto", expect: e.expect ?? "match" };
+    if (e.tolerance !== undefined && !(Number.isFinite(e.tolerance) && e.tolerance >= 0)) throw new Error(`${where}: compare[${i}].tolerance is a number of 0 or more (numbers within it count as equal)`);
+    if (e.ignore !== undefined && !(Array.isArray(e.ignore) && e.ignore.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].ignore is a list of paths ("doodads[3].scale", "units[].itemTable")`);
+    return { file: e.file, as: e.as ?? "auto", expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [] };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
   const dup = compare.map((c) => c.file).filter((f, i, a) => a.indexOf(f) !== i);
@@ -95,7 +98,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
     name,
     description: raw.description ?? "",
     input: parsedInput,
-    we: { mode: we.mode ?? "sd", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`)) },
+    we: { mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`)) },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`)) },
     compare,
     limit: raw.limit ?? 10,
@@ -126,11 +129,17 @@ const show = (v) => {
  * ("doodads[210]: WE absent, Studio {…}"). `entries` counts the differing elements of the top-level lists ({ list: { total, differing } }).
  * `a` is the World Editor's, `b` Studio's. `limit` is how many differences are kept in `diffs` (the count is all).
  */
-export function diffJson(a, b, limit = 10) {
+export function diffJson(a, b, limit = 10, tolerance = 0, ignore = []) {
   const diffs = [];
   let count = 0;
   const entries = {};
-  const add = (path, x, y) => { count++; if (diffs.length < limit) diffs.push({ path, we: x, studio: y }); };
+  // Two numbers within `tolerance` of each other are the same (a known, bounded difference of the two editors).
+  const same = (x, y) => x === y || (Number.isNaN(x) && Number.isNaN(y)) || (tolerance > 0 && typeof x === "number" && typeof y === "number" && Math.abs(x - y) <= tolerance);
+  // `ignore`: paths whose differences don't count (a known, named difference): "doodads[3].scale" (with everything below
+  // it), "units[].itemTable" ([] is any index).
+  const ignored = ignore.map((p) => new RegExp(`^${p.split("[]").map((part) => part.replace(/[.[\]]/g, (c) => `\\${c}`)).join("\\[\\d+\\]")}(?:$|[.[])`));
+  const paths = [];
+  const add = (path, x, y) => { if (ignored.some((re) => re.test(path))) return; count++; paths.push(path); if (diffs.length < limit) diffs.push({ path, we: x, studio: y }); };
   const walk = (x, y, path) => {
     if (Array.isArray(x) && Array.isArray(y)) {
       const n = Math.max(x.length, y.length);
@@ -145,17 +154,17 @@ export function diffJson(a, b, limit = 10) {
         else if (!(k in y)) add(path ? `${path}.${k}` : k, x[k], undefined);
         else walk(x[k], y[k], path ? `${path}.${k}` : k);
       }
-    } else if (!(x === y || (Number.isNaN(x) && Number.isNaN(y)))) add(path, x, y);
+    } else if (!same(x, y)) add(path, x, y);
   };
   walk(a, b, "");
   // Entries of the top-level lists: how many of them differ (a list element is one entry, whatever fields differ).
   if (isObject(a) && isObject(b)) {
     for (const k of Object.keys(a)) {
       if (!Array.isArray(a[k]) || !Array.isArray(b[k])) continue;
-      const total = Math.max(a[k].length, b[k].length);
-      const indices = [];
-      for (let i = 0; i < total; i++) if (JSON.stringify(a[k][i]) !== JSON.stringify(b[k][i])) indices.push(i);
-      entries[k] = { total, differing: indices.length, indices: indices.slice(0, 50) };
+      const hit = new Set();
+      for (const p of paths) if (p.startsWith(`${k}[`)) hit.add(Number(p.slice(k.length + 1, p.indexOf("]", k.length))));
+      const indices = [...hit].sort((m, n) => m - n);
+      entries[k] = { total: Math.max(a[k].length, b[k].length), differing: indices.length, indices: indices.slice(0, 50) };
     }
   }
   return { equal: count === 0, count, entries, diffs: diffs.map((d) => ({ ...d, text: `${d.path}: WE ${show(d.we)}, Studio ${show(d.studio)}` })) };
@@ -218,7 +227,7 @@ export function diffText(a, b, limit = 10) {
  * parsed JSON value ({ json }), or null when the map has no such file. Returns { file, kind, status, ... } where status is
  * "MATCH", "DIFFERS" or "MISSING" (the file is absent in one or both).
  */
-export function compareFile(file, kind, we, studio, limit = 10) {
+export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = []) {
   if (!we || !studio) {
     const only = !we && !studio ? "neither" : !we ? "Studio only" : "WE only";
     return { file, kind, status: !we && !studio ? "MISSING" : "DIFFERS", count: 1, diffs: [{ text: `the file is in ${only === "neither" ? "neither map" : only === "WE only" ? "the World Editor's save only" : "Studio's save only"}` }] };
@@ -226,7 +235,7 @@ export function compareFile(file, kind, we, studio, limit = 10) {
   // The terrain's w3e and the units' heights: both sides are the reduced tables of we-compare-w3e.mjs, compared as parsed.
   if (kind === "w3e" || kind === "w3e-spread" || kind === "unit-heights") { const w = diffJson(we.json, studio.json, limit); return { file, kind, status: w.equal ? "MATCH" : "DIFFERS", ...w }; }
   let r;
-  if (kind === "parsed") r = diffJson(we.json, studio.json, limit);
+  if (kind === "parsed") r = diffJson(we.json, studio.json, limit, tolerance, ignore);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
   else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
   else r = diffBytes(we.bytes, studio.bytes, limit);
