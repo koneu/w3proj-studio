@@ -77,6 +77,7 @@ import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
+import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
@@ -1691,6 +1692,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
+        /** The running cycle's hour (setting terrain.lighting.dayNightCycle); the stored hour stays as the user set it. */
+        let cycleHour = lightHour();
+        const cycleOn = () => w3.settings.get<boolean>("terrain.lighting.dayNightCycle", false) === true;
+        const lightHourNow = () => (cycleOn() ? cycleHour : lightHour());
         const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); keysToMap(); } });
         const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); keysToMap(); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
@@ -1712,11 +1717,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewSyncsAfterTab = () => {};
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
-          const on = lightOn() || gameViewOn(), hour = lightHour();
+          const on = lightOn() || gameViewOn(), hour = lightHourNow();
           lightBox.checked = lightOn();
           lightBox.disabled = gameViewOn();
-          lightSelect.value = String(hour);
-          lightSelect.disabled = !on;
+          lightSelect.value = String(Math.floor(hour));
+          lightSelect.disabled = !on || cycleOn();
           renderer.gameView = on;
           // The game's own lighting models light HD's real shadows more than a map's own do (tone.ts GAME_LIGHT_FILL).
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
@@ -1725,6 +1730,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };
+        // The running cycle: a step twice a second, none while the page or the view is hidden.
+        let cycleAt = 0;
+        const cycleTimer = setInterval(() => {
+          if (disposed || !cycleOn() || document.hidden || canvas.clientWidth <= 0) { cycleAt = 0; return; }
+          const now = performance.now();
+          if (cycleAt) cycleHour = stepHour(cycleHour, (now - cycleAt) / 1000, DAY_SECONDS);
+          cycleAt = now;
+          applyLight();
+        }, 500);
         const showBoundary = () => w3.settings.get<boolean>("terrain.boundary", true) !== false;
         /** The playable part as last read from the map; null until then. */
         let playableEdge: Area | null = null;
@@ -1789,6 +1803,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
           if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights") viewSyncs.forEach((f) => f());
+          if (key === "terrain.lighting.dayNightCycle") { cycleHour = lightHour(); cycleAt = 0; }
+          if (key === "terrain.lighting.hour" && !cycleOn()) cycleHour = lightHour();
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.gameView" || key === "terrain.fog" || key === "terrain.weather") viewChanged();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
@@ -5556,6 +5572,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopObjectWatch.dispose();
             objectReload.cancel();
             stopLightSettings.dispose();
+            clearInterval(cycleTimer);
             // The minimap panel's picture still due, or being made, isn't drawn any more.
             clearTimeout(minimapTimer);
             minimapSeq++;
