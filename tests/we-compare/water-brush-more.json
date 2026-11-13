@@ -1,0 +1,289 @@
+[
+  {
+    "name": "water-brush-slope-size1",
+    "description": "Shallow Water size 1 on the slope (fixtures/we-specs/slope.w3x) at the editor's opening camera's middle (corner 32,30): the editor sets the ground of the 13 corners within 2 to the clicked corner's (0) and types the 9 of the water corner and round it Grass Cliff (1, the palette's start)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1392,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 1], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-slope-size2",
+    "description": "the same, size 2: ground of the corners within 3 (a disc of radius size + 1)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1424,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 2], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-slope-size5",
+    "description": "the same, size 5: ground of the corners within 6",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1488,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 5], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-slope-size8",
+    "description": "the same, size 8: ground of the 234 corners within 9",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1520,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 8], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-edge-low",
+    "description": "Shallow Water size 3 at the middle of slope-edge.w3x (columns 34 and up a cliff level higher, cliff type 0 on columns 33 and 34): the brush reaches over the edge. Ground, layers and water match (the higher corners away from the water come down to the clicked level, those next to it stay). KNOWN DIFFERENCE (2026-11-13): the editor re-typed the whole cliff edge, all 65 rows of columns 33 and 34, to Grass Cliff (1); Studio types only round the click. Not seen again in water-brush-edge-low-deep",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-edge-high",
+    "description": "Shallow Water size 3 100 px east of the middle of slope-edge.w3x (corner 34,29), on the high side of the edge. Ground, layers and water match (the lower corners in the square of half side 4 come up, those next to the water 35 world units over the clicked ground). KNOWN DIFFERENCE (2026-11-13): the editor types the corners it raised Dirt Cliff (0, the plateau's) and leaves the outer rim of the new cliff untyped (15); Studio gives them the chosen Grass Cliff (1)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "848,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 848, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-dirt-cliff",
+    "description": "Shallow Water size 3 at the middle of slope.w3x with Dirt Cliff chosen in the cliff type palette first: the water corners and the ring round them take Dirt Cliff (0)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "1441,367"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["cliff", "Dirt"], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-swapped",
+    "description": "Shallow Water size 3 at the middle of slope-swapped.w3x (the w3e's cliff list CLgr CLdi, which the game ignores: lib cliffList). KNOWN DIFFERENCE (2026-11-13): the editor writes 0, Grass Cliff's place in the file's own list; Studio writes 1, Grass Cliff's number by the ground tiles (as the game reads it). It shows the palette starts on Grass Cliff whatever the list's order",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-swapped.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-edge-high-far",
+    "description": "Shallow Water size 3 200 px east of the middle of slope-edge.w3x (corner 36,29), the edge at the square's rim: ground, layers and water match (raised corners next to the water 140 stored units over the clicked 96). KNOWN DIFFERENCE: the raised corners' cliff type, as in water-brush-edge-high",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "948,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 948, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-edge-high-deep",
+    "description": "Deep Water size 3 at corner 34,29 of slope-edge.w3x: ground, layers and water match. KNOWN DIFFERENCE: the raised corners' cliff type, as in water-brush-edge-high",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1441,310"],
+        ["--click", "848,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 3], ["click", 848, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-brush-edge-low-deep",
+    "description": "Deep Water size 3 at the middle of slope-edge.w3x, the brush reaching over the edge. KNOWN DIFFERENCE (2026-11-13): the editor left water corner 33,29 dry on level 2 and its neighbour 34,28 on level 3 (it seems to refuse a 3-level cliff); Studio makes 33,29 water on level 0. The raised corners' types differ too",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1441,310"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [ ["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 3], ["click", 748, 500] ] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 30
+  }
+]

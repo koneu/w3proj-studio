@@ -6,7 +6,7 @@
 //
 // Actions: tab NAME (the terrain editor's tab, "Terrain"); view SPEC (the terrain view at the editor's size, the camera "we" or "we:X,Y[,distance…]" as app-drive's
 // --camera); tool PREFIX (the toolbar button whose title starts so: "Paint:", "−2:"); texture TILE (a ground tile in the
-// painter's options); size N (the brush size slider); click X,Y and drag X,Y,X2,Y2 (the left button, at editor positions);
+// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); size N (the brush size slider); click X,Y and drag X,Y,X2,Y2 (the left button, at editor positions);
 // sleep MS. Needs window.__driveEd (the "terrain" step). Positions and tool names are those of the page, not a copy.
 
 import { Hands, sleep } from "./cdp.mjs";
@@ -42,6 +42,7 @@ export async function uiStep(page, actions) {
     }
     else if (kind === "tool") await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith(${JSON.stringify(a[0])})); if (!b) throw new Error("no tool button " + ${JSON.stringify(a[0])}); b.click(); })()`);
     else if (kind === "texture") await page.evaluate(`(() => { const b = document.querySelector('.terrain-tex-thumb[title*=${JSON.stringify(a[0])}]'); if (!b) throw new Error("no tile " + ${JSON.stringify(a[0])}); b.click(); })()`);
+    else if (kind === "cliff") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Cliff type")); const o = s && [...s.options].find((o) => o.textContent.startsWith(${JSON.stringify(a[0])})); if (!o) throw new Error("no cliff type " + ${JSON.stringify(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     else if (kind === "size") await page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); i.value = ${Number(a[0])}; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     else if (kind === "click") {
       const p = at(a[0], a[1]);

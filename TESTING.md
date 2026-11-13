@@ -393,16 +393,16 @@ tests: `we-compare.test.mjs`. It isn't in the gate (the gate has no World Editor
 `W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
 
 Terrain specs (`we-compare-w3e.mjs`, `we-compare-ui.mjs`; specs `cliff-adjust-dry`, `unit-heights`, `water-brush-slope`,
-`painted-cliff-type`, `height-random-stops` in `tests/we-compare/`, inputs and their generators in
+`water-brush-more`, `painted-cliff-type`, `height-random-stops` in `tests/we-compare/`, inputs and their generators in
 `tests/fixtures/we-specs/`): compare kind `w3e` (the binary w3e corner by corner, `corners.30,27.ground: WE 0, Studio -48`;
 the random ground and cliff variations are left out), `w3e-spread` (the set of ground offsets, for runs that draw at
 random: Reset Height Field Random) and `unit-heights` (id, x, y, z of war3mapUnits.doo). Studio step `ui`: the terrain
 painter's real mouse at the World Editor's screen positions (`["tab","Terrain"]`, `["view","we"]` the editor's opening
 camera at its 1184x844 view, `["tool","Paint:"]`, `["texture","Lgrs"]`, `["size",3]`, `["click",748,500]`,
-`["drag",x,y,x2,y2]`), so one list of positions drives both editors. The World Editor's palette on its 1600x1000 display
+`["drag",x,y,x2,y2]`, `["cliff","Dirt"]` the Cliff type choice), so one list of positions drives both editors. The World Editor's palette on its 1600x1000 display
 (`--key t`): tile thumbs 1409,112 (Dirt) / 1409,144 (Grass), cliff icons y=282 from x=1409 (1409 is Decrease Two; the
-others, 32 px apart, are probably Decrease One, Level, Increase One, Increase Two), water brushes 1441,310 (Deep) and 1473,310 (Shallow), cliff type thumbs 1393,367 /
-1441,367, Apply Cliff box 1373,244, sizes y=569 at x=1392 (1), 1424 (2), 1456 (3), 1488 (5), 1520 (8); Advanced menu
+others, 32 px apart, are probably Decrease One, Level, Increase One, Increase Two), water brushes 1441,310 (Deep) and 1473,310 (Shallow), cliff type thumbs 1409,367 (Grass Cliff, chosen
+when the editor starts) / 1441,367 (Dirt Cliff), Apply Cliff box 1373,244, sizes y=569 at x=1392 (1), 1424 (2), 1456 (3), 1488 (5), 1520 (8); Advanced menu
 260,41 (Adjust Cliff Levels 299,206, Reset Height Field 300,189: its Random box 589,429, Smoothing slider 592 to 773
 at y=534, Variation slider 589 to 773 at y=494, OK 669,573, "Continue anyway" 767,523). The editor's Create New Map
 dialog (`ctrl+n`) lists 22 tilesets and no Misc, so a Misc-tileset base tile can't be compared there.

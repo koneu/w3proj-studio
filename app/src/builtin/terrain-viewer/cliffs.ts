@@ -34,6 +34,14 @@ export interface CliffType {
   groundTile: string;
 }
 
+/** The cliff type number (in `list`, cliffList's) the World Editor's cliff palette starts on: the tileset's second cliff
+ *  texture (texFile …_Cliff1). Seen: Grass Cliff on Lordaeron Summer, with the w3e's cliff list either way round
+ *  (we-compare water-brush-swapped, 2026-11-13; the status bar says "Grass Cliff" on a new map), and CAgr on Ashenvale
+ *  (tests/fixtures/water-brush/ash-shallow.w3e). -1 when the map has no such cliff. */
+export function weDefaultCliffType(list: readonly CliffType[]): number {
+  return list.findIndex((c) => /_cliff1$/i.test(c.texFile));
+}
+
 /** A cliff model and the tiles (y × (width-1) + x) it covers. */
 export type CliffRequest = ModelRequest & { tiles: number[] };
 

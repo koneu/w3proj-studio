@@ -1,7 +1,7 @@
 [
   {
     "name": "water-brush-slope-shallow",
-    "description": "test.md 'Water brush rim heights': one Shallow Water click, size 3, on sloping ground (fixtures/we-specs/slope.w3x, the ground rising 6 world units a corner along x), at the same screen position in both editors (the terrain view at the editor's opening camera). KNOWN DIFFERENCE (2026-11-13, 71 corners): the editor sets the ground of 47 corners round the click (the 13 water corners and a rim of 34, all within about 4 corners) to the height of the clicked corner; Studio moves only some rim corners (nearest wet corner: 34 ground differences); and the editor gives the rim corners cliff type 1 where Studio gives 0 (37). The layers and water words match. Expected to differ until Studio flattens as the editor does",
+    "description": "one Shallow Water click, size 3, on sloping ground (fixtures/we-specs/slope.w3x, the ground rising 6 world units a corner along x), at the same screen position in both editors (the terrain view at the editor's opening camera): the editor sets the ground of the 47 corners within 4 of the click (13 water corners and a rim of 34) to the clicked corner's height, gives the 37 water and rim corners Grass Cliff (1, the palette's start) and the 24 dry ones of them the water's level word too; Studio does the same (2026-11-13)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -20,12 +20,12 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 30
   },
   {
     "name": "water-brush-slope-deep",
-    "description": "the same with the Deep Water brush: the same 71 differences (ground of the 47 corners, cliff type of the rim)",
+    "description": "the same with the Deep Water brush",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -44,12 +44,12 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 30
   },
   {
     "name": "water-brush-slope-shallow-east",
-    "description": "the Shallow brush 100 px east of the middle, where the clicked corner's ground is 48 and its neighbours' 0 to 144: the editor sets all 47 corners to 48 (so the height is the clicked corner's, not the rim's nearest or the mean); Studio keeps most of the slope",
+    "description": "the Shallow brush 100 px east of the middle, where the clicked corner's ground is 48 and its neighbours' 0 to 144: the editor sets all 47 corners to 48 (so the height is the clicked corner's, not the rim's nearest or the mean), and the 24 dry corners round the water get its level word (8240)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -68,7 +68,7 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 30
   }
 ]
