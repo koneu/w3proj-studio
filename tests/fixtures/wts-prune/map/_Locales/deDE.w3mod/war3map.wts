@@ -1,0 +1,23 @@
+STRING 1
+{
+Kartenname
+}
+
+STRING 3
+{
+Waise für die drei, siehe TRIGSTR_009
+}
+
+STRING 5
+{
+eine Waise}
+STRING 12
+{
+zwölf
+}
+
+STRING 30
+{
+nur deutsch
+}
+

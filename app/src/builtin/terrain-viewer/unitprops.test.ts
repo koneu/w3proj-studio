@@ -354,6 +354,25 @@ test("a skin: another type's look, or back to its own; every unit and item has o
   assert.ok(!commonFields([{ entry: unit("hfoo"), facts: f }, { entry: unit("ratf"), facts: facts({ kind: "w3t" }) }]).includes("skin"));
 });
 
+test("a destructable's and a doodad's skin: only where the doo version stores one, undoable like the rest", () => {
+  const w3b = facts({ kind: "w3b" }), w3d = facts({ kind: "w3d" });
+  const dest = destructable({ skinId: "LTlt" }), plain = destructable({ id: "CPct", skinId: "CPct", itemSets: [] });
+  assert.deepEqual(fieldsFor(dest, w3b), ["life", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(plain, w3d), ["skin"], "a doodad: the skin, no life");
+  // An older doo (no skinId) has no row, and a change is refused with the reason.
+  assert.ok(!fieldsFor(destructable(), w3b).includes("skin"));
+  assert.match(checkChange(destructable(), w3b, { field: "skin", value: "LTt1" }) ?? "", /no skinId/);
+  const before = propSnapshot(dest);
+  assert.equal(checkChange(dest, w3b, { field: "skin", value: "LTt1" }), null);
+  assert.equal(applyChange(dest, w3b, { field: "skin", value: "LTt1" }), true);
+  assert.equal(skinOfEntry(dest), "LTt1");
+  restoreProps(dest, before);
+  assert.equal(get(dest).skinId, "LTlt", "undo restores it");
+  assert.equal(applyChange(dest, w3b, { field: "skin", value: null }), false, "its own again changes nothing");
+  assert.match(checkChange(plain, w3d, { field: "skin", value: "x" }) ?? "", /four characters/);
+  assert.ok(!commonFields([{ entry: dest, facts: w3b }, { entry: plain, facts: w3d }]).includes("skin"), "a destructable and a doodad don't share one");
+});
+
 // The World Editor's Random Unit tab (we-drive, 2026-11-10): Random Unit Type "Any Neutral Hostile Unit", "From Random
 // Group" or "Use Custom Table" (a list of "60% - Forest Troll Shadow Priest"), written as randomType 0, 1 and 2.
 test("a random object's choice: by level, from a random group, or its own table, with only that layout's fields", () => {

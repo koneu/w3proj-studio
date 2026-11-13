@@ -17,6 +17,17 @@
 // not the abilities' order strings (aord, aoru, aoro, aorf) nor the art one (uepa); and the upgrades' class and
 // effects (gcls, gef1-gef4), but not their codes (gco1-gco4). Icons, models, sounds, attachment points, tech lists,
 // tilesets, categories, races and an ability's data stay literal.
+//
+// A map's per-language string tables (`_Locales\deDE.w3mod\war3map.wts`, one per language; the game's own melee maps
+// carry eleven, each a full copy of war3map.wts with every number translated or not): the World Editor's save leaves
+// them byte for byte (we-drive, 2026-11-13, a copy of lit.w3m with a German table holding 1-3 and a German-only 50,
+// target/evidence/movetexts-locales): its new strings are missing there, the string it dropped from war3map.wts stays
+// there, and it numbers its new strings without looking at them, so its string 50 took the number of the German-only
+// one. (It keeps such a table only when war3map.imp lists it; one it doesn't list is gone after the save.) Move Texts
+// does better: its new strings go into every language's table too, with the same text and comment (to be translated
+// there; a table that replaces war3map.wts whole would otherwise show the bare reference), and they are numbered after
+// every number of every table. Strings it drops leave war3map.wts only: a language's table keeps its translations, and
+// its numbers stay taken.
 
 import { StringTable, appendStrings, removeStrings, wtsCutLines } from "./wts";
 
@@ -97,6 +108,9 @@ export interface TextMapInfo { players?: { name?: unknown }[]; forces?: { name?:
 export interface MoveTextsInput {
   /** war3map.wts, or null when the map has none (one is made). */
   wts: string | null;
+  /** The languages' string tables (`map/_Locales/deDE.w3mod/war3map.wts`), path as given: the new strings go into each
+   *  too, and no new string takes a number one of them has. */
+  locales?: { path: string; wts: string }[];
   /** war3map.w3i as its JSON, or null. */
   info: TextMapInfo | null;
   /** The object files as their JSON: main (war3map.w3u) and Skin (war3mapSkin.w3u) ones, any order. */
@@ -121,6 +135,8 @@ export interface KeptText { where: string; why: string }
 export interface MoveTextsResult {
   /** The new war3map.wts, or null when it stays as it is. */
   wts: string | null;
+  /** The languages' tables that changed (paths as given): each with the new strings added. */
+  locales: { path: string; wts: string }[];
   /** The new war3map.w3i JSON, or null when it stays. */
   info: TextMapInfo | null;
   /** The object files that changed (paths as given), with their new JSON. */
@@ -145,6 +161,11 @@ export function refsIn(text: string, into = new Set<number>()): Set<number> {
 const modsOf = (o: TextObject): TextMod[] => (o.sets ? o.sets.flatMap((s) => s.mods ?? []) : (o.mods ?? []));
 const keyOf = (o: TextObject) => o.id || o.base;
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+/** The line ends new blocks get: the table's own, CRLF for a new table or one of a single line (as the editor writes). */
+const eolOf = (wts: string | null) => (wts === null || wts.includes("\r\n") || !wts.includes("\n") ? "\r\n" : "\n");
+
+/** A language's string table in the project (`map/_Locales/deDE.w3mod/war3map.wts`), any case. */
+export const LOCALE_WTS = /^map\/_locales\/[^/]+\.w3mod\/war3map\.wts$/i;
 
 /** See the top. Pure: the inputs are left as they are; the result holds what changed. Throws rather than give a
  *  table that wouldn't read back as written. */
@@ -162,6 +183,10 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   for (const f of input.objects) refsIn(JSON.stringify(f.doc), before);
   for (const n of before) next = Math.max(next, n + 1);
   for (const n of input.reserved ?? []) next = Math.max(next, n + 1);
+  // And after every number of the languages' tables: a string only one of them has would otherwise show there in place
+  // of the new one.
+  const locales = (input.locales ?? []).map((l) => ({ ...l, table: new StringTable(l.wts) }));
+  for (const l of locales) for (const [n] of l.table.entries()) next = Math.max(next, n + 1);
   const blocks: { num: number; text: string; comment: string | null }[] = [];
   const kept: KeptText[] = [];
   /** The text's new reference, or null when it stays literal. */
@@ -238,8 +263,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   let wts: string | null = null;
   if (blocks.length || dropped.length) {
     const base = input.wts ?? "﻿";
-    const eol = input.wts === null || input.wts.includes("\r\n") || !input.wts.includes("\n") ? "\r\n" : "\n";
-    const out = appendStrings(removeStrings(base, droppedSet), blocks, eol);
+    const out = appendStrings(removeStrings(base, droppedSet), blocks, eolOf(input.wts));
     // Read back: every new string whole, every old one but the dropped as it was.
     const back = new StringTable(out);
     for (const b of blocks) {
@@ -252,8 +276,23 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
     }
     wts = out;
   }
+  // The languages' tables: the new strings added, nothing dropped (each keeps its translations).
+  const localeOut: { path: string; wts: string }[] = [];
+  if (blocks.length) {
+    for (const l of locales) {
+      const out = appendStrings(l.wts, blocks, eolOf(l.wts));
+      const back = new StringTable(out);
+      for (const b of blocks) {
+        if (back.get(b.num)?.replace(/\r\n/g, "\n") !== b.text) throw new Error(`string ${b.num} wouldn't read back as written in ${l.path}; nothing was changed.`);
+      }
+      for (const [n, v] of l.table.entries()) {
+        if (back.get(n) !== v) throw new Error(`string ${n} of ${l.path} wouldn't stay as it is; nothing was changed.`);
+      }
+      localeOut.push({ path: l.path, wts: out });
+    }
+  }
   return {
-    wts, info,
+    wts, locales: localeOut, info,
     objects: copies.filter((f) => f.changed).map((f) => ({ path: f.path, doc: f.doc })),
     added: blocks.map((b) => b.num), dropped, kept,
   };

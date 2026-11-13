@@ -142,6 +142,15 @@ test("Object Manager actions: rename and delete where the owning editor can, pla
   assert.deepEqual(nodeActions(tree[0]), { edit: false, rename: false, remove: false, play: false });
 });
 
+test("Object Manager: an import row can be renamed and removed (through the Import Manager); the group can't", () => {
+  const tree = buildTree(contents({ imports: ["war3mapImported\\a.mdx"] }));
+  const imp = tree.find((n) => n.label.startsWith("Imported files"))!.children![0];
+  assert.deepEqual(imp.target, { kind: "imports", path: "war3mapImported\\a.mdx" });
+  assert.deepEqual(nodeActions(imp), { edit: true, rename: true, remove: true, play: false });
+  // Control: a target without the path (nothing to name to the Import Manager) offers neither.
+  assert.deepEqual(nodeActions({ label: "x", target: { kind: "imports" } }), { edit: true, rename: false, remove: false, play: false });
+});
+
 test("Object Manager groups: Expand or Collapse, and the editor of their entries; cameras are renamed in their tab", () => {
   const tree = buildTree(contents({ cameras: [{ name: "Intro", targetX: 0, targetY: 0 }] }));
   const group = (start: string) => tree.find((n) => n.label.startsWith(start))!;

@@ -42,6 +42,10 @@ fn the_fixture_prunes_as_the_app_does() {
     assert_eq!(list(&r.restored), [20.0]);
     let expected = fs::read_to_string(root.join("expected.wts")).unwrap();
     assert_eq!(String::from_utf8(files["war3map.wts"].clone()).unwrap(), expected);
+    // The German table stays byte for byte: the strings war3map.wts dropped (3, 5, 12) and its own 30 too, and its
+    // text's `TRIGSTR_009` doesn't keep 9 (a string table refers to nothing).
+    let de = "_Locales/deDE.w3mod/war3map.wts";
+    assert_eq!(files[de], fs::read(root.join("map").join(de)).unwrap());
 }
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -74,6 +78,10 @@ fn pack_pruned_leaves_orphans_out_and_restores_recorded_strings_the_project_keep
     assert!(original.contains(six));
     let edited = format!("{}STRING 99\n{{\nnobody's\n}}\n", original.replace(six, ""));
     fs::write(&wts_path, &edited).unwrap();
+    // A German table holding the orphan 99 and an orphan of its own: packed as it is.
+    let de = "STRING 99\r\n{\r\nniemandes\r\n}\r\n\r\nSTRING 100\r\n{\r\nnur deutsch\r\n}\r\n\r\n";
+    fs::create_dir_all(project.join("map/_Locales/deDE.w3mod")).unwrap();
+    fs::write(project.join("map/_Locales/deDE.w3mod/war3map.wts"), de).unwrap();
     fs::create_dir_all(project.join(".w3proj")).unwrap();
     fs::write(project.join(wts::PRUNED_STRINGS_FILE), r#"{"format":"w3proj.prunedStrings/1","strings":{"6":"Force"}}"#).unwrap();
 
@@ -84,6 +92,7 @@ fn pack_pruned_leaves_orphans_out_and_restores_recorded_strings_the_project_keep
     let packed = packed_wts(&out);
     assert!(!packed.contains("STRING 99"));
     assert!(packed.ends_with("STRING 6\n{\nForce\n}\n\n"), "{packed}");
+    assert_eq!(Archive::open(&out).unwrap().read("_Locales\\deDE.w3mod\\war3map.wts").unwrap(), de.as_bytes());
     assert_eq!(fs::read_to_string(&wts_path).unwrap(), edited, "the project's file stays as it is");
 
     // The control: plain `pack` packs the table as it is.
