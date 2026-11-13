@@ -1,18 +1,16 @@
-import { campaignCandidates } from "./chapterimports";
 import { fogOf } from "../../lib/model/fog";
 import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { mapObjectData, readFile, readImport, savedObjects } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
-import { joinPath } from "../../lib/paths";
-import { importedPath, modeNames } from "../../lib/imports";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
@@ -33,7 +31,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -128,33 +126,6 @@ const keyCodeOf = (e: KeyboardEvent) => e.code || eventKey(e).toLowerCase();
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
 
-/** Custom object id → base id, from the project's object data (war3map.w3u.json, …). */
-/** The object data the terrain view needs (units, items, destructables, doodads): the bases
- *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
- *  the map's own, then its Skin files (Reforged keeps art changes there). */
-async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[] }> {
-  const kinds = ["w3u", "w3t", "w3b", "w3d"];
-  const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
-    try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
-  };
-  const art: ObjectArt[] = [];
-  // A campaign's chapter map also uses the campaign's custom objects.
-  const campaign = campaignRoot(w3);
-  if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  for (const prefix of ["war3map", "war3mapSkin"]) {
-    for (const k of kinds) {
-      const path = `map/${prefix}.${k}.json`;
-      if (!files.has(path.toLowerCase())) continue;
-      const f = await read(path, k);
-      if (f) art.push(f);
-    }
-  }
-  const bases = new Map<string, string>();
-  for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return { bases, art };
-}
-
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
 async function tilePaths(w3: W3Api): Promise<Map<string, string>> {
   return new Map([...(await tileCatalog(w3))].map(([id, t]) => [id, t.path]));
@@ -168,49 +139,6 @@ async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name:
 
 /** Maps hold at most this many ground tile types (World Editor limit). */
 const MAX_GROUND_TILES = 16;
-
-/** A game file, or the map's imported replacement of it. */
-/** The campaign project of a chapter map project (…/maps/<file>), or undefined. */
-function campaignRoot(w3: W3Api): string | undefined {
-  const root = w3.workspace.project()?.root;
-  return root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-}
-
-/** The files of a campaign's map folder, to find an import under its name on disk (see campaignCandidates); one listing per
- *  campaign for a few seconds, as most reads here are of the game's files. Null when it can't be listed. */
-const listings = new Map<string, { at: number; files: Promise<string[] | null> }>();
-function campaignListing(w3: W3Api, campaign: string): Promise<string[] | null> {
-  const known = listings.get(campaign);
-  if (known && Date.now() - known.at < 5000) return known.files;
-  const files = w3.workspace.listFolder(joinPath(campaign, "map")).catch(() => null);
-  listings.set(campaign, { at: Date.now(), files });
-  return files;
-}
-
-/** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
- *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
-async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
-  const names = modeNames(path.replace(/\//g, "\\"), w3.settings.get<string>("game.graphicsMode") ?? "hd");
-  const campaign = campaignRoot(w3);
-  // The project's own files are known; only those are read (most paths are the game's), under the name they have on
-  // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
-  const own = names.flatMap((n) => importedPath(w3, n) ?? []);
-  const candidates = [...own, ...(campaign ? campaignCandidates(campaign, names, await campaignListing(w3, campaign)) : [])];
-  let last: unknown = new Error(`${path} isn't imported`);
-  for (const c of candidates) {
-    try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
-  }
-  throw last;
-}
-
-/** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
- *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
-async function readFile(w3: W3Api, doc: EditorDocument, path: string, tileset?: string): Promise<Uint8Array> {
-  if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return await readImport(w3, path); } catch { /* use the game's */ }
-  }
-  return w3.game.read(path, { tileset });
-}
 
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
@@ -311,10 +239,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await deriveFromProject(w3, {
       terrainPath: path,
       from,
-      objects: async () => {
-        const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-        return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-      },
+      objects: () => savedObjects(w3),
       read: (p) => readFile(w3, doc, p),
       groups: toolGroups.all(),
       // Another project opened meanwhile: nothing of this one's is written into it.
@@ -373,10 +298,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const doc = { path } as EditorDocument;
       const { shd, stored } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
         terrainPath: path,
-        objects: async () => {
-          const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-          return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-        },
+        objects: () => savedObjects(w3),
         read: (p) => readFile(w3, doc, p),
       }));
       const changed = stored && stored.length === shd.length ? shd.reduce((n, v, i) => n + (v !== stored[i] ? 1 : 0), 0) : shd.length;
