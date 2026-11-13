@@ -20,7 +20,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, snappedInside, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -46,6 +46,7 @@ import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -76,6 +77,7 @@ import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
+import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
@@ -1148,10 +1150,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let spot: [number, number] | null = [x, y];
           // At a corner a line runs into the end of the last one, of the same fence: that's meant.
           const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
-          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await room.fits(kindOf, id, x, y, angle))) {
+          // A unit is snapped when placed (a building to its grid): room is checked where it lands.
+          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
+          const fitsAt = (px: number, py: number, ang: number) => fitsSnapped(snap, (sx, sy) => room!.fits(kindOf, id, sx, sy, ang), px, py);
+          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
             spot = null;
             if (nearest === true) {
-              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
+              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await fitsAt(s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
               skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
@@ -1160,8 +1165,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
           // Both sides or neither, or a skipped object would break the symmetry unseen.
-          // A unit is snapped when placed (a building to its grid): the bounds apply where it lands.
-          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
           if (!(await snappedInside(held, snap, spot[0], spot[1]))) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
@@ -1174,16 +1177,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
             continue;
           }
-          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await room.fits(kindOf, id, twin[0], twin[1], twinAngle))) {
+          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await fitsAt(twin[0], twin[1], twinAngle))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
           }
           await place?.(o, i, spot[0], spot[1], facing);
           // A line's pieces touch each other on purpose.
-          if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+          if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(spot[0], spot[1]), angle);
           if (paired) {
             await place?.(o, i, twin[0], twin[1], twinFacing);
-            if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
+            if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(twin[0], twin[1]), twinAngle);
           }
           placed += paired ? 2 : 1;
         }
@@ -1690,6 +1693,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
+        /** The running cycle's hour (setting terrain.lighting.dayNightCycle); the stored hour stays as the user set it. */
+        let cycleHour = lightHour();
+        const cycleOn = () => w3.settings.get<boolean>("terrain.lighting.dayNightCycle", false) === true;
+        const lightHourNow = () => (cycleOn() ? cycleHour : lightHour());
         const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); keysToMap(); } });
         const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); keysToMap(); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
@@ -1711,11 +1718,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewSyncsAfterTab = () => {};
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
-          const on = lightOn() || gameViewOn(), hour = lightHour();
+          const on = lightOn() || gameViewOn(), hour = lightHourNow();
           lightBox.checked = lightOn();
           lightBox.disabled = gameViewOn();
-          lightSelect.value = String(hour);
-          lightSelect.disabled = !on;
+          lightSelect.value = String(Math.floor(hour));
+          lightSelect.disabled = !on || cycleOn();
           renderer.gameView = on;
           // The game's own lighting models light HD's real shadows more than a map's own do (tone.ts GAME_LIGHT_FILL).
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
@@ -1724,6 +1731,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };
+        // The running cycle: a step twice a second, none while the page or the view is hidden.
+        let cycleAt = 0;
+        const cycleTimer = setInterval(() => {
+          if (disposed || !cycleOn() || document.hidden || canvas.clientWidth <= 0) { cycleAt = 0; return; }
+          const now = performance.now();
+          if (cycleAt) cycleHour = stepHour(cycleHour, (now - cycleAt) / 1000, DAY_SECONDS);
+          cycleAt = now;
+          applyLight();
+        }, 500);
         const showBoundary = () => w3.settings.get<boolean>("terrain.boundary", true) !== false;
         /** The playable part as last read from the map; null until then. */
         let playableEdge: Area | null = null;
@@ -1788,6 +1804,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
           if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights") viewSyncs.forEach((f) => f());
+          if (key === "terrain.lighting.dayNightCycle") { cycleHour = lightHour(); cycleAt = 0; }
+          if (key === "terrain.lighting.hour" && !cycleOn()) cycleHour = lightHour();
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.gameView" || key === "terrain.fog" || key === "terrain.weather") viewChanged();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
@@ -2580,8 +2598,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins: withObjectArt(skins, art), bases };
+            if (df && switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"])) await snapOnOpen(df);
+            if (disposed) return;
             await rebuildObjects();
           });
+        }
+        /** Puts the doodads of the map just opened on their grids, as the World Editor does when it opens a map
+         *  (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
+         *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
+         *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
+        async function snapOnOpen(f: PlacedFile) {
+          const sizes = new Map<string, PathSize | null>();
+          try {
+            pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+            const data = await pathingData;
+            await Promise.all([...new Set(f.list.map((p) => p.id))].map(async (id) => {
+              const info = data.placedTex(id);
+              const image = info?.path ? (await data.placedImage(info)).image : null;
+              sizes.set(id, image ? { width: image.width, height: image.height } : null);
+            }));
+          } catch (e) {
+            console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
+            return;
+          }
+          // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
+          if (disposed || dooFile !== f) return;
+          const snaps = doodadSnaps(f.list, (id) => sizes.get(id) ?? null);
+          for (const { entry, x, y, angle } of snaps) {
+            const moved = x !== entry.position[0] || y !== entry.position[1];
+            if (moved) {
+              entry.position = [x, y, (flagsOf(entry) ?? 0) & 4 ? entry.position[2] : heightAt(terrain, x, y)];
+              repositioned.add(entry);
+            }
+            entry.angle = angle;
+          }
+          if (!snaps.length) return;
+          objectsTouched = true;
+          const n = snaps.length;
+          void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the
@@ -5520,6 +5574,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopObjectWatch.dispose();
             objectReload.cancel();
             stopLightSettings.dispose();
+            clearInterval(cycleTimer);
             // The minimap panel's picture still due, or being made, isn't drawn any more.
             clearTimeout(minimapTimer);
             minimapSeq++;

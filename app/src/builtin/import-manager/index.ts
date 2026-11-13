@@ -18,6 +18,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { ModelPreview } from "../../lib/model/preview";
 import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
+import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -155,8 +156,8 @@ class ImportView {
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
   /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
   private modelPreview: { key: string; view: ModelPreview; failed: boolean } | null = null;
-  /** Replace File steps, for undo and redo; `at` of them are done. */
-  private history: ReplaceStep[] = [];
+  /** Replace File and Remove steps, for undo and redo; `at` of them are done. */
+  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> })[] = [];
   private at = 0;
   /** A replace, undo or redo is writing: another replace is refused meanwhile, undo and redo wait for it (in order;
    *  dropped when the editor closes or another project opens). */
@@ -448,20 +449,36 @@ class ImportView {
       }
       // The editor closed or another project opened during the question: nothing is done.
       if (this.disposed || this.w3.workspace.project()?.root !== this.root) return;
-      // Entries another action removed meanwhile are left out; the files as they are now.
-      entries = entries.filter((e) => this.list.files.includes(e));
-      const files = this.files();
-      const fileOf = new Map(entries.map((e) => [e, withFiles ? this.fileOf(e, files)?.path : undefined]));
-      // Sound entries of different extensions can stand for the same file.
-      const paths = [...new Set([...fileOf.values()].filter((p): p is string => !!p))];
-      const { deleted, error } = paths.length ? await this.w3.window.withProgress(`Removing ${plural(entries.length, "file")}`, () => this.w3.workspace.deleteMany(paths))
-        : { deleted: 0, error: null };
-      const kept = new Set(paths.slice(deleted));
-      const gone = new Set(entries.filter((e) => !kept.has(fileOf.get(e) ?? "")));
-      this.list.files = this.list.files.filter((f) => !gone.has(f));
-      await this.write();
+      if (this.busy) throw new Error("Another change is still being written.");
+      // Files too large to keep for undo: asked, as with Replace File.
+      if (withFiles) {
+        const sizes = asked.reduce((n, p) => n + (this.files().get(p.toLowerCase())?.size ?? 0), 0);
+        if (sizes > UNDO_LIMIT && !(await this.w3.window.confirm(`${what} has files too large to keep for undo: deleting them can't be taken back.`, "Remove", 60000))) return;
+        if (this.disposed || this.w3.workspace.project()?.root !== this.root) return;
+        if (this.busy) throw new Error("Another change is still being written.");
+      }
+      let error: string | null = null, count = 0, total = 0;
+      await this.queue.hold(async () => {
+        // Entries another action removed meanwhile are left out; the files as they are now.
+        entries = entries.filter((e) => this.list.files.includes(e));
+        const files = this.files();
+        const fileOf = new Map(entries.map((e) => [e, withFiles ? this.fileOf(e, files)?.path : undefined]));
+        // Sound entries of different extensions can stand for the same file.
+        const paths = [...new Set([...fileOf.values()].filter((p): p is string => !!p))];
+        const kept = paths.length ? await keepFiles(this.replaceFs(), paths) : [];
+        const res = paths.length ? await this.w3.window.withProgress(`Removing ${plural(entries.length, "file")}`, () => this.w3.workspace.deleteMany(paths))
+          : { deleted: 0, error: null };
+        error = res.error;
+        const left = new Set(paths.slice(res.deleted));
+        const gone = new Set(entries.filter((e) => !left.has(fileOf.get(e) ?? "")));
+        const step = removeStep(this.list.files, gone, kept.filter((f) => !left.has(f.path)));
+        this.list.files = this.list.files.filter((f) => !gone.has(f));
+        count = gone.size; total = entries.length;
+        if (gone.size) { this.history.splice(this.at, this.history.length, { remove: step }); this.at = this.history.length; }
+        await this.write();
+      });
       this.select([]);
-      if (error) throw new Error(`${gone.size} of ${entries.length} removed, then: ${error}`);
+      if (error) throw new Error(`${count} of ${total} removed, then: ${error}`);
     });
   }
   /** The workspace as a replace uses it. */
@@ -488,7 +505,7 @@ class ImportView {
       if (this.disposed || this.w3.workspace.project()?.root !== root || this.busy) return;
       await this.queue.hold(async () => {
         const step = await this.w3.window.withProgress(`Replacing ${e.path}`, () => replaceFile(this.replaceFs(), file, src));
-        this.history.splice(this.at, this.history.length, step);
+        this.history.splice(this.at, this.history.length, { replace: step });
         this.at = this.history.length;
       });
       this.preview_ = null;
@@ -545,13 +562,16 @@ class ImportView {
       void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
     });
   }
-  /** Undo (-1) or redo (1) of Replace File; pressed while a replace (or another step) is writing, it runs after that. */
+  /** Undo (-1) or redo (1) of Replace File and Remove; pressed while a replace (or another step) is writing, it runs after that. */
   step(dir: -1 | 1) {
     this.queue.step(() => {
       const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
       if (!step) return;
-      return this.run(dir < 0 ? "Undo Replace File" : "Redo Replace File", async () => {
-        await stepReplace(this.replaceFs(), step, dir);
+      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "Replace File"}`, async () => {
+        if ("remove" in step) {
+          await stepRemove(this.replaceFs(), this.list, step.remove, dir);
+          await this.write();
+        } else await stepReplace(this.replaceFs(), step.replace, dir);
         this.at += dir;
         this.preview_ = null;
       });

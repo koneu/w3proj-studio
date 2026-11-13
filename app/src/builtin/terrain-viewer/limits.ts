@@ -39,6 +39,12 @@ export async function snappedInside(b: Bounds | null, snap: (x: number, y: numbe
   return insideBounds(b, sx, sy) ? [sx, sy] : null;
 }
 
+/** Whether something fits where `snap` puts it: room is asked at the snapped spot, the one used. */
+export async function fitsSnapped(snap: (x: number, y: number) => Promise<readonly [number, number]>, fits: (x: number, y: number) => Promise<boolean>, x: number, y: number): Promise<boolean> {
+  const [sx, sy] = await snap(x, y);
+  return fits(sx, sy);
+}
+
 /** The warning for an edit Enforce Camera Bounds refused: `what` is the subject and verb, e.g. "that is". */
 export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE_BOUNDS}.`;
 
