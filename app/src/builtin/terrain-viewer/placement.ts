@@ -179,3 +179,14 @@ export const onBuildingGrid = (v: number, cells: number) => {
   const half = cells * 16;
   return Math.round((v - half) / 64) * 64 + half;
 };
+
+/** The building grid a start location stands on, as a 4×4 building's: the 64 grid. A start location has no pathing
+ *  texture, but the World Editor puts it there all the same (we-drive 2026-11-13, tests/we-compare/mine-start-grid.json:
+ *  placed from the palette at -1899.5, 500.3 it stood at -1920, 512; Alt-moved to about -1900, 500 and -2000, 900 at
+ *  -1920, 512 and -1984, 896; nudged from -2141, 675 at -2112, 768). A gold mine goes by its 16×16 texture, also 64n. */
+export const START_CELLS: readonly [number, number] = [4, 4];
+
+/** The building grid cells a unit type `id` snaps by: a start location's, else its pathing texture's size (`texture`;
+ *  null or missing: none, the unit stands where it is put). */
+export const unitGridCells = (id: string, texture: readonly [number, number] | null | undefined): readonly [number, number] | null =>
+  id === "sloc" ? START_CELLS : texture ?? null;

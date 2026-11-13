@@ -5834,6 +5834,94 @@ async function doodadRulesEdit(page, found) {
   }
 }
 
+/** A gold mine and a start location stand on their building grid, the 64 grid, as the World Editor puts them
+ *  (tests/we-compare/mine-start-grid.json; placement.ts unitGridCells): placed and moved by the tools, nudged by the
+ *  number pad, dragged, and typed into the Position box, on a new 64×64 map. Before, a start location went where it
+ *  was dragged, typed or moved by a tool, and move_object put a gold mine anywhere. */
+async function mineStartGrid(page, found) {
+  const fail = (what) => found.push(`mine and start grid: ${what}`);
+  const xy = (u) => [u?.position[0], u?.position[1]];
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  /** onBuildingGrid of placement.ts, written out: what the editor saved (64n for 4 and 16 cells). */
+  const grid = (v, cells) => Math.round((v - cells * 16) / 64) * 64 + cells * 16;
+  try {
+    const k = await heightKit(page, "MineStart");
+    const start = () => k.units().find((u) => u.id === "sloc" && u.player === 0);
+    const mine = () => k.units().find((u) => u.id === "ngol");
+    const s0 = xy(start());
+    if (s0[0] % 64 !== 0 || s0[1] % 64 !== 0) return fail(`a new map's start location isn't on the 64 grid (control): ${s0}`);
+
+    // The tools: a mine placed at 1000, 300 by its 16×16 texture at 1024, 320; moves to off-grid spots land on the grid.
+    await k.tool("place_objects", { kind: "units", objects: [{ id: "ngol", x: 1000, y: 300, player: 28 }], ignoreRoom: true });
+    await k.save();
+    if (!same(xy(mine()), [1024, 320])) fail(`place_objects put the gold mine asked at 1000, 300 at ${xy(mine())}, not 1024, 320`);
+    const index = (id) => k.units().findIndex((u) => u.id === id && (id !== "sloc" || u.player === 0));
+    await k.tool("move_object", { kind: "units", index: index("ngol"), id: "ngol", x: 1500, y: 700 });
+    await k.tool("move_object", { kind: "units", index: index("sloc"), id: "sloc", x: s0[0] + 141, y: s0[1] + 35 });
+    await k.save();
+    if (!same(xy(mine()), [1472, 704])) fail(`move_object put the gold mine asked at 1500, 700 at ${xy(mine())}, not 1472, 704`);
+    if (!same(xy(start()), [s0[0] + 128, s0[1] + 64])) fail(`move_object put the start location asked at ${s0[0] + 141}, ${s0[1] + 35} at ${xy(start())}, not ${s0[0] + 128}, ${s0[1] + 64}`);
+
+    await k.tab("Select");
+    // The editor's handle, through a tool group of the smoke's own (made for the open editor at once).
+    await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__gridGroup = s.registerToolGroup({ id: "smoke-grid", title: "SmokeGrid", order: 998, create: (ed) => { window.__gridEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+    if (!(await page.evaluate(`!!window.__gridEd`))) return fail("no handle of the terrain editor (control)");
+    for (const [id, get, cells, lift] of [["sloc", start, 4, 16], ["ngol", mine, 16, 60]]) {
+      const name = id === "sloc" ? "start location" : "gold mine";
+      const lookAt = async () => { const [x, y] = xy(get()); await k.look(x, y, { id, x, y }); };
+      // Number pad 6: a whole 64.
+      const a = xy(get());
+      await lookAt();
+      await k.focusMap();
+      await k.hands.key("6", "Numpad6", 102);
+      await k.save();
+      if (!same(xy(get()), [a[0] + 64, a[1]])) fail(`Number pad 6 took the ${name} from ${a} to ${xy(get())}, not 64 to the right`);
+      // Typed: Position X 40 more goes to the grid's next point.
+      const b = xy(get());
+      await lookAt();
+      const typed = await page.evaluate(`(() => { const e = document.querySelector(".terrain-selection .terrain-sel-triple input"); if (!e) return false; e.value = ${JSON.stringify(String(b[0] + 40))}; e.dispatchEvent(new Event("change")); return true; })()`);
+      if (!typed) fail(`no Position box for the selected ${name}`);
+      await k.save();
+      if (!same(xy(get()), [grid(b[0] + 40, cells), b[1]])) fail(`Position X typed ${b[0] + 40} put the ${name} at ${xy(get())}, not ${grid(b[0] + 40, cells)}, ${b[1]}`);
+      // Dragged: somewhere else, on the grid.
+      const c = xy(get());
+      await lookAt();
+      // On the model: its point `lift` over the ground, through the editor's own projection.
+      const p = await page.evaluate(`(() => { const s = ${JSON.stringify([...c, 0])}; const g = window.__gridEd.view().target[2]; return window.__gridEd.project([s[0], s[1], g + ${lift}]); })()`);
+      if (!p) { fail(`the ${name} isn't in the view (control)`); continue; }
+      await k.hands.drag({ x: p[0], y: p[1] }, { x: p[0] + 97, y: p[1] + 43 });
+      await k.save();
+      const d = xy(get());
+      if (same(d, c)) fail(`the drag didn't move the ${name} from ${c} (control)`);
+      else if (d[0] !== grid(d[0], cells) || d[1] !== grid(d[1], cells)) fail(`the drag put the ${name} at ${d}, off its grid`);
+    }
+
+    // At the edge: a start location nudged right stops 64 inside the whole map, past the playable part, as in the
+    // World Editor (4032 on a map whose edge is 4096). Moved there with Enforce Camera Bounds off.
+    const head = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+    const right = Number(/^offset (\S+)/m.exec(head)?.[1]) + (Number(/^corners (\d+)/m.exec(head)?.[1]) - 1) * 128;
+    const playableRight = right - k.read("war3map.w3i.json").cameraComplements[1] * 128;
+    if (!Number.isFinite(right) || !(playableRight < right - 192)) return fail(`the map's edge ${right} and playable edge ${playableRight} (control)`);
+    await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
+    const y = xy(start())[1];
+    await k.tool("move_object", { kind: "units", index: index("sloc"), id: "sloc", x: right - 200, y });
+    await k.save();
+    if (!same(xy(start()), [right - 192, y])) fail(`move_object put the start location asked at ${right - 200}, ${y} at ${xy(start())}, not ${right - 192}`);
+    await k.look(right - 192, y, { id: "sloc", x: right - 192, y });
+    await k.focusMap();
+    for (let i = 0; i < 4; i++) await k.hands.key("6", "Numpad6", 102);
+    await k.save();
+    if (!same(xy(start()), [right - 64, y])) fail(`four nudges right from ${right - 192} left the start location at ${xy(start())}, not ${right - 64} (the World Editor's stop: 64 inside the map's edge ${right})`);
+    await k.reset();
+    await k.verify(fail);
+    await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await page.evaluate(`window.__gridGroup?.dispose(); window.__gridGroup = window.__gridEd = null;`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Delete Invalid Objects changes war3map.doo without a terrain editor: pathing, shadows and the minimap follow at once
  *  and are recorded as following it (w3proj::derived). On a scratch copy of the mini map with two rocks of a custom
  *  type (solid doodads with a pathing texture; trees, destructables, aren't in the pathing map), made unknown by
@@ -11617,6 +11705,7 @@ async function run() {
         mcpLimits,
         mcpStartMove,
         meleeByHand,
+        mineStartGrid,
         moduleFunctions,
         moveTextsToTable,
         newMaps,
@@ -11907,6 +11996,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "doodadSnapOnLoad", found);
   await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
   await leftOpen(page, "doodadRulesEdit", found);
+  await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));
+  await leftOpen(page, "mineStartGrid", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await verify3Steps(page, found).catch((e) => found.push(`verify 3 steps: ${e.message}`));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, type PlacedFile } from "./placement";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, unitGridCells, type PlacedFile } from "./placement";
 import { fragmentOf } from "../../lib/terrain/fragment";
 import type { Placed } from "./objects";
 
@@ -150,6 +150,25 @@ test("buildings stand where real maps have them: their edges on the 64 grid", ()
   assert.equal(onBuildingGrid(-1000, 8) % 64, -0);
   for (const cells of [4, 6, 8, 12]) assert.equal(onBuildingGrid(onBuildingGrid(777, cells), cells), onBuildingGrid(777, cells), "stays put");
   assert.ok(Math.abs(onBuildingGrid(100, 6) - 100) <= 32, "the nearest spot");
+});
+
+test("a start location and a gold mine go on the 64 grid, as the World Editor puts them", () => {
+  // we-drive 2026-11-13 (tests/we-compare/mine-start-grid.json): what the editor saved after each placing or move.
+  const at = (id: string, texture: [number, number] | null, x: number, y: number) => {
+    const cells = unitGridCells(id, texture);
+    return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
+  };
+  // A start location has no pathing texture, but stands on the grid of a 4×4 building all the same.
+  assert.deepEqual(unitGridCells("sloc", null), [4, 4]);
+  assert.deepEqual(at("sloc", null, -1899.459, 500.25296), [-1920, 512], "placed from the palette");
+  assert.deepEqual(at("sloc", null, -2141, 675 + 64), [-2112, 768], "nudged up once from -2141, 675");
+  assert.deepEqual(at("sloc", null, -2000, 900), [-1984, 896], "Alt-moved");
+  // A gold mine by its 16×16 pathing texture (PathTextures\16x16Goldmine.tga).
+  assert.deepEqual(at("ngol", [16, 16], 1000 + 64, 300), [1088, 320], "nudged right once from 1000, 300");
+  assert.deepEqual(at("ngol", [16, 16], 1088, 320 + 64), [1088, 384], "then up");
+  // Control: a unit without a texture stays where it is put (the editor placed a Phoenix Egg at -1899.459, 500.25296).
+  assert.equal(unitGridCells("hpxe", null), null);
+  assert.deepEqual(at("hpxe", null, -1899.459, 500.25296), [-1899.459, 500.25296]);
 });
 
 test("a plain doodad has life 255, a destructable 100, also copied from each other", () => {

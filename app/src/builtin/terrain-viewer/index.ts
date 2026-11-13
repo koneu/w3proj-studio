@@ -44,7 +44,7 @@ import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
-import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
@@ -1171,13 +1171,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
       const { handle } = await liveEditor();
+      // A building, a gold mine and a start location go on their grid, as the World Editor moves them (placement.ts
+      // unitGridCells); the spot it lands on is held to the bounds too.
+      const key = fileKey(kind);
+      const [gx, gy] = key === "units" ? await handle.objects.buildingSpot(String(id), x, y) : [x, y];
       // Enforce Camera Bounds refuses the move, as the Properties panel's Position does.
-      if (!insideBounds(await heldBounds(), x, y)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
+      const held = await heldBounds();
+      if (!insideBounds(held, x, y) || !insideBounds(held, gx, gy)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
       let at: number[] = [x, y];
-      await editPlaced(`Move ${String(id)}`, fileKey(kind), async (f) => {
+      await editPlaced(`Move ${String(id)}`, key, async (f) => {
         const e = f.list[Number(index)];
         if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
-        e.position = [x, y, heightAt(handle.terrain, x, y)];
+        e.position = [gx, gy, heightAt(handle.terrain, gx, gy)];
         if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
         if (typeof scale === "number") e.scale = [scale, scale, scale];
         // A doodad goes on its grid and keeps to its scale range, as the World Editor puts it (doodadedit.ts).
@@ -1748,8 +1753,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
         let cameraCorners: [number, number][] | null = null;
         /** Where a dragged or nudged object's centre may go: on the map, a unit or item with its collision size or
-         *  footprint inside the playable part (unitHalves). Not held to the camera bounds, as the World Editor's moves aren't. */
-        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle) : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
+         *  footprint inside the playable part (unitHalves); a start location 64 inside the whole map, its grid's last
+         *  point (we-drive 2026-11-13: nudged on a 64×64 map whose edge is 4096, it stopped at 4032, 4032, past the
+         *  playable part's 3328, 3072).
+         *  Not held to the camera bounds, as the World Editor's moves aren't. */
+        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle)
+          : e.id === "sloc" ? insetBy(wholeMap(handle), START_CELLS.map((c) => c * 16) as [number, number])
+            : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
         const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
@@ -2299,8 +2309,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           buildingCells.set(id, cells);
           unitHalves.set(id, unitHalf(cells, shape?.collision));
         };
+        /** Where a unit of type `id` goes for (x, y): a building and a start location on their grid, anything else there. */
         const onGrid = (id: string, x: number, y: number): [number, number] => {
-          const cells = buildingCells.get(id);
+          const cells = unitGridCells(id, buildingCells.get(id));
           return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
         };
         /** Object data being taken in by a reload, until it's drawn. */
