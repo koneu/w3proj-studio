@@ -3515,6 +3515,27 @@ async function workbenchState(page, found) {
     if (!(scrolled > 0)) fail(`the script didn't scroll back to line ${at.top} (scrollTop ${scrolled})`);
     if ((await page.evaluate(`w3.editors.activePath()`)) !== J) fail("the remembered active tab isn't active");
 
+    // ---- 1b. A tab closed before the project's restore has run stays closed ----
+    // The project opens again (projectOpened: nothing stored until restore()); the user closes a tab meanwhile.
+    const X = await page.evaluate(`w3.workspace.files().map((f) => f.path).find((p) => p !== ${JSON.stringify(J)} && /\\.(wts|txt|lua|ini)$/i.test(p)) ?? null`);
+    if (!X) fail("the new map has no second text file for the restore race");
+    else {
+      await page.evaluate(`w3.editors.open(${JSON.stringify(X)})`);
+      await until("the second file's editor", () => page.evaluate(`!!${tabOf(X)}?.instance`), 20000);
+      const hasTab = `JSON.parse(localStorage.getItem(${storeKey}) ?? "null")?.tabs?.map((t) => t.path) ?? []`;
+      if (!(await page.evaluate(hasTab)).includes(X)) fail("the second tab wasn't remembered before the race");
+      await page.evaluate(`(async () => { w3Workbench.editors.projectOpened(); await w3Workbench.editors.closeWhere((p) => p === ${JSON.stringify(X)}); })()`);
+      // Still waiting for the restore: the stored tabs aren't overwritten by the half-state.
+      if (!(await page.evaluate(hasTab)).includes(J)) fail("a close before the restore overwrote the stored tabs");
+      await page.evaluate(`w3.editors.restore()`);
+      await settled(page);
+      const open = await page.evaluate(`w3Workbench.editors.tabs.map((t) => t.path)`);
+      if (open.includes(X)) fail(`the tab closed before the restore came back: ${JSON.stringify(open)}`);
+      if (!open.includes(J)) fail(`the other tab didn't come back: ${JSON.stringify(open)}`);
+      const after = await page.evaluate(hasTab);
+      if (after.includes(X) || !after.includes(J)) fail(`the stored tabs after the restore are ${JSON.stringify(after)}`);
+    }
+
     // ---- 2. The Trigger Editor's sash ----
     const wtg = await page.evaluate(`w3.workspace.files().map((f) => f.path).find((p) => /war3map\\.wtg(\\.json)?$/i.test(p)) ?? null`);
     if (!wtg) fail("the new map has no trigger file");
