@@ -162,6 +162,17 @@ It never starts the game itself.
   (`takeLock`'s timeout; a dead pid is taken over). `we-setup.mjs --snapshot` and `--compare` show the
   install and the user's `Documents/Warcraft III` unchanged; the user's own Battle.net app writes elsewhere in that
   prefix while it runs (and touches the install's `shmem` files when it checks the game), which `--compare` lists.
+- **Nothing is ever sent to Blizzard.** The editor crashes on close with View > Light Ranges on, and its crash
+  report dialog has "Send to Blizzard" ticked and a text box. The editor's sandbox has no network (`bwrap
+  --unshare-net`), and every window list we-drive reads (`Session.windows()`, so every step, `--close` included) is
+  checked for that dialog (`crashDialogs`: title, window class, or the owning process's command line). On a hit it
+  types and clicks nothing: it kills the editor, its crash reporter and everything else of its prefix (`wineserver -k`
+  and the process group), and prints `crashed: true` with "the World Editor crashed; report dismissed without
+  sending" (`--close` then counts as closed; any other step fails). Unticking the box isn't tried: the dialog's
+  controls aren't reachable from X. `--close` types "n" only into the "Warning" question, or an untitled or
+  editor-titled dialog while the main window exists (`closeAction`); after that such a dialog counts as a crash. The
+  detection is tested on recorded window lists (`we-drive.test.mjs`); the real dialog's title and class were not seen,
+  so the patterns are broad.
 - **Nothing on the screen, no sound.** A display of its own (Xvfb, 1600x1000), Vulkan through lavapipe. Wine's audio
   drivers are off, PulseAudio and PipeWire are pointed at nothing and their sockets and `/dev/snd` are hidden, and
   the editor's interface sounds are off in its preferences: nothing of it shows in `pactl list sink-inputs`.

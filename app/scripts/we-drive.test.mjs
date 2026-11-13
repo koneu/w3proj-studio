@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addCamerasToMap, classify, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -239,4 +239,44 @@ test("the lock's place is per user, outside every farm", () => {
   } finally {
     for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
+});
+
+const win = (title, extra = {}) => ({ id: 1, title, class: null, rect: [0, 0, 400, 300], overrideRedirect: false, ...extra });
+
+test("isCrashDialog recognises the crash report by title, class or owning process, and nothing the editor shows itself", () => {
+  for (const t of ["Warcraft III Crash Report", "Blizzard Error", "Error Report", "BugSplat", "Send Error Report to Blizzard"]) {
+    assert.ok(isCrashDialog(win(t)), t);
+  }
+  assert.ok(isCrashDialog(win("", { class: "BlizzardError" })));
+  assert.ok(isCrashDialog(win("Report"), "Z:\\x\\BlizzardError.exe -pid 12"), "by the process's command line");
+  for (const t of ["Warning", "Progress", "Reminder", "Warcraft III World Editor - [x.w3x]", "Trigger Editor", "Terrain Palette", ""]) {
+    assert.ok(!isCrashDialog(win(t)), t);
+  }
+  assert.ok(!isCrashDialog(win("Crash", { overrideRedirect: true })), "a menu or tooltip is no dialog");
+  assert.ok(!isCrashDialog(null), "control: nothing");
+});
+
+test("crashDialogs picks the crash window out of a recorded list; classify keeps the rest", () => {
+  const main = win("Warcraft III World Editor - [m.w3x]", { id: 2, rect: [4, 30, 1352, 937] });
+  const crash = win("Blizzard Error", { id: 3 });
+  assert.deepEqual(crashDialogs([main, win("Warning", { id: 4 })]), []);
+  assert.deepEqual(crashDialogs([main, crash, win("Warning", { id: 4 })]).map((w) => w.id), [3]);
+  assert.deepEqual(crashDialogs([win("x", { id: 5 })], () => "crashpad_handler").map((w) => w.id), [5]);
+});
+
+test("closeAction never types into a dialog it can't vouch for", () => {
+  assert.equal(closeAction(win("Warning"), true), "no");
+  assert.equal(closeAction(win("Warning"), false), "no");
+  assert.equal(closeAction(win(""), true), "no");
+  assert.equal(closeAction(win("Warcraft III World Editor"), true), "no");
+  assert.equal(closeAction(win(""), false), "crash", "an untitled dialog after the main window went is not the question");
+  assert.equal(closeAction(win("Warcraft III World Editor"), false), "crash");
+  assert.equal(closeAction(win("Something else"), true), "report", "control: unknown dialogs are reported, not answered");
+});
+
+test("EditorCrashed carries the message we-drive prints", () => {
+  const e = new EditorCrashed([{ title: "Blizzard Error" }]);
+  assert.equal(e.message, CRASH_MESSAGE);
+  assert.match(CRASH_MESSAGE, /crashed on close; report dismissed without sending|crashed; report dismissed without sending/);
+  assert.equal(e.crashed, true);
 });

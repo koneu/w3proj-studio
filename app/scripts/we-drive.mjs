@@ -61,6 +61,7 @@
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
 //   --close             quit without saving: closes the main window and answers "don't save" questions
+//                       (a crash-report dialog is never answered: the editor is killed, "crashed": true, nothing sent)
 //
 // Whatever happens, the editor (wineserver -k for its prefix) and the Xvfb display are stopped at the end.
 //
@@ -157,6 +158,52 @@ const PROGRESS_TITLE = "Progress";
  */
 export function questionDialogs(unknown) {
   return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE);
+}
+
+/**
+ * Whether a window is the editor's crash-report dialog (it has "Send to Blizzard" ticked and a text box; we-drive must
+ * never type into it or send it). By title or class, or by the command line of the process that owns it (`cmdline`,
+ * best effort). Deliberately broad: a false hit only costs the run, a miss could send something to Blizzard.
+ */
+const CRASH_TITLE = /crash|error report|bug ?report|bugsplat|blizzard error|send .*(report|blizzard)|unhandled|fatal|has stopped|stopped working|assert/i;
+const CRASH_CLASS = /crash|blizzard.?error|bugsplat|error.?report|bug.?report/i;
+const CRASH_PROCESS = /blizzarderror|blizzardcrash|crashpad|crash.?report|bugsplat|errorreport/i;
+export function isCrashDialog(w, cmdline = "") {
+  if (!w || w.overrideRedirect) return false;
+  return CRASH_TITLE.test(w.title ?? "") || CRASH_CLASS.test(w.class ?? "") || CRASH_PROCESS.test(cmdline ?? "");
+}
+
+/** The crash dialogs among the raw window list (`cmdlineOf` gives the command line of a window's process). */
+export function crashDialogs(windows, cmdlineOf = () => "") {
+  return windows.filter((w) => !w.overrideRedirect && w.rect[2] > 1 && w.rect[3] > 1 && isCrashDialog(w, cmdlineOf(w)));
+}
+
+/**
+ * What --close does with a dialog. "Save changes?" (titled "Warning") gets "n"; an untitled one or one titled like the
+ * editor gets "n" only while the editor's main window is still there. With the main window gone it could be a crash
+ * reporter nobody recognised: "crash", nothing is typed into it and the editor is killed. Anything else is "report".
+ */
+export function closeAction(dialog, mainPresent) {
+  if (dialog.title === "Warning") return "no";
+  const editorLike = dialog.title === "" || dialog.title.startsWith("Warcraft III World Editor");
+  if (editorLike) return mainPresent ? "no" : "crash";
+  return "report";
+}
+
+/** The line we-drive prints when it found the crash dialog. */
+export const CRASH_MESSAGE = "the World Editor crashed; report dismissed without sending";
+
+export class EditorCrashed extends Error {
+  constructor(dialogs) {
+    super(CRASH_MESSAGE);
+    this.crashed = true;
+    this.dialogs = dialogs;
+  }
+}
+
+function cmdlineOfPid(w) {
+  if (!w.pid) return "";
+  try { return readFileSync(`/proc/${w.pid}/cmdline`, "utf8").replaceAll("\0", " "); } catch { return ""; }
 }
 
 export function parseArgs(argv) {
@@ -369,7 +416,9 @@ class Session {
     const fdArgs = Buffer.from(ro.flatMap((p) => ["--ro-bind", p, p]).map((s) => `${s}\0`).join(""));
     const bw = ["--bind", "/", "/", "--dev-bind", "/dev", "/dev", "--proc", "/proc",
       // No sound: no ALSA devices, no PulseAudio or PipeWire sockets.
-      "--tmpfs", "/dev/snd"];
+      "--tmpfs", "/dev/snd",
+      // No network: nothing of this machine (a crash report included) can leave it. The editor works offline.
+      "--unshare-net"];
     for (const p of ["pulse"]) if (existsSync(join(run, p))) bw.push("--tmpfs", join(run, p));
     for (const p of ["pipewire-0", "pipewire-0-manager"]) if (existsSync(join(run, p))) bw.push("--ro-bind", "/dev/null", join(run, p));
     bw.push("--args", "3", join(this.proton.tool, "proton"), "run", program, ...args);
@@ -463,8 +512,24 @@ class Session {
     this.editor.on("exit", () => { this.editorExited = true; });
   }
 
+  /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
+   *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
   windows() {
-    return classify(x11(this.display, "windows").windows);
+    const all = x11(this.display, "windows").windows;
+    const crash = crashDialogs(all, cmdlineOfPid);
+    if (crash.length) {
+      this.killEditor();
+      this.crash = crash.map((w) => ({ title: w.title, class: w.class }));
+      throw new EditorCrashed(this.crash);
+    }
+    return classify(all);
+  }
+
+  /** Kills everything the editor started (its crash reporter too) instead of answering anything. */
+  killEditor() {
+    this.wineserver("-k");
+    try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
+    this.editorExited = true;
   }
 
   viewRect(main) {
@@ -706,6 +771,15 @@ class Session {
   async close() {
     if (!this.editor || this.editorExited) return { closed: true, answered: [] };
     const answered = [];
+    try {
+      return await this.closeSteps(answered);
+    } catch (e) {
+      if (e instanceof EditorCrashed) return { closed: true, crashed: true, answered, dialogs: e.dialogs, message: CRASH_MESSAGE };
+      throw e;
+    }
+  }
+
+  async closeSteps(answered) {
     const { main } = this.windows();
     if (main) x11(this.display, "close", main.id);
     const deadline = Date.now() + Math.min(this.opts.timeout, 120) * 1000;
@@ -718,7 +792,13 @@ class Session {
       }
       for (const d of w.dialogs) {
         // "Save changes to …?" is a message box titled "Warning" (Yes, No, Cancel): "n" is its "No".
-        if (d.title === "Warning" || d.title.startsWith("Warcraft III World Editor") || d.title === "") {
+        const action = closeAction(d, !!w.main);
+        if (action === "crash") {
+          this.killEditor();
+          this.crash = [{ title: d.title, class: d.class }];
+          throw new EditorCrashed(this.crash);
+        }
+        if (action === "no") {
           x11(this.display, "key", "--window", d.id, "n");
           answered.push(d.title || "(untitled)");
         } else {
@@ -878,7 +958,7 @@ async function main() {
         }
       } catch (e) {
         failed = true;
-        out({ step, arg, error: e.message });
+        out({ step, arg, error: e.message, ...(e.crashed ? { crashed: true, dialogs: e.dialogs } : {}) });
         break;
       }
     }
