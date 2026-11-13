@@ -7,6 +7,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { parseRandomId } from "../../lib/objects/randomids";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 /** How a kind's game data is loaded (a parameter so tests can stand in for the game). */
 export type KindLoader = (w3: W3Api, kind: string) => Promise<{ baseIds: string[] }>;
@@ -113,6 +114,17 @@ export async function editPlacedFile(w3: W3Api, file: string, change: (doc: Reco
   else await w3.backend.invoke("codec_write", { root, path: raw, text: JSON.stringify(doc) });
 }
 
+/** After placement files were changed with editPlacedFile: pathing, shadows and the minimap made again from the saved
+ *  files, and recorded as following them (else `w3proj pack` would refuse them as older than the doodads).
+ *  `doodadsBefore`: war3map.doo's list before the change, null when it didn't change. Without the terrain viewer
+ *  (disabled) nothing is rebuilt; a failed rebuild shows itself. */
+export async function rebuildDerived(w3: W3Api, doodadsBefore: unknown[] | null) {
+  const id = "w3.terrain.rebuildFromFiles";
+  await w3.commands.execute(id, doodadsBefore ?? undefined).catch((e) => {
+    if ((e instanceof Error ? e.message : String(e)) === commandNotFound(id)) return;
+  });
+}
+
 /** The question's text: what goes, in short. */
 export function describePlan(plan: InvalidPlan): string {
   const ids = [...plan.types].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -136,12 +148,19 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
   if (!t.gameOk) throw new Error("The game's object data isn't available any more. Nothing was changed.");
   const checkpointed = await checkpointIfOn(w3, "Delete Invalid Objects");
   let removed = 0;
-  for (const { file, key } of plan.files) {
-    await editPlacedFile(w3, file, (doc) => {
-      const { keep, removed: gone } = splitInvalid(doc[key] ?? [], t.known);
-      removed += gone.length;
-      doc[key] = keep;
-    });
+  let doodadsBefore: unknown[] | null = null;
+  try {
+    for (const { file, key } of plan.files) {
+      await editPlacedFile(w3, file, (doc) => {
+        const { keep, removed: gone } = splitInvalid(doc[key] ?? [], t.known);
+        removed += gone.length;
+        if (key === "doodads" && gone.length) doodadsBefore = doc[key] ?? [];
+        doc[key] = keep;
+      });
+    }
+  } finally {
+    // Also after a failure halfway: what was written is followed.
+    if (removed) await rebuildDerived(w3, doodadsBefore);
   }
   void w3.window.showInfo(`Deleted ${removed} invalid placed object${removed === 1 ? "" : "s"}.${checkpointed ? " The checkpoint made before is in Restore Checkpoint." : ""}`);
   return removed;

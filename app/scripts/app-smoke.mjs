@@ -4682,6 +4682,88 @@ async function testMapWithoutGame(page, found) {
   if (/isn't a Test Map option/.test(good ?? "")) found.push(`test map: the backend refused the World Editor's own flags: ${good}`);
 }
 
+/** Delete Invalid Objects changes war3map.doo without a terrain editor: pathing, shadows and the minimap follow at once
+ *  and are recorded as following it (w3proj::derived). On a scratch copy of the mini map with two rocks of a custom
+ *  type (solid doodads with a pathing texture; trees, destructables, aren't in the pathing map), made unknown by
+ *  taking the type out of the object data: `w3proj pack` takes the result without --force-stale, the packed pathing is
+ *  what a rebuild makes (and lacks the rocks), the map verifies, and restoring the checkpoint
+ *  made before (the way back) packs again without --force-stale, with the pathing from before. */
+async function derivedAfterDeletes(page, found) {
+  const fail = (what) => found.push(`derived after deletes: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "derived-after-deletes");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  let root = "";
+  const dooFile = () => join(root, "map", "war3map.doo.json"), w3dFile = () => join(root, "map", "war3map.w3d.json");
+  const wpmFile = () => join(root, "map", "war3map.wpm"), record = () => join(root, ".w3proj", "derived-from.json");
+  const pack = (label) => {
+    const map = join(dir, `${label}.w3x`);
+    const r = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    if (r.status !== 0) { fail(`${label}: w3proj pack refused: ${((r.stdout ?? "") + (r.stderr ?? "")).trim().slice(-400)}`); return null; }
+    return map;
+  };
+  const wpmOf = (map) => {
+    const r = spawnSync(cli, ["cat", map, "war3map.wpm"]);
+    return r.status === 0 ? r.stdout : null;
+  };
+  const same = (a, b) => !!a && !!b && Buffer.compare(a, b) === 0;
+  const ids = () => JSON.parse(readFileSync(dooFile(), "utf8")).doodads.map((d) => d.id);
+  await page.evaluate(`(() => { window.__derivedKept = w3.window.confirm; window.__derivedAsked = []; w3.window.confirm = async (m) => { window.__derivedAsked.push(m); return true; }; })()`);
+  try {
+    // A map big enough to have pathing inside its bounds (the mini map is all boundary).
+    await tool("new_map", { name: "DerivedAfterDeletes", width: 64, height: 64, folder: dir });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await settled(page);
+    root = await page.evaluate(`w3.workspace.project()?.root`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+    // Two rocks of a custom type (AOks, an 8x8 pathing texture).
+    writeFileSync(w3dFile(), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "AOks", id: "D000", mods: [] }] }, null, 2));
+    await page.evaluate(`w3.workspace.refresh()`);
+    await tool("place_objects", { kind: "doodads", objects: [{ id: "D000", x: 0, y: 0 }, { id: "D000", x: 512, y: 256 }], ignoreRoom: true });
+    if (ids().filter((id) => id === "D000").length !== 2) { fail(`place_objects placed ${ids().join()}`); return; }
+    // The starting point: derived files made with the rocks, and recorded.
+    await tool("rebuild_map");
+    await settled(page);
+    if (!existsSync(record())) { fail("rebuild_map left no record of what the derived files follow"); return; }
+    const wpmBefore = readFileSync(wpmFile());
+    await page.evaluate(`w3.editors.closeAll()`);
+    // The type is gone (an edit outside the app, not a source of the derived files): its rocks are invalid now.
+    rmSync(w3dFile());
+    await page.evaluate(`w3.workspace.refresh()`);
+    const err = await page.evaluate(`w3.commands.execute("w3.problems.deleteInvalid").then(() => null, (e) => String(e))`);
+    if (err) { fail(`Delete Invalid Objects: ${err}`); return; }
+    const question = (await page.evaluate(`window.__derivedAsked`)).find((m) => m.startsWith("Delete ")) ?? "";
+    if (!/D000 ×2/.test(question)) fail(`Delete Invalid Objects asked ${JSON.stringify(question)}`);
+    if (ids().includes("D000")) { fail(`the invalid rocks are still placed: ${ids().join()}`); return; }
+    const opened = await page.evaluate(`w3.editors.activePath()`);
+    if (opened) fail(`Delete Invalid Objects opened ${opened}`);
+    const packed = pack("after-delete");
+    if (!packed) return;
+    const v = spawnSync(cli, ["verify", "-q", packed, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+    if (v.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(v.stdout ?? "")) fail(`verify after the delete: ${((v.stdout ?? "") + (v.stderr ?? "")).trim().slice(-300)}`);
+    const wpmPacked = wpmOf(packed);
+    if (!wpmPacked) { fail("the packed map has no war3map.wpm"); return; }
+    if (same(wpmPacked, wpmBefore)) fail(`the packed pathing still has the deleted rocks (${await page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`)})`);
+    // A rebuild now makes the same pathing.
+    await tool("rebuild_map");
+    await settled(page);
+    if (!same(readFileSync(wpmFile()), wpmPacked)) fail("the packed pathing differs from what a rebuild makes");
+    // The way back: the checkpoint made before the delete, restored, packs as it is, with the pathing from before.
+    const newest = JSON.parse(await tool("list_checkpoints"))[0]?.name;
+    if (!newest) { fail("Delete Invalid Objects made no checkpoint"); return; }
+    await page.evaluate(`w3.editors.closeAll()`);
+    await tool("restore_checkpoint", { name: newest });
+    await settled(page);
+    if (!ids().includes("D000")) fail(`restoring the checkpoint didn't bring the rocks back: ${ids().join()}`);
+    const restored = pack("restored");
+    if (restored && !same(wpmOf(restored), wpmBefore)) fail("the restored map's pathing isn't the one from before the delete");
+  } finally {
+    await page.evaluate(`(async () => { if (window.__derivedKept) w3.window.confirm = window.__derivedKept; delete window.__derivedKept; delete window.__derivedAsked; await w3.editors.closeAll(); })()`).catch(() => {});
+  }
+}
+
 /** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
  *  replace, run through the app on scratch copies of the mini map; every project they change is
  *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
@@ -9412,6 +9494,7 @@ async function run() {
         configSafety,
         contextLoss,
         dataSafety,
+        derivedAfterDeletes,
         drawCalls,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
@@ -9699,6 +9782,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "typedFieldSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
   await leftOpen(page, "moduleFunctions", found);
+  await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
+  await leftOpen(page, "derivedAfterDeletes", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));

@@ -297,15 +297,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back). */
   let rebuilding: Promise<void> = Promise.resolve();
+  const rebuildFailed = (why: unknown) => {
+    const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
+    w3.window.showError(text);
+    return new Error(text);
+  };
+  /** The derived files of project `key` made from its saved files (no editor is opened), in the rebuilds' turn. */
+  const deriveSaved = async (key: string, path: string, from: RebuildFrom) => {
+    const doc = { path } as EditorDocument;
+    await deriveFromProject(w3, {
+      terrainPath: path,
+      from,
+      objects: async () => {
+        const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+        return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
+      },
+      read: (p) => readFile(w3, doc, p),
+      groups: toolGroups.all(),
+      // Another project opened meanwhile: nothing of this one's is written into it.
+      stillOpen: () => w3.workspace.project()?.root === key,
+    }).catch((e) => { throw rebuildFailed(e); });
+  };
   const runRebuild = () => {
     const run = rebuilding.then(async () => {
       const job = rebuild;
       if (!job || job.key !== w3.workspace.project()?.root) return;
-      const failed = (why: unknown) => {
-        const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
-        w3.window.showError(text);
-        return new Error(text);
-      };
       // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
       // it stays closed: the files are made from the project's saved ones.
       const editor = ownEditor();
@@ -313,25 +329,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const path = projectTerrain(w3);
         if (!path) return;
         rebuild = null;
-        const doc = { path } as EditorDocument;
-        await deriveFromProject(w3, {
-          terrainPath: path,
-          from: job.from,
-          objects: async () => {
-            const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-            return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-          },
-          read: (p) => readFile(w3, doc, p),
-          groups: toolGroups.all(),
-          // Another project opened meanwhile: nothing of this one's is written into it.
-          stillOpen: () => w3.workspace.project()?.root === job.key,
-        }).catch((e) => { throw failed(e); });
+        await deriveSaved(job.key, path, job.from);
         return;
       }
       // The wait was long enough for another project to be opened: its job and editor are not this one's.
       if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
       rebuild = null;
-      await editor.derive(job.from).catch((e) => { throw failed(e); });
+      await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
     });
     rebuilding = run.catch(() => {});
     return run;
@@ -400,6 +404,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const on = w3.settings.get<boolean>("terrain.minimap.panel", true) !== true;
       await w3.settings.set("terrain.minimap.panel", on);
       return on;
+    }),
+    // Placement files written straight to disk, not through a tool's edit (the Problems view's Delete Invalid Objects
+    // and Remove placed): pathing, shadows and the minimap are made from the saved files at once, in the rebuilds' turn,
+    // and recorded as following them (w3proj::derived), so `w3proj pack` takes them. Also with a terrain editor open:
+    // those commands refuse while anything is unsaved, and the record is of the files, not of what an editor holds.
+    // `doodadsBefore`: the doodad list before the change (shadows are updated from there), left out when the doodads
+    // didn't change. A rebuild still due from a tool's edit is taken in: its state before is the older one.
+    w3.commands.register("w3.terrain.rebuildFromFiles", async (doodadsBefore?: unknown) => {
+      const root = w3.workspace.project()?.root;
+      const path = projectTerrain(w3);
+      if (!root || !path) return;
+      clearTimeout(rebuildTimer);
+      const due = rebuild?.key === root ? rebuild.from : null;
+      if (due) rebuild = null;
+      const run = rebuilding.then(async () => {
+        if (w3.workspace.project()?.root !== root) return;
+        const before = due?.doodads ?? (Array.isArray(doodadsBefore) ? doodadsBefore as Placed[] : null);
+        // Unchanged doodads: the file's are those before too. One that is there but unreadable fails the rebuild.
+        const doodads = before ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch((e) => { throw rebuildFailed(e); }))?.list ?? [];
+        await deriveSaved(root, path, { terrain: due?.terrain, doodads });
+      });
+      rebuilding = run.catch(() => {});
+      return run;
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
