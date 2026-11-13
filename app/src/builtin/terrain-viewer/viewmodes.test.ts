@@ -171,19 +171,40 @@ test("every View key runs a command the terrain viewer declares, one per key; ti
   for (const b of bindings) if (b.key.startsWith("ctrl+tab") || b.key === "ctrl+shift+tab") assert.equal(runsAsCommand(b.command), false, b.command);
 });
 
-test("lightRings: round where the light is, as far as it reaches, scaled with the object", () => {
-  // Turned a quarter, twice the size, standing at (1000, 500, 20): the light 10 to the model's +x, 50 up.
+test("lightRings: as far as the World Editor's Light Ranges ring reaches, by the light's brightness", () => {
+  const at0 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const light = (color: number[], intensity: number) => ({ attenuationStart: 80, attenuationEnd: 200, color, intensity });
+  const white = [1, 1, 1], grey = [0.5, 0.5, 0.5], orange = [1, 0.389, 0];
+  // The editor's rings (we-drive, HD, top down; target/evidence/light-radius): colour and intensity of copies of the
+  // Ruins Brazier's light, and the radius drawn in world units.
+  const measured: [number[], number, number][] = [
+    [white, 0.1, 205.6], [white, 0.25, 278.3], [orange, 0.75, 332.0], [grey, 1.5, 365.1], [[1, 0, 0], 1.5, 376.4],
+    [[0, 1, 0], 1.5, 376.4], [[0, 0, 1], 1.5, 376.4], [orange, 1.5, 383.1], [white, 1.5, 420.5], [grey, 3, 420.5],
+    [orange, 3, 441.1], [orange, 6, 493.4], [orange, 12, 543.2], [white, 48, 657.8],
+  ];
+  for (const [color, intensity, r] of measured) {
+    const rings = lightRings(at0, [0, 0, 0], light(color, intensity));
+    assert.equal(rings.length, 1);
+    assert.ok(Math.abs(rings[0].r / r - 1) < 0.05, `colour ${color} intensity ${intensity}: ${rings[0].r} drawn, ${r} in the editor`);
+  }
+  // Neither the attenuation nor the object's size changes it: turned a quarter, twice the size, at (1000, 500, 20),
+  // the light 10 to the model's +x and 50 up, the ring stays round the light, as wide as at size 1.
   const s = 2, world = [0, s, 0, 0, -s, 0, 0, 0, 0, 0, s, 0, 1000, 500, 20, 1];
-  const rings = lightRings(world, [10, 0, 50], { attenuationStart: 80, attenuationEnd: 200 });
-  assert.equal(rings.length, 2);
-  assert.ok(Math.abs(rings[0].x - 1000) < 1e-9 && Math.abs(rings[0].y - 520) < 1e-9, `${rings[0].x}, ${rings[0].y}`);
-  assert.equal(rings[0].r, 400);
-  assert.equal(rings[1].r, 160);
-  // No start ring when it's zero or past the end; nothing for a light that reaches nowhere.
-  assert.equal(lightRings(world, [0, 0, 0], { attenuationStart: 0, attenuationEnd: 10 }).length, 1);
-  assert.equal(lightRings(world, [0, 0, 0], { attenuationStart: 300, attenuationEnd: 10 }).length, 1);
-  assert.deepEqual(lightRings(world, [0, 0, 0], { attenuationStart: 0, attenuationEnd: 0 }), []);
-  assert.deepEqual(lightRings([NaN, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, NaN, 0, 0, 1], [0, 0, 0], { attenuationStart: 0, attenuationEnd: 5 }), []);
+  const near = { ...light(orange, 1.5), attenuationStart: 0, attenuationEnd: 30 };
+  const big = lightRings(world, [10, 0, 50], near);
+  assert.equal(big.length, 1);
+  assert.ok(Math.abs(big[0].x - 1000) < 1e-9 && Math.abs(big[0].y - 520) < 1e-9, `${big[0].x}, ${big[0].y}`);
+  assert.equal(big[0].r, lightRings(at0, [0, 0, 0], light(orange, 1.5))[0].r);
+  // In the light's colour, its brightest channel full.
+  assert.deepEqual(big[0].rgb, [255, 99, 0]);
+  // An animated light: the mean of its keys (intensity 0.5 and 2.5 is a white light of 1.5).
+  const animated = lightRings(at0, [0, 0, 0], { ...light(white, 0), intensityTrack: { values: new Float32Array([0.5, 2.5]), size: 1 } });
+  assert.ok(Math.abs(animated[0].r / 420.5 - 1) < 0.05, `${animated[0]?.r}`);
+  // Nothing for a dark light or a broken placement.
+  assert.deepEqual(lightRings(at0, [0, 0, 0], light(white, 0)), []);
+  assert.deepEqual(lightRings(at0, [0, 0, 0], light([0, 0, 0], 5)), []);
+  assert.deepEqual(lightRings(at0, [0, 0, 0], light(white, 0.001)), []);
+  assert.deepEqual(lightRings([NaN, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, NaN, 0, 0, 1], [0, 0, 0], light(white, 1)), []);
 });
 
 test("View and camera keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {

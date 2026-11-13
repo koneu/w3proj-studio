@@ -206,6 +206,8 @@ function writeMdl(m: Model): string {
     else if (n.kind === "lite") node("Light", n, () => {
       if (!l) return;
       o.push(`\t${["Omnidirectional", "Directional", "Ambient"][l.type]},`, `\tstatic AttenuationStart ${num(l.attenuationStart)},`, `\tstatic AttenuationEnd ${num(l.attenuationEnd)},`);
+      prop("Color", l.color, l.colorTrack, "\t");
+      prop("Intensity", l.intensity, l.intensityTrack, "\t");
     });
     else if (e) node("ParticleEmitter2", n, () => {
       o.push(...flags(n.flags, { Unshaded: 0x8000, SortPrimsFarZ: 0x10000, LineEmitter: 0x20000, Unfogged: 0x40000, ModelSpace: 0x80000, XYQuad: 0x100000 }).map((s) => s.slice(1)));

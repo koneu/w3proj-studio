@@ -4591,7 +4591,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }
             }
           }
-          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)}`).join(";");
+          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)},${r.rgb.join(",")}`).join(";");
           if (key === lightsKey) return;
           lightsKey = key;
           renderer.setRings("lights", rings);
@@ -4822,7 +4822,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
               layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
-              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
+              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
               layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
               layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,

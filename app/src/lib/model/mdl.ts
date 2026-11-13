@@ -641,11 +641,15 @@ class MdlReader {
 
   private light() {
     this.skipped("LITE");
-    let type = 0, attenuationStart = 0, attenuationEnd = 0;
+    let type = 0, attenuationStart = 0, attenuationEnd = 0, intensity = 0;
+    let color: [number, number, number] = [1, 1, 1];
+    let colorTrack: Track | undefined, intensityTrack: Track | undefined;
     const node = this.node("lite", 0x200, (k) => {
       if (LIGHT_TYPE[k] !== undefined) type = LIGHT_TYPE[k];
       else if (k === "AttenuationStart") attenuationStart = this.prop(1).value[0];
       else if (k === "AttenuationEnd") attenuationEnd = this.prop(1).value[0];
+      else if (k === "Color") { const p = this.prop(3); color = [p.value[0], p.value[1], p.value[2]]; colorTrack = p.track; }
+      else if (k === "Intensity") { const p = this.prop(1); intensity = p.value[0]; intensityTrack = p.track; }
       else return false;
       return true;
     }, true);
@@ -653,7 +657,9 @@ class MdlReader {
     // As mdx.ts: a light whose reach makes no sense is left out; its node stays.
     const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
     if (ok(attenuationStart) && ok(attenuationEnd)) {
-      const light: ModelLight = { node, type, attenuationStart, attenuationEnd };
+      const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
+      if (colorTrack) light.colorTrack = colorTrack;
+      if (intensityTrack) light.intensityTrack = intensityTrack;
       (this.m.lights ??= []).push(light);
     }
   }

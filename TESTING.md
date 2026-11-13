@@ -257,6 +257,12 @@ It never starts the game itself.
   column's point at row 325.0 of an 844 high view, 222.6 of 592, 220.2 of 585 and 211.7 of 565, whatever the width:
   0.4057 h - 17.4 (within 0.3 px), not a share of the height (325.5 / 844 misses the small views by 6). Studio uses
   that row for wheel and keys (wheelzoom.ts `zoomPivotRow`).
+- **Light Ranges** (branch light-radius, 2026-11-13, HD, `--look X,Y,3000,270,70,90` straight down, copies of the
+  empty map with imported copies of the Ruins Brazier's HD model, one light value changed each; numbers in
+  `target/evidence/light-radius/` of the main checkout): one ring per light on the ground under it, in the light's
+  colour, its radius set by the brightness alone (intensity times the colour's length; not the attenuation, not the
+  object's scale), animated with the intensity track. Studio's fit: viewmodes.ts `lightRangeRadius`. In SD no rings
+  were drawn. Closing the editor with Light Ranges on ended in its crash dialog each time (`--close` times out).
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and
