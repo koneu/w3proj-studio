@@ -1,0 +1,370 @@
+[
+  {
+    "name": "resize-left-cut",
+    "description": "Map Size, left side cut by 4 tiles (arrow right of the left pair): the w3e map-edge marks (water-bits) after the WE's resize and Studio's",
+    "input": {
+      "new": {
+        "name": "resizeleftcut",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "steps": [
+        [
+          "--click",
+          "165,41"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "210,112"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "444,536"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "482,333"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "819,831"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true,
+        "mcp.confirmResize": false
+      },
+      "steps": [
+        {
+          "mcp": "save_project"
+        },
+        {
+          "mcp": "resize_map",
+          "args": {
+            "left": -4
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "text"
+      },
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "resize-bottom-cut",
+    "description": "Map Size, bottom cut by 4 tiles: the w3e map-edge marks",
+    "input": {
+      "new": {
+        "name": "resizebottomcu",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "steps": [
+        [
+          "--click",
+          "165,41"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "210,112"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "444,536"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "608,449"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "819,831"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true,
+        "mcp.confirmResize": false
+      },
+      "steps": [
+        {
+          "mcp": "save_project"
+        },
+        {
+          "mcp": "resize_map",
+          "args": {
+            "bottom": -4
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "text"
+      },
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "resize-top-grow",
+    "description": "Map Size, top grown by 4 tiles: the w3e map-edge marks",
+    "input": {
+      "new": {
+        "name": "resizetopgrow",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "steps": [
+        [
+          "--click",
+          "165,41"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "210,112"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "444,536"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "608,197"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "819,831"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true,
+        "mcp.confirmResize": false
+      },
+      "steps": [
+        {
+          "mcp": "save_project"
+        },
+        {
+          "mcp": "resize_map",
+          "args": {
+            "top": 4
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "text"
+      },
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "resize-right-cut",
+    "description": "Map Size, right side cut by 4 tiles: the w3e map-edge marks (the right column of corners)",
+    "input": {
+      "new": {
+        "name": "resizeleftcut",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "we": {
+      "steps": [
+        [
+          "--click",
+          "165,41"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "210,112"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "444,536"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "733,333"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "819,831"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true,
+        "mcp.confirmResize": false
+      },
+      "steps": [
+        {
+          "mcp": "save_project"
+        },
+        {
+          "mcp": "resize_map",
+          "args": {
+            "right": -4
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "text"
+      },
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  }
+]

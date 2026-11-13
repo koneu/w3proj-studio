@@ -232,11 +232,15 @@ export function validComplements(c: unknown): number[] | null {
   return Array.isArray(c) && c.length === 4 && c.every((n) => Number.isInteger(n) && n >= 0) ? [...c] as number[] : null;
 }
 
-/** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. */
-export function markMapEdge(t: Terrain, complements: readonly number[]) {
+/** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. `keepOuter`: the
+ *  corners of the top row and right column, which no tile has as its lower left, keep their mark as they are, as the
+ *  World Editor's Map Size leaves them (we-drive 2026-11-13: after a cut of the top they are marked, the old row's
+ *  mark, after a growth and in a new map they aren't). */
+export function markMapEdge(t: Terrain, complements: readonly number[], keepOuter = false) {
   const tilesX = t.width - 1, past = playableEdgeTiles(t, complements);
   for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
     const c = t.corners[y * t.width + x];
+    if (keepOuter && (x >= tilesX || y >= t.height - 1)) continue;
     c.rawWater = x < tilesX && y < t.height - 1 && past[y * tilesX + x] ? c.rawWater | MAP_EDGE : c.rawWater & ~MAP_EDGE;
   }
 }

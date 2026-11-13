@@ -1,6 +1,6 @@
 {
   "name": "unit-on-playable-edge",
-  "description": "Map Size: units without a footprint from 2432 to 2600 near the new playable top edge (2560) after the top is cut by 4 tiles (WE: Scenario > Map Size and Camera Bounds, Modify Map Bounds, top arrow down once; Studio resize_map top -4): both keep exactly 2432, 2500, 2528 and drop 2540 and above, the edge (2560) included; the w3e water-bit row 0 differs (WE 1, Studio 0) after the resize only (a plain save of a new map matches, new-map-script); w3i names (TRIGSTR) ignored",
+  "description": "Map Size: units without a footprint from 2432 to 2600 near the new playable top edge (2560) after the top is cut by 4 tiles (WE: Scenario > Map Size and Camera Bounds, Modify Map Bounds, top arrow down once; Studio resize_map top -4): both keep exactly 2432, 2500, 2528 and drop 2540 and above, the edge (2560) included; the w3e (the new top row of corners is edge-marked, kept from the old row, as in the WE); w3i names (TRIGSTR) ignored",
   "input": {
     "new": {
       "name": "EdgeUnits",
@@ -144,8 +144,7 @@
     },
     {
       "file": "war3map.w3e",
-      "as": "text",
-      "expect": "differs"
+      "as": "text"
     }
   ],
   "limit": 30

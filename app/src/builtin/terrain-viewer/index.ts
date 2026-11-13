@@ -4092,7 +4092,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await savePlacedFile(w3, f);
           }
-          markMapEdge(next, complements);
+          markMapEdge(next, complements, true);
           await writeTerrainBytes(doc.path, writeW3e(next), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
