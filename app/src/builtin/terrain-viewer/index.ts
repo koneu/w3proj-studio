@@ -17,6 +17,7 @@ import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
+import { wheelZoomDistance } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
@@ -118,8 +119,6 @@ const LOADING_FRAME_MS = 250;
 const PICTURE_WAIT_MS = 120_000;
 /** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
 const SHADOW_EDIT_DELAY = 700;
-/** How much a step of the mouse wheel zooms. */
-const WHEEL_ZOOM = 1.15;
 /** Which key on the keyboard an event is of, whatever Shift made of it (A and a), so that a held key's release is found. */
 const keyCodeOf = (e: KeyboardEvent) => e.code || eventKey(e).toLowerCase();
 
@@ -5066,7 +5065,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ids = w3.keybindings.mouseCommandsFor(e);
           const move = cameraMoveOf(ids);
           if (move && "zoom" in move) {
-            renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (move.zoom > 1 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM)));
+            renderer.distance = wheelZoomDistance(renderer.distance, move.zoom > 1, 200, renderer.terrain.width * 300);
             redraw();
             return;
           }
