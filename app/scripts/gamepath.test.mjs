@@ -34,6 +34,17 @@ test("mainCheckout outside a git repository: the folder itself, and nothing on s
   }
 });
 
+test(".game-path: the first listed folder that exists wins, else the first listed; comments and blanks don't count", async () => {
+  const { listedGamePaths, pickGamePath } = await import(gamepath);
+  const text = "# comment\r\n/home/me/Warcraft III\r\n\r\n  C:/Program Files (x86)/Warcraft III  \n";
+  const listed = listedGamePaths(text);
+  assert.deepEqual(listed, ["/home/me/Warcraft III", "C:/Program Files (x86)/Warcraft III"]);
+  assert.equal(pickGamePath(listed, (p) => p.startsWith("C:")), "C:/Program Files (x86)/Warcraft III");
+  assert.equal(pickGamePath(listed, () => true), "/home/me/Warcraft III");
+  assert.equal(pickGamePath(listed, () => false), "/home/me/Warcraft III", "none exists: the first, so the message names it");
+  assert.equal(pickGamePath([], () => true), null);
+});
+
 test("mainCheckout inside this checkout: the main checkout's folder (control: git did run)", () => {
   const r = mainCheckoutIn(app);
   assert.equal(r.status, 0, r.err);

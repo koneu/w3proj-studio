@@ -6,10 +6,12 @@ node_modules/
 /app/src-tauri/binaries/
 *.w3proj-test/
 /smoketest_maps/**
+/smoketest_models/**
 /openpoints/
 CLAUDE.md
 /.claude/*
 /.game-path
+/.worktrees/*
 
 # local compiler cache config (scripts/setup-linux.sh)
 /.cargo/config.toml
