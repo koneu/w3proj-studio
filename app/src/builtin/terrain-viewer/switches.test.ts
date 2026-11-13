@@ -23,6 +23,8 @@ const FRESH_WE: Record<string, boolean | string> = {
   "terrain.enforceCameraBounds": true,
   // Advanced > Reset Fixed Object Heights: checked; "Reset Fixed Z When Moving Objects=1".
   "terrain.resetFixedHeights": true,
+  // No menu item: opening a map always puts its doodads on their grids (we-drive 2026-11-13, doodadgrid.ts).
+  "terrain.doodads.snapOnLoad": true,
   // View > Lock to Game View Settings: unchecked.
   "terrain.gameView": false,
   // View > Fog Effects: unchecked.

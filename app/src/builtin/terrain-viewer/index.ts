@@ -46,6 +46,7 @@ import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -2565,8 +2566,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins: withObjectArt(skins, art), bases };
+            if (df && switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"])) await snapOnOpen(df);
+            if (disposed) return;
             await rebuildObjects();
           });
+        }
+        /** Puts the doodads of the map just opened on their grids, as the World Editor does when it opens a map
+         *  (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
+         *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
+         *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
+        async function snapOnOpen(f: PlacedFile) {
+          const sizes = new Map<string, PathSize | null>();
+          try {
+            pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+            const data = await pathingData;
+            await Promise.all([...new Set(f.list.map((p) => p.id))].map(async (id) => {
+              const info = data.placedTex(id);
+              const image = info?.path ? (await data.placedImage(info)).image : null;
+              sizes.set(id, image ? { width: image.width, height: image.height } : null);
+            }));
+          } catch (e) {
+            console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
+            return;
+          }
+          // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
+          if (disposed || dooFile !== f) return;
+          const snaps = doodadSnaps(f.list, (id) => sizes.get(id) ?? null);
+          for (const { entry, x, y, angle } of snaps) {
+            const moved = x !== entry.position[0] || y !== entry.position[1];
+            if (moved) {
+              entry.position = [x, y, (flagsOf(entry) ?? 0) & 4 ? entry.position[2] : heightAt(terrain, x, y)];
+              repositioned.add(entry);
+            }
+            entry.angle = angle;
+          }
+          if (!snaps.length) return;
+          objectsTouched = true;
+          const n = snaps.length;
+          void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the

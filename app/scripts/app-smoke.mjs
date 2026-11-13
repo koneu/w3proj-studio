@@ -4961,6 +4961,102 @@ async function testMapWithoutGame(page, found) {
   }
 }
 
+/** Snap Doodads on Load (terrain.doodads.snapOnLoad, doodadgrid.ts): opening a map in the terrain editor puts its
+ *  doodads on their grids as the World Editor does, without marking the map as changed or writing anything; the next
+ *  save writes them so. With the setting off nothing moves and the save keeps the stored places. On copies of the mini
+ *  map with a barrel (2×2) off its grid, a hay cart (4×2) at 10°, mushrooms (no pathing texture) off any grid; the
+ *  mini map's own LOtr (4×2 at 0°, at -64, 32) goes to -32, 64 and its tree ATtr (4×4, on its grid) stays. */
+async function doodadSnapOnLoad(page, found) {
+  const fail = (what) => found.push(`doodad snap on load: ${what}`);
+  const KEY = "terrain.doodads.snapOnLoad", TXT = "map/war3map.w3e.txt";
+  const dir = join(work, "doodad-snap");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const ten = Math.fround((10 * Math.PI) / 180);
+  const make = (name) => {
+    const root = join(dir, name);
+    cpSync(FIXTURE, root, { recursive: true });
+    const file = join(root, "map", "war3map.doo.json");
+    const doo = JSON.parse(readFileSync(file, "utf8"));
+    const add = (id, position, angle, editorId) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position, angle, flags: 2, life: 255, editorId });
+    add("LTbr", [40, 40, 0], 4.712389, 50);
+    add("LOch", [32, 64, 0], ten, 51);
+    add("APms", [13.5, 7.25, 0], 0.5, 52);
+    writeFileSync(file, JSON.stringify(doo, null, 2));
+    return root;
+  };
+  const xyAngle = (list) => Object.fromEntries((list ?? []).map((d) => [d.id, [d.position[0], d.position[1], d.angle]]));
+  const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
+  const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
+  const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  const open = async (root) => {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); document.querySelectorAll(".notification, .toast").forEach((e) => e.remove()); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the doodads loaded", async () => (await live()) !== null, 30000);
+  };
+  /** An edit that changes nothing, so the save runs: what it writes of the doodads is the snap's. */
+  const saveAfterEdit = async () => {
+    await page.evaluate(`(async () => {
+      const s = await w3.services.get("w3.terrain");
+      window.__snapGroup?.dispose();
+      window.__snapGroup = s.registerToolGroup({ id: "smoke-snap", title: "smoke-snap", order: 998, create: (ed) => { window.__snapEd = ed; return { toolbar: document.createElement("div") }; } });
+    })()`);
+    await until("the editor's handle", () => page.evaluate(`!!window.__snapEd`), 20000);
+    await page.evaluate(`window.__snapEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false })`);
+    await settled(page);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // The mini map's script isn't Studio's: a save would ask about it.
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    // ---- on (the default) ----
+    const on = make("on");
+    const stored = onDisk(on), before = hash(join(on, "map", "war3map.doo.json"));
+    if (!same(stored.LOtr?.slice(0, 2), [-64, 32])) fail(`the mini map's LOtr isn't at -64, 32 any more (control): ${JSON.stringify(stored.LOtr)}`);
+    await open(on);
+    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000)
+      .catch(async () => fail(`the barrel stored at 40, 40 is at ${JSON.stringify(xyAngle(await live()).LTbr)}, not 32, 32`));
+    const snapped = xyAngle(await live());
+    if (!same(snapped.LOtr?.slice(0, 2), [-32, 64])) fail(`LOtr (4×2 at 0°) is at ${JSON.stringify(snapped.LOtr)}, not -32, 64`);
+    if (!same(snapped.LOch, [32, 64, 0])) fail(`the hay cart at 10° is at ${JSON.stringify(snapped.LOch)}, not 32, 64 turned to 0`);
+    if (!same(snapped.APms, stored.APms)) fail(`the mushrooms (no pathing texture) moved: ${JSON.stringify(snapped.APms)}`);
+    if (!same(snapped.ATtr, stored.ATtr)) fail(`the tree on its grid moved: ${JSON.stringify(snapped.ATtr)}`);
+    if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the snap marked the map as changed");
+    if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("opening wrote the doodad file");
+    if (!/Put 3 doodads on their grid/.test(await toasts())) fail(`no note of the 3 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("saving with nothing changed wrote the doodad file");
+    await saveAfterEdit();
+    const written = onDisk(on);
+    for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(written[id], snapped[id])) fail(`the save after an edit wrote ${id} at ${JSON.stringify(written[id])}, not where it was put ${JSON.stringify(snapped[id])}`);
+    for (const id of ["APms", "ATtr"]) if (!same(written[id], stored[id])) fail(`the save moved ${id} to ${JSON.stringify(written[id])}`);
+
+    // ---- off ----
+    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, false)`);
+    const off = make("off");
+    const kept = onDisk(off);
+    await open(off);
+    await settled(page);
+    await sleep(1500);
+    const shown = xyAngle(await live());
+    for (const id of ["LTbr", "LOtr", "LOch", "APms", "ATtr"]) if (!same(shown[id], kept[id])) fail(`with the setting off ${id} is at ${JSON.stringify(shown[id])}, not where the map has it ${JSON.stringify(kept[id])}`);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("with the setting off the map is marked as changed");
+    if (/on their grid/.test(await toasts())) fail(`with the setting off it still says it put doodads on their grid: ${(await toasts()).slice(0, 300)}`);
+    await saveAfterEdit();
+    const after = onDisk(off);
+    for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(after[id]?.slice(0, 2), kept[id].slice(0, 2)) || Math.fround(after[id][2]) !== Math.fround(kept[id][2])) fail(`with the setting off the save wrote ${id} at ${JSON.stringify(after[id])}, not ${JSON.stringify(kept[id])}`);
+  } finally {
+    await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Delete Invalid Objects changes war3map.doo without a terrain editor: pathing, shadows and the minimap follow at once
  *  and are recorded as following it (w3proj::derived). On a scratch copy of the mini map with two rocks of a custom
  *  type (solid doodads with a pathing texture; trees, destructables, aren't in the pathing map), made unknown by
@@ -6368,8 +6464,10 @@ async function paletteMouse(page, found) {
  *  minimap panel off, so the numbers don't depend on the checks before or on a timer: alone 114 reads, 139 asked, 139 textures
  *  in every run; in the full part one fewer asked (a table another check was reading meanwhile), hence a limit. The panel is
  *  turned on afterwards, its reads counted apart (PANEL_READS_MAX, alone 9 and 19; after other checks fewer: it keeps tile
- *  colours in a cache of its own). Branch reads-order-free. */
-const GAME_READS_RECORDED = { reads: 114, asked: 139, textures: 139 };
+ *  colours in a cache of its own). Branch reads-order-free. Two more read and asked since doodads are put on their grids
+ *  when the map opens (branch doodad-snap-pref, doodadgrid.ts): the pathing textures PathTextures\4x2Default.tga and
+ *  4x4Default.tga of the scene's doodads (with terrain.doodads.snapOnLoad off it is 114 and 139 again). */
+const GAME_READS_RECORDED = { reads: 116, asked: 141, textures: 139 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {
@@ -10119,6 +10217,7 @@ async function run() {
         contextLoss,
         dataSafety,
         derivedAfterDeletes,
+        doodadSnapOnLoad,
         drawCalls,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
@@ -10408,6 +10507,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "moduleFunctions", found);
   await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
   await leftOpen(page, "derivedAfterDeletes", found);
+  await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
+  await leftOpen(page, "doodadSnapOnLoad", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
