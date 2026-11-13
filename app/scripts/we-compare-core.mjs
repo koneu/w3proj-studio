@@ -3,8 +3,8 @@
 
 import { dirname, isAbsolute, resolve } from "node:path";
 
-const KINDS = ["auto", "parsed", "text", "bytes", "wpm"];
-const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command"];
+const KINDS = ["auto", "parsed", "text", "bytes", "wpm", "w3e", "w3e-spread", "unit-heights"];
+const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
 
 const isObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 
@@ -41,6 +41,7 @@ function studioStep(step, where) {
   if (k === "sleep" && !(Number.isFinite(step.sleep) && step.sleep >= 0)) throw new Error(`${where}: "sleep" is milliseconds`);
   if (k === "open" && typeof step.open !== "string") throw new Error(`${where}: "open" is a project file`);
   if (k === "setting" && !(Array.isArray(step.setting) && step.setting.length === 2 && typeof step.setting[0] === "string")) throw new Error(`${where}: "setting" is [key, value]`);
+  if (k === "ui" && !(Array.isArray(step.ui) && step.ui.every(Array.isArray))) throw new Error(`${where}: "ui" is a list of actions, each a list (["tool", "Paint:"], ...: we-compare-ui.mjs)`);
   if (k === "command" && typeof step.command !== "string") throw new Error(`${where}: "command" is a command id`);
   return step;
 }
@@ -231,6 +232,8 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
     const only = !we && !studio ? "neither" : !we ? "Studio only" : "WE only";
     return { file, kind, status: !we && !studio ? "MISSING" : "DIFFERS", count: 1, diffs: [{ text: `the file is in ${only === "neither" ? "neither map" : only === "WE only" ? "the World Editor's save only" : "Studio's save only"}` }] };
   }
+  // The terrain's w3e and the units' heights: both sides are the reduced tables of we-compare-w3e.mjs, compared as parsed.
+  if (kind === "w3e" || kind === "w3e-spread" || kind === "unit-heights") { const w = diffJson(we.json, studio.json, limit); return { file, kind, status: w.equal ? "MATCH" : "DIFFERS", ...w }; }
   let r;
   if (kind === "parsed") r = diffJson(we.json, studio.json, limit, tolerance, ignore);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);

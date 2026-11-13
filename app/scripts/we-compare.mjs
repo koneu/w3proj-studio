@@ -27,6 +27,9 @@
 //               "ignore": ["doodads[3].scale", "units[].itemTable"] (parsed: paths whose differences are known and named; [] is any index) }. "as": auto
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
 //               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run.
+//               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
+//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z). Studio step { "ui": [["tab","Terrain"],
+//               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.
 //
 // Output: a short report on stdout (OK / UNEXPECTED per spec, MATCH / DIFFERS per file with the first differences:
 // "doodads[3].angle: WE 4.71, Studio 0", counts of fields and entries) and the same as JSON. Exit 0 when every file is
@@ -41,6 +44,8 @@ import { fileURLToPath } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { asExpected, autoKind, compareFile, formatReport, parseSpecFile } from "./we-compare-core.mjs";
+import { unitHeights, w3eView } from "./we-compare-w3e.mjs";
+import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -74,6 +79,7 @@ async function studioStep(page, step, ctx) {
   else if (step.sleep !== undefined) await sleep(step.sleep);
   else if (step.open) { await page.evaluate(`w3.editors.open(${JSON.stringify(step.open)})`); await sleep(300); }
   else if (step.setting) await page.evaluate(`w3.settings.set(${JSON.stringify(step.setting[0])}, ${JSON.stringify(step.setting[1])})`);
+  else if (step.ui) await uiStep(page, step.ui);
   else if (step.command) await page.evaluate(`w3.commands.execute(${JSON.stringify(step.command)}, ${JSON.stringify(step.args ?? {})})`, { timeout: 300000 });
   else if (step.terrain) {
     // As app-drive's --terrain: the terrain view's handle, the view open, the game's files read.
@@ -246,6 +252,8 @@ function compareSpec(spec, cli, game, opts) {
     if (kind === "auto") kind = autoKind(c.file, we.unpackedAs(c.file) === "json" && studio.unpackedAs(c.file) === "json" ? "json" : we.unpackedAs(c.file) ?? studio.unpackedAs(c.file));
     const load = (r) => {
       if (!r.listed(c.file) && !r.has(c.file)) return null;
+      if (kind === "w3e" || kind === "w3e-spread") return { json: w3eView(kind, r.bytes(c.file)) };
+      if (kind === "unit-heights") return r.unpackedAs(c.file) === "json" ? { json: unitHeights(r.json(c.file)) } : null;
       if (kind === "parsed") return r.unpackedAs(c.file) === "json" ? { json: r.json(c.file) } : null;
       if (kind === "text") return { text: r.text(c.file) };
       return { bytes: r.bytes(c.file) };
