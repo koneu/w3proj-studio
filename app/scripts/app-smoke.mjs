@@ -4883,7 +4883,16 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
     for (const [dx, dy] of [[7, -5], [-9, 11]]) {
       await page.evaluate(`document.querySelector('button.tool-button[title^=${JSON.stringify(title)}]').click()`);
       await setSize(size);
-      await hands.drag({ x: canvas.x + dx, y: canvas.y + dy }, { x: canvas.x + dx, y: canvas.y + dy }, 1);
+      // The button held still a moment, with a move on the same pixel past the stroke's tick (HEIGHT_TICK, 40 ms), as a
+      // busy machine's click came out: the ground under the pointer has risen by then, and a dab there would land on
+      // the next corner (18 corners for a +1 of size 3, two brushes one corner apart). The brush stays where it was.
+      const at = { x: canvas.x + dx, y: canvas.y + dy };
+      await hands.mouse("mouseMoved", at.x, at.y);
+      await hands.mouse("mousePressed", at.x, at.y, 1);
+      await sleep(150);
+      await hands.mouse("mouseMoved", at.x, at.y, 1);
+      await hands.mouse("mouseReleased", at.x, at.y);
+      await sleep(100);
       await save();
       const n = changed(section);
       if (n !== want) fail(`a ${title.slice(0, -1)} click of size ${size} (${dx},${dy} px off the middle) changed ${n} corners' ${section}, the World Editor's ${want}`);
