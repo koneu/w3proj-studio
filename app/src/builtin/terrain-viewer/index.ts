@@ -49,7 +49,7 @@ import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, GRID_NUDGE_STEPS, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, meleeFlagsAfter, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -78,7 +78,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
-import { isMeleeMap, playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
+import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
@@ -207,8 +207,11 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The key that turns the selection toward the pointer now (T by default), for hints. */
   const faceKey = () => w3.keybindings.labelFor(FACE_COMMAND) ?? "no key";
-  /** The key held for an area of ground (A by default), for hints. */
-  const areaKeyName = () => w3.keybindings.labelFor(AREA_COMMAND) ?? "the area key (none now)";
+  /** The key held for an area of ground, for hints: none by default, since a drag with A held is the World Editor's
+   *  plain box select of objects (we-drive, verify round 3, 2026-11-13); the Select tab's Area button selects ground. */
+  const areaKeyName = () => w3.keybindings.labelFor(AREA_COMMAND);
+  /** `text` with the area key put in (as {key}) when one is bound, else "". */
+  const withAreaKey = (text: string) => { const key = areaKeyName(); return key ? text.replace("{key}", key) : ""; };
   /** The camera's mouse buttons now, for the hint under the view (the keys are the World Editor's by default). */
   const cameraHelp = () => {
     const drag = (id: string) => { const k = w3.keybindings.labelFor(id); return k ? `${k} drag or ` : ""; };
@@ -2360,7 +2363,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces, previewMelee(units)), skins, team, undefined, undefined, false),
+            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
             loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -2380,7 +2383,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
           previewBatches = s.batches.map(lookOfPreview);
-          previewKey = startPreviewKey(units, startRaces, previewMelee(units));
+          previewKey = startPreviewKey(units, startRaces);
           renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
@@ -2486,10 +2489,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
          *  be read keeps the races last read: they only change what is drawn. */
         let startRaces = new Map<number, number>();
-        /** The map's Melee flag (war3map.w3i): the editor shows the start buildings on melee maps only. */
-        let startMelee = false;
-        /** war3map.w3i as last read: what the save's Melee rules (meleeFlagsAfter) are worked out from. */
-        let startInfo: MeleeInfo | null = null;
         /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
         let previewKey = "";
         let previewBatches: ObjectBatch[] = [];
@@ -2498,20 +2497,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const inst of b.instances) delete inst.pick;
           return { ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true };
         }
-        const previewMelee = (units: readonly Placed[]) => startMelee && (!startInfo || (meleeFlagsAfter(startInfo, units) & MELEE_MAP) !== 0);
-        /** Makes only the start buildings again when the start locations, the races or the Melee flag changed
-         *  (checked on each drawn frame: every edit, undo, paste and MCP call asks for one). */
+        /** Makes only the start buildings again when the start locations or the races changed (checked on each drawn
+         *  frame: every edit, undo, paste and MCP call asks for one). Whatever the Melee flag, as in the World Editor
+         *  (startPreviews). */
         function refreshStartPreviews() {
           const ctx = nextCtx ?? objCtx;
           if (!ctx || !unitsFile) return;
-          // Shown exactly when a save would leave the map melee: placing, pasting or moving a player's unit takes the
-          // flag off at once here (the file gets it at the save, or from the MCP tools in their edit).
-          const units = unitsFile.list, melee = previewMelee(units);
-          const key = startPreviewKey(units, startRaces, melee);
+          const units = unitsFile.list;
+          const key = startPreviewKey(units, startRaces);
           if (key === previewKey) return;
           previewKey = key;
           const gen = ++previewGen, rebuilt = rebuildGen;
-          void viewWork.track(loader.load("units", startPreviews(units, startRaces, melee), ctx.skins, team, undefined, undefined, false).then((s) => {
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces), ctx.skins, team, undefined, undefined, false).then((s) => {
             // A full rebuild in between made them itself; a newer change makes them again.
             if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
             const fresh = s.batches.map(lookOfPreview);
@@ -2536,9 +2533,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
-        const readRaces = async (): Promise<{ races: Map<number, number>; melee: boolean; info: MeleeInfo } | null> => {
-          const info = await readMapDoc<Parameters<typeof playerRaces>[0] & Parameters<typeof isMeleeMap>[0] & MeleeInfo>(w3, "map/war3map.w3i.json").catch(() => null);
-          return info ? { races: playerRaces(info), melee: isMeleeMap(info), info } : null;
+        const readRaces = async (): Promise<{ races: Map<number, number> } | null> => {
+          const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
+          return info ? { races: playerRaces(info) } : null;
         };
         /** After the map's players were saved (Map Properties): the start buildings follow their races. */
         const reloadRaces = async () => {
@@ -2546,8 +2543,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info = await readRaces();
           if (!info || disposed) return;
           startRaces = info.races;
-          startMelee = info.melee;
-          startInfo = info.info;
           refreshStartPreviews();
         };
         let objectsPlaced: Promise<void> = Promise.resolve();
@@ -2561,7 +2556,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             mapObjectData(w3),
             readRaces(),
           ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
-            if (races) { startRaces = races.races; startMelee = races.melee; startInfo = races.info; }
+            if (races) startRaces = races.races;
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
@@ -3291,7 +3286,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("button", { title: "Flatten hills and dips, keeping the cliff levels", onclick: () => commit(changeArea(terrain, a, (c) => { if (groundHeight(c) === 0) return false; setGroundHeight(c, 0); return true; }), "This ground is flat already.") }, "Reset height field"))),
           );
         };
-        /** The Select tab's mode: dragging selects objects or a block of ground. Holding A (the area key: AREA_COMMAND)
+        /** The Select tab's mode: dragging selects objects or a block of ground. Holding the area key (AREA_COMMAND, no key by default)
          *  does an area in either; `areaKeyCode` is the key held, so that its release ends it. */
         let areaMode = false, withObjects = true, areaKey = false, areaKeyCode = "";
         /** A press on the way to being an area: where it began. */
@@ -3679,7 +3674,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selected = null;
           group = [];
           selInfo.className = "terrain-selection muted";
-          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : `Click a unit, item, doodad or destructable, or drag a box around several. Hold ${areaKeyName()} and drag for an area.`);
+          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : `Click a unit, item, doodad or destructable, or drag a box around several.${withAreaKey(" Hold {key} and drag for an area.") || " The Area button selects ground."}`);
           renderer.setSelection(null);
           redraw();
         };
@@ -3895,8 +3890,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         function selectBar() {
-          const objectsOnly = h("button.chip", { title: `A drag selects objects. Hold ${areaKeyName()} and drag to select a block of ground`, onclick: () => setMode(false) }, "Objects");
-          const ground = h("button.chip", { title: `A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Holding ${areaKeyName()} and dragging does this in Objects too`, onclick: () => setMode(true) }, "Area");
+          const objectsOnly = h("button.chip", { title: `A drag selects objects (a box)${withAreaKey(". Hold {key} and drag to select a block of ground")}`, onclick: () => setMode(false) }, "Objects");
+          const ground = h("button.chip", { title: `A drag selects a block of ground, then Ctrl+C copies it. Esc clears it${withAreaKey(". Holding {key} and dragging does this in Objects too")}`, onclick: () => setMode(true) }, "Area");
           const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
             withObjects = standing.checked;
             if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
@@ -4330,7 +4325,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const tabsEl = h("div.terrain-tabs");
         /** The hint for the left button's drag in the Select tab's mode, naming the area key in effect. */
-        const dragHintText = () => (areaMode ? "Drag: select an area" : `Drag: select box · Hold ${areaKeyName()} and drag: select an area`);
+        const dragHintText = () => (areaMode ? "Drag: select an area" : `Drag: select box${withAreaKey(" · Hold {key} and drag: select an area")}`);
         const dragHint = h("span", {}, dragHintText());
         /** The camera's mouse buttons, named as they are bound now. */
         const cameraHint = h("span", {}, cameraHelp());

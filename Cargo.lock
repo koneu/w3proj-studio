@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "casc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -1924,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "mpq"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bzip2",
  "explode",
@@ -3922,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "w3proj"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mpq",
  "serde",
@@ -3934,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "w3proj-backend"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "casc",
  "serde",
@@ -3944,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "w3proj-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "casc",
@@ -3958,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "w3proj-studio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "casc",
  "libc",

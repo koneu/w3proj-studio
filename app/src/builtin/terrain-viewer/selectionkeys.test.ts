@@ -179,13 +179,17 @@ test("Undo's keys reach the map too (its editor says undoKeys), but the view doe
   }
 });
 
-test("Escape cancels, A held selects an area (Shift too, not with Ctrl or Alt)", () => {
+test("Escape cancels; A held is no area key (the World Editor's drag with A held is its box select of objects)", () => {
   const plain = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.deepEqual(bound({ ...plain, key: "Escape" }), [CANCEL_COMMAND]);
-  assert.ok(bound({ ...plain, key: "a" }).includes(AREA_COMMAND));
-  assert.ok(bound({ ...plain, key: "A", shiftKey: true }).includes(AREA_COMMAND));
-  assert.ok(bound({ ...plain, key: "Unidentified", code: "KeyA" }).includes(AREA_COMMAND), "WebKitGTK's unnamed key");
-  for (const mods of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }]) assert.equal(bound({ ...plain, key: "a", ...mods }).includes(AREA_COMMAND), false, JSON.stringify(mods));
+  // we-drive, verify round 3 (2026-11-13): a box dragged over two trees with A held selected both, Delete removed them.
+  for (const key of [{ key: "a" }, { key: "A", shiftKey: true }, { key: "Unidentified", code: "KeyA" }]) {
+    assert.equal(bound({ ...plain, ...key }).includes(AREA_COMMAND), false, JSON.stringify(key));
+  }
+  // The command is still there to be given a key (Keyboard Shortcuts), and the manifest binds nothing to it.
+  const manifestBindings = manifest.contributes.keybindings;
+  assert.equal(manifestBindings.some((b) => b.command === AREA_COMMAND), false);
+  assert.ok(manifestBindings.some((b) => b.command === CANCEL_COMMAND), "control: the manifest's bindings are read");
   assert.equal(runsAsCommand(CANCEL_COMMAND), false);
 });
 
