@@ -24,8 +24,15 @@
 //
 // Steps (in the order given; each prints one JSON line):
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
-//                       Another --map after a --close starts the editor again on the same display (one lock, one setup
-//                       for several maps: we-compare.mjs); the --look cameras go into the first map only
+//                       Another --map while the editor runs opens the map in it (as --open; if that fails, the editor is
+//                       stopped and started again with the map: "via": "open" or "restart" says which); after a --close
+//                       it starts the editor again. One display, one lock, one setup for several maps (we-compare.mjs);
+//                       the --look cameras go into the first map only
+//   --open FILE         open this map in the running editor (a copy in the prefix's Documents/Warcraft III/Maps; Ctrl+O, its row in
+//                       the editor's Open list, OK;
+//                       a "Save changes?" question about the map before is answered No: put --save before it to keep
+//                       that map's changes), then --wait-ready as after --map. Each further map costs its load time,
+//                       not an editor start
 //   --start             start the editor without a map
 //   --wait-ready        wait until the map is shown: the main window has the map's name, no dialog is open, and the
 //                       terrain view has drawn. A dialog that stays open (an error, "no longer a melee map", …) is
@@ -90,7 +97,7 @@
 //   node scripts/we-drive.mjs --map m.w3x --compare-ready --look center --shot c.png --look 1000,-500 --shot d.png --close
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -161,8 +168,12 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
+
+/** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
+const OPEN_DIALOG = "Open Document";
+const OPEN_LIST = { row: { x: 88, y: 105 }, ok: { x: 482, y: 787 } };
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
 const PROGRESS_TITLE = "Progress";
@@ -173,6 +184,26 @@ const PROGRESS_TITLE = "Progress";
  */
 export function questionDialogs(unknown) {
   return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE);
+}
+
+/**
+ * What --map does: "start" when no editor is running, "open" (File > Open in the running editor, with a restart as the
+ * fallback when that fails) when one is. `running`: an editor was started and hasn't exited.
+ */
+export function mapAction(running) {
+  return running ? "open" : "start";
+}
+
+/**
+ * What File > Open does with the dialogs it meets (`dialogs` without the file dialog and the loading window): the
+ * question "Save changes?" (a message box titled "Warning") is answered "n" (No), or "y" with `save`; any other titled
+ * dialog is an error of the open. Returns { answer: { dialog, key } } , { error: dialog } or {} for nothing to do.
+ */
+export function openQuestion(dialogs, save = false) {
+  const open = questionDialogs(dialogs);
+  const q = open.find((d) => d.title === "Warning");
+  if (q) return { answer: { dialog: q, key: save ? "y" : "n" } };
+  return open.length ? { error: open[0] } : {};
 }
 
 /**
@@ -302,6 +333,8 @@ export function parseArgs(argv) {
     throw new Error("--look needs --map before it (its cameras go into the map)");
   }
   if (looks.length && !steps.some(([s]) => s === "--map")) throw new Error("--look needs --map (its cameras go into the map)");
+  const firstOpen = steps.findIndex(([s]) => s === "--open"), firstStart = steps.findIndex(([s]) => s === "--map" || s === "--start");
+  if (firstOpen >= 0 && (firstStart < 0 || firstStart > firstOpen)) throw new Error("--open needs --map or --start before it (it opens the map in the running editor)");
   const firstSave = steps.findIndex(([s]) => s === "--save"), firstMap = steps.findIndex(([s]) => s === "--map");
   if (firstSave >= 0 && (firstMap < 0 || firstMap > firstSave)) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
   return { opts, steps, looks };
@@ -360,6 +393,10 @@ export function protonFor(game) {
 }
 
 /** A Linux path as the Windows program sees it. */
+/** The folder the editor's Open list shows: the prefix's Documents/Warcraft III/Maps. */
+export const openMapsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "steamuser", "Documents", "Warcraft III", "Maps");
+/** The name of the n-th opened copy there: unique per open, so the editor's title says which map it shows. */
+export const openCopyName = (n, map) => `we-open-${n}-${basename(map)}`;
 export const winePath = (p) => `Z:${p.split("/").join("\\")}`;
 
 /** The text locale the install has (from .build.info's tags, e.g. "enUS text?"), else enUS. */
@@ -552,6 +589,11 @@ class Session {
     if (after !== before) writeFileSync(file, after);
   }
 
+  /** An editor was started and hasn't exited. */
+  running() {
+    return !!this.editor && !this.editorExited;
+  }
+
   /** Starts the editor, with a copy of `map` if given; `looks` are the run's --look cameras to put into the copy. */
   async start(map, looks = []) {
     if (this.editor && !this.editorExited) {
@@ -651,6 +693,76 @@ class Session {
     const file = join(this.opts.work, `dialog-${name}-${Date.now()}.png`);
     this.shot(file);
     return file;
+  }
+
+  /**
+   * Opens `map` in the running editor, as File > Open: Ctrl+O shows the editor's own "Open Document" list (no file name
+   * box: its Directory field is read-only and Browse is a folder tree), which lists the prefix's Documents/Warcraft III/Maps.
+   * So a copy of the map goes there under a name of its own (the copies of earlier opens are removed first: the new one is the
+   * list's only row), its row is clicked and OK pressed. A "Save changes?" question about the map before (a "Warning") is
+   * answered "No": --save before --open keeps that map's changes. Returns when the editor has begun to load the map
+   * (its loading window, a new title, or 8 s after the list closed); --wait-ready waits for the rest. Throws when the
+   * list doesn't open or another dialog stays: --map then restarts the editor instead.
+   */
+  async openMap(map, looks = []) {
+    if (!this.editor || this.editorExited) throw new Error("the editor isn't running");
+    this.opens = (this.opens ?? 0) + 1;
+    const dir = openMapsDir();
+    mkdirSync(dir, { recursive: true });
+    for (const f of readdirSync(dir)) if (/^we-open-/.test(f)) rmSync(join(dir, f), { force: true });
+    const copy = join(dir, openCopyName(this.opens, map));
+    copyFileSync(map, copy);
+    const withLooks = looks.length ? addCamerasToMap(ensureCli(), copy, join(this.opts.work, "look-project"), looks) : null;
+    const { main } = this.mainOrThrow();
+    const beforeTitle = main.title;
+    const before = new Set(this.windows().dialogs.map((d) => d.id));
+    x11(this.display, "key", "--window", main.id, "ctrl+o");
+    const answered = [], asked = new Set();
+    let dialog = null;
+    for (const end = Date.now() + 20000; !dialog && Date.now() < end;) {
+      await sleep(250);
+      if (this.editorExited) throw new Error(`the editor exited (see ${this.log})`);
+      const fresh = this.windows().dialogs.filter((d) => !before.has(d.id));
+      dialog = fresh.find((d) => d.title === OPEN_DIALOG) ?? null;
+      const r = openQuestion(fresh.filter((d) => d !== dialog), false);
+      if (r.answer && !asked.has(r.answer.dialog.id)) {
+        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        asked.add(r.answer.dialog.id);
+        answered.push(r.answer.dialog.title);
+      } else if (r.error) throw new Error(`Ctrl+O met a dialog: "${r.error.title}"`);
+    }
+    if (!dialog) throw new Error(`no "${OPEN_DIALOG}" list opened for Ctrl+O`);
+    await sleep(500);
+    const at = (p) => `${dialog.rect[0] + p.x},${dialog.rect[1] + p.y}`;
+    x11(this.display, "click", at(OPEN_LIST.row));
+    await sleep(300);
+    x11(this.display, "click", at(OPEN_LIST.ok));
+    let loading = false, closedAt = 0;
+    for (const end = Date.now() + 40000; Date.now() < end;) {
+      await sleep(250);
+      if (this.editorExited) throw new Error(`the editor exited while opening (see ${this.log})`);
+      const w = this.windows();
+      if (w.dialogs.some((d) => d.title === PROGRESS_TITLE)) loading = true;
+      const r = openQuestion(w.dialogs.filter((d) => d.id !== dialog.id), false);
+      if (r.answer && !asked.has(r.answer.dialog.id)) {
+        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        asked.add(r.answer.dialog.id);
+        answered.push(r.answer.dialog.title);
+        continue;
+      }
+      if (r.error || r.answer) throw new Error(`the open met a dialog: "${(r.error ?? r.answer.dialog).title}"`);
+      if (w.dialogs.some((d) => d.id === dialog.id)) continue;
+      closedAt ||= Date.now();
+      if (loading || (w.main && w.main.title !== beforeTitle) || Date.now() - closedAt > 8000) {
+        this.copy = copy;
+        this.mapName = basename(copy);
+        this.answered = answered;
+        this.startedAt = Date.now();
+        if (withLooks) ({ looks: this.looks, parks: this.parks } = withLooks);
+        return { answered, loading, copy };
+      }
+    }
+    throw new Error(`the "${OPEN_DIALOG}" list stayed open`);
   }
 
   async waitReady() {
@@ -919,6 +1031,7 @@ class Session {
       const w = this.windows();
       if (!w.main && !w.dialogs.length && !w.palettes.length) {
         this.wineserver("-w");
+        this.editorExited = true;
         return { closed: true, answered };
       }
       for (const d of w.dialogs) {
@@ -987,8 +1100,26 @@ async function main() {
         if (step === "--map") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
-          await s.start(map, mapsStarted++ ? [] : looks);
-          out({ step, map, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
+          const first = mapsStarted++ === 0, info = {};
+          let via = mapAction(s.running()), fellBack = null;
+          if (via === "open") {
+            try {
+              Object.assign(info, await s.openMap(map, first ? looks : []));
+            } catch (e) {
+              if (e instanceof EditorCrashed) throw e;
+              // The open failed: the editor is stopped and started again with the map.
+              fellBack = e.message;
+              s.killEditor();
+              via = "restart";
+            }
+          }
+          if (via !== "open") await s.start(map, first ? looks : []);
+          out({ step, map, via, ...(fellBack ? { openFailed: fellBack } : {}), ...info, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
+        } else if (step === "--open") {
+          const map = resolve(arg);
+          if (!existsSync(map)) throw new Error(`no map at ${map}`);
+          mapsStarted++;
+          out({ step, map, via: "open", ...(await s.openMap(map, [])), display: s.display });
         } else if (step === "--start") {
           await s.start(null);
           out({ step, display: s.display });

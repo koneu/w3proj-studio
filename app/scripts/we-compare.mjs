@@ -8,6 +8,8 @@
 //   --game DIR      the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
 //   --json FILE     where the JSON report goes (default: <work>/report.json)
 //   --limit N       differences listed per file (default: the spec's "limit", else 10)
+//   --restart-per-map  the World Editor is closed and started again for each map (the old way, for timing); the default
+//                   is one editor per mode, each next map opened in it (we-drive --map on a running editor)
 //   --no-we         only Studio's side (its saves are in <work>/<spec>/studio.w3x)
 //
 // A spec file holds one spec or a list. A spec (we-compare-core.mjs `parseSpec` has the full form):
@@ -17,7 +19,7 @@
 //               Studio makes the map (new_map), runs the steps, packs it, and the World Editor opens that
 //   we          { "mode": "sd|hd|de", "saveAccept": ["Warning"] (dialog titles the save answers with Return), "steps": ["--key d", ["--click", "100,100"], ...] }: we-drive steps between the map being
 //               ready and the save (the save and the close are added); several specs of one mode share ONE we-drive
-//               process, so one display and one lock, and the editor is started once per map
+//               process, so one display and one lock, and ONE editor: each next map is opened in it (File > Open)
 //   studio      { "settings": { key: value }, "steps": [ { "mcp": "tool", "args": {} }, { "eval": "js" }, { "sleep": ms },
 //               { "open": "map/war3map.w3e.txt" }, { "terrain": true }, { "setting": [key, value] }, { "command": id } ] }:
 //               the project (the input map unpacked, or the new map) is open; afterwards everything is saved and packed
@@ -54,6 +56,7 @@ function parseArgs(argv) {
     else if (a === "--json") o.json = resolve(value());
     else if (a === "--limit") o.limit = Number(value());
     else if (a === "--no-we") o.we = false;
+    else if (a === "--restart-per-map") o.restart = true;
     else if (a === "-h" || a === "--help") o.help = true;
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a} (see the top of we-compare.mjs)`);
     else o.files.push(resolve(a));
@@ -155,16 +158,20 @@ async function runStudio(specs, opts, game) {
 
 /**
  * One we-drive process for `specs` (all of one mode): per spec --map input.w3x, --wait-ready, its steps, --save we.w3x,
- * --close. The editor is started once per map; the display, the lock and the farm's setup once. A spec whose steps fail
+ * (--close after the last only). One editor for all maps; the display, the lock and the farm's setup once. A spec whose steps fail
  * stops that process (we-drive stops at a failed step): the specs after it run in the next process.
  */
 async function runWorldEditor(specs, opts, game, mode, saveAccept) {
   let rest = specs.filter((s) => !s.error);
   while (rest.length) {
     const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : [])];
+    // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
+    // fails), the map before it was saved, so nothing is asked. Only the last map is followed by --close.
+    // --restart-per-map (opts.restart) is the old way, an editor start per map, for timing the two.
     for (const s of rest) {
       const dir = join(opts.work, s.name);
-      args.push("--map", join(dir, "input.w3x"), "--wait-ready", ...s.we.steps.flat(), "--save", join(dir, "we.w3x"), "--close");
+      args.push("--map", join(dir, "input.w3x"), "--wait-ready", ...s.we.steps.flat(), "--save", join(dir, "we.w3x"));
+      if (opts.restart || s === rest.at(-1)) args.push("--close");
     }
     const t0 = Date.now();
     say(`the World Editor on ${rest.length} map${rest.length === 1 ? "" : "s"} (${mode}), one we-drive process`);
