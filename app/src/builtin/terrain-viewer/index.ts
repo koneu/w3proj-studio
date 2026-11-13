@@ -4261,6 +4261,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleRandomGroups,
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
           view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
+          aspect: () => (canvas.clientWidth > 0 && canvas.clientHeight > 0 ? canvas.clientWidth / canvas.clientHeight : 4 / 3),
           setView: (v) => {
             if (v.target) renderer.target = [...v.target];
             Object.assign(renderer, Object.fromEntries((["yaw", "pitch", "distance", "fov"] as const).filter((k) => v[k] !== undefined).map((k) => [k, v[k]])));

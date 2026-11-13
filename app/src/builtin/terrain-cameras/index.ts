@@ -12,6 +12,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView, type TriggersService } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
+import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
 import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
@@ -62,8 +63,6 @@ const FIELDS: [keyof Camera, string, string][] = [
   ["dofDistance", "DoF", "Depth of field distance (the World Editor's DoF Distance)"], ["dofScale", "DoF ×", "Depth of field scale (DoF Scale)"],
   ["posAbsoluteZ", "Abs Z", "Absolute height of the camera's position (Pos Absolute Z)"],
 ];
-/** The game's field of view is horizontal at 4:3; the editor's is vertical. */
-const ASPECT = 4 / 3;
 
 const wrap = (a: number) => ((a % 360) + 360) % 360;
 
@@ -123,7 +122,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     return {
       target: [c.targetX, c.targetY, ground(c.targetX, c.targetY) + c.zOffset],
       yaw: (c.rotation + 180) * RAD, pitch, distance: c.distance,
-      fov: 2 * Math.atan(Math.tan((c.fieldOfView * RAD) / 2) / ASPECT),
+      fov: verticalFov(c.fieldOfView * RAD, ed.aspect()),
     };
   };
   const round = (v: number, k = 100) => Math.round(v * k) / k;
@@ -133,7 +132,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     return {
       targetX: round(v.target[0]), targetY: round(v.target[1]), zOffset: round(v.target[2] - ground(v.target[0], v.target[1])),
       rotation: round(wrap(v.yaw / RAD - 180)), angleOfAttack: round(wrap(-v.pitch / RAD)), distance: round(v.distance),
-      fieldOfView: round((2 * Math.atan(Math.tan(v.fov / 2) * ASPECT)) / RAD),
+      fieldOfView: round(horizontalFov(v.fov, ed.aspect()) / RAD),
     };
   };
 

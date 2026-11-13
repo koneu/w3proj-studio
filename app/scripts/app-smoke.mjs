@@ -2835,6 +2835,13 @@ async function cameraEditing(page, found) {
   if (!live || Math.abs(live.distance - 3333) > 1) fail(`typing a distance didn't show it in the view: ${JSON.stringify(live)} (before ${JSON.stringify(before)})`);
   if (live && Math.abs(live.target[0] - a.targetX) > 1) fail(`the live view isn't through the camera: target ${live.target}`);
   if (await dirty()) fail("a value being typed is already an edit");
+  // The preview's aspect is the panel's, not 4:3, and the camera's field of view is horizontal: it keeps its width.
+  const fovShown = Number(await shown("FoV"));
+  if (live && Number.isFinite(fovShown) && fovShown > 0) {
+    const want = 2 * Math.atan(Math.tan((fovShown * Math.PI) / 360) / live.aspect);
+    if (Math.abs(live.fov - want) > 1e-3) fail(`the preview's vertical field of view is ${live.fov}, not ${want} for ${fovShown} degrees at aspect ${live.aspect}`);
+    if (Math.abs(live.aspect - 4 / 3) < 0.01) fail(`the panel's aspect is 4:3 (${live.aspect}), so the check can't tell the real aspect from the old fixed one`);
+  } else fail(`the FoV field shows ${JSON.stringify(await shown("FoV"))}`);
   await type("Dist", 3333, "change");
   if (!(await dirty())) fail("the value, entered, isn't an edit");
   // The preview of a value ends with it: the view is the user's again once it's entered, the field left, or the panel
