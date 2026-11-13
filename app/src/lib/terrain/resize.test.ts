@@ -389,3 +389,20 @@ test("special doodads stay on their ground: their tiles shift by the left and bo
   assert.deepEqual(cut, { kept: [{ id: "YCx7", z: 0, x: 12, y: 24 }, { id: "LCc2", z: 0, x: 30, y: 0 }], removed: 1 });
   assert.deepEqual(list[0], { id: "YCx7", z: 0, x: 13, y: 24 }, "the list given isn't changed");
 });
+
+test("Map Size cutting the top: the top row keeps the old row's edge bit, as the World Editor leaves it", () => {
+  // we-drive 2026-11-13, new map 64x64 (borders 6 6 4 8), top cut by 4: the new top row of corners is 1 in the WE's
+  // save (the old row 60), while a new map has 0 there.
+  const t: Terrain = { ...base, width: 65, height: 65, offsetX: -4096, offsetY: -4096, corners: terrain(65, 65).corners };
+  markMapEdge(t, [6, 6, 4, 8]);
+  const top = (m: Terrain, x: number) => (m.corners[(m.height - 1) * m.width + x].rawWater & 0x4000) !== 0;
+  assert.equal(top(t, 10), false, "control: a new map's top row is not marked");
+  const r = resizeTerrain(t, [0, 0, 0, -4]);
+  markMapEdge(r, [6, 6, 4, 8], true);
+  assert.equal(r.height, 61);
+  assert.equal(top(r, 10), true);
+  assert.equal(top(r, 64), false, "the right column stays unmarked, as in the WE's save");
+  const plain = resizeTerrain(t, [0, 0, 0, -4]);
+  markMapEdge(plain, [6, 6, 4, 8]);
+  assert.equal(top(plain, 10), false, "control: the plain mark leaves the top row clear");
+});
