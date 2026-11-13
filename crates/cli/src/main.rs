@@ -118,7 +118,7 @@ fn write_baseline(path: &std::path::Path, base: &Baseline) -> Result<()> {
             out.push_str(&format!("{map}\t{file}\t{codec}\n"));
         }
     }
-    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+    w3proj::atomic::write(path, out.as_bytes()).with_context(|| format!("writing {}", path.display()))
 }
 
 /// What changed from the baseline, one line per file.
