@@ -3,7 +3,8 @@
 // destructables: a unit stands on the ground, at the size its type says.
 //
 // The defaults: Page Up and Down scale the height (Ctrl: raise and lower), Home and End the width, + and - all of it,
-// / and [ turn left, * and ] right, Ctrl and an arrow (or the number pad's) nudge; H and V mirror, R turns a quarter,
+// / and [ turn left, * and ] right, the number pad's 8 2 4 6 (NumLock on) nudge (the World Editor's Edit > Nudge
+// Selection; Ctrl and the arrows are its camera's, we-drive 2026-11-13: they moved no object); H and V mirror, R turns a quarter,
 // Shift+R back (the selection, or what's being pasted); T turns it toward the pointer (not F, the World Editor's Fog
 // Effects; T is none of its terrain view's keys: its View menu, read by we-drive --view-menu, 2026-11-10); Space
 // selects the last selection, or nothing; Ctrl+F1 shows it in the Object Editor; Delete and Backspace delete it;

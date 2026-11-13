@@ -40,10 +40,18 @@ test("slash and star turn", () => {
   assert.deepEqual(press("*"), { rotate: -15 });
 });
 
-test("Ctrl with arrows or the number pad nudges, in any NumLock state", () => {
-  assert.deepEqual(press("ArrowLeft", { ctrlKey: true, code: "ArrowLeft" }), { nudge: [-32, 0] });
-  assert.deepEqual(press("4", { ctrlKey: true, code: "Numpad4" }), { nudge: [-32, 0] });
-  assert.deepEqual(press("ArrowUp", { ctrlKey: true, code: "Numpad8" }), { nudge: [0, 32] });
+test("the number pad with NumLock on nudges (the World Editor's Edit > Nudge Selection, we-drive 2026-11-13)", () => {
+  assert.deepEqual(press("4", { code: "Numpad4" }), { nudge: [-32, 0] });
+  assert.deepEqual(press("6", { code: "Numpad6" }), { nudge: [32, 0] });
+  assert.deepEqual(press("8", { code: "Numpad8" }), { nudge: [0, 32] });
+  assert.deepEqual(press("2", { code: "Numpad2" }), { nudge: [0, -32] });
+});
+
+test("Ctrl and the arrows aren't the nudge: in the World Editor they zoom and turn the camera", () => {
+  for (const [key, code] of [["ArrowLeft", "ArrowLeft"], ["ArrowRight", "ArrowRight"], ["ArrowUp", "ArrowUp"], ["ArrowDown", "ArrowDown"], ["4", "Numpad4"], ["8", "Numpad8"]]) {
+    assert.equal(press(key, { ctrlKey: true, code }), null, `ctrl+${code}`);
+  }
+  assert.equal(press("ArrowUp", { code: "Numpad8" }), null, "NumLock off: an arrow, which pans the view");
 });
 
 test("plain arrows and everything else stay out of it", () => {

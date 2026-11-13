@@ -195,7 +195,7 @@ export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: 
  * view about 5°, its left side away for Left. Studio with these steps at the same camera (app-drive --camera
  * we:center,2200): 53 (at 1/17.5) and 261 (at 4.4 times that) before they were tuned to these; zoom 12.7% at 1.12.
  * Alt with an arrow, Insert, Delete, Page Up and Down, Home and End don't move the camera (with something selected the
- * Page keys, Home and End change it: selectionkeys.ts; so do Ctrl and the arrows, which nudge it). The pointer at the
+ * Page keys, Home and End change it: selectionkeys.ts; so do the number pad's 8 2 4 6, which nudge it). The pointer at the
  * view's edge scrolls it too (edgeScroll, below). The zoom keys are exactly the wheel's step (WHEEL_ZOOM, 1.1, branch
  * key-zoom: a key press and a notch back give the same picture) about the same point; the view does both by zoomStep.
  * Held, they step once per key repeat: 400 ms held zoomed once, 1500 ms 22 times (the display's repeat starts after

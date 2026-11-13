@@ -5031,8 +5031,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         /** The key commands after a tab's own keys (`ids` as earlyKeys'): Space, Ctrl+F1, the View keys and any other
          *  command bound here, facing the pointer, deleting, the selection's keys, and last the camera's (as the World
-         *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection Ctrl
-         *  and the arrows nudge it instead). True when one did something. */
+         *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection the
+         *  number pad's 8 2 4 6 nudge it instead). True when one did something. */
         const lateKeys = (ids: readonly string[], repeat: boolean) => {
           // Escape with nothing else to end: facing the pointer, else the selection.
           if (ids.includes(CANCEL_COMMAND)) {

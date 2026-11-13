@@ -1161,7 +1161,7 @@ async function heightsUniform(page, found) {
   await k.save();
   const held = k.doodads();
   if (held.some((d) => d.position[2] !== 150 || !(d.flags & k.FIXED))) return fail(`the fixed doodads to move (control): ${held.map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
-  const nudge = async () => { await k.focusMap(); await k.hands.key("ArrowRight", "ArrowRight", 39, 2); await k.save(); };
+  const nudge = async () => { await k.focusMap(); await k.hands.key("6", "Numpad6", 102); await k.save(); };
   await nudge();
   const landed = k.doodads();
   if (landed.some((d, i) => d.position[0] === held[i].position[0] || d.position[2] !== ground || (d.flags & k.FIXED))) fail(`nudged with Reset Fixed Object Heights on: ${landed.map((d) => `${d.position[0]},${d.position[2]}/${d.flags}`).join(" ")}`);
@@ -3084,11 +3084,11 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
-  for (let i = 0; i < 3; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  for (let i = 0; i < 3; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
   if (nearEdge()?.position[0] !== br) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, the bound is ${br}`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  await hands.key("6", "Numpad6", 102);
   await k.save();
   if (nearEdge()?.position[0] !== br + 32) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 32}`);
 
