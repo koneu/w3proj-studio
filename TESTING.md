@@ -226,9 +226,9 @@ It never starts the game itself.
   (2)BanditRidge, (8)Friends, (4)RustyCreek_S2_v1.3 and (4)FrozenClover (a creep 12 from a start) got it back from the
   editor's save, as from Studio's; (6)Zandalar got it back too, where Studio leaves it off (doodads 39 from the starts).
   Studio puts it back on 153 of the game's 185 FrozenThrone melee maps with the flag cleared. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
-- **Dialogs that don't draw**: Scenario > Player Properties opened (window "Scenario Properties") but stayed a blank
-  white rectangle in the hidden display, also after moving the pointer over it and clicking; `--close` then can't
-  answer it.
+- **Dialogs that don't draw at once**: Scenario > Player Properties (window "Scenario Properties") draws about 3 s
+  after the click; before that it is a blank white rectangle in the hidden display. Take pictures at least 3 s after
+  a click. A menu left open at `--close` can't be answered by it: never leave one open.
 - **Copy and paste of objects** (branch paste-anchor-we, 2026-11-12, SD, a flat 64x64 map): `--key d` (doodads layer),
   `--click` on a doodad or `--drag` a box round several, `--key ctrl+c`, `--key ctrl+v`, `--move` to a spot, `--click`
   there, `--key Escape`; the clipboard stays for another `ctrl+v`. The status bar's "Point: (x, y, z)" at the pointer

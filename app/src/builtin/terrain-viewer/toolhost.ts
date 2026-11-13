@@ -1,5 +1,6 @@
 import type { PlacedRef } from "./pickmatch";
 import type { ReplaceTypes } from "./replace";
+import type { RandomHeights } from "../../lib/terrain/wholemap";
 import type { Shown, TerrainLook, ToggleLayer, ViewSet } from "./viewmodes";
 import type { MinimapPanel } from "./minimappanel";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
@@ -70,7 +71,8 @@ export interface HeightCommands {
 /** Reset Height Field and Adjust Cliff Levels on one open terrain editor's whole map, each one undo step: how many
  *  corners changed (0: nothing to do), or why it was refused (nothing changed then). */
 export interface WholeMapGround {
-  resetHeightField(): number | string;
+  /** Flat over the cliff levels, or with `random` the World Editor's Random (lib/terrain/wholemap.ts randomizeHeightField). */
+  resetHeightField(random?: RandomHeights | null): number | string;
   adjustCliffLevels(by: number): number | string;
   /** How far the cliff levels can move (lib/terrain/wholemap.ts cliffShiftRange). */
   range(): { min: number; max: number };
