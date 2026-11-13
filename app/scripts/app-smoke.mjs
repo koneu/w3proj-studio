@@ -3067,6 +3067,18 @@ async function leftOpen(page, check, found) {
     console.log(`  left open after ${check}: ${text}`);
     found.push(`${check} left a question open: ${text}`);
   }
+  // A check that replaced a w3.window function (confirm, inputBox...) and didn't put it back would answer the next
+  // checks' dialogs: put them back, and fail the run naming the check.
+  const replaced = await page.evaluate(`(() => {
+    const orig = window.__w3WindowOrig, out = [];
+    if (!orig) return out;
+    for (const [name, fn] of Object.entries(orig)) if (w3.window[name] !== fn) { out.push(name); w3.window[name] = fn; }
+    return out;
+  })()`).catch(() => []);
+  if (replaced.length) {
+    console.log(`  w3.window left replaced after ${check}: ${replaced.join(", ")}`);
+    found.push(`${check} left w3.window.${replaced.join(", w3.window.")} replaced`);
+  }
 }
 
 /** The Pathing Editor's "Import differences from war3map.wpm": a wpm edited outside the app (bytes changed in a scratch
@@ -9749,6 +9761,8 @@ async function run() {
     const settingsAt = (await page.evaluate(`w3.backend.invoke("app_paths")`)).config_dir;
     if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
     const found = [];
+    // The window's functions as they are now, for `leftOpen` to compare each check's end against.
+    await page.evaluate(`window.__w3WindowOrig = Object.fromEntries(Object.entries(w3.window).filter(([, v]) => typeof v === "function"))`);
     // --only=<check> runs one of the checks below on its own, for working on it. Every check of the full run below is
     // named here too (`npm run check` holds the two lists against each other: scripts/check-scripts.mjs).
     // --only=graphics is graphicsModes after the project checks.
