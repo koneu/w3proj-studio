@@ -256,6 +256,16 @@ It never starts the game itself.
   (the bottom left of `--shot-window`) gives its world position; at the opening camera the ground maps to the display
   by a plane homography (fitted from six such readings to the pixel). The editor moves each doodad onto its own grid
   when the map loads (a barrel to 64n + 32, a crate to 64n), so the copied positions are read from its save.
+- **Doodad rules while editing** (branch doodad-rules-edit, 2026-11-13, HD, empty_map_on_newest_world_editor.w3m with a
+  barrel LTbr at 32, 32 scale 1.2, a log AOlg (12x6 texture) at 1056, 0 facing 0, wheat LPwh (no texture); saved after
+  each step): an 8 px drag of the barrel (about 20 units at the opening camera) didn't move it, an 18 px one put it at
+  96, 32: dragged doodads stay on their grid (whether it jumps during the drag or at the release a picture can't tell
+  with one `--drag`). `+` (`KP_Add`) ten times then `-` three times took the barrel's 1.2 to 1.35, not 1.55: the scale
+  is held to the type's range (1.1 to 1.5) at once. The numpad `/` turned the barrel and the wheat freely (by 5° to 15°
+  per press, depending on how long it was held) but the log a quarter per press (three: 0° to 270°, its place on the
+  grid of 270°). Ctrl+arrows moved nothing, wheat included, and `]` turned nothing: not the editor's keys in this
+  build. A `--click` on the wheat or the log may miss; a `--drag` box from bare ground round it selects it (a box
+  starting on a doodad drags it). doodadedit.ts follows this.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list
