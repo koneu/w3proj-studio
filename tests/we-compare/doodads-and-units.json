@@ -1,7 +1,7 @@
 [
   {
     "name": "doodad-flag-bits",
-    "description": "Fix Doodads on Load: flag bits above 4. KNOWN DIFFERENCE (Studio bug): the editor's save keeps bits 0 to 3 only (0x1e to 0x0e, 0x80 to 0x02), Studio keeps bits 4 to 7 (0x1e, 0x82); bits 0 to 3 and the outside-playable bit agree",
+    "description": "Fix Doodads on Load: flag bits above 4 (0x08 to 0xff, inside and outside the playable area): the editor's save keeps bits 0 to 3 only (0x1e to 0x0e, 0x80 to 0x02); Studio's fixed-on-load save does the same",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/flag-bits.w3x"
     },
@@ -31,7 +31,7 @@
       {
         "file": "war3map.doo",
         "as": "parsed",
-        "expect": "differs"
+        "expect": "match"
       }
     ],
     "limit": 40
