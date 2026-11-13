@@ -5973,14 +5973,15 @@ async function paletteMouse(page, found) {
  *  more read and asked and two more textures since the view draws shadows (branch view-shadows): the shadow images
  *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
  *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
- *  without one. */
-const GAME_READS_RECORDED = { reads: 105, asked: 138, textures: 140 };
+ *  without one. Measured with the minimap panel on, the default (branch small-fixes-48): six to ten more read and 14 to 20 more
+ *  asked for the panel's own game files (it varies from run to run, so these are the highest seen). */
+const GAME_READS_RECORDED = { reads: 115, asked: 158, textures: 140 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  // The scene is what the terrain view loads; the minimap panel (on in a new view) reads more game files of its own: off here, as recorded.
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+  // The default state: the minimap panel on (a new view has it), its own game reads counted in the numbers below.
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", true, "user")`);
   const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
