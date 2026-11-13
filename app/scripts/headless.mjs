@@ -10,7 +10,7 @@
 // Bundling first means the CLI never runs older code than the checkout's: no step to forget after a change.
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -32,7 +32,15 @@ function writeWhole(file, text) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, text);
-  renameSync(tmp, file);
+  try {
+    renameSync(tmp, file);
+  } catch (e) {
+    // Windows refuses a rename onto a file another run has just put there or still has open (EPERM/EACCES). Two
+    // runs bundling the same tree write the same text, so a file that is there with that text is the result.
+    const same = existsSync(file) && readFileSync(file, "utf8") === text;
+    rmSync(tmp, { force: true });
+    if (!same) throw e;
+  }
 }
 
 const args = process.argv.slice(2);
