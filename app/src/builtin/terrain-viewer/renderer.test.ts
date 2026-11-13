@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
 import { borderShade } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
-import { castsSunShadow, edgeMode, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, playRect, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -28,11 +28,29 @@ test("past the playable map cliffs and specials shade as the ground, placed mode
   assert.equal(edgeMode({ group: "doodads" }, 2), "object", "HD doodads and trees");
 });
 
+test("the view's tiles past the playable map follow the w3i's complements once read, the terrain's marks before", () => {
+  const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [1, 1, 1, 1]);
+  const edgeTiles = (complements: number[] | null) => TerrainRenderer.prototype.edgeTiles.call({ terrain: t, complements } as unknown as TerrainRenderer);
+  const count = (a: Uint8Array) => a.reduce((n, v) => n + v, 0);
+  assert.equal(count(edgeTiles(null)), 48 - 6 * 4, "the marks: margins 1");
+  assert.equal(count(edgeTiles([3, 1, 1, 1])), 48 - 4 * 4, "the w3i: left margin 3");
+  assert.equal(edgeTiles([3, 1, 1, 1])[2 * 8 + 2], 1, "tile 2, 2 is past the w3i's left margin");
+});
+
+test("HD water's dark edge goes by the playable rectangle round the tiles the border leaves", () => {
+  const t = { width: 9, height: 7, offsetX: -512, offsetY: -384, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [2, 1, 1, 2]);
+  assert.deepEqual(playRect(t, mapEdgeTiles(t)), [-512 + 256, -384 + 128, -512 + 7 * 128, -384 + 4 * 128]);
+  // Nothing playable: an empty rectangle in the middle, so all of the water is dark.
+  assert.deepEqual(playRect(t, new Uint8Array(48).fill(1)), [0, 0, 0, 0]);
+});
+
 test("the border shade's texel in a tile's middle is shaded exactly where the tile lies past the playable map", () => {
   // The "tile" mode reads it (lib/model/renderer.ts instanceEdge): 4 texels a tile, the middle one at 4 t + 2.
   const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
   markMapEdge(t, [2, 1, 1, 2]);
-  const marks = mapEdgeTiles(t), { rgba, width } = borderShade(t);
+  const marks = mapEdgeTiles(t), { rgba, width } = borderShade(t, marks);
   let past = 0;
   for (let ty = 0; ty < 6; ty++) for (let tx = 0; tx < 8; tx++) {
     const shaded = rgba[((4 * ty + 2) * width + 4 * tx + 2) * 4 + 3] > 0;

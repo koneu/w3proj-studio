@@ -2848,11 +2848,51 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
       if (!(r.ground < 0.3)) fail(`${l.what}: the ground past the edge isn't shaded: ${got}`);
       if (l.black ? r.model > 0.06 : Math.abs(r.model - r.ground) > 0.06) fail(`${l.what}, past the playable map, isn't ${l.black ? "black" : "shaded as the ground"}: ${got}`);
     }
+    await borderFromInfo(page, k, offset, boundary, fail);
   } finally {
     await boundary(true);
     await page.evaluate(`w3.settings.set("terrain.animate", ${JSON.stringify(animate ?? true)})`);
     await k.reset();
   }
+}
+
+/** The border's shade goes by the w3i's camera complements, not the terrain's map-edge marks, as the World Editor's
+ *  (w3e.ts playableEdgeTiles): with the w3i's west margin widened from 6 to 10 tiles and saved (the terrain and its
+ *  marks left alone), the ground 8 tiles in darkens; with the margin back it is lit again. From above, the Boundary
+ *  switch on against off over bare ground. */
+async function borderFromInfo(page, k, offset, boundary, fail) {
+  const ed = "window.__spEd", path = "map/war3map.w3i.json";
+  const original = await page.evaluate(`w3.workspace.readText(${JSON.stringify(path)})`);
+  const info = JSON.parse(original);
+  if (info.cameraComplements?.[0] !== 6) { fail(`border from the w3i: the new map's west margin is ${JSON.stringify(info.cameraComplements)}, not 6`); return; }
+  const writeInfo = (text) => page.evaluate(`w3.workspace.writeText(${JSON.stringify(path)}, ${JSON.stringify(text)})`);
+  // Tile 8 of the west, between the old margin and the new one, away from the specials and footmen (rows 24 and 40).
+  const x = offset[0] + 8 * 128 + 64, y = offset[1] + 32 * 128 + 64;
+  const box = [0.4, 0.4, 0.6, 0.6];
+  const keeps = async () => {
+    await page.evaluate(`${ed}.setView({ target: [${x}, ${y}, 0], yaw: -Math.PI / 2, pitch: Math.PI / 2 - 0.001, distance: 600 })`);
+    await boundary(true);
+    const on = await meanColour(page, await settledMapPicture(page), box);
+    await boundary(false);
+    const off = await meanColour(page, await settledMapPicture(page), box);
+    await boundary(true);
+    return (on[0] + on[1] + on[2]) / Math.max(1, off[0] + off[1] + off[2]);
+  };
+  try {
+    const before = await keeps();
+    if (before < 0.95) fail(`border from the w3i: tile 8, inside the playable map, is shaded (keeps ${before.toFixed(3)} of its colour)`);
+    const marks = await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    let wide = 1;
+    await until("tile 8 shaded once the w3i's west margin is 10", async () => (wide = await keeps()) < 0.3, 20000)
+      .catch(() => fail(`border from the w3i: with the w3i's west margin at 10, tile 8 keeps ${wide.toFixed(3)} of its colour, not shaded as the editor's`));
+    if (!marks && await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("border from the w3i: reading the w3i's margins marked the terrain as changed");
+  } finally {
+    await writeInfo(original);
+  }
+  let back = 0;
+  await until("tile 8 lit again with the margin back", async () => (back = await keeps()) > 0.95, 20000)
+    .catch(() => fail(`border from the w3i: with the w3i's margin back at 6, tile 8 keeps ${back.toFixed(3)} of its colour`));
 }
 
 /** Under the border's shade (pictures with the Boundary switch on and off, and off without the model's group): the
