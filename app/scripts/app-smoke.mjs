@@ -9057,6 +9057,9 @@ async function triggersAndAi(page, found) {
     await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
     await until("the AI Editor", () => page.evaluate(`!!document.querySelector(".ai-tabs")`), 20000).catch((e) => fail(e.message));
     await settled(page);
+    // The World Editor's saved new AI is 1312 bytes, with two test players (verification round 3 package 6).
+    const newBytes = existsSync(wai) ? readFileSync(wai) : Buffer.alloc(0);
+    if (newBytes.length !== 1312) fail(`the new AI file is ${newBytes.length} bytes, the World Editor's new AI 1312`);
     const addErr = await k.run("w3.ai.addToMap");
     if (addErr) fail(`Add To Map: ${addErr}`);
     const script = join(k.root, "map", "Scripts", "Smoke Raider.ai");

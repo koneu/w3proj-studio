@@ -102,7 +102,20 @@ test("a new AI is the AI Editor's new AI", () => {
   assert.deepEqual([ai.repeatWaves, ai.minForces, ai.initialDelay], [1, 0x41494148, 0]);
   assert.ok(Buffer.from(writeWai(ai)).includes("HAIA"), "as the file has it");
   assert.deepEqual([ai.gameOptions, ai.gameSpeed, ai.mapPath], [2, 1, "Maps\\(2)PlunderIsle.w3m"]);
-  assert.deepEqual(ai.players, [{ index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" }]);
+  assert.deepEqual(ai.players, [
+    { index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" },
+    { index: 1, team: 0, race: 1, color: 0, handicap: 100, aiType: 12, difficulty: 1, script: "" },
+  ]);
+});
+
+test("a new AI saved is as long as the World Editor's and ends as its file does", () => {
+  // we-drive, verification round 3 package 6: the editor's saved new AI is 1312 bytes; after the test map's path come
+  // the player count 2, both players and the trailer.
+  const bytes = writeWai(newWai());
+  assert.equal(bytes.length, 1312);
+  const tail = "02000000000000000000000020000000000000006400000003000000010000000001000000000000000100000000000000640000000c000000010000000000000000";
+  assert.equal(Buffer.from(bytes.subarray(bytes.length - tail.length / 2)).toString("hex"), tail);
+  assert.ok(Buffer.from(bytes.subarray(0, bytes.length - tail.length / 2)).toString("latin1").endsWith("Maps\\(2)PlunderIsle.w3m\0"));
 });
 
 test("an AI with every section survives, to the byte", () => {
