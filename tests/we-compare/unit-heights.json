@@ -1,0 +1,33 @@
+[
+  {
+    "name": "unit-heights-reset-on",
+    "description": "test.md 'Reset Fixed Object Heights: does it cover units?': no. Units with a height of their own in the file (footmen at 0 and 500 on a plateau of 256, one at 500 on flat ground, a gryphon at 0 on the plateau; fixtures/we-specs/make-unit-heights.mjs), the switch on as it starts: the editor saves each at the ground (256, 256, 0, 256); Studio's open and save does the same (savedUnitZ)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-heights.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights" }]
+  },
+  {
+    "name": "unit-heights-reset-off",
+    "description": "the same with the Reset Fixed Object Heights switch off (the editor: Ctrl+Shift+H, seen in its Advanced menu in round 3; Studio: terrain.resetFixedHeights false): the units are saved at the ground either way",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-heights.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "ctrl+shift+h"], ["--sleep", "500"]] },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "setting": ["terrain.resetFixedHeights", false] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights" }]
+  }
+]

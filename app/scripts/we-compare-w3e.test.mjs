@@ -1,0 +1,91 @@
+// we-compare-w3e.mjs: the w3e reader (corner by corner), the height spread, the unit heights, and the spec files of
+// tests/we-compare/ that use them parse. Each "differs" case has its "matches" control next to it.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { heightSpread, readW3e, unitHeights, w3eView } from "./we-compare-w3e.mjs";
+import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
+
+/** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
+function w3e(w, h, corner) {
+  const head = Buffer.alloc(13 + 4 + 4 + 4 + 16);
+  head.write("W3E!", 0, "latin1");
+  head.writeUInt32LE(11, 4);
+  head.write("L", 8, "latin1");
+  head.writeUInt32LE(0, 9); // no custom tilesets
+  head.writeUInt32LE(1, 13); // one ground tile
+  head.write("Ldrt", 17, "latin1");
+  head.writeUInt32LE(0, 21); // no cliff tiles
+  head.writeUInt32LE(w, 25);
+  head.writeUInt32LE(h, 29);
+  head.writeFloatLE(-128, 33);
+  head.writeFloatLE(-64, 37);
+  const body = Buffer.alloc(w * h * 7);
+  for (let i = 0; i < w * h; i++) {
+    const [g, water, tex, variation, cl] = corner(i % w, Math.floor(i / w));
+    body.writeInt16LE(g + 0x2000, i * 7);
+    body.writeUInt16LE(water, i * 7 + 2);
+    body[i * 7 + 4] = tex;
+    body[i * 7 + 5] = variation;
+    body[i * 7 + 6] = cl;
+  }
+  return Buffer.concat([head.subarray(0, 41), body]);
+}
+
+test("readW3e: every stored value of a corner, the water word and its edge bits apart", () => {
+  const file = w3e(2, 2, (x, y) => [x * 10 - y, 0x4000 | (0x2000 + x), 0x45 + y, 0x25, 0xf3]);
+  const { header, corners } = readW3e(file, true);
+  assert.deepEqual([header.version, header.tileset, header.ground, header.width, header.height, header.offset], [11, "L", ["Ldrt"], 2, 2, [-128, -64]]);
+  assert.deepEqual(corners["1,1"], { ground: 9, water: 0x2001, edge: 1, texture: 6, ramp: 0, blight: 0, wet: 1, boundary: 0, variation: 5, cliffVariation: 1, cliffType: 15, layer: 3 });
+  assert.equal("variation" in readW3e(file).corners["1,1"], false, "without the flag the random variations are left out");
+});
+
+test("readW3e leaves the variations out (the editor draws them at random) and refuses a file that isn't a w3e", () => {
+  const at = (variation, ground = 0) => readW3e(w3e(1, 1, () => [ground, 0, 0, variation, 0]));
+  assert.deepEqual(at(0x00), at(0xe1), "the variation byte (ground and cliff variation) isn't compared");
+  assert.notDeepEqual(at(0x00), at(0x00, 4), "control: the ground height is");
+  assert.throws(() => readW3e(Buffer.from("not a w3e at all")), /missing W3E! header/);
+  assert.throws(() => readW3e(w3e(2, 2, () => [0, 0, 0, 0, 0]).subarray(0, 50)), /truncated/);
+});
+
+test("a corner compared through compareFile: one differing water word is one difference, with its place", () => {
+  const mk = (water) => ({ json: w3eView("w3e", w3e(3, 3, (x, y) => [0, x === 2 && y === 1 ? water : 0x2000, 0, 0, 2])) });
+  const same = compareFile("war3map.w3e", "w3e", mk(7), mk(7));
+  assert.equal(same.status, "MATCH");
+  const r = compareFile("war3map.w3e", "w3e", mk(7), mk(9));
+  assert.equal(r.status, "DIFFERS");
+  assert.equal(r.count, 1);
+  assert.match(r.diffs[0].text, /corners\.2,1\.water: WE 7, Studio 9/);
+});
+
+test("heightSpread: the set of offsets from the base, so two random runs of one setting match and two settings don't", () => {
+  const run = (offsets) => w3e(4, 4, (x, y) => [offsets[(x + 4 * y) % offsets.length], 0, 0, 0, 2]);
+  assert.deepEqual(heightSpread(run([-26, 0, 25, 0])), { count: 3, min: -26, max: 25, values: [-26, 0, 25] });
+  assert.deepEqual(heightSpread(run([25, -26, 0, 0, 25])), heightSpread(run([-26, 0, 25])), "the order and the counts don't matter");
+  assert.notDeepEqual(heightSpread(run([-26, 0, 25])), heightSpread(run([-52, -26, 0, 25])), "control: another setting");
+  assert.deepEqual(heightSpread(run([100, 126]), 100), { count: 2, min: 0, max: 26, values: [0, 26] });
+});
+
+test("unitHeights keeps id, x, y and z, in file order, and drops the rest of a unit", () => {
+  const unit = (id, z, extra = {}) => ({ id, position: [1, 2, z], subversion: 11, itemTable: 5, ...extra });
+  const a = unitHeights({ units: [unit("hfoo", 256), unit("hgry", 0)] });
+  assert.deepEqual(a, { units: [{ id: "hfoo", x: 1, y: 2, z: 256 }, { id: "hgry", x: 1, y: 2, z: 0 }] });
+  assert.deepEqual(unitHeights({ units: [unit("hfoo", 256, { player: 3 }), unit("hgry", 0)] }), a, "other fields are not compared");
+  assert.notDeepEqual(unitHeights({ units: [unit("hfoo", 500), unit("hgry", 0)] }), a, "control: the height is");
+});
+
+test("the spec files in tests/we-compare/ that use these kinds parse", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = resolve(here, "..", "..", "tests", "we-compare");
+  const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json"];
+  let parsed = 0;
+  for (const f of readdirSync(dir).filter((f) => names.includes(f))) {
+    const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" });
+    assert.ok(specs.length > 0, f);
+    parsed += specs.length;
+  }
+  assert.ok(parsed >= 5, `${parsed} specs parsed`);
+});
