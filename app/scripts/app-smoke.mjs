@@ -2837,6 +2837,73 @@ async function cameraEditing(page, found) {
   }
 }
 
+/** The Select tab's Area panel, Level +1 and Level −1: a block dragged out on a new map moves by a cliff level, as the
+ *  World Editor's Adjust Cliff Levels moves the whole map: only the block's layers change (the ground over them, the
+ *  water and everything else as it was), each press one undo step, +1 then −1 gives the file back byte for byte, and
+ *  Level +1 is off once the block is at level 14. */
+async function areaLevels(page, found) {
+  try {
+    await areaLevelsSteps(page, found);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+async function areaLevelsSteps(page, found) {
+  const fail = (what) => found.push(`area levels: ${what}`);
+  const k = await heightKit(page, "AreaLevels");
+  await k.save();
+  const file = join(k.root, "map", "war3map.w3e.txt");
+  const text = () => readFileSync(file, "utf8");
+  /** The file without its [layer] section, which is all a level change may touch. */
+  const rest = () => text().replace(/^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "");
+  const layerSection = () => /^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m.exec(text())?.[0] ?? "";
+  const original = text(), originalRest = rest();
+  if (!layerSection()) return fail(`no [layer] section to read (control): ${original.slice(0, 200)}`);
+  await k.tab("Select");
+  await k.hands.click(".chip", "Area");
+  await k.look(0, 0);
+  const c = await k.hands.where(".model-stage canvas");
+  await k.hands.drag({ x: c.x - 40, y: c.y - 30 }, { x: c.x + 40, y: c.y + 30 });
+  const level = (by) => `[...document.querySelectorAll(".terrain-selection button")].find((b) => b.textContent === ${JSON.stringify(by > 0 ? "Level +1" : "Level −1")})`;
+  await until("the area panel", () => page.evaluate(`!!${level(1)}`), 8000).catch(() => fail("no area panel with Level +1 after the drag"));
+  const press = async (by) => { await page.evaluate(`${level(by)}.click()`); await k.save(); };
+  const disabled = (by) => page.evaluate(`${level(by)}?.disabled`);
+  if (await disabled(-1) !== false) fail("Level −1 is off on level 2 ground");
+
+  // +1: the block's layers only; the rest of the map stays on level 2.
+  await press(1);
+  const up = text();
+  if (up === original) return fail("Level +1 changed nothing");
+  if (rest() !== originalRest) fail("Level +1 changed more than the [layer] section");
+  if (/^\[layer\] all /m.test(up)) fail(`Level +1 moved the whole map, not the block: ${layerSection().slice(0, 80)}`);
+  // One undo gives the file back; redo the step, then −1 gives it back too.
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (text() !== original) fail("one undo of Level +1 didn't give the file back byte for byte");
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await k.save();
+  if (text() !== up) fail("redo of Level +1 didn't give its file again");
+  await until("Level −1 on", async () => (await disabled(-1)) === false, 5000).catch(() => fail("Level −1 is off after +1"));
+  await press(-1);
+  if (text() !== original) fail("Level −1 after +1 didn't give the file back byte for byte");
+
+  // The top: the whole map up by 10 (to 12), then the block twice to 14, where Level +1 is off.
+  const err = await k.run("w3.terrain.adjustCliffLevels", 10);
+  if (err) return fail(`Adjust Cliff Levels +10: ${err}`);
+  await k.save();
+  if (!/^\[layer\] all c$/m.test(text())) fail(`the whole map at level 12 (control): ${layerSection().slice(0, 80)}`);
+  await until("the panel again", () => page.evaluate(`${level(1)}?.disabled === false`), 5000).catch(() => fail("Level +1 is off at level 12"));
+  await press(1);
+  await until("Level +1 on", async () => (await disabled(1)) === false, 5000).catch(() => fail("Level +1 is off at level 13"));
+  await press(1);
+  await until("Level +1 off", async () => (await disabled(1)) === true, 5000).catch(() => fail("Level +1 is still on with the block at level 14"));
+  for (let i = 0; i < 3; i++) await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (text() !== original) fail("three undos didn't give the file back");
+  await k.focusMap();
+  await k.hands.key("Escape", "Escape", 27);
+}
+
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past level 0 stops every
  *  corner there (as the World Editor does), and undoing gives every file back byte for byte. */
@@ -10130,6 +10197,7 @@ async function run() {
       // One check per line, in alphabetical order (check-scripts.mjs keeps it so): branches that add checks then touch
       // different lines and merge without conflicts.
       const onlyChecks = {
+        areaLevels,
         artModeReload,
         atmosphereTools,
         byHand,
@@ -10359,6 +10427,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
+  await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
+  await leftOpen(page, "areaLevels", found);
   await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
   await leftOpen(page, "cameraEditing", found);
   await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));

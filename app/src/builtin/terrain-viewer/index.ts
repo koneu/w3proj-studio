@@ -56,9 +56,9 @@ import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
-import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField } from "../../lib/terrain/wholemap";
+import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField, TOP_LEVEL } from "../../lib/terrain/wholemap";
 import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
-import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
+import { CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -3141,11 +3141,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           const adjust = (by: number) => {
             const log = new CornerUndo();
-            adjustLevels(terrain, a, by, cliffGrounds, log);
-            commit(log.step(terrain));
+            const r = adjustCliffLevels(terrain, by, log, a);
+            if (typeof r === "string") { void w3.window.showWarning(r); return; }
+            commit(log.step(terrain), "These cliff levels can't move further.");
           };
           const lowest = Math.min(...layers), highest = Math.max(...layers);
-          const levelButton = (by: number, text: string) => h("button", { title: `Move all of this ${by > 0 ? "up" : "down"} a cliff level, with what's on it`, disabled: lowest + by < 0 || highest + by > 15, onclick: () => adjust(by) }, text);
+          const levelButton = (by: number, text: string) => h("button", { title: `Move all of this ${by > 0 ? "up" : "down"} a cliff level, with what's on it`, disabled: lowest + by < 0 || highest + by > TOP_LEVEL, onclick: () => adjust(by) }, text);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
             h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),

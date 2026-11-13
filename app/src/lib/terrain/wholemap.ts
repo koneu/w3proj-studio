@@ -3,6 +3,7 @@
 // Each reports the corners it changes to a log first, so the caller makes one undo step of them.
 
 import type { CornerLog } from "./cliffs";
+import type { CornerArea } from "./fragment";
 import { setGroundHeight, setLayer, type Terrain } from "./w3e";
 
 /** The stored ground height of flat ground: 0 over its cliff level. */
@@ -110,15 +111,26 @@ export function randomizeHeightField(t: Terrain, opts: RandomHeights, log: Corne
 /** The most levels the World Editor's Adjust Cliff Levels dialog takes upwards (we-drive, 2026-11-11). */
 export const MAX_RAISE = 10;
 
-/** How far Adjust Cliff Levels shifts this map without squeezing it: down to level 0 for its lowest corner, up to
- *  MAX_RAISE or TOP_LEVEL for its highest, whichever comes first. Further down still works: the corners stop at 0. */
-export function cliffShiftRange(t: Terrain): { min: number; max: number } {
+/** The corners of a block (inclusive corner numbers, cut to the map), or all of them without one. */
+function cornersOf(t: Terrain, area?: CornerArea): number[] {
+  if (!area) return t.corners.map((_, i) => i);
+  const out: number[] = [];
+  const x0 = Math.max(0, area.x0), y0 = Math.max(0, area.y0), x1 = Math.min(t.width - 1, area.x1), y1 = Math.min(t.height - 1, area.y1);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) out.push(y * t.width + x);
+  return out;
+}
+
+/** How far Adjust Cliff Levels shifts this map (or the block `area` of it) without squeezing it: down to level 0 for
+ *  its lowest corner, up to MAX_RAISE or TOP_LEVEL for its highest, whichever comes first. Further down still works:
+ *  the corners stop at 0. */
+export function cliffShiftRange(t: Terrain, area?: CornerArea): { min: number; max: number } {
   let low = Infinity, high = -Infinity;
-  for (const c of t.corners) {
-    low = Math.min(low, c.layer);
-    high = Math.max(high, c.layer);
+  const corners = cornersOf(t, area);
+  for (const i of corners) {
+    low = Math.min(low, t.corners[i].layer);
+    high = Math.max(high, t.corners[i].layer);
   }
-  if (!t.corners.length) return { min: 0, max: 0 };
+  if (!corners.length) return { min: 0, max: 0 };
   return { min: 0 - low || 0, max: Math.max(0, Math.min(MAX_RAISE, TOP_LEVEL - high)) };
 }
 
@@ -128,18 +140,23 @@ export function cliffShiftRange(t: Terrain): { min: number; max: number } {
  *  +1 the same): the ground over its level stays, so it rises 128 per level, and the water stays where it is.
  *  Downwards the corners stop at level 0, so a deep shift squeezes the low ones together (map 03 by -6: all at 0).
  *  Upwards the shift goes as far as cliffShiftRange's max (a bigger one is cut to it, as the dialog caps it at +10).
+ *  `area`: only that block of corners (the Area panel's Level +1/-1). The editor has no such thing: its Adjust Cliff
+ *  Levels shifts the whole map with a terrain selection as without one (we-drive 2026-11-13, cliff.w3m: the same file
+ *  both ways), so the block follows the same rule, ramps and water left as they are, and a cliff appears at its edge.
  *  Returns how many corners changed, or why nothing could be done. */
-export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog): number | string {
+export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog, area?: CornerArea): number | string {
   if (!Number.isInteger(by)) return "The adjustment is a whole number of cliff levels.";
-  if (by === 0 || !t.corners.length) return 0;
-  const shift = Math.min(by, cliffShiftRange(t).max);
+  const corners = cornersOf(t, area);
+  if (by === 0 || !corners.length) return 0;
+  const shift = Math.min(by, cliffShiftRange(t, area).max);
   let n = 0;
-  t.corners.forEach((c, i) => {
+  for (const i of corners) {
+    const c = t.corners[i];
     const layer = Math.max(0, c.layer + shift);
-    if (layer === c.layer) return;
+    if (layer === c.layer) continue;
     log.touch(t, i);
     setLayer(c, layer);
     n++;
-  });
+  }
   return n;
 }

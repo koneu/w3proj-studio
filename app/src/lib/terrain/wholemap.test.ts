@@ -275,3 +275,78 @@ test("the water words don't limit the shift, as they don't move", () => {
   setWaterLevel(t.corners[2], 400);
   assert.equal(cliffShiftRange(t).min, -3, "nor near the bottom");
 });
+
+/** The Area panel's Level +1/-1: Adjust Cliff Levels on a block of corners (inclusive corner numbers). */
+test("Adjust Cliff Levels on a block moves only its corners' layers: ramps, water and cliff types stay, the edge becomes a cliff", () => {
+  // make()'s corners 1 (land, x 1) and 2 (lake, x 2) on the bottom row, and the ramp corner 5 above corner 1.
+  const before = make(), t = make(), undo = new CornerUndo();
+  const block = { x0: 1, y0: 0, x1: 2, y1: 1 };
+  assert.equal(adjustCliffLevels(t, 1, undo, block), 4);
+  t.corners.forEach((c, i) => {
+    const b = before.corners[i], x = i % 4;
+    const inside = x >= 1 && x <= 2;
+    assert.equal(c.layer, b.layer + (inside ? 1 : 0), `corner ${i}'s level`);
+    assert.deepEqual({ ...c, layer: 0, height: 0 }, { ...b, layer: 0, height: 0 }, `corner ${i}: nothing but the level changes`);
+  });
+  assert.equal(t.corners[5].ramp, true, "the ramp the block cuts through stays, as Adjust Cliff Levels keeps ramps");
+  const step = undo.step(t);
+  assert.equal(step.corners.length, 4, "one step of the block's corners");
+  step.undo();
+  assert.deepEqual(t.corners, before.corners, "and it undoes exactly");
+  // A block past the map's side is cut to it.
+  assert.equal(adjustCliffLevels(t, 1, new CornerUndo(), { x0: 3, y0: 1, x1: 9, y1: 9 }), 1);
+  assert.equal(t.corners[7].layer, before.corners[7].layer + 1);
+});
+
+test("Adjust Cliff Levels on a block keeps it within levels 0 to 14", () => {
+  const t = make();
+  const land = { x0: 0, y0: 0, x1: 1, y1: 0 }, lake = { x0: 2, y0: 0, x1: 2, y1: 0 };
+  assert.deepEqual(cliffShiftRange(t, land), { min: -4, max: Math.min(10, TOP_LEVEL - 4) });
+  assert.deepEqual(cliffShiftRange(t, lake), { min: -2, max: 10 });
+  for (let n = 0; n < 10; n++) adjustCliffLevels(t, 1, new CornerUndo(), land);
+  assert.deepEqual([t.corners[0].layer, t.corners[1].layer], [TOP_LEVEL, TOP_LEVEL]);
+  const undo = new CornerUndo();
+  assert.equal(adjustCliffLevels(t, 1, undo, land), 0, "nothing goes past the top");
+  assert.equal(undo.step(t).corners.length, 0, "and nothing is logged");
+  assert.equal(adjustCliffLevels(t, -1, new CornerUndo(), lake), 1);
+  assert.equal(adjustCliffLevels(t, -1, new CornerUndo(), lake), 1);
+  assert.equal(adjustCliffLevels(t, -1, new CornerUndo(), lake), 0, "nor past the bottom");
+  assert.equal(t.corners[2].layer, 0);
+  assert.equal(t.corners[3].layer, 2, "the corner beside the block stays");
+});
+
+test("Level +1 then -1 on a block of a real map gives the file back, and +1 changes only the block's layer nibbles", (ctx) => {
+  const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
+  let tried = 0;
+  for (const name of maps) {
+    const original = realW3e(name);
+    if (!original) continue;
+    tried++;
+    const t = parseW3e(original);
+    const per = t.version === 12 ? 8 : 7, head = original.length - t.trailer.length - t.corners.length * per;
+    // A block round the map's first ramp corner, its edge through the ramp, so that the old way (ramps cut through
+    // taken away, cliff types matched) would show; else the middle of the map.
+    const ramp = t.corners.findIndex((c) => c.ramp);
+    const cx = ramp >= 0 ? ramp % t.width : t.width >> 1, cy = ramp >= 0 ? Math.floor(ramp / t.width) : t.height >> 1;
+    const block = { x0: Math.max(0, cx - 6), y0: Math.max(0, cy - 6), x1: cx, y1: Math.min(t.height - 1, cy + 6) };
+    const inside = (i: number) => { const x = i % t.width, y = Math.floor(i / t.width); return x >= block.x0 && x <= block.x1 && y >= block.y0 && y <= block.y1; };
+    const count = (block.x1 - block.x0 + 1) * (block.y1 - block.y0 + 1);
+    assert.ok(cliffShiftRange(t, block).max >= 1, `${name}: the block has room to go up`);
+    const undo = new CornerUndo();
+    assert.equal(adjustCliffLevels(t, 1, undo, block), count, name);
+    assert.equal(undo.step(t).corners.length, count, `${name}: one step of the block's corners`);
+    const up = writeW3e(t);
+    assert.equal(up.length, original.length, name);
+    for (let p = 0; p < original.length; p++) {
+      const k = p - head;
+      const corner = k >= 0 && p < head + t.corners.length * per ? (k / per) | 0 : -1;
+      const layerByte = corner >= 0 && k % per === per - 1 && inside(corner);
+      if (!layerByte) { if (up[p] !== original[p]) assert.fail(`${name}: byte ${p} (corner ${corner}) changed (${original[p]} to ${up[p]})`); continue; }
+      if ((up[p] & 0xf0) !== (original[p] & 0xf0) || (up[p] & 0xf) !== (original[p] & 0xf) + 1) assert.fail(`${name}: corner ${corner}'s byte ${original[p]} became ${up[p]}`);
+    }
+    const back = parseW3e(up);
+    assert.equal(adjustCliffLevels(back, -1, new CornerUndo(), block), count);
+    assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
+  }
+  if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
+});
