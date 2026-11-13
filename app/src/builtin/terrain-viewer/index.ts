@@ -1,18 +1,16 @@
-import { campaignCandidates } from "./chapterimports";
 import { fogOf } from "../../lib/model/fog";
 import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { mapObjectData, readFile, readImport, savedObjects } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
-import { joinPath } from "../../lib/paths";
-import { importedPath, modeNames } from "../../lib/imports";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
@@ -33,7 +31,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -43,7 +41,7 @@ import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMap
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
-import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
+import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
@@ -53,8 +51,9 @@ import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/t
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
-import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
-import { campsOf, checkMelee, unitLevels } from "./meleecheck";
+import { checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
+import { campsOf } from "./meleecheck";
+import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
@@ -77,11 +76,11 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
-import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
+import { isMeleeMap, playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
-import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
+import { groundHeight, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -129,36 +128,6 @@ const keyCodeOf = (e: KeyboardEvent) => e.code || eventKey(e).toLowerCase();
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
 
-/** Custom object id → base id, from the project's object data (war3map.w3u.json, …). */
-/** The object data the terrain view needs (units, items, destructables, doodads): the bases
- *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
- *  the map's own, then its Skin files (Reforged keeps art changes there). `unread`: the map's own files that are
- *  there but couldn't be read or parsed (left out of `art`). */
-async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[]; unread: string[] }> {
-  const kinds = ["w3u", "w3t", "w3b", "w3d"];
-  const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
-    try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
-  };
-  const art: ObjectArt[] = [];
-  // A campaign's chapter map also uses the campaign's custom objects.
-  const campaign = campaignRoot(w3);
-  if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  const unread: string[] = [];
-  for (const prefix of ["war3map", "war3mapSkin"]) {
-    for (const k of kinds) {
-      const path = `map/${prefix}.${k}.json`;
-      if (!files.has(path.toLowerCase())) continue;
-      const f = await read(path, k);
-      if (f) art.push(f);
-      else unread.push(path);
-    }
-  }
-  const bases = new Map<string, string>();
-  for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return { bases, art, unread };
-}
-
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
 async function tilePaths(w3: W3Api): Promise<Map<string, string>> {
   return new Map([...(await tileCatalog(w3))].map(([id, t]) => [id, t.path]));
@@ -172,49 +141,6 @@ async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name:
 
 /** Maps hold at most this many ground tile types (World Editor limit). */
 const MAX_GROUND_TILES = 16;
-
-/** A game file, or the map's imported replacement of it. */
-/** The campaign project of a chapter map project (…/maps/<file>), or undefined. */
-function campaignRoot(w3: W3Api): string | undefined {
-  const root = w3.workspace.project()?.root;
-  return root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-}
-
-/** The files of a campaign's map folder, to find an import under its name on disk (see campaignCandidates); one listing per
- *  campaign for a few seconds, as most reads here are of the game's files. Null when it can't be listed. */
-const listings = new Map<string, { at: number; files: Promise<string[] | null> }>();
-function campaignListing(w3: W3Api, campaign: string): Promise<string[] | null> {
-  const known = listings.get(campaign);
-  if (known && Date.now() - known.at < 5000) return known.files;
-  const files = w3.workspace.listFolder(joinPath(campaign, "map")).catch(() => null);
-  listings.set(campaign, { at: Date.now(), files });
-  return files;
-}
-
-/** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
- *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
-async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
-  const names = modeNames(path.replace(/\//g, "\\"), w3.settings.get<string>("game.graphicsMode") ?? "hd");
-  const campaign = campaignRoot(w3);
-  // The project's own files are known; only those are read (most paths are the game's), under the name they have on
-  // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
-  const own = names.flatMap((n) => importedPath(w3, n) ?? []);
-  const candidates = [...own, ...(campaign ? campaignCandidates(campaign, names, await campaignListing(w3, campaign)) : [])];
-  let last: unknown = new Error(`${path} isn't imported`);
-  for (const c of candidates) {
-    try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
-  }
-  throw last;
-}
-
-/** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
- *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
-async function readFile(w3: W3Api, doc: EditorDocument, path: string, tileset?: string): Promise<Uint8Array> {
-  if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return await readImport(w3, path); } catch { /* use the game's */ }
-  }
-  return w3.game.read(path, { tileset });
-}
 
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
@@ -315,10 +241,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await deriveFromProject(w3, {
       terrainPath: path,
       from,
-      objects: async () => {
-        const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-        return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-      },
+      objects: () => savedObjects(w3),
       read: (p) => readFile(w3, doc, p),
       groups: toolGroups.all(),
       // Another project opened meanwhile: nothing of this one's is written into it.
@@ -377,10 +300,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const doc = { path } as EditorDocument;
       const { shd, stored } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
         terrainPath: path,
-        objects: async () => {
-          const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-          return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-        },
+        objects: () => savedObjects(w3),
         read: (p) => readFile(w3, doc, p),
       }));
       const changed = stored && stored.length === shd.length ? shd.reduce((n, v, i) => n + (v !== stored[i] ? 1 : 0), 0) : shd.length;
@@ -631,12 +551,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }));
   };
 
+  /** The open editor's ground and objects, as check_melee and check_path read them (meleefacts.ts). */
+  const walkSource = (handle: TerrainEditorHandle): WalkSource => ({
+    terrain: handle.terrain,
+    pathing: () => handle.pathing(),
+    blockers: () => handle.objects.blockers(),
+    list: () => handle.objects.list() as unknown as Placed[],
+    baseOf: (id) => handle.objects.baseOf(id),
+  });
+
   /** What stands by the tight or stuck place of a report: usually the reason. */
-  const withNeighbour = <T extends { narrowest?: { at: [number, number] }; stuckAt?: [number, number] }>(handle: TerrainEditorHandle, report: T) => {
-    const place = report.stuckAt ?? report.narrowest?.at;
-    const near = place ? nearestObject(handle.objects.list(), place) : null;
-    return near ? { ...report, standingNearby: { id: near.id, position: near.position } } : report;
-  };
+  const withNeighbour = <T extends { narrowest?: { at: [number, number] }; stuckAt?: [number, number] }>(handle: TerrainEditorHandle, report: T) =>
+    neighbourOf(walkSource(handle), report);
 
   /** All of the map, the border included. */
   const wholeMap = ({ terrain: t }: TerrainEditorHandle) => ({ left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 });
@@ -652,12 +578,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const heldBounds = async () => toolBounds(w3, await readMapDoc<{ cameraBounds?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null));
 
   /** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
-  const walkGrid = async (handle: TerrainEditorHandle): Promise<Grid> => {
-    const [pathing, blockers] = await Promise.all([handle.pathing(), handle.objects.blockers()]);
-    const t = handle.terrain;
-    const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
-    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
-  };
+  const walkGrid = (handle: TerrainEditorHandle): Promise<Grid> => gridOf(walkSource(handle));
 
   /** How long Studio waits for a yes. Less than a tool call may take, or the answer goes nowhere. */
   const CONFIRM_TIME = 90_000;
@@ -690,44 +611,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
     const { handle } = await liveEditor("read");
-    const [balance, weapons, destructables, game, data, grid, unitMods] = await Promise.all([
-      w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
-      w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle), objectMods(w3, "war3map.w3u"),
-    ]);
-    // The map's own levels (ulev in its unit object data) over the game's.
-    const level = unitLevels(parseSlk(balance), unitMods, (id) => handle.objects.baseOf(id));
-    const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
-    const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
-    const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
-    const placed = handle.objects.list() as unknown as (Placed & { player?: number; targetAcquisition?: number; itemTable?: number; itemSets?: unknown[]; randomLevel?: string })[];
-    const units = placed.filter((e) => e.player !== undefined).map((e) => ({
-      id: e.id, x: e.position[0], y: e.position[1], player: e.player as number, acquisition: e.targetAcquisition ?? -1,
-      drops: (e.itemTable ?? -1) >= 0 || (e.itemSets ?? []).length > 0,
-      ...(e.id.startsWith("Y") ? { randomLevel: parseInt((e.randomLevel ?? "").slice(0, 2), 16) || 0 } : {}),
-    }));
-    const trees = placed.filter((e) => e.player === undefined && (isTree.has(e.id) || isTree.has(handle.objects.baseOf(e.id) ?? ""))).map((e) => [e.position[0], e.position[1]] as [number, number]);
-    const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
-    const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
-    const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
-    const way = (name: string, from: [number, number], to: [number, number], target?: [number, number], owner?: number) => {
-      let report = checkPath(grid, from, to, size, 200);
-      // A mine or a building at the end stands in its own way.
-      if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
-      routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route, ...(owner === undefined ? {} : { from: owner, length: report.length }) } : { name, problem: report.problem ?? "no way through" });
-    };
-    for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
-    for (const [i, s] of starts.entries()) {
-      const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
-      for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m), i);
-      for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
-    }
-    const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
-    const widest = starts.map((s) => widestFrom(grid, at(s)));
-    const t = handle.terrain, counts = new Map<number, number>();
-    for (const c of t.corners) if (!c.boundary) counts.set(c.layer, (counts.get(c.layer) ?? 0) + 1);
-    const commonLevel = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
-    const levelAt = (x: number, y: number) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer ?? 0;
-    return { handle, grid, widest, units, trees, routes, levelAt, commonLevel, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
+    return { handle, ...(await meleeFactsOf(w3, walkSource(handle), size)) };
   };
 
   let placeObjects: McpToolHandler = () => undefined;
@@ -874,7 +758,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
       const { handle } = await liveEditor("read");
-      return withNeighbour(handle, checkPath(await walkGrid(handle), start, goal, size));
+      return pathReport(walkSource(handle), start, goal, size);
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
@@ -1023,23 +907,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
-      const f = await meleeFacts(typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
-      return checkMelee({
-        units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
-        callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
-        narrow: narrowStrips(f.grid), levelAt: f.levelAt, commonLevel: f.commonLevel,
-        widestTo: (x, y) => {
-          // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
-          let best = 0;
-          const { width: w, height: h, offsetX, offsetY } = f.grid;
-          const cx = Math.floor((x - offsetX) / 32), cy = Math.floor((y - offsetY) / 32);
-          for (let b = -3; b <= 3; b++) for (let a = -3; a <= 3; a++) {
-            if (cx + a < 0 || cy + b < 0 || cx + a >= w || cy + b >= h) continue;
-            for (const field of f.widest) best = Math.max(best, field[(cy + b) * w + cx + a]);
-          }
-          return widthOf(best);
-        },
-      });
+      const { handle } = await liveEditor("read");
+      return meleeReport(w3, walkSource(handle), typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
     }),
     w3.mcp.registerTool("find_spots", async ({ kind, count, mirror }) => {
       if (kind !== "camp" && kind !== "expansion") throw new Error("kind must be camp or expansion.");
@@ -2447,7 +2316,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
+            loader.load("units", startPreviews(units, startRaces, startMelee), skins, team, undefined, undefined, false),
             loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -2460,8 +2329,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
-          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)),
-            ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true }))]);
+          previewBatches = s.batches.map(lookOfPreview);
+          previewKey = startPreviewKey(units, startRaces, startMelee);
+          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
@@ -2563,6 +2433,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
          *  be read keeps the races last read: they only change what is drawn. */
         let startRaces = new Map<number, number>();
+        /** The map's Melee flag (war3map.w3i): the editor shows the start buildings on melee maps only. */
+        let startMelee = false;
+        /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
+        let previewKey = "";
+        let previewBatches: ObjectBatch[] = [];
+        let previewGen = 0;
+        function lookOfPreview<B extends { instances: ObjectInstance[] }>(b: B) {
+          for (const inst of b.instances) delete inst.pick;
+          return { ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true };
+        }
+        /** Makes only the start buildings again when the start locations, the races or the Melee flag changed
+         *  (checked on each drawn frame: every edit, undo, paste and MCP call asks for one). */
+        function refreshStartPreviews() {
+          const ctx = nextCtx ?? objCtx;
+          if (!ctx || !unitsFile) return;
+          const units = unitsFile.list, key = startPreviewKey(units, startRaces, startMelee);
+          if (key === previewKey) return;
+          previewKey = key;
+          const gen = ++previewGen, rebuilt = rebuildGen;
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces, startMelee), ctx.skins, team, undefined, undefined, false).then((s) => {
+            // A full rebuild in between made them itself; a newer change makes them again.
+            if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
+            const fresh = s.batches.map(lookOfPreview);
+            renderer.setGroup("units", [...renderer.batches.filter((b) => b.group === "units" && !previewBatches.includes(b)), ...fresh]);
+            previewBatches = fresh;
+            redraw();
+          }));
+        }
         /** Map Properties' random groups; null when war3map.w3i can't be read (what is shown stays). */
         const readRandomGroups = async (): Promise<RandomGroup[] | null> => {
           // A file that isn't there has no groups; one that can't be read keeps what is shown.
@@ -2579,17 +2477,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
-        const readRaces = async (): Promise<Map<number, number> | null> => {
-          const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          return info ? playerRaces(info) : null;
+        const readRaces = async (): Promise<{ races: Map<number, number>; melee: boolean } | null> => {
+          const info = await readMapDoc<Parameters<typeof playerRaces>[0] & Parameters<typeof isMeleeMap>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
+          return info ? { races: playerRaces(info), melee: isMeleeMap(info) } : null;
         };
         /** After the map's players were saved (Map Properties): the start buildings follow their races. */
         const reloadRaces = async () => {
           await firstLoad.catch(() => {});
-          const races = await readRaces();
-          if (!races || disposed || JSON.stringify([...races]) === JSON.stringify([...startRaces])) return;
-          startRaces = races;
-          await rebuildObjects();
+          const info = await readRaces();
+          if (!info || disposed) return;
+          startRaces = info.races;
+          startMelee = info.melee;
+          refreshStartPreviews();
         };
         let objectsPlaced: Promise<void> = Promise.resolve();
         /** The first load of the placed objects and their types. */
@@ -2602,7 +2501,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             mapObjectData(w3),
             readRaces(),
           ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
-            if (races) startRaces = races;
+            if (races) { startRaces = races.races; startMelee = races.melee; }
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
@@ -4249,6 +4148,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           sunShadows: () => ({ ...renderer.sunShadowState }),
           waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
+          drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
           drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
@@ -5299,6 +5199,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
           if (canvas.clientWidth > 0 && due && !glDead) {
+            refreshStartPreviews();
             renderer.render();
             placeLabels();
             minimapOutline();

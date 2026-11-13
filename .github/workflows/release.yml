@@ -77,6 +77,9 @@ jobs:
           triple="$(rustc -vV | sed -n 's/^host: //p')"
           mkdir -p app/src-tauri/binaries
           cp "target/release/w3proj$exe" "app/src-tauri/binaries/w3proj-$triple$exe"
+          # The app's code `w3proj rebuild` runs in Node, as a resource: beside the program on Windows, in
+          # usr/lib/<the app>/ of the Linux packages (rebuild.rs bundle_places looks in both).
+          node app/scripts/headless.mjs --out app/src-tauri/binaries/w3proj-headless.mjs
 
       - name: App bundles
         working-directory: app
@@ -87,6 +90,8 @@ jobs:
           exe=""; [[ "${{ matrix.platform }}" == windows ]] && exe=".exe"
           mkdir -p out
           cp "target/release/w3proj$exe" "out/w3proj-${{ matrix.platform }}-x86_64$exe"
+          # For the loose w3proj download: the bundle goes beside it (the same file on every platform).
+          cp app/src-tauri/binaries/w3proj-headless.mjs out/w3proj-headless.mjs
           shopt -s nullglob
           for f in target/release/bundle/{nsis/*.exe,msi/*.msi,appimage/*.AppImage,deb/*.deb}; do cp "$f" out/; done
           ls -l out

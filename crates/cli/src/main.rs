@@ -13,6 +13,10 @@ macro_rules! print {
     ($($arg:tt)*) => { $crate::out(format_args!($($arg)*)) };
 }
 
+// After the macros: its reports end quietly on a closed pipe too.
+mod rebuild;
+mod check;
+
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
 static PIPE_CLOSED: AtomicBool = AtomicBool::new(false);
@@ -307,9 +311,8 @@ fn check_derived(project: &std::path::Path) -> Result<()> {
         chapters.sort();
         projects.extend(chapters);
     }
-    let again = "W3Proj Studio makes them again a few seconds after an edit made there and on every terrain save: wait \
-                 for that (or save the terrain there after an edit made elsewhere), then pack again; --force-stale packs \
-                 them as they are";
+    let again = "`w3proj rebuild` makes them again (W3Proj Studio does a few seconds after an edit made there and on every \
+                 terrain save), then pack again; --force-stale packs them as they are";
     for (at, dir) in projects {
         match check(&dir).with_context(|| format!("checking {}", dir.display()))? {
             Freshness::Fresh | Freshness::Unknown => {}
@@ -387,6 +390,61 @@ enum Cmd {
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
         force_stale: bool,
+    },
+    /// Make a project's derived files again from its files, as W3Proj Studio makes them: pathing
+    /// (war3map.wpm), shadows (war3map.shd), the minimap (war3mapMap.blp, war3map.mmp) and the map
+    /// script (war3map.j / war3map.lua from the triggers).
+    ///
+    /// Runs the app's own code in Node.js (22 or newer; W3PROJ_NODE names another node). Without
+    /// --only: pathing, shadows and the minimap when the terrain or doodads changed since they were
+    /// made (then `w3proj pack` takes them again), and the script. Shadows are calculated in whole,
+    /// as Calculate Shadows does. A script that isn't the one Studio wrote last (edited by hand,
+    /// from the World Editor with other code) is kept, and vJASS isn't compiled.
+    Rebuild {
+        project: PathBuf,
+        /// Only these parts, comma-separated: wpm, shd, minimap, script.
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// Make pathing, shadows and the minimap even when they follow the terrain and doodads.
+        #[arg(long)]
+        force: bool,
+        /// Game install folder: its tables, models and textures go into the files.
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
+        game: String,
+        /// Art set (sd, hd or de) instead of the project's game.graphicsMode setting (default hd, as the app).
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// Check a project as W3Proj Studio does: the Problems view's checks, check_melee and check_path.
+    ///
+    /// Prints one line per report (severity, check, location, message) and how many the project's
+    /// .w3proj/problems-ignore.json left out. Exits with 1 when there are errors (with
+    /// --warnings-fail also on warnings). Without --only: the Problems checks, check_melee when the
+    /// map's war3map.w3i has the Melee flag, and check_path when --path gives its points. Runs the
+    /// app's own code in Node.js (22 or newer; W3PROJ_NODE names another node); writes nothing.
+    Check {
+        project: PathBuf,
+        /// Only these, comma-separated: problems, melee (also on a map without the Melee flag), path.
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// check_path from one point to another, in world coordinates: x1,y1:x2,y2.
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
+        /// Collision size of the unit check_path and check_melee walk with (default 32, as the MCP tools).
+        #[arg(long)]
+        unit_size: Option<f64>,
+        /// Fail (exit 1) on warnings too.
+        #[arg(long)]
+        warnings_fail: bool,
+        /// The whole report as JSON (the Problems checks by check, check_melee's and check_path's answers as the MCP tools give them).
+        #[arg(long)]
+        json: bool,
+        /// Game install folder: its tables, models and textures.
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
+        game: String,
+        /// Art set (sd, hd or de) instead of the project's game.graphicsMode setting (default hd, as the app).
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Check that maps survive unpack → pack unchanged (in memory).
     Verify {
@@ -651,6 +709,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             if failed + changed > 0 {
                 return Ok(ExitCode::FAILURE);
             }
+        }
+        Cmd::Rebuild { project, only, force, game, mode } => {
+            return rebuild::run(rebuild::Options { project, only, force, game, mode, formats: extra });
+        }
+        Cmd::Check { project, only, path, unit_size, warnings_fail, json, game, mode } => {
+            return check::run(check::Options { project, only, path, unit_size, warnings_fail, json, game, mode, formats: extra });
         }
         Cmd::Mcp => mcp::run()?,
         Cmd::Ls { map } => {

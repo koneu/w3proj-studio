@@ -2617,6 +2617,53 @@ async function specialDoodads(page, found) {
   }
 }
 
+/** The see-through town hall at a start location follows it (move by MCP, undo) and shows on melee maps only
+ *  (war3map.w3i Melee flag, changed in the file as Scenario Properties does). */
+async function startPreviewFollow(page, found) {
+  try {
+  const fail = (what) => found.push(`start preview: ${what}`);
+  const k = await heightKit(page, "StartPreview");
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__spEd2 = null;
+    window.__spGroup2?.dispose();
+    window.__spGroup2 = s.registerToolGroup({ id: "smoke-startprev", title: "smoke-startprev", order: 998, create: (ed) => { window.__spEd2 = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = () => page.evaluate(`window.__spEd2?.drawnStartBuildings() ?? []`);
+  const setMelee = async (on) => {
+    const info = k.read("war3map.w3i.json");
+    info.flags = on ? (info.flags | 4) : (info.flags & ~4);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))})`);
+  };
+  try {
+    await k.save();
+    await setMelee(true);
+    const starts = () => k.units().filter((u) => u.id === "sloc");
+    const i = k.units().findIndex((u) => u.id === "sloc" && u.player === 0);
+    await until("a preview at a start location of a melee map", async () => (await drawn()).length > 0, 30000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn())}`); });
+    const near = async (x, y) => (await drawn()).some((d) => Math.abs(d.x - x) < 1 && Math.abs(d.y - y) < 1);
+    const was = starts()[0].position;
+    if (!(await near(was[0], was[1]))) fail(`no preview at the start location ${was.slice(0, 2)}: ${JSON.stringify(await drawn())}`);
+    const to = [was[0] + 512, was[1] + 256];
+    await k.tool("move_object", { kind: "units", index: i, id: "sloc", x: to[0], y: to[1] });
+    await until("the preview at the moved start", () => near(to[0], to[1]), 10000).catch(async () => fail(`the preview didn't follow the start to ${to}: ${JSON.stringify(await drawn())}`));
+    if (await near(was[0], was[1])) fail("a preview stayed at the old place");
+    await k.tool("undo_last_edit");
+    await until("the preview back after undo", () => near(was[0], was[1]), 10000).catch(async () => fail(`undo didn't move the preview back to ${was.slice(0, 2)}: ${JSON.stringify(await drawn())}, start now ${JSON.stringify(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.filter((u) => u.id === "sloc").map((u) => u.position))()`))}`));
+    await setMelee(false);
+    await until("no preview without the Melee flag", async () => (await drawn()).length === 0, 10000).catch(async () => fail(`still previews with Melee off: ${JSON.stringify(await drawn())}`));
+    await setMelee(true);
+    await until("previews again with Melee on", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after Melee went on"));
+  } finally {
+    await page.evaluate(`window.__spGroup2?.dispose(); window.__spGroup2 = null; window.__spEd2 = null;`);
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
  *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
  *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
@@ -5262,6 +5309,137 @@ async function derivedAfterDeletes(page, found) {
     await page.evaluate(`(async () => { if (window.__derivedKept) w3.window.confirm = window.__derivedKept; delete window.__derivedKept; delete window.__derivedAsked; await w3.editors.closeAll(); })()`).catch(() => {});
   }
   } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** `w3proj rebuild` (crates/cli/src/rebuild.rs running src/headless in Node) writes what the app writes. Two copies of
+ *  one new map get the same edit made outside the app (a rock and a footman moved in the placement files); then the
+ *  app makes the derived files from the saved files (w3.terrain.rebuildFromFiles, Calculate Shadows, Generate Map
+ *  Script) in one and the CLI in the other: pathing, shadows, the minimap and its icons, the script and both records
+ *  must be the same bytes. Controls: the edit changed the pathing and the script (equal isn't both doing nothing),
+ *  `w3proj pack` refuses the CLI's copy before its rebuild (stale) and takes it after. */
+async function rebuildCli(page, found) {
+  const fail = (what) => found.push(`rebuild cli: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "rebuild-cli");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  // new_map asks the user first: the check says yes.
+  await page.evaluate(`(() => { window.__rebuildKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    await tool("new_map", { name: "RebuildCli", width: 64, height: 64, folder: dir });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    await tool("place_objects", { objects: [{ id: "AOks", x: -512, y: 256 }, { id: "LTlt", x: 512, y: 0 }], ignoreRoom: true });
+    await tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: -256, player: 1 }], ignoreRoom: true });
+    await tool("rebuild_map");
+    await settled(page);
+    await page.evaluate(`w3.editors.closeAll()`);
+    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", "map/war3map.j", "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
+    const read = (r, f) => (existsSync(join(r, f)) ? readFileSync(join(r, f)) : null);
+    const before = Object.fromEntries(FILES.map((f) => [f, read(root, f)]));
+    // The edit outside the app (as an AI editing the text files would): the rock and the footman move.
+    const move = (file, list, id, dx) => {
+      const doc = JSON.parse(readFileSync(join(root, "map", file), "utf8"));
+      const o = doc[list].find((e) => e.id === id);
+      if (!o) throw new Error(`no ${id} in ${file}`);
+      o.position[0] += dx;
+      writeFileSync(join(root, "map", file), `${JSON.stringify(doc, null, 2)}\n`);
+    };
+    move("war3map.doo.json", "doodads", "AOks", 384);
+    move("war3mapUnits.doo.json", "units", "hfoo", -512);
+    const copy = join(dir, "cli-copy");
+    cpSync(root, copy, { recursive: true });
+    // The app's copy, from its saved files.
+    await page.evaluate(`w3.workspace.refresh()`);
+    const err = await page.evaluate(`(async () => { try { await w3.commands.execute("w3.terrain.rebuildFromFiles"); await w3.commands.execute("w3.terrain.calculateShadows"); await w3.commands.execute("w3.script.generate", { quiet: true }); return null; } catch (e) { return String(e); } })()`, { timeout: 180000 });
+    if (err) { fail(`the app's rebuild: ${err}`); return; }
+    await settled(page);
+    // The CLI's copy: stale for pack until rebuilt.
+    const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
+    const pack = (label) => spawnSync(cli, ["pack", copy, "-o", join(dir, `${label}.w3x`)], { encoding: "utf8" });
+    const stale = pack("before");
+    if (stale.status === 0 || !/war3map\.doo\.json/.test(stale.stderr ?? "")) fail(`w3proj pack took the copy before its rebuild: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
+    const r = spawnSync(cli, ["rebuild", copy], { encoding: "utf8", env, timeout: 300000 });
+    const said = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
+    if (r.status !== 0) { fail(`w3proj rebuild failed (${r.status}): ${said.slice(-600)}`); return; }
+    for (const part of ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.j"]) {
+      if (!new RegExp(`^(written|unchanged) .*${part.replace(".", "\\.")}`, "m").test(said)) fail(`w3proj rebuild didn't report ${part} made: ${said.slice(0, 600)}`);
+    }
+    const packed = pack("after");
+    if (packed.status !== 0) fail(`w3proj pack refused the rebuilt copy: ${(packed.stdout + packed.stderr).trim().slice(-300)}`);
+    for (const f of FILES) {
+      const a = read(root, f), b = read(copy, f);
+      if (!a || !b) fail(`${f}: ${!a ? "the app" : "the CLI"} left none`);
+      else if (Buffer.compare(a, b) !== 0) fail(`${f} differs: the app wrote ${a.length} bytes, w3proj rebuild ${b.length}`);
+    }
+    for (const f of ["map/war3map.wpm", "map/war3map.j"]) {
+      const now = read(root, f);
+      if (before[f] && now && Buffer.compare(before[f], now) === 0) fail(`${f} didn't change with the edit: the comparison proves nothing`);
+    }
+  } finally {
+    await page.evaluate(`(async () => { if (window.__rebuildKept) w3.window.confirm = window.__rebuildKept; delete window.__rebuildKept; await w3.editors.closeAll(); })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** `w3proj check` answers what the app answers for the same saved project: a new melee map with a second start, a mine
+ *  with creeps, a row of trees across the way check_path is asked about, two triggers nothing runs and one of them in
+ *  .w3proj/problems-ignore.json. list_problems (and its ignored count), check_melee and check_path in the app against
+ *  the CLI's --json report; the CLI wrote nothing. */
+async function cliCheck(page, found) {
+  const fail = (what) => found.push(`cli check: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "cli-check");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  await page.evaluate(`(() => { window.__cliCheckKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    await tool("new_map", { name: "CliCheck", width: 64, height: 64, folder: dir });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    await tool("place_objects", { objects: [{ id: "sloc", x: 2048, y: 2048, player: 2 }, { id: "ngol", x: -2048, y: 2048, player: 28 }, { id: "ngno", x: -1700, y: 1800, player: 25 }, { id: "ngno", x: -1800, y: 1700, player: 25 }], ignoreRoom: true });
+    await tool("place_line", { kind: "doodads", id: "LTlt", from: [-1024, -1024], to: [1024, -1024], ignoreRoom: true });
+    const trigger = (id, name) => ({ type: 8, name, description: "", isComment: 0, id, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0,
+      ecas: [{ kind: 2, name: "PauseGame", enabled: true, params: [{ type: 0, value: "ConvertBoolean" }], children: [] }] });
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify({
+      reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: [trigger(50331649, "Kept Smoke"), trigger(50331650, "Ignored Smoke")] }))});
+      await w3.workspace.writeText(".w3proj/problems-ignore.json", ${JSON.stringify(JSON.stringify({ version: 1, rules: [], items: [{ check: "triggerNoEvents", about: "Ignored Smoke" }] }))});
+      await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    const path = { from: [0, -1600], to: [0, -400] };
+    const app = {
+      problems: JSON.parse(await tool("list_problems", {})),
+      melee: JSON.parse(await tool("check_melee", {}, { timeout: 120000 })),
+      path: JSON.parse(await tool("check_path", path)),
+    };
+    const files = () => Object.fromEntries(readdirSync(join(root, "map")).filter((f) => statSync(join(root, "map", f)).isFile()).map((f) => [f, hash(join(root, "map", f))]));
+    const before = files();
+    const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
+    const r = spawnSync(cli, ["check", root, "--json", "--only=problems,melee,path", "--path", "0,-1600:0,-400"], { encoding: "utf8", env, timeout: 300000 });
+    let ours;
+    try { ours = JSON.parse(r.stdout); } catch { fail(`w3proj check gave no JSON (${r.status}): ${`${r.stdout}${r.stderr}`.slice(-600)}`); return; }
+    if (JSON.stringify(files()) !== JSON.stringify(before)) fail("w3proj check changed the project's files");
+    // The Problems checks: the same reports (a failed check as list_problems words it), the same ignored count.
+    const key = (p) => JSON.stringify([p.severity, p.message, p.location ?? null]);
+    const appRows = app.problems.filter((p) => p.ignored === undefined).map(key).sort();
+    const cliRows = ours.problems.flatMap((g) => [...(g.error ? [{ severity: "error", message: `The check failed: ${g.error}`, location: g.title }] : []), ...g.problems]).map(key).sort();
+    if (JSON.stringify(appRows) !== JSON.stringify(cliRows)) fail(`problems differ: the app ${JSON.stringify(appRows).slice(0, 600)}, the CLI ${JSON.stringify(cliRows).slice(0, 600)}`);
+    const appIgnored = app.problems.find((p) => p.ignored !== undefined)?.ignored ?? 0;
+    if (appIgnored !== 1 || ours.ignored !== 1) fail(`ignored: the app ${appIgnored}, the CLI ${ours.ignored} (1 expected)`);
+    if (!appRows.some((k) => k.includes("Kept Smoke"))) fail("no report of the trigger nothing runs: the comparison proves little (control)");
+    // check_melee and check_path: the MCP tools' answers, the same to the byte.
+    if (JSON.stringify(app.melee) !== JSON.stringify(ours.melee)) fail(`check_melee differs: the app ${JSON.stringify(app.melee.findings).slice(0, 500)}, the CLI ${JSON.stringify(ours.melee?.findings).slice(0, 500)}`);
+    if (JSON.stringify(app.path) !== JSON.stringify(ours.path)) fail(`check_path differs: the app ${JSON.stringify(app.path)}, the CLI ${JSON.stringify(ours.path)}`);
+    // The trees are in the way: the way squeezes between them (open ground is 1000s wide).
+    if (!app.path.walkable || app.path.standingNearby?.id !== "LTlt" || !(app.path.narrowest?.width < 200)) fail(`check_path didn't meet the trees (control): ${JSON.stringify(app.path).slice(0, 300)}`);
+    if (!app.melee.findings?.length) fail("check_melee found nothing to compare (control)");
+  } finally {
+    await page.evaluate(`(async () => { if (window.__cliCheckKept) w3.window.confirm = window.__cliCheckKept; delete window.__cliCheckKept; await w3.editors.closeAll(); })()`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -10398,6 +10576,7 @@ async function run() {
         cameraEditing,
         campaignPresets,
         chapterObjects,
+        cliCheck,
         configSafety,
         contextLoss,
         dataSafety,
@@ -10438,12 +10617,14 @@ async function run() {
         playerStarts: (p, f) => playerStarts(p, f, project),
         problemsIgnore,
         realMapSave,
+        rebuildCli,
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
         shouldHaves,
         specialDoodads,
         staleEditors,
+        startPreviewFollow,
         syncSafety,
         techtreeRandomLevels,
         terrainSelectCameras,
@@ -10620,6 +10801,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "flyingHeights", found);
   await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
   await leftOpen(page, "specialDoodads", found);
+  await startPreviewFollow(page, found).catch((e) => found.push(`start preview: ${e.message}`));
+  await leftOpen(page, "startPreviewFollow", found);
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
@@ -10696,6 +10879,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "moduleFunctions", found);
   await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
   await leftOpen(page, "derivedAfterDeletes", found);
+  await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
+  await leftOpen(page, "rebuildCli", found);
+  await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
+  await leftOpen(page, "cliCheck", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));

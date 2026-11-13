@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mpq", "crates/casc", "crates/w3proj", "crates/cli", "app/src-tauri"]
+members = ["crates/mpq", "crates/casc", "crates/w3proj", "crates/backend", "crates/cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ license = "MIT"
 mpq = { path = "crates/mpq" }
 casc = { path = "crates/casc" }
 w3proj = { path = "crates/w3proj" }
+backend = { path = "crates/backend", package = "w3proj-backend" }
 thiserror = "2"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

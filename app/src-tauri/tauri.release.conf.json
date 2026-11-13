@@ -4,6 +4,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "bundle": {
-    "externalBin": ["binaries/w3proj"]
+    "externalBin": ["binaries/w3proj"],
+    "resources": { "binaries/w3proj-headless.mjs": "w3proj-headless.mjs" }
   }
 }
