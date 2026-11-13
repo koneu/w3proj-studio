@@ -82,7 +82,7 @@ function loadFields(w3: W3Api, mode: Mode): Promise<Field[]> {
       };
       if (mode === "misc") {
         // Later files win (MiscGame over MiscData); per-object sections are in ItemFunc.txt.
-        const files = (await Promise.all(["Units\\MiscGame.txt", "Units\\MiscData.txt", "Units\\ItemFunc.txt"].map(text))).map(parseIni);
+        const files = (await Promise.all(["Units\\MiscGame.txt", "Units\\MiscData.txt", "Units\\ItemFunc.txt"].map(text))).map((t) => parseIni(t));
         return parseSlk(await text("Units\\MiscMetaData.slk")).filter((r) => r.field).map((r) => ({
           section: r.section, key: r.field, label: label(r.displayName, r.field), type: r.type,
           // Values may be followed by a comment ("0.75 // for cancelled construction").

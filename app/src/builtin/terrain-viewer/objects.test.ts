@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -40,6 +40,27 @@ test("the skin tables are asked for at once, and the later table still wins whic
   assert.deepEqual(skins.get("hfoo")?.animProps, ["upgrade", "first"]);
   assert.equal(skins.get("hfoo")?.moveType, "foot");
   assert.ok(skins.has("sloc"));
+});
+
+test("a destructable's scale range is its table's first minScale and maxScale, as the World Editor reads them", async () => {
+  // DestructableSkin.txt's tree bridge LTt0 has maxScale=1, maxScale=0.8, minScale=0.8, minScale=1: the editor saves
+  // its scales within 0.8 to 1 (we-drive, verification round 3 package 6). UnitSkin.txt keeps the last.
+  const files: Record<string, string> = {
+    "Units\\DestructableSkin.txt": "[LTt0]\r\nfile=Doodads\\Terrain\\TreeBridge0\\TreeBridge0\r\nmaxScale=1\r\nmaxScale=0.8\r\nminScale=0.8\r\nfixedRot=0\r\nminScale=1\r\n",
+    "Units\\UnitSkin.txt": "[hfoo]\nfile=Units\\Footman\nmodelScale=1\nmodelScale=1.2",
+  };
+  const w3 = {
+    settings: { get: () => "sd" },
+    game: { readText: async (path: string) => { if (path in files) return files[path]; throw new Error(`not found: ${path}`); } },
+  } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const bridge = skins.get("LTt0")!;
+  assert.deepEqual([bridge.minScale, bridge.maxScale, bridge.fixedRot], [0.8, 1, 0]);
+  assert.deepEqual(scaleRange(bridge), [0.8, 1]);
+  assert.equal(skins.get("hfoo")?.modelScale, 1.2);
+  // A range the wrong way round (a map's own bmis 1.5, bmas 1.1) is no drawing range (the saving rule's is
+  // savedScaleRange, held by app-smoke doodadSnapOnLoad).
+  assert.equal(scaleRange({ ...bridge, minScale: 1.5, maxScale: 1.1 }), undefined);
 });
 
 test("a unit table's Animprops land on the skins, whatever the table's spelling", () => {

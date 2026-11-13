@@ -1,7 +1,7 @@
 // The World Editor's doodad rules (doodadgrid.ts: the grid and quarter turn; doodadrules.ts: the scale range) applied to
 // a doodad or destructable as it is placed, pasted, moved, turned or scaled, as part of that edit, not only when a map
-// opens. The same settings switch them: Snap Doodads on Load (terrain.doodads.snapOnLoad) the grid, Fix Doodads on
-// Load (terrain.doodads.fixOnLoad) the scale. What the editor does while editing (we-drive, 2026-11-13) is written in
+// opens. The same settings switch them: Snap Doodads on Load (terrain.doodads.snapOnLoad) the grid and the facing,
+// Fix Doodads on Load (terrain.doodads.fixOnLoad) the scale. What the editor does while editing (we-drive, 2026-11-13) is written in
 // TESTING.md "Doodad rules while editing".
 
 import { doodadOnGrid, type PathSize } from "./doodadgrid";
@@ -14,13 +14,16 @@ export interface DoodadRuleSource {
   fix: boolean;
   size(id: string): PathSize | null | undefined;
   scaleRule(id: string): ScaleRule | null;
+  /** A destructable type's fixed rotation in degrees (null: none; doodads have none here, doodadgrid.ts). */
+  fixedRot?(id: string): number | null;
 }
 
 /** Where a doodad of type `id` asked to stand at (x, y) with `angle` goes: on its grid, turned to a quarter turn if its
- *  texture isn't square (doodadgrid.ts). As asked with snapping off or its pathing size not known. */
+ *  texture isn't square, a destructable to its type's fixed rotation, any other angle into 0..360 (doodadgrid.ts). As
+ *  asked with snapping off; a type whose pathing size isn't known yet stays where it is asked, its facing ruled. */
 export function doodadPose(rules: DoodadRuleSource, id: string, x: number, y: number, angle: number): { x: number; y: number; angle: number } {
   if (!rules.snap) return { x, y, angle };
-  return doodadOnGrid(x, y, angle, rules.size(id) ?? null);
+  return doodadOnGrid(x, y, angle, rules.size(id) ?? null, rules.fixedRot?.(id) ?? null);
 }
 
 /** The scale a doodad of type `id` asked to have gets: within its type's range (doodadrules.ts; 0 a random one). As

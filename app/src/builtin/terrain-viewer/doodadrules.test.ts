@@ -72,6 +72,19 @@ test("the measured scales tell the rules apart (controls)", () => {
   assert.ok(scales.some((c) => c.id === "LOfl" && c.stored[0] === 3 && c.saved[0] === 3));
 });
 
+test("a range the wrong way round saves every scale at its least; the tree bridges' 0.8 to 1 (measured)", () => {
+  // we-drive, verification round 3 package 6: the map's LTex at bmis 1.5, bmas 1.1 and LPfp at dmis 1.4, dmas 0.9.
+  const ltex: ScaleRule = { kind: "w3b", min: 1.5, max: 1.1 }, lpfp: ScaleRule = { kind: "w3d", min: 1.4, max: 0.9 };
+  for (const s of [1, 1.3, 2, 1.1]) assert.deepEqual(savedScale([s, s, s], ltex, never), [1.5, 1.5, 1.5], `LTex ${s}`);
+  for (const s of [1, 1.2, 2, 0.5]) assert.deepEqual(savedScale([s, s, s], lpfp, never), [1.4, 1.4, 1.4], `LPfp ${s}`);
+  // Control: held to the least first, then the most, 2 would be 1.1.
+  assert.equal(Math.max(ltex.max, Math.min(ltex.min, 2)), 1.5);
+  assert.equal(Math.min(ltex.max, Math.max(ltex.min, 2)), 1.1);
+  // LTt0, read as the editor reads its table (0.8 to 1): 0.5 to 0.8, 2 and 1.5 to 1, 0.9 and 0.8 kept.
+  const bridge: ScaleRule = { kind: "w3b", min: 0.8, max: 1 };
+  assert.deepEqual([0.5, 2, 1.5, 1, 0.9, 0.8].map((s) => savedScale([s, s, s], bridge, never)[0]), [0.8, 1, 1, 1, 0.9, 0.8]);
+});
+
 test("a scale that fits is returned as stored, in single precision", () => {
   const s: [number, number, number] = [1.1, 1.3, 1.5];
   assert.deepEqual(savedScale(s, { kind: "w3d", min: 1.1, max: 1.5 }, never), s);

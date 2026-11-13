@@ -41,8 +41,9 @@ export function parseSlk(text: string): Record<string, string>[] {
 export const unquote = (v: string) => (v.length > 1 && v.startsWith('"') && v.endsWith('"') ? v.slice(1, -1) : v);
 
 /** INI-style `[section] key=value` text. Keys are lower-cased; values keep
- *  their quotes so comma lists can be split correctly (see `listItem`). */
-export function parseIniRaw(text: string): Map<string, Map<string, string>> {
+ *  their quotes so comma lists can be split correctly (see `listItem`). A key given twice in a section keeps its last
+ *  value, or its first with `firstWins` (as the World Editor reads DestructableSkin.txt's tree bridges). */
+export function parseIniRaw(text: string, opts: { firstWins?: boolean } = {}): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
   let cur: Map<string, string> | null = null;
   for (const line of text.split(/\r?\n/)) {
@@ -52,15 +53,17 @@ export function parseIniRaw(text: string): Map<string, Map<string, string>> {
       out.set(name, cur);
     } else if (cur && !line.startsWith("//")) {
       const eq = line.indexOf("=");
-      if (eq > 0) cur.set(line.slice(0, eq).trim().toLowerCase(), line.slice(eq + 1).trim());
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim().toLowerCase();
+      if (!opts.firstWins || !cur.has(key)) cur.set(key, line.slice(eq + 1).trim());
     }
   }
   return out;
 }
 
 /** Same as parseIniRaw but with surrounding quotes removed. */
-export function parseIni(text: string): Map<string, Map<string, string>> {
-  const raw = parseIniRaw(text);
+export function parseIni(text: string, opts: { firstWins?: boolean } = {}): Map<string, Map<string, string>> {
+  const raw = parseIniRaw(text, opts);
   for (const section of raw.values()) for (const [k, v] of section) section.set(k, unquote(v));
   return raw;
 }
