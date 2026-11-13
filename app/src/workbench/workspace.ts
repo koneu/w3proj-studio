@@ -46,8 +46,41 @@ export class WorkspaceService {
     return this.folderList;
   }
 
+  /** The root whose files `fileList` holds all of (read from its disk once at least), or null: right after an open the
+   *  project is there before its list is, and a file not listed yet is no file that is absent. */
+  private listedRoot: string | null = null;
+  /** For app-smoke only (stringsBeforeListing): while set, a listing waits for it before it reads the folder, as a
+   *  slow disk would (the backend's invoke can't be wrapped from the page). */
+  testListingHold: Promise<void> | null = null;
+  /** The last listing started (open or refresh): what filesReady waits for. */
+  private listing: Promise<void> = Promise.resolve();
+  /** Whether files() lists every file of the open project (false while the first listing after an open runs). */
+  filesComplete() {
+    return !!this.info && this.listedRoot === this.info.root;
+  }
+  /** Resolves once files() lists every file of the project open now (at once when it does). Rejects when no project is
+   *  open, or the listing failed: code that deletes, drops or renumbers by what the list has waits for it, so a file not
+   *  listed yet never passes for one that isn't there. A switch to another project meanwhile waits for that one's. */
+  async filesReady(): Promise<void> {
+    for (;;) {
+      const root = this.info?.root;
+      if (!root) throw new Error("No project is open.");
+      if (this.listedRoot === root) return;
+      const listing = this.listing;
+      await listing.catch(() => {});
+      if (this.info?.root === root && this.listing === listing && this.listedRoot !== root) {
+        throw new Error("The project's file list couldn't be read, so what it holds can't be told.");
+      }
+    }
+  }
+
   async open(path: string) {
-    this.info = await invoke<ProjectInfo>("project_open", { path });
+    const info = await invoke<ProjectInfo>("project_open", { path });
+    // Another project's list (or this one's from before) isn't this one's: none until it's read.
+    this.info = info;
+    this.listedRoot = null;
+    this.setList([]);
+    this.folderList = [];
     await this.refresh(false);
     await this.settings.loadProject(this.info.root);
     // The list first, as the entries were saved; then, off the open's way, the entries under another
@@ -85,21 +118,34 @@ export class WorkspaceService {
 
   close() {
     this.info = null;
+    this.listedRoot = null;
     this.setList([]);
     this.folderList = [];
     void this.settings.loadProject(null);
     this.onDidChange.fire();
   }
 
-  async refresh(fire = true) {
-    if (!this.info) return;
+  refresh(fire = true): Promise<void> {
+    if (!this.info) return Promise.resolve();
+    const listing = this.relist(this.info.root, fire);
+    this.listing = listing;
+    return listing;
+  }
+
+  private async relist(root: string, fire: boolean) {
     // Writes that finish while this reads are neither lost from the list nor left for the next
     // external-change check to report: only what was known when it started is cleared.
     const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
-    this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
-    const list = await invoke<FileInfo[]>("project_files", { root: this.info.root });
-    this.folderList = await invoke<string[]>("project_folders", { root: this.info.root });
+    const info = await invoke<ProjectInfo>("project_open", { path: root });
+    if (this.testListingHold) await this.testListingHold;
+    const list = await invoke<FileInfo[]>("project_files", { root });
+    const folders = await invoke<string[]>("project_folders", { root });
+    // Another project was opened meanwhile (or none): this list isn't its.
+    if (this.info?.root !== root) return;
+    this.info = info;
+    this.folderList = folders;
     this.setList(this.keepNoticed(list, listedBefore, ownBefore));
+    this.listedRoot = info.root;
     for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
     if (fire) this.onDidChange.fire();
   }
@@ -156,6 +202,7 @@ export class WorkspaceService {
     }
     for (const k of before.keys()) if (!isOwn(k)) changed.add(k);
     this.setList(this.keepNoticed(after, listedBefore, ownBefore));
+    this.listedRoot = root;
     for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
     if (changed.size) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });

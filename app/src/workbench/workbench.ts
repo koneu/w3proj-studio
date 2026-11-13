@@ -338,6 +338,7 @@ export class Workbench {
         open: (p) => wb.workspace.open(p),
         close: () => wb.workspace.close(),
         files: () => wb.workspace.files(),
+        filesReady: () => wb.workspace.filesReady(),
         folders: () => wb.workspace.folders(),
         createFolder: (p) => wb.workspace.createFolder(p),
         removeFolder: (p) => wb.workspace.removeFolder(p),

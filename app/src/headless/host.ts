@@ -117,6 +117,7 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
       open: (p: string) => workspace.open(p),
       close: () => workspace.close(),
       files: () => workspace.files(),
+      filesReady: () => workspace.filesReady(),
       folders: () => workspace.folders(),
       createFolder: (p: string) => workspace.createFolder(p),
       removeFolder: (p: string) => workspace.removeFolder(p),
