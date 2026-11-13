@@ -8,6 +8,9 @@
 //
 // Options:
 //   --no-build          use the app as last built (otherwise it's built first; incremental, cheap if unchanged)
+//   --app PATH          a built app to run (W3_APP_BIN does the same; verify-build.mjs makes one): nothing is built. Its
+//                       settings and webview storage are under --work (W3PROJ_CONFIG_DIR moves the settings), so two
+//                       runs with different --work folders can use one binary at once
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
 //   --work DIR          scratch folder (default: target/app-drive); projects are copied or unpacked into it
 //   --set KEY=JSON      a setting for this run (repeatable), e.g. --set terrain.grid=true
@@ -81,6 +84,7 @@ function parseArgs(argv) {
     };
     if (a === "--no-build") opts.build = false;
     else if (a === "--strict") opts.strict = true;
+    else if (a === "--app") process.env.W3_APP_BIN = resolve(value());
     else if (a === "--game") opts.game = resolve(value());
     else if (a === "--work") opts.work = resolve(value());
     else if (a === "--set") {

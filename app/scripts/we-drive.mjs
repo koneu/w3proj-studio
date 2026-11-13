@@ -17,11 +17,15 @@
 //                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
+//   --save-accept T1,T2  titles of dialogs --save answers with Return besides "Reminder" (e.g. "Warning": the notice that the
+//                       map is no longer a melee map); another dialog still stops the save
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
 // Steps (in the order given; each prints one JSON line):
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
+//                       Another --map after a --close starts the editor again on the same display (one lock, one setup
+//                       for several maps: we-compare.mjs); the --look cameras go into the first map only
 //   --start             start the editor without a map
 //   --wait-ready        wait until the map is shown: the main window has the map's name, no dialog is open, and the
 //                       terrain view has drawn. A dialog that stays open (an error, "no longer a melee map", …) is
@@ -249,7 +253,7 @@ export function parseDrag(arg) {
 export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 
 export function parseArgs(argv) {
-  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed" };
+  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
   let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
@@ -262,6 +266,7 @@ export function parseArgs(argv) {
     else if (a === "--work") opts.work = resolve(value());
     else if (a === "--timeout") opts.timeout = Number(value());
     else if (a === "--mode") opts.mode = value();
+    else if (a === "--save-accept") opts.saveAccept.push(...value().split(",").filter(Boolean));
     else if (a === "--screen") {
       const m = /^(\d+)x(\d+)$/.exec(value());
       if (!m) throw new Error("--screen wants WxH");
@@ -549,7 +554,16 @@ class Session {
 
   /** Starts the editor, with a copy of `map` if given; `looks` are the run's --look cameras to put into the copy. */
   async start(map, looks = []) {
-    if (this.editor) throw new Error("the editor is already running (one map per run)");
+    if (this.editor && !this.editorExited) {
+      // A close that finished has stopped the editor's processes; its exit event may come a moment later.
+      for (let i = 0; i < 100 && !this.editorExited; i++) await sleep(100);
+      if (!this.editorExited) throw new Error("the editor is still running: add --close before another --map");
+    }
+    // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
+    this.editor = null;
+    this.editorExited = false;
+    this.answered = [];
+    this.copy = null;
     const exe = join(farmDir(), "_retail_", "x86_64", "World Editor.exe");
     const args = ["-launch"];
     if (map) {
@@ -698,7 +712,9 @@ class Session {
       await sleep(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
       const questions = questionDialogs(this.windows().dialogs);
-      const reminder = questions.find((d) => d.title === "Reminder");
+      // The reminder about the default map name, and any dialog --save-accept names (e.g. "Warning", the "no longer
+      // considered a melee map" notice): answered with Return.
+      const reminder = questions.find((d) => d.title === "Reminder" || this.opts.saveAccept.includes(d.title));
       if (reminder) {
         x11(this.display, "key", "--window", reminder.id, "Return");
         answered.push(reminder.title);
@@ -963,7 +979,7 @@ async function main() {
   const onSignal = () => { stopAll(); process.exit(130); };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  let failed = false, lookIndex = 0;
+  let failed = false, lookIndex = 0, mapsStarted = 0;
   try {
     await s.startDisplay();
     for (const [step, arg] of steps) {
@@ -971,7 +987,7 @@ async function main() {
         if (step === "--map") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
-          await s.start(map, looks);
+          await s.start(map, mapsStarted++ ? [] : looks);
           out({ step, map, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
         } else if (step === "--start") {
           await s.start(null);

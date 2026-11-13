@@ -11,6 +11,7 @@
 //
 //   node scripts/app-smoke.mjs            builds if needed, then runs
 //   node scripts/app-smoke.mjs --no-build runs what was built last
+//   W3_APP_BIN=<app> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>   runs a prebuilt app (verify-build.mjs)
 //   node scripts/app-smoke.mjs --break    breaks a file on purpose: this run has to fail
 //   node scripts/app-smoke.mjs --part=1/2 the project checks and the first half of the full run's checks
 //   node scripts/app-smoke.mjs --part=2/2 the second half (with --no-build while part 1 builds: they run side by side)
@@ -49,7 +50,11 @@ if (part === undefined || (part && process.argv.some((x) => x.startsWith("--only
 // W3_SMOKE_DIR: another folder, when this one has a project someone opened to try out.
 const work = (process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke")) + (part ? `-part${part}` : "");
 const exeName = process.platform === "win32" ? ".exe" : "";
-const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
+// W3_APP_BIN: a built app to run (verify-build.mjs makes one): nothing is built, and the run keeps its settings and the
+// webview's storage under its own folder (W3_SMOKE_DIR), as the parts do, so testers can share one binary.
+const prebuilt = Boolean(process.env.W3_APP_BIN);
+const exe = prebuilt ? resolve(process.env.W3_APP_BIN) : join(repo, "target", "debug", `w3proj-studio${exeName}`);
+const ownFolders = Boolean(part) || prebuilt;
 let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
 // W3_SMOKE_ID: another identifier; without it one per checkout, the one the gate uses (so a run by hand doesn't
 // rebuild the gate's app for another identifier, and two worktrees don't share a settings folder).
@@ -11252,7 +11257,7 @@ async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   mkdirSync(work, { recursive: true });
-  if (!process.argv.includes("--no-build")) build();
+  if (!process.argv.includes("--no-build") && !prebuilt) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
   // The release CLI is built when it isn't there (unless W3PROJ_BIN names another).
   cli = ensureCli();
@@ -11267,10 +11272,10 @@ async function run() {
 
   // A part's settings are in its own folder (both parts' apps have the build's identifier); the app is told where
   // its settings are in either case, and asked below whether it listened.
-  const configDir = part ? join(work, "config") : join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
+  const configDir = ownFolders ? join(work, "config") : join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
   // On Linux the webview keeps its storage (localStorage: the open tabs per project) by the build's identifier too: a
   // part has a folder of its own, else the other part's apps clear and rewrite it under this one's feet.
-  const configEnv = { W3PROJ_CONFIG_DIR: configDir, ...(part && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
+  const configEnv = { W3PROJ_CONFIG_DIR: configDir, ...(ownFolders && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
   rmSync(configDir, { recursive: true, force: true });
   for (const dir of [configEnv.XDG_DATA_HOME, configEnv.XDG_CACHE_HOME]) if (dir) rmSync(dir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
@@ -11458,7 +11463,7 @@ async function run() {
     if (appStarted && !LINUX) await until("the app to end", () => exited() !== null, 10000).catch(() => {});
     rmSync(configDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     // Linux: the app's data folder (WebKit storage) under this run's own identifier; 92 of them piled up.
-    if (LINUX && !part) rmSync(join(process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? "", ".local", "share"), IDENTIFIER), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    if (LINUX && !ownFolders) rmSync(join(process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? "", ".local", "share"), IDENTIFIER), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
 

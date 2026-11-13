@@ -1,0 +1,15 @@
+{
+  "name": "doodad-fix-on-load",
+  "description": "p6 item 9: 212 doodads (200 of doodad-save-rules + 12 odd angles, scale ranges, off-grid pathing); expected to differ: 6 doodads with a zero scale get a random one in both (the editor's differs from Studio's); Studio fixes and snaps them on load, then saves; the World Editor does the same on its own load",
+  "input": { "map": "${MAIN}/openpoints/verify-2026-11-13/p6/i9/X.w3x" },
+  "studio": {
+    "steps": [
+      { "setting": ["script.generateOnSave", false] },
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+      { "sleep": 2000 }
+    ]
+  },
+  "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+  "limit": 12
+}
