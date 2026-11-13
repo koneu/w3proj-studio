@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -335,4 +335,36 @@ test("EditorCrashed carries the message we-drive prints", () => {
   assert.equal(e.message, CRASH_MESSAGE);
   assert.match(CRASH_MESSAGE, /crashed on close; report dismissed without sending|crashed; report dismissed without sending/);
   assert.equal(e.crashed, true);
+});
+
+test("--open: parsed as a step, refused before any --map or --start; --map and --open mix", () => {
+  const r = parseArgs(["--map", "a.w3x", "--wait-ready", "--save", "a2.w3x", "--open", "b.w3x", "--wait-ready", "--map", "c.w3x", "--close"]);
+  assert.deepEqual(r.steps.map(([s]) => s), ["--map", "--wait-ready", "--save", "--open", "--wait-ready", "--map", "--close"]);
+  assert.deepEqual(r.steps[3], ["--open", "b.w3x"]);
+  assert.throws(() => parseArgs(["--open", "b.w3x"]), /--open needs --map or --start before it/);
+  assert.throws(() => parseArgs(["--open", "b.w3x", "--map", "a.w3x"]), /--open needs --map or --start before it/, "control: order matters");
+  assert.throws(() => parseArgs(["--map", "a.w3x", "--open"]), /--open needs a value/);
+  assert.doesNotThrow(() => parseArgs(["--start", "--open", "b.w3x"]));
+});
+
+test("--map: starts the editor when none runs, opens in it when one does", () => {
+  assert.equal(mapAction(false), "start");
+  assert.equal(mapAction(true), "open");
+});
+
+test("openQuestion: 'Save changes?' (Warning) is answered No, or Yes on request; other dialogs are errors; the loading window is ignored", () => {
+  const w = (title, id = 1) => ({ title, id, rect: [0, 0, 1, 1] });
+  assert.deepEqual(openQuestion([], false), {});
+  assert.deepEqual(openQuestion([w("Progress")], false), {}, "the loading window isn't a question");
+  assert.deepEqual(openQuestion([w("")], false), {}, "an untitled window isn't either");
+  assert.equal(openQuestion([w("Warning", 7)], false).answer.key, "n");
+  assert.equal(openQuestion([w("Warning", 7)], false).answer.dialog.id, 7);
+  assert.equal(openQuestion([w("Warning", 7)], true).answer.key, "y");
+  assert.equal(openQuestion([w("Error")], false).error.title, "Error", "control: an unknown dialog is reported, not answered");
+  assert.equal(openQuestion([w("Error"), w("Warning")], false).answer.key, "n", "the question wins when both are open");
+});
+
+test("openCopyName: one name per open (the editor's title names the map), the map's own name kept", () => {
+  assert.equal(openCopyName(1, "/x/y/R.w3x"), "we-open-1-R.w3x");
+  assert.notEqual(openCopyName(1, "/a/input.w3x"), openCopyName(2, "/b/input.w3x"), "control: the same file name twice still differs");
 });
