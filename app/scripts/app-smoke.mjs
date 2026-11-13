@@ -3670,16 +3670,18 @@ async function heightsLimits(page, found) {
   await k.tab("Select");
 
   // A paste whose ground would put water past the limit is refused whole, with the objects that stand on it. The source is the
-  // mound with the water drawn on it above, and trees over it (the area dragged out below covers some of them).
+  // mound with the water drawn on it above, and trees over it (the area dragged out below covers some of them). The area is
+  // dragged round where that water is (the stroke's 45 px below the tip came down at about 1280,1088): the water brush
+  // flattens the ground within its size + 1 round the clicked corner, the tip too, so the picture of the tip has moved.
   const trees = [];
   for (let x = 896; x <= 1664; x += 128) for (let y = 896; y <= 1664; y += 128) trees.push({ id: "LTlt", x, y });
   await k.tool("place_objects", { objects: trees, ignoreRoom: true });
   await k.save();
   await k.clearToasts();
   await hands.click(".chip", "Area");
-  await k.look(1280, 1280);
+  await k.look(1280, 1088);
   const c = await hands.where(".model-stage canvas");
-  await hands.drag({ x: c.x - 15, y: c.y + 45 }, { x: c.x + 15, y: c.y + 75 });
+  await hands.drag({ x: c.x - 15, y: c.y - 15 }, { x: c.x + 15, y: c.y + 15 });
   const areaShown = () => page.evaluate(`/\\d+ × \\d+ tiles/.test(document.querySelector(".terrain-selection")?.textContent ?? "")`);
   await until("the area", areaShown, 8000).catch(() => fail("no area was selected for the copy"));
   await k.focusMap();
