@@ -17,10 +17,10 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type Whole
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
-import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { composeLayers, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -47,7 +47,7 @@ import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
-import { doodadNudgeSteps, GRID_NUDGE_STEPS, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
+import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -629,7 +629,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
 
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random, startGold = DEFAULT_START_GOLD) => {
-    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player, handle.objects.type(id)?.kind, startGold);
+    // At the height the World Editor saves it with: a ship in water on the surface, anything else (doodads have no
+    // movement type) on the ground.
+    const type = handle.objects.type(id);
+    const z = savedUnitZ(type?.moveType, heightAt(handle.terrain, x, y), waterSurfaceAt(handle.terrain, x, y));
+    const entry = newEntry(f, id, [x, y, z], player, type?.kind, startGold);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
     return entry;
@@ -1336,6 +1340,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         height = typed.trim() === shown ? mean : n;
       }
       const why = await view.setUniformHeights(height);
+      if (why) void w3.window.showInfo(why);
+    }),
+    // The World Editor's key Y: the same, at the selection's mean height, with no dialog (verification round 3,
+    // 2026-11-13: two doodads at 150 and 400 went to 275 with flags 6, nothing asked).
+    w3.commands.register("w3.terrain.setUniformDoodadHeightsToMean", async () => {
+      const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      const mean = view.uniformDefaultHeight();
+      if (mean === null) { void w3.window.showInfo("No doodads are selected: select doodads or destructables first."); return; }
+      const why = await view.setUniformHeights(mean);
       if (why) void w3.window.showInfo(why);
     }),
     w3.commands.register("w3.terrain.resetFixedObjectHeights", () => {
@@ -2564,6 +2578,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             objCtx = { skins: withObjectArt(skins, art), bases };
             // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
             scalesKnown = !unread.some((p) => /\.w3[bd]\.json$/i.test(p));
+            // The map's own unit data that can't be read may change a type's movement type: heights stay then.
+            unitMovesKnown = !unread.some((p) => /\.w3u\.json$/i.test(p));
             if (df && snapsDoodads()) await snapOnOpen(df);
             if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
             if (disposed) return;
@@ -2572,6 +2588,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         /** Whether the scale ranges are known: false while the map's own doodad or destructable data can't be read. */
         let scalesKnown = true;
+        /** Whether the units' movement types are known: false while the map's own unit data can't be read. */
+        let unitMovesKnown = true;
+        /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
+         *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
+         *  anything else to the ground. Not an edit, as the doodads' rules on opening: no undo step; the save that runs
+         *  it writes it. One whose type isn't known (no skin; a start location has none, and goes to the ground) keeps
+         *  its height, and all do while the map's unit data can't be read. A height within unitZTolerance of the one
+         *  wanted is left as it is, so a map the World Editor saved isn't rewritten for the small differences of
+         *  Studio's ground from its own. True when one changed. */
+        const groundUnitsForSave = (): boolean => {
+          if (!unitsFile || !objCtx || !unitMovesKnown) return false;
+          if (!switchedOn(w3, "terrain.units.groundOnSave", SWITCH_DEFAULTS["terrain.units.groundOnSave"])) return false;
+          let changed = false;
+          for (const p of unitsFile.list) {
+            if (p.id !== "sloc" && !skinOf(p)) continue;
+            const [x, y, z] = p.position;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            const moveType = moveTypeOf(p);
+            const want = savedUnitZ(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
+            if (Math.abs(want - z) <= unitZTolerance(moveType)) continue;
+            p.position = [x, y, want];
+            changed = true;
+          }
+          return changed;
+        };
         const snapsDoodads = () => switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"]);
         const fixesDoodads = () => switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"]);
         /** Pathing texture size of each doodad and destructable type met so far, null for those without (doodadgrid.ts). */
@@ -3062,7 +3103,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A building and a doodad on a grid nudge a whole 64 (eight nudges): less would round back. The bounds
             // are applied to the nudge as it will be moved, steps and all.
             const rules = doodadRules();
-            const steps = entries.map((p) => (buildingCells.get(p.id) ? GRID_NUDGE_STEPS : isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : 1));
+            const steps = entries.map((p) => placedNudgeSteps(p.id, !!buildingCells.get(p.id), isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : null));
             const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), steps, key.nudge);
             for (const [i, p] of entries.entries()) {
               const at = ruledPose(p.id, p.position[0] + moves[i][0], p.position[1] + moves[i][1], p.angle);
@@ -4158,12 +4199,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objects: {
             type: (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot } : null;
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
             },
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
-              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player, kind, startGold);
+              // A ship in water on the surface, as the World Editor saves it; anything else on the ground.
+              const moveType = kind === "w3u" ? (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.moveType : undefined;
+              const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
               entry.angle = at.angle;
               repositioned.add(entry);
               entryFile.set(entry, f);
@@ -4627,7 +4670,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  (`step` 1 Next, -1 Previous), panning over the ground under it and keeping its distance and angles (we-drive
          *  2026-11-12: the view came back to the very picture it had there); else it frames the area drawn on the ground. */
         const viewSelection = (step: 1 | -1 = 1): string | null => {
-          const entries = selectedEntries();
+          const selection = selectedEntries();
+          const entries = viewOrder(selection.map((p) => p.position), selection.map((p) => fileOf(p)?.list.indexOf(p) ?? -1)).map((k) => selection[k]);
           const i = cycleIndex(entries.length, viewedEntry ? entries.indexOf(viewedEntry) : -1, step);
           const [x, y] = entries[i]?.position ?? [];
           if (Number.isFinite(x) && Number.isFinite(y)) {
@@ -5578,6 +5622,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
             if (objectsTouched) await settleMoved();
+            // Every unit at the height the World Editor's save gives it (setting Units on the Ground on Save). An item
+            // or a start location is drawn at its stored height: drawn again.
+            if (groundUnitsForSave()) { objectsTouched = true; void rebuildObjects(); }
             // Remove Unused Tiles on save (off unless chosen): an undo step of its own, so the save writes it and Undo
             // still takes it back. Not on a lost view, where nothing is edited.
             if (w3.settings.get<boolean>("terrain.removeUnusedTilesOnSave", false) === true && !lostViews.has(doc.path)) {

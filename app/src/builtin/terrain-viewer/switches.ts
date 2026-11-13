@@ -17,6 +17,7 @@ export const SWITCH_DEFAULTS = {
   "terrain.resetFixedHeights": true,
   "terrain.doodads.snapOnLoad": true,
   "terrain.doodads.fixOnLoad": true,
+  "terrain.units.groundOnSave": true,
 } as const;
 
 export type SwitchKey = keyof typeof SWITCH_DEFAULTS;

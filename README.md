@@ -573,7 +573,7 @@ War3Net / wc3libs and are verified byte-exact against the game's own 3.0 campaig
    `World Editor.exe -launch -loadfile <map>`, and watches the file. Each save
    in the World Editor syncs back into `map/`. The `project.syncOnWorldEditorSave`
    setting takes `ask`, `always` or `never`.
-3. **Ctrl+Shift+B** packs the release `.w3x`. **Ctrl+F5** packs and starts the game with the map.
+3. **Ctrl+Shift+B** packs the release `.w3x` (in the terrain view it is the World Editor's Enforce Camera Bounds; use the command palette or the status bar there). **Ctrl+F5** packs and starts the game with the map.
 
 The editor and game paths are in *Preferences: Open Settings (JSON)*. They default
 to `_retail_\x86_64`.

@@ -1226,7 +1226,9 @@ const sleepTicks = (page) => sleep(1100);
 
 /** Set Uniform Doodad Heights and Reset Fixed Object Heights, by command on a selection made with Ctrl+A: the height is
  *  asked for (a word that isn't a number changes nothing), the doodads take it and hold it, a unit in the selection is
- *  left alone, and each is one undo step. A reset with nothing fixed makes no change at all. */
+ *  left alone, and each is one undo step. A reset with nothing fixed makes no change at all. Then the World Editor's
+ *  key Y (the mean height, no dialog), a start location's nudge (64), and a unit stored 500 over the ground saved on it
+ *  (setting Units on the Ground on Save; off, it stays). */
 async function heightsUniform(page, found) {
   try {
   const fail = (what) => found.push(`height tools (uniform): ${what}`);
@@ -1314,6 +1316,68 @@ async function heightsUniform(page, found) {
   await k.run("w3.terrain.toggleResetFixedHeights");
   if ((await k.setting("terrain.resetFixedHeights")) === false || (await k.box("Reset fixed heights")) !== true) fail("the toggle command didn't switch Reset Fixed Object Heights on again");
   await k.save();
+
+  // Y, the World Editor's key for Set Uniform Doodad Heights: the selection's mean height, nothing asked (verification
+  // round 3, 2026-11-13: doodads at 150 and 400 went to 275, flags 6).
+  const one = k.doodads()[0].position;
+  await k.look(one[0], one[1], { id: "LTlt", x: one[0], y: one[1] });
+  await k.focusMap();
+  for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
+  await k.save();
+  const beforeY = k.doodads().map((d) => d.position[2]), hashY = k.docHash();
+  const meanY = beforeY.reduce((a, b) => a + b, 0) / beforeY.length;
+  if (new Set(beforeY).size < 2) fail(`the doodads for Y don't differ in height (control): ${beforeY.join(" ")}`);
+  await page.evaluate(`(() => { window.__asked = 0; w3.window.inputBox = async () => { window.__asked++; return undefined; }; })()`);
+  await k.focusMap();
+  await k.hands.key("a", "KeyA", 65, 2);
+  await settled(page);
+  await k.focusMap();
+  await k.hands.key("y", "KeyY", 89);
+  await k.save();
+  if (await page.evaluate(`window.__asked`)) fail("Y asked for a height");
+  if (k.doodads().some((d) => Math.abs(d.position[2] - meanY) > 0.01 || !(d.flags & k.FIXED))) fail(`Y didn't put the doodads at their mean ${meanY}: ${k.doodads().map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
+  await k.run("workbench.undo");
+  await k.save();
+  if (k.docHash() !== hashY) fail("one undo didn't take Y back");
+
+  // A start location nudges a whole 64, as the World Editor's (verification round 3: three presses moved it 192).
+  await k.hands.key("Escape", "Escape", 27);
+  const sloc = k.units().find((u) => u.id === "sloc");
+  if (!sloc) fail("the new map has no start location");
+  else {
+    await k.look(sloc.position[0], sloc.position[1], { id: "sloc", x: sloc.position[0], y: sloc.position[1] });
+    await k.focusMap();
+    await k.hands.key("6", "Numpad6", 102);
+    await k.save();
+    const nudged = k.units().find((u) => u.id === "sloc").position;
+    if (nudged[0] !== sloc.position[0] + 64 || nudged[1] !== sloc.position[1]) fail(`one nudge moved the start location from ${sloc.position.slice(0, 2)} to ${nudged.slice(0, 2)}, not 64 east`);
+    await k.run("workbench.undo");
+    await k.save();
+  }
+
+  // Units on the Ground on Save: the World Editor's save writes every unit at the ground, whatever height the file had
+  // (verification round 3: a footman stored at 500 over flat ground came out at 0). Off, the stored height stays.
+  const unitsGround = async (on) => {
+    await page.evaluate(`w3.settings.set("terrain.units.groundOnSave", ${on ? "undefined" : "false"})`);
+    const data = k.read("war3mapUnits.doo.json"), foot = data.units.find((u) => u.id === "hfoo");
+    const ground = footman.position[2];
+    foot.position[2] = ground + 500;
+    await page.evaluate(`w3.workspace.writeText("map/war3mapUnits.doo.json", ${JSON.stringify(JSON.stringify(data, null, 2))})`);
+    const reloaded = `(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.some((u) => u.id === "hfoo" && u.position[2] === ${ground + 500}) ?? false)()`;
+    await until("the footman stored at 500 read in", () => page.evaluate(reloaded), 20000);
+    await settled(page);
+    // An edit, so the save runs: one doodad up.
+    const d = k.doodads()[0].position;
+    await k.look(d[0], d[1], { id: "LTlt", x: d[0], y: d[1] });
+    await k.focusMap();
+    await k.hands.key("PageUp", "PageUp", 33, 2);
+    await k.save();
+    return k.units().find((u) => u.id === "hfoo").position[2] - ground;
+  };
+  const offBy = await unitsGround(false);
+  if (offBy !== 500) fail(`with Units on the Ground on Save off, the footman stored 500 over the ground was saved ${offBy} over it (control)`);
+  const onBy = await unitsGround(true);
+  if (Math.abs(onBy) > 0.01) fail(`with Units on the Ground on Save on (the default), the footman stored 500 over the ground was saved ${onBy} over it`);
   await k.verify(fail);
   await k.reset();
   } finally {
@@ -1334,9 +1398,9 @@ async function terrainSelectCameras(page, found) {
   const active = () => page.evaluate(`w3.editors.activePath()`);
   const cameras = () => k.read("war3map.w3c.json").cameras ?? [];
 
-  // View Selection, as the World Editor's Cycle Main View (we-drive 2026-11-12): each press pans to one of the selected
-  // objects and keeps the camera's distance and angles, goes on through the selection and stays at its end; Previous
-  // goes back.
+  // View Selection, as the World Editor's Cycle Main View (we-drive 2026-11-12, verification round 3 2026-11-13): each
+  // press pans to one of the selected objects and keeps the camera's distance and angles, goes through the selection
+  // west to east (the doodads are placed east one first) and round again; Previous goes back, round the other way.
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: -512, y: 0 }, { id: "LTlt", x: -1024, y: -512 }], ignoreRoom: true });
   await k.tab("Select");
   await k.look(0, -768);
@@ -1345,7 +1409,8 @@ async function terrainSelectCameras(page, found) {
   await settled(page);
   const camera = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().camera ?? null)()`);
   const from = await camera(), looks = [];
-  // Ctrl+A selects the start location too (as the World Editor's does): three stops, the fourth press stays at the third.
+  // Ctrl+A selects the start location too (as the World Editor's does): three stops, the fourth press back at the first,
+  // Previous from there to the third.
   for (const id of ["w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelectionPrevious"]) {
     const err = await k.run(id);
     if (err) fail(`${id}: ${err}`);
@@ -1353,13 +1418,15 @@ async function terrainSelectCameras(page, found) {
   }
   const spot = (c) => c ? c.target.slice(0, 2).map(Math.round).join(",") : "none";
   const spots = looks.map(spot);
+  const xs = looks.slice(0, 3).map((c) => c?.target[0] ?? NaN);
   if (new Set(spots.slice(0, 3)).size !== 3 || !["-512,0", "-1024,-512"].every((s) => spots.slice(0, 3).includes(s))) fail(`View Selection three times didn't go to the two doodads and the start location in turn: ${spots.join(" | ")}`);
-  else if (spots[3] !== spots[2] || spots[4] !== spots[1]) fail(`View Selection didn't stay at the selection's end, or Previous didn't go back: ${spots.join(" | ")}`);
+  else if (!(xs[0] < xs[1] && xs[1] < xs[2])) fail(`View Selection didn't go west to east: ${spots.join(" | ")}`);
+  else if (spots[3] !== spots[0] || spots[4] !== spots[2]) fail(`View Selection didn't go round to the first after the last, or Previous didn't go round back: ${spots.join(" | ")}`);
   const moved = looks.filter((c) => !c || ["distance", "yaw", "pitch", "fov"].some((key) => Math.abs(c[key] - from[key]) > 1e-6));
   if (moved.length) fail(`View Selection changed the camera's distance or angles: from ${JSON.stringify(from)} to ${JSON.stringify(moved[0])}`);
   // By key, as the World Editor's ~ (the key left of 1) and Shift+~: the US characters typed, then the German ^ (a dead
-  // key: key "Dead", code "Backquote") and its Shift+^ "°" as the webview gives them. From the second stop (Previous
-  // went back to it) the next key goes to the third, the previous one back to the second, at the same distance.
+  // key: key "Dead", code "Backquote") and its Shift+^ "°" as the webview gives them. From the third stop (Previous
+  // went round to it) the next key goes round to the first, the previous one back to the third, at the same distance.
   const byKey = [
     ["`", () => k.hands.chord("`")],
     ["Shift+`", () => k.hands.chord("Shift+`")],
@@ -1370,7 +1437,7 @@ async function terrainSelectCameras(page, found) {
     await k.focusMap();
     await press();
     await settled(page);
-    const c = await camera(), want = spots[i % 2 ? 1 : 2];
+    const c = await camera(), want = spots[i % 2 ? 2 : 0];
     if (spot(c) !== want) fail(`${what} in the terrain view didn't pan to ${want}: it looks at ${spot(c)}`);
     else if (Math.abs(c.distance - from.distance) > 1e-6) fail(`${what} changed the distance: ${from.distance} to ${c.distance}`);
   }
@@ -7050,6 +7117,16 @@ async function keybindings(page, found) {
     await press("G");
     const g1 = await grid();
     if (g0 !== "none" || g1 !== "large") fail(`G before it was rebound: ${g0} → ${g1}`);
+    // Ctrl+Shift+B in the map is the World Editor's Enforce Camera Bounds (verification round 3, 2026-11-13); Pack
+    // Release keeps it outside the terrain view.
+    const bounds = () => page.evaluate(`w3.settings.get("terrain.enforceCameraBounds") !== false`);
+    const b0 = await bounds();
+    await press("Ctrl+Shift+B");
+    const b1 = await bounds();
+    await press("Ctrl+Shift+B");
+    const b2 = await bounds();
+    if (!b0 || b1 || !b2) fail(`Ctrl+Shift+B in the terrain view didn't switch Enforce Camera Bounds off and on: ${b0} → ${b1} → ${b2}`);
+    for (const layer of ["user", "project"]) await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", undefined, ${JSON.stringify(layer)})`);
 
     // Ctrl+K Ctrl+S, from the map.
     await press("Ctrl+K");
