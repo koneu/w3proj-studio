@@ -486,38 +486,10 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     Ok(true)
 }
 
-/// Replaces `path` in one step: the bytes go to a temporary file next to it (same folder, so the same
-/// file system), flushed to disk, then renamed over it. A crash mid-write leaves the old file whole
-/// (and maybe the temporary file), never a truncated one. `fs::rename` replaces an existing file on
-/// Windows too (MoveFileEx with MOVEFILE_REPLACE_EXISTING).
+/// Replaces `path` in one step (`crate::atomic`): a crash mid-write leaves the old file whole, never a
+/// truncated one.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    fs::create_dir_all(dir)?;
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    // One temporary name per process and call, so two writers never share one.
-    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
-    let done = (|| -> std::io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        // The new file is made with default permissions: the old file's go over to it (a manifest the
-        // user made private stays private). Unix only: on Windows the only one is read-only, which a
-        // rename over the file would fail on anyway.
-        #[cfg(unix)]
-        if let Ok(old) = fs::metadata(path) {
-            fs::set_permissions(&tmp, old.permissions())?;
-        }
-        fs::rename(&tmp, path)
-    })();
-    if let Err(e) = done {
-        let _ = fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
+    Ok(crate::atomic::write(path, bytes)?)
 }
 
 fn walk(root: &Path) -> Result<Vec<String>> {
@@ -532,6 +504,9 @@ fn walk(root: &Path) -> Result<Vec<String>> {
             let path = entry.path();
             if entry.file_type()?.is_dir() {
                 stack.push(path);
+            } else if crate::atomic::is_temp(&entry.file_name().to_string_lossy()) {
+                // A write in progress (or a crash's leftover): neither packed nor deleted by a sync.
+                continue;
             } else {
                 let rel = path.strip_prefix(root).unwrap();
                 let rel: Vec<String> = rel
@@ -711,7 +686,8 @@ const GITATTRIBUTES_V1: &str = "\
 *.toc diff
 ";
 
-const GITIGNORE: &str = "build/\n";
+/// `.*.tmp`: a file being saved (`crate::atomic`) or one a crash left half written.
+const GITIGNORE: &str = "build/\n.*.tmp\n";
 
 /// Writes an extracted archive into a project directory. Existing pack
 /// settings in the manifest are kept.
