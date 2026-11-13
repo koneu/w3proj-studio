@@ -1893,7 +1893,8 @@ async function unitProperties(page, found) {
   if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
   // Its Skin (only where the doo version stores one): another type's look, drawn as that, one undo back, byte-exact
   // while unchanged.
-  if (tree && "skinId" in tree) {
+  if (!tree || !("skinId" in tree)) fail(`the placed tree has no skinId, so the Skin row can't be tried: ${JSON.stringify(tree)}`);
+  else {
     if (!(await shown("skin"))) fail("the destructable has no Skin row");
     else {
       const drawnTree = () => page.evaluate(`window.__propsEd?.drawnUnits("doodads").find((u) => Math.round(u.x) === -768 && Math.round(u.y) === 0)?.model ?? ""`);
