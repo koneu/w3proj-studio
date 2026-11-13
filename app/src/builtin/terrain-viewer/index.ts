@@ -47,6 +47,7 @@ import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingD
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
+import { doodadFixes } from "./doodadrules";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -131,8 +132,9 @@ const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "De
 /** Custom object id → base id, from the project's object data (war3map.w3u.json, …). */
 /** The object data the terrain view needs (units, items, destructables, doodads): the bases
  *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
- *  the map's own, then its Skin files (Reforged keeps art changes there). */
-async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[] }> {
+ *  the map's own, then its Skin files (Reforged keeps art changes there). `unread`: the map's own files that are
+ *  there but couldn't be read or parsed (left out of `art`). */
+async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[]; unread: string[] }> {
   const kinds = ["w3u", "w3t", "w3b", "w3d"];
   const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
     try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
@@ -142,17 +144,19 @@ async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; a
   const campaign = campaignRoot(w3);
   if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const unread: string[] = [];
   for (const prefix of ["war3map", "war3mapSkin"]) {
     for (const k of kinds) {
       const path = `map/${prefix}.${k}.json`;
       if (!files.has(path.toLowerCase())) continue;
       const f = await read(path, k);
       if (f) art.push(f);
+      else unread.push(path);
     }
   }
   const bases = new Map<string, string>();
   for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return { bases, art };
+  return { bases, art, unread };
 }
 
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
@@ -2591,7 +2595,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             loadSkins(w3),
             mapObjectData(w3),
             readRaces(),
-          ]).then(async ([df, uf, skins, { bases, art }, races]) => {
+          ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
             if (races) startRaces = races;
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
@@ -2599,6 +2603,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins: withObjectArt(skins, art), bases };
             if (df && switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"])) await snapOnOpen(df);
+            if (df && !disposed && switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"])) {
+              // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
+              await fixOnOpen(df, !unread.some((p) => /\.w3[bd]\.json$/i.test(p)));
+            }
             if (disposed) return;
             await rebuildObjects();
           });
@@ -2636,6 +2644,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           const n = snaps.length;
           void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
+        }
+        /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
+         *  (doodadrules.ts; setting terrain.doodads.fixOnLoad): the scale in its type's range, the outside flag from
+         *  the playable area, the solid flag set. Not an edit, as the snap: no undo step, the map isn't marked as
+         *  changed, the next save writes them. A map whose w3i can't be read keeps its flags (the playable area isn't
+         *  known); a type without a range keeps its scale, and so do all with `scales` false (the map's own ranges
+         *  couldn't be read). */
+        async function fixOnOpen(f: PlacedFile, scales: boolean) {
+          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          // Taken after the wait: a file reloaded meanwhile is another's, and is taken as it is.
+          if (disposed || dooFile !== f || !objCtx) return;
+          const skins = objCtx.skins;
+          const edge = info ? playableArea(info, terrain) : null;
+          if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
+          if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
+          const fixes = doodadFixes(f.list as (Placed & { flags?: number })[], (id) => {
+            if (!scales) return null;
+            const skin = skins.get(id), range = skin ? scaleRange(skin) : undefined;
+            return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
+          }, edge ? (x, y) => !inArea(x, y, edge) : null);
+          for (const { entry, scale, flags } of fixes) {
+            entry.scale = scale;
+            if (flags !== undefined) entry.flags = flags;
+          }
+          if (!fixes.length) return;
+          objectsTouched = true;
+          const n = fixes.length;
+          void w3.window.showInfo(`Set the scale or flags of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the
