@@ -42,7 +42,8 @@
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
 //   --drag X,Y:X,Y      press the left button at the first position, move to the second and let go (a box select)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
-//   --wheel N           turn the mouse wheel over the terrain view: N notches, positive zooms in
+//   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
+//                       positive zooms in
 //   --windows           list the editor's windows: title, rect, and which are dialogs
 //   --game-view STATE   "on", "off" or "status": the state of View > Lock to Game View Settings, read from the
 //                       picture of the View menu's check mark; on/off press V until it matches, and check again.
@@ -828,17 +829,20 @@ async function main() {
           x11(s.display, "move", arg);
           out({ step, at: arg });
         } else if (step === "--wheel") {
-          // Mouse wheel over the middle of the terrain view: positive zooms in (button 4), negative out (button 5).
-          const n = Number(arg);
-          if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0");
+          // Mouse wheel over the terrain view (its middle, or N@X,Y at a position of the display): positive zooms in
+          // (button 4), negative out (button 5).
+          const m = /^(-?\d+)(?:@(\d+),(\d+))?$/.exec(arg);
+          const n = m ? Number(m[1]) : NaN;
+          if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0, and optionally @X,Y");
           const { main } = s.mainOrThrow();
           const [vx, vy, vw, vh] = s.viewRect(main);
+          const at = m[2] ? `${m[2]},${m[3]}` : `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`;
           for (let i = 0; i < Math.abs(n); i++) {
-            x11(s.display, "click", `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`, "--button", n > 0 ? 4 : 5);
+            x11(s.display, "click", at, "--button", n > 0 ? 4 : 5);
             await sleep(100);
           }
           await sleep(500);
-          out({ step, notches: n });
+          out({ step, notches: n, at });
         } else if (step === "--windows") {
           const w = s.windows();
           const brief = (x) => ({ title: x.title, rect: x.rect });

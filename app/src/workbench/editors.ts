@@ -99,10 +99,13 @@ export class EditorService {
   /** From startup, and whenever a project opens, until its tabs are restored: tabs closed
    *  meanwhile (the welcome page at startup) must not overwrite what is remembered. */
   private awaitingRestore = true;
+  /** Tabs the user closed while awaiting the restore: they stay closed when it brings the others back. */
+  private closedWhileAwaiting = new Set<string>();
 
   /** A project was opened: the next restore() brings its tabs back; until then nothing is stored. */
   projectOpened() {
     this.awaitingRestore = true;
+    this.closedWhileAwaiting.clear();
   }
 
   /** `pending`: where saves and the reloads after them are counted, for the workbench's settled(). */
@@ -294,6 +297,7 @@ export class EditorService {
       if (e.button === 1) { e.preventDefault(); this.close(tab); }
       else if (e.button === 0) this.show(tab);
     });
+    if (this.remembering) this.closedWhileAwaiting.delete(path);
     this.tabs.push(tab);
     this.tabsEl.append(tab.tabEl);
     this.content.append(el);
@@ -324,12 +328,14 @@ export class EditorService {
    *  others when they are first shown). Tabs already open stay. */
   async restore() {
     this.awaitingRestore = false;
+    const closed = this.closedWhileAwaiting;
+    this.closedWhileAwaiting = new Set();
     const state = this.memory?.load();
     if (!state?.tabs.length) return;
     this.remembering = false;
     try {
       for (const { path, editor, view } of state.tabs) {
-        if (this.tabs.some((t) => t.path === path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
+        if (this.tabs.some((t) => t.path === path) || closed.has(path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
         const tab = this.addTab(path, editor);
         tab.pending = true;
         tab.view = keptView(view);
@@ -339,6 +345,8 @@ export class EditorService {
     }
     const active = this.tabs.find((t) => t.path === state.active) ?? this.tabs.find((t) => t.pending);
     if (active) this.show(active);
+    // Nothing left to show (all closed meanwhile): what is remembered is still the old set.
+    else if (closed.size) this.remember();
   }
 
   /** Stores the open tabs (with their editors' view states) for the project: on every tab change, and before the
@@ -648,6 +656,7 @@ export class EditorService {
     tab.el.remove();
     tab.tabEl.remove();
     this.tabs.splice(i, 1);
+    if (this.awaitingRestore && this.remembering) this.closedWhileAwaiting.add(tab.path);
     if (this.active === tab) {
       this.active = null;
       this.showActions();

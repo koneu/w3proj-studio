@@ -327,11 +327,16 @@ export class StringTable {
 // ---- Adjust Map String IDs ---------------------------------------------------------------------
 
 /** The World Editor's Adjust Map String IDs: `ids` maps a string's number to its new one. Every number that stays or
- *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why. */
-export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>) {
+ *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why.
+ *  `reserved`: numbers no string may take, those an earlier drop recorded that the table doesn't have
+ *  (lib/formats/prunedstrings): a reference to one can come back, and must not show another string's text. */
+export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>, reserved: ReadonlySet<number> = new Set()) {
   for (const [from, to] of ids) {
     if (!table.has(from)) throw new Error(`There's no string ${from}.`);
     if (!Number.isSafeInteger(to) || to < 0) throw new Error(`${to} isn't a string ID (a whole number from 0).`);
+    if (to !== from && reserved.has(to)) {
+      throw new Error(`String ${to} was dropped as unused when the map was packed, and comes back if something refers to it again, so another string can't take its ID.`);
+    }
   }
   const seen = new Map<number, number>();
   for (const [n] of table.entries()) {
@@ -343,10 +348,17 @@ export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, numb
 }
 
 /** The IDs from `start` up in the order of the current numbers (Adjust's renumbering of the whole table): only the
- *  strings whose number changes. */
-export function compactStringIds(table: StringTable, start = 1): Map<number, number> {
+ *  strings whose number changes. The `reserved` numbers (see checkStringIds) are stepped over. */
+export function compactStringIds(table: StringTable, start = 1, reserved: ReadonlySet<number> = new Set()): Map<number, number> {
   const nums = [...table.entries()].map(([n]) => n).sort((a, b) => a - b);
-  return new Map(nums.map((n, i) => [n, start + i] as [number, number]).filter(([n, to]) => n !== to));
+  const out = new Map<number, number>();
+  let to = start;
+  for (const n of nums) {
+    while (reserved.has(to)) to++;
+    if (n !== to) out.set(n, to);
+    to++;
+  }
+  return out;
 }
 
 /** war3map.wts with the numbers of its STRING headers changed by `ids` (see checkStringIds); everything else, the

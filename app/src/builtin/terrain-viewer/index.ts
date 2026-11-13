@@ -17,7 +17,7 @@ import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
-import { wheelZoomDistance } from "./wheelzoom";
+import { WHEEL_PIVOT_ROW, wheelPivot, wheelZoomDistance, wheelZoomTarget } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
@@ -5096,7 +5096,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ids = w3.keybindings.mouseCommandsFor(e);
           const move = cameraMoveOf(ids);
           if (move && "zoom" in move) {
-            renderer.distance = wheelZoomDistance(renderer.distance, move.zoom > 1, 200, renderer.terrain.width * 300);
+            // About the World Editor's camera target (wheelzoom.ts WHEEL_PIVOT_ROW), wherever the pointer is.
+            const next = wheelZoomDistance(renderer.distance, move.zoom > 1, 200, renderer.terrain.width * 300);
+            const pivot = wheelPivot(renderer.ray(canvas.clientWidth / 2, canvas.clientHeight * WHEEL_PIVOT_ROW), renderer.target, renderer.distance * 20);
+            renderer.target = wheelZoomTarget(renderer.target, pivot, renderer.distance, next);
+            renderer.distance = next;
             redraw();
             return;
           }
