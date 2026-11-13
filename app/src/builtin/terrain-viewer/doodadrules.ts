@@ -9,7 +9,8 @@
 //   of 0 is replaced by a random one within the range (a destructable's x, a doodad's each axis: three different);
 // - the flags: bit 0 is set outside the playable area (the edge itself is inside: x 3328 of a playable -3328..3328
 //   isn't outside, 3328.5 is), cleared inside; bit 1 is always set (0 and 1 are saved as 2, 4 and 5 as 6); bit 2
-//   (a height of its own) stays. Higher bits weren't tried and are left as they are.
+//   (a height of its own) and bit 3 stay; bits 4 to 7 are cleared (we-drive, spec doodad-flag-bits: 0x1e, 0x7e, 0xfe
+//   and 0xff are saved as 0x0e, 0x10 to 0x80 as 0x02, 0xf8 and 0x88 as 0x0a).
 // A type whose minScale is above its maxScale (we-drive, verification round 3 package 6): the least wins, every scale
 // is saved at it (a map's LTex at 1.5 to 1.1: 1, 1.3, 2 and 1.1 all to 1.5; a doodad LPfp at 1.4 to 0.9 likewise),
 // so the scale is held to the most first, then to the least. The game's tree bridges (LTt0, LTt1, ATt0, …) list
@@ -26,10 +27,12 @@ export interface ScaleRule { kind: string; min: number; max: number }
 export const OUTSIDE_FLAG = 1;
 /** The flag it always sets. */
 export const SOLID_FLAG = 2;
+/** The flags the World Editor keeps: bits 0 to 3. */
+export const KEPT_FLAGS = 0x0f;
 
 /** The flags the World Editor writes for a doodad stored with `flags`, outside the playable area or not. */
 export function savedFlags(flags: number, outside: boolean): number {
-  return (flags & ~(OUTSIDE_FLAG | SOLID_FLAG)) | SOLID_FLAG | (outside ? OUTSIDE_FLAG : 0);
+  return (flags & KEPT_FLAGS & ~(OUTSIDE_FLAG | SOLID_FLAG)) | SOLID_FLAG | (outside ? OUTSIDE_FLAG : 0);
 }
 
 /** The scale the World Editor writes for one stored as `scale` of a type with rule `rule`. Values it keeps are
