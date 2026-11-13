@@ -410,11 +410,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // and recorded as following them (w3proj::derived), so `w3proj pack` takes them. Also with a terrain editor open:
     // those commands refuse while anything is unsaved, and the record is of the files, not of what an editor holds.
     // `doodadsBefore`: the doodad list before the change (shadows are updated from there), left out when the doodads
-    // didn't change. A rebuild still due from a tool's edit is taken in: its state before is the older one.
-    w3.commands.register("w3.terrain.rebuildFromFiles", async (doodadsBefore?: unknown) => {
+    // didn't change. A rebuild still due from a tool's edit is taken in: its state before is the older one. `forRoot`:
+    // the project the files were written in; another one open by now is left alone.
+    w3.commands.register("w3.terrain.rebuildFromFiles", async (doodadsBefore?: unknown, forRoot?: unknown) => {
       const root = w3.workspace.project()?.root;
       const path = projectTerrain(w3);
-      if (!root || !path) return;
+      if (!root || !path || (typeof forRoot === "string" && forRoot !== root)) return;
       clearTimeout(rebuildTimer);
       const due = rebuild?.key === root ? rebuild.from : null;
       if (due) rebuild = null;

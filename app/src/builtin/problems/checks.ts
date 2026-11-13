@@ -647,11 +647,12 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
  *  follow. */
 const removePlaced = async (w3: W3Api, file: string, key: string, id: string) => {
   let before: unknown[] | null = null;
+  const root = w3.workspace.project()!.root;
   await editPlacedFile(w3, file, (doc) => {
     if (key === "doodads") before = doc[key] ?? [];
     doc[key] = (doc[key] ?? []).filter((p) => p.id !== id);
   });
-  await rebuildDerived(w3, before);
+  await rebuildDerived(w3, before, root);
 };
 
 /** Fixes run one at a time: each reads and writes war3map.imp and the object data. */

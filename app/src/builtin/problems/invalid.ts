@@ -116,11 +116,12 @@ export async function editPlacedFile(w3: W3Api, file: string, change: (doc: Reco
 
 /** After placement files were changed with editPlacedFile: pathing, shadows and the minimap made again from the saved
  *  files, and recorded as following them (else `w3proj pack` would refuse them as older than the doodads).
- *  `doodadsBefore`: war3map.doo's list before the change, null when it didn't change. Without the terrain viewer
- *  (disabled) nothing is rebuilt; a failed rebuild shows itself. */
-export async function rebuildDerived(w3: W3Api, doodadsBefore: unknown[] | null) {
+ *  `doodadsBefore`: war3map.doo's list before the change, null when it didn't change. `root`: the project written in
+ *  (another one opened since is left alone). Without the terrain viewer (disabled) nothing is rebuilt; a failed
+ *  rebuild shows itself. */
+export async function rebuildDerived(w3: W3Api, doodadsBefore: unknown[] | null, root: string) {
   const id = "w3.terrain.rebuildFromFiles";
-  await w3.commands.execute(id, doodadsBefore ?? undefined).catch((e) => {
+  await w3.commands.execute(id, doodadsBefore ?? undefined, root).catch((e) => {
     if ((e instanceof Error ? e.message : String(e)) === commandNotFound(id)) return;
   });
 }
@@ -149,6 +150,7 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
   const checkpointed = await checkpointIfOn(w3, "Delete Invalid Objects");
   let removed = 0;
   let doodadsBefore: unknown[] | null = null;
+  const root = w3.workspace.project()!.root;
   try {
     for (const { file, key } of plan.files) {
       await editPlacedFile(w3, file, (doc) => {
@@ -160,7 +162,7 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
     }
   } finally {
     // Also after a failure halfway: what was written is followed.
-    if (removed) await rebuildDerived(w3, doodadsBefore);
+    if (removed) await rebuildDerived(w3, doodadsBefore, root);
   }
   void w3.window.showInfo(`Deleted ${removed} invalid placed object${removed === 1 ? "" : "s"}.${checkpointed ? " The checkpoint made before is in Restore Checkpoint." : ""}`);
   return removed;

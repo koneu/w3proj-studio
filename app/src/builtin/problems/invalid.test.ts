@@ -97,10 +97,11 @@ test("pathing, shadows and the minimap are rebuilt from the files after the writ
   const { w3, log } = setup({ [UNITS]: units("hfoo", "xxxx"), [DOODADS]: doodads("LTlt", "yyyy") });
   const given: unknown[] = [];
   const execute = w3.commands.execute;
-  Object.assign(w3.commands, { execute: async (id: string, ...args: unknown[]) => { if (id === "w3.terrain.rebuildFromFiles") given.push(args[0]); return execute(id); } });
+  Object.assign(w3.commands, { execute: async (id: string, ...args: unknown[]) => { if (id === "w3.terrain.rebuildFromFiles") given.push(...args); return execute(id); } });
   assert.equal(await deleteInvalid(w3, game), 2);
   assert.equal(log.at(-1), "command w3.terrain.rebuildFromFiles", "after every write");
   assert.deepEqual((given[0] as { id: string }[]).map((p) => p.id), ["LTlt", "yyyy"]);
+  assert.equal(given[1], "C:\\p", "for the project written in");
   // Only units removed: the doodads didn't change, and none are given.
   const units2 = setup({ [UNITS]: units("hfoo", "xxxx"), [DOODADS]: doodads("LTlt") });
   const given2: unknown[] = [];
