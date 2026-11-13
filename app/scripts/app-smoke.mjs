@@ -9825,6 +9825,49 @@ async function editorExtras(page, found) {
         await page.evaluate(`w3.window.showWarning = window.__rmKept`);
       }
     }
+    // ---- Object Manager: an import row's Change Import Path… and Remove Import (through the Import Manager) ------------------
+    {
+      const NEW = "war3mapImported\\smoke2.txt", newDisk = join(k.root, "map", "war3mapImported", "smoke2.txt");
+      const listNow = () => JSON.parse(readFileSync(impFile, "utf8")).files.map((f) => f.path);
+      await page.evaluate(`window.__omImpKept = { info: w3.window.showInfo, warn: w3.window.showWarning }; w3.window.showInfo = async () => "Keep them";
+        w3.window.showWarning = async (m, ...a) => a.find((x) => /delete file/i.test(x)) ?? "Cancel"`);
+      const menuItem = async (label, item) => {
+        await page.evaluate(`(async () => {
+          await w3.views.show("objectManager");
+          const s = document.querySelector(".om-search");
+          if (s) { s.value = "smoke"; s.dispatchEvent(new Event("input")); }
+        })()`);
+        const shown = await soon(() => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(label)})`), 10000);
+        if (!shown) return `the Object Manager has no row ${label}`;
+        await page.evaluate(`[...document.querySelectorAll(".om-row")].find((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(label)}).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 }))`);
+        const clicked = await soon(() => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent === ${JSON.stringify(item)}); if (!e) return false; e.click(); return true; })()`), 5000);
+        return clicked ? null : `the import row's menu offers ${JSON.stringify(await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`))}, not ${item}`;
+      };
+      try {
+        await page.evaluate(`window.__errors.length = 0`);
+        await answer(NEW);
+        let why = await menuItem(IMP, "Change Import Path…");
+        if (why) fail(why);
+        else if (!(await soon(() => existsSync(newDisk) && !existsSync(onDisk) && listNow().join() === NEW, 10000))) fail(`Change Import Path: the file is ${existsSync(newDisk) ? "moved" : "not moved"}, the list holds ${JSON.stringify(listNow())}`);
+        else {
+          await settled(page);
+          if (!(await rows("smoke2", NEW, true, "the Object Manager doesn't show the new import path"))) { /* reported */ }
+          why = await menuItem(NEW, "Remove Import");
+          if (why) fail(why);
+          else if (!(await soon(() => !existsSync(newDisk) && listNow().length === 0, 10000))) fail(`Remove Import left the file (${existsSync(newDisk)}) or the list ${JSON.stringify(listNow())}`);
+          else {
+            // The Import Manager's undo takes it back, as after its own Remove.
+            await settled(page);
+            await page.evaluate(`w3.commands.execute("workbench.undo")`);
+            if (!(await soon(() => existsSync(newDisk) && listNow().join() === NEW, 10000))) fail(`undo after Remove Import left the file ${existsSync(newDisk) ? "there" : "gone"}, the list ${JSON.stringify(listNow())}`);
+          }
+        }
+        const errors = await page.evaluate(`window.__errors.slice()`);
+        if (errors.length) fail(`an import's menu in the Object Manager showed ${JSON.stringify(errors)}`);
+      } finally {
+        await page.evaluate(`(() => { const k = window.__omImpKept; if (k) { w3.window.showInfo = k.info; w3.window.showWarning = k.warn; } })()`);
+      }
+    }
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------

@@ -74,6 +74,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!openView) throw new Error("Open the Import Manager and select a file first.");
       await openView.addVersionSelected("de");
     }),
+    // Change path (with its Update references question) and Remove (undoable) of the import `path`, in the Import
+    // Manager, which is opened and shows the row: the Object Manager's Rename and Delete of an import.
+    w3.commands.register("w3.imports.renamePath", async (path: string, to: string) => {
+      if (typeof path !== "string" || typeof to !== "string" || !to.trim()) throw new Error("Name the import and its new path.");
+      await withRow(w3, path, (view, row) => view.changePathOf(row, to));
+    }),
+    w3.commands.register("w3.imports.removePath", async (path: string) => {
+      if (typeof path !== "string" || !path) throw new Error("Name the import to remove.");
+      await withRow(w3, path, (view, row) => view.removeRows([row]));
+    }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
         const raw = !doc.path.toLowerCase().endsWith(".json");
@@ -100,6 +110,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
   );
+}
+
+/** Opens the Import Manager, selects the row of `path` and runs `f` on it. */
+async function withRow(w3: W3Api, path: string, f: (view: ImportView, row: ImportRow) => Promise<boolean>): Promise<void> {
+  await w3.commands.execute("w3.imports.open");
+  if (!openView?.isListOf(w3.workspace.project()?.root)) throw new Error("The Import Manager can't change this project's list.");
+  const view = openView;
+  const row = view.selectPath(path);
+  // A failure was shown by the view itself.
+  await f(view, row);
 }
 
 /** Adds to the list one at a time: two adds reading and writing the list at once would lose an entry. */
@@ -225,14 +245,16 @@ class ImportView {
     this.render();
   }
   /** Selects the row of an archive path (either version), as the Problems view's fixes name it. */
-  selectPath(path: string) {
-    const row = this.rows().find((r) => samePath(r.path, classicPathOf(path)));
+  selectPath(path: string): ImportRow {
+    // A standard-path entry is listed by its name inside the import folder.
+    const row = this.rows().find((r) => samePath(r.path, classicPathOf(path))) ?? this.rows().find((r) => samePath(r.path, `${this.folder}\\${classicPathOf(path)}`));
     if (!row) throw new Error(`${path} isn't in the import list.`);
     // A filter that hides the row would drop the selection.
     this.query = "";
     this.selected = new Set([row.key]);
     this.anchor = row.key;
     this.render();
+    return row;
   }
   /** False when `f` failed (its error is shown). */
   private async run(label: string, f: () => Promise<void>): Promise<boolean> {
@@ -370,8 +392,10 @@ class ImportView {
   }
   /** Moves a row's files and entries: an import and its Reforged version move together (the Reforged one into its
    *  folder), so what names the plain path finds both. */
-  private changePath(row: ImportRow, to: string) {
-    void this.run("Change path", async () => {
+  private changePath(row: ImportRow, to: string) { void this.changePathOf(row, to); }
+  /** The same, for a caller that waits for it: false when it failed (its error is shown). */
+  changePathOf(row: ImportRow, to: string): Promise<boolean> {
+    return this.run("Change path", async () => {
       to = to.trim().replace(/\//g, "\\").replace(/^\\+/, "");
       const files = this.files();
       const pathOf = (e: ImportEntry) => this.shownPath(e, this.fileOf(e, files));
@@ -419,8 +443,10 @@ class ImportView {
   /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
    *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
    *  of it), so that is never done without saying so. */
-  private remove(rows: ImportRow[], only?: typeof SIDES[number][]) {
-    void this.run("Remove", async () => {
+  private remove(rows: ImportRow[], only?: typeof SIDES[number][]) { void this.removeRows(rows, only); }
+  /** The same, for a caller that waits for it: false when it failed (its error is shown). */
+  removeRows(rows: ImportRow[], only?: typeof SIDES[number][]): Promise<boolean> {
+    return this.run("Remove", async () => {
       const versions = rows.length === 1 ? SIDES.filter((s) => rows[0][s]) : [];
       // A row with several versions asks which of them go (Remove both / one side / Cancel); the buttons of the
       // detail pane name the side up front. Removing one leaves the other as a row of its own.
