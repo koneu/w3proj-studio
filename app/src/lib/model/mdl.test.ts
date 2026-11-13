@@ -38,7 +38,7 @@ class Bytes {
 /** A version 800 model: two sequences, a global sequence, a texture, a material whose layer's alpha is animated,
  *  a geoset of two triangles on two bone groups, two bones (one with a Hermite translation on the global sequence,
  *  a linear rotation), a helper, pivots. */
-function smallMdx(): Uint8Array {
+function smallMdx(uvSets: number[][] = [[0, 0, 1, 0, 0, 1, 1, 1]]): Uint8Array {
   const b = new Bytes();
   b.tag("MDLX");
   b.chunk("VERS", () => b.u32(800));
@@ -64,7 +64,8 @@ function smallMdx(): Uint8Array {
     b.tag("MTGC").u32(2).u32(1).u32(2);
     b.tag("MATS").u32(3).u32(0).u32(0).u32(1);
     b.u32(0).u32(0).u32(0).extent(1.5, [0, 0, 0], [1, 1, 0.5]).u32(1).extent(1, [0, 0, 0], [1, 1, 1]);
-    b.tag("UVAS").u32(1).tag("UVBS").u32(4); [0, 0, 1, 0, 0, 1, 1, 1].forEach((v) => b.f32(v));
+    b.tag("UVAS").u32(uvSets.length);
+    for (const set of uvSets) { b.tag("UVBS").u32(4); set.forEach((v) => b.f32(v)); }
   }));
   b.chunk("BONE", () => {
     b.sized(true, () => {
@@ -176,6 +177,7 @@ function writeMdl(m: Model): string {
     const rows = (a: ArrayLike<number>, size: number) => Array.from({ length: a.length / size }, (_, i) => `\t\t${vec(Array.from(a).slice(i * size, (i + 1) * size))},`);
     o.push("Geoset {", `\tVertices ${n} {`, ...rows(g.positions, 3), "\t}", `\tNormals ${n} {`, ...rows(g.normals, 3), "\t}");
     o.push(`\tTVertices ${g.uvs.length / 2} {`, ...rows(g.uvs, 2), "\t}");
+    if (g.uvs2) o.push(`\tTVertices ${g.uvs2.length / 2} {`, ...rows(g.uvs2, 2), "\t}");
     o.push("\tVertexGroup {", ...Array.from(g.vertexGroups, (v) => `\t\t${v},`), "\t}");
     if (g.skin) o.push(`\tSkinWeights ${n} {`, ...rows(g.skin, 8), "\t}");
     o.push(`\tFaces 1 ${g.faces.length} {`, "\t\tTriangles {", `\t\t\t${vec(g.faces)},`, "\t\t}", "\t}");
@@ -252,6 +254,15 @@ function comparable(m: Model) {
 }
 
 // --- tests ------------------------------------------------------------------------------------------------------
+
+test("a geoset's second texture coordinate set is kept for layers with CoordId 1 (the classic cliff doodads' overlay); a third isn't", () => {
+  const second = [0.5, 0.5, 0.25, 0.5, 0.5, 0.25, 0.75, 0.75];
+  const g = parseMdx(smallMdx([[0, 0, 1, 0, 0, 1, 1, 1], second, [9, 9, 9, 9, 9, 9, 9, 9]])).geosets[0];
+  assert.deepEqual([...g.uvs], [0, 0, 1, 0, 0, 1, 1, 1]);
+  assert.deepEqual([...(g.uvs2 ?? [])], second);
+  // One set: none.
+  assert.equal(parseMdx(smallMdx()).geosets[0].uvs2, undefined);
+});
 
 test("a model written as MDL text reads back as the MDX reader read it", () => {
   const fromMdx = parseMdx(smallMdx());
@@ -436,6 +447,7 @@ Geoset {
   assert.deepEqual(m.warnings, ["Wobble: block not read", "Geoset: Sparkle not read"]);
   const g = m.geosets[0];
   assert.deepEqual([...g.uvs], [0.5, 0.5], "the first coordinate set");
+  assert.deepEqual([...(g.uvs2 ?? [])], [9, 9], "the second, for layers with CoordId 1");
   assert.deepEqual([...g.skin!], [0, 1, 0, 0, 200, 55, 0, 0]);
   assert.deepEqual([g.lod, g.lodName], [1, "Body"]);
 });
