@@ -160,13 +160,13 @@ export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
  *  ground just inside came out as half of it plus half the light red, as anywhere else). */
 export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
 
-/** The tiles past the playable map (w3e.ts mapEdgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
+/** The tiles past the playable map (the renderer's edgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
 export interface EdgeTiles { tiles: ArrayLike<number>; tilesX: number }
 
 /** Where ships can't sail (per pathing cell, 4 by 4 per tile, rows from the south), as the World Editor shows it: red
  *  over every cell without water for ships (land, what blocks them), nothing over water they sail, shallow or deep, and
- *  the map's edge brown: the cells of the tiles the terrain marks as past the playable map (`edge`), as the editor goes
- *  by those marks, not by the w3i's border. Over the edge's water the editor's black water lies on top (the renderer's
+ *  the map's edge brown: the cells of the tiles past the playable map (`edge`, as the border's shade: by the w3i's
+ *  complements; that the naval view follows them too is assumed, not measured on a map whose marks disagree). Over the edge's water the editor's black water lies on top (the renderer's
  *  darkWaterCorners): HillsbradCreek's west border, a deep lake, stays black in its naval view (we-drive, 2026-11-12). */
 export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);

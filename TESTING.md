@@ -538,6 +538,20 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   edge): the editor's mean colour (10, 10, 8) SD and (7, 6, 4) HD; Studio's before (59, 55, 34) and (71, 66, 39), after
   (9, 8, 5) and (13, 12, 6), mean absolute differences 42.9 to 6.8 (SD) and 53.7 to 6.7 (HD); inside the playable part
   unchanged (0.1 and 1.7, animation). Studio's HD border ground keeps more than the editor's (0.20 against 0.088; open).
+- **Where the border is** (branch border-from-w3i, 2026-11-13; copies of AutumnLeaves_S2, margins 15, made with the CLI,
+  one thing changed each; `--look -5760,0,2400`, SD): the w3i's `cameraComplements` alone decide what the editor darkens.
+  Left complement 23 moved the dark edge 8 tiles in; the map-edge marks (water word 0x4000) at 23, `playableWidth` 90 or
+  the camera bounds 1024 further in alone moved nothing; the editor's save writes the marks from the complements.
+  Studio: w3e.ts `playableEdgeTiles`, the renderer's `setPlayable`/`edgeTiles` (the marks only until the w3i is read).
+  **Its shape**, from above (`--look x,y,1200,270,70,90`, rotation 0 for north and south; about 1.03 px a unit; a copy of
+  the empty map with lakes 400 deep across each edge, written into the unpacked war3map.w3e.txt): SD water fades
+  linearly per corner, a corner dark when the tile north-east of it is past the edge, so over the last border tile on
+  the west and south and the last playable tile on the east and north (half colour 77/69 px out, 80/70 px in); HD water
+  is dark by the pixel, hard (half colour 39-46 px inside on all sides, a tenth 24-29). The ground's shade fades over
+  about a cell (0.9 to 0.1 in 26 units) in both modes, its middle in SD 9-37 px inside (unevenly), in HD 35 px inside
+  on all sides (Studio 16); HD's dark ground keeps 8 % of the lit ground's brightness (Studio 14 %). Studio: area.ts
+  `darkWaterCorners`, renderer.ts `HD_WATER_EDGE`. HillsbradCreek's east and north water (the verify camera, HD), half
+  colour from the editor's: 45 and 34 px before, 6 and 9 after; SD 2 and 7.
 
 ## Process
 

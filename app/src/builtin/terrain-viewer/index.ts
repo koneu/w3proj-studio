@@ -82,7 +82,7 @@ import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { groundHeight, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -1643,13 +1643,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let playableEdge: Area | null = null;
         const loadBorder = async () => {
           const info = await readMapDoc<{ cameraComplements?: number[]; cameraBounds?: number[] } & Parameters<typeof fogOf>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          if (!info) return;
+          // Closed while it was read: the renderer is gone. A w3i missing or unreadable leaves the border as it is.
+          if (!info || disposed) return;
           cameraArea = cameraRect(info);
           cameraCorners = cameraBoundsCorners(info);
           showCameraBounds();
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
-          // The border's shade comes from the terrain's own marks (the renderer's refreshBorder), as the editor's.
+          // The border's shade and black water go by the w3i's complements, as the editor's (not the terrain's marks).
+          renderer.setPlayable(validComplements(info.cameraComplements));
           redraw();
         };
         renderer.showBorder = showBoundary();
@@ -4696,8 +4698,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
                 parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
-                // The edge brown where the terrain marks the tiles past the playable map, as the editor's naval view.
-                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: mapEdgeTiles(terrain), tilesX: terrain.width - 1 }) : null;
+                // The edge brown over the tiles past the playable map (as the border's shade: by the w3i), as the editor's naval view.
+                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 show();
               }));
             }
@@ -5566,7 +5568,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           // One save at a time, each taking its own snapshot: a later write can't be overtaken by an older one.
           save: editable ? serial(async () => {
-            // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
+            // The map-edge marks are written from the w3i, as the World Editor's save does (we-drive, 2026-11-13: a copy
+            // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
             // The game won't start a map with no players, so one always gets Player 1's start.

@@ -31,6 +31,24 @@ const WATER_SHADE: readonly [number, number, number] = [0.77, 0.69, 0.84];
  * 0.29, 0.48, 0.66, 0.77 there, and the colour the deep one throughout.
  */
 export const HD_WATER = { full: 100, power: 0.58, ramp: [10, 64] as const, shallow: [88, 104, 120] as const };
+/** HD water's dark edge: black up to the first of these distances (world units) inside the playable map, its colour
+ *  back in full at the second, by the pixel. The World Editor's HD water goes dark that far inside, hard, on all four
+ *  sides alike (we-drive, 2026-11-13, a copy of the empty map with lakes across each edge, from above at 1200: half its
+ *  colour 39 to 46 pixels inside, a tenth 24 to 29; about a pixel a unit there). */
+export const HD_WATER_EDGE = [10, 42] as const;
+
+/** The playable map's rectangle (left, bottom, right, top in world units) round the tiles `edge` leaves (1 per tile
+ *  past it, rows from the south); an empty one in the map's middle when there are none. */
+export function playRect(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, edge: ArrayLike<number>): [number, number, number, number] {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    if (edge[y * tilesX + x]) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + 1); y1 = Math.max(y1, y + 1);
+  }
+  if (x0 > x1) { const cx = t.offsetX + tilesX * 64, cy = t.offsetY + tilesY * 64; return [cx, cy, cx, cy]; }
+  return [t.offsetX + x0 * 128, t.offsetY + y0 * 128, t.offsetX + x1 * 128, t.offsetY + y1 * 128];
+}
 
 /** HD water at a depth (world units): how opaque, and how far its colour is from `shallow` to the deep colour (0–1).
  *  The water shader does the same. */
@@ -44,7 +62,7 @@ export function hdWaterAt(depth: number): { alpha: number; deep: number } {
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { cornerNormal, heightAt, mapEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { borderShade, darkWaterCorners } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
@@ -136,9 +154,10 @@ void main() { vUv = aUv; vDepth = aDepth; vDark = aDark; vWorld = aPos; gl_Posit
 const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
-// Past the playable map the water is black (vDark 1 at corners whose tiles are all past it: darkWaterCorners), its
-// colour fading in over the last tile there; uEdgeDark 0 when the border isn't shown.
-uniform float uEdgeDark;
+// Past the playable map the water is black: classic, vDark per corner (darkWaterCorners), fading over a tile; HD by the
+// pixel, hard, inside the playable rectangle uPlayRect (left, bottom, right, top: hdWaterEdge). uEdgeDark 0 when the
+// border isn't shown.
+uniform float uEdgeDark; uniform highp vec4 uPlayRect;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
 // The scene light on a flat surface (the map's water tint is in the ramp: waterRamp).
 uniform vec3 uLight;
@@ -181,7 +200,9 @@ void main() {
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its colour.
     vec3 shade = mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
-    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - vDark * uEdgeDark)), a);
+    highp vec2 inside = min(vWorld.xy - uPlayRect.xy, uPlayRect.zw - vWorld.xy);
+    float lit = smoothstep(${HD_WATER_EDGE[0].toFixed(1)}, ${HD_WATER_EDGE[1].toFixed(1)}, min(inside.x, inside.y));
+    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - (1.0 - lit) * uEdgeDark)), a);
     return;
   }
   vec4 w = t * c;
@@ -879,7 +900,7 @@ export class TerrainRenderer {
   private buildWater(): Mesh {
     const t = this.terrain, gl = this.gl, out: number[] = [];
     const surfaces = new Float32Array((t.width - 1) * (t.height - 1)).fill(NaN);
-    const dark = darkWaterCorners(t);
+    const dark = darkWaterCorners(t, this.edgeTiles());
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
@@ -1096,20 +1117,44 @@ export class TerrainRenderer {
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
   }
 
-  /** The border's shade, from the terrain's marks of the tiles past the playable map (area.ts borderShade): made
-   *  with the renderer and after each change of the corners; the editor calls it after it marks the edge anew. */
+  /** The w3i's camera complements (left, right, bottom, top, in tiles), which say where the playable map ends; null
+   *  until the editor has read them (or when the w3i can't say), and the terrain's own marks stand in. */
+  private complements: number[] | null = null;
+
+  /** The playable map as the w3i's camera complements leave it (null: the terrain's marks stand in). The border's
+   *  shade and its black water follow; nothing is made again when they didn't change. */
+  setPlayable(complements: readonly number[] | null) {
+    const next = complements ? [...complements] : null;
+    if (JSON.stringify(next) === JSON.stringify(this.complements)) return;
+    this.complements = next;
+    this.refreshBorder();
+    this.freeVao(this.water.vao);
+    this.water = this.buildWater();
+  }
+
+  /** The tiles past the playable map (1 per tile, rows from the south): by the w3i's complements, as the World Editor
+   *  draws them (w3e.ts playableEdgeTiles), else by the terrain's marks. */
+  edgeTiles(): Uint8Array {
+    return this.complements ? playableEdgeTiles(this.terrain, this.complements) : mapEdgeTiles(this.terrain);
+  }
+
+  /** The border's shade over the tiles past the playable map (edgeTiles, area.ts borderShade): made with the
+   *  renderer, after each change of the corners and when the playable map changes (setPlayable). */
   refreshBorder() {
     if (!this.overlayProgram()) return;
-    // Most edits leave the marks alone, and a big map's shade has millions of texels: made again only when they moved.
-    const marks = mapEdgeTiles(this.terrain);
+    // Most edits leave the edge alone, and a big map's shade has millions of texels: made again only when it moved.
+    const marks = this.edgeTiles();
     if (this.border && this.borderMarks && sameBytes(marks, this.borderMarks)) return;
     this.borderMarks = marks;
-    const { rgba, width, height } = borderShade(this.terrain);
+    this.playRect = playRect(this.terrain, marks);
+    const { rgba, width, height } = borderShade(this.terrain, marks);
     this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
     this.uploadOverlay(this.border.tex, rgba, width, height, true);
   }
   /** The marks the border's shade was made from. */
   private borderMarks: Uint8Array | null = null;
+  /** The playable rectangle round them, for HD water's dark edge (playRect). */
+  private playRect: [number, number, number, number] = [0, 0, 0, 0];
 
   /** Where the border's texture lies in the world (x, y, width, height): its texels sit on the pathing cells' corners
    *  (borderShade), half a cell past the terrain's rim. */
@@ -1783,6 +1828,7 @@ export class TerrainRenderer {
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
       // The border's black water goes with the border's shade (the Boundary switch, and the textured ground it lies on).
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uEdgeDark"), this.showBorder && textured ? 1 : 0);
+      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uPlayRect"), this.playRect);
       const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
       // The models' depth picture (a texture of its own is always bound to the sampler, as for the shadow map).

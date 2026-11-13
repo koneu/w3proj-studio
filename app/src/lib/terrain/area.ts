@@ -2,7 +2,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { readMapDoc } from "../formats/mapdoc";
-import { mapEdgeTiles, type Terrain } from "./w3e";
+import type { Terrain } from "./w3e";
 
 export interface Area { left: number; bottom: number; right: number; top: number; name?: string }
 interface AreaArgs { region?: unknown; left?: unknown; bottom?: unknown; right?: unknown; top?: unknown }
@@ -19,15 +19,15 @@ export function playableArea(info: { cameraComplements?: number[] }, t: { offset
 }
 
 /** The terrain's grid as the border's rules read it. */
-type EdgeGrid = Pick<Terrain, "width" | "height" | "corners">;
+type EdgeGrid = Pick<Terrain, "width" | "height">;
 
-/** The dark over the map's border: black at BORDER_ALPHA over each tile the terrain marks as past the playable map
- *  (mapEdgeTiles), not by the w3i's border, as the World Editor goes by the marks. One RGBA texel per corner of the
+/** The dark over the map's border: black at BORDER_ALPHA over each tile past the playable map (`edge`: 1 per tile,
+ *  rows from the south; w3e.ts playableEdgeTiles, as the World Editor goes by the w3i). One RGBA texel per corner of the
  *  pathing cells (`4 * tiles + 1` a side, row 0 in the south), dark where any cell around it is past the playable map:
  *  drawn smoothly between the corners, the dark fades out over the first playable cell, as the editor's (we-drive, map
  *  03's west edge, 2026-11-12: from green 16 to 107 over 13 pixels, a cell's width there, just inside the edge). */
-export function borderShade(t: EdgeGrid): { rgba: Uint8Array; width: number; height: number } {
-  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1), edge = mapEdgeTiles(t);
+export function borderShade(t: EdgeGrid, edge: ArrayLike<number>): { rgba: Uint8Array; width: number; height: number } {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
   const width = tilesX * 4 + 1, height = tilesY * 4 + 1, rgba = new Uint8Array(width * height * 4);
   const past = (cx: number, cy: number) => cx >= 0 && cy >= 0 && cx < tilesX * 4 && cy < tilesY * 4 && edge[(cy >> 2) * tilesX + (cx >> 2)] === 1;
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -39,21 +39,19 @@ export function borderShade(t: EdgeGrid): { rgba: Uint8Array; width: number; hei
  *  just inside, we-drive 2026-11-12; Studio's 165 kept 35 %, green 39). */
 export const BORDER_ALPHA = 218;
 
-/** Per corner (row 0 in the south), 1 where the water is black: every tile it belongs to lies past the playable map
- *  (mapEdgeTiles). The World Editor draws the border's water black and fades it in over the last border tile, its
- *  corners on the playable edge lit (we-drive, HillsbradCreek's west edge, 2026-11-12: a deep lake in the border,
- *  0, 0, 0 there, rising to the lake's colour over about one tile right up to the playable edge). */
-export function darkWaterCorners(t: EdgeGrid): Uint8Array {
-  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1), edge = mapEdgeTiles(t);
+/** Per corner (row 0 in the south), 1 where the classic water is black: the tile north-east of it (the one whose lower
+ *  left corner it is; on the last row and column the tile beside it) lies past the playable map (`edge`, as
+ *  borderShade's). Drawn smoothly between the corners, as the World Editor's SD water: it fades over the last border
+ *  tile on the west and south sides and over the last playable tile on the east and north (we-drive, 2026-11-13, a copy
+ *  of the empty map with lakes across each edge, from above: half its colour 77 and 69 pixels outside the west and
+ *  south edges, 80 and 70 inside the east and north, a tile about 130 pixels). HD water goes by the pixel instead
+ *  (renderer.ts HD_WATER_EDGE). */
+export function darkWaterCorners(t: EdgeGrid, edge: ArrayLike<number>): Uint8Array {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
   const out = new Uint8Array(t.width * t.height);
+  if (!tilesX || !tilesY) return out;
   for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
-    let any = false, lit = false;
-    for (const [tx, ty] of [[x - 1, y - 1], [x, y - 1], [x - 1, y], [x, y]]) {
-      if (tx < 0 || ty < 0 || tx >= tilesX || ty >= tilesY) continue;
-      any = true;
-      if (!edge[ty * tilesX + tx]) lit = true;
-    }
-    if (any && !lit) out[y * t.width + x] = 1;
+    if (edge[Math.min(y, tilesY - 1) * tilesX + Math.min(x, tilesX - 1)]) out[y * t.width + x] = 1;
   }
   return out;
 }
