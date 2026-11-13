@@ -8463,6 +8463,18 @@ async function objectManagerLive(page, found) {
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     }
 
+    // ---- The same with the terrain editor closed: the command opens it and waits for the placed objects. ----
+    {
+      await k.tool("place_objects", { objects: [{ id: "hkni", x: 768, y: 0 }], ignoreRoom: true });
+      await k.save();
+      await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+      const del = await run("w3.terrain.deletePlaced", 768, 0, { id: "hkni" });
+      if (del.e) fail(`Delete Object (placed unit) with the terrain editor closed: ${del.e}`);
+      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.x === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
+      await k.save();
+      await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    }
+
     // ---- A region renamed by typing in the Regions tab's name box (Enter) and deleted with its Delete button: edits by
     // hand, not through the Object Manager, which nothing but the terrain editor's own edit event tells of. ------------
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);

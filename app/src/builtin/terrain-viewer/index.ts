@@ -1348,6 +1348,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (w3.workspace.project()?.root !== root) return;
       const view = toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
       if (!view) throw new Error("The terrain editor didn't open.");
+      // Opened just now, the editor may still be loading its placed objects.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const loaded = await Promise.race([view.ready().then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), 30000); })]);
+      clearTimeout(timer);
+      if (!loaded) throw new Error("The terrain editor is still loading the placed objects. Try again in a moment.");
+      if (w3.workspace.project()?.root !== root || toolGroups.viewCommands.get(projectTerrain(w3) ?? "") !== view) return;
       const why = view.deletePlaced({ id: typeof ref?.id === "string" ? ref.id : undefined, editorId: typeof ref?.editorId === "number" ? ref.editorId : undefined, x, y });
       if (why) throw new Error(why);
     }),
@@ -4602,6 +4608,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return on;
         };
         const viewCommands: ViewCommands = {
+          ready: () => ready(),
           viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
           keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || tabKeys([id]) || lateKeys([id], false)),
           listCommand: (cmd) => {

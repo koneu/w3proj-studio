@@ -39,6 +39,8 @@ export interface ViewCommands {
   /** A named object of a tab's list (the Regions or Cameras tab, by its group id): the tab comes to the front and does
    *  the action (TerrainToolGroupInstance.itemAction); no name: only the tab. Null when done, else why not. */
   groupItemAction(group: string, name: string | null, action: "select" | "rename" | "delete", to?: string): Promise<string | null>;
+  /** Resolves once the placed objects are loaded (the first load and any reload after a save). */
+  ready(): Promise<void>;
   /** Deletes one placed object (as the Delete key does: one undo step) found by id, creation number and position. Null when done, else why not. */
   deletePlaced(ref: { id?: string; editorId?: number; x: number; y: number }): string | null;
   /** One of the view's key commands (camera, selection, clipboard: index.ts KEY_COMMANDS) as its key would do it,
