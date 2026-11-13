@@ -77,10 +77,10 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
-import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
+import { isMeleeMap, playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
-import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
+import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -2442,7 +2442,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
+            loader.load("units", startPreviews(units, startRaces, startMelee), skins, team, undefined, undefined, false),
             loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -2455,8 +2455,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
-          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)),
-            ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true }))]);
+          previewBatches = s.batches.map(lookOfPreview);
+          previewKey = startPreviewKey(units, startRaces, startMelee);
+          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
@@ -2557,6 +2558,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
          *  be read keeps the races last read: they only change what is drawn. */
         let startRaces = new Map<number, number>();
+        /** The map's Melee flag (war3map.w3i): the editor shows the start buildings on melee maps only. */
+        let startMelee = false;
+        /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
+        let previewKey = "";
+        let previewBatches: ObjectBatch[] = [];
+        let previewGen = 0;
+        function lookOfPreview<B extends { instances: ObjectInstance[] }>(b: B) {
+          for (const inst of b.instances) delete inst.pick;
+          return { ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true };
+        }
+        /** Makes only the start buildings again when the start locations, the races or the Melee flag changed
+         *  (checked on each drawn frame: every edit, undo, paste and MCP call asks for one). */
+        function refreshStartPreviews() {
+          const ctx = nextCtx ?? objCtx;
+          if (!ctx || !unitsFile) return;
+          const units = unitsFile.list, key = startPreviewKey(units, startRaces, startMelee);
+          if (key === previewKey) return;
+          previewKey = key;
+          const gen = ++previewGen, rebuilt = rebuildGen;
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces, startMelee), ctx.skins, team, undefined, undefined, false).then((s) => {
+            // A full rebuild in between made them itself; a newer change makes them again.
+            if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
+            const fresh = s.batches.map(lookOfPreview);
+            renderer.setGroup("units", [...renderer.batches.filter((b) => b.group === "units" && !previewBatches.includes(b)), ...fresh]);
+            previewBatches = fresh;
+            redraw();
+          }));
+        }
         /** Map Properties' random groups; null when war3map.w3i can't be read (what is shown stays). */
         const readRandomGroups = async (): Promise<RandomGroup[] | null> => {
           // A file that isn't there has no groups; one that can't be read keeps what is shown.
@@ -2573,17 +2602,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
-        const readRaces = async (): Promise<Map<number, number> | null> => {
-          const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          return info ? playerRaces(info) : null;
+        const readRaces = async (): Promise<{ races: Map<number, number>; melee: boolean } | null> => {
+          const info = await readMapDoc<Parameters<typeof playerRaces>[0] & Parameters<typeof isMeleeMap>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
+          return info ? { races: playerRaces(info), melee: isMeleeMap(info) } : null;
         };
         /** After the map's players were saved (Map Properties): the start buildings follow their races. */
         const reloadRaces = async () => {
           await firstLoad.catch(() => {});
-          const races = await readRaces();
-          if (!races || disposed || JSON.stringify([...races]) === JSON.stringify([...startRaces])) return;
-          startRaces = races;
-          await rebuildObjects();
+          const info = await readRaces();
+          if (!info || disposed) return;
+          startRaces = info.races;
+          startMelee = info.melee;
+          refreshStartPreviews();
         };
         let objectsPlaced: Promise<void> = Promise.resolve();
         /** The first load of the placed objects and their types. */
@@ -2596,7 +2626,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             mapObjectData(w3),
             readRaces(),
           ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
-            if (races) startRaces = races;
+            if (races) { startRaces = races.races; startMelee = races.melee; }
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
@@ -4243,6 +4273,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           sunShadows: () => ({ ...renderer.sunShadowState }),
           waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
+          drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
           drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
@@ -5298,6 +5329,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
           if (canvas.clientWidth > 0 && due && !glDead) {
+            refreshStartPreviews();
             renderer.render();
             placeLabels();
             minimapOutline();
