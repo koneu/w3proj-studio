@@ -5294,6 +5294,78 @@ async function derivedAfterDeletes(page, found) {
   }
 }
 
+/** `w3proj rebuild` (crates/cli/src/rebuild.rs running src/headless in Node) writes what the app writes. Two copies of
+ *  one new map get the same edit made outside the app (a rock and a footman moved in the placement files); then the
+ *  app makes the derived files from the saved files (w3.terrain.rebuildFromFiles, Calculate Shadows, Generate Map
+ *  Script) in one and the CLI in the other: pathing, shadows, the minimap and its icons, the script and both records
+ *  must be the same bytes. Controls: the edit changed the pathing and the script (equal isn't both doing nothing),
+ *  `w3proj pack` refuses the CLI's copy before its rebuild (stale) and takes it after. */
+async function rebuildCli(page, found) {
+  const fail = (what) => found.push(`rebuild cli: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "rebuild-cli");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  // new_map asks the user first: the check says yes.
+  await page.evaluate(`(() => { window.__rebuildKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    await tool("new_map", { name: "RebuildCli", width: 64, height: 64, folder: dir });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    await tool("place_objects", { objects: [{ id: "AOks", x: -512, y: 256 }, { id: "LTlt", x: 512, y: 0 }], ignoreRoom: true });
+    await tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: -256, player: 1 }], ignoreRoom: true });
+    await tool("rebuild_map");
+    await settled(page);
+    await page.evaluate(`w3.editors.closeAll()`);
+    const FILES = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp", "map/war3map.mmp.json", "map/war3map.j", "map/war3map.w3i.json", ".w3proj/derived-from.json", ".w3proj/generated-script"];
+    const read = (r, f) => (existsSync(join(r, f)) ? readFileSync(join(r, f)) : null);
+    const before = Object.fromEntries(FILES.map((f) => [f, read(root, f)]));
+    // The edit outside the app (as an AI editing the text files would): the rock and the footman move.
+    const move = (file, list, id, dx) => {
+      const doc = JSON.parse(readFileSync(join(root, "map", file), "utf8"));
+      const o = doc[list].find((e) => e.id === id);
+      if (!o) throw new Error(`no ${id} in ${file}`);
+      o.position[0] += dx;
+      writeFileSync(join(root, "map", file), `${JSON.stringify(doc, null, 2)}\n`);
+    };
+    move("war3map.doo.json", "doodads", "AOks", 384);
+    move("war3mapUnits.doo.json", "units", "hfoo", -512);
+    const copy = join(dir, "cli-copy");
+    cpSync(root, copy, { recursive: true });
+    // The app's copy, from its saved files.
+    await page.evaluate(`w3.workspace.refresh()`);
+    const err = await page.evaluate(`(async () => { try { await w3.commands.execute("w3.terrain.rebuildFromFiles"); await w3.commands.execute("w3.terrain.calculateShadows"); await w3.commands.execute("w3.script.generate", { quiet: true }); return null; } catch (e) { return String(e); } })()`, { timeout: 180000 });
+    if (err) { fail(`the app's rebuild: ${err}`); return; }
+    await settled(page);
+    // The CLI's copy: stale for pack until rebuilt.
+    const env = { ...process.env, ...(game ? { W3PROJ_GAME: game } : {}) };
+    const pack = (label) => spawnSync(cli, ["pack", copy, "-o", join(dir, `${label}.w3x`)], { encoding: "utf8" });
+    const stale = pack("before");
+    if (stale.status === 0 || !/war3map\.doo\.json/.test(stale.stderr ?? "")) fail(`w3proj pack took the copy before its rebuild: ${(stale.stdout + stale.stderr).trim().slice(-300)}`);
+    const r = spawnSync(cli, ["rebuild", copy], { encoding: "utf8", env, timeout: 300000 });
+    const said = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
+    if (r.status !== 0) { fail(`w3proj rebuild failed (${r.status}): ${said.slice(-600)}`); return; }
+    for (const part of ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.j"]) {
+      if (!new RegExp(`^(written|unchanged) .*${part.replace(".", "\\.")}`, "m").test(said)) fail(`w3proj rebuild didn't report ${part} made: ${said.slice(0, 600)}`);
+    }
+    const packed = pack("after");
+    if (packed.status !== 0) fail(`w3proj pack refused the rebuilt copy: ${(packed.stdout + packed.stderr).trim().slice(-300)}`);
+    for (const f of FILES) {
+      const a = read(root, f), b = read(copy, f);
+      if (!a || !b) fail(`${f}: ${!a ? "the app" : "the CLI"} left none`);
+      else if (Buffer.compare(a, b) !== 0) fail(`${f} differs: the app wrote ${a.length} bytes, w3proj rebuild ${b.length}`);
+    }
+    for (const f of ["map/war3map.wpm", "map/war3map.j"]) {
+      const now = read(root, f);
+      if (before[f] && now && Buffer.compare(before[f], now) === 0) fail(`${f} didn't change with the edit: the comparison proves nothing`);
+    }
+  } finally {
+    await page.evaluate(`(async () => { if (window.__rebuildKept) w3.window.confirm = window.__rebuildKept; delete window.__rebuildKept; await w3.editors.closeAll(); })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
  *  replace, run through the app on scratch copies of the mini map; every project they change is
  *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
@@ -10466,6 +10538,7 @@ async function run() {
         playerStarts: (p, f) => playerStarts(p, f, project),
         problemsIgnore,
         realMapSave,
+        rebuildCli,
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
@@ -10727,6 +10800,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "moduleFunctions", found);
   await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
   await leftOpen(page, "derivedAfterDeletes", found);
+  await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
+  await leftOpen(page, "rebuildCli", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));

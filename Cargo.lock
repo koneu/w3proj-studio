@@ -3933,6 +3933,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "w3proj-backend"
+version = "0.1.0"
+dependencies = [
+ "casc",
+ "serde",
+ "serde_json",
+ "w3proj",
+]
+
+[[package]]
 name = "w3proj-cli"
 version = "0.1.0"
 dependencies = [
@@ -3940,8 +3950,10 @@ dependencies = [
  "casc",
  "clap",
  "mpq",
+ "serde",
  "serde_json",
  "w3proj",
+ "w3proj-backend",
 ]
 
 [[package]]
@@ -3958,6 +3970,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "w3proj",
+ "w3proj-backend",
  "windows-sys 0.61.2",
 ]
 
