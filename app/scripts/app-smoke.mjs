@@ -2901,11 +2901,14 @@ async function areaLevelsSteps(page, found) {
   await k.save();
   const file = join(k.root, "map", "war3map.w3e.txt");
   const text = () => readFileSync(file, "utf8");
-  /** The file without its [layer] section, which is all a level change may touch. */
-  const rest = () => text().replace(/^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "");
+  /** The file without its [layer] and [water] sections, which are all a level change may touch (the water word moves
+   *  512 per level with its corner, as in the World Editor). */
+  const rest = () => text().replace(/^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "").replace(/^\[water\][^\n]*\n(?:[^[\n][^\n]*\n)*/m, "");
   const layerSection = () => /^\[layer\][^\n]*\n(?:[^[\n][^\n]*\n)*/m.exec(text())?.[0] ?? "";
-  const original = text(), originalRest = rest();
+  const waterSection = () => /^\[water\][^\n]*\n(?:[^[\n][^\n]*\n)*/m.exec(text())?.[0] ?? "";
+  const original = text(), originalRest = rest(), originalWater = waterSection();
   if (!layerSection()) return fail(`no [layer] section to read (control): ${original.slice(0, 200)}`);
+  if (!originalWater) return fail(`no [water] section to read (control): ${original.slice(0, 200)}`);
   await k.tab("Select");
   await k.hands.click(".chip", "Area");
   await k.look(0, 0);
@@ -2921,8 +2924,16 @@ async function areaLevelsSteps(page, found) {
   await press(1);
   const up = text();
   if (up === original) return fail("Level +1 changed nothing");
-  if (rest() !== originalRest) fail("Level +1 changed more than the [layer] section");
+  if (rest() !== originalRest) fail("Level +1 changed more than the [layer] and [water] sections");
   if (/^\[layer\] all /m.test(up)) fail(`Level +1 moved the whole map, not the block: ${layerSection().slice(0, 80)}`);
+  // The block's water words one level (512) up, the rest as they were.
+  const waterValues = (s) => { const all = /^\[water\] all (\S+)/.exec(s); return all ? null : s.split("\n").slice(1).join(" ").trim().split(/\s+/); };
+  const was = /^\[water\] all (-?\d+)/.exec(originalWater)?.[1], nowWater = waterValues(waterSection());
+  if (was === undefined || !nowWater) fail(`the water words: ${originalWater.slice(0, 40)} → ${waterSection().slice(0, 80)} (one value before, the block's 512 higher after)`);
+  else {
+    const vals = new Set(nowWater.flatMap((v) => { const m = /^(-?\d+)(?:\*\d+)?$/.exec(v); return m ? [Number(m[1])] : [Number.NaN]; }));
+    if (vals.size !== 2 || !vals.has(Number(was)) || !vals.has(Number(was) + 512)) fail(`the water words after Level +1: ${[...vals].join(", ")} (want ${was} and ${Number(was) + 512})`);
+  }
   // One undo gives the file back; redo the step, then −1 gives it back too.
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();

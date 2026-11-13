@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -174,7 +175,7 @@ test("Random keeps relief, skips water with Skip water areas, and is one undo st
   assert.deepEqual(r.corners, before.corners);
 });
 
-test("Adjust Cliff Levels moves every corner by the levels and leaves the water where it is, as the World Editor does", () => {
+test("Adjust Cliff Levels moves every corner and its water word by the levels, as the World Editor does", () => {
   const before = make(), t = make(), undo = new CornerUndo();
   assert.equal(adjustCliffLevels(t, 1, undo), 8);
   t.corners.forEach((c, i) => {
@@ -182,18 +183,75 @@ test("Adjust Cliff Levels moves every corner by the levels and leaves the water 
     assert.equal(c.layer, b.layer + 1);
     assert.equal(c.rawHeight, b.rawHeight, "the ground over its level stays");
     assert.equal(c.height, b.height + 128);
-    // we-drive, 4v4_SnowareBay by +1 (2026-11-11): every water word and water flag as it was.
-    assert.equal(c.rawWater, b.rawWater, "the stored water level stays, high bits and all");
-    assert.equal(c.water, b.water, "the surface stays");
+    // we-drive, map 03 by +1 (2026-11-13): every corner's water word 0x200 up, dry ones too (0x6000 to 0x6200, the
+    // lake's 0x2400 to 0x2600, the river's 0x2546 to 0x2746), the water flags as they were.
+    assert.equal(c.rawWater, b.rawWater + 0x200, "the stored water level one level up, the edge bit kept");
+    assert.equal(c.water, b.water + 128, "the surface 128 up, as the ground");
     assert.equal(c.hasWater, b.hasWater);
     assert.equal(c.ramp, b.ramp);
   });
+  assert.deepEqual(t.corners.map((c) => c.rawWater), [0x2200, 0x2746, 0x2600, 0x2600, 0x2200, 0x2200, 0x2600, 0x6200]);
   // What it writes reads back the same.
   const again = parseW3e(writeW3e(t));
   assert.deepEqual(again.corners.map((c) => [c.layer, c.rawWater, c.water]), t.corners.map((c) => [c.layer, c.rawWater, c.water]));
   const step = undo.step(t);
   step.undo();
   assert.deepEqual(t.corners, before.corners, "one step undoes it all");
+  // +2 then -1: 0x400 up, then 0x200 down (map 03's saves of the same steps).
+  assert.equal(adjustCliffLevels(t, 2, new CornerUndo()), 8);
+  assert.equal(t.corners[2].rawWater, 0x2800);
+  assert.equal(adjustCliffLevels(t, -1, new CornerUndo()), 8);
+  assert.deepEqual(t.corners.map((c) => c.rawWater), [0x2200, 0x2746, 0x2600, 0x2600, 0x2200, 0x2200, 0x2600, 0x6200]);
+});
+
+/** One corner as the World Editor's saves had it: level, water word, water flag. */
+const corner = (layer: number, rawWater: number, hasWater: boolean): Terrain => {
+  const t = make();
+  t.width = 1; t.height = 1;
+  const c = { ...t.corners[0], layer, rawWater, hasWater, water: ((rawWater & 0x3fff) - 0x2000) / 4 - 89.6 };
+  t.corners = [c];
+  return t;
+};
+
+test("Adjust Cliff Levels moves each corner's water by the levels that corner moved, wrapping dry words as the World Editor does", () => {
+  // we-drive 2026-11-13, a made-up map (water words 0x0000-0x3fff, wet and dry, levels 0-12) and map 03; each row is
+  // one corner of a save: [level, water word, wet] by `by` gave [level, water word].
+  const rows: [number, number, boolean, number, number, number][] = [
+    [0, 0x0000, false, +1, 1, 0x0200],
+    [6, 0x1000, true, +1, 7, 0x1200],
+    [10, 0x2400, false, +1, 11, 0x2600],
+    [2, 0x3e80, false, +1, 3, 0x0080], // round the top of the 14 bits
+    [5, 0x7fff, false, +1, 6, 0x41ff], // and the edge bit kept
+    [4, 0x0000, false, -3, 1, 0x3a00], // round the bottom
+    [5, 0x6200, false, -5, 0, 0x5800], // map 03 by -5
+    [3, 0x2600, true, -5, 0, 0x2000], // squeezed: 3 levels, so 0x600 only
+    [2, 0x2180, true, -3, 0, 0x1d80],
+    [0, 0x5800, false, +12, 10, 0x6c00], // map 03 by +12: cut to +10
+  ];
+  for (const [layer, w, wet, by, wantLayer, wantWord] of rows) {
+    const t = corner(layer, w, wet);
+    const r = adjustCliffLevels(t, by, new CornerUndo());
+    const c = t.corners[0];
+    assert.equal(r, 1, `level ${layer} word ${w.toString(16)} by ${by}`);
+    assert.equal(c.layer, wantLayer);
+    assert.equal(c.rawWater, wantWord, `level ${layer} word ${w.toString(16)} by ${by}: ${c.rawWater.toString(16)}`);
+    assert.equal(c.hasWater, wet, "the water flag stays");
+    assert.ok(Math.abs(c.water - (((wantWord & 0x3fff) - 0x2000) / 4 - 89.6)) < 1e-9, "the surface follows the word");
+  }
+});
+
+test("Adjust Cliff Levels refuses a shift that would wrap a corner's water round its 14 bits (the World Editor wraps it)", () => {
+  // The editor turned a wet 0x3fff on level 2 by +1 into 0x01ff: the lake from the top of the range to the bottom.
+  for (const [w, by] of [[0x3fff, 1], [0x3e80, 1], [0x0180, -1], [0x0000, -1]] as const) {
+    const t = corner(4, w, true), before = corner(4, w, true), undo = new CornerUndo();
+    const r = adjustCliffLevels(t, by, undo);
+    assert.equal(typeof r, "string", `wet ${w.toString(16)} by ${by}`);
+    assert.match(r as string, /water at 1 corner /);
+    assert.deepEqual(t.corners, before.corners, "nothing changed");
+    assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
+  }
+  // A corner squeezed at level 0 doesn't move, so its water can't wrap.
+  assert.equal(adjustCliffLevels(corner(0, 0x0000, true), -1, new CornerUndo()), 0);
 });
 
 test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or the top, as the World Editor does", () => {
@@ -203,9 +261,10 @@ test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or th
   let t = make(), before = make(), undo = new CornerUndo();
   assert.equal(adjustCliffLevels(t, -3, undo), 8);
   t.corners.forEach((c, i) => {
-    assert.equal(c.layer, Math.max(0, before.corners[i].layer - 3), `corner ${i}`);
+    const layer = Math.max(0, before.corners[i].layer - 3);
+    assert.equal(c.layer, layer, `corner ${i}`);
     assert.equal(c.rawHeight, before.corners[i].rawHeight);
-    assert.equal(c.rawWater, before.corners[i].rawWater);
+    assert.equal(c.rawWater, before.corners[i].rawWater + (layer - before.corners[i].layer) * 0x200, `corner ${i}: the water as far as its level moved`);
   });
   undo.step(t).undo();
   assert.deepEqual(t.corners, before.corners, "one step undoes the squeeze");
@@ -240,7 +299,36 @@ function realW3e(name: string): Uint8Array | null {
   return r.status === 0 ? new Uint8Array(r.stdout) : null;
 }
 
-test("Adjust Cliff Levels on real maps: +1 changes only each corner's layer nibble, -1 then gives the file back", (ctx) => {
+/** Whether +1 changed exactly what the World Editor's +1 changes in the bytes of a w3e: each moved corner's layer
+ *  nibble one up and its water word's low 14 bits 0x200 up (round them); `moved` says which corners. */
+function checkPlusOne(name: string, original: Uint8Array, up: Uint8Array, t: Terrain, moved: (corner: number) => boolean) {
+  const per = t.version === 12 ? 8 : 7, head = original.length - t.trailer.length - t.corners.length * per;
+  assert.equal(up.length, original.length, name);
+  const word = (b: Uint8Array, p: number) => b[p] | (b[p + 1] << 8);
+  for (let p = 0; p < original.length; p++) {
+    const k = p - head;
+    const corner = k >= 0 && p < head + t.corners.length * per ? (k / per) | 0 : -1;
+    const at = k - corner * per;
+    if (corner < 0 || !moved(corner) || (at !== per - 1 && at !== 2 && at !== 3)) {
+      if (up[p] !== original[p]) assert.fail(`${name}: byte ${p} (corner ${corner}) changed (${original[p]} to ${up[p]})`);
+    } else if (at === per - 1) {
+      if ((up[p] & 0xf0) !== (original[p] & 0xf0) || (up[p] & 0xf) !== (original[p] & 0xf) + 1) assert.fail(`${name}: corner ${corner}'s layer byte ${original[p]} became ${up[p]}`);
+    } else if (at === 2) {
+      const was = word(original, p), now = word(up, p);
+      if (now !== ((was & 0xc000) | ((was + 0x200) & 0x3fff))) assert.fail(`${name}: corner ${corner}'s water word ${was.toString(16)} became ${now.toString(16)}`);
+    }
+  }
+}
+
+/** SHA-256 of the war3map.w3e the World Editor saved after Adjust Cliff Levels +1 on these maps (we-drive 2026-11-13,
+ *  target/evidence/cliff-adjust-water and area-level-we in the main checkout; its plain save of each is the map's own
+ *  w3e byte for byte). */
+const WE_PLUS_ONE: Record<string, string> = {
+  "cliff.w3m": "bd1dc3b1fe4d640a131ea15c954172c416bbe64e6a15d7e15d7503a45be505c1",
+  "4v4_SnowareBay_w3c_260125_1357_5658.w3x": "d61a82eaaa07026685e6e2fe3de96bae729864af275b83a11783b70247688507",
+};
+
+test("Adjust Cliff Levels on real maps: +1 gives the World Editor's file, changes only layers and water words, -1 gives it back", (ctx) => {
   const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
   let tried = 0;
   for (const name of maps) {
@@ -248,17 +336,11 @@ test("Adjust Cliff Levels on real maps: +1 changes only each corner's layer nibb
     if (!original) continue;
     tried++;
     const t = parseW3e(original);
-    const per = t.version === 12 ? 8 : 7, head = original.length - t.trailer.length - t.corners.length * per;
     assert.ok(cliffShiftRange(t).max >= 1, `${name} has room to go up`);
     assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), t.corners.length, name);
     const up = writeW3e(t);
-    assert.equal(up.length, original.length, name);
-    for (let p = 0; p < original.length; p++) {
-      const k = p - head;
-      const layerByte = k >= 0 && p < head + t.corners.length * per && k % per === per - 1;
-      if (!layerByte) { if (up[p] !== original[p]) assert.fail(`${name}: byte ${p} changed (${original[p]} to ${up[p]})`); continue; }
-      if ((up[p] & 0xf0) !== (original[p] & 0xf0) || (up[p] & 0xf) !== (original[p] & 0xf) + 1) assert.fail(`${name}: corner ${k / per | 0}'s byte ${original[p]} became ${up[p]}`);
-    }
+    checkPlusOne(name, original, up, t, () => true);
+    if (WE_PLUS_ONE[name]) assert.equal(createHash("sha256").update(up).digest("hex"), WE_PLUS_ONE[name], `${name}: the World Editor's file`);
     const back = parseW3e(up);
     assert.equal(adjustCliffLevels(back, -1, new CornerUndo()), back.corners.length);
     assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
@@ -266,18 +348,20 @@ test("Adjust Cliff Levels on real maps: +1 changes only each corner's layer nibb
   if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
 });
 
-test("the water words don't limit the shift, as they don't move", () => {
+test("the water words don't limit the shift of dry corners: theirs wrap round, as in the World Editor", () => {
   const t = make();
-  setWaterLevel(t.corners[2], 0x3fff - 300);
+  t.corners[0].rawWater = 0x3fff - 300;
   assert.equal(cliffShiftRange(t).max, TOP_LEVEL - 4);
   assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), 8);
-  assert.equal(t.corners[2].rawWater & 0x3fff, 0x3fff - 300, "a water word near the top of its 14 bits stays");
-  setWaterLevel(t.corners[2], 400);
+  assert.equal(t.corners[0].rawWater, 0x3fff - 300 + 0x200 - 0x4000, "a dry word near the top of its 14 bits goes round");
+  t.corners[0].rawWater = 400;
   assert.equal(cliffShiftRange(t).min, -3, "nor near the bottom");
+  assert.equal(adjustCliffLevels(t, -3, new CornerUndo()), 8);
+  assert.equal(t.corners[0].rawWater, 400 - 0x600 + 0x4000);
 });
 
 /** The Area panel's Level +1/-1: Adjust Cliff Levels on a block of corners (inclusive corner numbers). */
-test("Adjust Cliff Levels on a block moves only its corners' layers: ramps, water and cliff types stay, the edge becomes a cliff", () => {
+test("Adjust Cliff Levels on a block moves only its corners' layers and water: ramps and cliff types stay, the edge becomes a cliff", () => {
   // make()'s corners 1 (land, x 1) and 2 (lake, x 2) on the bottom row, and the ramp corner 5 above corner 1.
   const before = make(), t = make(), undo = new CornerUndo();
   const block = { x0: 1, y0: 0, x1: 2, y1: 1 };
@@ -286,7 +370,10 @@ test("Adjust Cliff Levels on a block moves only its corners' layers: ramps, wate
     const b = before.corners[i], x = i % 4;
     const inside = x >= 1 && x <= 2;
     assert.equal(c.layer, b.layer + (inside ? 1 : 0), `corner ${i}'s level`);
-    assert.deepEqual({ ...c, layer: 0, height: 0 }, { ...b, layer: 0, height: 0 }, `corner ${i}: nothing but the level changes`);
+    assert.equal(c.rawWater, b.rawWater + (inside ? 0x200 : 0), `corner ${i}'s water word`);
+    assert.equal(c.water, b.water + (inside ? 128 : 0), `corner ${i}'s water`);
+    const rest = (k: Corner) => ({ ...k, layer: 0, height: 0, rawWater: 0, water: 0 });
+    assert.deepEqual(rest(c), rest(b), `corner ${i}: nothing but the level and the water changes`);
   });
   assert.equal(t.corners[5].ramp, true, "the ramp the block cuts through stays, as Adjust Cliff Levels keeps ramps");
   const step = undo.step(t);
@@ -315,7 +402,7 @@ test("Adjust Cliff Levels on a block keeps it within levels 0 to 14", () => {
   assert.equal(t.corners[3].layer, 2, "the corner beside the block stays");
 });
 
-test("Level +1 then -1 on a block of a real map gives the file back, and +1 changes only the block's layer nibbles", (ctx) => {
+test("Level +1 then -1 on a block of a real map gives the file back, and +1 changes only the block's layers and water words", (ctx) => {
   const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
   let tried = 0;
   for (const name of maps) {
@@ -323,7 +410,6 @@ test("Level +1 then -1 on a block of a real map gives the file back, and +1 chan
     if (!original) continue;
     tried++;
     const t = parseW3e(original);
-    const per = t.version === 12 ? 8 : 7, head = original.length - t.trailer.length - t.corners.length * per;
     // A block round the map's first ramp corner, its edge through the ramp, so that the old way (ramps cut through
     // taken away, cliff types matched) would show; else the middle of the map.
     const ramp = t.corners.findIndex((c) => c.ramp);
@@ -336,14 +422,7 @@ test("Level +1 then -1 on a block of a real map gives the file back, and +1 chan
     assert.equal(adjustCliffLevels(t, 1, undo, block), count, name);
     assert.equal(undo.step(t).corners.length, count, `${name}: one step of the block's corners`);
     const up = writeW3e(t);
-    assert.equal(up.length, original.length, name);
-    for (let p = 0; p < original.length; p++) {
-      const k = p - head;
-      const corner = k >= 0 && p < head + t.corners.length * per ? (k / per) | 0 : -1;
-      const layerByte = corner >= 0 && k % per === per - 1 && inside(corner);
-      if (!layerByte) { if (up[p] !== original[p]) assert.fail(`${name}: byte ${p} (corner ${corner}) changed (${original[p]} to ${up[p]})`); continue; }
-      if ((up[p] & 0xf0) !== (original[p] & 0xf0) || (up[p] & 0xf) !== (original[p] & 0xf) + 1) assert.fail(`${name}: corner ${corner}'s byte ${original[p]} became ${up[p]}`);
-    }
+    checkPlusOne(name, original, up, t, inside);
     const back = parseW3e(up);
     assert.equal(adjustCliffLevels(back, -1, new CornerUndo(), block), count);
     assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
