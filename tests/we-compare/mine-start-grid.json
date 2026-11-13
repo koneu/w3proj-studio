@@ -1,0 +1,241 @@
+{
+  "name": "mine-start-grid",
+  "description": "Gold mines and start locations on their building grid (64n). Input: the empty 64x64 map with two camera objects (1000, 300 and -2141, 675, distance 2000: the views the clicks are aimed in, chosen on the camera palette as we-drive's --look does), Player 1's start location at -2141, 675 and four gold mines off the grid (1000, 300 and others; loading and saving leaves them so). WE: the mine at 1000, 300 box-selected (from bare ground below it), number pad 6 and 8 (1088, 384); a start location from the palette at about -1900, 500 (moves Player 1's to -1920, 512), box-selected, number pad 8 (-1920, 576), Alt-dragged to about -2000, 900 (-1984, 896); a gold mine from Neutral Passive's palette at about 1030, -470 (1024, -448). Studio: the same by its selection keys and tools; placement.ts unitGridCells. Ignored: the start location's editor id, hit points and mana (the editor's palette makes it a new object, numbered last, with 0 and 0; Studio's moves the one there, which saves -1 and -1). The input is made by tests/fixtures/we-compare/make-mine-start-input.mjs. Expected MATCH",
+  "input": {
+    "map": "${REPO}/tests/fixtures/we-compare/mine-start-grid.w3m"
+  },
+  "we": {
+    "mode": "sd",
+    "steps": [
+      [
+        "--key",
+        "m"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "1396,177"
+      ],
+      [
+        "--sleep",
+        "300"
+      ],
+      [
+        "--click",
+        "1476,119"
+      ],
+      [
+        "--sleep",
+        "2500"
+      ],
+      [
+        "--key",
+        "Num_Lock"
+      ],
+      [
+        "--key",
+        "u"
+      ],
+      [
+        "--drag",
+        "398,737:998,200"
+      ],
+      [
+        "--key",
+        "KP_6"
+      ],
+      [
+        "--key",
+        "KP_8"
+      ],
+      [
+        "--key",
+        "Escape"
+      ],
+      [
+        "--key",
+        "m"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "1396,190"
+      ],
+      [
+        "--sleep",
+        "300"
+      ],
+      [
+        "--click",
+        "1476,119"
+      ],
+      [
+        "--sleep",
+        "2500"
+      ],
+      [
+        "--key",
+        "u"
+      ],
+      [
+        "--click",
+        "1510,403"
+      ],
+      [
+        "--click",
+        "896,489"
+      ],
+      [
+        "--key",
+        "Escape"
+      ],
+      [
+        "--drag",
+        "579,598:984,266"
+      ],
+      [
+        "--key",
+        "KP_8"
+      ],
+      [
+        "--drag-mod",
+        "alt"
+      ],
+      [
+        "--drag",
+        "883,483:825,306@800"
+      ],
+      [
+        "--key",
+        "Escape"
+      ],
+      [
+        "--key",
+        "m"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "1396,177"
+      ],
+      [
+        "--sleep",
+        "300"
+      ],
+      [
+        "--click",
+        "1476,119"
+      ],
+      [
+        "--sleep",
+        "2500"
+      ],
+      [
+        "--key",
+        "u"
+      ],
+      [
+        "--click",
+        "1435,80"
+      ],
+      [
+        "--click",
+        "1405,424"
+      ],
+      [
+        "--sleep",
+        "3000"
+      ],
+      [
+        "--click",
+        "1383,365"
+      ],
+      [
+        "--click",
+        "770,858"
+      ],
+      [
+        "--key",
+        "Escape"
+      ]
+    ]
+  },
+  "studio": {
+    "steps": [
+      {
+        "setting": [
+          "script.generateOnSave",
+          false
+        ]
+      },
+      {
+        "terrain": true
+      },
+      {
+        "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); const key = async (k, code) => { const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: k, code, bubbles: true })); await new Promise((r) => setTimeout(r, 300)); }; await s.look.get('map/war3map.w3e.txt')(1000, 300, { id: 'ngol', x: 1000, y: 300 }); await new Promise((r) => setTimeout(r, 1000)); await key('6', 'Numpad6'); await key('8', 'Numpad8'); await new Promise((r) => setTimeout(r, 500)); await w3.editors.saveAll();"
+      },
+      {
+        "mcp": "move_object",
+        "args": {
+          "kind": "units",
+          "index": 0,
+          "id": "sloc",
+          "x": -1899.459,
+          "y": 500.25296
+        }
+      },
+      {
+        "eval": "const s = await w3.services.get('w3.terrain'); const key = async (k, code) => { const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: k, code, bubbles: true })); await new Promise((r) => setTimeout(r, 300)); }; await key('Escape', 'Escape'); await s.look.get('map/war3map.w3e.txt')(-1920, 512, { id: 'sloc', x: -1920, y: 512 }); await new Promise((r) => setTimeout(r, 1000)); await key('8', 'Numpad8'); await new Promise((r) => setTimeout(r, 500)); await w3.editors.saveAll();"
+      },
+      {
+        "mcp": "move_object",
+        "args": {
+          "kind": "units",
+          "index": 0,
+          "id": "sloc",
+          "x": -1992,
+          "y": 890
+        }
+      },
+      {
+        "mcp": "place_objects",
+        "args": {
+          "kind": "units",
+          "objects": [
+            {
+              "id": "ngol",
+              "x": 1030,
+              "y": -470,
+              "player": 28
+            }
+          ],
+          "ignoreRoom": true
+        }
+      },
+      {
+        "sleep": 2000
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3mapUnits.doo",
+      "as": "parsed",
+      "ignore": [
+        "units[].editorId",
+        "units[0].hp",
+        "units[0].mana"
+      ]
+    }
+  ],
+  "limit": 30
+}

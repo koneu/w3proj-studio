@@ -283,6 +283,16 @@ It never starts the game itself.
   (the bottom left of `--shot-window`) gives its world position; at the opening camera the ground maps to the display
   by a plane homography (fitted from six such readings to the pixel). The editor moves each doodad onto its own grid
   when the map loads (a barrel to 64n + 32, a crate to 64n), so the copied positions are read from its save.
+- **Gold mines and start locations** (branch mine-start-grid, 2026-11-13, SD; spec tests/we-compare/mine-start-grid.json):
+  both stand on the 64 grid when placed, nudged, dragged or Alt-moved (a mine by its 16×16 texture, a start location as
+  a 4×4 building); loading and saving leaves off-grid ones where they are. Nudged, a start location stops 64 inside the
+  whole map (4032 of 4096), past the playable part. The palette's Start Location (`--key u`, `--click 1510,403`) makes
+  Player 1's start a new object (editor id last, hit points and mana 0); Neutral Passive is `--click 1435,80`, `--click
+  1405,424`, its first building (`--click 1383,365`, 3 s later) the Gold Mine. A click on a start location selected it
+  (its circle moved with the keys) but the save kept it where it was; a box select (`--drag` from bare ground) works.
+  we-compare refuses `--look`: the spec's input has the camera objects, picked as --look does (`--key m`, `--click
+  1396,177` for the first row, 13 px a row, `--click 1476,119`). Placing a unit without a texture (Phoenix Egg) is free:
+  it stood at -1899.459, 500.253 where -1900, 500 was aimed through `proj.py`'s projection.
 - **Doodad rules while editing** (branch doodad-rules-edit, 2026-11-13, HD, empty_map_on_newest_world_editor.w3m with a
   barrel LTbr at 32, 32 scale 1.2, a log AOlg (12x6 texture) at 1056, 0 facing 0, wheat LPwh (no texture); saved after
   each step): an 8 px drag of the barrel (about 20 units at the opening camera) didn't move it, an 18 px one put it at
