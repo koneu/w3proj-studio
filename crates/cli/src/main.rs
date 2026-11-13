@@ -287,6 +287,39 @@ fn check_trigger_data(file: &Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Pathing, shadows and the minimap that no longer follow the terrain and doodads (`w3proj::derived`) stop a pack, in the
+/// project and its chapter maps: the app makes them again a moment after an edit, this program can't.
+fn check_derived(project: &std::path::Path) -> Result<()> {
+    use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
+    let mut projects = vec![(String::new(), project.to_path_buf())];
+    let maps = project.join(w3proj::project::MAPS_DIR);
+    if let Ok(entries) = std::fs::read_dir(&maps) {
+        let mut chapters: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().join(w3proj::project::MANIFEST).is_file())
+            .map(|e| (format!("{}/{}/", w3proj::project::MAPS_DIR, e.file_name().to_string_lossy()), e.path()))
+            .collect();
+        chapters.sort();
+        projects.extend(chapters);
+    }
+    let again = "W3Proj Studio makes them again a few seconds after an edit made there and on every terrain save: wait \
+                 for that (or save the terrain there after an edit made elsewhere), then pack again; --force-stale packs \
+                 them as they are";
+    for (at, dir) in projects {
+        match check(&dir).with_context(|| format!("checking {}", dir.display()))? {
+            Freshness::Fresh | Freshness::Unknown => {}
+            Freshness::Stale(files) => {
+                let files = files.iter().map(|f| format!("{at}map/{f}")).collect::<Vec<_>>().join(", ");
+                anyhow::bail!("{files} changed since {DERIVED} were made from them: {again}");
+            }
+            Freshness::Unreadable(why) => {
+                anyhow::bail!("{at}{why}, so it can't be told whether {DERIVED} follow the terrain and doodads: {again} (that writes {at}{STAMP_FILE} anew)");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `file`: a TriggerData.txt to use instead of the game's (the tests bring a made-up one).
 fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>, file: &Option<PathBuf>) -> Registry {
     if let Some(file) = file.clone() {
@@ -345,6 +378,10 @@ enum Cmd {
         /// Pack war3map.wts as it is, unused strings included.
         #[arg(long)]
         keep_unused_strings: bool,
+        /// Pack pathing, shadows and the minimap as they are, even when the terrain or doodads
+        /// changed since they were made (the app makes them again a moment after an edit).
+        #[arg(long)]
+        force_stale: bool,
     },
     /// Check that maps survive unpack → pack unchanged (in memory).
     Verify {
@@ -509,7 +546,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings } => {
+        Cmd::Pack { project, output, keep_unused_strings, force_stale } => {
+            if !force_stale {
+                check_derived(&project)?;
+            }
             let codecs = Registry::for_project(&project, &extra)?;
             let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
             let r = pack(&project, output.as_deref(), &codecs)

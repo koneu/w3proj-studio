@@ -3879,6 +3879,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // since the editor reopens on the new size only afterwards.
           const rf = (p: string) => readFile(w3, doc, p);
           const doodads = dooFile?.list ?? [];
+          // The terrain and doodads as written above, which what follows is made from (w3proj::derived).
+          const root = w3.workspace.project()?.root;
+          const sources = root ? await w3.backend.invoke<Record<string, string>>("derived_sources", { root }).catch(() => null) : null;
           const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"), specialsOf(dooFile?.doc));
           // Same size: the tool groups' own filters, as everywhere else.
           if (change.every((c) => c === 0)) filterPathing(wpm);
@@ -3887,6 +3890,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (pathingText !== null) await w3.workspace.writeText(".w3proj/pathing.json", pathingText);
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           await updateMinimapIcons(next);
+          if (root && sources && w3.workspace.project()?.root === root) await w3.backend.invoke("derived_record", { root, sources }).catch(() => {});
           return { removed };
         };
         const handle: TerrainEditorHandle = {
@@ -5134,9 +5138,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
          *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take()) => {
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take(), unsaved = false) => {
           const icons = units ?? unitsFile?.list;
           await writeDerived(w3, {
+            unsaved,
             now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
             units: unitsFile && icons ? icons : null,
             skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
@@ -5241,7 +5246,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           derive: async (from) => {
             await ready();
             minimapStale.set();
-            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
+            // With unsaved edits in the editor, what's made has them: not what the files hold.
+            const unsaved = mark.isDirty(at);
+            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
         };
