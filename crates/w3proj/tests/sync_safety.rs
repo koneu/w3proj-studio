@@ -285,3 +285,24 @@ fn a_sync_never_deletes_a_file_with_a_backslash_in_its_name() {
     assert_eq!(fs::read(chapter.join("map").join(r"a\b.txt")).unwrap(), b"chapter stray");
     assert!(!map.join("added.txt").exists(), "a file the map doesn't have goes on a sync");
 }
+
+/// A save's temporary file (`w3proj::atomic`), there while it runs or left by a crash, is no project
+/// file: it isn't packed, and a sync neither deletes it (another program's save may be running) nor
+/// asks about it. The project's .gitignore leaves it out of git.
+#[test]
+fn a_saves_temporary_file_is_not_packed_or_synced() {
+    let dir = workdir("atomic-temp");
+    let root = new_project(&dir);
+    let map = root.join("map");
+    let tmp = map.join(".war3map.j.4242-0.tmp");
+    assert!(w3proj::atomic::is_temp(".war3map.j.4242-0.tmp"));
+    fs::write(&tmp, b"half a scr").unwrap();
+    fs::write(map.join(".hidden"), b"a real file").unwrap();
+    let (_, _, files) = project::read_project(&root).unwrap();
+    assert!(!files.contains_key(".war3map.j.4242-0.tmp"), "packed: {:?}", files.keys());
+    assert!(files.contains_key(".hidden"), "another dot file is a file of the map");
+    project::write_files(&root, extracted(&root, "Map", &[("war3map.j", SCRIPT)])).unwrap();
+    assert_eq!(fs::read(&tmp).unwrap(), b"half a scr");
+    let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert!(ignore.lines().any(|l| l == ".*.tmp"), "{ignore}");
+}

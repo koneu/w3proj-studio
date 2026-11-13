@@ -4,6 +4,7 @@
 //! The backend stays small on purpose. Features live in UI extensions, which
 //! reach the core only through these commands.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -166,7 +167,7 @@ fn stamp_of(path: &Path) -> CmdResult<Stamp> {
     Ok(Stamp { size: meta.len(), modified: modified_ms(&meta) })
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct Stamp {
     size: u64,
     modified: u64,
@@ -255,6 +256,9 @@ fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>,
                 continue;
             }
             let rel = rel_of(&path);
+            // A save in progress (`write_file`) or a crash's leftover: no project file, and never
+            // reported as one added by another program.
+            let temp = || w3proj::atomic::is_temp(&entry.file_name().to_string_lossy());
             let is_dir = match entry.file_type() {
                 Ok(t) => t.is_dir(),
                 Err(e) => {
@@ -266,7 +270,7 @@ fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>,
                 if !matches!(rel.as_str(), "build" | ".git" | "node_modules") {
                     stack.push(path);
                 }
-            } else {
+            } else if !temp() {
                 let meta = entry.metadata().ok();
                 let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
                 let modified = meta.as_ref().map(modified_ms).unwrap_or(0);
@@ -415,7 +419,7 @@ fn objects_canonicalize(name: String, text: String) -> CmdResult<String> {
 fn objects_export(name: String, text: String, path: String) -> CmdResult<()> {
     let opt = w3proj::objdata::kind(&name).ok_or("not an object data file")?;
     let bin = w3proj::objdata::from_json(text.as_bytes(), opt).map_err(err)?;
-    std::fs::write(&path, bin).map_err(err)
+    w3proj::atomic::write(Path::new(&path), &bin).map_err(err)
 }
 
 /// Reads a binary object data file, like one the World Editor exported, as project JSON.
@@ -439,7 +443,7 @@ struct W3oPart {
 fn w3o_export(parts: Vec<W3oPart>, path: String) -> CmdResult<()> {
     let parts: Vec<(String, String)> = parts.into_iter().map(|p| (p.kind, p.text)).collect();
     let bin = w3proj::w3o::pack_json(&parts).map_err(err)?;
-    std::fs::write(&path, bin).map_err(err)
+    w3proj::atomic::write(Path::new(&path), &bin).map_err(err)
 }
 
 /// Reads a `.w3o` as the project JSON of each kind it holds.
@@ -501,9 +505,7 @@ fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdR
     for codec in registry.for_archive_name(&name) {
         match codec.encode(&name, text.as_bytes()) {
             Ok(bin) => {
-                let file = Path::new(&root).join(&path);
-                std::fs::write(&file, bin).map_err(err)?;
-                return stamp_of(&file);
+                return write_file(&Path::new(&root).join(&path), |f| f.write_all(&bin));
             }
             Err(e) => last = e.to_string(),
         }
@@ -573,11 +575,15 @@ fn fs_read_text(path: String) -> CmdResult<String> {
 
 #[tauri::command]
 fn fs_write_text(path: String, text: String) -> CmdResult<Stamp> {
-    if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent).map_err(err)?;
-    }
-    std::fs::write(&path, text).map_err(err)?;
-    stamp_of(Path::new(&path))
+    write_file(Path::new(&path), |f| f.write_all(text.as_bytes()))
+}
+
+/// Every save of the app: the folders above are made, then the file is replaced in one step
+/// (`w3proj::atomic`: a temporary file renamed over it), so a write that fails partway (a full disk)
+/// leaves the old file whole. A link is written through to its file. Gives the stamp the file has after.
+fn write_file(path: &Path, fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>) -> CmdResult<Stamp> {
+    w3proj::atomic::write_with(path, fill).map_err(err)?;
+    stamp_of(path)
 }
 
 /// Writes the raw request body to the file named by the (URI-encoded) `path`
@@ -593,11 +599,7 @@ fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<Stamp> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected a raw byte body".into());
     };
-    if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent).map_err(err)?;
-    }
-    std::fs::write(&path, bytes).map_err(err)?;
-    stamp_of(Path::new(&path))
+    write_file(Path::new(&path), |f| f.write_all(bytes))
 }
 
 /// Decodes `%XX` escapes (as produced by encodeURIComponent).
@@ -786,7 +788,8 @@ fn list_tree(root: &Path) -> CmdResult<Vec<String>> {
             let kind = entry.file_type().map_err(|e| format!("{}: {e}", entry.path().display()))?;
             if kind.is_dir() {
                 pending.push((entry.path(), format!("{prefix}{name}/")));
-            } else if kind.is_file() {
+            } else if kind.is_file() && !w3proj::atomic::is_temp(&name) {
+                // Not a save's temporary file: half written, it is nothing to import.
                 files.push(format!("{prefix}{name}"));
             }
         }
@@ -1500,6 +1503,49 @@ mod fs_tests {
         let Err(err) = open(dir.join("map").to_string_lossy().into_owned()) else { panic!("a folder without a manifest opened") };
         assert!(err.contains("cannot read w3proj.toml"), "{err}");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A save that fails partway (here the writer fails after half the bytes, as on a full disk) leaves
+    /// the old file whole and no temporary file behind; std::fs::write would have cut the file short.
+    #[test]
+    fn a_save_failing_partway_leaves_the_old_file_whole() {
+        let (dir, _) = project();
+        let file = dir.join("map/sub/a.txt");
+        std::fs::write(&file, b"the old contents").unwrap();
+        let e = write_file(&file, |f| {
+            f.write_all(b"the new con")?;
+            Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "No space left on device"))
+        })
+        .unwrap_err();
+        assert!(e.contains("No space left"), "{e}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"the old contents");
+        let names: Vec<_> = std::fs::read_dir(dir.join("map/sub")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, ["a.txt"], "no temporary file is left");
+        // A save that goes through: the new bytes and their stamp; a new folder is made.
+        let stamp = fs_write_text(file.to_string_lossy().into_owned(), "new".into()).unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"new");
+        assert_eq!(stamp.size, 3);
+        let deep = dir.join("map/new/b.txt");
+        fs_write_text(deep.to_string_lossy().into_owned(), "b".into()).unwrap();
+        assert_eq!(std::fs::read(&deep).unwrap(), b"b");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A save's temporary file (there while it runs, or left by a crash) isn't in the file list the
+    /// workspace checks for external changes, nor in an import's list; a dot file of the user's is.
+    #[test]
+    fn a_saves_temporary_file_is_in_no_listing() {
+        let (dir, root) = project();
+        let tmp = ".a.txt.4242-7.tmp";
+        assert!(w3proj::atomic::is_temp(tmp));
+        std::fs::write(dir.join("map/sub").join(tmp), b"half").unwrap();
+        std::fs::write(dir.join("map/sub/.keep"), b"").unwrap();
+        let listed: Vec<String> = project_files(root.clone()).unwrap().into_iter().map(|f| f.path).collect();
+        assert_eq!(listed, ["map/sub/.keep", "map/sub/a.txt"]);
+        let partial: Vec<String> = project_files_partial(root.clone()).unwrap().files.into_iter().map(|f| f.path).collect();
+        assert_eq!(partial, listed);
+        assert_eq!(list_tree(&dir.join("map")).unwrap(), ["sub/.keep", "sub/a.txt"]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A same-size write that keeps the time (as one in the same millisecond does) changes the hash, not the stamp.
