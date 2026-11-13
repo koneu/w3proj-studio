@@ -166,13 +166,20 @@ export class Workbench {
       return root ? tabsKey(root) : null;
     };
     this.editors.memory = {
-      load: () => {
+      load: async () => {
+        // Right after a start or an open the file list may still be read: a tab whose file isn't listed yet isn't gone
+        // (taken so, every tab was dropped and the empty list stored over the remembered one). A list that can't be read
+        // tells nothing: the tabs all come back (their editors say why they can't open) and stay remembered.
+        const root = this.workspace.project()?.root;
+        if (!root) return null;
+        const listed = await this.workspace.filesReady().then(() => true, () => false);
+        if (this.workspace.project()?.root !== root) return null;
         const key = memoryKey();
         let state: OpenEditors | null = null;
         try { state = key ? JSON.parse(localStorage.getItem(key) ?? "null") : null; } catch { return null; }
         if (!state || !Array.isArray(state.tabs)) return null;
         const files = new Set(this.workspace.files().map((f) => f.path.toLowerCase()));
-        const exists = (p: string) => p.startsWith("w3:") || isGame(p) || isFullPath(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
+        const exists = (p: string) => !listed || p.startsWith("w3:") || isGame(p) || isFullPath(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
         return { tabs: state.tabs.filter((t) => typeof t.path === "string" && typeof t.editor === "string" && exists(t.path)), active: state.active };
       },
       store: (state) => {

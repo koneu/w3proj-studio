@@ -95,8 +95,9 @@ export class EditorService {
   confirm: (message: string, ...actions: string[]) => Promise<string | undefined> = async () => undefined;
   /** Why an extension's editor isn't available (disabled, failed to activate). */
   whyUnavailable: (extensionId: string) => string | undefined = () => undefined;
-  /** Where the open tabs are remembered (per project; null: not remembered). */
-  memory: { load(): OpenEditors | null; store(state: OpenEditors): void } | null = null;
+  /** Where the open tabs are remembered (per project; null: not remembered). `load` may wait (for the project's file
+   *  list: a file not listed yet is no file that is gone). */
+  memory: { load(): OpenEditors | null | Promise<OpenEditors | null>; store(state: OpenEditors): void } | null = null;
   /** Off while tabs are closed for a project switch or restored. */
   private remembering = true;
   /** From startup, and whenever a project opens, until its tabs are restored: tabs closed
@@ -104,9 +105,12 @@ export class EditorService {
   private awaitingRestore = true;
   /** Tabs the user closed while awaiting the restore: they stay closed when it brings the others back. */
   private closedWhileAwaiting = new Set<string>();
+  /** Counts the projectOpened() calls: a restore that waited through another one is out of date. */
+  private openedGen = 0;
 
   /** A project was opened: the next restore() brings its tabs back; until then nothing is stored. */
   projectOpened() {
+    this.openedGen++;
     this.awaitingRestore = true;
     this.closedWhileAwaiting.clear();
   }
@@ -330,10 +334,15 @@ export class EditorService {
   /** Reopens the tabs remembered for the current project (the active one is loaded, the
    *  others when they are first shown). Tabs already open stay. */
   async restore() {
+    // The memory may wait for the project's file list (right after a start or an open): until it has answered, tabs
+    // closed meanwhile (the welcome page at startup) are still noted, and nothing is stored over what is remembered.
+    const gen = this.openedGen;
+    const state = await this.memory?.load();
+    // Another project opened meanwhile: its own restore brings its tabs back.
+    if (gen !== this.openedGen) return;
     this.awaitingRestore = false;
     const closed = this.closedWhileAwaiting;
     this.closedWhileAwaiting = new Set();
-    const state = this.memory?.load();
     if (!state?.tabs.length) return;
     this.remembering = false;
     try {

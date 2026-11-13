@@ -7263,6 +7263,68 @@ async function stringsBeforeListing(page, found) {
   }
 }
 
+/** The project's tabs come back after a start whose project is there before its file list (openpoints bugs.md,
+ *  tab-restore-files): at a real start map-project reopens the last project, and the workbench restores its tabs as soon
+ *  as the project is open, while its list is still read. Simulated with the listing held: the project opens, the
+ *  workbench is told it changed (as its start does), the welcome page and a tab opened meanwhile are closed. Nothing may
+ *  be stored over the remembered tabs while the list is read; once it's read the remembered tabs come back, but not the
+ *  one closed meanwhile nor one whose file is really gone. Without the wait every tab was dropped as "not there" and
+ *  closing the welcome page stored `{"tabs":[]}`. */
+async function tabsBeforeListing(page, found) {
+  const fail = (what) => found.push(`tabs before the file list: ${what}`);
+  const dir = join(work, "tabs-before-listing");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  const kept = ["map/war3map.w3i.json", "map/war3map.wts", "map/war3map.j"], closed = "map/war3map.wtg.json", gone = "map/gone.txt";
+  for (const p of [...kept, closed]) if (!existsSync(join(dir, ...p.split("/")))) return fail(`the mini map has no ${p} (the check needs it)`);
+  const remembered = { tabs: [...kept, closed, gone].map((path) => ({ path, editor: path.endsWith(".wtg.json") ? "w3.triggerEditor" : "w3.textEditor" })), active: kept[1] };
+  const storeKey = `(() => { const r = ${JSON.stringify(dir)}.replace(/[\\\\/]+$/, ""); return "w3.openEditors:" + (/^[A-Za-z]:/.test(r) ? r.toLowerCase() : r); })()`;
+  const stored = async () => JSON.parse(await page.evaluate(`localStorage.getItem(${storeKey}) ?? "null"`));
+  const open = () => page.evaluate(`w3Workbench.editors.tabs.map((t) => t.path)`);
+  await page.evaluate(`(async () => {
+    await w3.editors.closeAll();
+    w3.workspace.close();
+    localStorage.setItem(${storeKey}, ${JSON.stringify(JSON.stringify(remembered))});
+    await w3.editors.open("w3:welcome");
+    w3Workbench.workspace.testListingHold = new Promise((r) => { window.__tblRelease = r; });
+  })()`);
+  try {
+    await page.evaluate(`void w3.workspace.open(${JSON.stringify(dir)}).catch(() => {})`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`), 20000);
+    const listed = await page.evaluate(`w3.workspace.files().length`);
+    if (listed) return fail(`the project's files were listed (${listed}) though the listing was held (control)`);
+    // As the workbench's start does when the project is open before its listeners are: its tabs are restored now.
+    await page.evaluate(`w3Workbench.workspace.onDidChange.fire()`);
+    // A tab opened and closed right away, and the welcome page closed (map-project does once the project is open).
+    await page.evaluate(`void w3.editors.open(${JSON.stringify(closed)}, "w3.triggerEditor").catch(() => {})`);
+    await until("the tab opened while the list is read", async () => (await open()).includes(closed), 10000);
+    await page.evaluate(`w3.editors.close(${JSON.stringify(closed)})`);
+    await page.evaluate(`w3.editors.close("w3:welcome")`);
+    await sleep(1000);
+    const meanwhile = await stored();
+    if (JSON.stringify(meanwhile) !== JSON.stringify(remembered)) fail(`while the list was read the remembered tabs became ${JSON.stringify(meanwhile)}`);
+    const early = await open();
+    if (early.some((p) => kept.includes(p))) fail(`tabs came back before the list was read: ${JSON.stringify(early)}`);
+    await page.evaluate(`window.__tblRelease()`);
+    await page.evaluate(`w3.workspace.filesReady()`);
+    await settled(page);
+    const back = await open();
+    for (const p of kept) if (!back.includes(p)) fail(`the remembered tab ${p} didn't come back: ${JSON.stringify(back)}`);
+    if (back.includes(closed)) fail(`the tab closed while the list was read came back: ${JSON.stringify(back)}`);
+    if (back.includes(gone)) fail(`the tab of a file that is gone came back: ${JSON.stringify(back)}`);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== remembered.active) fail(`the active tab is ${await page.evaluate(`w3.editors.activePath()`)}, not ${remembered.active}`);
+    const after = (await stored())?.tabs?.map((t) => t.path) ?? [];
+    if (JSON.stringify(after) !== JSON.stringify(kept)) fail(`the remembered tabs after the restore are ${JSON.stringify(after)}, not ${JSON.stringify(kept)}`);
+  } finally {
+    await page.evaluate(`(() => {
+      w3Workbench.workspace.testListingHold = null;
+      window.__tblRelease?.();
+      delete window.__tblRelease;
+    })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Commands and editors that create a file the list doesn't have (or start it empty), run while the first list after an
  *  open is still read: Gameplay Constants writes an empty war3mapMisc.txt for a map without one, and the Import Manager
  *  starts an empty list for a map without war3map.imp.json. Both wait for the whole list, so the map's own files stay
@@ -11056,6 +11118,7 @@ async function run() {
         startPreviewFollow,
         stringsBeforeListing,
         syncSafety,
+        tabsBeforeListing,
         techtreeRandomLevels,
         terrainSelectCameras,
         terrainWiring,
@@ -11343,6 +11406,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "moveTextsToTable", found);
   await stringsBeforeListing(page, found).catch((e) => found.push(`strings before the file list: ${e.message}`));
   await leftOpen(page, "stringsBeforeListing", found);
+  await tabsBeforeListing(page, found).catch((e) => found.push(`tabs before the file list: ${e.message}`));
+  await leftOpen(page, "tabsBeforeListing", found);
   await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
   await leftOpen(page, "drawCalls", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
