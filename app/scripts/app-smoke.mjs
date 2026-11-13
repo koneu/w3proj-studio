@@ -2668,7 +2668,8 @@ async function specialDoodads(page, found) {
 }
 
 /** The see-through town hall at a start location follows it (move by MCP, undo) and shows on melee maps only
- *  (war3map.w3i Melee flag, changed in the file as Scenario Properties does). */
+ *  (war3map.w3i Melee flag, changed in the file as Scenario Properties does), by the flag the file holds: a player's
+ *  unit placed doesn't hide it in the open editor (as in the World Editor), an editor opened after the save does. */
 async function startPreviewFollow(page, found) {
   try {
   const fail = (what) => found.push(`start preview: ${what}`);
@@ -2705,13 +2706,25 @@ async function startPreviewFollow(page, found) {
     await until("no preview without the Melee flag", async () => (await drawn()).length === 0, 10000).catch(async () => fail(`still previews with Melee off: ${JSON.stringify(await drawn())}`));
     await setMelee(true);
     await until("previews again with Melee on", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after Melee went on"));
-    // A player's unit placed on the melee map takes the flag off (as a save would): the open editor drops the previews
-    // at once, without a save or a reopen.
+    // A player's unit placed on the melee map breaks its Melee rules, but the previews stay, as in the World Editor
+    // (we-drive, verify round 3, 2026-11-13: a pasted footman left the see-through town hall drawn): they follow the
+    // flag war3map.w3i holds, not the live check. The editor's units hold the footman before the wait.
+    const footmen = () => page.evaluate(`window.__spEd2?.drawnUnits().filter((u) => u.id === "hfoo").length ?? 0`);
     await k.tool("place_objects", { objects: [{ id: "hfoo", x: was[0] + 1024, y: was[1] + 1024, player: 1 }], ignoreRoom: true });
-    await until("no preview after a player's footman was placed", async () => (await drawn()).length === 0, 10000)
-      .catch(async () => fail(`still previews after placing a player's unit: ${JSON.stringify(await drawn())}`));
-    await k.tool("undo_last_edit");
-    await until("previews back after undoing the placing", async () => (await drawn()).length > 0, 10000).catch(() => fail("no preview after undoing the footman"));
+    await until("the footman drawn", async () => (await footmen()) === 1, 10000).catch(() => fail("the placed footman isn't drawn (control)"));
+    await settled(page);
+    if ((await drawn()).length === 0) fail("placing a player's unit hid the previews at once (the World Editor keeps them until the map is opened again)");
+    // Saved, the map is no longer melee (its flag off in the file); the open editor still draws them (the World Editor too,
+    // after Ctrl+S), and an editor opened on it now goes by the file: none.
+    await k.save();
+    if ((k.read("war3map.w3i.json").flags & 4) !== 0) fail("a player's footman left the saved map melee (control: the flag should go off)");
+    if ((await drawn()).length === 0) fail("the save that took the Melee flag off hid the previews in the open editor");
+    await page.evaluate(`w3.editors.closeAll(); window.__spEd2 = null;`);
+    await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+    await until("the terrain editor, opened again", async () => (await page.evaluate(`w3.editors.activePath()`)) === "map/war3map.w3e.txt" && await page.evaluate(`!!window.__spEd2`), 20000);
+    await until("the footman in the reopened editor", async () => (await footmen()) === 1, 20000).catch(() => fail("the reopened editor draws no footman (control)"));
+    await settled(page);
+    if ((await drawn()).length !== 0) fail(`an editor opened on the saved map without its Melee flag draws previews: ${JSON.stringify(await drawn())}`);
   } finally {
     await page.evaluate(`window.__spGroup2?.dispose(); window.__spGroup2 = null; window.__spEd2 = null;`);
   }
@@ -2959,6 +2972,41 @@ async function areaLevels(page, found) {
     await restoreWindow(page);
   }
 }
+/** In Objects mode a drag with A held is a box select of objects, as the World Editor's (we-drive, verify round 3,
+ *  2026-11-13: a box over two trees with A held selected both, Delete removed both); Studio's A once did an area of
+ *  ground there, and Delete then removed nothing. Leaves the Select tab in Objects mode, the trees gone and saved. */
+async function holdABox(page, k, fail) {
+  const trees = [[2048, 1536], [2304, 1536]];
+  await k.tool("place_objects", { objects: trees.map(([x, y]) => ({ id: "LTlt", x, y })), ignoreRoom: true });
+  await k.save();
+  const standing = () => k.doodads().filter((d) => trees.some(([x, y]) => d.position[0] === x && d.position[1] === y)).length;
+  if (standing() !== 2) return fail(`the two trees for the A box aren't in the file (control): ${JSON.stringify(k.doodads().map((d) => d.position))}`);
+  await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__aBoxGroup = s.registerToolGroup({ id: "smoke-abox", title: "SmokeABox", order: 998, create: (ed) => { window.__aBoxEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+  try {
+    await k.look(2176, 1536);
+    const ground = await page.evaluate(`window.__aBoxEd?.view().target[2] ?? null`);
+    const corner = async (x, y) => page.evaluate(`window.__aBoxEd.project([${x}, ${y}, ${ground}])`);
+    const a = await corner(1856, 1792), b = await corner(2496, 1280);
+    if (ground === null || !a || !b) return fail(`the box's corners aren't in the view (control): ${JSON.stringify([ground, a, b])}`);
+    const A = { key: "a", code: "KeyA", windowsVirtualKeyCode: 65 };
+    await k.focusMap();
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...A });
+    try {
+      await k.hands.drag({ x: a[0], y: a[1] }, { x: b[0], y: b[1] });
+    } finally {
+      await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...A });
+    }
+    await settled(page);
+    const area = await page.evaluate(`[...document.querySelectorAll(".terrain-selection button")].some((e) => e.textContent === "Level +1")`);
+    if (area) fail("a drag with A held selected an area of ground (its Level +1 panel shows), not the objects in the box");
+    await k.focusMap();
+    await k.hands.key("Delete", "Delete", 46);
+    await k.save();
+    if (standing() !== 0) fail(`after a drag with A held over two trees and Delete, ${standing()} of them stand (the World Editor removes both)`);
+  } finally {
+    await page.evaluate(`window.__aBoxGroup?.dispose(); window.__aBoxGroup = window.__aBoxEd = null;`);
+  }
+}
 async function areaLevelsSteps(page, found) {
   const fail = (what) => found.push(`area levels: ${what}`);
   const k = await heightKit(page, "AreaLevels");
@@ -2974,6 +3022,7 @@ async function areaLevelsSteps(page, found) {
   if (!layerSection()) return fail(`no [layer] section to read (control): ${original.slice(0, 200)}`);
   if (!originalWater) return fail(`no [water] section to read (control): ${original.slice(0, 200)}`);
   await k.tab("Select");
+  await holdABox(page, k, fail);
   await k.hands.click(".chip", "Area");
   await k.look(0, 0);
   const c = await k.hands.where(".model-stage canvas");
@@ -4691,7 +4740,7 @@ async function byHand(page, found) {
   if (hash(ground) !== untouched) fail(`one undo didn't take the whole Noise stroke back (${hash(ground) === noisy ? "nothing happened" : "the file differs"})`);
 
   // Shallow water, one click at the default size 2: the World Editor's brush, the nearest corner and the 4 next to it
-  // (terrain-painter/tools.ts waterBrush). Wet corners: the water bit (4) of the w3e's flags.
+  // (terrain-painter/tools.ts cornerBrush). Wet corners: the water bit (4) of the w3e's flags.
   const wetCorners = () => {
     const text = readFileSync(ground, "utf8"), all = /^\[flags\] all (\S)/m.exec(text);
     if (all) return (parseInt(all[1], 36) & 4) ? -1 : 0;
@@ -4706,12 +4755,53 @@ async function byHand(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await save();
   if (hash(ground) !== untouched) fail("undo didn't take the water back");
+  await brushSizesByHand(page, hands, ground, untouched, canvas, save, fail);
 
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
   } finally {
     await restoreWindow(page);
   }
+}
+
+/** The World Editor's brush sizes (we-drive, one click each on flat ground, 2026-11-13): +1 cliff and a ground texture
+ *  take the corners within size − 1 tiles of the corner nearest the pointer (size 3: 13; size 1: that corner), Raise
+ *  those strictly inside (size 3: 9), wherever in the cell the click lands (terrain-painter/tools.ts brushOf). Each
+ *  click undone after. */
+async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fail) {
+  /** Corners whose value in a section of the w3e text isn't the most common one. */
+  const changed = (name) => {
+    const text = readFileSync(ground, "utf8");
+    if (new RegExp(`^\\[${name}\\] all `, "m").test(text)) return 0;
+    const rows = text.split(`\n[${name}]\n`)[1]?.split("\n[")[0].trim().split("\n") ?? [];
+    // Height rows are numbers ("0*42 13 30 …"), the others a character per corner.
+    const values = rows.flatMap((r) => (name === "height" ? r.trim().split(/\s+/).flatMap((v) => { const [x, n] = v.split("*"); return Array(Number(n ?? 1)).fill(x); }) : [...r]));
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+    const most = Math.max(...counts.values());
+    return values.length - most;
+  };
+  const setSize = (s) => page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); i.value = "${s}"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  const steps = [
+    ["+1:", "layer", 3, 13], ["+1:", "layer", 1, 1],
+    ["Paint:", "texture", 3, 13],
+    ["Raise:", "height", 3, 9],
+  ];
+  for (const [title, section, size, want] of steps) {
+    // A click off the corner, in another part of the cell each time: the count stays.
+    for (const [dx, dy] of [[7, -5], [-9, 11]]) {
+      await page.evaluate(`document.querySelector('button.tool-button[title^=${JSON.stringify(title)}]').click()`);
+      await setSize(size);
+      await hands.drag({ x: canvas.x + dx, y: canvas.y + dy }, { x: canvas.x + dx, y: canvas.y + dy }, 1);
+      await save();
+      const n = changed(section);
+      if (n !== want) fail(`a ${title.slice(0, -1)} click of size ${size} (${dx},${dy} px off the middle) changed ${n} corners' ${section}, the World Editor's ${want}`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await save();
+      if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
+    }
+  }
+  await setSize(2);
 }
 
 /** Replaces all of a text field's text, as selecting it and typing does; Tab commits. Returns once the focus has left
