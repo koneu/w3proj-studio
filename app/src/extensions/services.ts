@@ -199,6 +199,8 @@ export interface TerrainEditorHandle {
   /** The view camera: it looks at `target` from `distance` away, `yaw` (radians)
    *  points from the target to the eye, `pitch` lifts the eye, `fov` is vertical. */
   view(): TerrainView;
+  /** The view's width / height as drawn now (4:3 while it has no size). */
+  aspect(): number;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
