@@ -9241,6 +9241,86 @@ async function niceToHaves(page, found) {
     const files1 = snapshot(mapDir);
     for (const [f, h] of files0) if (files1.get(f) !== h) fail(`the undo of Adjust Map String IDs left ${f} changed`);
 
+    // ---- Adjust Map String IDs with the Object Editor as the other editor of war3map.wts ------------------------------------
+    // A unit's name is string 7. Adjust refuses while the Object Editor holds an unsaved name; with it saved, the string
+    // moves to 20 with its reference, the Object Editor opens again on 20, and its next save writes there: no string lost,
+    // none left behind, no reference dangling. A number a drop recorded (.w3proj/pruned-strings.json) isn't given away.
+    {
+      const wtsFile = join(mapDir, "war3map.wts"), recordFile = join(k.root, ".w3proj", "pruned-strings.json");
+      const unitFiles = ["war3map.w3u.json", "war3mapSkin.w3u.json"];
+      const keep = { wts: readFileSync(wtsFile, "utf8"), units: unitFiles.map((f) => (existsSync(join(mapDir, f)) ? readFileSync(join(mapDir, f), "utf8") : null)) };
+      const strings = () => { const t = readFileSync(wtsFile, "utf8"); return new Map([...t.matchAll(/STRING (\d+)\r?\n\{\r?\n([^}]*?)\r?\n\}/g)].map((m) => [Number(m[1]), m[2]])); };
+      const before = strings();
+      const eol = keep.wts.includes("\r\n") ? "\r\n" : "\n";
+      await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(`${keep.wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 7${eol}{${eol}Nice Unit${eol}}${eol}`)})`);
+      const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+      await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: "TRIGSTR_007" }] });
+      // The name is a Skin field: in a new map it is kept in war3mapSkin.w3u.
+      const unam = () => ["war3map.w3u.json", "war3mapSkin.w3u.json"].map((f) => { try { return k.read(f).custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === "unam")?.value; } catch { return undefined; } }).find((v) => v !== undefined);
+      if (unam() !== "TRIGSTR_007" || strings().get(7) !== "Nice Unit") fail(`the unit's name isn't string 7 (control): ${unam()}, ${JSON.stringify(strings().get(7))}`);
+      const objects = "map/war3map.w3u.json", objectsDirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(objects)})`);
+      const nameInput = ".obj-table .obj-value-cell input";
+      /** The Object Editor on the unit, its fields filtered to the name; the name's text. */
+      const showName = async () => {
+        await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+        await until("the unit's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
+        await retype(k.hands, "input.obj-field-search", "unam");
+        await until("the name field", () => page.evaluate(`document.querySelectorAll(${JSON.stringify(nameInput)}).length === 1`), 5000);
+        return page.evaluate(`document.querySelector(${JSON.stringify(nameInput)}).value`);
+      };
+      try {
+        if ((await showName()) !== "Nice Unit") fail(`the Object Editor shows the name as ${JSON.stringify(await page.evaluate(`document.querySelector(${JSON.stringify(nameInput)})?.value`))}`);
+        await retype(k.hands, nameInput, "Saved Name");
+        await k.save();
+        if (strings().get(7) !== "Saved Name") fail(`the Object Editor saved string 7 as ${JSON.stringify(strings().get(7))}`);
+        // Unsaved in the Object Editor: refused, nothing written.
+        await retype(k.hands, nameInput, "Unsaved Name");
+        if (!(await objectsDirty())) fail("a typed name left the Object Editor saved (control)");
+        const wtsHeld = readFileSync(wtsFile, "utf8");
+        const refusedObjects = await run("w3.triggers.adjustStringIds", [[7, 20]]);
+        if (!/unsaved changes/.test(refusedObjects.e ?? "") || !/war3map\.w3u/.test(refusedObjects.e ?? "")) fail(`Adjust Map String IDs with an unsaved name in the Object Editor: ${JSON.stringify(refusedObjects)}`);
+        if (readFileSync(wtsFile, "utf8") !== wtsHeld) fail("the refused Adjust changed war3map.wts");
+        await page.evaluate(`w3.commands.execute("workbench.undo")`);
+        await settled(page);
+        if (await objectsDirty()) fail("undoing the typed name left the Object Editor unsaved");
+        // Saved: Adjust moves the string; the Object Editor follows.
+        const moved = await run("w3.triggers.adjustStringIds", [[7, 20]]);
+        if (moved.e || moved.r !== 1) fail(`Adjust Map String IDs with the Object Editor open and saved: ${moved.e ?? JSON.stringify(moved.r)}`);
+        await settled(page);
+        const after = strings();
+        if (after.has(7) || after.get(20) !== "Saved Name" || unam() !== "TRIGSTR_020") fail(`after Adjust: string 7 ${JSON.stringify(after.get(7))}, 20 ${JSON.stringify(after.get(20))}, the unit's name ${unam()}`);
+        for (const [n, v] of before) if (after.get(n) !== v) fail(`Adjust with the Object Editor open changed string ${n}: ${JSON.stringify(after.get(n))}`);
+        if ((await showName()) !== "Saved Name") fail("after Adjust the Object Editor doesn't show the name of string 20");
+        await retype(k.hands, nameInput, "After Adjust");
+        await k.save();
+        const last = strings();
+        if (last.has(7) || last.get(20) !== "After Adjust" || unam() !== "TRIGSTR_020") fail(`the Object Editor's save after Adjust: string 7 ${JSON.stringify(last.get(7))}, 20 ${JSON.stringify(last.get(20))}, the unit's name ${unam()}`);
+        for (const [n, v] of before) if (last.get(n) !== v) fail(`the Object Editor's save after Adjust changed string ${n}: ${JSON.stringify(last.get(n))}`);
+        if (await objectsDirty()) fail("the Object Editor's save after Adjust left it unsaved");
+        // A recorded drop keeps its number: Adjust refuses to give it to string 20, and the renumbering of all steps over it.
+        mkdirSync(dirname(recordFile), { recursive: true });
+        writeFileSync(recordFile, JSON.stringify({ format: "w3proj.prunedStrings/1", strings: { 30: "Dropped" } }));
+        const wtsKept = readFileSync(wtsFile, "utf8");
+        const onRecorded = await run("w3.triggers.adjustStringIds", [[20, 30]]);
+        if (!/dropped as unused/.test(onRecorded.e ?? "")) fail(`Adjust onto a recorded drop's number: ${JSON.stringify(onRecorded)}`);
+        if (readFileSync(wtsFile, "utf8") !== wtsKept || unam() !== "TRIGSTR_020") fail("the refused Adjust onto a recorded number changed a file");
+        writeFileSync(recordFile, "{ not json");
+        const unreadable = await run("w3.triggers.adjustStringIds", [[20, 21]]);
+        if (!/pruned-strings\.json/.test(unreadable.e ?? "") || readFileSync(wtsFile, "utf8") !== wtsKept) fail(`Adjust with an unreadable record of drops: ${JSON.stringify(unreadable)}`);
+      } finally {
+        rmSync(recordFile, { force: true });
+        await page.evaluate(`w3.editors.closeAll()`);
+        await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(keep.wts)})`);
+        for (const [i, f] of unitFiles.entries()) {
+          const text = keep.units[i], path = JSON.stringify(`map/${f}`);
+          if (text !== null) await page.evaluate(`w3.workspace.writeText(${path}, ${JSON.stringify(text)})`);
+          else if (existsSync(join(mapDir, f))) await page.evaluate(`w3.workspace.delete(${path})`);
+        }
+        await page.evaluate(`w3.workspace.refresh()`);
+        await settled(page);
+      }
+    }
+
     // ---- Regions tab: Select Next in List (Ctrl+Tab), Move Down in List (Ctrl+Page Down) -------------------------------
     const regions = k.read("war3map.w3r.json");
     const box = (name, index, x) => ({ left: x, bottom: 0, right: x + 256, top: 256, name, index, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) });
