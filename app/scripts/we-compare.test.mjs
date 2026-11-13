@@ -3,6 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
 import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, expandPath, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
 
@@ -10,7 +11,7 @@ const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.
 
 test("a minimal spec gets its defaults", () => {
   const s = parseSpec(good(), "/specs", {});
-  assert.equal(s.input.map, "/specs/R.w3x");
+  assert.equal(s.input.map, resolve("/specs", "R.w3x"));
   assert.deepEqual(s.compare, [{ file: "war3map.wpm", as: "auto", expect: "match" }]);
   assert.equal(s.we.mode, "sd");
   assert.equal(s.limit, 10);
@@ -135,7 +136,7 @@ test("autoKind: the codecs' json first, then the name", () => {
 
 test("verify-build: folders per commit and per tester differ", () => {
   const l = layout("/main", "abc123");
-  assert.equal(l.dir, "/main/target/verify/abc123");
+  assert.equal(l.dir, join("/main", "target", "verify", "abc123"));
   const built = { exe: l.exe, cli: l.cli, id: "dev.x" };
   const a = testerCommands(built, l.runs, "p1"), b = testerCommands(built, l.runs, "p2");
   assert.notEqual(a.appDrive, b.appDrive);
