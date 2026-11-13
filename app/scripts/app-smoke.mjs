@@ -10594,13 +10594,23 @@ async function editorExtras(page, found) {
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.redo")`), "new words\n"))) fail("redo of Replace File didn't bring the new content back");
     // Undo and redo pressed at once: the redo waits for the undo's file move (not refused, not lost), then runs. The
     // end (the new words) differs from the undo's, so it is reached only once both ran in order.
-    if (!(await impStep(() => page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.redo"]) void w3.commands.execute(c); })()`), "new words\n"))) {
+    // The file holds the new words before and after, so "holds the new words" is true before the undo even ran (reading
+    // then, under load, caught the undo half way): wait for the file to have been written afresh (changed) as well.
+    const changedBefore = statSync(onDisk).ctimeMs;
+    const bothRan = async () => {
+      await page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.redo"]) void w3.commands.execute(c); })()`);
+      await soon(() => statSync(onDisk).ctimeMs !== changedBefore && holds("new words\n") && !existsSync(`${onDisk}.replacing`), 15000);
+    };
+    if (!(await impStep(bothRan, "new words\n"))) {
       fail(`undo and redo pressed at once left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the new words`);
     }
     // Then one undo: the history has the one step in its place (none done twice or skipped).
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail("after the queued steps, undo didn't bring the old content back");
     // Replace File on the same import again and again (a second one once didn't take effect, with no message: round 2,
     // 2026-11-11): each takes, from files of the same size and of others, each only once the last one is done.
+    // "Replaced <path>." comes once the replace's undo step is in the history and the queue is free: the file holding the
+    // new content is not that yet (the next Replace pressed in between is refused as "still being written").
+    await page.evaluate(`(() => { window.__replacedInfos = 0; window.__replKept = w3.window.showInfo; w3.window.showInfo = (m, ...a) => { if (/^Replaced /.test(m)) window.__replacedInfos++; return window.__replKept.call(w3.window, m, ...a); }; })()`);
     for (let i = 1; i <= 10; i++) {
       const text = i % 2 ? `run ${i} words\n` : `run ${i}\n${"x".repeat(i * 7)}\n`;
       const src = join(dir, `replacement-${i}.txt`);
@@ -10610,7 +10620,7 @@ async function editorExtras(page, found) {
       await answer("pickFile", src);
       const pressed = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
       if (!pressed) { fail(`replace ${i} of 10: no Replace button for the selected file`); break; }
-      const took = await soon(() => holds(text) && !existsSync(`${onDisk}.replacing`), 10000);
+      const took = await soon(async () => holds(text) && !existsSync(`${onDisk}.replacing`) && (await page.evaluate(`window.__replacedInfos`)) === i, 10000);
       const errors = await page.evaluate(`window.__errors.slice()`);
       if (!took || errors.length) {
         fail(`replace ${i} of 10 in a row left ${JSON.stringify(readFileSync(onDisk, "utf8"))}${errors.length ? `, showed ${JSON.stringify(errors)}` : ""}`);
@@ -10618,6 +10628,7 @@ async function editorExtras(page, found) {
       }
       if (readFileSync(impFile, "utf8") !== impBefore) { fail(`replace ${i} of 10 changed the import list`); break; }
     }
+    await page.evaluate(`(() => { if (window.__replKept) w3.window.showInfo = window.__replKept; })()`);
     // One undo takes back the last of them only.
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), `run 9 words\n`))) fail(`undo after 10 replaces left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the 9th`);
     // Remove and delete file, then Ctrl+Z / Ctrl+Y: the file and the entry (flags) come back and go again.
@@ -10864,10 +10875,10 @@ async function editorExtras(page, found) {
     await until("the chapter project", () => existsSync(chapterInfo), 30000).catch(() => fail("Add map didn't unpack One.w3x under maps/"));
     /** Saves until the campaign file says what `ok` wants (the editor's change can land after a first save on a busy
      *  machine): waited for, not a fixed pause. */
-    const savedCampaign = (what, ok) => until(what, async () => {
+    const savedCampaign = (what, ok, timeout = 10000) => until(what, async () => {
       await page.evaluate(`w3.editors.saveAll()`);
       try { return ok(w3f()); } catch { return false; }
-    }, 10000).then(() => true, () => false);
+    }, timeout).then(() => true, () => false);
     if (!(await savedCampaign("one button saved", (f) => f.chapters.length === 1))) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
     // Export: the chapter's project packed, as the CLI packs it.
     const exported = join(dir, "exported.w3x"), byCli = join(dir, "by-cli-chapter.w3x");
@@ -10927,9 +10938,18 @@ async function editorExtras(page, found) {
     if (campErrors.length) fail(`undo and redo of Replace map pressed at once showed ${JSON.stringify(campErrors)}`);
     // Remove Button, answered "and map": both go in one step; undo brings both back.
     await page.evaluate(`w3.window.showWarning = async (m) => (/Remove the map from the campaign too/.test(m) ? "Remove button and map" : undefined)`);
-    await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
-    await soon(() => page.evaluate(`!!document.querySelector("tr.camp-row.active") && document.querySelector(".camp-remove-button")?.disabled === false`), 5000);
-    await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
+    // The redos above are done as far as the screen shows, their file moves may not be: a Remove pressed meanwhile is
+    // refused ("still being done", nothing changed), so it is pressed again every few seconds until the button is gone.
+    let lastPress = 0;
+    await until("the button to go", async () => {
+      if (!(await page.evaluate(`!!document.querySelector(".camp-editor:not([hidden]) tr.camp-row")`))) return true;
+      if (Date.now() - lastPress < 4000) return false;
+      lastPress = Date.now();
+      await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
+      await soon(() => page.evaluate(`!!document.querySelector("tr.camp-row.active") && document.querySelector(".camp-remove-button")?.disabled === false`), 5000);
+      await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
+      return false;
+    }, 60000).catch(() => fail("Remove button, answered with the map, left the button"));
     await until("the map to go", () => !existsSync(join(camp, "maps", "One.w3x")), 10000).catch(() => fail("Remove button, answered with the map, left maps/One.w3x"));
     if (!(await savedCampaign("no button and no map saved", (f) => !f.chapters.length && !f.mapOrder.length))) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
