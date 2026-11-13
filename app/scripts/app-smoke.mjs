@@ -5973,14 +5973,15 @@ async function paletteMouse(page, found) {
  *  more read and asked and two more textures since the view draws shadows (branch view-shadows): the shadow images
  *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
  *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
- *  without one. */
-const GAME_READS_RECORDED = { reads: 105, asked: 138, textures: 140 };
+ *  without one. Measured with the minimap panel on, the default (branch small-fixes-48): six to ten more read and 14 to 20 more
+ *  asked for the panel's own game files (it varies from run to run, so these are the highest seen). */
+const GAME_READS_RECORDED = { reads: 115, asked: 158, textures: 140 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  // The scene is what the terrain view loads; the minimap panel (on in a new view) reads more game files of its own: off here, as recorded.
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+  // The default state: the minimap panel on (a new view has it), its own game reads counted in the numbers below.
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", true, "user")`);
   const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
@@ -8463,6 +8464,18 @@ async function objectManagerLive(page, found) {
         if (readFileSync(unitsFile, "utf8") !== before) fail("after Delete Object (placed unit), Ctrl+Z and saving, war3mapUnits.doo.json isn't what it was");
         await omHas("", "");
       }
+      await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    }
+
+    // ---- The same with the terrain editor closed: the command opens it and waits for the placed objects. ----
+    {
+      await k.tool("place_objects", { objects: [{ id: "hkni", x: 768, y: 0 }], ignoreRoom: true });
+      await k.save();
+      await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+      const del = await run("w3.terrain.deletePlaced", 768, 0, { id: "hkni" });
+      if (del.e) fail(`Delete Object (placed unit) with the terrain editor closed: ${del.e}`);
+      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.x === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
+      await k.save();
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     }
 
