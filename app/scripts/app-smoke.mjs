@@ -7193,7 +7193,7 @@ async function shouldHaves(page, found) {
 async function placerAndCampaign(page, found) {
   const fail = (what) => found.push(`placer and campaign: ${what}`);
   const k = await heightKit(page, "Placer");
-  const settings = ["terrain.placement.randomVariation", "terrain.placement.randomRotation", "terrain.placement.randomScale"];
+  const settings = ["terrain.placement.randomVariation", "terrain.placement.randomRotation", "terrain.placement.randomScale", "terrain.placement.autoCycleRandomGroups"];
   const doodads = () => k.doodads().filter((d) => d.id === "ARrk");
   const set = (sel, value) => page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); if (!s || s.closest("[hidden]")) return false;
     if (s.type === "checkbox") s.checked = ${JSON.stringify(value)}; else s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event("change")); return true; })()`);
@@ -7273,6 +7273,9 @@ async function placerAndCampaign(page, found) {
       if (why) { await page.evaluate(`document.querySelector(".random-overlay")?.remove()`); throw new Error(why); }
       await settled(page);
     };
+    // Auto Cycle Random Groups (default on) is off here: the checks below count the manual cycles from the question mark.
+    if (await k.setting("terrain.placement.autoCycleRandomGroups") !== undefined && await k.setting("terrain.placement.autoCycleRandomGroups") !== true) fail("Auto Cycle Random Groups isn't on by default");
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", false)`);
     await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
     await click(-512, 512);
     await random(`set(".random-what", "unit"); set(".random-by-group"); set(".random-group", "7"); set(".random-position", "0")`);
@@ -7295,6 +7298,39 @@ async function placerAndCampaign(page, found) {
       await k.clearToasts();
     }
     if ((await page.evaluate(`w3.editors.unsavedPaths()`)).length) fail(`Cycle Random Groups left unsaved editors: ${await page.evaluate(`w3.editors.unsavedPaths()`)}`);
+    // Auto Cycle Random Groups: placing from a group moves on to line 1 (so Next says line 2) when on, and stays at the
+    // question mark (Next says line 1) when off; a random item by level doesn't cycle.
+    let guard = 0;
+    const nextSays = async () => {
+      await k.clearToasts();
+      const err = await k.run("w3.terrain.cycleRandomGroupsNext");
+      if (err) { fail(`Cycle Random Groups: ${err}`); return ""; }
+      await soon(async () => /line \d|question mark/.test(await k.toasts()), 5000);
+      return (await k.toasts()).match(/line \d|question mark/)?.[0] ?? "";
+    };
+    const placeGroupUnit = async () => {
+      await random(`set(".random-what", "unit"); set(".random-by-group"); set(".random-group", "7"); set(".random-position", "0")`);
+      await click(-512, -512);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await settled(page);
+    };
+    for (const [on, want] of [[false, "line 1"], [true, "line 2"]]) {
+      await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", ${on})`);
+      await placeGroupUnit();
+      const got = await nextSays();
+      if (got !== want) fail(`placing from a random group with Auto Cycle ${on ? "on" : "off"}, Next says "${got}", not "${want}"`);
+      // Back to the question mark for the next round.
+      guard = 0;
+      while (await nextSays() !== "question mark") if (++guard > 10) { fail("Cycle Random Groups never returned to the question mark"); break; }
+    }
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", true)`);
+    await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
+    await click(-512, -512);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await settled(page);
+    if (await nextSays() !== "line 1") fail("placing a random item by level cycled the random groups");
+    await nextSays(); await nextSays();
+    await k.save();
     // Through the codec and into the packed script.
     await k.verify(fail);
     const output = await page.evaluate(`w3.workspace.project().default_output`);

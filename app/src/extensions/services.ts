@@ -183,6 +183,8 @@ export interface TerrainEditorHandle {
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */
   pathing(opts?: { filtered?: boolean }): Promise<{ cells: Uint8Array; width: number; height: number }>;
   focus(): void;
+  /** Cycle Random Groups - Next (1) or Previous (-1) (the same as the commands): says what is shown now. */
+  cycleRandomGroups(step: 1 | -1): Promise<string>;
   /** Moves the camera to look at a world point. */
   lookAt(x: number, y: number): void;
   /** The view camera: it looks at `target` from `distance` away, `yaw` (radians)

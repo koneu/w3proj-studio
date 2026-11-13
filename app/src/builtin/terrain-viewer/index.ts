@@ -4098,6 +4098,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
           },
           focus: () => keysToMap(),
+          cycleRandomGroups,
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
           view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
           setView: (v) => {

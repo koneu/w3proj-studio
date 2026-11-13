@@ -76,6 +76,14 @@ export type RandomChoice =
 
 export type RandomSpec = RandomChoice & { what: RandomWhat };
 
+/** Auto Cycle Random Groups: after a placement of a random-group unit or item (and only that) with the option on,
+ *  `cycle` moves the view to the next group line, as Cycle Random Groups - Next. True when it was called. */
+export function autoCycleAfterPlace(random: RandomSpec | undefined, enabled: boolean, cycle: (step: 1) => unknown): boolean {
+  if (!enabled || random?.by !== "group") return false;
+  cycle(1);
+  return true;
+}
+
 /** What a random object's id places (uDNR, bDNR, iDNR), else undefined. */
 export function randomWhatOf(id: string): RandomWhat | undefined {
   return (Object.keys(RANDOM_IDS) as RandomWhat[]).find((w) => RANDOM_IDS[w] === id);
