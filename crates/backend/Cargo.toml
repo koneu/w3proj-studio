@@ -1,0 +1,15 @@
+[package]
+name = "w3proj-backend"
+description = "The app's backend commands that need no window: project files, codecs, game data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "backend"
+
+[dependencies]
+casc.workspace = true
+w3proj.workspace = true
+serde.workspace = true
+serde_json.workspace = true

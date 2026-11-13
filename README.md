@@ -342,9 +342,12 @@ crates/mpq       MPQ v1 reader/writer (zlib/bzip2/pkware, encrypted tables, dete
 crates/casc      read-only CASC reader for the installed game (index, BLTE, encoding, text root,
                  mod layering SD/HD/DE + locale + FileAliases + .blp→.dds fallback)
 crates/w3proj    project format, codecs, unpack/sync/pack/verify
+crates/backend   the app's backend commands that need no window (project files, codecs, game data), shared
+                 by the Tauri backend and `w3proj rebuild`
 crates/cli       `w3proj` command line
 app/             Tauri desktop app
   src-tauri/     Rust backend (thin: exposes the core, files, launching WE/game)
+  src/headless/  the app's own code run in Node by the CLI, without a window (`w3proj rebuild`)
   src/workbench/ VS Code-like shell: activity bar, views, tabs, palette, status bar, output
   src/extensions/api.ts       the public extension API
   src/extensions/services.ts  contracts of the services extensions provide each other
@@ -457,6 +460,9 @@ w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
                                     # (a re-sync that would delete files you added lists them and writes
                                     #  nothing; --allow-deletes deletes them)
 w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x)
+w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
+                                    # map script, made as the app makes them; --only=wpm,shd,minimap,script,
+                                    # --force, --mode sd|hd|de
 w3proj verify *.w3x                 # unpack→pack in memory, compare every file
 w3proj ls MyMap.w3x                 # sizes, stored sizes, flags, table sizes
 w3proj cat MyMap.w3x war3map.j
@@ -468,6 +474,16 @@ w3proj game ls footman                         # stored files containing "footma
 w3proj game --mode hd resolve Units/Human/Footman/Footman.mdx
 w3proj game cat Units/UnitMetaData.slk
 ```
+
+`w3proj rebuild` is for edits made without the app (by hand, by an AI editing the text files): it makes the derived
+files again, so `w3proj pack` takes them. It runs the app's own generators, not a copy of them: the TypeScript in
+`app/src/headless` runs in Node.js 22 or newer and asks the CLI for files, codecs and game data over a pipe, which the
+CLI answers with the same Rust as the app (`crates/backend`). In a checkout the CLI bundles that code itself
+(`app/scripts/headless.mjs`, needs `npm ci` in `app/`); elsewhere it runs `w3proj-headless.mjs` next to the program
+(made by `node app/scripts/headless.mjs --out w3proj-headless.mjs`) or the file `W3PROJ_HEADLESS` names; `W3PROJ_NODE`
+names another node. Shadows are calculated in whole (as Calculate Shadows does); a script that isn't the one Studio
+wrote last is kept, and vJASS isn't compiled. A rebuild is recorded in `.w3proj/derived-from.json` only when pathing,
+shadows and the minimap all follow the terrain and doodads.
 
 ### Tests
 
