@@ -9342,6 +9342,57 @@ async function niceToHaves(page, found) {
       }
     }
 
+    // ---- Adjust Map String IDs and an editor whose file it doesn't change: its undo history -------------------------------
+    // The map header names string 7, then is saved without it. Adjust moves 7 to 20; the custom script file has no
+    // reference to change. An undo in the Trigger Editor afterwards must not bring back TRIGSTR_007, a number no string
+    // has now (or another string's, after a renumbering of all).
+    {
+      const wtsFile = join(mapDir, "war3map.wts"), wctFile = join(mapDir, "war3map.wct.txt");
+      const keep = { wts: readFileSync(wtsFile, "utf8"), wct: existsSync(wctFile) ? readFileSync(wctFile, "utf8") : null };
+      const eol = keep.wts.includes("\r\n") ? "\r\n" : "\n";
+      const header = () => (existsSync(wctFile) ? readFileSync(wctFile, "utf8") : "");
+      const hasString = (n) => new RegExp(`STRING ${n}\\r?\\n`).test(readFileSync(wtsFile, "utf8"));
+      try {
+        await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(`${keep.wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 7${eol}{${eol}Header Text${eol}}${eol}`)})`);
+        await run("w3.triggers.open");
+        await until("the trigger tree", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-map").length > 0`), 20000);
+        await k.hands.click(".trig-row.trig-map");
+        await until("the map header's code editor", () => page.evaluate(`!!document.querySelector(".trig-code .cm-content")`), 10000);
+        /** Replaces the map header with `text` by typing, and saves. */
+        const typeHeader = async (text) => {
+          await k.hands.click(".trig-code .cm-content");
+          await k.hands.chord("Ctrl+A");
+          await k.hands.type(text);
+          await k.hands.chord("Ctrl+S");
+          await until(`the header ${text} saved`, () => header().includes(text), 5000);
+          await settled(page);
+        };
+        await typeHeader("// header TRIGSTR_007");
+        await typeHeader("// header plain");
+        if (header().includes("TRIGSTR_007")) fail("the header saved without the reference still has it (control)");
+        await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+        const headerBefore = header();
+        const moved = await run("w3.triggers.adjustStringIds", [[7, 20]]);
+        if (moved.e || moved.r !== 1) fail(`Adjust Map String IDs with the Trigger Editor open: ${moved.e ?? JSON.stringify(moved.r)}`);
+        await settled(page);
+        if (hasString(7) || !hasString(20)) fail("Adjust didn't move string 7 to 20 (control)");
+        if (header() !== headerBefore) fail("Adjust changed the custom scripts, which name no moved string (control)");
+        await page.evaluate(`w3.commands.execute("workbench.undo")`);
+        await settled(page);
+        if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) await k.save();
+        if (header().includes("TRIGSTR_007")) fail("an undo in the Trigger Editor after Adjust Map String IDs brought back TRIGSTR_007, a string that moved to 20");
+      } catch (e) {
+        fail(`Adjust with the Trigger Editor's undo history: ${e?.message ?? e}`);
+      } finally {
+        await page.evaluate(`w3.editors.closeAll()`);
+        await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(keep.wts)})`);
+        if (keep.wct !== null) await page.evaluate(`w3.workspace.writeText("map/war3map.wct.txt", ${JSON.stringify(keep.wct)})`);
+        await page.evaluate(`w3.workspace.refresh()`);
+        await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+        await settled(page);
+      }
+    }
+
     // ---- Regions tab: Select Next in List (Ctrl+Tab), Move Down in List (Ctrl+Page Down) -------------------------------
     const regions = k.read("war3map.w3r.json");
     const box = (name, index, x) => ({ left: x, bottom: 0, right: x + 256, top: 256, name, index, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) });
