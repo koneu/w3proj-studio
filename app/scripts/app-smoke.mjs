@@ -1386,6 +1386,13 @@ async function viewModes(page, found) {
   regions.regions = [{ left: -256, bottom: 256, right: 256, top: 640, name: "Smoke Region", index: 0, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) }];
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
+  // The picture to compare with is taken in an editor opened after the placing and the save: the one open before drew
+  // the start building of the melee map it was opened on, and placing a player's unit (the footman) ends that (a melee
+  // map has no player units), which the open editor doesn't follow; a fresh one reads the map as it is now, as the
+  // later ones of this check do. In a full run the timing of that follow-up decided, under --only it went the other way.
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor, opened again", async () => (await page.evaluate(`w3.editors.activePath()`)) === TXT && (await state()) !== null, 20000);
   /** Water and Effects off, by their boxes: the brazier's flames are particles, new ones at random places every frame,
    *  which made two pictures of the same view differ (and the view draw without end). The boxes are greyed in game
    *  view, where a click does nothing: called with game view off, and the state says it took. */
