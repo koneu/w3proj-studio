@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits } from "./limits";
+import { clampPoint, cameraRect, insideBounds, insetBy, pasteSkipText, scaledNudge, waterLimitHits } from "./limits";
+import { unitHalf } from "../../lib/terrain/resize";
 import { clampShift } from "./moveedit";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, waterLevelAt } from "../../lib/terrain/w3e";
 
@@ -44,23 +45,26 @@ test("a point is inside up to the edge; without bounds everything is", () => {
 
 const map = { left: -50, bottom: -50, right: 200, top: 100 };
 
-test("the bounds an object keeps to are the map's cut by the camera bounds, if those are enforced", () => {
-  assert.deepEqual(limitTo(map, null), map);
-  assert.deepEqual(limitTo(map, box), { left: 0, bottom: 0, right: 100, top: 50 });
-  assert.deepEqual(limitTo(map, { left: -500, bottom: -500, right: 500, top: 500 }), map, "camera bounds past the map change nothing");
-  assert.deepEqual(limitTo({ left: 10, bottom: 10, right: 60, top: 40 }, box), { left: 10, bottom: 10, right: 60, top: 40 }, "a playable part inside them stays");
+test("a moved unit keeps what it takes up inside the playable part: the World Editor's nudges and drags", () => {
+  // we-drive 2026-11-13, a 64x64 map with the playable part's right edge at 3328: a footman (collision 31) nudged
+  // 8 a step stopped at 3296, a farm (4x4 cells, half 64) at 3264; a drag stopped them short of the edge too.
+  const playable = { left: -3328, bottom: -3584, right: 3328, top: 3072 };
+  const footman = insetBy(playable, unitHalf(null, 31)), farm = insetBy(playable, unitHalf([4, 4], 72));
+  assert.equal(footman.right, 3297);
+  assert.ok(3296 <= footman.right && 3304 > footman.right, "the footman's last step fits, the next doesn't");
+  assert.equal(farm.right, 3264, "the farm's footprint, not its collision size 72");
+  assert.deepEqual(insetBy(playable, unitHalf(null, null)), playable, "an item or unknown type: its centre alone");
+  assert.deepEqual(clampShift([[3200, 512]], [footman], 500, 0), [97, 0]);
+  assert.deepEqual(clampShift([[3136, -1024]], [farm], 500, 0), [128, 0]);
+  // Too big for the area: its middle, never bounds turned inside out.
+  assert.deepEqual(insetBy({ left: 0, bottom: 0, right: 100, top: 1000 }, [80, 80]), { left: 50, right: 50, bottom: 80, top: 920 });
 });
 
-test("one clampShift holds a group to both: the camera bounds when enforced, the map when not", () => {
+test("a group keeps its shape and stops at the map's edge, whatever the camera bounds", () => {
   const group: [number, number][] = [[10, 10], [60, 30]];
-  const bounds = (camera: typeof box | null) => group.map(() => limitTo(map, camera));
-  assert.deepEqual(clampShift(group, bounds(box), 80, 0), [40, 0], "60 + 40 reaches the camera bound");
-  assert.deepEqual(clampShift(group, bounds(null), 80, 0), [80, 0], "without them the map's edge is 200");
-  assert.deepEqual(clampShift(group, bounds(null), 500, 0), [140, 0], "and then the map stops it");
-  assert.deepEqual(clampShift(group, bounds(box), -80, -80), [-10, -10]);
-  // A unit already past the camera bounds but inside the map doesn't hold the others back.
-  const out: [number, number][] = [[150, 10], [20, 10]];
-  assert.deepEqual(clampShift(out, out.map(() => limitTo(map, box)), -30, 0), [-20, 0], "the one inside stops at the left bound");
+  const bounds = group.map(() => insetBy(map, [0, 0]));
+  assert.deepEqual(clampShift(group, bounds, 500, 0), [140, 0], "the map's edge at 200 stops the one at 60");
+  assert.deepEqual(clampShift(group, bounds, -80, -80), [-60, -60], "the one at 10, 10 stops at -50, -50");
 });
 
 test("water at the lowest stored level is a hit, one step above it is not", () => {

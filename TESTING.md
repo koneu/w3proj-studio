@@ -149,6 +149,21 @@ runs in two worktrees don't share settings; none of these tools starts the game 
 ### The real World Editor: we-drive.mjs
 
 - **Dragging**: `--drag X,Y:X,Y[@MS]` presses the left button, moves in 20 steps over MS (400) and lets go; `--drag-mod alt` holds a key during the next drag. Measured (TerenasStand_LV, doodad layer `--key d`, a tree clicked, 800 ms): a plain drag of the selected tree changes nothing in war3map.doo (it is a box select), Alt+drag moves it (editor id 1224, (320, -576) to (576, -768)), the only change in 1680 doodads.
+- **Moving objects at the edges** (branch we-drag-checks, 2026-11-13, SD, copies of the empty 64x64 map: camera bounds
+  right at 2816, playable part 3328, map 4096; scripts and saves in `target/evidence/we-drag-checks/` of the main
+  checkout). A plain drag that starts on a selected object moves it (a doodad by `--key d`, a unit by `--key u`; the
+  first click must hit the model: a footman's feet miss, 10 px higher hits); Alt+drag moves a unit's centre to the
+  pointer. The nudge is Edit > Nudge Selection: the number pad (`--key Num_Lock` once, then `--key KP_6`; without Num
+  Lock the keys arrive as arrows and do nothing), 64 a step for a tree, 8 for a doodad without pathing and a footman.
+  The editor takes the drag's second-to-last motion step (a footman dragged 576 in 20 steps moved 547). Found: with
+  Enforce Camera Bounds on (and off alike) drags and nudges go past the camera bounds; a unit stops with its collision
+  size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
+  goes past the playable part and stops with its centre strictly inside the map (tree and a 12x12 LZth 4032 on 64
+  steps, a pathless LPcr 4088 on 8 steps). The camera too scrolls past the camera bounds with the switch on. Studio:
+  limits.ts `insetBy`, terrain-viewer `moveBounds`; app-smoke heightsLimits.
+- **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
+  through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
+  the view at 156,79): the status bar read (3713.9, 515.4) where (3712, 512) was aimed (`proj.py` in that folder).
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
