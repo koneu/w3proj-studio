@@ -8,7 +8,9 @@
 // pointing at nothing. Studio keeps every string any file of the map still refers to (TRIGSTR_ anywhere in a text or
 // raw map file, and the dialogue keys): lib/formats/mapdoc stringRefsInMap. The strings that stay keep their numbers
 // (the editor doesn't renumber either), their comments and their order; the editor rewrites the whole file, in order,
-// without comments other than the ones it makes for object fields.
+// without comments other than the ones it makes for object fields. The languages' tables (`_Locales\x.w3mod\war3map.wts`)
+// stay as they are, as the editor's save leaves them: their translations stay, and Move Texts numbers past them
+// (lib/formats/movetexts).
 //
 // One undoable edit (the MCP edit log, like Move Texts), after every editor is saved and the map script settled;
 // refused while anything is still unsaved, as an unsaved editor may hold references the files don't have yet.

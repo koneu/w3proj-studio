@@ -7182,7 +7182,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
 
 /** Move Texts to String Table on a copy of cliff.w3m given literal texts, as the World Editor test had it (we-drive,
  *  2026-11-10): opened and saved without the command, the map packs as before; the command writes the World Editor's
- *  war3map.wts, byte for byte, and the references; reopened, the texts are there; a second run changes nothing; undo
+ *  war3map.wts, byte for byte, and the references, and adds the new strings to the map's German table; reopened, the texts are there; a second run changes nothing; undo
  *  puts every file back. */
 async function moveTextsToTable(page, found) {
   try {
@@ -7214,6 +7214,12 @@ async function moveTextsToTable(page, found) {
   writeFileSync(file("war3map.w3a.json"), JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [],
     custom: [{ base: "AHhb", id: "A000", end: "A000", mods: [str("anam", "Lit Ability", 0), str("atp1", "Lit AbTip1", 1), str("aub1", "Lit AbUber1", 1), str("ansf", "Lit Suffix", 0), str("atar", "air,ground", 1)] }],
   }, null, 2));
+  // A German string table (as the game's melee maps carry them: CRLF, no BOM): the new strings go into it too, its own
+  // stay byte for byte (lib/formats/movetexts, "the languages' tables").
+  const DE = "map/_Locales/deDE.w3mod/war3map.wts";
+  const deBefore = "STRING 1\r\n{\r\nSpieler 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nStreitmacht 1\r\n}\r\n\r\n";
+  mkdirSync(join(mapDir, "_Locales", "deDE.w3mod"), { recursive: true });
+  writeFileSync(join(dir, DE), deBefore);
   const packed0 = await pack("before");
   await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
@@ -7240,7 +7246,7 @@ async function moveTextsToTable(page, found) {
 
     const moved = await run("w3.strings.moveToTable");
     await settled(page);
-    if (moved.e || moved.r?.moved !== 12 || moved.r?.dropped !== 2) fail(`the command: ${moved.e ?? JSON.stringify(moved.r)}`);
+    if (moved.e || moved.r?.moved !== 12 || moved.r?.dropped !== 2 || JSON.stringify(moved.r?.locales) !== JSON.stringify([DE])) fail(`the command: ${moved.e ?? JSON.stringify(moved.r)}`);
     // The World Editor's war3map.wts for this map (its save, then Export Strings), byte for byte.
     const weWts = "﻿" + [
       "STRING 3\r\n{\r\nLit Player\r\n}\r\n", "STRING 4\r\n{\r\nLit Force\r\n}\r\n",
@@ -7257,6 +7263,10 @@ async function moveTextsToTable(page, found) {
     ].join("\r\n") + "\r\n";
     const wts = readFileSync(file("war3map.wts"), "utf8");
     if (wts !== weWts) fail(`war3map.wts isn't the World Editor's: ${JSON.stringify(wts.slice(0, 300))}`);
+    // The German table: its own strings as they were (1 and 2 kept, though war3map.wts dropped them), then the new ones.
+    const deWts = deBefore + weWts.slice(1);
+    const de = readFileSync(join(dir, DE), "utf8");
+    if (de !== deWts) fail(`the German table isn't its own strings and the new ones: ${JSON.stringify(de.slice(0, 300))}`);
     const values = (name) => Object.fromEntries(JSON.parse(readFileSync(file(name), "utf8")).custom[0].mods.map((m) => [m.field, m.value]));
     const u = values("war3map.w3u.json"), a = values("war3map.w3a.json");
     if (u.unam !== "TRIGSTR_006" || u.uhot !== "TRIGSTR_010" || u.umdl !== "units\\human\\Footman\\Footman" || u.ua1p !== "ground,enemies") fail(`war3map.w3u after the move: ${JSON.stringify(u)}`);
@@ -7291,6 +7301,8 @@ async function moveTextsToTable(page, found) {
     await pack("moved");
     const inMap = spawnSync(cli, ["cat", join(work, "move-texts-moved.w3x"), "war3map.wts"]);
     if (inMap.status !== 0 || !inMap.stdout.equals(Buffer.from(weWts, "utf8"))) fail("the packed map's war3map.wts isn't the one written");
+    const deInMap = spawnSync(cli, ["cat", join(work, "move-texts-moved.w3x"), "_Locales\\deDE.w3mod\\war3map.wts"]);
+    if (deInMap.status !== 0 || !deInMap.stdout.equals(Buffer.from(deWts, "utf8"))) fail("the packed map's German table isn't the one written");
 
     // A second run changes nothing.
     const again = await run("w3.strings.moveToTable");

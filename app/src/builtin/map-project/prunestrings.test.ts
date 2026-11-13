@@ -186,6 +186,10 @@ test("the fixture the CLI's Rust prunes too (crates/w3proj/tests/wts_prune.rs): 
   const { w3 } = fakeW3(files);
   assert.deepEqual(await dropUnusedStrings(w3), { dropped: [3, 5, 9, 12], restored: [20], kept: null });
   assert.equal(files["map/war3map.wts"], readFileSync(join(root, "expected.wts"), "utf8"));
+  // The German table stays byte for byte: the strings war3map.wts dropped (3, 5, 12) and its own 30 too, and its text's
+  // TRIGSTR_009 doesn't keep 9 (a string table refers to nothing).
+  const de = "map/_Locales/deDE.w3mod/war3map.wts";
+  assert.equal(files[de], readFileSync(join(root, de), "latin1"));
 });
 
 test("a record that is there but can't be read: nothing restored, nothing dropped", async () => {

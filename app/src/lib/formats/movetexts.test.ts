@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { moveTexts, refsIn, stringRef, type MoveTextsInput, type TextObjectFile } from "./movetexts";
+import { LOCALE_WTS, moveTexts, refsIn, stringRef, type MoveTextsInput, type TextObjectFile } from "./movetexts";
 import { StringTable, removeStrings } from "./wts";
 
 const WTS = "﻿STRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n";
@@ -180,6 +180,59 @@ test("a name with a line break makes a one-line comment", () => {
   const doc = { original: [], custom: [{ base: "hfoo", id: "h000", mods: [{ field: "unam", type: "string", value: "Two\nlines" }] }] };
   const r = moveTexts({ wts: null, info: null, otherTexts: [], objects: [{ path: "u", kind: "w3u", skin: false, doc }] });
   assert.match(r.wts!, /\/\/ Units: h000 \(Two lines\), Name \(Name\)\r\n\{\r\nTwo\r\nlines\r\n\}/);
+});
+
+// The we-drive test of the languages' tables (2026-11-13, target/evidence/movetexts-locales): war3map.wts with 1-3, 3
+// unused; a German table (CRLF, no BOM, as the game's melee maps have them) with 1-3 and a German-only 50.
+const block = (n: number, t: string, eol = "\r\n") => `STRING ${n}${eol}{${eol}${t}${eol}}${eol}${eol}`;
+const MAIN3 = "﻿" + block(1, "Player 1") + block(2, "Force 1") + block(3, "orphan main");
+const DE = block(1, "Spieler 1") + block(2, "Streitmacht 1") + block(3, "Waise") + block(50, "nur deutsch");
+const named = () => ({ ...info(), players: [{ id: 0, name: "TRIGSTR_001" }], forces: [{ flags: 0, name: "TRIGSTR_002" }] });
+const DE_PATH = "map/_Locales/deDE.w3mod/war3map.wts";
+
+test("the languages' tables get the new strings, numbered after their own; what goes leaves war3map.wts only", () => {
+  // The control: without the German table the new strings start at 4, as the World Editor numbers them (its 50 then
+  // took the German-only number).
+  const plain = moveTexts(input({ wts: MAIN3, info: named() }));
+  assert.equal(plain.added[0], 4);
+  assert.deepEqual(plain.locales, []);
+  const fr = block(1, "Joueur 1", "\n") + block(2, "Force 1", "\n");
+  const r = moveTexts(input({ wts: MAIN3, info: named(), locales: [{ path: DE_PATH, wts: DE }, { path: "map/_Locales/frFR.w3mod/war3map.wts", wts: fr }] }));
+  assert.deepEqual(r.added, [51, 52, 53, 54, 55, 56, 57, 58, 59, 60]);
+  assert.deepEqual(r.dropped, [3]);
+  const main = new StringTable(r.wts!);
+  assert.deepEqual([...main.entries()].map(([n]) => n), [1, 2, ...r.added]);
+  assert.deepEqual(r.locales.map((l) => l.path), [DE_PATH, "map/_Locales/frFR.w3mod/war3map.wts"]);
+  const [de, frOut] = r.locales.map((l) => l.wts);
+  // Each table: its own bytes first, untouched (string 3 kept), then the new blocks as war3map.wts has them, in the
+  // table's own line ends.
+  const added = r.wts!.slice(r.wts!.indexOf("STRING 51"));
+  assert.ok(de.startsWith(DE));
+  assert.equal(de.slice(DE.length), added);
+  assert.ok(frOut.startsWith(fr));
+  assert.equal(frOut.slice(fr.length), added.replace(/\r\n/g, "\n"));
+  assert.equal(new StringTable(de).get(3), "Waise");
+  assert.equal(new StringTable(de).get(51), main.get(51));
+  // A second run: nothing to move, nothing changes anywhere.
+  assert.equal(r.info, null, "the players' and forces' names were references already");
+  const again = moveTexts({ ...input(), wts: r.wts, info: named(), locales: r.locales,
+    objects: r.objects.map((f) => ({ path: f.path, kind: f.path.includes("w3a") ? "w3a" : "w3u", skin: false, doc: f.doc })) });
+  assert.deepEqual([again.wts, again.locales, again.added], [null, [], []]);
+});
+
+test("a language's table is war3map.wts in a _Locales mod folder of the map, any case", () => {
+  for (const p of [DE_PATH, "map/_locales/ZHTW.W3MOD/WAR3MAP.WTS"]) assert.ok(LOCALE_WTS.test(p), p);
+  for (const p of ["map/war3map.wts", "map/_Locales/deDE.w3mod/sub/war3map.wts", "map/_Locales/war3map.wts", "map/_HD.w3mod/war3map.wts",
+    "maps/One.w3x/map/_Locales/deDE.w3mod/war3map.wts", "map/_Locales/deDE.w3mod/war3campaign.wts"]) assert.ok(!LOCALE_WTS.test(p), p);
+});
+
+test("a drop alone leaves the languages' tables as they are; a table without a last line end gets one", () => {
+  const r = moveTexts({ wts: MAIN3, info: named(), objects: [], otherTexts: [], locales: [{ path: DE_PATH, wts: DE }] });
+  assert.deepEqual([r.added, r.dropped, r.locales], [[], [3], []]);
+  const open = "STRING 1\r\n{\r\nSpieler 1\r\n}";
+  const moved = moveTexts({ wts: null, info: { players: [{ name: "Lit" }] }, objects: [], otherTexts: [], locales: [{ path: DE_PATH, wts: open }] });
+  assert.deepEqual(moved.added, [2]);
+  assert.equal(moved.locales[0].wts, `${open}\r\n\r\n${block(2, "Lit")}`);
 });
 
 test("removeStrings takes a block and the blank line after it, the last one too", () => {

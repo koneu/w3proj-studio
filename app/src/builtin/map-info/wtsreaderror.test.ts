@@ -7,4 +7,7 @@ test("a war3map.wts that isn't UTF-8 gets a plain message, other errors pass thr
   assert.equal((wtsReadError(bad) as Error).message, "war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.");
   const other = new Error("disk gone");
   assert.equal(wtsReadError(other), other);
+  // A language's table names itself.
+  assert.equal((wtsReadError(bad, "map/_Locales/deDE.w3mod/war3map.wts") as Error).message,
+    "map/_Locales/deDE.w3mod/war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.");
 });

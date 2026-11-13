@@ -10,6 +10,8 @@
 //!   `STRING` header up to the next header;
 //! - recorded strings an earlier drop took (`.w3proj/pruned-strings.json`) that are referenced
 //!   again and missing come back first, at the end, with their old numbers and texts;
+//! - the languages' tables (`_Locales\x.w3mod\war3map.wts`) stay as they are, as the World
+//!   Editor's save leaves them, and refer to nothing;
 //! - nothing is dropped when anything can't be read (a sounds file, the record, a table that isn't
 //!   UTF-8): the strings just stay.
 //!

@@ -6,19 +6,20 @@ import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { requireProject, STRING_REF_TEXT_FILE, stringRefsInMap } from "../../lib/formats/mapdoc";
 import { readPrunedStrings, recordPrunedStrings } from "../../lib/formats/prunedstrings";
-import { moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
+import { LOCALE_WTS, moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 
-/** What reading war3map.wts failing says: a file that isn't UTF-8 text gets a plain sentence, anything else stays. */
-export function wtsReadError(e: unknown): unknown {
+/** What reading a string table (war3map.wts, or `path`) failing says: a file that isn't UTF-8 text gets a plain
+ *  sentence, anything else stays. */
+export function wtsReadError(e: unknown, path = "war3map.wts"): unknown {
   return (e as Error)?.name === "NotUtf8Error" || /not valid UTF-8/.test(String(e))
-    ? new Error("war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.") : e;
+    ? new Error(`${path} isn't UTF-8 text, so no texts were moved. Nothing changed.`) : e;
 }
 
 const WTS = "map/war3map.wts";
 const INFO = "map/war3map.w3i";
 
-export interface MoveTextsOutcome { moved: number; dropped: number; kept: string[]; raw: string[] }
+export interface MoveTextsOutcome { moved: number; dropped: number; kept: string[]; raw: string[]; locales: string[] }
 
 /** The game's metadata of the kinds whose fields move, for the comments; a kind it can't read (no game) gives none. */
 async function gameData(w3: W3Api, kinds: string[]): Promise<Map<string, KindData>> {
@@ -54,6 +55,13 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       try { return JSON.parse(text) as T; } catch { throw new Error(`${path} is there but can't be read; nothing was changed.`); }
     };
     const wts = await read(WTS).catch((e) => { throw wtsReadError(e); });
+    // The languages' tables get the new strings too; one that is there but can't be read stops here.
+    const locales: { path: string; wts: string }[] = [];
+    for (const path of files.values()) {
+      if (!LOCALE_WTS.test(path.replace(/\\/g, "/"))) continue;
+      const text = await read(path).catch((e) => { throw wtsReadError(e, path); });
+      if (text !== null) locales.push({ path, wts: text });
+    }
     const info = await readJson<TextMapInfo>(`${INFO}.json`);
     const objects: { path: string; kind: string; skin: boolean; doc: TextObjectFile }[] = [];
     for (const f of objectFiles) {
@@ -72,7 +80,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     const record = await readPrunedStrings(w3);
     if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
     result = moveTexts({
-      wts, info, objects, otherTexts: [], otherRefs, reserved: record.keys(),
+      wts, locales, info, objects, otherTexts: [], otherRefs, reserved: record.keys(),
       describe: (kind, field) => {
         const f = data.get(kind)?.fieldById.get(field);
         return f && f.field && f.label ? { field: f.field, label: f.label } : undefined;
@@ -86,7 +94,9 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     if (result.info) {
       out.push({ path: `${INFO}.json`, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${INFO}.json`, text: JSON.stringify(result.info) }) });
     }
-    // The table last: written after the files that refer to its new strings. What it drops is recorded first, so an
+    // The languages' tables, then the main one last: written after the files that refer to their new strings.
+    for (const l of result.locales) out.push({ path: l.path, text: l.wts });
+    // The main table: What it drops is recorded first, so an
     // undo that brings a reference back gets the string back on the next pack.
     if (result.wts !== null) {
       if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
@@ -97,7 +107,8 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
   });
   const r = result as MoveTextsResult | null;
   const kept = r ? r.kept.map((k) => `${k.where}: ${k.why}`) : [];
-  const outcome: MoveTextsOutcome = { moved: done && r ? r.added.length : 0, dropped: done && r ? r.dropped.length : 0, kept, raw };
+  const outcome: MoveTextsOutcome = { moved: done && r ? r.added.length : 0, dropped: done && r ? r.dropped.length : 0, kept, raw,
+    locales: done && r ? r.locales.map((l) => l.path) : [] };
   const plural = (n: number, one: string, more = `${one}s`) => `${n} ${n === 1 ? one : more}`;
   const notes = [
     kept.length ? ` ${plural(kept.length, "text")} stay${kept.length === 1 ? "s" : ""} literal: ${kept.slice(0, 3).join("; ")}${kept.length > 3 ? "; …" : ""}.` : "",
@@ -108,7 +119,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     return outcome;
   }
   const what = [
-    outcome.moved ? `Moved ${plural(outcome.moved, "text")} into war3map.wts` : "",
+    outcome.moved ? `Moved ${plural(outcome.moved, "text")} into war3map.wts${outcome.locales.length ? ` (and into ${plural(outcome.locales.length, "language's table", "languages' tables")}, to be translated there)` : ""}` : "",
     outcome.dropped ? `${outcome.moved ? "dropped" : "Dropped"} ${plural(outcome.dropped, "string")} nothing refers to` : "",
   ].filter(Boolean).join("; ");
   void w3.window.showInfo(`${what}.${notes}`, "Undo")
