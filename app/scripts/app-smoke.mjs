@@ -3032,18 +3032,37 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   await hands.key("c", "KeyC", 67, 2);
 
-  // A nudge: the doodad 40 inside the bound moves right.
+  // A nudge: the doodad 40 inside the bound moves right, past the bound with the switch on and off alike, as the
+  // World Editor's nudges and drags do (we-drive 2026-11-13).
   await k.look(br - 40, 0, { id: "LTlt", x: br - 40, y: 0 });
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
   for (let i = 0; i < 3; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
   await k.save();
-  if (nearEdge()?.position[0] !== br) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, the bound is ${br}`);
+  if (nearEdge()?.position[0] !== br + 56) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 56} (past the bound ${br}, as in the World Editor)`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await hands.key("ArrowRight", "ArrowRight", 39, 2);
   await k.save();
-  if (nearEdge()?.position[0] !== br + 32) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 32}`);
+  if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
+
+  // A unit nudged at the playable part's edge stops with its collision size inside it (a footman, 31), the switch on.
+  const w3eHead = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
+  const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
+  if (!Number.isFinite(pr)) return fail(`no playable edge from the terrain's head and the w3i (${pr})`);
+  // Placed with the switch off (a placement past the camera bounds is refused with it on), nudged with it on.
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: pr - 100, y: 256, player: 1 }], ignoreRoom: true });
+  await k.save();
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  const footman = () => k.units().find((u) => u.id === "hfoo" && u.position[1] === 256);
+  const fx0 = footman()?.position[0];
+  await k.look(fx0, 256, { id: "hfoo", x: fx0, y: 256 });
+  await k.focusMap();
+  for (let i = 0; i < 8; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  await k.save();
+  if (footman()?.position[0] !== pr - 31) fail(`eight nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
 
   // A paste outside the bounds.
   await k.run("w3.terrain.toggleEnforceCameraBounds");

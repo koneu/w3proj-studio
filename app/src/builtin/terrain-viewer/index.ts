@@ -20,7 +20,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -1837,10 +1837,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cameraArea: Bounds | null = null;
         /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
         let cameraCorners: [number, number][] | null = null;
+        /** Where a dragged or nudged object's centre may go: on the map, a unit or item with its collision size or
+         *  footprint inside the playable part (unitHalves). Not held to the camera bounds, as the World Editor's moves aren't. */
+        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle) : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
-        /** Where a moved object may stand: the map (the playable part, for units and items) cut by the camera bounds when enforced. */
-        const moveBase = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle);
-        const moveBounds = (e: Placed): Bounds => limitTo(moveBase(e), heldTo());
         const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
@@ -2357,12 +2357,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopShadows = () => { clearTimeout(shadowTimer); viewShadows.dispose(); stopShadowSaves.dispose(); stopShadowSetting.dispose(); };
         /** Pathing texture size of each unit type met so far, null for those without: buildings have one. */
         const buildingCells = new Map<string, [number, number] | null>();
+        /** What each unit type met so far takes up, half across and up (resize.ts unitHalf): a drag or nudge keeps it
+         *  inside the playable part, as the World Editor's do (moveBounds). Missing: its centre alone. */
+        const unitHalves = new Map<string, [number, number]>();
         const loadCells = async (id: string) => {
           if (buildingCells.has(id) || id === "sloc") return;
           pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
           const data = await pathingData, shape = data.unitShape(id);
           const image = shape?.path ? await data.texture(shape.path).catch(() => null) : null;
-          buildingCells.set(id, image ? [image.width, image.height] : null);
+          const cells: [number, number] | null = image ? [image.width, image.height] : null;
+          buildingCells.set(id, cells);
+          unitHalves.set(id, unitHalf(cells, shape?.collision));
         };
         const onGrid = (id: string, x: number, y: number): [number, number] => {
           const cells = buildingCells.get(id);
@@ -2516,6 +2521,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (pathing) {
               pathingData = null;
               buildingCells.clear();
+              unitHalves.clear();
               occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             }
             const before = objCtx;
@@ -4978,18 +4984,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
         let drag: { x: number; y: number; mode: "translate" | "rotate" } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
-        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean; warned?: boolean } | null = null;
+        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
         const dragObjects = (p: Vec3) => {
           if (!objDrag) return;
-          // The group keeps its shape and stops at the map's edge (the playable part, for units), and at the camera bounds when enforced, together.
+          // The group keeps its shape and stops together at the map's edge (units and items with what they take up
+          // inside the playable part); not at the camera bounds, as in the World Editor.
           const [dx, dy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
             objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
-          if (!objDrag.warned && heldTo()) {
-            // Said once per drag, when the camera bounds (not the map's edge) are what stops it.
-            const [fx, fy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
-              objDrag.entries.map(moveBase), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
-            if (fx !== dx || fy !== dy) { objDrag.warned = true; void w3.window.showWarning(stoppedAtBoundsText(objDrag.entries.length)); }
-          }
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
             const to = landed(objDrag!.before[i], x + dx, y + dy);
