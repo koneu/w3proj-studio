@@ -267,6 +267,44 @@ test("filesReady: a switch while the list is read waits for the new project's; a
   await assert.rejects(ws.filesReady(), /No project is open/);
 });
 
+test("externalChanges while the first list after an open is read: it waits for it, and nothing is reported as changed", async () => {
+  reset();
+  const { ws } = make();
+  backend.get(A)!.push({ path: "map/war3map.w3i", size: 9, modified: 9 });
+  const release = holdReads();
+  const opening = ws.open(A);
+  await new Promise((r) => setTimeout(r, 5));
+  let fired = 0;
+  ws.onDidChange.on(() => fired++);
+  const check = ws.externalChanges();
+  await new Promise((r) => setTimeout(r, 5));
+  release();
+  assert.deepEqual([...(await check)], [], "the files the open is reading are no outside changes");
+  await opening;
+  assert.deepEqual(ws.files().map((f) => f.path).sort(), ["map/war3map.w3i", "war3map.j"]);
+  // A real change afterwards still is one.
+  backend.get(A)!.push({ path: "by-git.txt", size: 5, modified: 3 });
+  assert.deepEqual([...(await ws.externalChanges())], ["by-git.txt"]);
+  assert.ok(fired >= 1);
+});
+
+test("externalChanges after an open whose list couldn't be read: no \"before\", so nothing is reported; the list is read", async () => {
+  reset();
+  const { ws } = make();
+  failFiles = true;
+  try {
+    await assert.rejects(ws.open(A));
+  } finally {
+    failFiles = false;
+  }
+  let fired = 0;
+  ws.onDidChange.on(() => fired++);
+  assert.deepEqual([...(await ws.externalChanges())], []);
+  assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j"]);
+  assert.equal(ws.filesComplete(), true);
+  assert.equal(fired, 1, "the Explorer is told the list is there");
+});
+
 const OFFLINE = "//offline/share/p";
 
 test("opening a project doesn't wait for the recent list's paths to be resolved", async () => {

@@ -171,6 +171,13 @@ export class WorkspaceService {
   async externalChanges(): Promise<Set<string>> {
     if (!this.info) return new Set();
     const root = this.info.root;
+    // Right after an open the list is still read: compared with it, every file would be "changed" (editors reloaded,
+    // unsaved ones flagged). The check waits for it; a list that couldn't be read is no "before", so nothing is reported.
+    if (this.listedRoot !== root) {
+      await this.filesReady().catch(() => {});
+      if (this.info?.root !== root) return new Set();
+    }
+    const baseline = this.listedRoot === root;
     const before = new Map(this.fileList.map((f) => [this.key(f.path, root), f]));
     const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     const after = await invoke<FileInfo[]>("project_files", { root });
@@ -201,10 +208,11 @@ export class WorkspaceService {
       if ((!b || b.size !== f.size || b.modified !== f.modified) && !isOwn(k, f)) changed.add(k);
     }
     for (const k of before.keys()) if (!isOwn(k)) changed.add(k);
+    if (!baseline) changed.clear();
     this.setList(this.keepNoticed(after, listedBefore, ownBefore));
     this.listedRoot = root;
     for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
-    if (changed.size) {
+    if (changed.size || !baseline) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });
       this.onDidChange.fire();
     }
