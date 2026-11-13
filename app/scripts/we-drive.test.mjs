@@ -35,7 +35,12 @@ test("editorPrefs: sd turns the Reforged switches off, hd on; first-start questi
   assert.equal(sd["Editor User Interface Sound"], "0");
   assert.equal(sd["Fixed Day Night Cycle"], "0");
   assert.equal(hd["Fixed Day Night Cycle"], "1");
-  assert.throws(() => editorPrefs("ultra", "cycle"), /sd or hd/);
+  const de = editorPrefs("de", "fixed");
+  assert.equal(de.assetMode, "2", "de is the editor's third Asset Mode entry");
+  assert.equal(de.hd, "1");
+  assert.equal(editorPrefs("hd", "fixed").assetMode, "1");
+  assert.equal(editorPrefs("sd", "fixed").assetMode, "0");
+  assert.throws(() => editorPrefs("ultra", "cycle"), /sd, hd or de/);
   assert.throws(() => editorPrefs("hd", "noon"), /cycle or fixed/);
 });
 
