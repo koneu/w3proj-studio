@@ -8432,6 +8432,33 @@ async function objectManagerLive(page, found) {
     await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     await rows("hkni", { detail: "hkni" }, true, "after the terrain editor closed unsaved the Object Manager doesn't list the saved knight");
 
+    // ---- A placed unit deleted from the Object Manager's menu (Delete Object): through the terrain editor's edit path,
+    // so the open view loses it, Ctrl+Z (workbench.undo) brings it back, and the saved file is then byte-identical. ----
+    {
+      const unitsFile = join(k.root, "map", "war3mapUnits.doo.json");
+      const before = readFileSync(unitsFile, "utf8");
+      const knights = () => page.evaluate(`(async () => ((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).filter((u) => u.id === "hkni").length)()`);
+      await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+      await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+      await until("the knight in the open editor", async () => (await knights()) === 1, 20000).catch(() => fail("the open terrain editor doesn't hold the saved knight"));
+      await omHas("(512, 0)", "(512, 0)");
+      const why = await contextMenuItem(page, ".om-row", "(512, 0)", "Delete Object");
+      if (why) fail(`Delete Object (placed unit): ${why}`);
+      else {
+        if (!(await until("the knight deleted", async () => (await knights()) === 0, 10000).then(() => true, () => false))) fail("Delete Object (placed unit) left the knight in the open terrain editor");
+        await rows("hkni", { detail: "hkni" }, false, "after Delete Object (placed unit, unsaved) the Object Manager still lists it");
+        await k.save();
+        if (k.units().some((u) => u.id === "hkni")) fail("after Delete Object (placed unit) and saving, the saved units still hold the knight");
+        const undone = await run("workbench.undo");
+        if (undone.e) fail(`undo after Delete Object (placed unit): ${undone.e}`);
+        if (!(await until("the knight back", async () => (await knights()) === 1, 10000).then(() => true, () => false))) fail("Ctrl+Z after Delete Object (placed unit) didn't bring the knight back");
+        await k.save();
+        if (readFileSync(unitsFile, "utf8") !== before) fail("after Delete Object (placed unit), Ctrl+Z and saving, war3mapUnits.doo.json isn't what it was");
+        await omHas("", "");
+      }
+      await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    }
+
     // ---- A region renamed by typing in the Regions tab's name box (Enter) and deleted with its Delete button: edits by
     // hand, not through the Object Manager, which nothing but the terrain editor's own edit event tells of. ------------
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);

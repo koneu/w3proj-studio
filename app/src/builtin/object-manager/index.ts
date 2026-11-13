@@ -173,6 +173,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return;
     }
     if (!t) return;
+    // A placed object: deleted in the terrain editor's own edit path (undo there; unsaved).
+    if (n.placed && action === "delete" && t.kind === "point") {
+      await w3.commands.execute("w3.terrain.deletePlaced", t.x, t.y, { id: t.id, editorId: t.editorId });
+      hookTerrain();
+      reload();
+      return;
+    }
     if (action === "play") { if (t.kind === "sounds" && t.file) await w3.commands.execute("w3.sounds.play", t.file); return; }
     let to: string | undefined;
     if (action === "rename") {
