@@ -20,6 +20,7 @@ serde_json.workspace = true
 mpq.workspace = true
 w3proj.workspace = true
 casc.workspace = true
+backend.workspace = true
 # The MCP server's pipe; the runtime itself comes with Tauri.
 tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 
