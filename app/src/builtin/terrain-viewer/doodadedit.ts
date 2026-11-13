@@ -76,3 +76,11 @@ export function doodadNudgeSteps(rules: DoodadRuleSource, id: string): number {
   const size = rules.snap ? rules.size(id) : null;
   return size && size.width >= 1 && size.height >= 1 ? GRID_NUDGE_STEPS : 1;
 }
+
+/** How many nudges long a nudge of any placed object is: a building's (`building`) and a start location's a whole 64
+ *  (verification round 3, 2026-11-13: three presses of the number pad's 6 moved a start location from -2176 to -1984),
+ *  a doodad's what doodadNudgeSteps gives (`doodad`, null for anything that isn't a doodad), anything else one. */
+export function placedNudgeSteps(id: string, building: boolean, doodad: number | null): number {
+  if (building || id === "sloc") return GRID_NUDGE_STEPS;
+  return doodad ?? 1;
+}

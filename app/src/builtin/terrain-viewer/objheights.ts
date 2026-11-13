@@ -35,6 +35,36 @@ export function pastedFlags(flags: number, preserve: boolean): number {
 const ON_WATER = new Set(["float", "amph"]);
 export const goesOnWater = (moveType: string | undefined) => !!moveType && ON_WATER.has(moveType.toLowerCase());
 
+/** The height the World Editor's save writes for an object of war3mapUnits.doo (a unit, building, item or start
+ *  location) whose type moves by `moveType` (UnitData.slk `movetp`; undefined for items, start locations and types not
+ *  known), over ground `ground` (heightAt) with the water's surface at `surface` (waterSurfaceAt; null without): the
+ *  ground, whatever height the file had, except a ship (movetp "float") in water, at the surface. Verification round 3
+ *  (2026-11-13, we-drive, the map saved and read back), on flat ground 0, a plateau at 256, a ramp, a lake with its bed
+ *  at -128 and its surface at -89.6: footmen stored at 500 came out at 0, those stored at 0 on the plateau at 256, on the
+ *  ramp at 64, in the lake at -128; gryphons (flying) stored at 0 and 500 at the ground too (256, -128): their flying
+ *  height comes from their type; the transport ship in the lake at -89.6, the one on land stored at 300 at 0; naga
+ *  (amphibious) stored at 0 and 300 in the lake at its bed, -128; an item stored at 500 in the lake at -128 and one on the
+ *  plateau at 256; barracks at 256 and 0; the start location stored at 500 at 0. The same with Reset Fixed Object Heights
+ *  off: that switch is about doodads. */
+export function savedUnitZ(moveType: string | undefined, ground: number, surface: number | null): number {
+  return moveType?.toLowerCase() === "float" && surface !== null && surface > ground ? surface : ground;
+}
+
+/** Movement types whose saved height in maps the World Editor saved isn't always savedUnitZ's: buildings ("_"), flying
+ *  and amphibious units. Over the 24 maps of smoketest_maps (3020 placed objects, 2026-11-13) every foot, horse and
+ *  hover unit, start location and item stood within 0.001 of it (the editor counts in 32-bit numbers), but 161 of 427
+ *  buildings were off by up to 17.5 (neutral buildings mostly: taverns, merchants, camps), 10 of 26 flyers by up to 1.3
+ *  and 26 of 226 amphibious units by up to 4.3 (near shores). The editor's own ground for those isn't known here. */
+const LOOSE = new Set(["_", "fly", "amph"]);
+
+/** How far from savedUnitZ a unit's stored height may be and still be left as it is by a save, so that a map the
+ *  World Editor saved isn't rewritten for differences of Studio's ground from the editor's: 32 for the movement types
+ *  in LOOSE (more than the 17.5 seen, less than a unit stored at 0 on a plateau or a ship on the sea bed, which needs
+ *  deeper water than DEEP_WATER), 0.01 for any other. */
+export function unitZTolerance(moveType: string | undefined): number {
+  return moveType && LOOSE.has(moveType.toLowerCase()) ? 32 : 0.01;
+}
+
 /** Whether a placed object's drawn height comes from its movement type rather than the height the placement file
  *  holds: any unit type with one (UnitData.slk `movetp`; buildings have "_"). */
 export const heightByMoveType = (moveType: string | undefined) => !!moveType;

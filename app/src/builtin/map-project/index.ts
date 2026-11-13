@@ -49,7 +49,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     projectItem.text = p ? `◈ ${p.name.replace(/\|c[0-9a-f]{8}|\|r/gi, "")}` : "";
     projectItem.tooltip = p?.root ?? "";
     buildItem.text = p ? "⬇ Build" : "";
-    buildItem.tooltip = p ? `Pack the project into ${p.default_output} (Ctrl+Shift+B)` : "";
+    buildItem.tooltip = p ? `Pack the project into ${p.default_output} (Ctrl+Shift+B outside the terrain view)` : "";
     testItem.text = p ? "▶ Test" : "";
     testItem.tooltip = p ? "Pack and start Warcraft III with the map (Ctrl+F5)" : "";
   };

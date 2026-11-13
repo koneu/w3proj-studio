@@ -293,6 +293,8 @@ export interface TerrainObjectType {
   maxScale: number;
   /** Fixed facing in degrees, or null. */
   fixedRot: number | null;
+  /** A unit type's movement type (UnitData.slk `movetp`: "foot", "fly", "float", …); absent for other kinds. */
+  moveType?: string;
 }
 
 export interface TerrainObjects {

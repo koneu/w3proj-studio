@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, type DoodadRuleSource, type RuledEntry } from "./doodadedit";
+import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, type DoodadRuleSource, type RuledEntry } from "./doodadedit";
 import type { PathSize } from "./doodadgrid";
 import type { ScaleRule } from "./doodadrules";
 
@@ -77,4 +77,13 @@ test("doodadNudgeSteps: a doodad on a grid nudges a grid step (eight nudges of 8
   // A nudge of 8 on the barrel's grid would round back to where it was; 64 doesn't.
   assert.equal(doodadPose(rules(), "LTbr", 32 + 8 * doodadNudgeSteps(rules(), "LTbr"), 32, deg(270)).x, 96);
   assert.equal(doodadPose(rules(), "LTbr", 96 - 8, 32, deg(270)).x, 96);
+});
+
+test("placedNudgeSteps: buildings and start locations nudge 64, units 8, doodads by their grid", () => {
+  // Verification round 3 (2026-11-13): three presses moved a start location 192 in the World Editor.
+  assert.equal(3 * 8 * placedNudgeSteps("sloc", false, null), 192);
+  assert.equal(placedNudgeSteps("hbar", true, null), 8);
+  assert.equal(placedNudgeSteps("hfoo", false, null), 1);
+  assert.equal(placedNudgeSteps("LTbr", false, 8), 8);
+  assert.equal(placedNudgeSteps("LPwh", false, 1), 1);
 });
