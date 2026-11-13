@@ -7,7 +7,10 @@ its own), through python-xlib and its XTest extension. Every command prints one 
                                                        "Return"), held MS (default 50)
   we-x11.py --display :N click X,Y [--button 1|3] [--double]   click at a screen position
   we-x11.py --display :N move X,Y                      move the pointer
-  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3]  press at one point, move to the other, release
+  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--dry]
+                                                       press at one point, move to the other in steps over MS (default
+                                                       400), release; MOD held all the while; --dry only prints the
+                                                       pointer path (needs no display)
   we-x11.py --display :N shot FILE [--rect X,Y,W,H]    picture of the screen (or a part of it) as PNG
   we-x11.py --display :N focus ID                      give a window the keyboard focus and raise it
   we-x11.py --display :N close ID                      ask a window to close (WM_DELETE_WINDOW)
@@ -158,21 +161,41 @@ def click(d, x, y, button=1, double=False):
         time.sleep(0.05)
 
 
-def drag(d, a, b, button=1):
+def drag_path(a, b, steps):
+    """The pointer positions after the press: `steps` points on the line from a to b, the last one b."""
+    steps = max(1, steps)
+    return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
+
+
+def drag_path(a, b, steps):
+    """The pointer positions after the press: `steps` points on the line from a to b, the last one b."""
+    steps = max(1, steps)
+    return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
+
+
+def drag(d, a, b, button=1, ms=400, steps=20, mod=None):
     from Xlib import X
     from Xlib.ext import xtest
     import time
+    modkey = keycode(d, MODS[mod.lower()]) if mod else None
     move(d, *a)
     time.sleep(0.05)
-    xtest.fake_input(d, X.ButtonPress, button)
-    d.sync()
-    steps = 20
-    for i in range(1, steps + 1):
-        time.sleep(0.02)
-        move(d, a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps)
-    time.sleep(0.05)
-    xtest.fake_input(d, X.ButtonRelease, button)
-    d.sync()
+    try:
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyPress, modkey)
+            d.sync()
+            time.sleep(0.05)
+        xtest.fake_input(d, X.ButtonPress, button)
+        d.sync()
+        for p in drag_path(a, b, steps):
+            time.sleep(ms / 1000 / max(1, steps))
+            move(d, *p)
+        time.sleep(0.05)
+    finally:
+        xtest.fake_input(d, X.ButtonRelease, button)
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyRelease, modkey)
+        d.sync()
 
 
 def grab(d, rect=None):
@@ -274,6 +297,18 @@ def main(argv):
         out(stats(img))
         return 0
 
+    if cmd == "drag" and flag("--dry"):
+        a = tuple(int(v) for v in rest[0].split(","))
+        b = tuple(int(v) for v in rest[1].split(","))
+        out({"path": drag_path(a, b, int(opt("--steps", "20")))})
+        return 0
+
+    if cmd == "drag" and flag("--dry"):
+        a = tuple(int(v) for v in rest[0].split(","))
+        b = tuple(int(v) for v in rest[1].split(","))
+        out({"path": drag_path(a, b, int(opt("--steps", "20")))})
+        return 0
+
     d = connect(disp)
     if cmd == "windows":
         out({"windows": windows(d)})
@@ -296,9 +331,12 @@ def main(argv):
         out({"move": [x, y]})
     elif cmd == "drag":
         button = int(opt("--button", "1"))
+        ms = int(opt("--ms", "400"))
+        steps = int(opt("--steps", "20"))
+        mod = opt("--mod")
         a = tuple(int(v) for v in rest[0].split(","))
         b = tuple(int(v) for v in rest[1].split(","))
-        drag(d, a, b, button)
+        drag(d, a, b, button, ms, steps, mod)
         out({"drag": [a, b], "button": button})
     elif cmd == "shot":
         rect = opt("--rect")

@@ -5,7 +5,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -94,8 +96,21 @@ test("parseArgs: the day and night fixed by default; --compare-ready refuses a t
   assert.throws(() => parseArgs(["--day-night", "cycle", "--map", "m.w3x", "--compare-ready"]), /day and night fixed/);
 });
 
-test("parseArgs: --drag takes its two positions as one value", () => {
-  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", "375,200:570,255"], ["--key", "ctrl+c"]]);
+test("parseArgs: --drag takes its two positions (and a duration) as one value; --drag-mod belongs to the next drag", () => {
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", { from: "375,200", to: "570,255", ms: 400 }], ["--key", "ctrl+c"]]);
+  assert.deepEqual(parseArgs(["--drag-mod", "alt", "--drag", "1,2:3,4@900", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 900, mod: "alt" }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  for (const bad of ["1,2", "1,2:3", "1,2:3,4@5", "1,2:3,4@x", "-1,2:3,4", ""]) assert.throws(() => parseArgs(["--drag", bad]), /--drag/, bad);
+  assert.throws(() => parseArgs(["--drag-mod", "meta", "--drag", "1,2:3,4"]), /--drag-mod wants/);
+  assert.throws(() => parseArgs(["--drag-mod", "alt"]), /needs a --drag/);
+});
+
+test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
+  const run = (...a) => spawnSync("python3", ["-I", join(dirname(fileURLToPath(import.meta.url)), "we-x11.py"), "drag", ...a, "--dry"], { encoding: "utf8" });
+  const probe = run("0,0", "1,1");
+  if (probe.status !== 0) return t.skip("python3 with Pillow isn't here");
+  const path = JSON.parse(run("100,100", "300,60", "--steps", "4").stdout).path;
+  assert.deepEqual(path, [[150, 90], [200, 80], [250, 70], [300, 60]]);
+  assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
 });
 
 test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
