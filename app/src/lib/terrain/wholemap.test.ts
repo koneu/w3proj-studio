@@ -429,3 +429,21 @@ test("Level +1 then -1 on a block of a real map gives the file back, and +1 chan
   }
   if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
 });
+
+test("Reset Height Field Random keeps the ground words inside the 16-bit range near the height limits", () => {
+  const near = (raw: number) => {
+    const t = make();
+    t.corners.forEach((c) => { c.hasWater = false; c.rawHeight = raw; });
+    return t;
+  };
+  const top = near(0x7ff0);
+  randomizeHeightField(top, { variation: 20, smoothing: 0, skipWater: false }, new CornerUndo(), () => 0.999);
+  assert.ok(top.corners.every((c) => c.rawHeight === 0x7fff), "top: noise of +256 clamps at 0x7fff");
+  const bottom = near(-0x7ff0);
+  randomizeHeightField(bottom, { variation: 20, smoothing: 3, skipWater: false }, new CornerUndo(), () => 0);
+  assert.ok(bottom.corners.every((c) => c.rawHeight === -0x8000), "bottom: noise of -256 clamps at -0x8000, smoothing keeps it");
+  // control: the same noise away from the limit is not clamped, so the clamp assertions above can fail
+  const mid = near(0x2000);
+  randomizeHeightField(mid, { variation: 20, smoothing: 0, skipWater: false }, new CornerUndo(), () => 0.999);
+  assert.ok(mid.corners.every((c) => c.rawHeight === 0x2000 + 256));
+});
