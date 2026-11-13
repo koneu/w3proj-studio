@@ -89,6 +89,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     // The table last: written after the files that refer to its new strings. What it drops is recorded first, so an
     // undo that brings a reference back gets the string back on the next pack.
     if (result.wts !== null) {
+      if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
       if (wts !== null && result.dropped.length) await recordPrunedStrings(w3, wts, result.dropped, result.wts, record);
       out.push({ path: WTS, text: result.wts });
     }
