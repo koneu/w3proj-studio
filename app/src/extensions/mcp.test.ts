@@ -31,6 +31,24 @@ test("a declared tool is listed before its extension runs, which activates on th
   assert.equal(activated, "onMcpTool:look");
 });
 
+test("a call waits for `ready` (the project's whole file list) before its tool runs; a list that can't be read is the call's error", async () => {
+  let release!: () => void, fail = false;
+  let gate = new Promise<void>((r) => { release = r; });
+  const { t } = tools({ ready: () => (fail ? Promise.reject(new Error("The project's file list couldn't be read")) : gate) });
+  let ran = 0;
+  t.declare("ext.a", "builtin", [read]);
+  t.registerTool("look", () => { ran++; return "seen"; });
+  const call = t.call("look", {});
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ran, 0, "not before the list is read");
+  release();
+  assert.deepEqual(await call, { content: [{ type: "text", text: "seen" }] });
+  gate = Promise.resolve();
+  fail = true;
+  assert.deepEqual(await t.call("look", {}), { content: [{ type: "text", text: "The project's file list couldn't be read" }], isError: true });
+  assert.equal(ran, 1);
+});
+
 test("a failing tool, or one that can't start, is an error of that call only", async () => {
   const { t } = tools({ whyUnavailable: (id) => `${id} failed to activate` });
   t.declare("ext.a", "builtin", [read, { name: "boom", description: "Fails" }]);

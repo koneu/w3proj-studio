@@ -126,6 +126,17 @@ export function requireProject(w3: W3Api) {
   return project;
 }
 
+/** For code that decides by files() whether a file is there (to create it, start it empty, or refuse): the open
+ *  project once its whole file list is read. Right after an open the list may not be yet, and a file not listed yet
+ *  isn't an absent one. Throws when none is open, the list can't be read, or another project was opened meanwhile
+ *  (`root`: the one asked about, if it was taken earlier). */
+export async function projectWithFiles(w3: W3Api, root = requireProject(w3).root) {
+  await w3.workspace.filesReady();
+  const project = w3.workspace.project();
+  if (project?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
+  return project;
+}
+
 /** Cuts a list for a tool's answer, saying how much there was. */
 export const capped = <T>(list: T[], limit: unknown, fallback: number) => {
   const most = typeof limit === "number" && limit > 0 ? limit : fallback;

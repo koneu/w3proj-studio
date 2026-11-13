@@ -64,17 +64,21 @@ test("what is no sound, or has no name to replace, is refused", () => {
   assert.throws(() => planReplace({ soundFile: "noext", sourceName: "n.wav", projectFiles: [], imports: [] }), /no file name/);
 });
 
-interface Opts { mapFiles?: Record<string, Uint8Array>; gameFiles?: Record<string, Uint8Array>; pick?: string | null; save?: string | null; confirm?: boolean; unsaved?: string[]; imp?: string }
+/** `listing`: the file list is still read (as right after an open) until it resolves; files() is empty till then. */
+interface Opts { mapFiles?: Record<string, Uint8Array>; gameFiles?: Record<string, Uint8Array>; pick?: string | null; save?: string | null; confirm?: boolean; unsaved?: string[]; imp?: string; listing?: Promise<void> }
 
 function fake(opts: Opts = {}) {
   const map = new Map(Object.entries(opts.mapFiles ?? {}));
   const log: string[] = [];
   const written: { path: string; bytes: Uint8Array }[] = [];
   let imp = opts.imp;
+  let listed = !opts.listing;
+  opts.listing?.then(() => { listed = true; });
   const w3 = {
     workspace: {
       project: () => ({ root: "C:\\p" }),
-      files: () => [...map.keys(), ...(imp === undefined ? [] : ["map/war3map.imp.json"])].map((path) => ({ path, size: 1, modified: 0 })),
+      files: () => (listed ? [...map.keys(), ...(imp === undefined ? [] : ["map/war3map.imp.json"])] : []).map((path) => ({ path, size: 1, modified: 0 })),
+      filesReady: async () => { await opts.listing; },
       readBytes: async (p: string) => { const b = map.get(p); if (!b) throw new Error("none"); return b; },
       readText: async (p: string) => { if (p === "map/war3map.imp.json" && imp !== undefined) return imp; throw new Error("none"); },
       writeText: async (p: string, t: string) => { log.push(`writeText ${p}`); if (p === "map/war3map.imp.json") imp = t; },
@@ -135,6 +139,19 @@ test("Replace Internal Sound asks, makes a checkpoint, copies the file, removes 
   assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.mp3");
   assert.deepEqual(f.log, ["confirm", "command w3.checkpoints.create", "copy C:\\in\\new.mp3 map/war3mapImported/boom.mp3", "delete map/war3mapImported/boom.wav", "writeText map/war3map.imp.json", "refresh"]);
   assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.mp3" }]);
+});
+
+test("Replace Internal Sound right after an open, while the file list is still read: it waits, and the import list keeps its entries", async () => {
+  let done!: () => void;
+  const listing = new Promise<void>((r) => { done = r; });
+  const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1), "map/Sound/x.wav": bytes(2) }, imp: IMP, listing });
+  // The control: the list as it is before the listing ends has neither the sound nor the import list.
+  assert.equal(f.w3.workspace.files().length, 0);
+  const run = replaceSound(f.w3, "Sound\\x.wav");
+  setTimeout(done, 20);
+  assert.equal(await run, "map/Sound/x.mp3");
+  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.wav" }, { flags: 13, path: "Sound\\x.mp3" }]);
+  assert.ok(f.log.includes("delete map/Sound/x.wav"), "the map's own file, now listed, is replaced");
 });
 
 test("Replace Internal Sound goes on with the Checkpoints extension off, and says no checkpoint was made", async () => {

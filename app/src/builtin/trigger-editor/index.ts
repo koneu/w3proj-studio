@@ -17,7 +17,7 @@ import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
-import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
+import { mapStrings, projectWithFiles, requireProject } from "../../lib/formats/mapdoc";
 import { addScriptTrigger, addVariable, exportedTriggers, mapFileName, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
@@ -198,6 +198,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.services.provide(TRIGGERS_SERVICE, kinds),
     w3.commands.register("w3.triggers.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await projectWithFiles(w3);
       const path = triggerFile(w3);
       if (!path) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(path, "w3.triggerEditor");
@@ -245,6 +246,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     })),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await projectWithFiles(w3);
       const path = triggerFile(w3);
       if (!path) throw new Error("This project has no war3map.wtg.");
       startWithVariables = !openView;
@@ -449,6 +451,10 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
     }
     return { ...n, inEditor: true };
   }
+  // No trigger file listed is "no triggers to rename" only once the list has every file (right after an open it may not).
+  await w3.workspace.filesReady();
+  if (!same()) return null;
+  if (openView) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
   const path = wtgPath(w3.workspace.files());
   if (!path) return null;
   // A file that is there and can't be read stops here: it isn't written over.

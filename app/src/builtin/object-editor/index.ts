@@ -20,7 +20,7 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { REPLACEABLE, TEAM_COLORS } from "../../lib/model/renderer";
 import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
-import { readMapDocStrict } from "../../lib/formats/mapdoc";
+import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
 import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
@@ -213,7 +213,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       ext ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: k.label, description: objectDocPath(w3, k.ext).slice(4, -5), value: k.ext })), { placeholder: "Which object data?" }))?.value;
       if (!ext) return;
-      // A kind the map (or campaign) has no file for opens empty; the file is created on the first save.
+      // A kind the map (or campaign) has no file for opens empty; the file is created on the first save. Which file
+      // (the map's or the campaign's) is told from the whole list, not one still being read after an open.
+      await projectWithFiles(w3);
       const path = objectDocPath(w3, ext);
       const open = w3.workspace.files().find((f) => f.path.toLowerCase() === path.toLowerCase())?.path ?? path;
       if (focusId) pendingFocus = { path: open, id: focusId };

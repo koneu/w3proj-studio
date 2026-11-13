@@ -115,6 +115,7 @@ function fake(files: Record<string, string>, opts: Options = {}) {
       project: () => ({ name: "My Map", root: "C:\\p" }),
       resolve: (p: string) => p,
       files: () => [...fs.keys()].map((path) => ({ path, size: 1, modified: 0 })),
+      filesReady: async () => {},
       readText: async (p: string) => { if (!fs.has(p)) throw new Error("no such file"); return fs.get(p)!; },
       writeText: async (p: string, t: string) => { log.push(`write ${p}`); fs.set(p, t); },
       refresh: async () => { log.push("refresh"); },

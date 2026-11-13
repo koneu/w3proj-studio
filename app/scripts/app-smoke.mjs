@@ -7252,14 +7252,53 @@ async function stringsBeforeListing(page, found) {
     if (!readFileSync(script, "utf8").includes("// TRIGSTR_007")) fail("war3map.j lost its reference to string 7 (control)");
     const wtsAfter = readFileSync(wtsFile, "utf8");
     if (wtsAfter !== wtsBefore) fail(`war3map.wts changed: ${JSON.stringify(wtsAfter.slice(-80))}`);
+    await createsBeforeListing(page, fail, dir);
   } finally {
     await page.evaluate(`(() => {
       w3Workbench.workspace.testListingHold = null;
       window.__sblRelease?.();
-      for (const k of ["__sblRelease", "__sblRun", "__sblDone"]) delete window[k];
+      for (const k of ["__sblRelease", "__sblRun", "__sblDone", "__sblGs", "__sblImp"]) delete window[k];
     })()`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
+}
+
+/** Commands and editors that create a file the list doesn't have (or start it empty), run while the first list after an
+ *  open is still read: Gameplay Constants writes an empty war3mapMisc.txt for a map without one, and the Import Manager
+ *  starts an empty list for a map without war3map.imp.json. Both wait for the whole list, so the map's own files stay
+ *  (openpoints bugs.md, files-ready-create). Without the waits the misc file is emptied and the editor shows no entry. */
+async function createsBeforeListing(page, fail, dir) {
+  const misc = join(dir, "map", "war3mapMisc.txt"), imp = join(dir, "map", "war3map.imp.json");
+  const miscText = "[Misc]\r\nGoldMineMaxGold=12345\r\n";
+  writeFileSync(misc, miscText);
+  writeFileSync(imp, JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [{ flags: 21, path: "war3mapImported\\readme.txt" }] }, null, 2) + "\n");
+  const impBefore = readFileSync(imp, "utf8");
+  await page.evaluate(`(async () => {
+    await w3.editors.closeAll();
+    w3.workspace.close();
+    w3Workbench.workspace.testListingHold = new Promise((r) => { window.__sblRelease = r; });
+  })()`);
+  await page.evaluate(`void w3.workspace.open(${JSON.stringify(dir)}).catch(() => {})`);
+  await until("the project again", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`), 20000);
+  const listed = await page.evaluate(`w3.workspace.files().length`);
+  if (listed) return fail(`creates: the project's files were listed (${listed}) though the listing was held (control)`);
+  const started = (name, call) => `window.${name} = { done: false }; window.${name}.run = ${call}.then((r) => ({ r }), (e) => ({ e: String(e) })).finally(() => { window.${name}.done = true; });`;
+  await page.evaluate(`(() => {
+    ${started("__sblGs", `w3.commands.execute("w3.gameplayConstants.open")`)}
+    ${started("__sblImp", `w3.editors.open("map/war3map.imp.json", "w3.importManager")`)}
+  })()`);
+  await sleep(1500);
+  if (readFileSync(misc, "utf8") !== miscText) fail(`Gameplay Constants wrote war3mapMisc.txt before the file list was read: ${JSON.stringify(readFileSync(misc, "utf8"))}`);
+  if (await page.evaluate(`window.__sblImp.done`)) fail("the Import Manager opened before the file list was read");
+  await page.evaluate(`window.__sblRelease()`);
+  const gs = await page.evaluate(`window.__sblGs.run`), opened = await page.evaluate(`window.__sblImp.run`);
+  await settled(page);
+  if (gs.e) fail(`Gameplay Constants: ${gs.e}`);
+  if (opened.e) fail(`the Import Manager: ${opened.e}`);
+  if (readFileSync(misc, "utf8") !== miscText) fail(`war3mapMisc.txt changed: ${JSON.stringify(readFileSync(misc, "utf8"))}`);
+  if (readFileSync(imp, "utf8") !== impBefore) fail(`war3map.imp.json changed: ${JSON.stringify(readFileSync(imp, "utf8"))}`);
+  const row = `[...document.querySelectorAll("tr.imp-row")].some((r) => /readme/i.test(r.textContent))`;
+  if (!(await soon(() => page.evaluate(row), 10000))) fail("the Import Manager opened right after the open shows no entry: it took the map's list for a new one");
 }
 
 /** Move Texts to String Table on a copy of cliff.w3m given literal texts, as the World Editor test had it (we-drive,

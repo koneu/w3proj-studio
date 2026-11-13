@@ -47,6 +47,7 @@ export class Workbench {
   readonly game = new GameService(this.settings);
   readonly mcp = new McpTools({
     activate: (event) => this.host.fire(event),
+    ready: async () => { if (this.workspace.project()) await this.workspace.filesReady(); },
     note: (name) => (name === "begin_edit" && this.settings.get<boolean>("mcp.ignoreUndoSteps", false) === true ? UNDO_NOTE : undefined),
     allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
       && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)
@@ -99,6 +100,14 @@ export class Workbench {
         if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
       key: (p) => this.workspace.key(p),
+      // A game file needs no project list. A project file whose list can't be read doesn't open (its editor couldn't
+      // tell new from unlisted); a virtual document or one outside the project (settings.json) opens all the same.
+      filesReady: async (p) => {
+        if (isGame(p) || !this.workspace.project()) return;
+        await this.workspace.filesReady().catch((e) => {
+          if (!p.startsWith("w3:") && !isFullPath(p)) throw e;
+        });
+      },
     }, this.workspace.pending);
     this.statusBar = new StatusBar((c) => this.run(c));
     this.progress = new Progress(this.statusBar.progress);

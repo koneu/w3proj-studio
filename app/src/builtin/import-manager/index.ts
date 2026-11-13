@@ -10,6 +10,7 @@ import { findPathRefs, updatePathRefs } from "./references";
 import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
 import { bringsTextures, followingTextures, modelTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
@@ -47,6 +48,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.imports.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      // Which list (the map's or the campaign's, JSON or raw) from the whole file list, not one still being read.
+      await projectWithFiles(w3);
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       const { RAW, FILE } = lists(files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f"));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.importManager"); return; }

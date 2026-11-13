@@ -1,7 +1,7 @@
 // Export All Object Data, Export Object and Import Object Data: .w3o files, in the app.
 
 import type { W3Api } from "../../extensions/api";
-import { jsonPathOf, mapStrings, readMapDocStrict } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import type { EditFile, EditObject } from "./objectedit";
 import { describeConflicts, describeConversion, describeImport, describeSkin, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
@@ -66,6 +66,8 @@ export async function importObjectData(w3: W3Api): Promise<number> {
   if (open.length) throw new Error(`Save or discard the changes of ${open.join(", ")} first: Import works on the saved files.`);
   const source = await w3.window.pickFile({ title: "Import Object Data", filters: WE_FILTER });
   if (!source) return 0;
+  // Which files are kept raw (refused) and which are there comes from the whole file list, not one still read.
+  const root = (await projectWithFiles(w3)).root;
   const parts = await w3.backend.invoke<{ kind: string; text: string }[]>("w3o_import", { path: source });
   const existing: Record<string, EditFile | null> = {}, skins: Record<string, EditFile | null> = {};
   const paths: Record<string, string> = {};
@@ -89,6 +91,7 @@ export async function importObjectData(w3: W3Api): Promise<number> {
   }
   const converted = plan.conversions.map((c) => describeConversion(c.kind, c)).join("");
   if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${converted}${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to, where they're enabled.`, "Import", 60_000))) return 0;
+  if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was imported.");
   await checkpointIfOn(w3, "Import Object Data");
   for (const t of texts) await w3.workspace.writeText(t.path, t.text);
   await w3.workspace.refresh();

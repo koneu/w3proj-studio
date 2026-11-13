@@ -18,7 +18,7 @@ import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { askWtsCuts, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
-import { stringNumbersTaken } from "../../lib/formats/mapdoc";
+import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
@@ -116,7 +116,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.sounds.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // The JSON form, else the raw file (decoded by the format engine); a map without sounds
-      // opens an empty list, and the file is created on the first save.
+      // opens an empty list, and the file is created on the first save. From the whole file list, not one still read.
+      await projectWithFiles(w3);
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
       await w3.editors.open(FILE, "w3.soundEditor");
