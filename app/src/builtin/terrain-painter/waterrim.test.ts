@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { applyLayer, retypeCliffs, Stroke, waterBrush } from "./tools";
+import { applyLayer, retypeCliffs, Stroke, cornerBrush } from "./tools";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -36,7 +36,7 @@ for (const [mode, file] of [["shallow", "ash-shallow.w3e"], ["deep", "ash-deep.w
     const layer = c.layer - (mode === "deep" ? 2 : 1);
     const stroke = new Stroke(mode);
     // Brush size 1, the click a little off the corner: the brush takes the nearest corner alone.
-    const brush = waterBrush(t, t.offsetX + X * 128 + 40, t.offsetY + Y * 128 - 30, 1);
+    const brush = cornerBrush(t, t.offsetX + X * 128 + 40, t.offsetY + Y * 128 - 30, 1);
     assert.equal(applyLayer(t, brush, mode, { layer, waterLevel: waterLevelAt(c.height - WATER_OFFSET) }, stroke), true);
     retypeCliffs(t, stroke, ["Agrd"]);
     assert.deepEqual(look(t), look(want));
@@ -68,7 +68,7 @@ for (const size of [2, 3]) {
     const [cx, cy] = we.centre, c = at(t, cx, cy);
     const stroke = new Stroke("shallow");
     // The click lands a little off the corner, as a click does.
-    const brush = waterBrush(t, t.offsetX + cx * 128 - 50, t.offsetY + cy * 128 + 20, size);
+    const brush = cornerBrush(t, t.offsetX + cx * 128 - 50, t.offsetY + cy * 128 + 20, size);
     assert.equal(applyLayer(t, brush, "shallow", { layer: c.layer - 1, waterLevel: waterLevelAt(c.height - WATER_OFFSET) }, stroke), true);
     // The cliff type the World Editor's palette had chosen: Grass Cliff, the map's second.
     retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
@@ -88,9 +88,9 @@ for (const size of [2, 3]) {
 
 test("the water brush: centred on the nearest corner, size − 1 tiles round it", () => {
   const t = emptyLordaeron();
-  assert.deepEqual(waterBrush(t, 70, -200, 1), { x: 128, y: -256, radius: 0, square: false });
-  assert.deepEqual(waterBrush(t, -63, 63, 3, true), { x: 0, y: 0, radius: 2, square: true });
-  assert.equal(waterBrush(t, 0, 0, 0).radius, 0, "never less than one corner");
+  assert.deepEqual(cornerBrush(t, 70, -200, 1), { x: 128, y: -256, radius: 0, square: false });
+  assert.deepEqual(cornerBrush(t, -63, 63, 3, true), { x: 0, y: 0, radius: 2, square: true });
+  assert.equal(cornerBrush(t, 0, 0, 0).radius, 0, "never less than one corner");
 });
 
 test("the rim leaves what is on another layer, in the brush or already water", () => {

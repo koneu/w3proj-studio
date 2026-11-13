@@ -26,17 +26,38 @@ export interface Brush {
   /** Radius in tiles (half the side of a square brush). */
   radius: number;
   square?: boolean;
+  /** The corners on the rim (radius tiles out) are left out: the height brushes fade to nothing there. */
+  open?: boolean;
 }
 
-/** The Shallow and Deep Water brush of a size (the toolbar's Size, as the World Editor's brush size) at a ground point:
- *  centred on the nearest corner, it takes the corners up to size − 1 tiles from it, so size 1 is that corner alone,
- *  size 2 it and the 4 next to it (a cross), size 3 the 13 within two (a diamond). we-drive 2026-11-12 (verify round 2,
- *  C3), one Shallow Water click on a flat empty Lordaeron map: size 2 turned 5 corners into water, size 3 13, these;
- *  size 1 the one corner (tests/fixtures/water-brush). Larger sizes and the square shape weren't seen: they go on alike
- *  (a circle of radius size − 1 over the corners, a square of that half side). */
-export function waterBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
+/** The World Editor's brush of a size (the toolbar's Size, as the World Editor's brush size) at a ground point, for its
+ *  cliff, water and ground texture brushes: centred on the nearest corner, it takes the corners up to size − 1 tiles
+ *  from it, so size 1 is that corner alone, size 2 it and the 4 next to it (a cross), size 3 the 13 within two.
+ *  we-drive, one click each on a flat empty Lordaeron map: Shallow Water sizes 1, 2, 3 took 1, 5, 13 corners
+ *  (2026-11-12, verify round 2, C3; tests/fixtures/water-brush); Raise One sizes 1, 2, 3, 5, 8 1, 5, 13, 49, 149
+ *  (verify round 3 item 7), and a grass texture the same 1, 5, 13, 49, 149 (2026-11-13, verify3-we-diffs): the corners
+ *  within a circle of radius size − 1. The square shape wasn't seen: a square of that half side. */
+export function cornerBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
   const snap = (v: number, o: number) => o + Math.round((v - o) / 128) * 128;
   return { x: snap(x, t.offsetX), y: snap(y, t.offsetY), radius: Math.max(0, Math.round(size) - 1), square };
+}
+
+const HEIGHT_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower", "plateau", "smooth", "noise"]);
+
+/** The brush a painter tool puts down for a pointer at (x, y) and the toolbar's Size (not Ramp's, which goes by the
+ *  cliff): the World Editor's corner brush (cornerBrush). The height brushes leave its rim out: the World Editor's
+ *  Raise (we-drive, one click each on flat ground, 2026-11-13, verify3-we-diffs) changed 1, 1, 9, 45, 145 corners at
+ *  sizes 1, 2, 3, 5, 8, the corners strictly inside radius size − 1 round the nearest corner (size 1: that corner),
+ *  fading to nothing at the rim. Cliffs, water and the ground textures (Blight and Boundary are tiles of its texture
+ *  palette) take the rim too. */
+export function brushOf(tool: string, t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
+  const b = cornerBrush(t, x, y, size, square);
+  return HEIGHT_TOOLS.has(tool) ? { ...b, open: true } : b;
+}
+
+/** How far out the brush's outline is drawn, in world units: half a tile past the outermost corners it takes. */
+export function brushReach(b: Brush): number {
+  return (b.open ? Math.max(b.radius - 0.5, 0.5) : b.radius + 0.5) * 128;
 }
 
 /** Corners inside the brush with a weight (1 in the middle, 0 at the rim). */
@@ -48,7 +69,7 @@ function cornersIn(t: Terrain, b: Brush): { i: number; w: number }[] {
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const dx = t.offsetX + x * 128 - b.x, dy = t.offsetY + y * 128 - b.y;
     const d = b.square ? Math.max(Math.abs(dx), Math.abs(dy)) : Math.hypot(dx, dy);
-    if (d > r) continue;
+    if (d > r || (b.open && r > 0 && d >= r)) continue;
     // Smooth falloff so repeated strokes don't leave terraces.
     const w = r > 0 ? Math.cos((d / r) * (Math.PI / 2)) ** 2 : 1;
     out.push({ i: y * t.width + x, w: Math.max(w, 0.15) });
