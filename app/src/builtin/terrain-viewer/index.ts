@@ -45,7 +45,8 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { doodadSnaps, type PathSize } from "./doodadgrid";
-import { doodadFixes } from "./doodadrules";
+import { doodadFixes, savedFlags } from "./doodadrules";
+import { doodadNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -1023,8 +1024,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let spot: [number, number] | null = [x, y];
           // At a corner a line runs into the end of the last one, of the same fence: that's meant.
           const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
-          // A unit is snapped when placed (a building to its grid): room is checked where it lands.
-          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py) : Promise.resolve([px, py] as const);
+          // A unit is snapped when placed (a building to its grid), a doodad to its own (doodadedit.ts): room is checked where it lands.
+          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py)
+            : handle.objects.placedSpot(kindOf, id, px, py, angle).then((at) => [at.x, at.y] as const);
           const fitsAt = (px: number, py: number, ang: number) => fitsSnapped(snap, (sx, sy) => room!.fits(kindOf, id, sx, sy, ang), px, py);
           if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
             spot = null;
@@ -1074,7 +1076,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [atX, atY] = key === "units" ? await handle.objects.buildingSpot(o.id as string, x, y) : [x, y];
           const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random, startGold);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
-          else markBackdrop(entry, x, y, edge);
+          else {
+            // On its grid, turned and scaled as the World Editor places it (doodadedit.ts), in this edit.
+            await handle.objects.settleDoodads([entry], { place: true, scale: true });
+            markBackdrop(entry, entry.position[0], entry.position[1], edge);
+          }
           giveProps(entry, i);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
@@ -1114,12 +1120,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // doesn't fit at a spot is left out there.
         const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
         const spacing = Math.max(64, smallest) / Math.sqrt(density);
-        for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
+        for (const asked of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
-          if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
-          if (!insideBounds(held, spot.x, spot.y)) { outside++; continue; }
+          if (isKeptClear(asked.x, asked.y, keep)) { keptClear++; continue; }
+          if (!insideBounds(held, asked.x, asked.y)) { outside++; continue; }
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
+          // A doodad on its grid (doodadedit.ts): what's checked is where it lands. Its facing follows in settleDoodads.
+          const spot = await handle.objects.placedSpot(type.kind, id, asked.x, asked.y, angle);
+          if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
+          if (!insideBounds(held, spot.x, spot.y)) { outside++; continue; }
           if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           const twin = args.mirror === true ? twinOf(spot.x, spot.y, whole) : null;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
@@ -1129,10 +1139,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
           }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
-          markBackdrop(add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random), spot.x, spot.y, edge);
+          // Turned and scaled as the World Editor places it (doodadedit.ts): a scaleRange past the type's is held to it.
+          const placed = add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
+          await handle.objects.settleDoodads([placed], { place: true, scale: true });
+          markBackdrop(placed, placed.position[0], placed.position[1], edge);
           if (twin) {
             await room.mark(type.kind, id, twin[0], twin[1], twinAngle);
-            markBackdrop(add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random), twin[0], twin[1], edge);
+            const pair = add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random);
+            await handle.objects.settleDoodads([pair], { place: true, scale: true });
+            markBackdrop(pair, pair.position[0], pair.position[1], edge);
           }
           counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
@@ -1148,14 +1163,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { handle } = await liveEditor();
       // Enforce Camera Bounds refuses the move, as the Properties panel's Position does.
       if (!insideBounds(await heldBounds(), x, y)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
-      await editPlaced(`Move ${String(id)}`, fileKey(kind), (f) => {
+      let at: number[] = [x, y];
+      await editPlaced(`Move ${String(id)}`, fileKey(kind), async (f) => {
         const e = f.list[Number(index)];
         if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
         e.position = [x, y, heightAt(handle.terrain, x, y)];
         if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
         if (typeof scale === "number") e.scale = [scale, scale, scale];
+        // A doodad goes on its grid and keeps to its scale range, as the World Editor puts it (doodadedit.ts).
+        await handle.objects.settleDoodads([e], { place: true, scale: typeof scale === "number" });
+        at = e.position;
       });
-      return `Moved ${String(id)} to ${x}, ${y}.`;
+      return at[0] === x && at[1] === y ? `Moved ${String(id)} to ${x}, ${y}.` : `Moved ${String(id)} to ${at[0]}, ${at[1]} (its grid's point next to ${x}, ${y}).`;
     }),
     w3.mcp.registerTool("remove_objects", async (args) => {
       const { items, id, player } = args;
@@ -2330,6 +2349,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void artLoad(showSplats());
           showShadowObjects();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
+          // The doodads' grids, for moving them (doodadedit.ts).
+          for (const id of new Set(doodads.map((p) => p.id))) void loadDoodadCells(id).catch(() => { /* stays where it is put */ });
           // Objects without a model (start locations, unknown ids) stay markers.
           unresolvedDoodads = d.unresolved;
           unresolvedUnits = u.unresolved;
@@ -2386,6 +2407,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (pathing) {
               pathingData = null;
               buildingCells.clear();
+              doodadCells.clear();
               occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             }
             const before = objCtx;
@@ -2394,7 +2416,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Only what is placed with a type that looks different is drawn again; models stay loaded.
             const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
             const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
-            for (const id of changed) buildingCells.delete(id);
+            for (const id of changed) { buildingCells.delete(id); doodadCells.delete(id); }
             if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             // A rebuild that starts meanwhile (a file taken in place) draws with the new data too.
             nextCtx = next;
@@ -2501,36 +2523,70 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins: withObjectArt(skins, art), bases };
-            if (df && switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"])) await snapOnOpen(df);
-            if (df && !disposed && switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"])) {
-              // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
-              await fixOnOpen(df, !unread.some((p) => /\.w3[bd]\.json$/i.test(p)));
-            }
+            // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
+            scalesKnown = !unread.some((p) => /\.w3[bd]\.json$/i.test(p));
+            if (df && snapsDoodads()) await snapOnOpen(df);
+            if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
             if (disposed) return;
             await rebuildObjects();
           });
         }
+        /** Whether the scale ranges are known: false while the map's own doodad or destructable data can't be read. */
+        let scalesKnown = true;
+        const snapsDoodads = () => switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"]);
+        const fixesDoodads = () => switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"]);
+        /** Pathing texture size of each doodad and destructable type met so far, null for those without (doodadgrid.ts). */
+        const doodadCells = new Map<string, PathSize | null>();
+        const loadDoodadCells = async (id: string) => {
+          if (doodadCells.has(id)) return;
+          pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+          const data = await pathingData;
+          const info = data.placedTex(id);
+          const image = info?.path ? (await data.placedImage(info)).image : null;
+          doodadCells.set(id, image ? { width: image.width, height: image.height } : null);
+        };
+        const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+        const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
+        /** The World Editor's rules for a doodad being placed, moved, turned or scaled (doodadedit.ts), as the settings
+         *  have them now. A type whose pathing size isn't read yet stays where it is asked to be. */
+        const doodadRules = (): DoodadRuleSource => ({
+          snap: snapsDoodads(),
+          fix: fixesDoodads() && scalesKnown,
+          size: (id) => (isDoodadType(id) ? doodadCells.get(id) : null),
+          scaleRule: (id) => {
+            const skin = skinById(id), range = skin ? scaleRange(skin) : undefined;
+            return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
+          },
+        });
+        /** Where a doodad moved or turned to (x, y, angle) goes by the rules; units and items as asked. */
+        const ruledPose = (id: string, x: number, y: number, angle: number) => (isDoodadType(id) ? doodadPose(doodadRules(), id, x, y, angle) : { x, y, angle });
+        /** Applies the rules to doodads among `entries` in place (`what`: the place and facing, the scale), as part of
+         *  the edit that changed them; units and items are left alone. */
+        const settleDoodads = (entries: readonly Placed[], what: { place?: boolean; scale?: boolean }): boolean => {
+          if (!what.place && !what.scale) return false;
+          const rules = doodadRules();
+          let changed = false;
+          for (const p of entries) {
+            if (!isDoodadType(p.id) || !settleDoodad(p as Placed & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what)) continue;
+            changed = true;
+            if (what.place) repositioned.add(p);
+          }
+          return changed;
+        };
         /** Puts the doodads of the map just opened on their grids, as the World Editor does when it opens a map
          *  (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
          *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
          *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
         async function snapOnOpen(f: PlacedFile) {
-          const sizes = new Map<string, PathSize | null>();
           try {
-            pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
-            const data = await pathingData;
-            await Promise.all([...new Set(f.list.map((p) => p.id))].map(async (id) => {
-              const info = data.placedTex(id);
-              const image = info?.path ? (await data.placedImage(info)).image : null;
-              sizes.set(id, image ? { width: image.width, height: image.height } : null);
-            }));
+            await Promise.all([...new Set(f.list.map((p) => p.id))].map(loadDoodadCells));
           } catch (e) {
             console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
             return;
           }
           // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
           if (disposed || dooFile !== f) return;
-          const snaps = doodadSnaps(f.list, (id) => sizes.get(id) ?? null);
+          const snaps = doodadSnaps(f.list, (id) => doodadCells.get(id) ?? null);
           for (const { entry, x, y, angle } of snaps) {
             const moved = x !== entry.position[0] || y !== entry.position[1];
             if (moved) {
@@ -2649,9 +2705,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
           if (!info) { for (const p of moved) repositioned.add(p); return; }
           const edge = playableArea(info, terrain);
+          // Fix Doodads on Load: the solid flag as well, as the World Editor saves it (doodadrules.ts savedFlags).
+          const flagsFor = fixesDoodads() ? savedFlags : borderFlags;
           for (const p of dooFile.list) {
             const flags = flagsOf(p);
-            if (moved.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
+            if (moved.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = flagsFor(flags, !inArea(p.position[0], p.position[1], edge));
           }
         };
         const deleteSelected = () => deleteEntries(selectedEntries());
@@ -2675,11 +2733,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ...(e.player !== undefined ? { player: e.player } : {}), ...(flagsOf(e) !== undefined ? { flags: flagsOf(e) } : {}),
           variation: e.variation, scale: e.scale, position: e.position, angle: e.angle,
         });
+        /** Whether a change moves an entry over the ground or turns it: what the doodad grid is applied for (a new height alone isn't). */
+        const movesOrTurns = (p: Placed, c: Partial<Props>) =>
+          (!!c.position && (c.position[0] !== p.position[0] || c.position[1] !== p.position[1])) || (c.angle !== undefined && c.angle !== p.angle);
         const editProps = (entry: Placed, change: Partial<Props>) => {
           const before = snapshot(entry);
+          const moved = movesOrTurns(entry, change);
           Object.assign(entry, change);
           if (change.position) repositioned.add(entry);
+          // A doodad typed to another place, facing or scale goes where the World Editor puts it, in this step.
+          const ruled = settleDoodads([entry], { place: moved, scale: !!change.scale });
           const after = snapshot(entry);
+          // Ruled back to what it was (a scale past its type's range that already is at the end): no step.
+          if (ruled && JSON.stringify(after) === JSON.stringify(before)) {
+            if (selected) selectObject(selected);
+            return;
+          }
           pushEdit({ undo: () => Object.assign(entry, structuredClone(before)), redo: () => Object.assign(entry, structuredClone(after)), terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
@@ -2865,10 +2934,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Applies new values to entries as one undo step (x/y moves keep objects on the ground). */
         const applyMass = (entries: Placed[], change: (p: Placed, i: number) => Partial<Props> | null) => {
           const before = entries.map(snapshot);
-          let n = 0;
-          entries.forEach((p, i) => { const c = change(p, i); if (c) { Object.assign(p, c); n++; if (c.position) repositioned.add(p); } });
+          let n = 0, ruled = false;
+          entries.forEach((p, i) => {
+            const c = change(p, i);
+            if (!c) return;
+            const moved = movesOrTurns(p, c);
+            Object.assign(p, c);
+            n++;
+            if (c.position) repositioned.add(p);
+            // Doodads go where the World Editor puts them, and keep to their scale range, in this step.
+            if (settleDoodads([p], { place: moved, scale: !!c.scale })) ruled = true;
+          });
           if (!n) return;
           const after = entries.map(snapshot);
+          // Ruled back to what they were (a size key at the end of the range): no step.
+          if (ruled && JSON.stringify(after) === JSON.stringify(before)) return;
           const set = (v: Props[]) => entries.forEach((p, i) => Object.assign(p, structuredClone(v[i])));
           pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
           objectsTouched = true;
@@ -2936,11 +3016,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const before = entries.map(poseOf);
             // The building grid is twice as fine as a nudge: half a step would round back one way. The bounds
             // are applied to the nudge as it will be moved, steps and all.
-            const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), entries.map((p) => (buildingCells.get(p.id) ? 2 : 1)), key.nudge);
+            const rules = doodadRules();
+            const steps = entries.map((p) => (buildingCells.get(p.id) ? 2 : isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : 1));
+            const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), steps, key.nudge);
             for (const [i, p] of entries.entries()) {
-              const x = p.position[0] + moves[i][0], y = p.position[1] + moves[i][1];
-              const to = landed(poseOf(p), x, y);
-              setPlacement(p, to.position, p.angle, to.flags);
+              const at = ruledPose(p.id, p.position[0] + moves[i][0], p.position[1] + moves[i][1], p.angle);
+              const to = landed(poseOf(p), at.x, at.y);
+              setPlacement(p, to.position, at.angle, to.flags);
             }
             moveEdits(entries, before);
           } else if ("raise" in key) {
@@ -2956,9 +3038,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           for (const p of entries) {
-            const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy), x = cx + dx, y = cy + dy;
-            const to = landed(poseOf(p), x, y);
-            setPlacement(p, to.position, turnAngle(turn, p.angle), to.flags);
+            const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy);
+            const at = ruledPose(p.id, cx + dx, cy + dy, turnAngle(turn, p.angle));
+            const to = landed(poseOf(p), at.x, at.y);
+            setPlacement(p, to.position, at.angle, to.flags);
           }
           moveEdits(entries, before);
           refreshGroupRings();
@@ -3183,7 +3266,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Where an object of the fragment lands, null if that's off the map. */
         const pasteSpot = (o: FragmentObject, g: Vec3): [number, number, number] | null => {
           const [cx, cy] = pasteCentre(pasting as Fragment, g);
-          const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [cx + o.at[0], cy + o.at[1]];
+          // A doodad on its grid (doodadedit.ts), as placed; placeObjects turns it as the grid has it.
+          const at = ruledPose(String(o.entry.id), cx + o.at[0], cy + o.at[1], o.angle);
+          const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [at.x, at.y];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const ground = heightAt(terrain, x, y);
           if (o.list === "doodads") return [x, y, pastedHeight(ground, o.z ?? ground + o.at[2], preserveHeight())];
@@ -3202,7 +3287,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.ghosts = pasteModels.flatMap((m, i) => {
             const o = f.objects[i], position = pasteSpot(o, g);
             if (!m || !position) return [];
-            const entry = { ...(o.entry as unknown as Placed), position, angle: o.angle };
+            const entry = { ...(o.entry as unknown as Placed), position, angle: ruledPose(String(o.entry.id), position[0], position[1], o.angle).angle };
             const team = entry.player !== undefined && entry.player < TEAM_COLORS.length ? entry.player : NEUTRAL;
             return [{ gpu: m.gpu, world: placement(entry, m.modelScale, drawnZ(entry), m.scaleRange), team, ok: true }];
           });
@@ -3235,6 +3320,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
           // The clipboard may come from another map, with buildings this one hasn't met.
           for (const id of new Set(f.objects.filter((o) => o.list === "units").map((o) => String(o.entry.id)))) void loadCells(id).catch(() => { /* stays free */ });
+          for (const id of new Set(f.objects.filter((o) => o.list === "doodads").map((o) => String(o.entry.id)))) void loadDoodadCells(id).catch(() => { /* stays where it is put */ });
           void Promise.all(f.objects.slice(0, MAX_GHOSTS).map(async (o) => {
             const skin = skinOf(o.entry as unknown as Placed);
             if (!skin) return null;
@@ -3314,6 +3400,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               (made as Placed & { flags: number }).flags = o.list === "doodads" ? pastedFlags(madeFlags, preserveHeight())
                 : preserveHeight() ? madeFlags : madeFlags & ~FIXED_HEIGHT;
             }
+            // Turned as its grid has it, and within this map's scale range for its type (doodadedit.ts).
+            if (o.list === "doodads") settleDoodads([made], { place: true, scale: true });
             file.list.push(made);
             repositioned.add(made);
             added.push({ entry: made, f: file });
@@ -3387,7 +3475,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           keysToMap();
         };
         const faceToward = (g: Vec3) => {
-          for (const p of facing!.entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
+          facing!.entries.forEach((p, i) => {
+            // Turned from where it was before: a doodad whose turn puts it on another grid point doesn't wander.
+            const [x, y] = facing!.before[i].position;
+            const at = ruledPose(p.id, x, y, Math.atan2(g[1] - y, g[0] - x));
+            const to = landed(facing!.before[i], at.x, at.y);
+            setPlacement(p, to.position, at.angle, to.flags);
+          });
           refreshGroupRings();
         };
         const endFacing = (apply: boolean) => {
@@ -3404,7 +3498,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const entries = selectedEntries();
           if (!entries.length) return;
           const before = entries.map(poseOf);
-          for (const e of entries) setPlacement(e, [...e.position], e.angle + (deg * Math.PI) / 180);
+          const rules = doodadRules();
+          entries.forEach((e, i) => {
+            // A doodad that turns only by quarters turns a quarter (doodadedit.ts doodadTurn).
+            const turned = isDoodadType(e.id) ? doodadTurn(rules, e.id, e.angle, (deg * Math.PI) / 180) : e.angle + (deg * Math.PI) / 180;
+            const at = ruledPose(e.id, e.position[0], e.position[1], turned);
+            const to = landed(before[i], at.x, at.y);
+            setPlacement(e, to.position, at.angle, to.flags);
+          });
+          // A doodad that turns only by quarters stays as it was: no step.
+          if (entries.every((e, i) => JSON.stringify(poseOf(e)) === JSON.stringify(before[i]))) return;
           moveEdits(entries, before);
         };
         /** Blocked ground and object footprints, built when placing needs it
@@ -4023,6 +4126,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
             buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
+            placedSpot: async (kind, id, x, y, angle) => {
+              if (kind === "w3u") { await loadCells(id).catch(() => { /* stays free */ }); const [gx, gy] = onGrid(id, x, y); return { x: gx, y: gy, angle }; }
+              if (kind !== "w3d" && kind !== "w3b") return { x, y, angle };
+              await loadDoodadCells(id).catch(() => { /* stays where it is put */ });
+              return ruledPose(id, x, y, angle);
+            },
+            settleDoodads: async (entries, what) => {
+              await Promise.all([...new Set(entries.map((e) => e.id))].filter(isDoodadType).map((id) => loadDoodadCells(id).catch(() => { /* stays where it is put */ })));
+              const rules = doodadRules();
+              for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what);
+            },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             inBounds: (x, y) => insideBounds(heldTo(), x, y),
             refusedOutside: refusedOutsideText,
@@ -4031,6 +4145,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void rebuildObjects();
             },
             insert: (entries) => {
+              // A new doodad on its grid and within its scale range, as the World Editor places it (doodadedit.ts). One put
+              // back by a redo already is: the rules change nothing then.
+              settleDoodads((entries as Placed[]).filter((e) => entryFile.get(e) === dooFile && !dooFile?.list.includes(e)), { place: true, scale: true });
               for (const e of entries) { const f = entryFile.get(e as Placed); if (f && !f.list.includes(e as Placed)) f.list.push(e as Placed); }
               objectsTouched = true;
               void rebuildObjects();
@@ -4892,8 +5009,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
-            const to = landed(objDrag!.before[i], x + dx, y + dy);
-            setPlacement(entry, to.position, entry.angle, to.flags);
+            // A doodad jumps from grid point to grid point while it's dragged, as in the World Editor.
+            const at = ruledPose(entry.id, x + dx, y + dy, objDrag!.before[i].angle);
+            const to = landed(objDrag!.before[i], at.x, at.y);
+            setPlacement(entry, to.position, at.angle, to.flags);
           });
           refreshGroupRings();
         };
