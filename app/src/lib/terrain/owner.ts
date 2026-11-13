@@ -72,8 +72,8 @@ export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: s
 }
 
 /** The map's flags after a save: Melee goes off when one of meleeBlockers applies, as the World Editor's save does.
- *  Studio never turns it back on: the editor does when none of its reasons applies, but two of those (start locations
- *  in invalid positions, custom triggers) Studio can't tell (see meleeBlockers); the editor's next save does it. */
+ *  This never turns it back on: that needs the project's triggers, object data and what stands around the start
+ *  locations (meleesave.ts meleeSetBlockers). */
 export function meleeFlagsAfter(info: MeleeInfo, placed: readonly (Owned & { id: string })[], startsInvalid = false): number {
   return info.flags & MELEE_MAP && meleeBlockers(info, placed, startsInvalid).length ? info.flags & ~MELEE_MAP : info.flags;
 }
