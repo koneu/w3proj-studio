@@ -1891,6 +1891,32 @@ async function unitProperties(page, found) {
   await k.save();
   const tree = k.doodads().find((d) => d.id === "LTlt");
   if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
+  // Its Skin (only where the doo version stores one): another type's look, drawn as that, one undo back, byte-exact
+  // while unchanged.
+  if (!tree || !("skinId" in tree)) fail(`the placed tree has no skinId, so the Skin row can't be tried: ${JSON.stringify(tree)}`);
+  else {
+    if (!(await shown("skin"))) fail("the destructable has no Skin row");
+    else {
+      const drawnTree = () => page.evaluate(`window.__propsEd?.drawnUnits("doodads").find((u) => Math.round(u.x) === -768 && Math.round(u.y) === 0)?.model ?? ""`);
+      const before = await drawnTree();
+      await k.hands.click(at("skin"));
+      await until("the destructable browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+      await k.hands.click("input.picker-search");
+      await k.hands.type("LTe1");
+      const row = `[...document.querySelectorAll(".picker-rows > .picker-row")].find((r) => r.querySelector("code")?.textContent === "LTe1")`;
+      await until("the other destructable in the browser", () => page.evaluate(`!!${row}`), 10000).catch((e) => fail(e.message));
+      await page.evaluate(`${row}?.setAttribute("data-smoke-pick", "")`);
+      await k.hands.click("[data-smoke-pick]");
+      await redrawn();
+      await k.save();
+      if (k.doodads().find((d) => d.id === "LTlt")?.skinId !== "LTe1") fail(`the tree's skin: ${k.doodads().find((d) => d.id === "LTlt")?.skinId}`);
+      await until("the tree drawn with the other skin", async () => { const m = await drawnTree(); return m !== "" && m !== before; }, 20000)
+        .catch(async (e) => fail(`${e.message}: ${before} -> ${await drawnTree()}`));
+      await undo();
+      await k.save();
+      if (k.doodads().find((d) => d.id === "LTlt")?.skinId !== "LTlt") fail("one undo didn't put the tree's skin back");
+    }
+  }
 
   // A footman's Defend placed switched on (the World Editor's Active box): a level-0 entry with autocast 1, and one undo
   // takes it off again. The Paladin's skills have no box (its inventory can't be switched on).
@@ -2835,6 +2861,13 @@ async function cameraEditing(page, found) {
   if (!live || Math.abs(live.distance - 3333) > 1) fail(`typing a distance didn't show it in the view: ${JSON.stringify(live)} (before ${JSON.stringify(before)})`);
   if (live && Math.abs(live.target[0] - a.targetX) > 1) fail(`the live view isn't through the camera: target ${live.target}`);
   if (await dirty()) fail("a value being typed is already an edit");
+  // The preview's aspect is the panel's, not 4:3, and the camera's field of view is horizontal: it keeps its width.
+  const fovShown = Number(await shown("FoV"));
+  if (live && Number.isFinite(fovShown) && fovShown > 0) {
+    const want = 2 * Math.atan(Math.tan((fovShown * Math.PI) / 360) / live.aspect);
+    if (Math.abs(live.fov - want) > 1e-3) fail(`the preview's vertical field of view is ${live.fov}, not ${want} for ${fovShown} degrees at aspect ${live.aspect}`);
+    if (Math.abs(live.aspect - 4 / 3) < 0.01) fail(`the panel's aspect is 4:3 (${live.aspect}), so the check can't tell the real aspect from the old fixed one`);
+  } else fail(`the FoV field shows ${JSON.stringify(await shown("FoV"))}`);
   await type("Dist", 3333, "change");
   if (!(await dirty())) fail("the value, entered, isn't an edit");
   // The preview of a value ends with it: the view is the user's again once it's entered, the field left, or the panel
@@ -9847,6 +9880,64 @@ async function editorExtras(page, found) {
         }
       } finally {
         await page.evaluate(`w3.window.showWarning = window.__rmKept`);
+      }
+    }
+    // ---- Object Manager: an import row's Change Import Path… and Remove Import (through the Import Manager) ------------------
+    {
+      const NEW = "war3mapImported\\smoke2.txt", newDisk = join(k.root, "map", "war3mapImported", "smoke2.txt");
+      const listNow = () => JSON.parse(readFileSync(impFile, "utf8")).files.map((f) => f.path);
+      await page.evaluate(`window.__omImpKept = { info: w3.window.showInfo, warn: w3.window.showWarning }; w3.window.showInfo = async (m, ...a) => a.includes("Update references") ? "Update references" : "Keep them";
+        w3.window.showWarning = async (m, ...a) => a.find((x) => /delete file/i.test(x)) ?? "Cancel"`);
+      // A script naming the import: Change Import Path updates it, its undo and redo move it back and forth.
+      const refDisk = join(k.root, "map", "omref.j"), refOld = 'call Foo("war3mapImported\\\\smoke.txt")\n';
+      writeFileSync(refDisk, refOld);
+      await page.evaluate(`w3.workspace.refresh()`);
+      const menuItem = async (label, item) => {
+        await page.evaluate(`(async () => {
+          await w3.views.show("objectManager");
+          const s = document.querySelector(".om-search");
+          if (s) { s.value = "smoke"; s.dispatchEvent(new Event("input")); }
+        })()`);
+        const shown = await soon(() => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(label)})`), 10000);
+        if (!shown) return `the Object Manager has no row ${label}`;
+        await page.evaluate(`[...document.querySelectorAll(".om-row")].find((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(label)}).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 }))`);
+        const clicked = await soon(() => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent === ${JSON.stringify(item)}); if (!e) return false; e.click(); return true; })()`), 5000);
+        return clicked ? null : `the import row's menu offers ${JSON.stringify(await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`))}, not ${item}`;
+      };
+      try {
+        await page.evaluate(`window.__errors.length = 0`);
+        await answer("inputBox", NEW);
+        let why = await menuItem(IMP, "Change Import Path…");
+        if (why) fail(why);
+        else if (!(await soon(() => existsSync(newDisk) && !existsSync(onDisk) && listNow().join() === NEW, 10000))) fail(`Change Import Path: the file is ${existsSync(newDisk) ? "moved" : "not moved"}, the list holds ${JSON.stringify(listNow())}`);
+        else {
+          await settled(page);
+          if (!(await soon(() => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.querySelector(".tree-label")?.textContent === ${JSON.stringify(NEW)})`), 10000))) fail("the Object Manager doesn't show the new import path");
+          if (readFileSync(refDisk, "utf8") === refOld) fail("Change Import Path didn't update the reference in a script");
+          const undoRename = async (dir) => {
+            await page.evaluate(`w3.commands.execute("workbench.${dir}")`);
+            return soon(() => (dir === "undo" ? existsSync(onDisk) && !existsSync(newDisk) && listNow().join() === IMP && readFileSync(refDisk, "utf8") === refOld
+              : existsSync(newDisk) && !existsSync(onDisk) && listNow().join() === NEW && readFileSync(refDisk, "utf8") !== refOld), 10000);
+          };
+          if (!(await undoRename("undo"))) fail(`undo of Change Import Path: file ${existsSync(onDisk) ? "back" : "not back"}, list ${JSON.stringify(listNow())}, reference ${JSON.stringify(readFileSync(refDisk, "utf8"))}`);
+          else if (!(await undoRename("redo"))) fail(`redo of Change Import Path: file ${existsSync(newDisk) ? "moved" : "not moved"}, list ${JSON.stringify(listNow())}`);
+          await settled(page);
+          why = await menuItem(NEW, "Remove Import");
+          if (why) fail(why);
+          else if (!(await soon(() => !existsSync(newDisk) && listNow().length === 0, 10000))) fail(`Remove Import left the file (${existsSync(newDisk)}) or the list ${JSON.stringify(listNow())}`);
+          else {
+            // The Import Manager's undo takes it back, as after its own Remove.
+            await settled(page);
+            await page.evaluate(`w3.commands.execute("workbench.undo")`);
+            if (!(await soon(() => existsSync(newDisk) && listNow().join() === NEW, 10000))) fail(`undo after Remove Import left the file ${existsSync(newDisk) ? "there" : "gone"}, the list ${JSON.stringify(listNow())}`);
+          }
+        }
+        const errors = await page.evaluate(`window.__errors.slice()`);
+        if (errors.length) fail(`an import's menu in the Object Manager showed ${JSON.stringify(errors)}`);
+      } finally {
+        await page.evaluate(`(() => { const k = window.__omImpKept; if (k) { w3.window.showInfo = k.info; w3.window.showWarning = k.warn; } })()`);
+        rmSync(refDisk, { force: true });
+        await page.evaluate(`w3.workspace.refresh()`);
       }
     }
     await page.evaluate(`w3.editors.closeAll()`);

@@ -38,14 +38,14 @@ export type Target =
   | { kind: "trigger"; name: string }
   | { kind: "variables"; /** The variable, for renaming and deleting it. */ name?: string }
   | { kind: "sounds"; /** The sound (gg_snd_…) and its file, for playing, renaming and deleting it. */ name?: string; file?: string }
-  | { kind: "imports" };
+  | { kind: "imports"; /** The import's archive path, for renaming (Change path) and deleting (Remove) it in the Import Manager. */ path?: string };
 
 /** What the Object Manager's menu offers for an entry: Edit Object Properties (going to it in its editor), and where
  *  the owning editor can do it, Rename Object, Delete Object and Play Sound. */
 export interface NodeActions { edit: boolean; rename: boolean; remove: boolean; play: boolean }
 export function nodeActions(n: Node): NodeActions {
   const t = n.target;
-  const own = !!n.item || (!!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name)));
+  const own = !!n.item || (!!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name) || (t.kind === "imports" && !!t.path)));
   return { edit: !!t, rename: own, remove: own || n.placed === true, play: t?.kind === "sounds" && !!t.file };
 }
 
@@ -254,7 +254,7 @@ export function buildTree(c: MapContents): Node[] {
       label: v.name, detail: `${v.type}${v.isArray ? "[]" : ""}`, ref: `udg:${v.name}`, target: { kind: "variables", name: v.name },
     })) },
     { label: `Imported files (${c.imports.length})`, opens: { label: "Open Import Manager", command: "w3.imports.open", args: [] },
-      children: c.imports.map((p): Node => ({ label: p, target: { kind: "imports" } })) },
+      children: c.imports.map((p): Node => ({ label: p, target: { kind: "imports", path: p } })) },
   ];
   return groups;
 }

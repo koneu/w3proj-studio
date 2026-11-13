@@ -297,6 +297,10 @@ It never starts the game itself.
   of cliff.w3m (branch unit-props-2, 2026-11-10): the editor draws a placed unit's skin and its Custom Color only where
   the type allows a custom team colour (`utcc`, not "is a waygate"), and its script switches a custom ability on by
   its base's order.
+  Placed destructables and doodads (branch skin-row-dest, 2026-11-13, empty 64x64 map, doodad layer `--key d`, click, Return):
+  Doodad Properties has a Skin button at the end for both (a destructable's General tab: Variation, Z, Scale, Life, Skin;
+  a plain doodad's: Rotation, Roll, Pitch, Scale, Skin); Choose Skin lists the kind's types (destructables for a tree).
+  Choosing LTe1 for an LTlt and saving wrote skinId LTe1 in a version-13 doo, id and life unchanged.
 - **Wheel zoom** (branch wheel-zoom-pivot, 2026-11-13, cliff.w3m, SD): each notch changes the camera distance by 1.1
   and keeps the camera target fixed, the eye sliding along the ray to it, wherever the pointer is: three notches in
   with the pointer at the view's middle, top left and bottom right all expand about (593, 325.5) of the 1184x844

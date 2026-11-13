@@ -19,6 +19,7 @@ import { ModelPreview } from "../../lib/model/preview";
 import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
+import { stepPath, type PathFs, type PathStep } from "./path";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -74,6 +75,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!openView) throw new Error("Open the Import Manager and select a file first.");
       await openView.addVersionSelected("de");
     }),
+    // Change path (with its Update references question) and Remove (undoable) of the import `path`, in the Import
+    // Manager, which is opened and shows the row: the Object Manager's Rename and Delete of an import.
+    w3.commands.register("w3.imports.renamePath", async (path: string, to: string) => {
+      if (typeof path !== "string" || typeof to !== "string" || !to.trim()) throw new Error("Name the import and its new path.");
+      await withRow(w3, path, (view, row) => view.changePathOf(row, to));
+    }),
+    w3.commands.register("w3.imports.removePath", async (path: string) => {
+      if (typeof path !== "string" || !path) throw new Error("Name the import to remove.");
+      await withRow(w3, path, (view, row) => view.removeRows([row]));
+    }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
         const raw = !doc.path.toLowerCase().endsWith(".json");
@@ -100,6 +111,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
   );
+}
+
+/** Opens the Import Manager, selects the row of `path` and runs `f` on it. */
+async function withRow(w3: W3Api, path: string, f: (view: ImportView, row: ImportRow) => Promise<boolean>): Promise<void> {
+  await w3.commands.execute("w3.imports.open");
+  if (!openView?.isListOf(w3.workspace.project()?.root)) throw new Error("The Import Manager can't change this project's list.");
+  const view = openView;
+  const row = view.selectPath(path);
+  // A failure was shown by the view itself.
+  await f(view, row);
 }
 
 /** Adds to the list one at a time: two adds reading and writing the list at once would lose an entry. */
@@ -156,8 +177,8 @@ class ImportView {
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
   /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
   private modelPreview: { key: string; view: ModelPreview; failed: boolean } | null = null;
-  /** Replace File and Remove steps, for undo and redo; `at` of them are done. */
-  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> })[] = [];
+  /** Replace File, Remove and Change path steps, for undo and redo; `at` of them are done. */
+  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> } | { path: PathStep<ImportEntry> })[] = [];
   private at = 0;
   /** A replace, undo or redo is writing: another replace is refused meanwhile, undo and redo wait for it (in order;
    *  dropped when the editor closes or another project opens). */
@@ -225,14 +246,16 @@ class ImportView {
     this.render();
   }
   /** Selects the row of an archive path (either version), as the Problems view's fixes name it. */
-  selectPath(path: string) {
-    const row = this.rows().find((r) => samePath(r.path, classicPathOf(path)));
+  selectPath(path: string): ImportRow {
+    // A standard-path entry is listed by its name inside the import folder.
+    const row = this.rows().find((r) => samePath(r.path, classicPathOf(path))) ?? this.rows().find((r) => samePath(r.path, `${this.folder}\\${classicPathOf(path)}`));
     if (!row) throw new Error(`${path} isn't in the import list.`);
     // A filter that hides the row would drop the selection.
     this.query = "";
     this.selected = new Set([row.key]);
     this.anchor = row.key;
     this.render();
+    return row;
   }
   /** False when `f` failed (its error is shown). */
   private async run(label: string, f: () => Promise<void>): Promise<boolean> {
@@ -370,8 +393,10 @@ class ImportView {
   }
   /** Moves a row's files and entries: an import and its Reforged version move together (the Reforged one into its
    *  folder), so what names the plain path finds both. */
-  private changePath(row: ImportRow, to: string) {
-    void this.run("Change path", async () => {
+  private changePath(row: ImportRow, to: string) { void this.changePathOf(row, to); }
+  /** The same, for a caller that waits for it: false when it failed (its error is shown). */
+  changePathOf(row: ImportRow, to: string): Promise<boolean> {
+    return this.run("Change path", async () => {
       to = to.trim().replace(/\//g, "\\").replace(/^\\+/, "");
       const files = this.files();
       const pathOf = (e: ImportEntry) => this.shownPath(e, this.fileOf(e, files));
@@ -383,18 +408,25 @@ class ImportView {
       const clash = moves.find((m) => !own.has(m.to.toLowerCase()) && this.taken(m.to));
       if (clash) throw new Error(`${clash.to} is already in the map.`);
       let changed = false;
+      const step: PathStep<ImportEntry> = { moves: [], refs: [] };
       try {
         for (const m of moves) {
           const f = this.fileOf(m.entry, files);
+          const before = { path: m.entry.path, flags: m.entry.flags };
           if (f) await this.w3.workspace.rename(f.path, projectPath(m.to));
           // A standard-path entry (name inside the import folder) now has a path of its own.
           if (m.entry.path !== m.from) m.entry.flags = CUSTOM_PATH_FLAGS;
           m.entry.path = m.to;
+          step.moves.push({ entry: m.entry, before, after: { path: m.entry.path, flags: m.entry.flags }, file: f ? { from: f.path, to: projectPath(m.to) } : undefined });
           changed = true;
         }
       } finally {
         // Also after a failed second move: the list says where the first file went.
-        if (changed) await this.write();
+        if (changed) {
+          this.history.splice(this.at, this.history.length, { path: step });
+          this.at = this.history.length;
+          await this.write();
+        }
       }
       // The data names the plain path, whichever versions moved.
       const from = classicPathOf(moves[0].from);
@@ -412,15 +444,20 @@ class ImportView {
       const list = refs.files.map((r) => `${r.path.slice(4)} (${r.count})`).join(", ");
       const pick = await this.w3.window.showInfo(`Moved. ${count} reference${count === 1 ? "" : "s"} to the old path in ${list}.${raw}`, "Update references", "Keep them");
       if (pick !== "Update references") return;
+      // The files as they were, for undo (bytes: exactly, whatever the editors would make of them).
+      const olds = await Promise.all(refs.files.map((r) => this.w3.workspace.readBytes(r.path)));
       await updatePathRefs(this.w3, refs, from, to);
+      for (const [i, r] of refs.files.entries()) step.refs.push({ path: r.path, before: olds[i], after: await this.w3.workspace.readBytes(r.path) });
       void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
   /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
    *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
    *  of it), so that is never done without saying so. */
-  private remove(rows: ImportRow[], only?: typeof SIDES[number][]) {
-    void this.run("Remove", async () => {
+  private remove(rows: ImportRow[], only?: typeof SIDES[number][]) { void this.removeRows(rows, only); }
+  /** The same, for a caller that waits for it: false when it failed (its error is shown). */
+  removeRows(rows: ImportRow[], only?: typeof SIDES[number][]): Promise<boolean> {
+    return this.run("Remove", async () => {
       const versions = rows.length === 1 ? SIDES.filter((s) => rows[0][s]) : [];
       // A row with several versions asks which of them go (Remove both / one side / Cancel); the buttons of the
       // detail pane name the side up front. Removing one leaves the other as a row of its own.
@@ -480,6 +517,9 @@ class ImportView {
       this.select([]);
       if (error) throw new Error(`${count} of ${total} removed, then: ${error}`);
     });
+  }
+  private pathFs(): PathFs {
+    return { ...this.replaceFs(), rename: (a, b) => this.w3.workspace.rename(a, b), isDirty: (p) => this.w3.editors.isDirty(p) };
   }
   /** The workspace as a replace uses it. */
   private replaceFs(): ReplaceFs {
@@ -562,13 +602,17 @@ class ImportView {
       void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
     });
   }
-  /** Undo (-1) or redo (1) of Replace File and Remove; pressed while a replace (or another step) is writing, it runs after that. */
+  /** Undo (-1) or redo (1) of Replace File, Remove and Change path; pressed while a replace (or another step) is writing, it runs after that. */
   step(dir: -1 | 1) {
     this.queue.step(() => {
       const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
       if (!step) return;
-      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "Replace File"}`, async () => {
-        if ("remove" in step) {
+      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "path" in step ? "Change path" : "Replace File"}`, async () => {
+        if ("path" in step) {
+          await stepPath(this.pathFs(), this.list, step.path, dir);
+          await this.write();
+          this.select(step.path.moves.length ? [classicPathOf((dir < 0 ? step.path.moves[0].before : step.path.moves[0].after).path)] : []);
+        } else if ("remove" in step) {
           await stepRemove(this.replaceFs(), this.list, step.remove, dir);
           await this.write();
         } else await stepReplace(this.replaceFs(), step.replace, dir);

@@ -199,6 +199,8 @@ export interface TerrainEditorHandle {
   /** The view camera: it looks at `target` from `distance` away, `yaw` (radians)
    *  points from the target to the eye, `pitch` lifts the eye, `fov` is vertical. */
   view(): TerrainView;
+  /** The view's width / height as drawn now (4:3 while it has no size). */
+  aspect(): number;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
@@ -219,7 +221,7 @@ export interface TerrainEditorHandle {
   /** The see-through start buildings drawn now (melee maps), where they stand. For tests. */
   drawnStartBuildings(): { x: number; y: number }[];
   drawnSpecials(): { id: string; x: number; y: number; z: number; model: string }[];
-  drawnUnits(): { id: string; x: number; y: number; z: number; team: number; model: string }[];
+  drawnUnits(group?: "units" | "doodads"): { id: string; x: number; y: number; z: number; team: number; model: string }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
