@@ -162,31 +162,50 @@ export function questionDialogs(unknown) {
 
 /**
  * Whether a window is the editor's crash-report dialog (it has "Send to Blizzard" ticked and a text box; we-drive must
- * never type into it or send it). By title or class, or by the command line of the process that owns it (`cmdline`,
- * best effort). Deliberately broad: a false hit only costs the run, a miss could send something to Blizzard.
+ * never type into it or send it). By title or class, or by the program that owns it (`program`, the file name of the
+ * owning process's argv[0], best effort). Deliberately broad: a false hit only costs the run, a miss could send
+ * something to Blizzard.
+ *
+ * Seen for real (2026-11-13, View > Light Ranges on, then the main window closed): the dialog is titled exactly
+ * "Warcraft III World Editor", its class is the editor's own ("steam_app_<appid>"), and it belongs to BlizzardError.exe
+ * (`-product Warcraft III World Editor -reopen …\Warcraft III Launcher.exe -attachment …\War3.dmp …`); it comes
+ * after the main window is gone. So the program is what tells it apart; title and class are a fallback. A title's
+ * "[…]" part (the map's path in the main window's title) is left out, and so is everything but the program's own
+ * name: a folder called "we-crash-dialog" in the map's or the farm's path once made the main window count as a crash.
  */
-const CRASH_TITLE = /crash|error report|bug ?report|bugsplat|blizzard error|send .*(report|blizzard)|unhandled|fatal|has stopped|stopped working|assert/i;
+const CRASH_TITLE = /crash|error report|bug ?report|bugsplat|blizzard error|send .*(report|blizzard)|unhandled|unexpected error|fatal|has stopped|stopped working|assert/i;
 const CRASH_CLASS = /crash|blizzard.?error|bugsplat|error.?report|bug.?report/i;
-const CRASH_PROCESS = /blizzarderror|blizzardcrash|crashpad|crash.?report|bugsplat|errorreport/i;
-export function isCrashDialog(w, cmdline = "") {
+const CRASH_PROCESS = /blizzarderror|blizzardcrash|crashpad|crash.?report|crash.?handler|bugsplat|errorreport|werfault/i;
+export function isCrashDialog(w, program = "") {
   if (!w || w.overrideRedirect) return false;
-  return CRASH_TITLE.test(w.title ?? "") || CRASH_CLASS.test(w.class ?? "") || CRASH_PROCESS.test(cmdline ?? "");
+  const title = (w.title ?? "").replace(/\[.*\]/g, "");
+  return CRASH_TITLE.test(title) || CRASH_CLASS.test(w.class ?? "") || CRASH_PROCESS.test(program ?? "");
 }
 
-/** The crash dialogs among the raw window list (`cmdlineOf` gives the command line of a window's process). */
-export function crashDialogs(windows, cmdlineOf = () => "") {
-  return windows.filter((w) => !w.overrideRedirect && w.rect[2] > 1 && w.rect[3] > 1 && isCrashDialog(w, cmdlineOf(w)));
+/** The file name of a program from a process's NUL-separated /proc/PID/cmdline (its argv[0]; Wine's are Windows
+ *  paths, "Z:\…\BlizzardError.exe"). Its arguments are left out: they hold paths that may say anything. */
+export function programName(cmdline) {
+  const argv0 = (cmdline ?? "").split("\0")[0];
+  return argv0.split(/[\\/]/).pop();
+}
+
+/** The crash dialogs among the raw window list (`programOf` gives the program name of a window's process). */
+export function crashDialogs(windows, programOf = () => "") {
+  return windows.filter((w) => !w.overrideRedirect && w.rect[2] > 1 && w.rect[3] > 1 && isCrashDialog(w, programOf(w)));
 }
 
 /**
- * What --close does with a dialog. "Save changes?" (titled "Warning") gets "n"; an untitled one or one titled like the
- * editor gets "n" only while the editor's main window is still there. With the main window gone it could be a crash
- * reporter nobody recognised: "crash", nothing is typed into it and the editor is killed. Anything else is "report".
+ * What --close does with a dialog, `main` being the editor's main window or null. A window of another process than the
+ * main window's is never answered ("crash": the real crash dialog has the editor's title and class). "Save changes?"
+ * (titled "Warning") gets "n"; an untitled one or one titled like the editor gets "n" only while the editor's main
+ * window is still there. With the main window gone it could be a crash reporter nobody recognised: "crash", nothing is
+ * typed into it and the editor is killed. Anything else is "report".
  */
-export function closeAction(dialog, mainPresent) {
+export function closeAction(dialog, main) {
+  if (main && dialog.pid && main.pid && dialog.pid !== main.pid) return "crash";
   if (dialog.title === "Warning") return "no";
   const editorLike = dialog.title === "" || dialog.title.startsWith("Warcraft III World Editor");
-  if (editorLike) return mainPresent ? "no" : "crash";
+  if (editorLike) return main ? "no" : "crash";
   return "report";
 }
 
@@ -194,16 +213,17 @@ export function closeAction(dialog, mainPresent) {
 export const CRASH_MESSAGE = "the World Editor crashed; report dismissed without sending";
 
 export class EditorCrashed extends Error {
-  constructor(dialogs) {
+  constructor(dialogs, screen) {
     super(CRASH_MESSAGE);
     this.crashed = true;
     this.dialogs = dialogs;
+    this.screen = screen;
   }
 }
 
-function cmdlineOfPid(w) {
+function programOfPid(w) {
   if (!w.pid) return "";
-  try { return readFileSync(`/proc/${w.pid}/cmdline`, "utf8").replaceAll("\0", " "); } catch { return ""; }
+  try { return programName(readFileSync(`/proc/${w.pid}/cmdline`, "utf8")); } catch { return ""; }
 }
 
 export function parseArgs(argv) {
@@ -516,13 +536,19 @@ class Session {
    *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
   windows() {
     const all = x11(this.display, "windows").windows;
-    const crash = crashDialogs(all, cmdlineOfPid);
-    if (crash.length) {
-      this.killEditor();
-      this.crash = crash.map((w) => ({ title: w.title, class: w.class }));
-      throw new EditorCrashed(this.crash);
-    }
+    const crash = crashDialogs(all, programOfPid);
+    if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
     return classify(all);
+  }
+
+  /** The crash dialog was seen: a picture of the screen (read from the X server, nothing sent to the dialog), then the
+   *  editor is killed and EditorCrashed thrown. */
+  crashed(dialogs) {
+    let screen;
+    try { screen = this.dialogShot("crash"); } catch { /* the picture is a bonus; the kill isn't */ }
+    this.killEditor();
+    this.crash = dialogs;
+    throw new EditorCrashed(dialogs, screen);
   }
 
   /** Kills everything the editor started (its crash reporter too) instead of answering anything. */
@@ -774,7 +800,7 @@ class Session {
     try {
       return await this.closeSteps(answered);
     } catch (e) {
-      if (e instanceof EditorCrashed) return { closed: true, crashed: true, answered, dialogs: e.dialogs, message: CRASH_MESSAGE };
+      if (e instanceof EditorCrashed) return { closed: true, crashed: true, answered, dialogs: e.dialogs, message: CRASH_MESSAGE, screen: e.screen };
       throw e;
     }
   }
@@ -792,12 +818,8 @@ class Session {
       }
       for (const d of w.dialogs) {
         // "Save changes to …?" is a message box titled "Warning" (Yes, No, Cancel): "n" is its "No".
-        const action = closeAction(d, !!w.main);
-        if (action === "crash") {
-          this.killEditor();
-          this.crash = [{ title: d.title, class: d.class }];
-          throw new EditorCrashed(this.crash);
-        }
+        const action = closeAction(d, w.main);
+        if (action === "crash") this.crashed([{ title: d.title, class: d.class, program: programOfPid(d) }]);
         if (action === "no") {
           x11(this.display, "key", "--window", d.id, "n");
           answered.push(d.title || "(untitled)");
@@ -958,7 +980,7 @@ async function main() {
         }
       } catch (e) {
         failed = true;
-        out({ step, arg, error: e.message, ...(e.crashed ? { crashed: true, dialogs: e.dialogs } : {}) });
+        out({ step, arg, error: e.message, ...(e.crashed ? { crashed: true, dialogs: e.dialogs, screen: e.screen } : {}) });
         break;
       }
     }

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -248,11 +248,14 @@ test("isCrashDialog recognises the crash report by title, class or owning proces
     assert.ok(isCrashDialog(win(t)), t);
   }
   assert.ok(isCrashDialog(win("", { class: "BlizzardError" })));
-  assert.ok(isCrashDialog(win("Report"), "Z:\\x\\BlizzardError.exe -pid 12"), "by the process's command line");
+  assert.ok(isCrashDialog(win("Report"), "BlizzardError.exe"), "by the owning program");
   for (const t of ["Warning", "Progress", "Reminder", "Warcraft III World Editor - [x.w3x]", "Trigger Editor", "Terrain Palette", ""]) {
     assert.ok(!isCrashDialog(win(t)), t);
   }
   assert.ok(!isCrashDialog(win("Crash", { overrideRedirect: true })), "a menu or tooltip is no dialog");
+  // Seen for real: a worktree called we-crash-dialog in the map's path made the main window a "crash".
+  assert.ok(!isCrashDialog(win("Warcraft III World Editor - [Z:/home/u/.worktrees/we-crash-dialog/target/maps/m.w3m]")), "the map's path");
+  assert.ok(isCrashDialog(win("Fatal error - [m.w3x]")), "control: the title outside the path still counts");
   assert.ok(!isCrashDialog(null), "control: nothing");
 });
 
@@ -264,14 +267,47 @@ test("crashDialogs picks the crash window out of a recorded list; classify keeps
   assert.deepEqual(crashDialogs([win("x", { id: 5 })], () => "crashpad_handler").map((w) => w.id), [5]);
 });
 
+// The window list and command lines recorded on 2026-11-13 (View > Light Ranges on, main window closed; paths shortened).
+const REAL_EDITOR_CMDLINE = ["Z:\\home\\u\\we-crash-dialog\\install\\_retail_\\x86_64\\World Editor.exe", "-launch", "-loadfile",
+  "Z:\\tmp\\crash-report\\maps\\light_map.w3m"].join("\0") + "\0";
+const REAL_CRASH_CMDLINE = ["Z:\\home\\u\\we-crash-dialog\\install\\_retail_\\x86_64\\BlizzardError.exe", "-product", "Warcraft III World Editor",
+  "-reopen", "Z:\\home\\u\\install\\Warcraft III Launcher.exe", "-attachment",
+  "C:/users/steamuser/Documents/Warcraft III/Errors/2026-11-13 06.24.35 fdb01594/War3.dmp"].join("\0") + "\0";
+const REAL_CRASH = { id: 37748737, title: "Warcraft III World Editor", class: "steam_app_4104009084", rect: [538, 306, 523, 414], pid: 3749590, overrideRedirect: false };
+const REAL_XALIA = { id: 27262981, title: "", class: "steam_app_4104009084", rect: [545, 427, 509, 158], pid: 3743617, overrideRedirect: true };
+const REAL_MAIN = { id: 33554433, title: "Warcraft III World Editor - [Z:/tmp/crash-report/maps/light_map.w3m]", class: "steam_app_4104009084", rect: [4, 30, 1352, 937], pid: 3743646, overrideRedirect: false };
+const REAL_PALETTE = { id: 33554434, title: "Tool Palette", class: "steam_app_4104009084", rect: [1356, 30, 240, 600], pid: 3743646, overrideRedirect: false };
+
+test("programName is argv[0]'s file name, whatever the arguments or folders say", () => {
+  assert.equal(programName(REAL_CRASH_CMDLINE), "BlizzardError.exe");
+  assert.equal(programName(REAL_EDITOR_CMDLINE), "World Editor.exe");
+  assert.equal(programName("/usr/bin/crashpad_handler\0--x\0"), "crashpad_handler");
+  assert.equal(programName(""), "");
+});
+
+test("the real crash dialog is found by its program, and the real editor's windows are not", () => {
+  const cmdlines = { 3749590: REAL_CRASH_CMDLINE, 3743646: REAL_EDITOR_CMDLINE, 3743617: "xalia.exe\0" };
+  const programOf = (w) => programName(cmdlines[w.pid] ?? "");
+  assert.deepEqual(crashDialogs([REAL_MAIN, REAL_PALETTE, REAL_XALIA], programOf), [], "a running editor, 'crash' in its folders and map path");
+  assert.deepEqual(crashDialogs([REAL_CRASH, REAL_XALIA], programOf).map((w) => w.id), [REAL_CRASH.id]);
+  assert.deepEqual(crashDialogs([REAL_CRASH, REAL_XALIA]), [], "control: its title and class alone are the editor's");
+  // With the whole command line instead of the program name, the editor's own folders would trip it.
+  assert.ok(isCrashDialog(REAL_MAIN, REAL_EDITOR_CMDLINE), "control: the arguments do mention crash-report");
+});
+
 test("closeAction never types into a dialog it can't vouch for", () => {
-  assert.equal(closeAction(win("Warning"), true), "no");
-  assert.equal(closeAction(win("Warning"), false), "no");
-  assert.equal(closeAction(win(""), true), "no");
-  assert.equal(closeAction(win("Warcraft III World Editor"), true), "no");
-  assert.equal(closeAction(win(""), false), "crash", "an untitled dialog after the main window went is not the question");
-  assert.equal(closeAction(win("Warcraft III World Editor"), false), "crash");
-  assert.equal(closeAction(win("Something else"), true), "report", "control: unknown dialogs are reported, not answered");
+  const main = win("Warcraft III World Editor - [m.w3x]", { pid: 10 });
+  assert.equal(closeAction(win("Warning"), main), "no");
+  assert.equal(closeAction(win("Warning"), null), "no");
+  assert.equal(closeAction(win(""), main), "no");
+  assert.equal(closeAction(win("Warcraft III World Editor"), main), "no");
+  assert.equal(closeAction(win("Warning", { pid: 10 }), main), "no", "the editor's own question");
+  assert.equal(closeAction(win(""), null), "crash", "an untitled dialog after the main window went is not the question");
+  assert.equal(closeAction(win("Warcraft III World Editor"), null), "crash");
+  assert.equal(closeAction(REAL_CRASH, null), "crash", "the real dialog, after the main window went");
+  assert.equal(closeAction(REAL_CRASH, REAL_MAIN), "crash", "the real dialog's title is the editor's, but its process isn't");
+  assert.equal(closeAction(win("Warning", { pid: 11 }), main), "crash", "another process's window is never answered");
+  assert.equal(closeAction(win("Something else"), main), "report", "control: unknown dialogs are reported, not answered");
 });
 
 test("EditorCrashed carries the message we-drive prints", () => {
