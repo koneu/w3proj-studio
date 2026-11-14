@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterLimitHits } from "./limits";
+import { clampPoint, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterLimitHits } from "./limits";
 import { unitHalf } from "../../lib/terrain/resize";
 import { clampShift, refuseShift } from "./moveedit";
 import type { Bounds } from "./moveedit";
@@ -26,19 +26,9 @@ test("the unknown high bits of the word don't hide a limit, and dry corners aren
   assert.deepEqual(waterLimitHits([wet(0x2000)], [{ hasWater: false, rawWater: WATER_LEVEL_MAX }]), []);
 });
 
-test("camera bounds are the first four numbers of the w3i, if they make a box", () => {
-  assert.deepEqual(cameraRect({ cameraBounds: [-100, -50, 300, 200, -100, 200, 300, -50] }), { left: -100, bottom: -50, right: 300, top: 200 });
-  for (const bad of [undefined, {}, { cameraBounds: [] }, { cameraBounds: [1, 2, 3] }, { cameraBounds: [5, 0, 1, 10] }, { cameraBounds: [0, 5, 10, 1] }, { cameraBounds: [5, 0, 5, 10] }, { cameraBounds: [0, 5, 10, 5] }, { cameraBounds: [0, 0, NaN, 5] }]) {
-    assert.equal(cameraRect(bad as never), null, JSON.stringify(bad));
-  }
-});
-
 const box = { left: 0, bottom: 0, right: 100, top: 50 };
 
-test("a point is inside up to the edge; without bounds everything is", () => {
-  assert.ok(insideBounds(box, 0, 50) && insideBounds(box, 100, 0) && insideBounds(box, 50, 25));
-  assert.ok(!insideBounds(box, -0.1, 10) && !insideBounds(box, 10, 50.1) && !insideBounds(box, 101, 10));
-  assert.ok(insideBounds(null, 1e9, -1e9));
+test("a point is clamped into the bounds; without bounds it stays", () => {
   assert.deepEqual(clampPoint(box, 150, -20), [100, 0]);
   assert.deepEqual(clampPoint(box, 30, 20), [30, 20]);
   assert.deepEqual(clampPoint(null, 150, -20), [150, -20]);
@@ -131,13 +121,10 @@ test("a drag's step is judged where a gridded doodad lands, not where the pointe
 });
 
 test("a paste's word on what it didn't place names each reason that holds, and no other", () => {
-  const none = { noFile: 0, offMap: 0, pastPlayable: 0, outsideBounds: 0 };
+  const none = { noFile: 0, offMap: 0, pastPlayable: 0 };
   assert.equal(pasteSkipText(3, none), null);
-  const bounds = pasteSkipText(3, { ...none, outsideBounds: 2 })!;
-  assert.match(bounds, /^2 of 3 pasted objects weren't placed: 2 would land outside the camera bounds/);
-  assert.doesNotMatch(bounds, /playable|off the map|placement file/);
-  const all = pasteSkipText(10, { noFile: 1, offMap: 2, pastPlayable: 3, outsideBounds: 4 })!;
-  assert.match(all, /^10 of 10 pasted objects weren't placed: 2 would land off the map; 3 are units or items past the playable part/);
-  assert.match(all, /; 4 would land outside the camera bounds .*; 1 has no placement file in this map\.$/);
+  const all = pasteSkipText(10, { noFile: 1, offMap: 2, pastPlayable: 3 })!;
+  assert.match(all, /^6 of 10 pasted objects weren't placed: 2 would land off the map; 3 are units or items past the playable part/);
+  assert.match(all, /; 1 has no placement file in this map\.$/);
   assert.match(pasteSkipText(1, { ...none, pastPlayable: 1 })!, /^1 of 1 pasted object wasn't placed: 1 is a unit or item past the playable part/);
 });

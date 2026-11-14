@@ -1,0 +1,83 @@
+[
+  {
+    "name": "cliff-type-mixed-level-far",
+    "description": "plateau.w3x (Grass Cliff); Level, size 1, with Dirt Cliff chosen, on flat ground whose 3x3 stencil ends one row below the plateau's cliff: the editor types the 9 stencil corners and leaves the plateau's; Studio also re-types the 5 cliff corners next to the stencil (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1473,282"],["--click","1392,569"],["--click","400,800"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Level:"],["cliff","Dirt"],["tool","Level:"],["size",1],["click",400,800]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-level-rim",
+    "description": "a Grass Cliff pit (level 0), then Level, size 1, with Dirt Cliff on the level-2 corner two east of the floor's end: the editor types the 3x3 and RAISES the three floor corners just west of it (33,29..31) to the start's level 2; they keep type 1 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,367"],["--click","1473,282"],["--click","1392,569"],["--click","900,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","Level:"],["cliff","Dirt"],["tool","Level:"],["size",1],["click",900,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-down1",
+    "description": "the same with Decrease One, size 1: the corner goes to level 1, the 3x3 is typed 0, the same three floor corners go up to level 2 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,367"],["--click","1441,282"],["--click","1392,569"],["--click","900,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−1:"],["cliff","Dirt"],["tool","−1:"],["size",1],["click",900,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-down1-3",
+    "description": "a Grass Cliff pit, then Decrease One, size 3, Dirt Cliff, beside it: the floor's column on the edge of the square 4 round the centre (32,28..32) goes up to level 2, and every cliff corner of the old pit still on a cliff becomes type 0 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,367"],["--click","1441,282"],["--click","1456,569"],["--click","960,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−1:"],["cliff","Dirt"],["tool","−1:"],["size",3],["click",960,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-plateau-down1-3",
+    "description": "plateau.w3x; Decrease One, size 3, Dirt Cliff, on the south edge: the editor re-types the WHOLE plateau's cliff to 0 and raises the low ground in the square 4 round the centre, outside the brush's stencil, to the start's level 3 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1441,282"],["--click","1456,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−1:"],["cliff","Dirt"],["tool","−1:"],["size",3],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-plateau-down2-5",
+    "description": "plateau.w3x; Decrease Two, size 5, Dirt Cliff, on the south edge: the whole plateau's cliff becomes type 0, the low ground in the square 6 round the centre outside the brush and its neighbours goes up to level 3, with types 1 and 0 mixed on it; with Grass Cliff chosen the same click matches Studio (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1409,282"],["--click","1488,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["cliff","Dirt"],["tool","−2:"],["size",5],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-plateau-down2-5-low",
+    "description": "plateau.w3x; Decrease Two, size 5, Dirt Cliff, on the low ground below the south edge: the plateau's rows 27 to 31 fall to level 2 but for single corners, its cliff gets types 1 and 0 mixed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1409,282"],["--click","1488,569"],["--click","750,760"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["cliff","Dirt"],["tool","−2:"],["size",5],["click",750,760]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-plateau-up1-top",
+    "description": "plateau.w3x; Increase One, size 1, Dirt Cliff, in the plateau's middle, no Grass cliff near: a Dirt Cliff hill, the plateau's cliff stays 1 (matches) (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1505,282"],["--click","1392,569"],["--click","750,450"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+1:"],["cliff","Dirt"],["tool","+1:"],["size",1],["click",750,450]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-mixed-far",
+    "description": "a Grass Cliff pit, then Decrease One, size 1, Dirt Cliff, far from it: the pit stays type 1 (matches) (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,367"],["--click","1441,282"],["--click","1392,569"],["--click","400,300"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−1:"],["cliff","Dirt"],["tool","−1:"],["size",1],["click",400,300]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  }
+]

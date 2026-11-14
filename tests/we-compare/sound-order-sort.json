@@ -1,0 +1,61 @@
+{
+  "name": "sound-order-sort",
+  "description": "Sound Editor's Sort Sound Variables (Ctrl+R) against the WE's own save of war3map.w3s. Input sound-order.w3m (Delta, alpha, Charlie, bravo, Echo: mixed case, so by name without case and with it differ). WE (Sound Editor, F5): a sound selected, Ctrl+R. Studio: w3.sounds.sort. Ignored: each sound's file (the editor saves an empty file for a game sound it doesn't find under that name, whatever its extension). Expected MATCH",
+  "input": {
+    "map": "${REPO}/tests/fixtures/we-compare/sound-order-sort.w3m"
+  },
+  "we": {
+    "mode": "sd",
+    "steps": [
+      [
+        "--key",
+        "F5"
+      ],
+      [
+        "--sleep",
+        "2000"
+      ],
+      [
+        "--click",
+        "428,221"
+      ],
+      [
+        "--key",
+        "ctrl+r"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--close-modules"
+      ]
+    ]
+  },
+  "studio": {
+    "steps": [
+      {
+        "open": "map/war3map.w3s.json"
+      },
+      {
+        "sleep": 500
+      },
+      {
+        "eval": "[...document.querySelectorAll(\"tr.snd-row\")].find((r) => r.firstChild.textContent === \"Charlie\").click();"
+      },
+      {
+        "command": "w3.sounds.sort"
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3map.w3s",
+      "as": "parsed",
+      "ignore": [
+        "sounds[].file"
+      ]
+    }
+  ],
+  "limit": 30
+}

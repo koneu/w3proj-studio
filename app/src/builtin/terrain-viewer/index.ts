@@ -15,10 +15,10 @@ import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
-import { zoomStep } from "./wheelzoom";
-import { toolBounds, toolWaterRefusal } from "./toollimits";
+import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
+import { toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, strictlyInside, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -581,10 +581,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return info && facts ? playableArea(info, facts) : null;
   };
 
-  /** The camera bounds the AI tools' objects are held to with Enforce Camera Bounds on; null with it off, or when the map's
-   *  w3i has none or can't be read (as the terrain editor, which then holds nothing either). */
-  const heldBounds = async () => toolBounds(w3, await readMapDoc<{ cameraBounds?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null));
-
   /** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
   const walkGrid = (handle: TerrainEditorHandle): Promise<Grid> => gridOf(walkSource(handle));
 
@@ -1020,8 +1016,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if ("error" in r) throw new Error(`Nothing was placed: objects[${i}]: ${r.error}`);
       };
       const edge = await playable().catch(() => null);
-      // Enforce Camera Bounds: an object (or its twin) outside them is skipped, as a paste skips it.
-      const held = await heldBounds();
       const whole = wholeMap(handle);
       const pathing = await handle.pathing();
       const why = (x: number, y: number, what: { kind: string; id: string }) => whyNoRoom(handle.terrain, pathing, nearestObject(handle.objects.list(), [x, y]), x, y, what);
@@ -1039,7 +1033,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await handle.objects.ready(o.id as string);
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
           if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
-          if (!insideBounds(held, x, y)) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           // Decided here: a footprint is checked at the facing the object ends up with.
           const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? random() * 360 : 270);
           const angle = (facing * Math.PI) / 180;
@@ -1053,7 +1046,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
             spot = null;
             if (nearest === true) {
-              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await fitsAt(s[0], s[1], angle)) { spot = s; break; }
+              for (const s of spotsAround(x, y)) if (await fitsAt(s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
               skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
@@ -1061,19 +1054,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
-          // Both sides or neither, or a skipped object would break the symmetry unseen.
-          if (!(await snappedInside(held, snap, spot[0], spot[1]))) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
-          if (paired && !insideBounds(held, twin[0], twin[1])) {
-            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
-            continue;
-          }
-          if (paired && !(await snappedInside(held, snap, twin[0], twin[1]))) {
-            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
-            continue;
-          }
           if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await fitsAt(twin[0], twin[1], twinAngle))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
@@ -1125,11 +1108,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const files = new Set((ids as string[]).map((i) => fileOfType(handle, i, args.kind)).filter(Boolean));
       if (files.size > 1) throw new Error("ids mixes units and doodads: scatter each in its own call.");
       const edge = await playable().catch(() => null), whole = wholeMap(handle);
-      // Enforce Camera Bounds: spots outside them (or whose twin is) are left out.
-      const held = await heldBounds();
       const key = [...files][0] ?? fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
-      let noRoom = 0, keptClear = 0, outside = 0;
+      let noRoom = 0, keptClear = 0;
       await editPlaced(`Scatter ${(ids as string[]).join(", ")} in ${area.name ?? "an area"}`, key, async (f) => {
         const room = await handle.objects.occupancy();
         await Promise.all((ids as string[]).map((id) => handle.objects.ready(id)));
@@ -1146,19 +1127,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         for (const asked of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
           if (isKeptClear(asked.x, asked.y, keep)) { keptClear++; continue; }
-          if (!insideBounds(held, asked.x, asked.y)) { outside++; continue; }
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
           // A doodad on its grid (doodadedit.ts): what's checked is where it lands. Its facing follows in settleDoodads.
           const spot = await handle.objects.placedSpot(type.kind, id, asked.x, asked.y, angle);
           if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
-          if (!insideBounds(held, spot.x, spot.y)) { outside++; continue; }
           if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           const twin = args.mirror === true ? twinOf(spot.x, spot.y, whole) : null;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
           if (twin) {
             if (isKeptClear(twin[0], twin[1], keep)) { keptClear++; continue; }
-            if (!insideBounds(held, twin[0], twin[1])) { outside++; continue; }
             if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
           }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
@@ -1174,23 +1152,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
-        if (!counts.size) throw new Error(outside ? `Nothing was placed: ${outside} spot${outside === 1 ? " is" : "s are"} ${OUTSIDE_BOUNDS}${noRoom || keptClear ? ", and the others had no free ground" : ""}.` : "There's no free ground there for these.");
+        if (!counts.size) throw new Error("There's no free ground there for these.");
       });
       return {
         placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, spotsKeptClear: keptClear,
-        ...(outside ? { spotsOutsideCameraBounds: outside, note: `Spots ${OUTSIDE_BOUNDS} were left out.` } : {}), seed, area,
+        seed, area,
       };
     }),
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
       const { handle } = await liveEditor();
       // A building, a gold mine and a start location go on their grid, as the World Editor moves them (placement.ts
-      // unitGridCells); the spot it lands on is held to the bounds too.
+      // unitGridCells).
       const key = fileKey(kind);
       const [gx, gy] = key === "units" ? await handle.objects.buildingSpot(String(id), x, y) : [x, y];
-      // Enforce Camera Bounds refuses the move, as the Properties panel's Position does.
-      const held = await heldBounds();
-      if (!insideBounds(held, x, y) || !insideBounds(held, gx, gy)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
       let at: number[] = [x, y];
       await editPlaced(`Move ${String(id)}`, key, async (f) => {
         const e = f.list[Number(index)];
@@ -1678,7 +1653,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info = await readMapDoc<{ cameraComplements?: number[]; cameraBounds?: number[] } & Parameters<typeof fogOf>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           // Closed while it was read: the renderer is gone. A w3i missing or unreadable leaves the border as it is.
           if (!info || disposed) return;
-          cameraArea = cameraRect(info);
           cameraCorners = cameraBoundsCorners(info);
           showCameraBounds();
           renderer.fog = fogOf(info);
@@ -1762,8 +1736,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]);
         const resetFixedOn = () => switchedOn(w3, "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]);
         const enforceWater = () => switchedOn(w3, "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]);
-        /** The map's camera bounds as last read; null until then, or when the map has none. */
-        let cameraArea: Bounds | null = null;
         /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
         let cameraCorners: [number, number][] | null = null;
         /** Where a dragged or nudged object's centre may go: on the map, a unit or item with its collision size or
@@ -1774,8 +1746,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? strictlyInside(wholeMap(handle))
           : e.id === "sloc" ? insetBy(wholeMap(handle), START_CELLS.map((c) => c * 16) as [number, number])
             : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
-        /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
-        const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
         /** Undo history; `at` edits are applied, `mark` knows which position the files match. */
@@ -3075,7 +3045,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Sets `field` of every entry to the expression's value; returns an error message or null. */
         const massEdit = (entries: Placed[], field: MassField, src: string): string | null => {
-          let node, heldBack = 0;
+          let node;
           try { node = compileExpr(src); } catch (e) { return (e as Error).message; }
           const vals = entries.map((p, i) => { const v = varsOf(p); return evalFor(node, v, v[field], i, entries.length); });
           if (vals.some((v) => !Number.isFinite(v))) return "the expression gives no number for some objects";
@@ -3083,9 +3053,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const v = vals[i];
             switch (field) {
               case "x": case "y": {
-                const wantX = field === "x" ? v : p.position[0], wantY = field === "y" ? v : p.position[1];
-                const [x, y] = clampPoint(heldTo(), wantX, wantY);
-                if (x !== wantX || y !== wantY) heldBack++;
+                const x = field === "x" ? v : p.position[0], y = field === "y" ? v : p.position[1];
                 return { position: [x, y, heightAt(terrain, x, y)] };
               }
               case "z": return { position: [p.position[0], p.position[1], v] };
@@ -3095,7 +3063,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               case "owner": return p.player !== undefined ? { player: Math.max(0, Math.min(27, Math.round(v) - 1)) } : null;
             }
           });
-          if (heldBack) void w3.window.showWarning(stoppedAtBoundsText(heldBack));
           return null;
         };
         /** Every placed object with a model (the groups not hidden). */
@@ -3151,11 +3118,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The selection mirrored or turned a quarter around its middle, as one undo step. */
         const turnSelection = (turn: Turn) => {
           const entries = selectedEntries(), before = entries.map(poseOf), [cx, cy] = centreOf(entries.map((p) => p.position));
-          const held = heldTo();
-          if (held && entries.some((p) => { const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy); return !insideBounds(held, cx + dx, cy + dy); })) {
-            void w3.window.showWarning(refusedOutsideText("part of the selection would end up"));
-            return;
-          }
           for (const p of entries) {
             const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy);
             const at = ruledPose(p.id, cx + dx, cy + dy, turnAngle(turn, p.angle));
@@ -3507,14 +3469,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const placeObjects = (f: Fragment, g: Vec3, renames: ReadonlyMap<string, string> = new Map()) => {
           const added: { entry: Placed; f: PlacedFile }[] = [];
-          const skips: PasteSkips = { noFile: 0, offMap: 0, pastPlayable: 0, outsideBounds: 0 };
+          const skips: PasteSkips = { noFile: 0, offMap: 0, pastPlayable: 0 };
           for (const o of f.objects) {
             const file = o.list === "doodads" ? dooFile : unitsFile, spot = pasteSpot(o, g);
             if (!file) { skips.noFile++; continue; }
             if (!spot) { skips.offMap++; continue; }
             // Units and items can't stand past the playable map, trees and doodads can.
             if (o.list !== "doodads" && playableEdge && !inArea(spot[0], spot[1], playableEdge)) { skips.pastPlayable++; continue; }
-            if (!insideBounds(heldTo(), spot[0], spot[1])) { skips.outsideBounds++; continue; }
             // A type given another id here: its skin, and the items and abilities the object has, follow.
             const made = pastedEntry(file, renames.size ? { ...o, entry: renamedEntry(o.entry, renames) } : o, spot);
             const madeFlags = (made as Placed & { flags?: number }).flags;
@@ -3700,15 +3661,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             dropsSlot([pl]),
             ...(editable ? [
               ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),
-              field("Position", triple(pl.position, "16", (v) => {
-                if (!insideBounds(heldTo(), v[0], v[1])) {
-                  void w3.window.showWarning(refusedOutsideText("that is"));
-                  // The boxes show where the object is again, not what was typed.
-                  if (selected) selectObject(selected);
-                  return;
-                }
-                editProps(pl, { position: v });
-              })),
+              field("Position", triple(pl.position, "16", (v) => editProps(pl, { position: v }))),
               field("Facing", num((pl.angle * 180) / Math.PI, "15", (v) => editProps(pl, { angle: (v * Math.PI) / 180 }))),
               field("Scale", triple(pl.scale, "0.1", (v) => editProps(pl, { scale: v }))),
               numVar > 1
@@ -4266,8 +4219,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what);
             },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
-            inBounds: (x, y) => insideBounds(heldTo(), x, y),
-            refusedOutside: refusedOutsideText,
             update: () => {
               objectsTouched = true;
               void rebuildObjects();
@@ -5093,7 +5044,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]),
                 switchBox("Reset fixed heights", "Reset Fixed Object Heights (Ctrl+Shift+H): a doodad with a height of its own that is moved lands on the ground and follows it again; with it off the doodad keeps its height", "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]),
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
-                switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]),
+                switchBox("Enforce camera bounds", "Enforce Camera Bounds: the Cameras tab makes no camera from a view outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]),
               ] : []),
               toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", false) === true, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
@@ -5121,13 +5072,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // ---- camera ------------------------------------------------------------------
         const initial = { yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov };
         const resetCamera = () => { Object.assign(renderer, initial, { target: [...renderer.center] }); redraw(); };
-        /** Moves the target over the ground by screen pixels, in the camera's facing. */
+        /** Moves the target over the ground by screen pixels, in the camera's facing. The view stops at the map's
+         *  edges as the World Editor's does (wheelzoom.ts heldPan), whatever Enforce Camera Bounds says: keys, the
+         *  mouse and the screen's edge all pan through here. */
         const pan = (dx: number, dy: number) => {
           const s = renderer.distance / Math.max(1, canvas.clientHeight) * 0.9;
           const cy = Math.cos(renderer.yaw), sy = Math.sin(renderer.yaw);
           // The ground follows the pointer: right = (-sin, cos), forward = (-cos, -sin).
           renderer.target[0] += (sy * dx - cy * dy) * s;
           renderer.target[1] += (-cy * dx - sy * dy) * s;
+          const pivot = wheelPivot(renderer.ray(canvas.clientWidth / 2, zoomPivotRow(canvas.clientHeight)), renderer.target, renderer.distance * 20);
+          renderer.target = heldPan(renderer.target, pivot, wholeMap(handle));
           redraw();
         };
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */

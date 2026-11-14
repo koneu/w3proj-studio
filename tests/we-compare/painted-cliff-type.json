@@ -1,97 +1,146 @@
 [
   {
     "name": "painted-cliff-type-grass",
-    "description": "a Grass patch (size 3), a cliff pit (Apply Cliff, Decrease Two, size 3: 13 corners down; the 13 and the 24 round them on cliff tiles typed 1 = Grass Cliff, the palette's start), then a Dirt stroke (size 5) over the pit with Apply Cliff still on (Decrease Two, Grass Cliff); Studio: Paint Lgrs size 3, -2 size 3, Paint Ldrt size 5 at the same screen position. The editor re-types none of the 37 cliff corners (they stay 1), nor does Studio (2026-11-13; it used to re-type 36 to Dirt Cliff)",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
-    "we": {
-      "saveAccept": ["Warning"],
-      "steps": [
-        ["--key", "t"],
-        ["--click", "1409,144"],
-        ["--click", "1456,569"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,282"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,112"],
-        ["--click", "1488,569"],
-        ["--click", "748,500"],
-        ["--sleep", "1500"]
-      ]
-    },
-    "studio": {
-      "steps": [
-        { "terrain": true },
-        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
-        { "sleep": 1000 }
-      ]
-    },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1), then a Dirt tile picked with Apply Cliff still on (Decrease Two, Grass Cliff) and clicked at size 5 on the pit's middle: the editor's click paints AND runs the cliff brush, which does nothing from the floor at level 0 (cliff-floor.json), so only the ground changes and all 37 cliff corners stay 1. Studio: Paint Lgrs size 3, -2 size 3, Paint Ldrt size 5 at the same screen position (2026-11-13; (branch painted-cliff-type-we, 2026-11-14) for why)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
     "limit": 40
   },
   {
     "name": "painted-cliff-type-dirt",
-    "description": "the same with Dirt Cliff chosen as the cliff type before the Dirt stroke (Apply Cliff on, Decrease Two, Dirt Cliff): the editor still re-types none (37 stay 1)",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
-    "we": {
-      "saveAccept": ["Warning"],
-      "steps": [
-        ["--key", "t"],
-        ["--click", "1409,144"],
-        ["--click", "1456,569"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,282"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,112"],
-        ["--click", "1488,569"],
-        ["--click", "1441,367"],
-        ["--click", "748,500"],
-        ["--sleep", "1500"]
-      ]
-    },
-    "studio": {
-      "steps": [
-        { "terrain": true },
-        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
-        { "sleep": 1000 }
-      ]
-    },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "description": "the same with Dirt Cliff chosen before the Dirt click (Apply Cliff on, Decrease Two): the refused cliff brush types nothing either, 37 stay 1",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","1441,367"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
     "limit": 40
   },
   {
     "name": "painted-cliff-type-unticked",
-    "description": "the same with Apply Cliff unticked for the Dirt stroke (round 3's setup): the editor re-types none",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
-    "we": {
-      "saveAccept": ["Warning"],
-      "steps": [
-        ["--key", "t"],
-        ["--click", "1409,144"],
-        ["--click", "1456,569"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,282"],
-        ["--click", "748,500"],
-        ["--sleep", "500"],
-        ["--click", "1409,112"],
-        ["--click", "1488,569"],
-        ["--click", "1373,244"],
-        ["--click", "748,500"],
-        ["--sleep", "1500"]
-      ]
-    },
-    "studio": {
-      "steps": [
-        { "terrain": true },
-        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
-        { "sleep": 1000 }
-      ]
-    },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "description": "the same with Apply Cliff unticked, so the tile alone is painted (round 3's setup): the editor re-types none",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","1373,244"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-beside5",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt, size 5, clicked beside the pit over its east half, Apply Cliff unticked, so the tile alone: no cliff corner re-typed, no level moved (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","1373,244"],["--click","960,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",960,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-narrow1",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt, size 1, on the pit's middle, Apply Cliff unticked, so the tile alone: narrower than the pit, nothing re-typed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1392,569"],["--click","1373,244"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",1],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-rim3",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt, size 3, over the pit's north-east rim, Apply Cliff unticked, so the tile alone: part of the cliff, nothing re-typed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1456,569"],["--click","1373,244"],["--click","900,440"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",3],["click",900,440]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-wide8",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt, size 8, Apply Cliff unticked, so the tile alone: nothing re-typed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1520,569"],["--click","1373,244"],["--click","700,540"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",8],["click",700,540]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-rock5",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Rock (a tile no cliff type goes with), size 5, Apply Cliff unticked, so the tile alone: nothing re-typed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1505,112"],["--click","1488,569"],["--click","1373,244"],["--click","800,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Lrok"],["size",5],["click",800,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-dirtpit-grass5",
+    "description": "a pit typed Dirt Cliff (0) on Dirt ground, then Grass, size 5, over it, Apply Cliff unticked, so the tile alone: the 37 stay 0 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,144"],["--click","1488,569"],["--click","1373,244"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["cliff","Dirt"],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Lgrs"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-dirtpit-grass3",
+    "description": "a pit typed Dirt Cliff (0), then Grass, size 3, over its east rim, Apply Cliff unticked, so the tile alone: nothing re-typed (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,367"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,144"],["--click","1456,569"],["--click","1373,244"],["--click","900,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["cliff","Dirt"],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",900,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-plateau-dirt5",
+    "description": "plateau.w3x (Grass Cliff, on Dirt), no cliff tool picked: Dirt, size 5, on the south edge: the same file back (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,112"],["--click","1488,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-plateau-grass5",
+    "description": "plateau.w3x; Decrease Two and Dirt Cliff picked, then Grass, size 5, on the south edge with Apply Cliff unticked, so the tile alone: only the ground changes, the plateau stays Grass Cliff (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1441,367"],["--click","1409,144"],["--click","1488,569"],["--click","1373,244"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",5],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-with-cliff-down1",
+    "description": "the editor's tile and cliff brush at once (Grass picked, then Decrease One: both Apply boxes on), one click of size 3: the same file as Studio's Paint stroke followed by its -1 stroke at that spot (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1441,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−1:"],["size",3],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-with-cliff-up1-dirt",
+    "description": "Grass and Increase One at once with Dirt Cliff chosen, size 5: the new cliff is Dirt Cliff (the chosen type, not the tile's), as Studio's two strokes (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1505,282"],["--click","1441,367"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",5],["click",748,500],["tool","+1:"],["cliff","Dirt"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-with-cliff-beside-pit",
+    "description": "a Grass patch (size 3) and a cliff pit on it (Decrease Two, size 3, Grass Cliff: 13 corners at level 0, they and the 24 round them typed 1); Dirt picked with Apply Cliff still on (Decrease Two), size 5, clicked beside the pit: a second pit and the Dirt, as Studio's Paint and -2 strokes there (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,144"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,112"],["--click","1488,569"],["--click","960,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lgrs"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",748,500],["tool","Paint:"],["texture","Ldrt"],["size",5],["click",960,500],["tool","−2:"],["size",5],["click",960,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "painted-with-cliff-rock-level",
+    "description": "plateau.w3x; Rock and Level at once, size 3, on the south edge: levels and ground as Studio's two strokes; 7 corners on the rim of the cliff brush's cliff-type stencil differ (cliff-type-stencil.json's known difference next to a cliff) (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1505,112"],["--click","1473,282"],["--click","1456,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lrok"],["size",3],["click",750,630],["tool","Level:"],["size",3],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
     "limit": 40
   }
 ]

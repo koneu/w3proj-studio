@@ -11,7 +11,9 @@
       {"name":"search_script_api","description":"Looks up the game's script functions, types and constants, with their exact signatures, so nothing has to be guessed. Names are the same in JASS and Lua.","readOnly":true,"inputSchema":{"type":"object","required":["filter"],"properties":{"filter":{"type":"string","description":"Part of a name, not case sensitive, like Hashtable or SpecialEffect."},"kind":{"type":"string","enum":["native","function","global","constant","type"]},"limit":{"type":"integer","description":"At most this many (default 80)."}}}}
     ],
     "editors": [{ "id": "w3.scriptDiff", "title": "Script Changes", "patterns": ["w3:script-diff:**/*", "w3:script-diff:*"] }],
-    "commands": [{ "id": "w3.script.generate", "when": "project", "menu": "Tools:1:2", "title": "Generate Map Script", "category": "Project" }],
+    "commands": [{ "id": "w3.script.generate", "when": "project", "menu": "Tools:1:2", "title": "Generate Map Script", "category": "Project" },
+      { "id": "w3.script.export", "when": "project", "title": "Export Script…", "category": "Project" }
+    ],
     "configuration": {
       "title": "Map Script",
       "properties": {

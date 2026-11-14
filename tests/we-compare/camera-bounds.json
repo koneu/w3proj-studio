@@ -1,0 +1,844 @@
+[
+  {
+    "name": "camera-bounds-paste",
+    "description": "Enforce Camera Bounds on (the editor's default, we-drive pins it): a footman (2432, 0) and a pathless doodad LPcr (2432, -512) copied and pasted past the right camera bound (2816), inside the playable part (3328): the World Editor places both (3070.8, 0 and 3072.2, -510.5, 2026-11-14); Studio refused the paste before. The two objects already past the bound (3136) stay through the save. Input: tests/fixtures/we-compare/make-camera-bounds-input.mjs; the view is its first camera (2816, 0 from 3000), the clicks at 847,404 and 858,578 are 3072, 0 and 3072, -512 there. Expected MATCH (positions within 4: the two picks differ by a unit or two)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "m"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "1396,177"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2500"
+        ],
+        [
+          "--key",
+          "u"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--drag",
+          "560,340:640,430"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--key",
+          "ctrl+c"
+        ],
+        [
+          "--key",
+          "ctrl+v"
+        ],
+        [
+          "--move",
+          "847,404"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "847,404"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--drag",
+          "545,530:625,605"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--key",
+          "ctrl+c"
+        ],
+        [
+          "--key",
+          "ctrl+v"
+        ],
+        [
+          "--move",
+          "858,578"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "858,578"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "300"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ]
+          ]
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); await s.look.get('map/war3map.w3e.txt')(2432, 0, { id: 'hfoo', x: 2432, y: 0 }); await new Promise((r) => setTimeout(r, 800)); document.querySelector('.model-stage canvas').focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));"
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ],
+            [
+              "click",
+              847,
+              404
+            ]
+          ]
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await s.look.get('map/war3map.w3e.txt')(2432, -512, { id: 'LPcr', x: 2432, y: -512 }); await new Promise((r) => setTimeout(r, 800)); c.focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));"
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ],
+            [
+              "click",
+              858,
+              578
+            ]
+          ]
+        },
+        {
+          "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); const s = await w3.services.get('w3.terrain'); const o = s.placedObjects(); if (o.units.filter((u) => u.id === 'hfoo').length !== 3 || o.doodads.length !== 3) throw new Error('the pastes past the camera bounds placed ' + (o.units.filter((u) => u.id === 'hfoo').length - 2) + ' footmen and ' + (o.doodads.length - 2) + ' doodads'); await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "tolerance": 4
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "tolerance": 4
+      }
+    ]
+  },
+  {
+    "name": "camera-bounds-create",
+    "description": "Enforce Camera Bounds on: what the switch does. Create Camera from the views of the input's cameras 2 to 7 (View Selected Camera first): the World Editor answers 'The current camera position is outside of the world camera bounds.' for the views whose target is past the camera bounds (3000, 0 inside the playable part; 0, 2900 with the eye inside; 2820, 0) and makes a camera for the others (2700, 0; 0, -3000 with the eye south of the map; 2700, 300 from 500): Camera 008 to 010. Studio's Cameras tab: Go to camera, View, Create from view, for the same six. Studio gives a new camera a far clipping of its distance + 3000 (the editor: 5000), left out here. Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "m"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "1396,190"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,203"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,216"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,229"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,242"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,255"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ],
+            [
+              "tab",
+              "Cameras"
+            ]
+          ]
+        },
+        {
+          "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const jump = document.querySelector('select[title=\"Go to a camera\"]'); if (!jump) throw new Error('no Cameras tab'); for (let i = 0; i < 40 && jump.options.length < 8; i++) await wait(250); for (const n of [2, 3, 4, 5, 6, 7]) { const o = [...jump.options].find((o) => o.textContent === '00 we-drive look 0' + n); if (!o) throw new Error('no camera ' + n); jump.value = o.value; jump.dispatchEvent(new Event('change')); await wait(300); const view = [...document.querySelectorAll('.terrain-region-panel button')].find((b) => b.textContent === 'View'); if (!view) throw new Error('no View button'); view.click(); await wait(500); [...document.querySelectorAll('.terrain-group-tools button')].find((b) => b.textContent === 'Create from view').click(); await wait(800); } await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3c",
+        "as": "parsed",
+        "tolerance": 0.01,
+        "ignore": [
+          "cameras[].farZ"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "camera-bounds-create-off",
+    "description": "Enforce Camera Bounds off (Advanced > Enforce Camera Bounds, switched back before the save): Create Camera from the same six views makes all six, Camera 008 to 013, also the three past the camera bounds. Studio: the setting terrain.enforceCameraBounds off, the same six. The far clipping is left out as in camera-bounds-create. Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "310,411"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--key",
+          "m"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "1396,190"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,203"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,216"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,229"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,242"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "1396,255"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "1476,119"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ],
+        [
+          "--click",
+          "1476,80"
+        ],
+        [
+          "--sleep",
+          "1200"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--sleep",
+          "400"
+        ],
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "310,411"
+        ],
+        [
+          "--sleep",
+          "800"
+        ]
+      ]
+    },
+    "studio": {
+      "settings": {
+        "terrain.enforceCameraBounds": false
+      },
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ],
+            [
+              "tab",
+              "Cameras"
+            ]
+          ]
+        },
+        {
+          "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const jump = document.querySelector('select[title=\"Go to a camera\"]'); if (!jump) throw new Error('no Cameras tab'); for (let i = 0; i < 40 && jump.options.length < 8; i++) await wait(250); for (const n of [2, 3, 4, 5, 6, 7]) { const o = [...jump.options].find((o) => o.textContent === '00 we-drive look 0' + n); if (!o) throw new Error('no camera ' + n); jump.value = o.value; jump.dispatchEvent(new Event('change')); await wait(300); const view = [...document.querySelectorAll('.terrain-region-panel button')].find((b) => b.textContent === 'View'); if (!view) throw new Error('no View button'); view.click(); await wait(500); [...document.querySelectorAll('.terrain-group-tools button')].find((b) => b.textContent === 'Create from view').click(); await wait(800); } await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3c",
+        "as": "parsed",
+        "tolerance": 0.01,
+        "ignore": [
+          "cameras[].farZ"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "camera-bounds-typed",
+    "description": "Enforce Camera Bounds on: a camera's typed target. The World Editor's Camera Properties (the camera's row, Return) puts a Target X typed past the camera bounds on the bound without a word: 3100 for the input's seventh camera (2700, 300 from 500) becomes 2816 (2026-11-14; with the switch off it stayed 3100). Studio's Cameras tab: Go to camera, 3100 typed into X. Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "m"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "1396,255"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--key",
+          "Return"
+        ],
+        [
+          "--sleep",
+          "3000"
+        ],
+        [
+          "--click",
+          "709,328"
+        ],
+        [
+          "--sleep",
+          "200"
+        ],
+        [
+          "--key",
+          "ctrl+a"
+        ],
+        [
+          "--type",
+          "3100"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "684,727"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "view",
+              "we:2816,0,3000"
+            ],
+            [
+              "tab",
+              "Cameras"
+            ]
+          ]
+        },
+        {
+          "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const jump = document.querySelector('select[title=\"Go to a camera\"]'); if (!jump) throw new Error('no Cameras tab'); for (let i = 0; i < 40 && jump.options.length < 8; i++) await wait(250); const o = [...jump.options].find((o) => o.textContent === '00 we-drive look 07'); if (!o) throw new Error('no camera 7'); jump.value = o.value; jump.dispatchEvent(new Event('change')); await wait(300); const x = document.querySelector('.terrain-camera-field input'); if (!x || Number(x.value) !== 2700) throw new Error('the X box shows ' + x?.value); x.value = '3100'; x.dispatchEvent(new Event('change')); await wait(800); await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3c",
+        "as": "parsed",
+        "tolerance": 0.01
+      }
+    ]
+  }
+]

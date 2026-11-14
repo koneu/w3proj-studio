@@ -11,8 +11,24 @@
       { "id": "w3.sounds.replace", "when": "project", "title": "Replace Internal Sound…", "category": "Sound Editor" },
       { "id": "w3.sounds.findUsages", "when": "project", "title": "Find Sound Usages…", "category": "Sound Editor" },
       { "id": "w3.sounds.removeUnused", "when": "project", "title": "Remove Unused Sounds…", "category": "Sound Editor" },
+      { "id": "w3.sounds.moveUp", "when": "project", "title": "Move Sound Variable Up", "category": "Sound Editor" },
+      { "id": "w3.sounds.moveDown", "when": "project", "title": "Move Sound Variable Down", "category": "Sound Editor" },
+      { "id": "w3.sounds.sort", "when": "project", "title": "Sort Sound Variables", "category": "Sound Editor" },
+      { "id": "w3.sounds.volumeUp", "when": "project", "title": "Increase Sound Volume", "category": "Sound Editor" },
+      { "id": "w3.sounds.volumeDown", "when": "project", "title": "Decrease Sound Volume", "category": "Sound Editor" },
+      { "id": "w3.sounds.musicVolumeUp", "when": "project", "title": "Increase Music Volume", "category": "Sound Editor" },
+      { "id": "w3.sounds.musicVolumeDown", "when": "project", "title": "Decrease Music Volume", "category": "Sound Editor" },
       { "id": "w3.sounds.play", "title": "Sound Editor: Play Sound File", "category": "Sound Editor", "hidden": true },
       { "id": "w3.sounds.soundAction", "title": "Sound Editor: Rename or Delete a Sound", "category": "Sound Editor", "hidden": true }
+    ],
+    "keybindings": [
+      { "key": "ctrl+up", "command": "w3.sounds.moveUp", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+down", "command": "w3.sounds.moveDown", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+r", "command": "w3.sounds.sort", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+pageup", "command": "w3.sounds.volumeUp", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+pagedown", "command": "w3.sounds.volumeDown", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+shift+pageup", "command": "w3.sounds.musicVolumeUp", "when": "soundEditor && !inputFocus" },
+      { "key": "ctrl+shift+pagedown", "command": "w3.sounds.musicVolumeDown", "when": "soundEditor && !inputFocus" }
     ],
     "services": [{ "id": "w3.sounds", "description": "The map's sounds as the open Sound Editor holds them (unsaved changes included): liveSounds, onDidEdit." }]
   }
