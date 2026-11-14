@@ -17,8 +17,22 @@ export function expandPath(p, specDir, vars) {
   return isAbsolute(s) ? s : resolve(specDir, s);
 }
 
-/** One World Editor step of a spec as the arguments we-drive takes: "--key d" or ["--key", "d"] or ["--wait-ready"]. */
-function weStep(step, where) {
+/** `${NAME}` in a step's text replaced by `vars[NAME]` for the names `vars` has; any other `${…}` (a script's own
+ *  template literal) stays as it is. `quote` makes a value fit into a JavaScript string literal (backslashes). */
+export function expandText(text, vars, quote = false) {
+  return String(text).replace(/\$\{(\w+)\}/g, (all, name) => (Object.hasOwn(vars, name) ? (quote ? JSON.stringify(String(vars[name])).slice(1, -1) : String(vars[name])) : all));
+}
+
+/** A path of this machine as the World Editor sees it: on Linux through Wine's Z: drive (we-drive's winePath). */
+export const editorPath = (p, platform = process.platform) => (platform === "win32" ? p : `Z:${String(p).split("/").join("\\")}`);
+
+/** The `${…}` names of `--type` text: `${REPO_WE}` and `${MAIN_WE}`, the checkouts as the editor's file dialogs take them. */
+export const editorVars = (vars, platform = process.platform) =>
+  Object.fromEntries(Object.entries(vars).filter(([k]) => k === "REPO" || k === "MAIN").map(([k, v]) => [`${k}_WE`, editorPath(v, platform)]));
+
+/** One World Editor step of a spec as the arguments we-drive takes: "--key d" or ["--key", "d"] or ["--wait-ready"].
+ *  A `--type` text gets `${REPO_WE}` / `${MAIN_WE}` (editorVars) filled in. */
+function weStep(step, where, vars = {}) {
   const tokens = typeof step === "string" ? [step.slice(0, /\s/.test(step) ? step.search(/\s/) : step.length), ...(/\s/.test(step) ? [step.slice(step.search(/\s/)).trim()] : [])] : step;
   if (!Array.isArray(tokens) || !tokens.length || tokens.some((t) => typeof t !== "string") || tokens.length > 2 || !tokens[0].startsWith("--")) {
     throw new Error(`${where}: a World Editor step is "--step value" or ["--step", "value"], got ${JSON.stringify(step)}`);
@@ -26,10 +40,11 @@ function weStep(step, where) {
   if (["--map", "--start", "--save", "--close", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--look"].includes(tokens[0])) {
     throw new Error(`${where}: ${tokens[0]} is done by we-compare itself (the map, the wait for it, the save and the close)`);
   }
-  return tokens;
+  return tokens[0] === "--type" && tokens.length === 2 ? [tokens[0], expandText(tokens[1], vars)] : tokens;
 }
 
-function studioStep(step, where) {
+/** One Studio step; an `eval`'s `${REPO}` / `${MAIN}` become the checkouts' paths (quoted for a string literal). */
+function studioStep(step, where, vars = {}) {
   if (!isObject(step)) throw new Error(`${where}: a Studio step is an object, got ${JSON.stringify(step)}`);
   const keys = Object.keys(step).filter((k) => STUDIO_STEPS.includes(k));
   if (keys.length !== 1) throw new Error(`${where}: a Studio step has exactly one of ${STUDIO_STEPS.join(", ")}, got ${JSON.stringify(step)}`);
@@ -43,6 +58,10 @@ function studioStep(step, where) {
   if (k === "setting" && !(Array.isArray(step.setting) && step.setting.length === 2 && typeof step.setting[0] === "string")) throw new Error(`${where}: "setting" is [key, value]`);
   if (k === "ui" && !(Array.isArray(step.ui) && step.ui.every(Array.isArray))) throw new Error(`${where}: "ui" is a list of actions, each a list (["tool", "Paint:"], ...: we-compare-ui.mjs)`);
   if (k === "command" && typeof step.command !== "string") throw new Error(`${where}: "command" is a command id`);
+  if (k === "eval") {
+    const paths = Object.fromEntries(Object.entries(vars).filter(([n]) => n === "REPO" || n === "MAIN"));
+    return { eval: expandText(step.eval, paths, true) };
+  }
   return step;
 }
 
@@ -71,7 +90,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
   } else if (isObject(input.new)) {
     const n = input.new;
     if (typeof n.name !== "string" || !Number.isInteger(n.width) || !Number.isInteger(n.height)) throw new Error(`${where}: input.new wants name, width and height`);
-    parsedInput = { new: n, steps: (input.steps ?? []).map((s, i) => studioStep(s, `${where}: input.steps[${i}]`)) };
+    parsedInput = { new: n, steps: (input.steps ?? []).map((s, i) => studioStep(s, `${where}: input.steps[${i}]`, vars)) };
   } else throw new Error(`${where}: "input" needs "map" (a path) or "new"`);
   const we = raw.we ?? {};
   if (!isObject(we)) throw new Error(`${where}: "we" is an object`);
@@ -98,8 +117,8 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
     name,
     description: raw.description ?? "",
     input: parsedInput,
-    we: { mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`)) },
-    studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`)) },
+    we: { mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))) },
+    studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
     limit: raw.limit ?? 10,
   };

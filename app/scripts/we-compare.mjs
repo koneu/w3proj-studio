@@ -17,6 +17,8 @@
 //   input       { "map": "path.w3x" } (copied: the original isn't touched; ${MAIN} is the main checkout, ${REPO} this one,
 //               a relative path is the spec file's folder's) or { "new": { name, width, height }, "steps": [studio steps] }:
 //               Studio makes the map (new_map), runs the steps, packs it, and the World Editor opens that
+//               A file from the checkout: `${REPO_WE}` / `${MAIN_WE}` in a "--type" step's text are the checkouts as the
+//               editor's file dialogs take them (Z:\… on Linux), `${REPO}` / `${MAIN}` in an "eval" their paths.
 //   we          { "mode": "sd|hd|de", "from": "input|studio" (studio: the editor opens the map Studio saved and re-saves it), "saveAccept": ["Warning"] (dialog titles the save answers with Return), "steps": ["--key d", ["--click", "100,100"], ...] }: we-drive steps between the map being
 //               ready and the save (the save and the close are added); several specs of one mode share ONE we-drive
 //               process, so one display and one lock, and ONE editor: each next map is opened in it (File > Open)

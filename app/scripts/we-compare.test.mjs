@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
-import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, expandPath, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
+import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
 
 const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.wpm"] });
@@ -28,6 +28,22 @@ test("World Editor steps: a string or a pair; the ones we-compare does itself ar
   assert.deepEqual(s.we.steps, [["--key", "d"], ["--click", "1,2"], ["--shot-window"]]);
   assert.throws(() => parseSpec({ ...good(), we: { steps: ["--save x.w3x"] } }, "/s"), /done by we-compare itself/);
   assert.throws(() => parseSpec({ ...good(), we: { steps: ["key d"] } }, "/s"), /World Editor step/);
+});
+
+test("a --type text gets the checkout as the editor sees it, an eval the checkout's path; other ${…} stay", () => {
+  assert.equal(editorPath("/home/u/repo", "linux"), "Z:\\home\\u\\repo");
+  assert.equal(editorPath("C:\\repo", "win32"), "C:\\repo");
+  const vars = { REPO: "/home/u/repo", MAIN: "/home/u/main" };
+  const s = parseSpec({ ...good(),
+    we: { steps: [["--type", "${REPO_WE}\\a.wav"], ["--key", "${REPO_WE}"]] },
+    studio: { steps: [{ eval: "const p = \"${REPO}/a.wav\"; return `${p}${MAIN}`;" }] } }, "/s", vars);
+  assert.deepEqual(s.we.steps[0], ["--type", `${editorPath("/home/u/repo")}\\a.wav`]);
+  // Only --type is filled in.
+  assert.deepEqual(s.we.steps[1], ["--key", "${REPO_WE}"]);
+  assert.equal(s.studio.steps[0].eval, "const p = \"/home/u/repo/a.wav\"; return `${p}/home/u/main`;");
+  // A backslash in a path is quoted for the string literal; an unknown name and a script's own ${p} are left.
+  assert.equal(expandText("\"${REPO}\" ${p} ${NOPE}", { REPO: "C:\\r" }, true), "\"C:\\\\r\" ${p} ${NOPE}");
+  assert.equal(expandText("${REPO}", { REPO: "C:\\r" }), "C:\\r");
 });
 
 test("Studio steps have one kind each", () => {
