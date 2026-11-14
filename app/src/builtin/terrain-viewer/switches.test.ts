@@ -69,7 +69,7 @@ test("the object placer starts as a fresh World Editor's Tools menu: Randomly Ro
   assert.equal(placed("terrain.placement.randomScale"), "symmetric");
 });
 
-test("the terrain view starts with the medium grid and the camera bounds, as a fresh World Editor", () => {
+test("the terrain view starts with the grid of its setting (large) and the camera bounds", () => {
   const source = readFileSync("src/builtin/terrain-viewer/index.ts", "utf8");
-  assert.match(source, /const viewState = \{\s*grid: "medium" as GridSize,[^}]*cameraBounds: true,/);
+  assert.match(source, /const viewState = \{\s*grid: gridDefault\(w3\.settings\.get\("terrain\.grid\.default", "large"\)\),[^}]*cameraBounds: true,/);
 });
