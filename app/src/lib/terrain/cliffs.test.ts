@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { slopeBand, toggleRamp, widestRun } from "./cliffs";
+import { rampSides, slopeBand, toggleRamp, widestRun } from "./cliffs";
 import type { Corner, Terrain } from "./w3e";
 
 /** Rows from the north, a digit per corner: its cliff level. */
@@ -174,6 +174,49 @@ test("a diagonal cliff gets a ramp from the brush, on both of its levels", () =>
   const flagged = t.corners.filter((c) => c.ramp);
   assert.ok(flagged.some((c) => c.layer === 3) && flagged.some((c) => c.layer === 2), ramps(t).join(" "));
   assert.equal(toggleRamp(land(["2222", "2222"]), 128, 64, 1, log, true) !== null, true);
+});
+
+// The east edge of a round +1 plateau (size 7): straight, but for one corner in its middle that sticks out
+// (level 3 at x 5, y 5). A ramp beside it would end next to that bend, where its side piece can't meet the cliff:
+// a hole in the ground, black from the side (verification of a44f02c87c, 2026-11-14). The World Editor draws a
+// hole there too with those flags.
+const bump = () => land([
+  "3333222",
+  "3333222",
+  "3333222",
+  "3333322",
+  "3333222",
+  "3333222",
+  "3333222",
+  "3333222",
+  "3333222",
+]);
+
+test("a ramp doesn't end beside a corner sticking out of the cliff, so its side pieces meet the cliff", () => {
+  const t = bump();
+  assert.equal(toggleRamp(t, 3.6 * 128, 3.6 * 128, 3, log, true), null);
+  assert.deepEqual(ramps(t), [
+    ".......",
+    ".......",
+    ".......",
+    ".......",
+    ".......",
+    "...###.",
+    "...###.",
+    "...###.",
+    ".......",
+  ], "the row beside the bend stays a cliff");
+  // Every ramp side the view draws has its far middle corner on the ramp's low layer, as a straight cliff does.
+  for (const side of rampSides(t)) {
+    const far = side.w === 2
+      ? t.corners[(side.outer[1].ramp ? side.y : side.y + 1) * t.width + side.x + 1]
+      : t.corners[(side.y + 1) * t.width + (side.outer[0].ramp ? side.x + 1 : side.x)];
+    assert.equal(far.layer, 2, `side at ${side.x},${side.y}`);
+  }
+  // Asked for exactly that width, the ramp is refused rather than built against the bend.
+  const strict = bump();
+  assert.match(toggleRamp(strict, 3.6 * 128, 2.6 * 128, 1, log) ?? "", /straight/);
+  assert.equal(strict.corners.some((c) => c.ramp), false);
 });
 
 test("the brush takes off what it built, in one click", () => {

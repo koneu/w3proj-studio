@@ -20,7 +20,7 @@ import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { composeLayers, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -4744,17 +4744,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
             const show = () => {
               if (!latest()) return;
-              const rgba = composeLayers(parts);
-              if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
+              // Regions and Pathing - Ground over the border lie over the water too (the editor's); the naval view keeps its own.
+              const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
+              const top = !on.naval ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
+              const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts);
+              const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
+              if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over); else renderer.setViewLayer(null);
               redraw();
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
-                parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
+                parts[1] = fits && on.pathing ? groundPathingColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 // The edge brown over the tiles past the playable map (as the border's shade: by the w3i), as the editor's naval view.
                 parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 show();

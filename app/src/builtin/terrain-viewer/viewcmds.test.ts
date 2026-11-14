@@ -230,3 +230,32 @@ test("regionColors: each region filled in its colour inside a darker edge, small
   const none = regionColors([{ left: 1000, bottom: 1000, right: 2000, top: 2000 }, { left: NaN, bottom: 0, right: 1, top: 1 }], 8, 4, -128, -64);
   assert.ok(none.every((v) => v === 0));
 });
+
+// ---- over the map's border (we-drive, border128x96 with regions regedge, 2026-11-14) ----------------------------
+
+// A map of 2 x 1 tiles (8 x 4 pathing cells): the west tile is past the playable map.
+const EDGE = { tiles: [1, 0], tilesX: 2 };
+
+test("groundPathingColors: over the border a flat opaque grey, whatever the cells hold; inside as before", () => {
+  const cells = new Array(32).fill(0).map((_, i) => (i % 8 === 0 || i % 8 === 4 ? 0 : NO_WALK));
+  const rgba = groundPathingColors(cells, EDGE);
+  assert.deepEqual([...rgba.subarray(0, 4)], [137, 138, 137, 255]); // cell 0: west tile, nothing blocked
+  assert.deepEqual([...rgba.subarray(3 * 4, 3 * 4 + 4)], [137, 138, 137, 255]);
+  assert.deepEqual([...rgba.subarray(4 * 4, 4 * 4 + 4)], [0, 0, 0, 0]); // cell 4: east tile, free
+  assert.deepEqual([...rgba.subarray(5 * 4, 5 * 4 + 4)], [230, 40, 230, 150]);
+});
+
+test("regionColors: over the border the fill carries no darker edge and is stronger than inside", () => {
+  const rgba = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64, EDGE);
+  assert.deepEqual([...rgba.subarray(0, 4)], [255, 0, 0, 194]); // the region's own corner cell, over the border
+  assert.deepEqual([...rgba.subarray(4 * 4, 4 * 4 + 4)].slice(3), [235]); // the rim inside the playable part stays dark
+  const without = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
+  assert.equal(without[3], 235); // control: without the border it is the rim
+});
+
+test("splitEdge: the border's cells go to one picture, the rest to the other", () => {
+  const rgba = new Uint8Array(32 * 4).fill(9);
+  const { inside, over } = viewcmds.splitEdge(rgba, EDGE);
+  assert.equal(over[0], 9); assert.equal(inside[3], 0);
+  assert.equal(over[4 * 4], 0); assert.equal(inside[4 * 4], 9);
+});
