@@ -12,6 +12,7 @@ import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { renameInTriggers } from "../../lib/triggers/renamed";
 import { ident } from "../../lib/script/names";
 import { bindUndoKeys, History } from "../../lib/undo";
+import { addKeyContext } from "../../lib/keybindings";
 import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
@@ -24,7 +25,7 @@ import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
-  type Sound, type SoundLabel,
+  sortSounds, stepVolume, type Sound, type SoundLabel,
 } from "./sounds";
 
 const RAW = "map/war3map.w3s", FILE = `${RAW}.json`, WTS = "map/war3map.wts";
@@ -66,9 +67,13 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
   return gameSounds;
 }
 
+/** The preview volumes (Increase/Decrease Sound/Music Volume): what the editor's own playback is scaled by, 0 to 1. They
+ *  belong to this session, not to the map (nothing of them is saved in war3map.w3s). */
+const previewVolume = { sound: 1, music: 1 };
+
 /** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). The audio
  *  and its object URL (to stop it and free the URL), or null (said why) when there's nothing to play. */
-async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null): Promise<{ audio: HTMLAudioElement; url: string } | null> {
+async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null, music = false): Promise<{ audio: HTMLAudioElement; url: string } | null> {
   // Under its name on disk, whatever the case the sound names (as the game finds it).
   let bytes: Uint8Array | null = await readImported(w3, path).catch(() => null);
   if (!bytes && game) {
@@ -81,6 +86,7 @@ async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null): 
   const type = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : ext === "wav" ? "audio/wav" : "audio/flac";
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
   const audio = new Audio(url);
+  audio.volume = previewVolume[music ? "music" : "sound"];
   void audio.play().catch((e) => w3.window.showWarning(`Can't play ${path}: ${errorText(e)}`));
   return { audio, url };
 }
@@ -149,6 +155,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return true;
     }),
     { dispose: stopPlaying },
+    // Move Sound Variable Up/Down, Sort Sound Variables (one undo step each; false = nothing to move) and the preview volume.
+    w3.commands.register("w3.sounds.moveUp", () => needEditor().move(-1)),
+    w3.commands.register("w3.sounds.moveDown", () => needEditor().move(1)),
+    w3.commands.register("w3.sounds.sort", () => needEditor().sort()),
+    w3.commands.register("w3.sounds.volumeUp", () => needEditor().stepVolume("sound", 1)),
+    w3.commands.register("w3.sounds.volumeDown", () => needEditor().stepVolume("sound", -1)),
+    w3.commands.register("w3.sounds.musicVolumeUp", () => needEditor().stepVolume("music", 1)),
+    w3.commands.register("w3.sounds.musicVolumeDown", () => needEditor().stepVolume("music", -1)),
     w3.commands.register("w3.sounds.export", () => needEditor().exportCurrent()),
     w3.commands.register("w3.sounds.replace", () => needEditor().replaceCurrent()),
     // Where a sound is used (triggers, scripts, regions): the given sound, else the selected one.
@@ -212,6 +226,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
+        addKeyContext(el, "soundEditor");
         // Switching tabs: the commands and the Object Manager follow the Sound Editor that is shown.
         const activeSub = w3.editors.onDidChangeActive((a) => {
           if (a?.editor !== "w3.soundEditor" || a.path !== doc.path || current === editor) return;
@@ -344,6 +359,7 @@ class SoundEditor {
   private dialogueOpened = new WeakSet<Sound>();
   private audio: HTMLAudioElement | null = null;
   private audioUrl: string | null = null;
+  private audioMusic = false;
   private query = "";
   private open = new Set<string>();
   private tab: "game" | "map" = "game";
@@ -396,10 +412,18 @@ class SoundEditor {
     this.audioUrl = null;
   }
   /** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). */
-  private async play(path: string) {
+  private async play(path: string, music = false) {
     this.stop();
-    const p = await playSoundFile(this.w3, path, this.game);
-    if (p) ({ audio: this.audio, url: this.audioUrl } = p);
+    const p = await playSoundFile(this.w3, path, this.game, music);
+    if (p) { ({ audio: this.audio, url: this.audioUrl } = p); this.audioMusic = music; }
+  }
+  /** Increase/Decrease Sound or Music Volume: the preview volume moves one step (VOLUME_STEP) within 0 to 1, a sound
+   *  playing now follows. Returns the new volume. */
+  stepVolume(kind: "sound" | "music", dir: -1 | 1): number {
+    const v = (previewVolume[kind] = stepVolume(previewVolume[kind], dir));
+    if (this.audio && this.audioMusic === (kind === "music")) this.audio.volume = v;
+    void this.w3.window.showInfo(`${kind === "music" ? "Music" : "Sound"} volume ${Math.round(v * 100)}%`);
+    return v;
   }
 
   // ---- browser ----------------------------------------------------------------------
@@ -505,6 +529,32 @@ class SoundEditor {
     this.renderList();
     this.renderDetail();
   }
+  /** Move Sound Variable Up/Down: the selected sound swaps places with its neighbour (the order of war3map.w3s and of
+   *  the script's sound declarations), one undo step. False at the end of the list or with nothing selected. */
+  move(delta: -1 | 1): boolean {
+    this.needEdit();
+    const sounds = this.doc.sounds;
+    const at = this.selected ? sounds.indexOf(this.selected) : -1;
+    const to = at + delta;
+    if (at < 0 || to < 0 || to >= sounds.length) return false;
+    const list = sounds.slice();
+    [list[at], list[to]] = [list[to], list[at]];
+    this.doc.sounds = list;
+    this.changed();
+    this.renderList();
+    return true;
+  }
+  /** Sort Sound Variables: by name (SORT_KEY), one undo step. False when the list is in that order already. */
+  sort(): boolean {
+    this.needEdit();
+    const list = sortSounds(this.doc.sounds);
+    if (list.every((s, i) => s === this.doc.sounds[i])) return false;
+    this.doc.sounds = list;
+    this.changed();
+    this.renderList();
+    return true;
+  }
+  private needEdit() { if (!this.editable) throw new Error("This sound list can't be changed here."); }
   /** The map's sound `name` (gg_snd_…), selected; throws if there's none. */
   select(name: string): Sound {
     const s = this.doc.sounds.find((x) => x.name === name);
@@ -533,7 +583,7 @@ class SoundEditor {
   private renderList() {
     const rows = this.doc.sounds.map((s) => h(`tr.snd-row${this.selected === s ? ".active" : ""}`, {
       onclick: () => { this.selected = s; this.renderList(); this.renderDetail(); },
-      ondblclick: () => void this.play(s.file),
+      ondblclick: () => void this.play(s.file, !!(s.flags & MUSIC)),
       oncontextmenu: (e: MouseEvent) => {
         e.preventDefault();
         this.selected = s;

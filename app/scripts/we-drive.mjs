@@ -836,7 +836,8 @@ class Session {
     while (Date.now() < deadline) {
       await sleep(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
-      const questions = questionDialogs(this.windows().dialogs);
+      // A module window the run opened itself (the Sound Editor, F5) stays beside the map: not a question.
+      const questions = questionDialogs(this.windows().dialogs).filter((d) => !isReopenedModule(d.title));
       // The reminder about the default map name, and any dialog --save-accept names (e.g. "Warning", the "no longer
       // considered a melee map" notice): answered with Return.
       const reminder = questions.find((d) => d.title === "Reminder" || this.opts.saveAccept.includes(d.title));
