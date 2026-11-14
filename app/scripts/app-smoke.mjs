@@ -2806,11 +2806,11 @@ async function itemDrops(page, found) {
   if (!/Ogre Loot \(#3\)/.test(ogreBlock) || !ogreBlock.includes(clawsName) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
 
   // The Selection panel's Drops block has the random item control too, except for objects that drop from a table.
-  if (await has(".terrain-drops [data-prop=\"add-random\"]")) fail("the drops block offers a random set to an object that drops from a map item table");
+  if (await has(".terrain-drops [data-prop=\"block-add-random\"]")) fail("the drops block offers a random set to an object that drops from a map item table");
   await k.look(0, 0, { id: "nftt", x: 0, y: 0 });
-  await until("the troll's drops block with the random control", () => has(".terrain-drops [data-prop=\"add-random\"]"), 20000).catch(() => fail("the drops block has no random item control"));
-  await page.evaluate(`(() => { const s = (p, v) => { const e = document.querySelector('.terrain-drops [data-prop="' + p + '"]'); e.value = v; }; s("random-class", "3"); s("random-level", "0"); })()`);
-  await k.hands.click(".terrain-drops [data-prop=\"add-random\"]");
+  await until("the troll's drops block with the random control", () => has(".terrain-drops [data-prop=\"block-add-random\"]"), 20000).catch(() => fail("the drops block has no random item control"));
+  await page.evaluate(`(() => { const s = (p, v) => { const e = document.querySelector('.terrain-drops [data-prop="' + p + '"]'); e.value = v; }; s("block-random-class", "3"); s("block-random-level", "0"); })()`);
+  await k.hands.click(".terrain-drops [data-prop=\"block-add-random\"]");
   await redrawn();
   await k.save();
   if (JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify([...pasted, [{ id: "YkI0", chance: 100 }]])) fail(`the troll's drops after the block's random power-up, level 0: ${JSON.stringify(troll(0, 0)?.itemSets)}`);
