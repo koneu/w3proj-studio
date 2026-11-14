@@ -76,7 +76,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
     const key = `${path}|${texture}`;
     const req = byPath.get(key) ?? {
       path, replaceable: { 11: texture }, instances: [], tiles: [],
-      retexture: (p: string, slot?: string) => cliffRetexture(p, type, slot),
+      retexture: (p: string, slot?: string) => cliffRetexture(p, type, slot), retextureKey: texture,
     };
     req.instances.push({ world, team: 0 });
     req.tiles.push(...tiles);

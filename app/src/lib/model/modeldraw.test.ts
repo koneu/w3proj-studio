@@ -140,3 +140,19 @@ test("a model is shaded with the sun's shadow map it's given, and the map isn't 
   assert.deepEqual(pass.f("uSunOn"), [0]);
   assert.ok(!pass.onFive.includes(map), "never the map being drawn into");
 });
+
+test("a model whose node ids have a gap is posed like any other", () => {
+  // A node chunk that only warned (ATCH, PRE2, …) or collision shapes in between leave ids without a node.
+  const m = model(0);
+  const node = (objectId: number, parentId: number) => ({ name: "", objectId, parentId, flags: 0, kind: "bone" });
+  const nodes: unknown[] = [];
+  nodes[0] = node(0, -1);
+  nodes[5] = node(5, 0);
+  (m as unknown as { nodes: unknown[]; pivots: Float32Array }).nodes = nodes;
+  (m as unknown as { pivots: Float32Array }).pivots = new Float32Array(18);
+  const { gl } = recordingGl();
+  const gpu = new ModelGpu(gl, m);
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  assert.equal(gpu.stats.nodes, 2);
+  assert.equal(gpu.nodeWorld[5]?.length, 16);
+});

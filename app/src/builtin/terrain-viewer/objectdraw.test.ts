@@ -115,3 +115,23 @@ test("a type whose scales are no range (most below least, not a number) is drawn
   const out = await loader.load("doodads", [placed("D000", [3, 3, 3]), placed("D001", [3, 3, 3])], skins, () => 0);
   assert.deepEqual(out.batches.flatMap((b) => b.instances).map((i) => drawnScale(i.world)), [[3, 3, 3], [3, 3, 3]]);
 });
+
+test("a model whose read failed in passing is read again by the next load; one that isn't there, or can't be parsed, is not", async () => {
+  const reads: string[] = [];
+  let busy = true;
+  const loader = new ObjectLoader(fakeGl(), (path) => {
+    reads.push(path);
+    if (path.includes("Gone")) return Promise.reject(new Error(`not found: ${path}`));
+    if (path.includes("Broken")) return Promise.resolve(new Uint8Array([1, 2, 3, 4]));
+    return busy ? Promise.reject(new Error("the storage is busy")) : Promise.resolve(standModel());
+  }, () => {});
+  const skins = new Map([["D000", skin("w3d", 1, 1)], ["D001", { ...skin("w3d", 1, 1), file: "Doodads\\Gone\\Gone" }], ["D002", { ...skin("w3d", 1, 1), file: "Doodads\\Broken\\Broken" }]]);
+  const all = [placed("D000", [1, 1, 1]), placed("D001", [1, 1, 1]), placed("D002", [1, 1, 1])];
+  const first = await loader.load("doodads", all, skins, () => 0, undefined, undefined, false);
+  assert.equal(first.problems.length, 3);
+  busy = false;
+  reads.length = 0;
+  const second = await loader.load("doodads", all, skins, () => 0, undefined, undefined, false);
+  assert.deepEqual(reads, ["Doodads\\Test\\Test.mdx"], "only the one that failed in passing");
+  assert.deepEqual(second.problems.map((p) => p.items[0].id).sort(), ["D001", "D002"]);
+});
