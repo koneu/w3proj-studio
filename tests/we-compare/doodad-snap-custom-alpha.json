@@ -1,7 +1,7 @@
 [
   {
     "name": "doodad-snap-custom-alpha",
-    "description": "Snap Doodads on Load, doodads whose pathing texture is a 32-bit 4x4 file of the map of one colour whose alpha varies (magenta with half, one pixel or a ring transparent; red and black with half transparent), each at two angles (doodads 0-9; fixtures/we-specs/make-doodad-snap.mjs alpha): does the editor's mixed-picture rule look at the alpha (test.md)? KNOWN DIFFERENCE (2026-11-14, two runs): the editor turns all five to the quarter (doodads[0].angle 0, doodads[1] 1.5707964), as a picture of more than one colour; Studio keeps their angles (0.4, 1.2: doodadgrid.ts mixedPicture ignores alpha)",
+    "description": "Snap Doodads on Load, doodads whose pathing texture is a 32-bit 4x4 file of the map of one colour whose alpha varies (magenta with half, one pixel or a ring transparent; red and black with half transparent), each at two angles (doodads 0-9; fixtures/we-specs/make-doodad-snap.mjs alpha): does the editor's mixed-picture rule look at the alpha (test.md)? It does (2026-11-14, two runs): the editor turns all five to the quarter (doodads[0].angle 0, doodads[1] 1.5707964), as a picture of more than one colour, and so does Studio (doodadgrid.ts mixedPicture counts the alpha)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-alpha.w3x" },
     "studio": {
       "steps": [
@@ -11,7 +11,7 @@
         { "sleep": 2000 }
       ]
     },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }],
     "limit": 40
   },
   {

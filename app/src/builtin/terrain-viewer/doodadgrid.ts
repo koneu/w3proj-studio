@@ -11,7 +11,8 @@
 //   textures of 4×4: ring, corner, row, diagonal, half, cross, quadrants, and a magenta one with a single red, green or
 //   blue pixel all turn; all magenta, red, green, blue, black or white keep; the game's 1x1Default and 2x1Default are
 //   2×2 pictures with one and two magenta pixels and turn, 2x2Default is all magenta and keeps). Their places come
-//   from the picture's size as before. Whether the alpha counts is not measured (the game's own are uniform);
+//   from the picture's size as before. The alpha counts: one colour partly transparent turns (doodad-snap-custom-alpha);
+// - a type whose map-named texture is missing (the pathing map then uses the type's own) stays where it is;
 // - a plain square one keeps its angle;
 // - a type without a pathing texture (none, _) stays where it is.
 // The facing (we-drive, verification round 3 package 6, 2026-11-13; doodadgrid.test.ts):
@@ -36,10 +37,25 @@ export interface PathSize {
   mixed?: boolean;
 }
 
-/** True when the picture's pixels (RGBA, row after row) aren't all one colour; alpha isn't looked at. */
+/** True when the picture's pixels (RGBA, row after row) aren't all one colour, the alpha counted: a magenta picture
+ *  partly transparent is mixed (we-drive 2026-11-14, doodad-snap-custom-alpha spec: 32-bit magenta, red and black
+ *  4×4 pictures with half, one pixel or a ring transparent all turn to the quarter). */
 export function mixedPicture(rgba: ArrayLike<number>): boolean {
-  for (let i = 4; i + 2 < rgba.length; i += 4) if (rgba[i] !== rgba[0] || rgba[i + 1] !== rgba[1] || rgba[i + 2] !== rgba[2]) return true;
+  for (let i = 4; i + 3 < rgba.length; i += 4) {
+    if (rgba[i] !== rgba[0] || rgba[i + 1] !== rgba[1] || rgba[i + 2] !== rgba[2] || rgba[i + 3] !== rgba[3]) return true;
+  }
   return false;
+}
+
+/** The pathing size the snap goes by, from what a type's texture lookup found (PathingData.placedImage): null when
+ *  there's no picture, and also when the map's own texture is missing and the type's from the game's table stood in
+ *  for it (`fellBackTo`): the World Editor then leaves the doodad or destructable where it stands, place and angle
+ *  (we-drive 2026-11-14, doodad-snap-custom-missing spec: D300 and B300 on Custom\own-missing4.tga stay at -1486.5,
+ *  521.25, 0.4), though its pathing map uses the stand-in. */
+export function snapSize(found: { image: { width: number; height: number; rgba: ArrayLike<number> } | null; fellBackTo?: string }): PathSize | null {
+  const { image } = found;
+  if (!image || found.fellBackTo !== undefined) return null;
+  return { width: image.width, height: image.height, mixed: mixedPicture(image.rgba) };
 }
 
 const QUARTER = Math.fround(Math.PI / 2);
