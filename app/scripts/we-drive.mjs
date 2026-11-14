@@ -185,10 +185,11 @@ const PROGRESS_TITLE = "Progress";
 
 /**
  * The dialogs among `unknown` (those answerKnown didn't answer) that are questions: a dialog with a title, except
- * the loading window. An untitled window and the "Progress" window come and go while the map loads.
+ * the loading window and the editor's module windows. An untitled window and the "Progress" window come and go while
+ * the map loads; a module (the Trigger Editor a step opened for its JassHelper menu) stays open during a save.
  */
 export function questionDialogs(unknown) {
-  return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE);
+  return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE && !isReopenedModule(d.title));
 }
 
 /**

@@ -21,6 +21,7 @@ import { parseW3e } from "../../lib/terrain/w3e";
 import { weatherName } from "../../lib/terrain/weather";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { FIXED_START, fixedStartForRace, HUD_SKINS, priorityOf, RACE_SELECTABLE, withPriority, type Priority } from "./priorities";
+import { MAP_EXTRA_PATH, readMapExtra, TIMES_OF_DAY, writeMapExtra, type MapExtra } from "../../lib/formats/mapextra";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
 // where the file version decides whether they exist.
@@ -56,6 +57,7 @@ const SECTIONS = [
   { id: "prologue", label: "Prologue Screen" },
   { id: "options", label: "Options" },
   { id: "environment", label: "Environment" },
+  { id: "preferences", label: "Preferences" },
   { id: "players", label: "Players" },
   { id: "forces", label: "Forces" },
   { id: "techtree", label: "Techtree & Tables" },
@@ -113,6 +115,8 @@ interface GameLists {
   tilesets: [string, string][];
   weather: [string, string][];
   loadingScreens: [number, string][];
+  /** UI\WorldEditData.txt [SkyModels]: the number war3mapExtra.txt's SkyModel stores, and the sky's name. */
+  skies: [number, string][];
 }
 let gameLists: Promise<GameLists> | null = null;
 function loadGameLists(w3: W3Api): Promise<GameLists> {
@@ -132,10 +136,24 @@ function loadGameLists(w3: W3Api): Promise<GameLists> {
     const weather = parseSlk(await w3.game.readText("TerrainArt\\Weather.slk").catch(() => ""))
       .filter((r) => r.effectID)
       .map((r) => [r.effectID, weatherName(r.name, r.effectID, we)] as [string, string]);
-    return { tilesets, weather, loadingScreens };
+    const skies = [...(data.get("SkyModels") ?? new Map())]
+      .filter(([k]) => /^\d+$/.test(k))
+      .map(([k, v]) => [Number(k), westring(we, v.split(",")[1] ?? k).replace(/^"|"$/g, "")] as [number, string]);
+    return { tilesets, weather, loadingScreens, skies };
   })();
   gameLists.catch(() => { gameLists = null; });
   return gameLists;
+}
+
+/** war3mapExtra.txt as it is now: its text, null when the map has none, or the error when it's there but couldn't be
+ *  read (then it's left alone: treating it as empty would write over it). */
+async function readMapPrefs(w3: W3Api): Promise<{ text: string | null; error: string | null }> {
+  try {
+    return { text: await w3.workspace.readText(MAP_EXTRA_PATH), error: null };
+  } catch (e) {
+    const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === MAP_EXTRA_PATH.toLowerCase());
+    return { text: null, error: listed ? String(e) : null };
+  }
 }
 
 const PATH = "map/war3map.w3i.json";
@@ -333,18 +351,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return startLocations(unitsText ? (JSON.parse(unitsText) as { units?: [] }).units ?? [] : []);
         };
         let starts = await readStarts();
+        // The map's preferences (war3mapExtra.txt), edited here and saved with the map info. A missing file is no
+        // preferences; one that is there but can't be read is shown as such and never written over.
+        const prefs = await readMapPrefs(w3);
+        const extra: MapExtra = prefs.text !== null ? readMapExtra(prefs.text) : {};
+        /** The preferences as read or last saved here: a save writes the file only when they changed since (so a
+         *  change made to the file by another editor meanwhile isn't undone by a save of the map info). */
+        let extraSaved = JSON.stringify(extra);
 
-        // Undo: the map info and the string table texts it refers to (the only ones edited here).
+        // Undo: the map info, the string table texts it refers to (the only ones edited here) and the preferences.
         const snapshot = () => {
           const json = JSON.stringify(info);
           const refs = strings ? [...new Set([...json.matchAll(/TRIGSTR_(\d+)/g)].map((m) => Number(m[1])))].filter((n) => strings.has(n)) : [];
-          return JSON.stringify({ info, texts: refs.map((n) => [n, strings!.get(n)]) });
+          return JSON.stringify({ info, texts: refs.map((n) => [n, strings!.get(n)]), extra });
         };
         const history = new History(snapshot, (state) => {
-          const s = JSON.parse(state) as { info: MapInfo; texts: [number, string][] };
+          const s = JSON.parse(state) as { info: MapInfo; texts: [number, string][]; extra: MapExtra };
           for (const k of Object.keys(info)) delete (info as unknown as Record<string, unknown>)[k];
           Object.assign(info, s.info);
           for (const [n, t] of s.texts) strings!.set(n, t);
+          for (const k of Object.keys(extra)) delete extra[k as keyof MapExtra];
+          Object.assign(extra, s.extra);
           doc.setDirty(history.dirty);
           show(section);
           edits.fire();
@@ -539,6 +566,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...Object.keys(info.water).map((k) => row(k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
                 num(() => info.water![k], (n) => { info.water![k] = n; }, { int: true })))) : null,
           ].filter((x): x is HTMLElement => x !== null),
+          // The World Editor's Map Properties > Prefs and its Trigger Editor's JassHelper menu: war3mapExtra.txt.
+          preferences: () => {
+            if (prefs.error) return [h("p.muted", {}, `war3mapExtra.txt couldn't be read (${prefs.error}); its preferences are left as they are.`)];
+            const check = (label: string, get: () => boolean, set: (b: boolean) => void, disabled = false) => {
+              const box = h("input", { type: "checkbox", checked: get(), disabled });
+              box.addEventListener("change", () => { set(box.checked); update(); show(section); });
+              return h("label.form-check", {}, box, " ", label);
+            };
+            const off = extra.jassHelper !== true;
+            return [
+              section_("JassHelper",
+                h("div.form-checks", {},
+                  check("Enable JassHelper", () => extra.jassHelper === true, (b) => { extra.jassHelper = b || undefined; }),
+                  check("Enable vJass", () => extra.vjass !== false, (b) => { extra.vjass = b ? undefined : false; }, off),
+                  check("Enable debug mode", () => extra.debug === true, (b) => { extra.debug = b || undefined; }, off),
+                  check("Enable optimizer", () => extra.optimizer === true, (b) => { extra.optimizer = b || undefined; }, off)),
+                h("small.muted", {}, "The World Editor's JassHelper menu (Trigger Editor), kept with the map. Studio compiles vJASS with its own "
+                  + "settings (vJASS: debug, optimizer): in this World Editor build the map's debug and optimizer switches didn't change the compiled script."),
+              ),
+              section_("View",
+                row("Sky display", select<number>([[-1, "Use Editor Preference"], ...(lists?.skies ?? [])], () => extra.skyModel ?? -1,
+                  (n) => { extra.skyModel = n < 0 ? undefined : n; })),
+                row("Time of day", select<number>([[-1, "Use Editor Preference"], ...TIMES_OF_DAY], () => extra.timeOfDay ?? -1,
+                  (n) => { extra.timeOfDay = n < 0 ? undefined : n; })),
+                h("div.form-checks", {}, check("Enforce terrain limits", () => extra.enforceTerrainLimits === true, (b) => { extra.enforceTerrainLimits = b || undefined; })),
+                h("small.muted", {}, "What the World Editor's terrain view uses for this map (Map Properties › Prefs). Studio's terrain view keeps its own sky and limits."),
+              ),
+            ];
+          },
           players: () => {
             const ids = [...new Set([...info.players.map((p) => p.id), ...[...starts.keys()].filter((id) => id < maxPlayers(info))])].sort((a, b) => a - b);
             const controller = (id: number) => {
@@ -698,10 +754,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
             // undo isn't mixed up with the save.
             const taken = history.mark();
+            // What is saved is taken now: an edit made while the save waits stays unsaved (and the editor dirty).
             const saved = structuredClone(info);
+            const extraNow = JSON.stringify(extra);
+            // The preferences on top of the file as it is now (its other lines stay); a file that has become
+            // unreadable stops the save before anything is written.
+            let extraWrite: string | null = null;
+            if (extraNow !== extraSaved && !prefs.error) {
+              const now = await readMapPrefs(w3);
+              if (now.error) throw new Error(`war3mapExtra.txt couldn't be read (${now.error}); nothing was saved.`);
+              const base = now.text ?? "";
+              const next = writeMapExtra(base, JSON.parse(extraNow) as MapExtra);
+              if (next !== base && !(now.text === null && next === "")) extraWrite = next;
+            }
             applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
             await doc.writeText(text);
+            if (extraWrite !== null) await w3.workspace.writeText(MAP_EXTRA_PATH, extraWrite);
+            extraSaved = extraNow;
             if (strings && wtsBase !== null) {
               const base = wtsBase;
               const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);

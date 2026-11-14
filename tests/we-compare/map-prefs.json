@@ -1,0 +1,120 @@
+[
+  {
+    "name": "mapprefs-jasshelper",
+    "description": "war3mapExtra.txt (branch map-settings-we): Studio ticks Map Properties > Preferences > Enable JassHelper; the World Editor opens Studio's save and saves it again: the same bytes (it read the switch: its file is written from what it holds, an empty file with JassHelper off)",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enable JassHelper', true]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-debug",
+    "description": "Enable JassHelper and Enable debug mode from Studio, read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enable JassHelper', true], ['check', 'Enable debug mode', true]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-optimizer",
+    "description": "Enable JassHelper and Enable optimizer from Studio, read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enable JassHelper', true], ['check', 'Enable optimizer', true]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-no-vjass",
+    "description": "Enable JassHelper with Enable vJass unticked from Studio (EnableJassHelperVJass=false), read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enable JassHelper', true], ['check', 'Enable vJass', false]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-terrain-limits",
+    "description": "Enforce terrain limits from Studio (EnforceTerrainLimits=true), read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enforce terrain limits', true]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-sky",
+    "description": "Sky display Felwood Sky (SkyModel=2) from Studio, read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['select', 'Sky display', 2]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-time-of-day",
+    "description": "Time of day Fixed - Dusk (TimeOfDay=3) from Studio, read and saved again by the World Editor",
+    "input": { "new": { "name": "MapPrefs", "width": 64, "height": 64 }, "steps": [] },
+    "we": { "from": "studio" },
+    "studio": {
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['select', 'Time of day', 3]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-we-adds-optimizer",
+    "description": "The input has JassHelper and debug mode on, set in Studio; both editors then switch the optimizer on (the World Editor in its Trigger Editor's JassHelper menu): the same file, so the editor read Studio's switches (a switch it hadn't read would be lost from its save)",
+    "input": {
+      "new": { "name": "MapPrefs", "width": 64, "height": 64 },
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['check', 'Enable JassHelper', true], ['check', 'Enable debug mode', true]]);" }
+      ]
+    },
+    "we": { "steps": ["--key F4", ["--sleep", "3000"], ["--click", "200,111"], ["--sleep", "1000"], ["--click", "229,182"], ["--sleep", "1000"], ["--click", "200,111"], ["--sleep", "1000"], ["--click", "200,111"], ["--sleep", "1000"]] },
+    "studio": {
+      "steps": [
+        { "eval": "await window.__prefs([['check', 'Enable optimizer', true]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  },
+  {
+    "name": "mapprefs-we-adds-time",
+    "description": "The input has the sky set in Studio (Ashenvale Sky, SkyModel=15); both editors then fix the time of day at midnight (the World Editor in Scenario > Map Properties > Prefs): the same file, so the editor read Studio's sky",
+    "input": {
+      "new": { "name": "MapPrefs", "width": 64, "height": 64 },
+      "steps": [
+        { "eval": "window.__prefs = async (actions) => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); const body = async () => { for (let i = 0; i < 100; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); if (b) return b; await wait(100); } throw new Error('Map Properties > Preferences did not open'); }; for (const [kind, label, value] of actions) { if (kind === 'check') { const l = [...(await body()).querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === label); if (!l) throw new Error('no box ' + label); const box = l.querySelector('input'); if (box.disabled) throw new Error(label + ' is greyed'); if (box.checked !== value) box.click(); } else { let sel = null; for (let i = 0; i < 100 && !sel; i++) { const r = [...(await body()).querySelectorAll('label.form-row')].find((x) => x.querySelector('.form-label')?.textContent === label); const s = r?.querySelector('select'); if (s && [...s.options].some((o) => o.value === String(value))) sel = s; else await wait(100); } if (!sel) throw new Error('no choice ' + value + ' in ' + label); sel.value = String(value); sel.dispatchEvent(new Event('change')); } await wait(300); } }; await window.__prefs([['select', 'Sky display', 15]]);" }
+      ]
+    },
+    "we": { "steps": [["--click", "166,41"], ["--sleep", "800"], ["--click", "203,146"], ["--sleep", "3500"], ["--click", "700,217"], ["--sleep", "1500"], ["--click", "700,300"], ["--sleep", "800"], ["--click", "818,831"], ["--sleep", "1500"]] },
+    "studio": {
+      "steps": [
+        { "eval": "await window.__prefs([['select', 'Time of day', 4]]);" }
+      ]
+    },
+    "compare": [{ "file": "war3mapExtra.txt", "as": "bytes" }]
+  }
+]

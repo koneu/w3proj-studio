@@ -292,6 +292,37 @@ fn a_changed_project_file_reaches_the_map() {
     assert_ne!(fs::read(first).unwrap(), fs::read(edited).unwrap());
 }
 
+/// war3mapExtra.txt holds the World Editor's per-map preferences (its JassHelper menu, Map Properties > Prefs). The
+/// editor's own saves (branch map-settings-we): LF lines with an empty one at the end, and a file of 0 bytes when
+/// nothing is set, which it keeps in the map. Each must come back byte for byte through pack, unpack and pack.
+#[test]
+fn the_map_preferences_file_keeps_its_bytes_even_when_empty() {
+    let saves: [&[u8]; 3] = [
+        b"[MapExtraInfo]\nEnableJassHelper=true\nEnableJassHelperDebug=true\nEnableJassHelperOptimizer=true\nEnableJassHelperVJass=false\nEnforceTerrainLimits=true\nSkyModel=2\nTimeOfDay=3\n\n",
+        b"[MapExtraInfo]\r\nSkyModel=2\r\nTimeOfDay=4\r\n\r\n",
+        b"",
+    ];
+    for (i, bytes) in saves.iter().enumerate() {
+        let dir = workdir(&format!("mapextra-{i}"));
+        let (source, first, project, second) = (dir.join("source"), dir.join("first.w3x"), dir.join("project"), dir.join("second.w3x"));
+        // The fixture with this save of the file in place of its own.
+        for (name, data) in files(&fixture()) {
+            let to = source.join(&name);
+            fs::create_dir_all(to.parent().unwrap()).unwrap();
+            fs::write(to, data).unwrap();
+        }
+        fs::write(source.join("map/war3mapExtra.txt"), bytes).unwrap();
+        pack(&source, &first);
+        // In the map (an empty file too), under its own name.
+        assert!(ok(&["ls", s(&first)]).contains("war3mapExtra.txt"), "save {i}: not in the packed map");
+        assert_eq!(w3proj(&["cat", s(&first), "war3mapExtra.txt"]).stdout, bytes.to_vec(), "save {i}: packed differently");
+        unpack(&first, &project);
+        assert_eq!(fs::read(project.join("map/war3mapExtra.txt")).unwrap(), bytes.to_vec(), "save {i}: unpacked differently");
+        pack(&project, &second);
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "save {i}: the map changed");
+    }
+}
+
 #[test]
 fn a_project_file_that_makes_no_sense_stops_the_pack() {
     let dir = workdir("broken");
