@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, strictlyInside, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -88,7 +88,7 @@ import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
-import { clampShift, pushMoveEdit } from "./moveedit";
+import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
@@ -1760,7 +1760,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  point (we-drive 2026-11-13: nudged on a 64×64 map whose edge is 4096, it stopped at 4032, 4032, past the
          *  playable part's 3328, 3072).
          *  Not held to the camera bounds, as the World Editor's moves aren't. */
-        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle)
+        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? strictlyInside(wholeMap(handle))
           : e.id === "sloc" ? insetBy(wholeMap(handle), START_CELLS.map((c) => c * 16) as [number, number])
             : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
@@ -5110,13 +5110,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
         let drag: { x: number; y: number; mode: "translate" | "rotate" } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
-        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
+        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean; shift?: [number, number] } | null = null;
         const dragObjects = (p: Vec3) => {
           if (!objDrag) return;
           // The group keeps its shape and stops together at the map's edge (units and items with what they take up
-          // inside the playable part); not at the camera bounds, as in the World Editor.
-          const [dx, dy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
-            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
+          // inside the playable part); not at the camera bounds, as in the World Editor. A motion that would pass the
+          // limit is refused: the group stays where the last one that fitted put it (we-compare edge-last-step).
+          const [dx, dy] = refuseShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
+            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1], objDrag.shift ?? [0, 0]);
+          objDrag.shift = [dx, dy];
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
             // A doodad jumps from grid point to grid point while it's dragged, as in the World Editor.
