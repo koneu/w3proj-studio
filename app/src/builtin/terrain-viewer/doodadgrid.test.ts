@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { doodadOnGrid, doodadSnaps, mixedPicture, quarterTurn, type PathSize } from "./doodadgrid";
+import { doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, type PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 
 /** The pathing texture sizes of the measured types (the game's Doodads.slk and DestructableData.slk, the textures'
@@ -193,4 +193,24 @@ test("a destructable's fixed rotation holds only with a pathing texture (measure
   assert.equal(two(270, 2.9), Math.fround((270 * Math.PI) / 180));
   assert.equal(two(-1, 2.9), 2.9);
   assert.equal(doodadOnGrid(0, 0, 0.4, { width: 4, height: 4 }, 0).angle, 0);
+});
+
+// we-compare spec doodad-snap-grid (2026-11-14): pictures of 1 to 8 pixels across and high, every one placed at 16 offsets
+// at 0 and 90 degrees; the editor's places (modulo 64) for each count along an axis.
+test("a texture's grid is 64n plus the whole cells below its middle (measured, 1 to 8 pixels)", () => {
+  for (const [cells, offset] of [[1, 0], [2, 32], [3, 32], [4, 0], [6, 32], [8, 0], [16, 0]] as const) {
+    for (const v of [-478.75, -286.5, 13.5, 21.25, 100]) {
+      const at = onDoodadGrid(v, cells);
+      assert.equal((((at - offset) % 64) + 64) % 64, 0, `${cells} cells at ${v}: ${at}`);
+      assert.ok(Math.abs(at - v) <= 32, `${cells} cells at ${v} goes to the nearest`);
+    }
+  }
+  // The two the spec doodad-snap-custom-more left open: a 4x1 picture at 0 and at a quarter turn, on 64n for both axes.
+  assert.deepEqual(doodadOnGrid(-286.5, -478.75, 0, { width: 4, height: 1 }), { x: -256, y: -448, angle: 0 });
+  assert.deepEqual(doodadOnGrid(-286.5, -478.75, Math.fround(Math.PI / 2), { width: 4, height: 1 }), { x: -256, y: -448, angle: Math.fround(Math.PI / 2) });
+  // A 3x3 one stands on 64n + 32, not the 48 of a building.
+  assert.equal(doodadOnGrid(13.5, 21.25, 0, { width: 3, height: 3 }).x, 32);
+  // Control: halves go upwards.
+  assert.equal(onDoodadGrid(32, 1), 64);
+  assert.equal(onDoodadGrid(-32, 1), 0);
 });

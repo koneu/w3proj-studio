@@ -2,9 +2,9 @@
 // pathing texture. Measured with we-drive (2026-11-13, a copy of empty_map_on_newest_world_editor.w3m with 340
 // doodads off their grids, opened and saved by the editor; doodadgrid.test.ts has the measured cases) and borne out
 // by every doodad with a pathing texture on the 14 maps of smoketest_maps (44 390 of 44 390):
-// - a type with a pathing texture stands on the building grid of its texture's size (placement.ts onBuildingGrid):
-//   its texture's edges on the 64 grid, so a 2×2 or 6×6 one at 64n + 32, a 4×4 or 8×8 one at 64n, each axis on its
-//   own, the nearest such point, halves upwards (-3328 goes to -3296 on the 64n + 32 grid, -3040 to -3008 on 64n);
+// - a type with a pathing texture stands on the grid of its texture's size (onDoodadGrid, the building grid for even
+//   sizes): a 2×2 or 6×6 one at 64n + 32, a 4×4 or 8×8 one at 64n, an odd count as the even one below it (1 as 0, 3 as
+//   2: a 1×1 or 4×1 picture on 64n, a 3×3 on 64n + 32), each axis on its own, the nearest such point, halves upwards (-3328 goes to -3296 on the 64n + 32 grid, -3040 to -3008 on 64n);
 // - the texture is drawn for the default facing 270°: at a quarter turn of 0° or 180° its width lies along y;
 // - a type whose texture isn't square also turns to the nearest quarter turn (all 73 such on those maps are), and so
 //   does a square one whose pixels aren't all one colour (we-drive 2026-11-14, doodad-snap-custom-tex / -col specs, map
@@ -27,7 +27,6 @@
 //   the 270 of its 315).
 // The editor doesn't count this as a change (closing it asks nothing), but its next save writes the new places.
 
-import { onBuildingGrid } from "./placement";
 import type { Placed } from "./objects";
 
 /** A pathing texture's size in cells. */
@@ -73,6 +72,15 @@ export function fixedAngle(degrees: number): number {
   return Math.fround((degrees * Math.PI) / 180);
 }
 
+/** The nearest point of the doodad grid for a texture `cells` pixels across: 64n plus the middle of the texture, which
+ *  for an odd count is the whole cell below it (we-drive 2026-11-14, spec doodad-snap-grid, all 480 placements of
+ *  pictures 1 to 8 across and high at 0° and 90°: 1 goes to 64n, 2 and 3 to 64n + 32, 4 and 8 to 64n, so 3 isn't 48).
+ *  A building's grid (onBuildingGrid) is the same for even counts only. Halves go upwards. */
+export function onDoodadGrid(v: number, cells: number): number {
+  const half = Math.floor(cells / 2) * 32;
+  return Math.round((v - half) / 64) * 64 + half;
+}
+
 /** Where the World Editor puts a doodad of pathing size `size` (null: no pathing texture) that is stored at (x, y)
  *  with `angle` (radians), and the angle it turns it to. `fixedRot`: a destructable type's fixed rotation in degrees
  *  (null: none, and always for doodads, whose fixed rotation the editor doesn't enforce); it only holds with a texture. */
@@ -89,7 +97,7 @@ export function doodadOnGrid(x: number, y: number, angle: number, size: PathSize
   const cellsX = across ? size.height : size.width, cellsY = across ? size.width : size.height;
   const quarter = Math.fround((q * Math.PI) / 2);
   const turned = keep(angle, size.width === size.height && !size.mixed ? wholeTurns(facing) : quarter);
-  return { x: keep(x, onBuildingGrid(x, cellsX)), y: keep(y, onBuildingGrid(y, cellsY)), angle: turned };
+  return { x: keep(x, onDoodadGrid(x, cellsX)), y: keep(y, onDoodadGrid(y, cellsY)), angle: turned };
 }
 
 /** The doodads of a list the World Editor would move or turn when it opens the map, with where to. `sizeOf`: an
