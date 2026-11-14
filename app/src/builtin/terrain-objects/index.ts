@@ -14,7 +14,7 @@ import {
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
-import { applyRandom, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { applyRandom, autoCycleAfterPlace, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { readArea } from "../../lib/terrain/area";
@@ -39,6 +39,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     return { placed: all.length, types: capped(placedTypes(all, names), limit, 200) };
   }));
+  ctx.subscriptions.push(w3.commands.register("w3.terrainObjects.toggleAutoCycleRandomGroups", () =>
+    w3.settings.set("terrain.placement.autoCycleRandomGroups", w3.settings.get<boolean>("terrain.placement.autoCycleRandomGroups", true) === false)));
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "objects", title: "Objects", order: 20, create: (ed) => placer(w3, ed) }));
   });
@@ -74,9 +76,9 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!g || !placing || scatter) { ed.objects.setGhost(null); return; }
     const { kind, id } = placing;
     const type = ed.objects.type(id);
-    const angle = next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING));
+    // Where a click puts it: a building on its grid, a doodad on its own (turned by quarters if its footprint isn't square).
+    const { x, y, angle } = await ed.objects.placedSpot(kind, id, g[0], g[1], next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING)));
     let ok = true;
-    const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, g[0], g[1]) : g;
     if (respect()) {
       const occ = await ed.objects.occupancy();
       ok = ed.objects.backdrop(kind, x, y) || await occ.fits(kind, id, x, y, angle);
@@ -112,6 +114,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** A scatter drag: everything it places is one undo step. */
   let drag: { entries: PlacedEntry[]; last: [number, number, number]; queue: Promise<void> } | null = null;
 
+  const autoCycle = () => w3.settings.get<boolean>("terrain.placement.autoCycleRandomGroups", true) !== false;
+
   /** Places the chosen object at `pos`, or (with `stroke`) fills the brush there. */
   const placeAt = async (pos: [number, number, number], stroke?: { entries: PlacedEntry[] }) => {
     if (!placing) return;
@@ -122,12 +126,11 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const look = stroke ? null : next ?? rollLook(type, lookOptions());
     const occ = respect() || stroke ? await ed.objects.occupancy() : null;
     const fp = occ ? await occ.footprint(kind, id) : null;
-    const facing = () => (type?.fixedRot != null ? deg(type.fixedRot) : Math.random() * Math.PI * 2);
+    const facing = () => placeAngle(type, lookOptions().randomRotation);
 
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
-      const angle = look!.angle;
-      const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
+      const { x, y, angle } = await ed.objects.placedSpot(kind, id, pos[0], pos[1], look!.angle);
       if (!ed.objects.inBounds(x, y)) {
         w3.window.showWarning(ed.objects.refusedOutside("that is"));
         return;
@@ -146,9 +149,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         for (let gx = -radius; gx <= radius; gx += spacing) {
           const x = pos[0] + gx + (Math.random() - 0.5) * spacing * 0.6, y = pos[1] + gy + (Math.random() - 0.5) * spacing * 0.6;
           if (Math.hypot(x - pos[0], y - pos[1]) > radius) continue;
-          const angle = facing();
-          // Snap to the pathing grid like the World Editor (cell centres for trees).
-          const [sx, sy] = kind === "w3u" ? await ed.objects.buildingSpot(id, Math.round(x / 32) * 32, Math.round(y / 32) * 32) : [Math.round(x / 32) * 32, Math.round(y / 32) * 32];
+          // Snap to the pathing grid like the World Editor (cell centres for trees; a doodad's own grid, doodadedit.ts).
+          const { x: sx, y: sy, angle } = await ed.objects.placedSpot(kind, id, Math.round(x / 32) * 32, Math.round(y / 32) * 32, facing());
           if (!ed.objects.inBounds(sx, sy)) continue;
           if (fp) {
             if (respect()) {
@@ -181,6 +183,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       entries.push(e);
     }
     ed.objects.insert(entries);
+    autoCycleAfterPlace(random, autoCycle(), (step) => void ed.cycleRandomGroups(step).catch(() => undefined));
     if (stroke) stroke.entries.push(...entries);
     else {
       ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
@@ -303,6 +306,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
       () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
     sizeWrap, densityWrap,
+    toggle("Auto cycle random groups", "After placing a unit or item from a random group, show the next line of the groups, as Cycle Random Groups - Next; setting terrain.placement.autoCycleRandomGroups",
+      () => autoCycle(), (v) => void w3.settings.set("terrain.placement.autoCycleRandomGroups", v)),
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),
   );

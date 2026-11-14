@@ -42,8 +42,10 @@ test("projects' build outputs and checkpoints are left out, maps beside them are
   if (misnamed.length) want.push("x\\y.w3x");
   assert.deepEqual(listed(root, [root]).sort(), want.sort());
 
-  // The control: the project's maps are found when the project itself is given, as verify does.
-  assert.deepEqual(listed(root, [join(root, "proj")]).sort(), ["proj/build/Proj.w3x", "proj/build/checkpoints/Proj-1.w3x"]);
+  // A project given directly is searched, but its build folder is still left out.
+  assert.deepEqual(listed(root, [join(root, "proj")]), []);
+  // The control: a folder named build given directly is searched.
+  assert.deepEqual(listed(root, [join(root, "proj", "build")]).sort(), ["proj/build/Proj.w3x", "proj/build/checkpoints/Proj-1.w3x"]);
   // A map named directly is checked whatever it is.
   assert.deepEqual(listed(root, [join(root, "proj", "build", "Proj.w3x")]), ["proj/build/Proj.w3x"]);
 });

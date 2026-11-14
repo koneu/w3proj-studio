@@ -134,18 +134,42 @@ falls short, rather than copying their insides into a scratch file.
 | compare two pictures | `node scripts/pic-compare.mjs a.png b.png` (in `app/`): mean colour per region in both, their difference, the mean absolute difference of the pixels; `--region [name=]x,y,w,h`, `--sample` (whole and a 3x3 grid), `--diff d.png`, `--tolerance T` (exit 1 when a region's difference is above it, 2 when the pictures can't be compared). Plain JavaScript, no Pillow |
 | run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too; `--part=1/2` / `--part=2/2` runs one half (see "Running it") |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
+| make a project's pathing, shadows, minimap and script as the app does, without it | `w3proj rebuild <project> [--only=wpm,shd,minimap,script] [--force]`: the app's own code in Node (`app/src/headless`); app-smoke's `rebuildCli` holds its bytes against the app's |
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
-| see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines), writes `openpoints/openpoints.json` (every point with file, section, text, a stable id), adds an entry to `openpoints/burndown.json` and writes `openpoints/burndown.html` (the chart, data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |
+| see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines; leading `[tag]`s such as `[game]`, `[windows]`, `[we]`, `[eye]`, `[extra]` become `tags`), writes `openpoints/openpoints.json` (every point with file, section, tags, text, a stable id), adds an entry to `openpoints/burndown.json` (per file, plus three lines: to build / to prove by agents / waiting for the user, primary vs `[extra]`, and per snapshot how many ids opened, closed or were edited) and `openpoints/burndown-ids.json` (the ids: first snapshot, then the deltas; a vanished id with a new one of at least 80% similar text is an edit), and writes `openpoints/burndown.html` (chart, tiles, per-day table; data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |
+| apply testers' verdicts to the open points | `node scripts/openpoints-close.mjs <verdicts-file> [--dry-run]` (repo root): lines `<id>: PASS \| FAIL \| DIFFERS \| NOT DONE — <text>`. PASS removes the item block; FAIL/DIFFERS add a one-line item to `bugs.md` "From verification" pointing at the old one; NOT DONE adds `(not done: reason, date)`, the second moves the item to `user.md` (game/Windows/user) or `onhold.md`. Unknown ids refuse the whole run; changed files are copied to `openpoints/.backup/<timestamp>/` first. Tested in `app/scripts/openpoints.test.mjs` |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--drag X,Y:X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` before it), `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
-The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
-line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
+The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh` and
+`scripts/setup-windows.bat`; one folder per line after `#` comments, the first that exists counts, so a checkout
+shared by a Windows and a Linux machine lists both), else the folder above the checkout (the Windows layout).
 The CLI reads `W3PROJ_GAME` too. The smoke app's identifier is one per checkout (`W3_SMOKE_ID` overrides it), so
 runs in two worktrees don't share settings; none of these tools starts the game or the World Editor, except
 `we-drive.mjs`, which starts the World Editor only.
 
 ### The real World Editor: we-drive.mjs
+
+- **Dragging**: `--drag X,Y:X,Y[@MS]` presses the left button, moves in 20 steps over MS (400) and lets go; `--drag-mod alt` holds a key during the next drag. Measured (TerenasStand_LV, doodad layer `--key d`, a tree clicked, 800 ms): a plain drag of the selected tree changes nothing in war3map.doo (it is a box select), Alt+drag moves it (editor id 1224, (320, -576) to (576, -768)), the only change in 1680 doodads.
+- **Moving objects at the edges** (branch we-drag-checks, 2026-11-13, SD, copies of the empty 64x64 map: camera bounds
+  right at 2816, playable part 3328, map 4096; scripts and saves in `target/evidence/we-drag-checks/` of the main
+  checkout). A plain drag that starts on a selected object moves it (a doodad by `--key d`, a unit by `--key u`; the
+  first click must hit the model: a footman's feet miss, 10 px higher hits); Alt+drag moves a unit's centre to the
+  pointer. The nudge is Edit > Nudge Selection: the number pad (`--key Num_Lock` once, then `--key KP_6`; without Num
+  Lock the keys arrive as arrows and do nothing), 64 a step for a tree, 8 for a doodad without pathing and a footman.
+  Measured again in nudge-turn-we (target/evidence/nudge-turn-we): the nudge is 64 for a tree (LTlt) and a farm (hhou), 8
+  for a doodad without pathing (LPcr) and a footman; the diagonals KP_7 9 1 3 move both axes the whole step (a tree:
+  -64/+64, +64/+64, -64/-64, +64/-64); KP_Divide turns a selection 5 degrees left, KP_Multiply 5 right. Studio:
+  selectionkeys.ts (NUDGE 8, TURN 5), doodadedit.ts GRID_NUDGE_STEPS.
+  The editor takes the drag's second-to-last motion step (a footman dragged 576 in 20 steps moved 547). Found: with
+  Enforce Camera Bounds on (and off alike) drags and nudges go past the camera bounds; a unit stops with its collision
+  size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
+  goes past the playable part and stops with its centre strictly inside the map (tree and a 12x12 LZth 4032 on 64
+  steps, a pathless LPcr 4088 on 8 steps). The camera too scrolls past the camera bounds with the switch on. Studio:
+  limits.ts `insetBy`, terrain-viewer `moveBounds`; app-smoke heightsLimits.
+- **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
+  through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
+  the view at 156,79): the status bar read (3713.9, 515.4) where (3712, 512) was aimed (`proj.py` in that folder).
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
@@ -157,18 +181,38 @@ It never starts the game itself.
   0.35 GB). The farm is made again only for another game build (`.build.info`), `--clean` removes it all. The editor
   runs in bubblewrap with the user's whole Steam prefix and every hardlink mounted read-only; the editor opens the
   CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
-  at a time (`target/we/lock`; a second run waits and says so). `we-setup.mjs --snapshot` and `--compare` show the
+  at a time, machine-wide: the lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
+  every worktree and every `W3PROJ_WE_DIR`; a second run says once who holds it and since when, and waits
+  (`takeLock`'s timeout; a dead pid is taken over). `we-setup.mjs --snapshot` and `--compare` show the
   install and the user's `Documents/Warcraft III` unchanged; the user's own Battle.net app writes elsewhere in that
   prefix while it runs (and touches the install's `shmem` files when it checks the game), which `--compare` lists.
+- **Nothing is ever sent to Blizzard.** The editor crashes on close with View > Light Ranges on, and its crash
+  report dialog has "Send to Blizzard" ticked and a text box. The editor's sandbox has no network (`bwrap
+  --unshare-net`: the editor's processes see only `lo`; it starts and loads maps as before), and every window list
+  we-drive reads (`Session.windows()`, so every step, `--close` included) is checked for that dialog (`crashDialogs`:
+  the owning program's name, else title or window class). Seen for real (2026-11-13): the dialog comes after the main
+  window has gone, is titled exactly "Warcraft III World Editor" with the editor's class (`steam_app_<appid>`), and
+  belongs to `BlizzardError.exe`, so the program name is what finds it. Only argv[0]'s file name counts, and a
+  title's `[…]` (the map's path) is left out: paths may say "crash" (a worktree named so once tripped it). On a hit
+  it takes a picture of the screen (`dialog-crash-*.png` in the work folder), types and clicks nothing, kills the
+  editor, its crash reporter and everything else of its prefix (`wineserver -k` and the process group), and prints
+  `crashed: true` with "the World Editor crashed; report dismissed without sending" (`--close` then counts as
+  closed; any other step fails). Unticking the box isn't tried. `--close` types "n" only into a window of the main
+  window's process: the "Warning" question, or an untitled or editor-titled dialog while the main window exists
+  (`closeAction`); anything else of the kind counts as a crash. Tested on the recorded window list
+  (`we-drive.test.mjs`); the crash leaves its dump in the farm's prefix (`Documents/Warcraft III/Errors`).
 - **Nothing on the screen, no sound.** A display of its own (Xvfb, 1600x1000), Vulkan through lavapipe. Wine's audio
   drivers are off, PulseAudio and PipeWire are pointed at nothing and their sockets and `/dev/snd` are hidden, and
   the editor's interface sounds are off in its preferences: nothing of it shows in `pactl list sink-inputs`.
 - **Preferences** (`Documents/Warcraft III/WorldEditPreferences.txt` in the farm's prefix, written before each start,
   the rest kept): `Has Been Run=true`, no interface or splash sounds, `Fixed Day Night Cycle` from `--day-night`, and
-  the graphics: `--mode sd` sets `assetMode`, `hd` and the Reforged switches (`Buildings`, `Environment`, `EnvOld`,
-  `Heroes`, `Icons`, `Textures`, `Units`, `Vfx`) to 0, `--mode hd` (the default) to 1; told apart by pictures of
-  footmen, a barracks and trees close up (classic red-roofed barracks and round trees in SD, the white stone barracks
-  and new trees in HD). The install's text locale goes into the prefix's registry (else the editor shows
+  the graphics: `--mode sd|hd|de` sets `assetMode` to 0, 1 or 2 (File > Preferences > General > Asset Mode offers
+  SD, HD, DE; DE is the 3.0 art) and `hd` and the Reforged switches (`Buildings`, `Environment`, `EnvOld`, `Heroes`,
+  `Icons`, `Textures`, `Units`, `Vfx`) to 0 for sd, else 1. Told apart (2026-11-13) by pictures of one map in all
+  three modes: `assetMode` alone decides (assetMode 2 with every other switch 0 draws DE, assetMode 0 with them all
+  1 draws SD); the registry and the install showed no mode value in a before/after diff. SD has round trees, HD flat grass with
+  pointed trees, DE feathered pines and a detailed terrain. Switching in the dialog crashes the hidden editor
+  (it re-opens its archive over the network), so write the key instead. The install's text locale goes into the prefix's registry (else the editor shows
   `WESTRING_…` names). The first start of a new prefix shows the editor's welcome, which asks to accept Blizzard's
   terms. The user accepted them in their own install (which the farm is made from) and agreed on 2026-11-08 that
   we-drive presses Continue in its own prefix; `W3PROJ_WE_ACCEPT_TERMS=0` makes it report the dialog instead. The
@@ -199,6 +243,21 @@ It never starts the game itself.
   packed again), one row each, then two parking cameras at the terrain's corners; after View Selected Camera the
   parking camera farther away is selected, which takes the selected camera's green circle out of the picture
   without moving the view. `--look center` on cliff.w3m (SD) gives the opening picture exactly (difference 0).
+- **The Camera Objects layer** (`--view "Camera Objects=on"`, Ctrl+M; branch camera-layer, 2026-11-13, a copy of
+  cliff.w3m with flat cameras of distance 500, 1000 and 2000, and 12b_RoC_Orc04Interlude's 28): one blue model per
+  camera, a small movie camera with an arrow whose tip is the target, pointing along the camera's view and scaled by
+  its distance (the camera's back 0.365 of it from the target; world-sized, so it grows as the view comes closer). No
+  footprint or field of view on the ground. Lit by the map's light (blue under 12b's, light cyan on cliff.w3m's day).
+  Studio's lib/terrain/cameras.ts `cameraMarkers` lines up within 2 px at the opening view. The colour (branch
+  camera-tab-markers) fits one colour lit by the units' light as the lighting model gives it, without HD's response
+  to it (renderer `setShapes`); with that response no one colour fits both maps. The camera layer (`m`) shows no
+  models by itself (View > Camera Objects does), but a selected camera (its palette row) gets a pure green circle
+  round its target on the ground (following hills), radius 0.096 of its distance; on cliff.w3m's bright grass it is
+  hard to see by eye (find it by difference).
+- **Adjust Map String IDs** (branch locale-string-ids, 2026-11-13): Advanced (`--click 250,41`) > Adjust Map String IDs
+  (`--click 300,163`) opens "Map String IDs", a list of war3map.wts's strings (rows at y 304, 318, … in steps of 14);
+  `--double-click 392,304` opens "Enter New ID" with the number selected: `--key 4 --key Return`, then OK
+  (`--click 871,710`) and `--save`. It leaves the `_Locales` tables alone (lib/formats/localewts.ts).
 - **Saving** (`--save FILE`, branch save-parity, 2026-11-09): variants of a map made with the release CLI (unpack, JSON,
   pack), saved by the editor and unpacked again, show what its save works out by itself. Found so: the ally priorities
   (lib/terrain/startlocations.ts `editorAllyPriorities`), hit points and mana of 0 saved as -1 (lib/terrain/owner.ts
@@ -207,17 +266,51 @@ It never starts the game itself.
   reports; the flat `empty_map_on_newest_world_editor.w3m` doesn't. The save also turns the Melee flag back on for a map
   that meets its rules (a copy with the flag off got it). Those rules (branch props-ui-fixes: copies of (4)PhantomGrove
   with the flag cleared and one change each) are in lib/terrain/owner.ts `meleeBlockers`; Studio's save takes the flag
-  off by them but never puts it back, since two of the editor's reasons (custom triggers, start locations in invalid
-  positions) it can't tell. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
-- **Dialogs that don't draw**: Scenario > Player Properties opened (window "Scenario Properties") but stayed a blank
-  white rectangle in the hidden display, also after moving the pointer over it and clicking; `--close` then can't
-  answer it.
+  off by them, and puts it back only where it can tell every reason is absent (lib/terrain/meleesave.ts
+  `meleeSetBlockers`: the default trigger only, no object data or interface file, nothing but creeps within 512 of a
+  start on flat buildable ground). Branch melee-flag-set (2026-11-13): copies with the flag cleared of cliff.w3m,
+  (2)BanditRidge, (8)Friends, (4)RustyCreek_S2_v1.3 and (4)FrozenClover (a creep 12 from a start) got it back from the
+  editor's save, as from Studio's; (6)Zandalar got it back too, where Studio leaves it off (doodads 39 from the starts).
+  Studio puts it back on 153 of the game's 185 FrozenThrone melee maps with the flag cleared. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
+- **Dialogs that don't draw at once**: Scenario > Player Properties (window "Scenario Properties") draws about 3 s
+  after the click; before that it is a blank white rectangle in the hidden display. Take pictures at least 3 s after
+  a click. A menu left open at `--close` can't be answered by it: never leave one open.
+- **Testers' hygiene**: a number field needs Enter (`\r`) or a blur, or `change` never fires and no edit happens (a
+  hidden-app dirty-flag reading looked wrong for this reason). Kill processes by PID, never by pattern: a `pkill` by
+  pattern once hit another display's Proton services.
 - **Copy and paste of objects** (branch paste-anchor-we, 2026-11-12, SD, a flat 64x64 map): `--key d` (doodads layer),
   `--click` on a doodad or `--drag` a box round several, `--key ctrl+c`, `--key ctrl+v`, `--move` to a spot, `--click`
   there, `--key Escape`; the clipboard stays for another `ctrl+v`. The status bar's "Point: (x, y, z)" at the pointer
   (the bottom left of `--shot-window`) gives its world position; at the opening camera the ground maps to the display
   by a plane homography (fitted from six such readings to the pixel). The editor moves each doodad onto its own grid
   when the map loads (a barrel to 64n + 32, a crate to 64n), so the copied positions are read from its save.
+- **Gold mines and start locations** (branch mine-start-grid, 2026-11-13, SD; spec tests/we-compare/mine-start-grid.json):
+  both stand on the 64 grid when placed, nudged, dragged or Alt-moved (a mine by its 16×16 texture, a start location as
+  a 4×4 building); loading and saving leaves off-grid ones where they are. Nudged, a start location stops 64 inside the
+  whole map (4032 of 4096), past the playable part. The palette's Start Location (`--key u`, `--click 1510,403`) makes
+  Player 1's start a new object (editor id last, hit points and mana 0); Neutral Passive is `--click 1435,80`, `--click
+  1405,424`, its first building (`--click 1383,365`, 3 s later) the Gold Mine. A click on a start location selected it
+  (its circle moved with the keys) but the save kept it where it was; a box select (`--drag` from bare ground) works.
+  we-compare refuses `--look`: the spec's input has the camera objects, picked as --look does (`--key m`, `--click
+  1396,177` for the first row, 13 px a row, `--click 1476,119`). Placing a unit without a texture (Phoenix Egg) is free:
+  it stood at -1899.459, 500.253 where -1900, 500 was aimed through `proj.py`'s projection.
+- **Doodad rules while editing** (branch doodad-rules-edit, 2026-11-13, HD, empty_map_on_newest_world_editor.w3m with a
+  barrel LTbr at 32, 32 scale 1.2, a log AOlg (12x6 texture) at 1056, 0 facing 0, wheat LPwh (no texture); saved after
+  each step): an 8 px drag of the barrel (about 20 units at the opening camera) didn't move it, an 18 px one put it at
+  96, 32: dragged doodads stay on their grid (whether it jumps during the drag or at the release a picture can't tell
+  with one `--drag`). `+` (`KP_Add`) ten times then `-` three times took the barrel's 1.2 to 1.35, not 1.55: the scale
+  is held to the type's range (1.1 to 1.5) at once. The numpad `/` turned the barrel and the wheat freely (by 5° to 15°
+  per press, depending on how long it was held) but the log a quarter per press (three: 0° to 270°, its place on the
+  grid of 270°). Ctrl+arrows moved nothing, wheat included, and `]` turned nothing: not the editor's keys in this
+  build. A `--click` on the wheat or the log may miss; a `--drag` box from bare ground round it selects it (a box
+  starting on a doodad drags it). doodadedit.ts follows this.
+- **Doodad facings and turned ranges on load** (branch verify3-p6-diffs, 2026-11-13, SD, the 212-doodad map of
+  verification round 3 package 6 with 26 more, opened and saved): a destructable's fixed rotation is enforced (LTlt
+  fixedRot 270 at 30, -90, 400 saved 270; LTt0 0 and ATt0 90 likewise, before the quarter turn of their 24×12
+  texture), a doodad's isn't (YZef 270 at 30 stays 30); every other angle comes into 0..360 by whole turns in single
+  precision, doodads and destructables, with or without a texture (1080 and 720 to 360, -720 to 0); a range the wrong
+  way round saves every scale at its least (the map's LTex 1.5 to 1.1, LPfp 1.4 to 0.9); the tree bridges' doubled
+  minScale/maxScale lines count by their first. doodadgrid.test.ts and doodadrules.test.ts hold the cases.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list
@@ -226,6 +319,30 @@ It never starts the game itself.
   of cliff.w3m (branch unit-props-2, 2026-11-10): the editor draws a placed unit's skin and its Custom Color only where
   the type allows a custom team colour (`utcc`, not "is a waygate"), and its script switches a custom ability on by
   its base's order.
+  Placed destructables and doodads (branch skin-row-dest, 2026-11-13, empty 64x64 map, doodad layer `--key d`, click, Return):
+  Doodad Properties has a Skin button at the end for both (a destructable's General tab: Variation, Z, Scale, Life, Skin;
+  a plain doodad's: Rotation, Roll, Pitch, Scale, Skin); Choose Skin lists the kind's types (destructables for a tree).
+  Choosing LTe1 for an LTlt and saving wrote skinId LTe1 in a version-13 doo, id and life unchanged.
+- **Wheel zoom** (branch wheel-zoom-pivot, 2026-11-13, cliff.w3m, SD): each notch changes the camera distance by 1.1
+  and keeps the camera target fixed, the eye sliding along the ray to it, wherever the pointer is: three notches in
+  with the pointer at the view's middle, top left and bottom right all expand about (593, 325.5) of the 1184x844
+  view, the target's place in the off-centre projection (focus of expansion of matched patches, residual 1.5 px).
+  Studio zooms about the same point (wheelzoom.ts `zoomStep`).
+- **Keyboard zoom and the zoom's row** (branch key-zoom, 2026-11-13, cliff.w3m, SD; numbers and the patch matcher in
+  `target/evidence/key-zoom/` of that worktree): Ctrl+Up and Ctrl+Down are a wheel notch exactly (Ctrl+Up then a notch
+  out gives the opening picture back to the pixel, a notch in after Ctrl+Up's undo the Ctrl+Up picture), wherever the
+  pointer is. Held, they step once per key repeat (400 ms: one step; 1500 ms: 22, the display's repeat starting after
+  660 ms at 25 a second). Page Up and Down, the number pad's + and -, and Ctrl+Page Up don't zoom. `--screen` gave
+  other view sizes (moving the window by X doesn't: the editor doesn't lay it out again): the zoom keeps the middle
+  column's point at row 325.0 of an 844 high view, 222.6 of 592, 220.2 of 585 and 211.7 of 565, whatever the width:
+  0.4057 h - 17.4 (within 0.3 px), not a share of the height (325.5 / 844 misses the small views by 6). Studio uses
+  that row for wheel and keys (wheelzoom.ts `zoomPivotRow`).
+- **Light Ranges** (branch light-radius, 2026-11-13, HD, `--look X,Y,3000,270,70,90` straight down, copies of the
+  empty map with imported copies of the Ruins Brazier's HD model, one light value changed each; numbers in
+  `target/evidence/light-radius/` of the main checkout): one ring per light on the ground under it, in the light's
+  colour, its radius set by the brightness alone (intensity times the colour's length; not the attenuation, not the
+  object's scale), animated with the intensity track. Studio's fit: viewmodes.ts `lightRangeRadius`. In SD no rings
+  were drawn. Closing the editor with Light Ranges on ended in its crash dialog each time (`--close` times out).
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and
@@ -242,6 +359,54 @@ It never starts the game itself.
   clamps the light to 1); in HD it holds for map 03, but cliff.w3m's own strong lighting makes its game view much
   brighter than the editor's light (green about 233 against 123). The rest of the colour difference to Studio was
   the HD picture's tone (`lib/model/tone.ts`).
+
+### Verification rounds: one build, many testers, one World Editor session
+
+**One build per round**: `node scripts/verify-build.mjs [--commit REV] [--tester NAME] [--json] [--no-cli] [--force]` (in `app/`)
+`git archive`s the commit into `target/verify/<short-sha>/` of the main checkout, runs `npm ci`, builds the smoke app
+(`appctl.mjs buildApp`, debug, sccache through the main checkout's `.cargo/config.toml`) and the release CLI, and writes
+`verify.json`. A commit already built is not built again (the second caller prints at once); two callers at once take
+turns (a lock folder next to it). It prints the binary, the CLI and the command lines for a tester named NAME:
+
+- app-drive: `node scripts/app-drive.mjs --app <binary> --work <own folder> <steps>`
+- app-smoke: `W3_APP_BIN=<binary> W3PROJ_BIN=<cli> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>`
+- we-compare: `node scripts/we-compare.mjs --app <binary> --work <own folder> <spec.json>`
+
+`W3_APP_BIN` (or `--app`) makes `appctl.mjs`, app-drive, app-smoke and we-compare run that binary and build nothing.
+Settings (`W3PROJ_CONFIG_DIR`, default `<work>/config`) and the webview's storage (`XDG_DATA_HOME`/`XDG_CACHE_HOME`
+under the work folder, Linux) are per run, so testers sharing a binary share nothing. The identifier of the build is
+the same for all (`W3_SMOKE_ID` only names the build). Proven with two `app-drive` and two `app-smoke --only=byHand` runs
+at once on one binary. Costs (this machine, sccache warm): archive 0 s, `npm ci` 3 s, app build 142 s, CLI about 10 s more.
+
+**we-compare** (`node scripts/we-compare.mjs [--app P] [--work D] [--json F] [--no-we] <spec.json…>`, local only like
+we-drive): the common check "do the same in the World Editor and in Studio, save both, diff the saved files". A spec
+(the list of fields is at the top of the script; `tests/we-compare/examples/` has three from verification round 3
+package 6) names the input map (copied; `${MAIN}` is the main checkout), the World Editor's steps (we-drive's steps
+between "map ready" and the save), Studio's steps (`mcp`, `eval`, `sleep`, `open`, `terrain`, `setting`, `command`; the
+project is the input unpacked, or a `new_map` made by steps), and the files to compare. All specs of one mode go to
+**one we-drive process**: one display, one setup, one lock and ONE editor (each next map is opened in it, `--map` on the
+running editor; `--restart-per-map` is the old editor start per map, for timing). Measured 2026-11-13, 4 small maps, warm: 75 s
+by restart, 47 s by open (an extra map costs about 9 s instead of 18 s; the start of a cold prefix is longer). Both saves are unpacked with the release CLI's codecs and compared per file: `parsed`
+(the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
+entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect": "differs"` marks a known difference
+(not a failure). Exit 0 as expected, 1 not, 2 something couldn't run; the JSON report is `<work>/report.json`. Unit
+tests: `we-compare.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
+`W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
+
+Terrain specs (`we-compare-w3e.mjs`, `we-compare-ui.mjs`; specs `cliff-adjust-dry`, `unit-heights`, `water-brush-slope`,
+`water-brush-more`, `painted-cliff-type`, `height-random-stops` in `tests/we-compare/`, inputs and their generators in
+`tests/fixtures/we-specs/`): compare kind `w3e` (the binary w3e corner by corner, `corners.30,27.ground: WE 0, Studio -48`;
+the random ground and cliff variations are left out), `w3e-spread` (the set of ground offsets, for runs that draw at
+random: Reset Height Field Random) and `unit-heights` (id, x, y, z of war3mapUnits.doo). Studio step `ui`: the terrain
+painter's real mouse at the World Editor's screen positions (`["tab","Terrain"]`, `["view","we"]` the editor's opening
+camera at its 1184x844 view, `["tool","Paint:"]`, `["texture","Lgrs"]`, `["size",3]`, `["click",748,500]`,
+`["drag",x,y,x2,y2]`, `["cliff","Dirt"]` the Cliff type choice), so one list of positions drives both editors. The World Editor's palette on its 1600x1000 display
+(`--key t`): tile thumbs 1409,112 (Dirt) / 1409,144 (Grass), cliff icons y=282 from x=1409 (1409 is Decrease Two; the
+others, 32 px apart, are probably Decrease One, Level, Increase One, Increase Two), water brushes 1441,310 (Deep) and 1473,310 (Shallow), cliff type thumbs 1409,367 (Grass Cliff, chosen
+when the editor starts) / 1441,367 (Dirt Cliff), Apply Cliff box 1373,244, sizes y=569 at x=1392 (1), 1424 (2), 1456 (3), 1488 (5), 1520 (8); Advanced menu
+260,41 (Adjust Cliff Levels 299,206, Reset Height Field 300,189: its Random box 589,429, Smoothing slider 592 to 773
+at y=534, Variation slider 589 to 773 at y=494, OK 669,573, "Continue anyway" 767,523). The editor's Create New Map
+dialog (`ctrl+n`) lists 22 tilesets and no Misc, so a Misc-tileset base tile can't be compared there.
 
 ### Comparing pictures with Studio
 
@@ -412,6 +577,42 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   each by its own amount: the editor's HD shading of the materials (normal and ORM maps, which Studio's model shader
   doesn't use for light) is the likelier cause.
 
+- **Special doodads** (branch special-doodads-we, 2026-11-13, AutumnLeaves_S2, look -6208,-5376,1200; we-drive SD and HD
+  give the same picture): to see which patches of Studio's picture are the specials, rewrite war3map.doo.json with
+  `specials: []` (app-drive `--eval` with `w3.workspace.writeText`) and `pic-compare` the two shots. At the first YCl2 the
+  editor draws a cliff hollow exactly there, so the position fits; Studio's model shows as a hard-edged flat grass
+  square with tan rock on it (lowprio-bugs). Not compared: facing and height of other types. The editor's picture is
+  dark on its left half there (outside the camera bounds), Studio's isn't.
+- **Border shade** (branch border-shade-models, 2026-11-13; copies of empty_map_on_newest_world_editor.w3m made with
+  app-drive's MCP tools and packed with the CLI: a tree, a hay cart, a footman, claws of attack, a start location and a
+  YCl2 three tiles inside (x -2944) and three tiles past the west edge (x -3712), a raised plateau and a lake across the
+  edge; a second copy with trees, footmen every 64, a farm and a hay cart across the corner line x -3328; a bare copy for
+  the models' masks; `--look x,y,1200,270,70,90` from above, SD and HD, game view on and off). Past the edge the share of
+  its brightness a model keeps (the median over its pixels): the SD ground 0.149, the HD ground 0.088; a cliff fades
+  across the edge as the ground does, per pixel; a special doodad 0.146 (as the ground); units, items, start locations
+  0 (black) in both modes; SD doodads and trees black, HD ones about as the ground (a tree 0.107, a hay cart 0.071).
+  Whole models, not per pixel: a footman or SD tree on the corner line is lit, one 64 further out black; an HD tree on
+  the line is shaded whole, an HD hay cart 32 inside lit; a farm on the line is lit, its ground texture too. The water
+  past the edge is black. Studio: renderer.ts `edgeMode`, lib/model/renderer.ts EdgeShade; app-smoke specialDoodads
+  holds it. AutumnLeaves_S2's left edge (`--look -6272,-5248,1200`, game view; pic-compare region 200,0,380,700, past the
+  edge): the editor's mean colour (10, 10, 8) SD and (7, 6, 4) HD; Studio's before (59, 55, 34) and (71, 66, 39), after
+  (9, 8, 5) and (13, 12, 6), mean absolute differences 42.9 to 6.8 (SD) and 53.7 to 6.7 (HD); inside the playable part
+  unchanged (0.1 and 1.7, animation). Studio's HD border ground keeps more than the editor's (0.20 against 0.088; open).
+- **Where the border is** (branch border-from-w3i, 2026-11-13; copies of AutumnLeaves_S2, margins 15, made with the CLI,
+  one thing changed each; `--look -5760,0,2400`, SD): the w3i's `cameraComplements` alone decide what the editor darkens.
+  Left complement 23 moved the dark edge 8 tiles in; the map-edge marks (water word 0x4000) at 23, `playableWidth` 90 or
+  the camera bounds 1024 further in alone moved nothing; the editor's save writes the marks from the complements.
+  Studio: w3e.ts `playableEdgeTiles`, the renderer's `setPlayable`/`edgeTiles` (the marks only until the w3i is read).
+  **Its shape**, from above (`--look x,y,1200,270,70,90`, rotation 0 for north and south; about 1.03 px a unit; a copy of
+  the empty map with lakes 400 deep across each edge, written into the unpacked war3map.w3e.txt): SD water fades
+  linearly per corner, a corner dark when the tile north-east of it is past the edge, so over the last border tile on
+  the west and south and the last playable tile on the east and north (half colour 77/69 px out, 80/70 px in); HD water
+  is dark by the pixel, hard (half colour 39-46 px inside on all sides, a tenth 24-29). The ground's shade fades over
+  about a cell (0.9 to 0.1 in 26 units) in both modes, its middle in SD 9-37 px inside (unevenly), in HD 35 px inside
+  on all sides (Studio 16); HD's dark ground keeps 8 % of the lit ground's brightness (Studio 14 %). Studio: area.ts
+  `darkWaterCorners`, renderer.ts `HD_WATER_EDGE`. HillsbradCreek's east and north water (the verify camera, HD), half
+  colour from the editor's: 45 and 34 px before, 6 and 9 after; SD 2 and 7.
+
 ## Process
 
 **Every change.** Run the gate. Fixing a bug starts with a test that fails because of it.
@@ -516,8 +717,9 @@ In order of what I'd do next.
    maps, places objects, saves, builds and unpacks. The New Map dialog, painting terrain, changing a
    unit's field and renaming a trigger go by mouse and keyboard, sent over DevTools into the hidden
    window (on Linux over WebDriver, in Xvfb: `app/scripts/webdriver.mjs`). Building a trigger's events and actions, and placing with the mouse, are still GUI rounds.
-2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
-   read map files too. They can't corrupt memory, but they can freeze the app.
+2. **Hostile input on the TypeScript side.** Covered by `lib/hostile.test.ts` (terrain, AI, model and image
+   parsers; hidden app PASS 2026-11-11, see `openpoints/test.md`). Unproven: textures in other people's maps
+   (the limits were checked on the game's own 1,658).
 3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is
    at 37%. A small made-up TriggerData fixes that.
 4. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist

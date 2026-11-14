@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
+import { applySky } from "../../lib/terrain/atmosphere";
+import { borderShade } from "../../lib/terrain/area";
+import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
+import { castsSunShadow, edgeMode, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, playRect, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -11,6 +14,54 @@ test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline 
   assert.equal(castsSunShadow({ group: "shoreline", instances: one }), false);
   assert.equal(castsSunShadow({ group: "units", instances: one, tint: [1, 1, 1, 0.5] }), false, "a start building's see-through look");
   assert.equal(castsSunShadow({ group: "units", instances: [] }), false);
+});
+
+test("past the playable map cliffs and specials shade as the ground, placed models go black (doodads as the ground in HD)", () => {
+  for (const tone of [1, 2] as const) {
+    assert.equal(edgeMode({ group: "cliffs", followGround: true }, tone), "pixel", `cliffs, tone ${tone}`);
+    // The special doodads: drawn with the doodads, standing on the ground's height map.
+    assert.equal(edgeMode({ group: "doodads", followGround: true }, tone), "pixel", `specials, tone ${tone}`);
+    assert.equal(edgeMode({ group: "units" }, tone), "tile", `units, items and start locations, tone ${tone}`);
+    assert.equal(edgeMode({ group: "shoreline" }, tone), "tile", `the shore's waves, tone ${tone}`);
+  }
+  assert.equal(edgeMode({ group: "doodads" }, 1), "tile", "SD doodads and trees");
+  assert.equal(edgeMode({ group: "doodads" }, 2), "object", "HD doodads and trees");
+});
+
+test("the view's tiles past the playable map follow the w3i's complements once read, the terrain's marks before", () => {
+  const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [1, 1, 1, 1]);
+  const edgeTiles = (complements: number[] | null) => TerrainRenderer.prototype.edgeTiles.call({ terrain: t, complements } as unknown as TerrainRenderer);
+  const count = (a: Uint8Array) => a.reduce((n, v) => n + v, 0);
+  assert.equal(count(edgeTiles(null)), 48 - 6 * 4, "the marks: margins 1");
+  assert.equal(count(edgeTiles([3, 1, 1, 1])), 48 - 4 * 4, "the w3i: left margin 3");
+  assert.equal(edgeTiles([3, 1, 1, 1])[2 * 8 + 2], 1, "tile 2, 2 is past the w3i's left margin");
+});
+
+test("HD water's dark edge goes by the playable rectangle round the tiles the border leaves", () => {
+  const t = { width: 9, height: 7, offsetX: -512, offsetY: -384, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [2, 1, 1, 2]);
+  assert.deepEqual(playRect(t, mapEdgeTiles(t)), [-512 + 256, -384 + 128, -512 + 7 * 128, -384 + 4 * 128]);
+  // Nothing playable: an empty rectangle in the middle, so all of the water is dark.
+  assert.deepEqual(playRect(t, new Uint8Array(48).fill(1)), [0, 0, 0, 0]);
+});
+
+test("the border shade's texel in a tile's middle is shaded exactly where the tile lies past the playable map", () => {
+  // The "tile" mode reads it (lib/model/renderer.ts instanceEdge): 4 texels a tile, the middle one at 4 t + 2.
+  const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
+  markMapEdge(t, [2, 1, 1, 2]);
+  const marks = mapEdgeTiles(t), { rgba, width } = borderShade(t, marks);
+  let past = 0;
+  for (let ty = 0; ty < 6; ty++) for (let tx = 0; tx < 8; tx++) {
+    const shaded = rgba[((4 * ty + 2) * width + 4 * tx + 2) * 4 + 3] > 0;
+    assert.equal(shaded, marks[ty * 8 + tx] === 1, `tile ${tx}, ${ty}`);
+    if (shaded) past++;
+  }
+  // The marks round the playable 5 by 3 tiles.
+  assert.equal(past, 48 - 15);
+  // A tile's edge texel is shaded beside a marked tile (the fade over the first playable cell), its middle not.
+  assert.ok(rgba[((4 * 3 + 2) * width + 4 * 2) * 4 + 3] > 0);
+  assert.equal(rgba[((4 * 3 + 2) * width + 4 * 2 + 2) * 4 + 3], 0);
 });
 
 const b = (group: string, name: string) => ({ group, name });
@@ -103,21 +154,33 @@ const near = (a: number[], b: number[]) => assert.ok(a.every((v, k) => Math.abs(
 test("without water tinting the water keeps the tileset's colour ramp", () => {
   const ramp = waterRamp(LORDAERON, null);
   for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) near(ramp[k], LORDAERON[k]);
-  assert.equal(ramp.grey, false, "the texture keeps its own colour");
 });
 
-test("the map's water tint replaces the ramp's colour, stored blue first, and keeps its depth fade", () => {
+test("the map's water tint multiplies the ramp's colour, stored blue first, as the World Editor draws SD water", () => {
   // 03b_Water_Tint: war3map.w3i holds 100, 100, 255, 255; its script says SetWaterBaseColor( 255, 100, 100, 255 ):
-  // red. In the game that water is plainly red, not the ramp's blue darkened.
+  // red. The World Editor (we-drive, SD, unlit, 2026-11-13) draws its deep water dark purple, 39, 19, 53: the red
+  // tint times Lordaeron's blue ramp times the (blue) water texture, whose colour is kept.
   const ramp = waterRamp(LORDAERON, [100, 100, 255, 255]);
   const red = [1, 100 / 255, 100 / 255];
-  for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) near(ramp[k], [...red, LORDAERON[k][3]]);
-  // The water texture is blue itself (Lordaeron's Water00 averages 104, 117, 183): under red it would stay a
-  // dull mauve. Tinted, only its brightness is kept, so the water is the tint's colour.
-  assert.equal(ramp.grey, true);
+  for (const k of ["shallowMin", "shallowMax", "deepMin", "deepMax"] as const) {
+    near(ramp[k], [LORDAERON[k][0] * red[0], LORDAERON[k][1] * red[1], LORDAERON[k][2] * red[2], LORDAERON[k][3]]);
+  }
+  // Lordaeron's Water00 averages 104, 117, 183: the deep water the shader gives (ramp times texture, alpha 250/255
+  // over the bed) comes within a few levels of the editor's.
+  const texture = [104, 117, 183], editor = [39, 19, 53];
+  const deep = ramp.deepMax.slice(0, 3).map((c, k) => c * texture[k]);
+  deep.forEach((v, k) => assert.ok(Math.abs(v - editor[k]) <= 4, `deep water ${deep.map(Math.round)} against the editor's ${editor}`));
   // The tint's alpha makes all of it more see-through, the shore still fading out.
   const half = waterRamp(LORDAERON, [100, 100, 255, 51]);
   near([half.shallowMin[3], half.deepMax[3]], [(10 / 255) * 0.2, (250 / 255) * 0.2]);
+});
+
+test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and as [red, green, blue]", () => {
+  for (const waterTint of ["#dc5028", [220, 80, 40]]) {
+    const doc: Record<string, any> = { version: 31, flags: 0 };
+    applySky(doc, { waterTint }, { tilesets: [] });
+    assert.deepEqual(waterRamp(LORDAERON, doc.waterTint).shallowMin.slice(0, 3).map((c) => Math.round(c * 255)), [220, 80, 40], JSON.stringify(waterTint));
+  }
 });
 
 test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-drive, 2026-11-08)", () => {

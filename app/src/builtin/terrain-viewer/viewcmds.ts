@@ -24,15 +24,25 @@ export async function layerRegions(groups: Iterable<Pick<TerrainToolGroupInstanc
 }
 
 /** Which selected object View Selection goes to (the World Editor's Edit > View Selection > Cycle Main View - Next, ~,
- *  and - Previous, Shift+~): an index into the `count` selected, `last` the one looked at before (-1 when it isn't one of
- *  them). we-drive 2026-11-12, copies of an empty map with three and four rocks: each press pans to one object, keeping
- *  the camera's distance and angles; Next goes on through the selection and then stays at its end, Previous goes back
- *  and stays at its start; neither goes round. (The editor's own order isn't the placement order; Studio goes by the
- *  selection's.) -1 for nothing selected. */
+ *  and - Previous, Shift+~): an index into the `count` selected, in viewOrder's order, `last` the one looked at before
+ *  (-1 when it isn't one of them). Each press pans to one object, keeping the camera's distance and angles (we-drive
+ *  2026-11-12). Next goes round: after the last comes the first again (verification round 3, 2026-11-13: five trees
+ *  and four footmen, the sixth press back on the first; the run of 2026-11-12 that saw it stop at the end didn't know
+ *  the editor's order, so it read the order's last as the end). Previous goes round the other way. -1 for nothing
+ *  selected. */
 export function cycleIndex(count: number, last: number, step: 1 | -1): number {
   if (count <= 0) return -1;
   if (last < 0 || last >= count) return step > 0 ? 0 : count - 1;
-  return Math.max(0, Math.min(count - 1, last + step));
+  return (last + step + count) % count;
+}
+
+/** The order View Selection goes through the selected objects (`points`: their x, y; `filePlace`: each one's index in
+ *  its placement file): west to east, by x ascending, whatever order they were placed or selected in (verification
+ *  round 3, 2026-11-13: trees at x 0, 1280, -1024, 512, -1792 in file order came as -1792, -1024, 0, 512, 1280; footmen
+ *  likewise). Equal x: the one later in the file first (we-drive 2026-11-13: three trees at x 0, stored with y 2048,
+ *  2304, 1792 in that order, came as 1792, 2304, 2048, neither by y nor in file order). Indexes into `points`. */
+export function viewOrder(points: readonly (readonly number[])[], filePlace: readonly number[]): number[] {
+  return points.map((_, i) => i).sort((a, b) => (points[a][0] - points[b][0]) || (filePlace[b] - filePlace[a]) || a - b);
 }
 
 export interface Box { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }
@@ -160,13 +170,13 @@ export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
  *  ground just inside came out as half of it plus half the light red, as anywhere else). */
 export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
 
-/** The tiles past the playable map (w3e.ts mapEdgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
+/** The tiles past the playable map (the renderer's edgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
 export interface EdgeTiles { tiles: ArrayLike<number>; tilesX: number }
 
 /** Where ships can't sail (per pathing cell, 4 by 4 per tile, rows from the south), as the World Editor shows it: red
  *  over every cell without water for ships (land, what blocks them), nothing over water they sail, shallow or deep, and
- *  the map's edge brown: the cells of the tiles the terrain marks as past the playable map (`edge`), as the editor goes
- *  by those marks, not by the w3i's border. Over the edge's water the editor's black water lies on top (the renderer's
+ *  the map's edge brown: the cells of the tiles past the playable map (`edge`, as the border's shade: by the w3i's
+ *  complements; that the naval view follows them too is assumed, not measured on a map whose marks disagree). Over the edge's water the editor's black water lies on top (the renderer's
  *  darkWaterCorners): HillsbradCreek's west border, a deep lake, stays black in its naval view (we-drive, 2026-11-12). */
 export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
@@ -179,7 +189,10 @@ export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): 
 }
 
 /** Pathing - Ground (per pathing cell, rows from the south), in the World Editor's colours: magenta where nothing
- *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). */
+ *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). Deep
+ *  water's cells are magenta too, but the editor lays the layer on the ground, under the water: deep water hides it
+ *  in SD and HD alike, shallow water lets it show through faintly, and View > Water off shows it all (we-drive, a copy of
+ *  (2)EchoIsles' south shore, 2026-11-13). The renderer draws the view layer before the water, so Studio does the same. */
 export function groundPathingColors(cells: ArrayLike<number>): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {

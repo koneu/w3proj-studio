@@ -3,6 +3,9 @@
 import type { W3Api } from "../../extensions/api";
 import { StringTable } from "./wts";
 import { refsIn } from "./movetexts";
+import { readPrunedStrings } from "./prunedstrings";
+import { isLocaleWts, localeNumbers } from "./localewts";
+import { errorText } from "../oserror";
 import { parseW3e } from "../terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../terrain/w3etext";
 
@@ -31,19 +34,64 @@ export const STRING_REF_TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc|ai|slk|in
 /** The map's own files kept raw (no codec): searched as bytes. */
 export const STRING_REF_RAW_FILE = /^map\/war3(map|campaign)[^/]*$/i;
 
+/** The sounds file: its dialogue sounds name their strings by number (dialogueTextKey, speakerNameKey), not as
+ *  TRIGSTR_ text. */
+const SOUNDS_FILE = "map/war3map.w3s";
+
+/** The string numbers a sounds document (w3proj.sounds JSON) names in its dialogue keys, added to `into`. */
+export function soundKeysIn(doc: unknown, into = new Set<number>()): Set<number> {
+  const sounds = (doc as { sounds?: unknown } | null)?.sounds;
+  if (!Array.isArray(sounds)) return into;
+  for (const s of sounds) {
+    for (const k of [(s as Record<string, unknown>)?.dialogueTextKey, (s as Record<string, unknown>)?.speakerNameKey]) {
+      if (typeof k === "number" && Number.isSafeInteger(k) && k >= 0) into.add(k);
+    }
+  }
+  return into;
+}
+
 /** Every TRIGSTR number the map's files refer to (`paths`: the project's files; string tables, `.wts`, and those
- *  `skip` names in lower case are left out), added to `into`. New strings are numbered after these, so a reference
- *  to a string the table lacks doesn't come to show a new text (Move Texts, the Sound Editor's dialogue keys). A file
- *  that can't be read throws: an unknown reference is never taken for none. */
+ *  `skip` names in lower case are left out), added to `into`: TRIGSTR_ anywhere in a text file or a raw map file, and
+ *  the dialogue keys of the sounds file. New strings are numbered after these, so a reference to a string the table
+ *  lacks doesn't come to show a new text (Move Texts, the Sound Editor's dialogue keys), and the strings that aren't
+ *  among them are the ones a save drops. A file that can't be read throws (a raw sounds file too, which is read
+ *  through its codec): an unknown reference is never taken for none. */
 export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: (lower: string) => boolean = () => false,
   into = new Set<number>()): Promise<Set<number>> {
   for (const path of paths) {
     const lower = path.replace(/\\/g, "/").toLowerCase();
     if (skip(lower) || lower.endsWith(".wts")) continue;
     if (!STRING_REF_TEXT_FILE.test(lower) && !STRING_REF_RAW_FILE.test(lower)) continue;
-    refsIn(new TextDecoder("latin1").decode(await w3.workspace.readBytes(path)), into);
+    const text = new TextDecoder("latin1").decode(await w3.workspace.readBytes(path));
+    refsIn(text, into);
+    if (lower === `${SOUNDS_FILE}.json`) {
+      let doc: unknown;
+      try { doc = JSON.parse(text); } catch { throw new Error(`${path} is there but can't be read, so the strings its dialogue sounds use can't be told.`); }
+      soundKeysIn(doc, into);
+    } else if (lower === SOUNDS_FILE) {
+      // Kept raw: its keys are binary numbers, so the codec reads it.
+      const root = w3.workspace.project()?.root;
+      const json = root ? await w3.backend.invoke<string>("codec_decode", { root, path: path.replace(/\\/g, "/") }).catch(() => null) : null;
+      let doc: unknown = null;
+      try { doc = json === null ? null : JSON.parse(json); } catch { /* below */ }
+      if (doc === null) throw new Error(`${path} is kept raw and can't be read, so the strings its dialogue sounds use can't be told.`);
+      soundKeysIn(doc, into);
+    }
   }
   return into;
+}
+
+/** The string numbers a new string must go after: those the map's files refer to (stringRefsInMap), those an earlier
+ *  drop recorded (lib/formats/prunedstrings), which come back when a reference does, and every number of the languages'
+ *  tables (lib/formats/localewts), whose own strings would show in place of a new one. Throws when any can't be read. */
+export async function stringNumbersTaken(w3: W3Api, paths: Iterable<string>): Promise<Set<number>> {
+  const list = [...paths];
+  const locales = list.filter(isLocaleWts).map((path) => w3.workspace.readText(path)
+    .catch((e) => { throw new Error(`${path} is there but can't be read (${errorText(e)}), so the string numbers it uses can't be told.`); }));
+  const [refs, record, tables] = await Promise.all([stringRefsInMap(w3, list), readPrunedStrings(w3), Promise.all(locales)]);
+  for (const n of record.keys()) refs.add(n);
+  localeNumbers(tables, refs);
+  return refs;
 }
 
 /** Turns "TRIGSTR_012" into the text in war3map.wts (`path`: another string table, such as a campaign's
@@ -75,6 +123,17 @@ export async function terrainFacts(w3: W3Api): Promise<{ tileset: string; offset
 export function requireProject(w3: W3Api) {
   const project = w3.workspace.project();
   if (!project) throw new Error("No project is open in W3Proj Studio.");
+  return project;
+}
+
+/** For code that decides by files() whether a file is there (to create it, start it empty, or refuse): the open
+ *  project once its whole file list is read. Right after an open the list may not be yet, and a file not listed yet
+ *  isn't an absent one. Throws when none is open, the list can't be read, or another project was opened meanwhile
+ *  (`root`: the one asked about, if it was taken earlier). */
+export async function projectWithFiles(w3: W3Api, root = requireProject(w3).root) {
+  await w3.workspace.filesReady();
+  const project = w3.workspace.project();
+  if (project?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
   return project;
 }
 

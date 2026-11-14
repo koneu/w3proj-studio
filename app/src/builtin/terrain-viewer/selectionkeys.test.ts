@@ -36,14 +36,27 @@ test("sizes: plus and minus all over, Home and End across, PageUp and PageDown u
 });
 
 test("slash and star turn", () => {
-  assert.deepEqual(press("/"), { rotate: 15 });
-  assert.deepEqual(press("*"), { rotate: -15 });
+  assert.deepEqual(press("/"), { rotate: 5 });
+  assert.deepEqual(press("*"), { rotate: -5 });
 });
 
-test("Ctrl with arrows or the number pad nudges, in any NumLock state", () => {
-  assert.deepEqual(press("ArrowLeft", { ctrlKey: true, code: "ArrowLeft" }), { nudge: [-32, 0] });
-  assert.deepEqual(press("4", { ctrlKey: true, code: "Numpad4" }), { nudge: [-32, 0] });
-  assert.deepEqual(press("ArrowUp", { ctrlKey: true, code: "Numpad8" }), { nudge: [0, 32] });
+test("the number pad with NumLock on nudges (the World Editor's Edit > Nudge Selection, we-drive 2026-11-13)", () => {
+  assert.deepEqual(press("4", { code: "Numpad4" }), { nudge: [-8, 0] });
+  assert.deepEqual(press("6", { code: "Numpad6" }), { nudge: [8, 0] });
+  assert.deepEqual(press("8", { code: "Numpad8" }), { nudge: [0, 8] });
+  assert.deepEqual(press("2", { code: "Numpad2" }), { nudge: [0, -8] });
+  // The diagonals nudge both ways by the whole step (we-drive 2026-11-13: a tree 64 and 64).
+  assert.deepEqual(press("7", { code: "Numpad7" }), { nudge: [-8, 8] });
+  assert.deepEqual(press("9", { code: "Numpad9" }), { nudge: [8, 8] });
+  assert.deepEqual(press("1", { code: "Numpad1" }), { nudge: [-8, -8] });
+  assert.deepEqual(press("3", { code: "Numpad3" }), { nudge: [8, -8] });
+});
+
+test("Ctrl and the arrows aren't the nudge: in the World Editor they zoom and turn the camera", () => {
+  for (const [key, code] of [["ArrowLeft", "ArrowLeft"], ["ArrowRight", "ArrowRight"], ["ArrowUp", "ArrowUp"], ["ArrowDown", "ArrowDown"], ["4", "Numpad4"], ["8", "Numpad8"]]) {
+    assert.equal(press(key, { ctrlKey: true, code }), null, `ctrl+${code}`);
+  }
+  assert.equal(press("ArrowUp", { code: "Numpad8" }), null, "NumLock off: an arrow, which pans the view");
 });
 
 test("plain arrows and everything else stay out of it", () => {
@@ -115,7 +128,7 @@ test("H, V and R mirror and turn, but Ctrl+V is still paste", () => {
 
 test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {
   assert.deepEqual(press("Unidentified", { code: "NumpadAdd" }), { scale: [0.05, 0.05, 0.05] });
-  assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 15 });
+  assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 5 });
   assert.deepEqual(press("Unidentified", { code: "PageUp", ctrlKey: true }), { raise: 16 });
   const plain = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.equal(isRecallKey({ key: "Unidentified", code: "Space", ...plain }), true);
@@ -166,13 +179,17 @@ test("Undo's keys reach the map too (its editor says undoKeys), but the view doe
   }
 });
 
-test("Escape cancels, A held selects an area (Shift too, not with Ctrl or Alt)", () => {
+test("Escape cancels; A held is no area key (the World Editor's drag with A held is its box select of objects)", () => {
   const plain = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.deepEqual(bound({ ...plain, key: "Escape" }), [CANCEL_COMMAND]);
-  assert.ok(bound({ ...plain, key: "a" }).includes(AREA_COMMAND));
-  assert.ok(bound({ ...plain, key: "A", shiftKey: true }).includes(AREA_COMMAND));
-  assert.ok(bound({ ...plain, key: "Unidentified", code: "KeyA" }).includes(AREA_COMMAND), "WebKitGTK's unnamed key");
-  for (const mods of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }]) assert.equal(bound({ ...plain, key: "a", ...mods }).includes(AREA_COMMAND), false, JSON.stringify(mods));
+  // we-drive, verify round 3 (2026-11-13): a box dragged over two trees with A held selected both, Delete removed them.
+  for (const key of [{ key: "a" }, { key: "A", shiftKey: true }, { key: "Unidentified", code: "KeyA" }]) {
+    assert.equal(bound({ ...plain, ...key }).includes(AREA_COMMAND), false, JSON.stringify(key));
+  }
+  // The command is still there to be given a key (Keyboard Shortcuts), and the manifest binds nothing to it.
+  const manifestBindings = manifest.contributes.keybindings;
+  assert.equal(manifestBindings.some((b) => b.command === AREA_COMMAND), false);
+  assert.ok(manifestBindings.some((b) => b.command === CANCEL_COMMAND), "control: the manifest's bindings are read");
   assert.equal(runsAsCommand(CANCEL_COMMAND), false);
 });
 

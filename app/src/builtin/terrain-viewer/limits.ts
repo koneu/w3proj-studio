@@ -29,6 +29,22 @@ export const waterLimitText = (corners: number) =>
 /** Where Enforce Camera Bounds keeps an object from going, as a paste and the AI tools say it. */
 export const OUTSIDE_BOUNDS = "outside the camera bounds (turn off Enforce Camera Bounds to allow it)";
 
+/**
+ * Where a unit ends up once `snap` (a building's grid snap) has moved it, if that is still inside the bounds;
+ * null if the snap pushed it out. The bounds are checked on the spot as given before the snap, and a spot
+ * near the edge can leave them by a few units when it is snapped.
+ */
+export async function snappedInside(b: Bounds | null, snap: (x: number, y: number) => Promise<readonly [number, number]>, x: number, y: number): Promise<[number, number] | null> {
+  const [sx, sy] = await snap(x, y);
+  return insideBounds(b, sx, sy) ? [sx, sy] : null;
+}
+
+/** Whether something fits where `snap` puts it: room is asked at the snapped spot, the one used. */
+export async function fitsSnapped(snap: (x: number, y: number) => Promise<readonly [number, number]>, fits: (x: number, y: number) => Promise<boolean>, x: number, y: number): Promise<boolean> {
+  const [sx, sy] = await snap(x, y);
+  return fits(sx, sy);
+}
+
 /** The warning for an edit Enforce Camera Bounds refused: `what` is the subject and verb, e.g. "that is". */
 export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE_BOUNDS}.`;
 
@@ -64,12 +80,16 @@ export function scaledNudge(points: readonly (readonly [number, number])[], boun
   return steps.map((s) => [(dx * s) / longest, (dy * s) / longest]);
 }
 
-/** The bounds a moved object has to stay in: the map's own (the playable part, for a unit) and, when camera bounds
- *  are enforced (`camera` is not null), the camera bounds as well, so where both reach. One rule for `clampShift`
- *  in moveedit.ts, which cuts a group's shift to each entry's bounds. */
-export function limitTo(own: Bounds, camera: Bounds | null): Bounds {
-  if (!camera) return own;
-  return { left: Math.max(own.left, camera.left), right: Math.min(own.right, camera.right), bottom: Math.max(own.bottom, camera.bottom), top: Math.min(own.top, camera.top) };
+/** Where a dragged or nudged object's centre may go so that what it takes up (`half`, across and up: a unit's
+ *  collision size or half a building's footprint, resize.ts unitHalf) stays inside `own` (the playable part, for a
+ *  unit). The camera bounds don't come in: the World Editor's drags and nudges go past them with Enforce Camera
+ *  Bounds on (we-drive 2026-11-13, see TESTING.md). An object too big for `own` gets its middle. One rule for
+ *  `clampShift` in moveedit.ts, which cuts a group's shift to each entry's bounds. */
+export function insetBy(own: Bounds, half: readonly [number, number]): Bounds {
+  const [hx, hy] = half.map((h) => (Number.isFinite(h) && h > 0 ? h : 0));
+  const across = hx * 2 <= own.right - own.left ? [own.left + hx, own.right - hx] : [(own.left + own.right) / 2, (own.left + own.right) / 2];
+  const up = hy * 2 <= own.top - own.bottom ? [own.bottom + hy, own.top - hy] : [(own.bottom + own.top) / 2, (own.bottom + own.top) / 2];
+  return { left: across[0], right: across[1], bottom: up[0], top: up[1] };
 }
 
 /** Why pasted objects weren't placed, each counted once by the first reason that holds. */

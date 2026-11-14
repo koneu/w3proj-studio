@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import * as viewcmds from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
@@ -95,17 +95,30 @@ test("viewOfMap: as the World Editor, straight down, north up, framed by the pla
   assert.equal(offCentre.target[0], (1024 + 32768) / 2);
 });
 
-test("cycleIndex: View Selection goes through the selection one object a press and stops at either end", () => {
-  // we-drive 2026-11-12, four rocks selected: Next twice, then it stayed; Previous then stayed at its end too.
+test("cycleIndex: View Selection goes through the selection one object a press and goes round", () => {
+  // Verification round 3 (2026-11-13), five trees: the sixth press came back to the first.
   assert.equal(cycleIndex(4, -1, 1), 0, "the first press: the first selected");
   assert.equal(cycleIndex(4, 0, 1), 1);
-  assert.equal(cycleIndex(4, 3, 1), 3, "Next stays at the last");
+  assert.equal(cycleIndex(4, 3, 1), 0, "Next after the last: the first again");
   assert.equal(cycleIndex(4, 3, -1), 2);
-  assert.equal(cycleIndex(4, 0, -1), 0, "Previous stays at the first");
+  assert.equal(cycleIndex(4, 0, -1), 3, "Previous before the first: the last");
   assert.equal(cycleIndex(4, -1, -1), 3, "Previous first: the last selected");
   assert.equal(cycleIndex(4, 7, 1), 0, "a look from an older selection starts again");
   assert.equal(cycleIndex(1, 0, 1), 0, "one object: always it");
   assert.equal(cycleIndex(0, -1, 1), -1, "nothing selected");
+});
+
+test("viewOrder: View Selection goes west to east, whatever the file order", () => {
+  // Verification round 3 (2026-11-13): trees T1..T5 in file order; the World Editor showed T5, T3, T1, T4, T2.
+  const trees = [[0, 2048], [1280, 1792], [-1024, 2304], [512, 2432], [-1792, 1856]];
+  assert.deepEqual(viewOrder(trees, [0, 1, 2, 3, 4]), [4, 2, 0, 3, 1]);
+  assert.deepEqual(viewOrder([trees[3], trees[0], trees[4]], [3, 0, 4]), [2, 1, 0], "the selection's own order doesn't count");
+  // Footmen at x 0, 1280, -1024, 512 came as -1024, 0, 512, 1280.
+  assert.deepEqual(viewOrder([[0, -2560], [1280, -2816], [-1024, -2304], [512, -2432]], [7, 8, 9, 10]), [2, 0, 3, 1]);
+  // we-drive 2026-11-13: trees at x 0 stored as y 2048, 2304, 1792 (file places 0, 1, 2), one at -1024 (3); the World
+  // Editor went -1024, then 1792, 2304, 2048, then back to -1024.
+  assert.deepEqual(viewOrder([[0, 2048], [0, 2304], [0, 1792], [-1024, 2048]], [0, 1, 2, 3]), [3, 2, 1, 0], "equal x: later in the file first");
+  assert.deepEqual(viewOrder([], []), []);
 });
 
 test("boxOf: the points' extent plus the padding; nothing and non-numbers give null", () => {

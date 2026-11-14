@@ -37,7 +37,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("li", {}, "Import a .w3x — every file lands in map/, object data as JSON."),
                   h("li", {}, "Commit the project folder to git."),
                   h("li", {}, "Edit scripts and objects here, or run \"Open in World Editor\" (F5). Saves in the World Editor sync back into the project."),
-                  h("li", {}, "\"Pack Release .w3x\" (Ctrl+Shift+B) builds the distributable map."),
+                  h("li", {}, "\"Pack Release .w3x\" (Ctrl+Shift+B, outside the terrain view) builds the distributable map."),
                 ),
               ),
             ),

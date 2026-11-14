@@ -124,3 +124,12 @@ export function changesToA(a: string, b: string): TextChange[] {
     return { from: start[h.fromB] - (lead ? 1 : 0), to: len, insert: h.toA > h.fromA ? (lead ? "\n" : "") + seg : "" };
   });
 }
+
+/**
+ * Hands the changes over one at a time, last first (so the offsets stay right). The merge view updates its chunks
+ * per transaction and, when one transaction holds many separate changes (about 20 or more), merges them into
+ * one chunk covering the whole file: one transaction per change keeps them apart.
+ */
+export function eachChangeLastFirst(changes: TextChange[], apply: (c: TextChange) => void): void {
+  for (let i = changes.length - 1; i >= 0; i--) apply(changes[i]);
+}

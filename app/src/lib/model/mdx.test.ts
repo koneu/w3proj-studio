@@ -63,16 +63,20 @@ test("a Reforged layer's diffuse flipbook is its texture track; the normal slot'
   assert.equal(still.slotTracks, undefined);
 });
 
-/** A model with one light per entry of `lights`: `words` 18 is the Reforged layout (the game's 1800 models: type, a
- *  word, start, end, …), 12 the classic one (type, start, end, …); `track` adds an intensity track after the values;
+/** A model of `version` with one light per entry of `lights`, in one of the three layouts measured on real models:
+ *  `words` 18 (72 bytes, versions 1600–1800: type, a word, start, end, colour, intensity, ambient colour and
+ *  intensity, shadow intensity and five more), 12 (48 bytes, version 1200: type, start, end, colour, intensity,
+ *  ambient colour and intensity, shadow intensity) or 11 (44 bytes, versions 800–1100: the same without the shadow
+ *  intensity). `values` are the words after the end (colour, intensity, …; 1 for those not given); `track` adds an
+ *  intensity track (KLAI, 10) after the values, `visibility` a visibility track (KLAV, two Hermite keys) after that;
  *  `size` overrides the light's stated size. */
-function lightModel(lights: { words: 12 | 18; start: number; end: number; track?: boolean; size?: number }[]): Uint8Array {
+function lightModel(lights: { words: 11 | 12 | 18; start: number; end: number; values?: number[]; track?: boolean; visibility?: boolean; size?: number }[], version = 1800): Uint8Array {
   const parts: number[] = [];
   const u32 = (v: number) => parts.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255);
   const f32 = (v: number) => { const b = new Uint8Array(new Float32Array([v]).buffer); parts.push(...b); };
   const tag = (s: string) => parts.push(...[...s].map((c) => c.charCodeAt(0)));
   tag("MDLX");
-  tag("VERS"); u32(4); u32(1800);
+  tag("VERS"); u32(4); u32(version);
   tag("LITE");
   const chunk = parts.length; u32(0);
   lights.forEach((l, i) => {
@@ -80,9 +84,10 @@ function lightModel(lights: { words: 12 | 18; start: number; end: number; track?
     u32(96); parts.push(...new Array(80).fill(0)); u32(i); u32(0xffffffff); u32(0x200); // node: size, name, id, parent, flags
     u32(0); if (l.words === 18) u32(i % 2);
     f32(l.start); f32(l.end);
-    const rest = l.words === 18 ? 14 : 9;
-    for (let k = 0; k < rest; k++) f32(1);
+    const rest = l.words === 18 ? 14 : l.words - 3;
+    for (let k = 0; k < rest; k++) f32(l.values?.[k] ?? 1);
     if (l.track) { tag("KLAI"); u32(1); u32(0); u32(0xffffffff); u32(0); f32(10); }
+    if (l.visibility) { tag("KLAV"); u32(2); u32(2); u32(0xffffffff); for (const [t, v] of [[0, 1], [500, 0]]) { u32(t); f32(v); f32(0); f32(0); } }
     const n = l.size ?? parts.length - at;
     parts.splice(at, 4, n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
   });
@@ -91,12 +96,32 @@ function lightModel(lights: { words: 12 | 18; start: number; end: number; track?
   return new Uint8Array(parts);
 }
 
-test("lights: how far each reaches, in the Reforged layout and the classic one, with or without tracks", () => {
-  const m = parseMdx(lightModel([{ words: 18, start: 80, end: 200 }, { words: 18, start: 0, end: 10, track: true }, { words: 12, start: 50, end: 300 }, { words: 12, start: 5, end: 60, track: true }]));
+test("lights: how far each reaches, in the Reforged layout (version 1800), with or without tracks", () => {
+  const m = parseMdx(lightModel([{ words: 18, start: 80, end: 200 }, { words: 18, start: 0, end: 10, track: true }, { words: 18, start: 50, end: 300, visibility: true }, { words: 18, start: 5, end: 60, track: true, visibility: true }]));
   assert.deepEqual(m.lights?.map((l) => [l.attenuationStart, l.attenuationEnd]), [[80, 200], [0, 10], [50, 300], [5, 60]]);
   assert.deepEqual(m.lights?.map((l) => l.node.objectId), [0, 1, 2, 3]);
+  // Colour and intensity (the helper writes 1 for every value after the attenuation; an animated one's first key, 10,
+  // stands in for it), and the intensity's track.
+  assert.deepEqual(m.lights?.map((l) => [...l.color, l.intensity]), [[1, 1, 1, 1], [1, 1, 1, 10], [1, 1, 1, 1], [1, 1, 1, 10]]);
+  assert.deepEqual(m.lights?.map((l) => (l.intensityTrack ? [...l.intensityTrack.values] : null)), [null, [10], null, [10]]);
+  assert.equal(m.lights?.some((l) => l.colorTrack), false);
   assert.deepEqual(m.warnings, []);
   assert.equal(parseMdx(model(["a.blp"])).lights, undefined, "a model without lights has none");
+});
+
+test("lights: the classic 44-byte layout (versions 800–1100) and version 1200's 48 bytes, with and without tracks", () => {
+  // As the custom models measured: colour, intensity 18, white ambient colour, ambient intensity 0 (a torch's light).
+  const values = [1, 0.5, 0.25, 18, 1, 1, 1, 0];
+  for (const version of [800, 1000, 1100]) {
+    const m = parseMdx(lightModel([{ words: 11, start: 80, end: 200, values }, { words: 11, start: 30, end: 120, values, track: true }, { words: 11, start: 60, end: 250, values, visibility: true }, { words: 11, start: 5, end: 40, values, track: true, visibility: true }], version));
+    assert.deepEqual(m.lights?.map((l) => [l.attenuationStart, l.attenuationEnd]), [[80, 200], [30, 120], [60, 250], [5, 40]], `v${version}`);
+    assert.deepEqual(m.lights?.map((l) => [...l.color, l.intensity]), [[1, 0.5, 0.25, 18], [1, 0.5, 0.25, 10], [1, 0.5, 0.25, 18], [1, 0.5, 0.25, 10]], `v${version}`);
+    assert.deepEqual(m.lights?.map((l) => !!l.intensityTrack), [false, true, false, true], `v${version}`);
+    assert.deepEqual(m.warnings, []);
+  }
+  // Version 1200: a shadow intensity (0.4) after the ambient intensity.
+  const v1200 = parseMdx(lightModel([{ words: 12, start: 80, end: 200, values: [...values, 0.4] }, { words: 12, start: 30, end: 120, values: [...values, 0.4], track: true, visibility: true }], 1200));
+  assert.deepEqual(v1200.lights?.map((l) => [l.attenuationStart, l.attenuationEnd, l.intensity]), [[80, 200, 18], [30, 120, 10]]);
 });
 
 test("lights: a damaged one is left out or warned about, never read past its end", () => {

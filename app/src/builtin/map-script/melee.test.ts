@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { defaultTriggerFile } from "../../lib/triggers/defaults";
+import { writeWtgJson } from "../../lib/triggers/wtg";
 import { activate } from "./index";
 
 /** The mini map's map/ folder, found from where the tests run (app/ or the repository). */
@@ -20,28 +22,30 @@ function fixture(name: string): string {
 
 const MELEE = 4, ROOT = "/maps/Melee";
 
-/** A 4x3 flat terrain, the west half under water. */
-function lake(): Uint8Array {
+/** A 4x3 flat terrain, the west half under water; `size`: that many corners a side, all dry. */
+function lake(size?: number): Uint8Array {
   const corners: Corner[] = [];
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 4; x++) {
-    const wet = x < 2;
+  const w = size ?? 4, h = size ?? 3;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const wet = !size && x < 2;
     // As stored: ground at -100 under water at 50 (raw values 0x2000 + 4 per unit), dry ground at 0.
     corners.push({ layer: 2, ramp: false, height: wet ? -100 : 0, rawHeight: 0x2000 + (wet ? -400 : 0), hasWater: wet, water: wet ? 50 : -2137.6, texture: 0, variation: 0, cliffVariation: 0, cliffTexture: 0, blight: false, boundary: false, rawWater: wet ? 0x2000 + 200 : 0, texExtra: 0 });
   }
-  return writeW3e({ version: 11, tileset: "L", customTilesets: false, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], width: 4, height: 3, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array(0) } as unknown as Terrain);
+  return writeW3e({ version: 11, tileset: "L", customTilesets: false, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], width: w, height: h, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array(0) } as unknown as Terrain);
 }
 
 /** The mini map as a melee map with a neutral gold mine and Player 1's start at `start`, and the app's API around the
- *  map script extension. `own`: more files (or replacements). */
-function project(opts: { generateOnSave: boolean; start?: [number, number]; own?: Record<string, string>; bytes?: Record<string, Uint8Array>; dirty?: boolean }) {
+ *  map script extension. `own`: more files (or replacements). `off`: the Melee flag cleared. `game`: the game's files. */
+function project(opts: { generateOnSave: boolean; start?: [number, number]; mine?: [number, number]; own?: Record<string, string>; bytes?: Record<string, Uint8Array>; dirty?: boolean; off?: boolean; game?: Record<string, string> }) {
   const info = JSON.parse(fixture("war3map.w3i.json"));
   // A melee map by every rule (the mini map's game data set 2 is a reason).
   info.flags |= MELEE;
+  if (opts.off) info.flags &= ~MELEE;
   info.gameDataSet = 0;
   const units = JSON.parse(fixture("war3mapUnits.doo.json"));
   const like = units.units[0];
   const [sx, sy] = opts.start ?? [320, 64];
-  units.units = [{ ...like, id: "sloc", player: 0, position: [sx, sy, 0] }, { ...like, id: "ngol", player: 27, position: [300, 300, 0] }];
+  units.units = [{ ...like, id: "sloc", player: 0, position: [sx, sy, 0] }, { ...like, id: "ngol", player: 27, position: [...(opts.mine ?? [300, 300]), 0] }];
   const files: Record<string, string> = {
     "map/war3map.w3i.json": JSON.stringify(info),
     "map/war3mapUnits.doo.json": JSON.stringify(units),
@@ -62,7 +66,7 @@ function project(opts: { generateOnSave: boolean; start?: [number, number]; own?
     output: { channel: () => ({ append() {} }) },
     services: { provide: () => none },
     settings: { get: (key: string) => (key === "script.generateOnSave" ? opts.generateOnSave : undefined) },
-    game: { readText: async () => "", read: async (p: string) => { throw notFound(p); } },
+    game: { readText: async (p: string) => opts.game?.[p] ?? "", read: async (p: string) => { throw notFound(p); } },
     window: { showInfo: async () => undefined, showWarning: async () => undefined, showError: async () => undefined, notify: async () => undefined },
     editors: { isDirty: (p: string) => !!opts.dirty && p === "map/war3map.w3i.json", registerProvider: () => none, open: async () => {} },
     commands: {
@@ -140,4 +144,25 @@ test("Map Properties with unsaved changes isn't written over: it gets its turn w
   const p = project({ generateOnSave: false, dirty: true });
   await p.save("map/war3mapUnits.doo.json", footman as never);
   assert.equal(p.written.has("map/war3map.w3i.json"), false);
+});
+
+// The World Editor's save makes a map melee again when it meets the rules; Studio's does when it can tell they're met.
+test("a map that meets the melee rules gets the flag back when its triggers or doodads are saved", async () => {
+  const slk = 'ID;PWXL;N;E\nC;Y1;X1;K"tileID"\nC;X2;K"buildable"\nC;Y2;X1;K"Ldrt"\nC;X2;K1\nE\n';
+  const units = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"pathTex"\nC;Y2;X1;K"nftk"\nC;X2;K"_"\nE\n';
+  const doodads = (x: number) => JSON.stringify({ doodads: [{ id: "LTlt", position: [x, 1024, 0] }], specials: [] });
+  const make = (treeX: number) => project({
+    generateOnSave: false, off: true, start: [1024, 1024], mine: [1024 + 750, 1024], bytes: { "map/war3map.w3e": lake(17) },
+    own: { "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("Melee")), "map/war3map.doo.json": doodads(treeX) }, game: { "TerrainArt\\Terrain.slk": slk, "Units\\UnitData.slk": units },
+  });
+  const p = make(1024 + 600);
+  await p.save("map/war3map.wtg.json");
+  assert.equal(p.flags() & MELEE, MELEE);
+  const tree = make(1024 + 200);
+  await tree.save("map/war3map.doo.json");
+  assert.equal(tree.flags() & MELEE, 0, "a tree 200 from the start: left off");
+  const custom = make(1024 + 600);
+  await custom.save("map/war3map.wtg.json", (f) => { (f.items as { type: number; name: string }[]).find((i) => i.type === 8)!.name = "Mine"; });
+  assert.equal(custom.flags() & MELEE, 0, "custom triggers: left off");
+  assert.equal(custom.written.has("map/war3map.w3i.json"), false);
 });

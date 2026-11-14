@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { applyLayer, retypeCliffs, Stroke, waterBrush } from "./tools";
+import { applyLayer, retypeCliffs, Stroke, cornerBrush } from "./tools";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -36,7 +36,7 @@ for (const [mode, file] of [["shallow", "ash-shallow.w3e"], ["deep", "ash-deep.w
     const layer = c.layer - (mode === "deep" ? 2 : 1);
     const stroke = new Stroke(mode);
     // Brush size 1, the click a little off the corner: the brush takes the nearest corner alone.
-    const brush = waterBrush(t, t.offsetX + X * 128 + 40, t.offsetY + Y * 128 - 30, 1);
+    const brush = cornerBrush(t, t.offsetX + X * 128 + 40, t.offsetY + Y * 128 - 30, 1);
     assert.equal(applyLayer(t, brush, mode, { layer, waterLevel: waterLevelAt(c.height - WATER_OFFSET) }, stroke), true);
     retypeCliffs(t, stroke, ["Agrd"]);
     assert.deepEqual(look(t), look(want));
@@ -68,7 +68,7 @@ for (const size of [2, 3]) {
     const [cx, cy] = we.centre, c = at(t, cx, cy);
     const stroke = new Stroke("shallow");
     // The click lands a little off the corner, as a click does.
-    const brush = waterBrush(t, t.offsetX + cx * 128 - 50, t.offsetY + cy * 128 + 20, size);
+    const brush = cornerBrush(t, t.offsetX + cx * 128 - 50, t.offsetY + cy * 128 + 20, size);
     assert.equal(applyLayer(t, brush, "shallow", { layer: c.layer - 1, waterLevel: waterLevelAt(c.height - WATER_OFFSET) }, stroke), true);
     // The cliff type the World Editor's palette had chosen: Grass Cliff, the map's second.
     retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
@@ -88,12 +88,12 @@ for (const size of [2, 3]) {
 
 test("the water brush: centred on the nearest corner, size − 1 tiles round it", () => {
   const t = emptyLordaeron();
-  assert.deepEqual(waterBrush(t, 70, -200, 1), { x: 128, y: -256, radius: 0, square: false });
-  assert.deepEqual(waterBrush(t, -63, 63, 3, true), { x: 0, y: 0, radius: 2, square: true });
-  assert.equal(waterBrush(t, 0, 0, 0).radius, 0, "never less than one corner");
+  assert.deepEqual(cornerBrush(t, 70, -200, 1), { x: 128, y: -256, radius: 0, square: false });
+  assert.deepEqual(cornerBrush(t, -63, 63, 3, true), { x: 0, y: 0, radius: 2, square: true });
+  assert.equal(cornerBrush(t, 0, 0, 0).radius, 0, "never less than one corner");
 });
 
-test("the rim leaves what is on another layer, in the brush or already water", () => {
+test("the AI tools' rim leaves what is on another layer, in the area or already water", () => {
   const t = load("ash-before.w3e");
   const i = Y * t.width + X;
   at(t, X + 1, Y).layer = 4;
@@ -109,7 +109,7 @@ test("the rim leaves what is on another layer, in the brush or already water", (
   assert.deepEqual(after[i - 1], before[i - 1]);
 });
 
-test("the rim takes the height of the nearest wet corner", () => {
+test("the AI tools' rim takes the height of the nearest wet corner", () => {
   const t = load("ash-before.w3e");
   const a = Y * t.width + 20, b = Y * t.width + 26;
   at(t, 20, Y).rawHeight = 8300; at(t, 26, Y).rawHeight = 8900;
@@ -118,4 +118,80 @@ test("the rim takes the height of the nearest wet corner", () => {
   assert.equal(at(t, 25, Y).rawHeight, 8900);
   assert.equal(at(t, 20, Y + 2).rawHeight, 8300);
   assert.equal(at(t, 20, Y + 1).rawHeight, 8300);
+});
+
+/** tests/fixtures/water-brush/slope-clicks.json: the World Editor's water clicks on the we-compare slope maps. */
+interface SlopeClick { name: string; input: "slope" | "edge"; mode: "shallow" | "deep"; size: number; centre: [number, number]; changes: number[][] }
+
+/** tests/fixtures/we-specs/slope.w3x (or slope-edge.w3x) as a terrain: make-slope.mjs and make-water-inputs.mjs. */
+function slopeMap(edge: boolean): Terrain {
+  const rows = (f: (x: number) => string, sep = "") => Array.from({ length: 65 }, () => Array.from({ length: 65 }, (_, x) => f(x)).join(sep));
+  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt Ldro Ldrg Lrok Lgrs Lgrd", "cliffs CLdi CLgr", "corners 65 65",
+    "offset -4096 -4096", "[height]", ...rows((x) => String((x - 32) * 24), " "), "[water] all 0", "[water-bits] all 0", "[texture] all 0",
+    "[variation] all 0", "[cliff-variation] all 0",
+    ...(edge ? ["[cliff-texture]", ...rows((x) => (x === 33 || x === 34 ? "0" : "f")), "[layer]", ...rows((x) => (x >= 34 ? "3" : "2"))] : ["[cliff-texture] all f", "[layer] all 2"]),
+    "[flags] all 0"].join("\n");
+  return parseW3e(w3eFromText(text));
+}
+
+/** What a corner holds that the fixture lists: ground (stored, minus 0x2000), layer, water flag, water word, cliff type. */
+const fields = (c: Terrain["corners"][number]) => [c.rawHeight - 0x2000, c.layer, c.hasWater ? 1 : 0, c.rawWater & 0x3fff, c.cliffTexture];
+
+/** What Studio doesn't do as the World Editor yet, per click: the fields (of ground, layer, wet, water, type) that
+ *  still differ somewhere, and why (waterrim.ts). On the high side of a cliff edge the editor typed the corners it
+ *  raised as the plateau's cliff (0) and left the outer rim of the new cliff untyped (15); Studio gives them the chosen
+ *  type (1). */
+const NOT_YET: Record<string, { fields: string[]; why: string }> = {
+  "water-brush-edge-high": { fields: ["type"], why: "the raised corners' cliff type" },
+  "water-brush-edge-high-far": { fields: ["type"], why: "the raised corners' cliff type" },
+  "water-brush-edge-high-deep": { fields: ["type"], why: "the raised corners' cliff type" },
+  "water-brush-edge-low-deep": { fields: ["layer", "wet", "type"], why: "the editor left one water corner dry next to a corner it kept a level up (a 3-level cliff refused)" },
+};
+const FIELDS = ["ground", "layer", "wet", "water", "type"];
+
+/** The painter's click: the brush round the nearest corner, the water one or two levels below it with the surface the
+ *  water offset under its ground, Grass Cliff (the palette's start) for the cliffs (index.ts). */
+function click(t: Terrain, c: SlopeClick) {
+  const [cx, cy] = c.centre, from = at(t, cx, cy);
+  const stroke = new Stroke(c.mode);
+  const brush = cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, c.size);
+  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer }, stroke);
+  retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
+  return stroke;
+}
+
+for (const c of json<{ clicks: SlopeClick[] }>("slope-clicks.json").clicks) {
+  const notYet = NOT_YET[c.name];
+  test(`${c.name}: ${c.mode} size ${c.size} at ${c.centre} on the ${c.input} map, as the World Editor${notYet ? ` but ${notYet.fields.join(", ")} (${notYet.why})` : ""}`, () => {
+    const t = slopeMap(c.input === "edge"), want = slopeMap(c.input === "edge");
+    for (const [x, y, ground, layer, wet, water, type] of c.changes) {
+      const k = at(want, x, y);
+      k.rawHeight = ground + 0x2000; k.layer = layer; k.hasWater = wet === 1; k.rawWater = (k.rawWater & 0xc000) | water; k.cliffTexture = type;
+    }
+    click(t, c);
+    // Within the brush's reach (size + 2 corners round the centre): the editor re-typed a whole cliff edge once, far
+    // from the click (edge-low; not again in edge-low-deep), which isn't followed.
+    const reach = c.size + 2, diffs: string[] = [], differing = new Set<string>();
+    for (let y = c.centre[1] - reach; y <= c.centre[1] + reach; y++) for (let x = c.centre[0] - reach; x <= c.centre[0] + reach; x++) {
+      const a = fields(at(t, x, y)), b = fields(at(want, x, y));
+      const off = FIELDS.filter((_, k) => a[k] !== b[k] && !notYet?.fields.includes(FIELDS[k]));
+      FIELDS.forEach((f, k) => { if (a[k] !== b[k]) differing.add(f); });
+      if (off.length) diffs.push(`${x},${y} ${off.join(" ")}: Studio ${a.join(" ")}, WE ${b.join(" ")}`);
+    }
+    assert.deepEqual(diffs, []);
+    if (notYet) assert.deepEqual([...differing].sort(), [...notYet.fields].sort(), "the known differences are all there (when one goes, take it off NOT_YET)");
+  });
+}
+
+test("the water brush flattens round the clicked corner, not round the nearest water corner (control: the old rule fails)", () => {
+  // The size 3 click on the slope: the editor's ground of the 47 corners within 4 is the clicked corner's (0), so the
+  // water corners at the brush's rim (x = 30, 34) are flattened too, which a rule by the nearest water corner leaves.
+  const c = json<{ clicks: SlopeClick[] }>("slope-clicks.json").clicks.find((k) => k.name === "water-brush-slope-shallow")!;
+  const t = slopeMap(false);
+  click(t, c);
+  assert.equal(at(t, 30, 30).rawHeight - 0x2000, 0);
+  assert.equal(at(t, 34, 30).rawHeight - 0x2000, 0);
+  assert.equal(at(t, 36, 30).rawHeight - 0x2000, 0, "four corners out");
+  assert.equal(at(t, 37, 30).rawHeight - 0x2000, 120, "five out: as it was");
+  assert.equal(c.changes.filter(([, , g]) => g === 0).length, 47, "the fixture: the editor's 47 corners at 0");
 });

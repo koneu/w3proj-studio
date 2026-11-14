@@ -309,6 +309,16 @@ export const TEAM_COLORS: [string, Vec3][] = [
   ["Coal", [40, 40, 40]], ["Snow", [235, 240, 255]], ["Emerald", [0, 120, 30]], ["Peanut", [164, 111, 51]],
 ];
 
+/** The slot each texture fills in the model's HD layers (diffuse, normal, ORM: the first three of a layer's list), as
+ *  the suffix of its set's files. A texture in no HD layer isn't in the map. */
+export function hdSlots(model: Pick<Model, "materials">): Map<number, "_Diffuse" | "_Normal" | "_ORM"> {
+  const slot = new Map<number, "_Diffuse" | "_Normal" | "_ORM">();
+  for (const mat of model.materials) for (const l of mat.layers) {
+    if (l.textureIds.length >= 3) (["_Diffuse", "_Normal", "_ORM"] as const).forEach((s, k) => slot.set(l.textureIds[k], s));
+  }
+  return slot;
+}
+
 /** Textures for replaceable ids other than team colour/glow. */
 export const REPLACEABLE: Record<number, string> = {
   11: "ReplaceableTextures\\Cliff\\Cliff0.blp",
@@ -323,20 +333,40 @@ export const REPLACEABLE: Record<number, string> = {
 
 // ------------------------------------------------------------------ shaders
 
+/** The border shade's uniforms (EdgeShade), the same in both stages: the texture spread over uEdgeRect (x, y, width,
+ *  height), the tiles' grid uEdgeTiles (x, y of the first tile, its size, texels per tile), uEdgeMode (0: none,
+ *  1: per pixel, 2: per instance by the shade at its origin, 3: per instance, full where the tile under its origin is
+ *  shaded). */
+const EDGE_UNIFORMS = "uniform highp sampler2D uEdge; uniform highp vec4 uEdgeRect; uniform highp vec4 uEdgeTiles; uniform highp float uEdgeMode;";
+
 const VS = `#version 300 es
 precision highp float;
-in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
+in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec2 aUV2; in vec4 aBones; in vec4 aWeights;
 // The instance's world transform: one per instance, so every copy of a model in a batch is one draw.
 in mat4 aWorld;
 uniform mat4 uViewProj;
 // Texture animation (TXAN) of the layer: identity without one.
 uniform mat3 uTexMatrix;
+// The layer's texture coordinate set (CoordId): 1 takes aUV2 (the geoset's second set, else its first).
+uniform float uCoord;
 uniform highp sampler2D uBones;
 // Optional ground height map (R32F, one texel per terrain corner): cliff models
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
 uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect;
+${EDGE_UNIFORMS}
 out vec3 vNormal; out vec2 vUV; out highp vec3 vWorldPos;
+// The border shade of the whole instance, at its origin (EdgeShade's "object" and "tile").
+flat out float vEdge;
 ${FOG_VS}
+float instanceEdge() {
+  if (uEdgeMode < 1.5) return 0.0;
+  highp vec2 o = aWorld[3].xy;
+  if (uEdgeMode < 2.5) return texture(uEdge, (o - uEdgeRect.xy) / uEdgeRect.zw).a;
+  // The texel in the middle of the tile under the origin: its cells all lie in that tile, so it's shaded exactly where
+  // the tile lies past the playable map.
+  ivec2 t = ivec2(floor((o - uEdgeTiles.xy) / uEdgeTiles.z) * uEdgeTiles.w + 0.5 * uEdgeTiles.w);
+  return texelFetch(uEdge, clamp(t, ivec2(0), textureSize(uEdge, 0) - 1), 0).a > 0.0 ? 1.0 : 0.0;
+}
 float groundAt(vec2 p) {
   vec2 g = clamp((p - uHeightRect.xy) / 128.0, vec2(0.0), uHeightRect.zw - 1.0);
   ivec2 i0 = ivec2(floor(g)), i1 = min(i0 + 1, ivec2(uHeightRect.zw) - 1);
@@ -354,7 +384,7 @@ void main() {
   mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
   if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
   vNormal = mat3(aWorld) * mat3(m) * aNormal;
-  vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
+  vUV = (uTexMatrix * vec3(uCoord > 0.5 ? aUV2 : aUV, 1.0)).xy;
   vec4 world = aWorld * m * vec4(aPos, 1.0);
   if (uUseHeight > 0.5) {
     world.z += groundAt(world.xy);
@@ -370,6 +400,7 @@ void main() {
     }
   }
   vWorldPos = world.xyz;
+  vEdge = instanceEdge();
   gl_Position = uViewProj * world;
   vFogDepth = gl_Position.w;
 }`;
@@ -388,10 +419,19 @@ uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix
 uniform sampler2D uEmissive; uniform float uGlow;
 // Scene light: direction toward it, diffuse and ambient colour (intensity included).
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
+// The map's border shade (EdgeShade): how far the colour goes to uEdgeColor, as the ground under the shade's overlay goes
+// to black. uEdgeMode 1: the shade's alpha at the pixel's world x, y; 2 and 3: worked out per instance (vEdge).
+${EDGE_UNIFORMS}
+uniform vec3 uEdgeColor;
+flat in float vEdge;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
 ${SUN_FS}
+float edgeShade() {
+  if (uEdgeMode < 0.5) return 0.0;
+  return uEdgeMode < 1.5 ? texture(uEdge, (vWorldPos.xy - uEdgeRect.xy) / uEdgeRect.zw).a : vEdge;
+}
 void main() {
   vec4 c = texture(uTex, vUV);
   c.a *= uColor.a;
@@ -403,7 +443,7 @@ void main() {
   float lit = uUnshaded > 0.5 ? 1.0 : sunLit(vWorldPos, vNormal);
   vec3 light = uUnshaded > 0.5 ? vec3(1.0) : objectLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
-  outColor = vec4(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), c.a);
+  outColor = vec4(mix(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), fogged(uEdgeColor), edgeShade()), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -484,7 +524,15 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep", "uEdge", "uEdgeRect", "uEdgeTiles", "uEdgeMode", "uEdgeColor"] as const;
+
+/** Texture unit of the border shade (EdgeShade): past the HD water's depth picture (6) and the sun's map (5). */
+const EDGE_UNIT = 7;
+
+/** What a layer of a filter mode turns into under the border shade, at full shade: black for what covers or adds,
+ *  and for a layer that multiplies what's behind it the colour that changes nothing there (fogColorForBlend), since
+ *  what's behind it is shaded already. */
+export const edgeColorForBlend = (filterMode: number) => fogColorForBlend(filterMode, [0, 0, 0]);
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -580,7 +628,23 @@ export interface DrawOptions {
   /** Draws into the sun's shadow map instead (depth only): the layers that hide what's behind them (opaque and
    *  alpha-tested ones), from both sides, with their alpha test. */
   shadowPass?: boolean;
+  /** The map's border shade over the model (the terrain's shade past the playable map); none: not shaded. */
+  edge?: EdgeShade | null;
 }
+
+/** A texture whose alpha says per world x, y how far toward black a pixel goes (the border shade over the ground: area.ts
+ *  borderShade), read with its filtering over `rect` (x, y, width, height in world units). `mode` (the terrain viewer's
+ *  edgeMode): "pixel" shades each pixel by the texture there, "object" a whole instance by the texture at its origin,
+ *  "tile" makes an instance black when the tile under its origin is shaded (`tiles`: x, y of the first tile, its size,
+ *  texels per tile; the texel in a tile's middle tells). */
+export interface EdgeShade {
+  texture: WebGLTexture;
+  rect: readonly [number, number, number, number];
+  tiles: readonly [number, number, number, number];
+  mode: "pixel" | "object" | "tile";
+}
+
+const EDGE_MODES = { pixel: 1, object: 2, tile: 3 } as const;
 
 /** The depth texture shaders read as "no shadow anywhere" in this context (setSunShadow's fallback). */
 export function noSunTexture(gl: WebGL2RenderingContext): WebGLTexture {
@@ -688,10 +752,7 @@ export class ModelGpu {
    *  `replaceable` first (e.g. a destructable's own tree texture). */
   texturePaths(replaceable: Record<number, string> = {}): (string | null)[] {
     // In HD layers a replaceable texture names a set: X_Diffuse, X_Normal, X_ORM.
-    const slot = new Map<number, string>();
-    for (const mat of this.model.materials) for (const l of mat.layers) {
-      if (l.textureIds.length >= 3) ["_Diffuse", "_Normal", "_ORM"].forEach((s, k) => slot.set(l.textureIds[k], s));
-    }
+    const slot = hdSlots(this.model);
     return this.model.textures.map((t, i) => {
       if (t.replaceableId === 0) return t.path;
       const p = replaceable[t.replaceableId] ?? REPLACEABLE[t.replaceableId];
@@ -716,26 +777,29 @@ export class ModelGpu {
       }
     }
     const prog = this.sh.prog;
-    const buffers = new Map<string, WebGLBuffer>();
+    // By data: a geoset without a second UV set gives its first to both attributes, in one buffer.
+    const buffers = new Map<Float32Array, WebGLBuffer>();
     const attr = (name: string, data: Float32Array, size: number) => {
       const loc = gl.getAttribLocation(prog, name);
       if (loc < 0) return;
-      let b = buffers.get(name);
+      let b = buffers.get(data);
       if (!b) {
         b = gl.createBuffer()!;
         gl.bindBuffer(gl.ARRAY_BUFFER, b);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-        buffers.set(name, b);
+        buffers.set(data, b);
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
     };
     const uvs = g.uvs.length ? g.uvs : new Float32Array(n * 2);
+    const uvs2 = g.uvs2 && g.uvs2.length >= n * 2 ? g.uvs2 : uvs;
     const attributes = () => {
       attr("aPos", g.positions, 3);
       attr("aNormal", g.normals, 3);
       attr("aUV", uvs, 2);
+      attr("aUV2", uvs2, 2);
       attr("aBones", bones, 4);
       attr("aWeights", weights, 4);
       // The world matrix, a column per location, steps once per instance; its buffer is set at the draw.
@@ -882,6 +946,15 @@ export class ModelGpu {
       gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
       gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
       gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
+      const edge = opts.edge;
+      gl.uniform1f(u.uEdgeMode, edge ? EDGE_MODES[edge.mode] : 0);
+      gl.activeTexture(gl.TEXTURE0 + EDGE_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, edge?.texture ?? sh.white);
+      gl.uniform1i(u.uEdge, EDGE_UNIT);
+      if (edge) {
+        gl.uniform4f(u.uEdgeRect, edge.rect[0], edge.rect[1], edge.rect[2], edge.rect[3]);
+        gl.uniform4f(u.uEdgeTiles, edge.tiles[0], edge.tiles[1], edge.tiles[2], edge.tiles[3]);
+      }
     }
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
@@ -896,6 +969,7 @@ export class ModelGpu {
       if (alpha <= 0.01) continue;
       gl.uniform4f(u.uColor, color[0] * tint[0], color[1] * tint[1], color[2] * tint[2], alpha * tint[3]);
       gl.uniformMatrix3fv(u.uTexMatrix, false, texMatrix);
+      gl.uniform1f(u.uCoord, layer.coordId === 1 ? 1 : 0);
       const tex = m.textures[texIndex];
       // Team colour (1) and team glow (2) are textures of the player's colour.
       // (The shadow map takes the shape only: a team colour texture is opaque, and colours don't count.)
@@ -933,6 +1007,7 @@ export class ModelGpu {
       }
       // Shading flag 0x20: the layer isn't fogged.
       if (opts.fog) { const fc = fogColorForBlend(mode, opts.fog.color); gl.uniform4f(u.uFogColor, fc[0], fc[1], fc[2], sf & 0x20 ? 0 : 1); }
+      if (opts.edge && !shadow) { const ec = edgeColorForBlend(mode); gl.uniform3f(u.uEdgeColor, ec[0], ec[1], ec[2]); }
       if (sf & 0x80) gl.depthMask(false);
       if (opts.onTop) gl.disable(gl.DEPTH_TEST);
       if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }

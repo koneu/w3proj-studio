@@ -466,3 +466,65 @@ fn w3o_survives_damaged_files() {
         assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
     }
 }
+
+/// `w3proj pack` prunes war3map.wts (`w3proj::wts`), reading a stranger's string table, sounds file
+/// and the app's record of dropped strings: none of them damaged makes it panic, and a table it
+/// prunes keeps every string the map refers to as it was.
+#[test]
+fn wts_pruning_survives_damaged_files() {
+    use w3proj::wts;
+    let root = fixture().join("../wts-prune");
+    let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for name in ["war3map.wts", "war3map.w3i.json", "war3map.w3s.json", "war3map.wct.txt", "war3map.wtg"] {
+        files.insert(name.into(), fs::read(root.join("map").join(name)).unwrap());
+    }
+    let record = fs::read(root.join(wts::PRUNED_STRINGS_FILE)).unwrap();
+    let codecs = registry();
+    {
+        let mut f = files.clone();
+        let r = wts::prune_files(&mut f, Ok(Some(String::from_utf8(record.clone()).unwrap())), &codecs);
+        assert!(r.kept.is_none() && !r.dropped.is_empty(), "the undamaged fixture must prune: else keeping means nothing");
+    }
+    let targets = ["war3map.wts", "war3map.w3s.json", "record"];
+    let runs = par_seeds("wts pruning", seeds(rounds() * 5), |chunk| {
+        let mut found = Found::default();
+        for seed in chunk.seeds() {
+            let target = targets[(seed % 3) as usize];
+            let mut f = files.clone();
+            let mut rec = record.clone();
+            let mut rng = Rng::new(seed + 1);
+            match target {
+                "record" => rec = damage(&rec, &mut rng),
+                name => {
+                    let bad = damage(&f[name], &mut rng);
+                    f.insert(name.into(), bad);
+                }
+            }
+            let before = f["war3map.wts"].clone();
+            guarded(&mut found.failures, || format!("{target}, seed {seed}"), || {
+                let rec = String::from_utf8(rec).map_err(|_| "not UTF-8".to_string()).map(Some);
+                let r = wts::prune_files(&mut f, rec, &codecs);
+                if r.kept.is_some() {
+                    found.rejected += 1;
+                    assert_eq!(f["war3map.wts"], before, "{target}, seed {seed}: kept, yet the table changed");
+                    return;
+                }
+                found.accepted += 1;
+                let refs = wts::map_string_refs(&f, &codecs).unwrap();
+                let (was, now) = (wts::strings(&String::from_utf8_lossy(&before)), wts::strings(&String::from_utf8_lossy(&f["war3map.wts"])));
+                for (n, v) in &was {
+                    if refs.contains(n) {
+                        assert_eq!(now.get(n), Some(v), "{target}, seed {seed}: string {n} referenced but not kept as it was");
+                    }
+                }
+            });
+        }
+        found
+    });
+    let Found { failures, accepted, rejected, .. } = Found::all(runs);
+    report(failures);
+    println!("wts pruning: {accepted} damaged inputs pruned, {rejected} kept the table");
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} pruned, {rejected} kept");
+    }
+}

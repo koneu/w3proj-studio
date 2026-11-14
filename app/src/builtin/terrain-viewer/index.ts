@@ -1,38 +1,37 @@
-import { campaignCandidates } from "./chapterimports";
 import { fogOf } from "../../lib/model/fog";
 import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
-import { joinPath } from "../../lib/paths";
-import { importedPath, modeNames } from "../../lib/imports";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
+import { zoomStep } from "./wheelzoom";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
-import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { cameraRect, clampPoint, insideBounds, snappedInside, fitsSnapped, insetBy, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { composeLayers, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
-import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
+import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
-import { cliffList, planCliffs, type CliffType } from "./cliffs";
+import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -42,21 +41,27 @@ import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMap
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
-import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
-import { specialFootprints, specialPlacements, type Footprint } from "./specials";
-import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
+import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
+import { skinTextures } from "../../lib/model/replaceable";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
+import { doodadSnaps, type PathSize } from "./doodadgrid";
+import { doodadFixes, savedFlags } from "./doodadrules";
+import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { meleeAfterSave, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
-import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
-import { campsOf, checkMelee, unitLevels } from "./meleecheck";
+import { checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
+import { campsOf } from "./meleecheck";
+import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
-import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
-import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
+import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField, TOP_LEVEL } from "../../lib/terrain/wholemap";
+import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
+import { CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -73,10 +78,11 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
-import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
+import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
+import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
-import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
+import { groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -84,7 +90,7 @@ import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
-import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
+import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
@@ -118,40 +124,11 @@ const LOADING_FRAME_MS = 250;
 const PICTURE_WAIT_MS = 120_000;
 /** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
 const SHADOW_EDIT_DELAY = 700;
-/** How much a step of the mouse wheel zooms. */
-const WHEEL_ZOOM = 1.15;
 /** Which key on the keyboard an event is of, whatever Shift made of it (A and a), so that a held key's release is found. */
 const keyCodeOf = (e: KeyboardEvent) => e.code || eventKey(e).toLowerCase();
 
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
-
-/** Custom object id → base id, from the project's object data (war3map.w3u.json, …). */
-/** The object data the terrain view needs (units, items, destructables, doodads): the bases
- *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
- *  the map's own, then its Skin files (Reforged keeps art changes there). */
-async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[] }> {
-  const kinds = ["w3u", "w3t", "w3b", "w3d"];
-  const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
-    try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
-  };
-  const art: ObjectArt[] = [];
-  // A campaign's chapter map also uses the campaign's custom objects.
-  const campaign = campaignRoot(w3);
-  if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  for (const prefix of ["war3map", "war3mapSkin"]) {
-    for (const k of kinds) {
-      const path = `map/${prefix}.${k}.json`;
-      if (!files.has(path.toLowerCase())) continue;
-      const f = await read(path, k);
-      if (f) art.push(f);
-    }
-  }
-  const bases = new Map<string, string>();
-  for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return { bases, art };
-}
 
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
 async function tilePaths(w3: W3Api): Promise<Map<string, string>> {
@@ -166,49 +143,6 @@ async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name:
 
 /** Maps hold at most this many ground tile types (World Editor limit). */
 const MAX_GROUND_TILES = 16;
-
-/** A game file, or the map's imported replacement of it. */
-/** The campaign project of a chapter map project (…/maps/<file>), or undefined. */
-function campaignRoot(w3: W3Api): string | undefined {
-  const root = w3.workspace.project()?.root;
-  return root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-}
-
-/** The files of a campaign's map folder, to find an import under its name on disk (see campaignCandidates); one listing per
- *  campaign for a few seconds, as most reads here are of the game's files. Null when it can't be listed. */
-const listings = new Map<string, { at: number; files: Promise<string[] | null> }>();
-function campaignListing(w3: W3Api, campaign: string): Promise<string[] | null> {
-  const known = listings.get(campaign);
-  if (known && Date.now() - known.at < 5000) return known.files;
-  const files = w3.workspace.listFolder(joinPath(campaign, "map")).catch(() => null);
-  listings.set(campaign, { at: Date.now(), files });
-  return files;
-}
-
-/** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
- *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
-async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
-  const names = modeNames(path.replace(/\//g, "\\"), w3.settings.get<string>("game.graphicsMode") ?? "hd");
-  const campaign = campaignRoot(w3);
-  // The project's own files are known; only those are read (most paths are the game's), under the name they have on
-  // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
-  const own = names.flatMap((n) => importedPath(w3, n) ?? []);
-  const candidates = [...own, ...(campaign ? campaignCandidates(campaign, names, await campaignListing(w3, campaign)) : [])];
-  let last: unknown = new Error(`${path} isn't imported`);
-  for (const c of candidates) {
-    try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
-  }
-  throw last;
-}
-
-/** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
- *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
-async function readFile(w3: W3Api, doc: EditorDocument, path: string, tileset?: string): Promise<Uint8Array> {
-  if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return await readImport(w3, path); } catch { /* use the game's */ }
-  }
-  return w3.game.read(path, { tileset });
-}
 
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
@@ -273,8 +207,11 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The key that turns the selection toward the pointer now (T by default), for hints. */
   const faceKey = () => w3.keybindings.labelFor(FACE_COMMAND) ?? "no key";
-  /** The key held for an area of ground (A by default), for hints. */
-  const areaKeyName = () => w3.keybindings.labelFor(AREA_COMMAND) ?? "the area key (none now)";
+  /** The key held for an area of ground, for hints: none by default, since a drag with A held is the World Editor's
+   *  plain box select of objects (we-drive, verify round 3, 2026-11-13); the Select tab's Area button selects ground. */
+  const areaKeyName = () => w3.keybindings.labelFor(AREA_COMMAND);
+  /** `text` with the area key put in (as {key}) when one is bound, else "". */
+  const withAreaKey = (text: string) => { const key = areaKeyName(); return key ? text.replace("{key}", key) : ""; };
   /** The camera's mouse buttons now, for the hint under the view (the keys are the World Editor's by default). */
   const cameraHelp = () => {
     const drag = (id: string) => { const k = w3.keybindings.labelFor(id); return k ? `${k} drag or ` : ""; };
@@ -298,15 +235,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back). */
   let rebuilding: Promise<void> = Promise.resolve();
+  const rebuildFailed = (why: unknown) => {
+    const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
+    w3.window.showError(text);
+    return new Error(text);
+  };
+  /** The derived files of project `key` made from its saved files (no editor is opened), in the rebuilds' turn. */
+  const deriveSaved = async (key: string, path: string, from: RebuildFrom) => {
+    const doc = { path } as EditorDocument;
+    await deriveFromProject(w3, {
+      terrainPath: path,
+      from,
+      objects: () => savedObjects(w3),
+      read: (p) => readFile(w3, doc, p),
+      groups: toolGroups.all(),
+      // Another project opened meanwhile: nothing of this one's is written into it.
+      stillOpen: () => w3.workspace.project()?.root === key,
+    }).catch((e) => { throw rebuildFailed(e); });
+  };
   const runRebuild = () => {
     const run = rebuilding.then(async () => {
       const job = rebuild;
       if (!job || job.key !== w3.workspace.project()?.root) return;
-      const failed = (why: unknown) => {
-        const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
-        w3.window.showError(text);
-        return new Error(text);
-      };
       // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
       // it stays closed: the files are made from the project's saved ones.
       const editor = ownEditor();
@@ -314,25 +264,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const path = projectTerrain(w3);
         if (!path) return;
         rebuild = null;
-        const doc = { path } as EditorDocument;
-        await deriveFromProject(w3, {
-          terrainPath: path,
-          from: job.from,
-          objects: async () => {
-            const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-            return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-          },
-          read: (p) => readFile(w3, doc, p),
-          groups: toolGroups.all(),
-          // Another project opened meanwhile: nothing of this one's is written into it.
-          stillOpen: () => w3.workspace.project()?.root === job.key,
-        }).catch((e) => { throw failed(e); });
+        await deriveSaved(job.key, path, job.from);
         return;
       }
       // The wait was long enough for another project to be opened: its job and editor are not this one's.
       if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
       rebuild = null;
-      await editor.derive(job.from).catch((e) => { throw failed(e); });
+      await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
     });
     rebuilding = run.catch(() => {});
     return run;
@@ -365,14 +303,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await runRebuild();
       if (w3.workspace.project()?.root !== root) return null;
       const doc = { path } as EditorDocument;
-      const { shd, stored } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
+      const { shd, stored, write, leftOut, problem } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
         terrainPath: path,
-        objects: async () => {
-          const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-          return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
-        },
+        objects: () => savedObjects(w3),
         read: (p) => readFile(w3, doc, p),
       }));
+      if (!write) throw new Error(`Shadows not calculated: ${problem}. The stored war3map.shd is kept.`);
+      if (leftOut) w3.window.showWarning(`${leftOut} doodad${leftOut === 1 ? "" : "s"} left out of the shadows: their models couldn't be read.`);
       const changed = stored && stored.length === shd.length ? shd.reduce((n, v, i) => n + (v !== stored[i] ? 1 : 0), 0) : shd.length;
       if (changed) {
         // Outside the rebuilds' turn: making a checkpoint waits for them (w3.terrain.settle).
@@ -401,6 +338,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const on = w3.settings.get<boolean>("terrain.minimap.panel", true) !== true;
       await w3.settings.set("terrain.minimap.panel", on);
       return on;
+    }),
+    // Placement files written straight to disk, not through a tool's edit (the Problems view's Delete Invalid Objects
+    // and Remove placed): pathing, shadows and the minimap are made from the saved files at once, in the rebuilds' turn,
+    // and recorded as following them (w3proj::derived), so `w3proj pack` takes them. Also with a terrain editor open:
+    // those commands refuse while anything is unsaved, and the record is of the files, not of what an editor holds.
+    // `doodadsBefore`: the doodad list before the change (shadows are updated from there), left out when the doodads
+    // didn't change. A rebuild still due from a tool's edit is taken in: its state before is the older one. `forRoot`:
+    // the project the files were written in; another one open by now is left alone.
+    w3.commands.register("w3.terrain.rebuildFromFiles", async (doodadsBefore?: unknown, forRoot?: unknown) => {
+      const root = w3.workspace.project()?.root;
+      const path = projectTerrain(w3);
+      if (!root || !path || (typeof forRoot === "string" && forRoot !== root)) return;
+      clearTimeout(rebuildTimer);
+      const due = rebuild?.key === root ? rebuild.from : null;
+      if (due) rebuild = null;
+      const run = rebuilding.then(async () => {
+        if (w3.workspace.project()?.root !== root) return;
+        const before = due?.doodads ?? (Array.isArray(doodadsBefore) ? doodadsBefore as Placed[] : null);
+        // Unchanged doodads: the file's are those before too. One that is there but unreadable fails the rebuild.
+        const doodads = before ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch((e) => { throw rebuildFailed(e); }))?.list ?? [];
+        await deriveSaved(root, path, { terrain: due?.terrain, doodads });
+      });
+      rebuilding = run.catch(() => {});
+      return run;
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
@@ -484,7 +445,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** One edit of a placement file. Units: the map stops being a melee map in the same edit (one undo step) when the
    *  World Editor's save would take it off (lib/terrain/meleesave: a player's unit or item, custom gameplay constants,
-   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types). The map
+   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types), and becomes
+   *  one again when Studio can tell the editor's save would make it one. The map
    *  script's run after the save would do it too, but a moment later and lost when the project closes first. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
@@ -515,7 +477,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
         // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
         // saved terrain's (a start under water).
-        const flags = info.flags as number, after = (await savedMelee(w3.workspace, info as unknown as MeleeInfo, list)).flags;
+        const flags = info.flags as number, after = (await savedMelee(meleeFiles(w3), info as unknown as MeleeInfo, list)).flags;
         if (after !== flags) { info.flags = after; changed = true; }
         if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
@@ -596,12 +558,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }));
   };
 
+  /** The open editor's ground and objects, as check_melee and check_path read them (meleefacts.ts). */
+  const walkSource = (handle: TerrainEditorHandle): WalkSource => ({
+    terrain: handle.terrain,
+    pathing: () => handle.pathing(),
+    blockers: () => handle.objects.blockers(),
+    list: () => handle.objects.list() as unknown as Placed[],
+    baseOf: (id) => handle.objects.baseOf(id),
+  });
+
   /** What stands by the tight or stuck place of a report: usually the reason. */
-  const withNeighbour = <T extends { narrowest?: { at: [number, number] }; stuckAt?: [number, number] }>(handle: TerrainEditorHandle, report: T) => {
-    const place = report.stuckAt ?? report.narrowest?.at;
-    const near = place ? nearestObject(handle.objects.list(), place) : null;
-    return near ? { ...report, standingNearby: { id: near.id, position: near.position } } : report;
-  };
+  const withNeighbour = <T extends { narrowest?: { at: [number, number] }; stuckAt?: [number, number] }>(handle: TerrainEditorHandle, report: T) =>
+    neighbourOf(walkSource(handle), report);
 
   /** All of the map, the border included. */
   const wholeMap = ({ terrain: t }: TerrainEditorHandle) => ({ left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 });
@@ -617,12 +585,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const heldBounds = async () => toolBounds(w3, await readMapDoc<{ cameraBounds?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null));
 
   /** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
-  const walkGrid = async (handle: TerrainEditorHandle): Promise<Grid> => {
-    const [pathing, blockers] = await Promise.all([handle.pathing(), handle.objects.blockers()]);
-    const t = handle.terrain;
-    const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
-    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
-  };
+  const walkGrid = (handle: TerrainEditorHandle): Promise<Grid> => gridOf(walkSource(handle));
 
   /** How long Studio waits for a yes. Less than a tool call may take, or the answer goes nowhere. */
   const CONFIRM_TIME = 90_000;
@@ -655,44 +618,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
     const { handle } = await liveEditor("read");
-    const [balance, weapons, destructables, game, data, grid, unitMods] = await Promise.all([
-      w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
-      w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle), objectMods(w3, "war3map.w3u"),
-    ]);
-    // The map's own levels (ulev in its unit object data) over the game's.
-    const level = unitLevels(parseSlk(balance), unitMods, (id) => handle.objects.baseOf(id));
-    const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
-    const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
-    const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
-    const placed = handle.objects.list() as unknown as (Placed & { player?: number; targetAcquisition?: number; itemTable?: number; itemSets?: unknown[]; randomLevel?: string })[];
-    const units = placed.filter((e) => e.player !== undefined).map((e) => ({
-      id: e.id, x: e.position[0], y: e.position[1], player: e.player as number, acquisition: e.targetAcquisition ?? -1,
-      drops: (e.itemTable ?? -1) >= 0 || (e.itemSets ?? []).length > 0,
-      ...(e.id.startsWith("Y") ? { randomLevel: parseInt((e.randomLevel ?? "").slice(0, 2), 16) || 0 } : {}),
-    }));
-    const trees = placed.filter((e) => e.player === undefined && (isTree.has(e.id) || isTree.has(handle.objects.baseOf(e.id) ?? ""))).map((e) => [e.position[0], e.position[1]] as [number, number]);
-    const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
-    const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
-    const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
-    const way = (name: string, from: [number, number], to: [number, number], target?: [number, number], owner?: number) => {
-      let report = checkPath(grid, from, to, size, 200);
-      // A mine or a building at the end stands in its own way.
-      if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
-      routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route, ...(owner === undefined ? {} : { from: owner, length: report.length }) } : { name, problem: report.problem ?? "no way through" });
-    };
-    for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
-    for (const [i, s] of starts.entries()) {
-      const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
-      for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m), i);
-      for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
-    }
-    const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
-    const widest = starts.map((s) => widestFrom(grid, at(s)));
-    const t = handle.terrain, counts = new Map<number, number>();
-    for (const c of t.corners) if (!c.boundary) counts.set(c.layer, (counts.get(c.layer) ?? 0) + 1);
-    const commonLevel = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
-    const levelAt = (x: number, y: number) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer ?? 0;
-    return { handle, grid, widest, units, trees, routes, levelAt, commonLevel, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
+    return { handle, ...(await meleeFactsOf(w3, walkSource(handle), size)) };
   };
 
   let placeObjects: McpToolHandler = () => undefined;
@@ -702,8 +628,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The seed a tool was given, or a new one: the answer says it, so any result can be repeated. */
   const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
 
-  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random) => {
-    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player, handle.objects.type(id)?.kind);
+  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random, startGold = DEFAULT_START_GOLD) => {
+    // At the height the World Editor saves it with: a ship in water on the surface, anything else (doodads have no
+    // movement type) on the ground.
+    const type = handle.objects.type(id);
+    const z = savedUnitZ(type?.moveType, heightAt(handle.terrain, x, y), waterSurfaceAt(handle.terrain, x, y));
+    const entry = newEntry(f, id, [x, y, z], player, type?.kind, startGold);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
     return entry;
@@ -839,7 +769,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
       const { handle } = await liveEditor("read");
-      return withNeighbour(handle, checkPath(await walkGrid(handle), start, goal, size));
+      return pathReport(walkSource(handle), start, goal, size);
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
@@ -988,23 +918,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
-      const f = await meleeFacts(typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
-      return checkMelee({
-        units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
-        callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
-        narrow: narrowStrips(f.grid), levelAt: f.levelAt, commonLevel: f.commonLevel,
-        widestTo: (x, y) => {
-          // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
-          let best = 0;
-          const { width: w, height: h, offsetX, offsetY } = f.grid;
-          const cx = Math.floor((x - offsetX) / 32), cy = Math.floor((y - offsetY) / 32);
-          for (let b = -3; b <= 3; b++) for (let a = -3; a <= 3; a++) {
-            if (cx + a < 0 || cy + b < 0 || cx + a >= w || cy + b >= h) continue;
-            for (const field of f.widest) best = Math.max(best, field[(cy + b) * w + cx + a]);
-          }
-          return widthOf(best);
-        },
-      });
+      const { handle } = await liveEditor("read");
+      return meleeReport(w3, walkSource(handle), typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
     }),
     w3.mcp.registerTool("find_spots", async ({ kind, count, mirror }) => {
       if (kind !== "camp" && kind !== "expansion") throw new Error("kind must be camp or expansion.");
@@ -1119,10 +1034,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let spot: [number, number] | null = [x, y];
           // At a corner a line runs into the end of the last one, of the same fence: that's meant.
           const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
-          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await room.fits(kindOf, id, x, y, angle))) {
+          // A unit is snapped when placed (a building to its grid), a doodad to its own (doodadedit.ts): room is checked where it lands.
+          const snap = (px: number, py: number) => key === "units" ? handle.objects.buildingSpot(id, px, py)
+            : handle.objects.placedSpot(kindOf, id, px, py, angle).then((at) => [at.x, at.y] as const);
+          const fitsAt = (px: number, py: number, ang: number) => fitsSnapped(snap, (sx, sy) => room!.fits(kindOf, id, sx, sy, ang), px, py);
+          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await fitsAt(x, y, angle))) {
             spot = null;
             if (nearest === true) {
-              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
+              for (const s of spotsAround(x, y)) if (insideBounds(held, s[0], s[1]) && await fitsAt(s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
               skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
@@ -1131,6 +1050,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
           // Both sides or neither, or a skipped object would break the symmetry unseen.
+          if (!(await snappedInside(held, snap, spot[0], spot[1]))) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
           const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
@@ -1138,16 +1058,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
             continue;
           }
-          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await room.fits(kindOf, id, twin[0], twin[1], twinAngle))) {
+          if (paired && !(await snappedInside(held, snap, twin[0], twin[1]))) {
+            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} would be ${OUTSIDE_BOUNDS}` });
+            continue;
+          }
+          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await fitsAt(twin[0], twin[1], twinAngle))) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
           }
           await place?.(o, i, spot[0], spot[1], facing);
           // A line's pieces touch each other on purpose.
-          if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+          if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(spot[0], spot[1]), angle);
           if (paired) {
             await place?.(o, i, twin[0], twin[1], twinFacing);
-            if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
+            if (ownPieces === undefined) await room?.mark(kindOf, id, ...await snap(twin[0], twin[1]), twinAngle);
           }
           placed += paired ? 2 : 1;
         }
@@ -1155,12 +1079,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
       let placed = 0;
+      // The gold new units get, as the palette's (a map whose ability data can't be read: the game's).
+      const startGold = key === "units" ? await loadStartGold(w3).catch(() => DEFAULT_START_GOLD) : DEFAULT_START_GOLD;
       await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
         placed = await plan(async (o, i, x, y, facing) => {
           const [atX, atY] = key === "units" ? await handle.objects.buildingSpot(o.id as string, x, y) : [x, y];
-          const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
+          const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random, startGold);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
-          else markBackdrop(entry, x, y, edge);
+          else {
+            // On its grid, turned and scaled as the World Editor places it (doodadedit.ts), in this edit.
+            await handle.objects.settleDoodads([entry], { place: true, scale: true });
+            markBackdrop(entry, entry.position[0], entry.position[1], edge);
+          }
           giveProps(entry, i);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
@@ -1200,12 +1130,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // doesn't fit at a spot is left out there.
         const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
         const spacing = Math.max(64, smallest) / Math.sqrt(density);
-        for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
+        for (const asked of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
-          if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
-          if (!insideBounds(held, spot.x, spot.y)) { outside++; continue; }
+          if (isKeptClear(asked.x, asked.y, keep)) { keptClear++; continue; }
+          if (!insideBounds(held, asked.x, asked.y)) { outside++; continue; }
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
+          // A doodad on its grid (doodadedit.ts): what's checked is where it lands. Its facing follows in settleDoodads.
+          const spot = await handle.objects.placedSpot(type.kind, id, asked.x, asked.y, angle);
+          if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
+          if (!insideBounds(held, spot.x, spot.y)) { outside++; continue; }
           if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           const twin = args.mirror === true ? twinOf(spot.x, spot.y, whole) : null;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
@@ -1215,10 +1149,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
           }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
-          markBackdrop(add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random), spot.x, spot.y, edge);
+          // Turned and scaled as the World Editor places it (doodadedit.ts): a scaleRange past the type's is held to it.
+          const placed = add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
+          await handle.objects.settleDoodads([placed], { place: true, scale: true });
+          markBackdrop(placed, placed.position[0], placed.position[1], edge);
           if (twin) {
             await room.mark(type.kind, id, twin[0], twin[1], twinAngle);
-            markBackdrop(add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random), twin[0], twin[1], edge);
+            const pair = add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random);
+            await handle.objects.settleDoodads([pair], { place: true, scale: true });
+            markBackdrop(pair, pair.position[0], pair.position[1], edge);
           }
           counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
@@ -1232,16 +1171,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
       const { handle } = await liveEditor();
+      // A building, a gold mine and a start location go on their grid, as the World Editor moves them (placement.ts
+      // unitGridCells); the spot it lands on is held to the bounds too.
+      const key = fileKey(kind);
+      const [gx, gy] = key === "units" ? await handle.objects.buildingSpot(String(id), x, y) : [x, y];
       // Enforce Camera Bounds refuses the move, as the Properties panel's Position does.
-      if (!insideBounds(await heldBounds(), x, y)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
-      await editPlaced(`Move ${String(id)}`, fileKey(kind), (f) => {
+      const held = await heldBounds();
+      if (!insideBounds(held, x, y) || !insideBounds(held, gx, gy)) throw new Error(`Not done: ${x}, ${y} is ${OUTSIDE_BOUNDS}.`);
+      let at: number[] = [x, y];
+      await editPlaced(`Move ${String(id)}`, key, async (f) => {
         const e = f.list[Number(index)];
         if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
-        e.position = [x, y, heightAt(handle.terrain, x, y)];
+        e.position = [gx, gy, heightAt(handle.terrain, gx, gy)];
         if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
         if (typeof scale === "number") e.scale = [scale, scale, scale];
+        // A doodad goes on its grid and keeps to its scale range, as the World Editor puts it (doodadedit.ts).
+        await handle.objects.settleDoodads([e], { place: true, scale: typeof scale === "number" });
+        at = e.position;
       });
-      return `Moved ${String(id)} to ${x}, ${y}.`;
+      return at[0] === x && at[1] === y ? `Moved ${String(id)} to ${x}, ${y}.` : `Moved ${String(id)} to ${at[0]}, ${at[1]} (its grid's point next to ${x}, ${y}).`;
     }),
     w3.mcp.registerTool("remove_objects", async (args) => {
       const { items, id, player } = args;
@@ -1338,6 +1286,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await view.groupItemAction(group, named ? name : null, action, typeof to === "string" ? to.trim() : undefined);
       if (why) throw new Error(why);
     }),
+    // A placed unit, item, doodad or destructable, for the Object Manager: deleted in the project's terrain editor
+    // (opened first) as its Delete key does, one undo step there.
+    w3.commands.register("w3.terrain.deletePlaced", async (x?: number, y?: number, ref?: { id?: string; editorId?: number }) => {
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("w3.terrain.deletePlaced takes the object's x and y and optionally { id, editorId }.");
+      const root = w3.workspace.project()?.root;
+      await w3.commands.execute("w3.terrain.open");
+      if (w3.workspace.project()?.root !== root) return;
+      const view = toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("The terrain editor didn't open.");
+      // Opened just now, the editor may still be loading its placed objects.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const loaded = await Promise.race([view.ready().then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), 30000); })]);
+      clearTimeout(timer);
+      if (!loaded) throw new Error("The terrain editor is still loading the placed objects. Try again in a moment.");
+      if (w3.workspace.project()?.root !== root || toolGroups.viewCommands.get(projectTerrain(w3) ?? "") !== view) return;
+      const why = view.deletePlaced({ id: typeof ref?.id === "string" ? ref.id : undefined, editorId: typeof ref?.editorId === "number" ? ref.editorId : undefined, x, y });
+      if (why) throw new Error(why);
+    }),
     // The View commands act on the terrain editor in front: another tab's would change what no one sees.
     ...viewCommandList.map(([id, run]) => w3.commands.register(id, async () => {
       const path = w3.editors.activePath();
@@ -1381,6 +1347,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await view.setUniformHeights(height);
       if (why) void w3.window.showInfo(why);
     }),
+    // The World Editor's key Y: the same, at the selection's mean height, with no dialog (verification round 3,
+    // 2026-11-13: two doodads at 150 and 400 went to 275 with flags 6, nothing asked).
+    w3.commands.register("w3.terrain.setUniformDoodadHeightsToMean", async () => {
+      const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      const mean = view.uniformDefaultHeight();
+      if (mean === null) { void w3.window.showInfo("No doodads are selected: select doodads or destructables first."); return; }
+      const why = await view.setUniformHeights(mean);
+      if (why) void w3.window.showInfo(why);
+    }),
     w3.commands.register("w3.terrain.resetFixedObjectHeights", () => {
       const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
       if (!view) throw new Error("Switch to a terrain editor first.");
@@ -1403,15 +1379,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!reset()) void w3.window.showInfo("The map has no ground tiles to reset.");
     }),
     // Reset Height Field and Adjust Cliff Levels (the World Editor's Advanced menu): the terrain editor in front. Unlike
-    // the World Editor's, each is one undo step, so neither asks first.
-    w3.commands.register("w3.terrain.resetHeightField", async () => {
+    // the World Editor's, each is one undo step, so neither asks "cannot be undone" first. Reset Height Field shows its
+    // dialog (flat or Random), or does `given` as it is (scripts and tests).
+    w3.commands.register("w3.terrain.resetHeightField", async (given?: ResetHeightRequest) => {
       const path = w3.editors.activePath();
       const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
       if (!ground) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
-      const r = ground.resetHeightField();
+      let req = given && typeof given === "object" ? given : undefined;
+      if (!req) {
+        req = await askResetHeight() ?? undefined;
+        if (!req) return;
+        // The editor may have closed, or its view been lost, while the dialog was open.
+        if (toolGroups.wholeMapGround.get(path!) !== ground) return;
+        refuseLostView(path);
+      }
+      const random = randomSettings(req);
+      const r = ground.resetHeightField(random);
       if (typeof r === "string") void w3.window.showWarning(r);
-      else if (r === 0) void w3.window.showInfo("The ground is flat over its cliff levels already.");
+      else if (r === 0) void w3.window.showInfo(random ? "Nothing changed: the variation is 0 and the smoothing had nothing to smooth." : "The ground is flat over its cliff levels already.");
     }),
     w3.commands.register("w3.terrain.adjustCliffLevels", async (given?: number) => {
       const path = w3.editors.activePath();
@@ -1562,8 +1548,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const openedMode = artMode();
         try {
           renderer = new TerrainRenderer(canvas, terrain);
-          renderer.tone = toneOf(openedMode);
-        } catch (e) {
+          renderer.tone = toneOf(openedMode);        } catch (e) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
@@ -1625,6 +1610,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
+        /** The running cycle's hour (setting terrain.lighting.dayNightCycle); the stored hour stays as the user set it. */
+        let cycleHour = lightHour();
+        const cycleOn = () => w3.settings.get<boolean>("terrain.lighting.dayNightCycle", false) === true;
+        const lightHourNow = () => (cycleOn() ? cycleHour : lightHour());
         const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); keysToMap(); } });
         const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); keysToMap(); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
@@ -1646,11 +1635,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewSyncsAfterTab = () => {};
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
-          const on = lightOn() || gameViewOn(), hour = lightHour();
+          const on = lightOn() || gameViewOn(), hour = lightHourNow();
           lightBox.checked = lightOn();
           lightBox.disabled = gameViewOn();
-          lightSelect.value = String(hour);
-          lightSelect.disabled = !on;
+          lightSelect.value = String(Math.floor(hour));
+          lightSelect.disabled = !on || cycleOn();
           renderer.gameView = on;
           // The game's own lighting models light HD's real shadows more than a map's own do (tone.ts GAME_LIGHT_FILL).
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
@@ -1659,18 +1648,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };
+        // The running cycle: a step twice a second, none while the page or the view is hidden.
+        let cycleAt = 0;
+        const cycleTimer = setInterval(() => {
+          if (disposed || !cycleOn() || document.hidden || canvas.clientWidth <= 0) { cycleAt = 0; return; }
+          const now = performance.now();
+          if (cycleAt) cycleHour = stepHour(cycleHour, (now - cycleAt) / 1000, DAY_SECONDS);
+          cycleAt = now;
+          applyLight();
+        }, 500);
         const showBoundary = () => w3.settings.get<boolean>("terrain.boundary", true) !== false;
         /** The playable part as last read from the map; null until then. */
         let playableEdge: Area | null = null;
         const loadBorder = async () => {
           const info = await readMapDoc<{ cameraComplements?: number[]; cameraBounds?: number[] } & Parameters<typeof fogOf>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          if (!info) return;
+          // Closed while it was read: the renderer is gone. A w3i missing or unreadable leaves the border as it is.
+          if (!info || disposed) return;
           cameraArea = cameraRect(info);
           cameraCorners = cameraBoundsCorners(info);
           showCameraBounds();
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
-          // The border's shade comes from the terrain's own marks (the renderer's refreshBorder), as the editor's.
+          // The border's shade and black water go by the w3i's complements, as the editor's (not the terrain's marks).
+          renderer.setPlayable(validComplements(info.cameraComplements));
           redraw();
         };
         renderer.showBorder = showBoundary();
@@ -1723,6 +1723,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
           if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights") viewSyncs.forEach((f) => f());
+          if (key === "terrain.lighting.dayNightCycle") { cycleHour = lightHour(); cycleAt = 0; }
+          if (key === "terrain.lighting.hour" && !cycleOn()) cycleHour = lightHour();
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.gameView" || key === "terrain.fog" || key === "terrain.weather") viewChanged();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
@@ -1750,10 +1752,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cameraArea: Bounds | null = null;
         /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
         let cameraCorners: [number, number][] | null = null;
+        /** Where a dragged or nudged object's centre may go: on the map, a unit or item with its collision size or
+         *  footprint inside the playable part (unitHalves); a start location 64 inside the whole map, its grid's last
+         *  point (we-drive 2026-11-13: nudged on a 64×64 map whose edge is 4096, it stopped at 4032, 4032, past the
+         *  playable part's 3328, 3072).
+         *  Not held to the camera bounds, as the World Editor's moves aren't. */
+        const moveBounds = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle)
+          : e.id === "sloc" ? insetBy(wholeMap(handle), START_CELLS.map((c) => c * 16) as [number, number])
+            : insetBy(playableEdge ?? wholeMap(handle), unitHalves.get(e.id) ?? [0, 0]);
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
-        /** Where a moved object may stand: the map (the playable part, for units and items) cut by the camera bounds when enforced. */
-        const moveBase = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle);
-        const moveBounds = (e: Placed): Bounds => limitTo(moveBase(e), heldTo());
         const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
@@ -2079,6 +2086,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cliffData: { types: Map<string, CliffType>; exists: (p: string) => boolean } | null = null;
         /** Bumped per re-plan so a slow older one can't overwrite a newer one. */
         let cliffGen = 0;
+        /** The special doodads as last drawn, the tiles they cover (same order), and their cliff textures and heights
+         *  then (specialLooks): a cliff re-plan that changes those (the cliff types once known, a cliff type painted,
+         *  a layer raised) draws the objects again. The cliff models leave the covered tiles to them. */
+        let specialsPlaced: Placed[] = [], specialRects: TileRect[] = [], specialsLook = "";
+        /** A special's textures: its cliff type's (specialTextures), unless its type names a texture of its own. */
+        const specialLook = (p: Placed, skin: Skin | undefined) => {
+          if (!cliffData || (skin && Object.keys(skinTextures(skin)).length)) return undefined;
+          const type = specialCliffType(terrain, cliffList(terrain, cliffData.types), p.position[0], p.position[1]);
+          return type ? specialTextures(type) : undefined;
+        };
+        const specialLooks = (placed: readonly Placed[], rects: readonly TileRect[]) =>
+          placed.map((p, i) => `${specialLook(p, undefined)?.key ?? ""}@${specialBase(terrain, rects[i])}`).join("|");
+        /** The tiles the cliffs were last planned without (specialCliffTiles), as a key. */
+        let cliffsHidden = "";
         /** The tileset's shoreline models (from Water.slk), once known. */
         let shoreModels: ShoreModels | null = null;
         let shoreGen = 0;
@@ -2098,12 +2119,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (shore) void replanShore();
           if (!cliffData) return;
           const gen = ++cliffGen;
-          const { requests, groundOverrides } = planCliffs(terrain, cliffData.types, cliffData.exists);
+          const hidden = specialCliffTiles(terrain, specialRects);
+          cliffsHidden = [...hidden].join();
+          const { requests, groundOverrides, hiddenTiles } = planCliffs(terrain, cliffData.types, cliffData.exists, hidden);
+          // The specials take the cliff texture and the layer of their ground.
+          if (specialsPlaced.length && specialLooks(specialsPlaced, specialRects) !== specialsLook) void rebuildObjects();
           const { batches, failed } = await loader.loadModels("cliffs", requests);
           if (gen !== cliffGen) return;
           const broken = new Set(failed.map((f) => f.index));
           renderer.setGroup("cliffs", batches.map((b) => ({ ...b, followGround: true })));
-          renderer.setCliffTiles(new Set(requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles))), groundOverrides);
+          renderer.setCliffTiles(new Set([...requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles)), ...hiddenTiles]), groundOverrides);
           const tiles = requests.reduce((n, r) => n + r.tiles.length, 0);
           cliffInfo.textContent = `${tiles.toLocaleString()} cliff tiles · ${requests.length} cliff models${failed.length ? ` · ${failed.length} failed` : ""}`;
           cliffInfo.title = failed.map((f) => f.error).join("\n");
@@ -2138,6 +2163,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Doodads as last saved (shadow baseline, like savedW3e). */
         let savedDoodads: Placed[] | null = null;
         let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
+        /** The gold a new placed unit gets (typefacts.ts loadStartGold), read now and after the ability data is saved;
+         *  the last read started wins. One that fails leaves the game's 12500, said once. */
+        let startGold = DEFAULT_START_GOLD, startGoldRead = 0;
+        const readStartGold = () => {
+          const n = ++startGoldRead;
+          void loadStartGold(w3).then((g) => { if (n === startGoldRead) startGold = g; }, (e) => {
+            if (n !== startGoldRead) return;
+            startGold = DEFAULT_START_GOLD;
+            reportOnce(w3, `The map's ability data couldn't be read, so new units get ${DEFAULT_START_GOLD} gold`, e);
+          });
+        };
+        readStartGold();
         /** Set once an object was edited: the placement files are saved too. */
         let objectsTouched = false;
         /** An object to select once the placed objects have models (Object Manager double-click). */
@@ -2151,6 +2188,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  draws a footman with a knight's skin as the knight: we-drive, 2026-11-10), else its own type. */
         const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined)
           ?? (skinOfEntry(p) !== p.id ? skinOfEntry(p) : undefined);
+        /** A placed doodad or destructable is drawn as its skin's type (when it names another). */
+        const skinShown = (p: Placed) => (skinOfEntry(p) !== p.id ? skinOfEntry(p) : undefined);
         const marker =(p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
@@ -2258,15 +2297,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopShadows = () => { clearTimeout(shadowTimer); viewShadows.dispose(); stopShadowSaves.dispose(); stopShadowSetting.dispose(); };
         /** Pathing texture size of each unit type met so far, null for those without: buildings have one. */
         const buildingCells = new Map<string, [number, number] | null>();
+        /** What each unit type met so far takes up, half across and up (resize.ts unitHalf): a drag or nudge keeps it
+         *  inside the playable part, as the World Editor's do (moveBounds). Missing: its centre alone. */
+        const unitHalves = new Map<string, [number, number]>();
         const loadCells = async (id: string) => {
           if (buildingCells.has(id) || id === "sloc") return;
           pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
           const data = await pathingData, shape = data.unitShape(id);
           const image = shape?.path ? await data.texture(shape.path).catch(() => null) : null;
-          buildingCells.set(id, image ? [image.width, image.height] : null);
+          const cells: [number, number] | null = image ? [image.width, image.height] : null;
+          buildingCells.set(id, cells);
+          unitHalves.set(id, unitHalf(cells, shape?.collision));
         };
+        /** Where a unit of type `id` goes for (x, y): a building and a start location on their grid, anything else there. */
         const onGrid = (id: string, x: number, y: number): [number, number] => {
-          const cells = buildingCells.get(id);
+          const cells = unitGridCells(id, buildingCells.get(id));
           return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
         };
         /** Object data being taken in by a reload, until it's drawn. */
@@ -2339,28 +2384,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (gen !== rebuildGen) return;
           const specialPlaced = specialPlacements(specialList, skins, (id) => specialSizes.get(id) ?? undefined,
-            { x: terrain.offsetX, y: terrain.offsetY }, (x, y) => heightAt(terrain, x, y));
-          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
+            { x: terrain.offsetX, y: terrain.offsetY }, (_x, _y, tiles) => specialBase(terrain, tiles));
+          const rects = specialList.filter((sp) => skins.has(sp.id)).map((sp) => specialTiles(sp, specialSizes.get(sp.id) ?? undefined));
+          const look = specialLooks(specialPlaced, rects);
+          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
-            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
+            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
+          specialsPlaced = specialPlaced;
+          specialRects = rects;
+          specialsLook = look;
+          // The cliff models leave the specials' tiles to them.
+          if ([...specialCliffTiles(terrain, rects)].join() !== cliffsHidden) void replanCliffs(false);
           drawnSpecials = sp.batches.flatMap((b) => b.instances.flatMap((i) => (i.pick ? [{ id: i.pick.id, x: i.world[12], y: i.world[13], z: i.world[14], model: i.pick.model }] : [])));
           for (const b of sp.batches) for (const inst of b.instances) delete inst.pick;
-          renderer.setGroup("doodads", [...d.batches, ...sp.batches]);
+          // Like the cliff models, they stand on a layer and follow the ground's height per vertex (specialBase).
+          renderer.setGroup("doodads", [...d.batches, ...sp.batches.map((b) => ({ ...b, followGround: true }))]);
           // The start buildings inside the start locations' rings: drawn see-through without their particles
           // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
           // the units; a town hall that doesn't load is just left out.
           for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
           // The start locations' model and the start buildings are the editor's: game view leaves them out.
           const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
-          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)),
-            ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true }))]);
+          previewBatches = s.batches.map(lookOfPreview);
+          previewKey = startPreviewKey(units, startRaces);
+          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)), ...previewBatches]);
           void artLoad(showSplats());
           showShadowObjects();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
+          // The doodads' grids, for moving them (doodadedit.ts).
+          for (const id of new Set(doodads.map((p) => p.id))) void loadDoodadCells(id).catch(() => { /* stays where it is put */ });
           // Objects without a model (start locations, unknown ids) stay markers.
           unresolvedDoodads = d.unresolved;
           unresolvedUnits = u.unresolved;
@@ -2417,6 +2473,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (pathing) {
               pathingData = null;
               buildingCells.clear();
+              doodadCells.clear();
+              unitHalves.clear();
               occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             }
             const before = objCtx;
@@ -2425,7 +2483,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Only what is placed with a type that looks different is drawn again; models stay loaded.
             const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
             const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
-            for (const id of changed) buildingCells.delete(id);
+            for (const id of changed) { buildingCells.delete(id); doodadCells.delete(id); }
             if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             // A rebuild that starts meanwhile (a file taken in place) draws with the new data too.
             nextCtx = next;
@@ -2446,6 +2504,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The properties panel reads its lists and the types' facts anew.
           if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
           if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
+          if (/(^|\/)war3(map|campaign)(Skin)?\.w3a(\.json)?$/i.test(p)) readStartGold();
           const art = changesObjectData(p);
           const imported = changesImports(p);
           // Also before the first load is done (see objectReload): it may have read the file before this save.
@@ -2457,6 +2516,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
          *  be read keeps the races last read: they only change what is drawn. */
         let startRaces = new Map<number, number>();
+        /** What the previews drawn now were made from (startPreviewKey), and their batches in the units group. */
+        let previewKey = "";
+        let previewBatches: ObjectBatch[] = [];
+        let previewGen = 0;
+        function lookOfPreview<B extends { instances: ObjectInstance[] }>(b: B) {
+          for (const inst of b.instances) delete inst.pick;
+          return { ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true };
+        }
+        /** Makes only the start buildings again when the start locations or the races changed (checked on each drawn
+         *  frame: every edit, undo, paste and MCP call asks for one). Whatever the Melee flag, as in the World Editor
+         *  (startPreviews). */
+        function refreshStartPreviews() {
+          const ctx = nextCtx ?? objCtx;
+          if (!ctx || !unitsFile) return;
+          const units = unitsFile.list;
+          const key = startPreviewKey(units, startRaces);
+          if (key === previewKey) return;
+          previewKey = key;
+          const gen = ++previewGen, rebuilt = rebuildGen;
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces), ctx.skins, team, undefined, undefined, false).then((s) => {
+            // A full rebuild in between made them itself; a newer change makes them again.
+            if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
+            const fresh = s.batches.map(lookOfPreview);
+            renderer.setGroup("units", [...renderer.batches.filter((b) => b.group === "units" && !previewBatches.includes(b)), ...fresh]);
+            previewBatches = fresh;
+            redraw();
+          }));
+        }
         /** Map Properties' random groups; null when war3map.w3i can't be read (what is shown stays). */
         const readRandomGroups = async (): Promise<RandomGroup[] | null> => {
           // A file that isn't there has no groups; one that can't be read keeps what is shown.
@@ -2473,17 +2560,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
-        const readRaces = async (): Promise<Map<number, number> | null> => {
+        const readRaces = async (): Promise<{ races: Map<number, number> } | null> => {
           const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
-          return info ? playerRaces(info) : null;
+          return info ? { races: playerRaces(info) } : null;
         };
         /** After the map's players were saved (Map Properties): the start buildings follow their races. */
         const reloadRaces = async () => {
           await firstLoad.catch(() => {});
-          const races = await readRaces();
-          if (!races || disposed || JSON.stringify([...races]) === JSON.stringify([...startRaces])) return;
-          startRaces = races;
-          await rebuildObjects();
+          const info = await readRaces();
+          if (!info || disposed) return;
+          startRaces = info.races;
+          refreshStartPreviews();
         };
         let objectsPlaced: Promise<void> = Promise.resolve();
         /** The first load of the placed objects and their types. */
@@ -2495,15 +2582,151 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             loadSkins(w3),
             mapObjectData(w3),
             readRaces(),
-          ]).then(async ([df, uf, skins, { bases, art }, races]) => {
-            if (races) startRaces = races;
+          ]).then(async ([df, uf, skins, { bases, art, unread }, races]) => {
+            if (races) startRaces = races.races;
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins: withObjectArt(skins, art), bases };
+            // A map's own doodad or destructable data that can't be read may change a type's range: scales stay then.
+            scalesKnown = !unread.some((p) => /\.w3[bd]\.json$/i.test(p));
+            // The map's own unit data that can't be read may change a type's movement type: heights stay then.
+            unitMovesKnown = !unread.some((p) => /\.w3u\.json$/i.test(p));
+            if (df && snapsDoodads()) await snapOnOpen(df);
+            if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
+            if (disposed) return;
             await rebuildObjects();
           });
+        }
+        /** Whether the scale ranges are known: false while the map's own doodad or destructable data can't be read. */
+        let scalesKnown = true;
+        /** Whether the units' movement types are known: false while the map's own unit data can't be read. */
+        let unitMovesKnown = true;
+        /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
+         *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
+         *  anything else to the ground. Not an edit, as the doodads' rules on opening: no undo step; the save that runs
+         *  it writes it. One whose type isn't known (no skin; a start location has none, and goes to the ground) keeps
+         *  its height, and all do while the map's unit data can't be read. A height within unitZTolerance of the one
+         *  wanted is left as it is, so a map the World Editor saved isn't rewritten for the small differences of
+         *  Studio's ground from its own. True when one changed. */
+        const groundUnitsForSave = (): boolean => {
+          if (!unitsFile || !objCtx || !unitMovesKnown) return false;
+          if (!switchedOn(w3, "terrain.units.groundOnSave", SWITCH_DEFAULTS["terrain.units.groundOnSave"])) return false;
+          let changed = false;
+          for (const p of unitsFile.list) {
+            if (p.id !== "sloc" && !skinOf(p)) continue;
+            const [x, y, z] = p.position;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            const moveType = moveTypeOf(p);
+            const want = savedUnitZ(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
+            if (Math.abs(want - z) <= unitZTolerance(moveType)) continue;
+            p.position = [x, y, want];
+            changed = true;
+          }
+          return changed;
+        };
+        const snapsDoodads = () => switchedOn(w3, "terrain.doodads.snapOnLoad", SWITCH_DEFAULTS["terrain.doodads.snapOnLoad"]);
+        const fixesDoodads = () => switchedOn(w3, "terrain.doodads.fixOnLoad", SWITCH_DEFAULTS["terrain.doodads.fixOnLoad"]);
+        /** Pathing texture size of each doodad and destructable type met so far, null for those without (doodadgrid.ts). */
+        const doodadCells = new Map<string, PathSize | null>();
+        const loadDoodadCells = async (id: string) => {
+          if (doodadCells.has(id)) return;
+          pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+          const data = await pathingData;
+          const info = data.placedTex(id);
+          const image = info?.path ? (await data.placedImage(info)).image : null;
+          doodadCells.set(id, image ? { width: image.width, height: image.height } : null);
+        };
+        const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+        const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
+        /** A destructable type's fixed rotation (degrees; the map's bfxr on top), which the World Editor turns its
+         *  destructables to; null for none and for doodads, whose own it doesn't enforce (doodadgrid.ts). */
+        const destructableFixedRot = (id: string): number | null => { const s = skinById(id); return s?.kind === "w3b" ? s.fixedRot : null; };
+        /** The World Editor's rules for a doodad being placed, moved, turned or scaled (doodadedit.ts), as the settings
+         *  have them now. A type whose pathing size isn't read yet stays where it is asked to be. */
+        const doodadRules = (): DoodadRuleSource => ({
+          snap: snapsDoodads(),
+          fix: fixesDoodads() && scalesKnown,
+          size: (id) => (isDoodadType(id) ? doodadCells.get(id) : null),
+          scaleRule: (id) => {
+            const skin = skinById(id), range = skin ? savedScaleRange(skin) : undefined;
+            return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
+          },
+          fixedRot: (id) => (scalesKnown ? destructableFixedRot(id) : null),
+        });
+        /** Where a doodad moved or turned to (x, y, angle) goes by the rules; units and items as asked. */
+        const ruledPose = (id: string, x: number, y: number, angle: number) => (isDoodadType(id) ? doodadPose(doodadRules(), id, x, y, angle) : { x, y, angle });
+        /** Applies the rules to doodads among `entries` in place (`what`: the place and facing, the scale), as part of
+         *  the edit that changed them; units and items are left alone. */
+        const settleDoodads = (entries: readonly Placed[], what: { place?: boolean; scale?: boolean }): boolean => {
+          if (!what.place && !what.scale) return false;
+          const rules = doodadRules();
+          let changed = false;
+          for (const p of entries) {
+            if (!isDoodadType(p.id) || !settleDoodad(p as Placed & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what)) continue;
+            changed = true;
+            if (what.place) repositioned.add(p);
+          }
+          return changed;
+        };
+        /** Puts the doodads of the map just opened on their grids and facings (a destructable's fixed rotation, angles
+         *  into 0..360), as the World Editor does when it opens a map (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
+         *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
+         *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
+        async function snapOnOpen(f: PlacedFile) {
+          try {
+            await Promise.all([...new Set(f.list.map((p) => p.id))].map(loadDoodadCells));
+          } catch (e) {
+            console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
+            return;
+          }
+          // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
+          if (disposed || dooFile !== f) return;
+          // A fixed rotation the map's own data may change isn't known while that data can't be read: angles only
+          // come into 0..360 then.
+          const snaps = doodadSnaps(f.list, (id) => doodadCells.get(id) ?? null, scalesKnown ? destructableFixedRot : () => null);
+          for (const { entry, x, y, angle } of snaps) {
+            const moved = x !== entry.position[0] || y !== entry.position[1];
+            if (moved) {
+              entry.position = [x, y, (flagsOf(entry) ?? 0) & 4 ? entry.position[2] : heightAt(terrain, x, y)];
+              repositioned.add(entry);
+            }
+            entry.angle = angle;
+          }
+          if (!snaps.length) return;
+          objectsTouched = true;
+          const n = snaps.length;
+          void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid and facing, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
+        }
+        /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
+         *  (doodadrules.ts; setting terrain.doodads.fixOnLoad): the scale in its type's range, the outside flag from
+         *  the playable area, the solid flag set. Not an edit, as the snap: no undo step, the map isn't marked as
+         *  changed, the next save writes them. A map whose w3i can't be read keeps its flags (the playable area isn't
+         *  known); a type without a range keeps its scale, and so do all with `scales` false (the map's own ranges
+         *  couldn't be read). */
+        async function fixOnOpen(f: PlacedFile, scales: boolean) {
+          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          // Taken after the wait: a file reloaded meanwhile is another's, and is taken as it is.
+          if (disposed || dooFile !== f || !objCtx) return;
+          const skins = objCtx.skins;
+          const edge = info ? playableArea(info, terrain) : null;
+          if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
+          if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
+          const fixes = doodadFixes(f.list as (Placed & { flags?: number })[], (id) => {
+            if (!scales) return null;
+            const skin = skins.get(id), range = skin ? savedScaleRange(skin) : undefined;
+            return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
+          }, edge ? (x, y) => !inArea(x, y, edge) : null, undefined, (id) => skins.get(id)?.kind);
+          for (const { entry, scale, flags, life } of fixes) {
+            entry.scale = scale;
+            if (life !== undefined) (entry as Placed & { life?: number }).life = life;
+            if (flags !== undefined) entry.flags = flags;
+          }
+          if (!fixes.length) return;
+          objectsTouched = true;
+          const n = fixes.length;
+          void w3.window.showInfo(`Set the scale, flags or life of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the
@@ -2582,9 +2805,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
           if (!info) { for (const p of moved) repositioned.add(p); return; }
           const edge = playableArea(info, terrain);
+          // Fix Doodads on Load: the solid flag as well, as the World Editor saves it (doodadrules.ts savedFlags).
+          const flagsFor = fixesDoodads() ? savedFlags : borderFlags;
           for (const p of dooFile.list) {
             const flags = flagsOf(p);
-            if (moved.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
+            if (moved.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = flagsFor(flags, !inArea(p.position[0], p.position[1], edge));
           }
         };
         const deleteSelected = () => deleteEntries(selectedEntries());
@@ -2608,11 +2833,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ...(e.player !== undefined ? { player: e.player } : {}), ...(flagsOf(e) !== undefined ? { flags: flagsOf(e) } : {}),
           variation: e.variation, scale: e.scale, position: e.position, angle: e.angle,
         });
+        /** Whether a change moves an entry over the ground or turns it: what the doodad grid is applied for (a new height alone isn't). */
+        const movesOrTurns = (p: Placed, c: Partial<Props>) =>
+          (!!c.position && (c.position[0] !== p.position[0] || c.position[1] !== p.position[1])) || (c.angle !== undefined && c.angle !== p.angle);
         const editProps = (entry: Placed, change: Partial<Props>) => {
           const before = snapshot(entry);
+          const moved = movesOrTurns(entry, change);
           Object.assign(entry, change);
           if (change.position) repositioned.add(entry);
+          // A doodad typed to another place, facing or scale goes where the World Editor puts it, in this step.
+          const ruled = settleDoodads([entry], { place: moved, scale: !!change.scale });
           const after = snapshot(entry);
+          // Ruled back to what it was (a scale past its type's range that already is at the end): no step.
+          if (ruled && JSON.stringify(after) === JSON.stringify(before)) {
+            if (selected) selectObject(selected);
+            return;
+          }
           pushEdit({ undo: () => Object.assign(entry, structuredClone(before)), redo: () => Object.assign(entry, structuredClone(after)), terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
@@ -2692,9 +2928,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The Properties part of the selection panel for `entries`, filled in once the types' facts are read. Nothing
          *  is shown if the selection has moved on by then. */
-        const propsSlot = (entries: Placed[]) => {
+        const propsSlot = (selected: Placed[]) => {
+          // A start location has no properties: what the other objects share is shown (Ctrl+A selects it too).
+          const entries = selected.filter((p) => p.id !== "sloc");
           const slot = h("div.terrain-props-slot");
-          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(selected.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown()) return;
             const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
@@ -2765,9 +3003,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The Selection panel's Drops block for `entries` (when they all can drop items), filled in once the types' facts
          *  are read; nothing if the selection has moved on by then. */
-        const dropsSlot = (entries: Placed[]) => {
+        const dropsSlot = (selected: Placed[]) => {
+          // A start location has no properties: what the other objects share is shown (Ctrl+A selects it too).
+          const entries = selected.filter((p) => p.id !== "sloc");
           const slot = h("div.terrain-drops-slot");
-          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(selected.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown() || !commonFields(items).includes("drops")) return;
             const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
@@ -2794,10 +3034,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Applies new values to entries as one undo step (x/y moves keep objects on the ground). */
         const applyMass = (entries: Placed[], change: (p: Placed, i: number) => Partial<Props> | null) => {
           const before = entries.map(snapshot);
-          let n = 0;
-          entries.forEach((p, i) => { const c = change(p, i); if (c) { Object.assign(p, c); n++; if (c.position) repositioned.add(p); } });
+          let n = 0, ruled = false;
+          entries.forEach((p, i) => {
+            const c = change(p, i);
+            if (!c) return;
+            const moved = movesOrTurns(p, c);
+            Object.assign(p, c);
+            n++;
+            if (c.position) repositioned.add(p);
+            // Doodads go where the World Editor puts them, and keep to their scale range, in this step.
+            if (settleDoodads([p], { place: moved, scale: !!c.scale })) ruled = true;
+          });
           if (!n) return;
           const after = entries.map(snapshot);
+          // Ruled back to what they were (a size key at the end of the range): no step.
+          if (ruled && JSON.stringify(after) === JSON.stringify(before)) return;
           const set = (v: Props[]) => entries.forEach((p, i) => Object.assign(p, structuredClone(v[i])));
           pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
           objectsTouched = true;
@@ -2829,14 +3080,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return null;
         };
         /** Every placed object with a model (the groups not hidden). */
-        const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
-          const out: { p: Placed; kind: string; id: string }[] = [];
-          for (const { group, inst } of shownInstances()) {
-            if ((group !== "doodads" && group !== "units") || renderer.hiddenGroups.has(group)) continue;
-            if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
-          }
-          return out;
-        };
+        const allPlaced = (): { p: Placed; kind: string; id: string }[] => selectableObjects(shownInstances(), renderer.hiddenGroups);
         const selectSameTypes = () => {
           const ids = new Set(selectedEntries().map((p) => p.id));
           selectEntries(allPlaced().filter((o) => ids.has(o.id)).map((o) => o.p));
@@ -2850,7 +3094,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const kd = await loadKind(w3, k).catch(() => null);
             if (kd) for (const [id, n] of kd.names) names.set(id, n);
           }
-          const nameOf = (id: string) => names.get(id) ?? names.get(objCtx?.bases.get(id) ?? "") ?? id;
+          const nameOf = (id: string) => typeName(names, objCtx?.bases, id) ?? id;
           const found = allPlaced().filter((o) => boxKinds.has(o.kind) && test({ ...varsOf(o.p), id: o.id, kind: o.kind, name: nameOf(o.id) })).map((o) => o.p);
           selectEntries(found);
           if (!found.length) w3.window.showInfo("No objects match.");
@@ -2870,13 +3114,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ("rotate" in key) rotateSelected(key.rotate);
           else if ("nudge" in key) {
             const before = entries.map(poseOf);
-            // The building grid is twice as fine as a nudge: half a step would round back one way. The bounds
+            // A building and a doodad on a grid nudge a whole 64 (eight nudges): less would round back. The bounds
             // are applied to the nudge as it will be moved, steps and all.
-            const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), entries.map((p) => (buildingCells.get(p.id) ? 2 : 1)), key.nudge);
+            const rules = doodadRules();
+            const steps = entries.map((p) => placedNudgeSteps(p.id, !!buildingCells.get(p.id), isDoodadType(p.id) ? doodadNudgeSteps(rules, p.id) : null));
+            const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), steps, key.nudge);
             for (const [i, p] of entries.entries()) {
-              const x = p.position[0] + moves[i][0], y = p.position[1] + moves[i][1];
-              const to = landed(poseOf(p), x, y);
-              setPlacement(p, to.position, p.angle, to.flags);
+              const at = ruledPose(p.id, p.position[0] + moves[i][0], p.position[1] + moves[i][1], p.angle);
+              const to = landed(poseOf(p), at.x, at.y);
+              setPlacement(p, to.position, at.angle, to.flags);
             }
             moveEdits(entries, before);
           } else if ("raise" in key) {
@@ -2892,9 +3138,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           for (const p of entries) {
-            const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy), x = cx + dx, y = cy + dy;
-            const to = landed(poseOf(p), x, y);
-            setPlacement(p, to.position, turnAngle(turn, p.angle), to.flags);
+            const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy);
+            const at = ruledPose(p.id, cx + dx, cy + dy, turnAngle(turn, p.angle));
+            const to = landed(poseOf(p), at.x, at.y);
+            setPlacement(p, to.position, at.angle, to.flags);
           }
           moveEdits(entries, before);
           refreshGroupRings();
@@ -3066,11 +3313,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           const adjust = (by: number) => {
             const log = new CornerUndo();
-            adjustLevels(terrain, a, by, cliffGrounds, log);
-            commit(log.step(terrain));
+            const r = adjustCliffLevels(terrain, by, log, a);
+            if (typeof r === "string") { void w3.window.showWarning(r); return; }
+            commit(log.step(terrain), "These cliff levels can't move further.");
           };
           const lowest = Math.min(...layers), highest = Math.max(...layers);
-          const levelButton = (by: number, text: string) => h("button", { title: `Move all of this ${by > 0 ? "up" : "down"} a cliff level, with what's on it`, disabled: lowest + by < 0 || highest + by > 15, onclick: () => adjust(by) }, text);
+          const levelButton = (by: number, text: string) => h("button", { title: `Move all of this ${by > 0 ? "up" : "down"} a cliff level, with what's on it`, disabled: lowest + by < 0 || highest + by > TOP_LEVEL, onclick: () => adjust(by) }, text);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
             h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),
@@ -3093,7 +3341,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("button", { title: "Flatten hills and dips, keeping the cliff levels", onclick: () => commit(changeArea(terrain, a, (c) => { if (groundHeight(c) === 0) return false; setGroundHeight(c, 0); return true; }), "This ground is flat already.") }, "Reset height field"))),
           );
         };
-        /** The Select tab's mode: dragging selects objects or a block of ground. Holding A (the area key: AREA_COMMAND)
+        /** The Select tab's mode: dragging selects objects or a block of ground. Holding the area key (AREA_COMMAND, no key by default)
          *  does an area in either; `areaKeyCode` is the key held, so that its release ends it. */
         let areaMode = false, withObjects = true, areaKey = false, areaKeyCode = "";
         /** A press on the way to being an area: where it began. */
@@ -3118,7 +3366,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Where an object of the fragment lands, null if that's off the map. */
         const pasteSpot = (o: FragmentObject, g: Vec3): [number, number, number] | null => {
           const [cx, cy] = pasteCentre(pasting as Fragment, g);
-          const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [cx + o.at[0], cy + o.at[1]];
+          // A doodad on its grid (doodadedit.ts), as placed; placeObjects turns it as the grid has it.
+          const at = ruledPose(String(o.entry.id), cx + o.at[0], cy + o.at[1], o.angle);
+          const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [at.x, at.y];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const ground = heightAt(terrain, x, y);
           if (o.list === "doodads") return [x, y, pastedHeight(ground, o.z ?? ground + o.at[2], preserveHeight())];
@@ -3137,7 +3387,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.ghosts = pasteModels.flatMap((m, i) => {
             const o = f.objects[i], position = pasteSpot(o, g);
             if (!m || !position) return [];
-            const entry = { ...(o.entry as unknown as Placed), position, angle: o.angle };
+            const entry = { ...(o.entry as unknown as Placed), position, angle: ruledPose(String(o.entry.id), position[0], position[1], o.angle).angle };
             const team = entry.player !== undefined && entry.player < TEAM_COLORS.length ? entry.player : NEUTRAL;
             return [{ gpu: m.gpu, world: placement(entry, m.modelScale, drawnZ(entry), m.scaleRange), team, ok: true }];
           });
@@ -3170,6 +3420,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
           // The clipboard may come from another map, with buildings this one hasn't met.
           for (const id of new Set(f.objects.filter((o) => o.list === "units").map((o) => String(o.entry.id)))) void loadCells(id).catch(() => { /* stays free */ });
+          for (const id of new Set(f.objects.filter((o) => o.list === "doodads").map((o) => String(o.entry.id)))) void loadDoodadCells(id).catch(() => { /* stays where it is put */ });
           void Promise.all(f.objects.slice(0, MAX_GHOSTS).map(async (o) => {
             const skin = skinOf(o.entry as unknown as Placed);
             if (!skin) return null;
@@ -3249,6 +3500,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               (made as Placed & { flags: number }).flags = o.list === "doodads" ? pastedFlags(madeFlags, preserveHeight())
                 : preserveHeight() ? madeFlags : madeFlags & ~FIXED_HEIGHT;
             }
+            // Turned as its grid has it, and within this map's scale range for its type (doodadedit.ts).
+            if (o.list === "doodads") settleDoodads([made], { place: true, scale: true });
             file.list.push(made);
             repositioned.add(made);
             added.push({ entry: made, f: file });
@@ -3284,7 +3537,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (ids.includes(CLIPBOARD_COMMANDS.cut) && !terrainArea && editable && copySelection()) { deleteEntries(copyable()); return true; }
           if (ids.includes(CLIPBOARD_COMMANDS.paste) && editable && startPaste()) return true;
-          if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
+          if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().map((o) => o.p)); return true; }
           return false;
         };
         /** The key commands the open tab takes (`ids` as earlyKeys'): Cancel and Delete when it has something of its own
@@ -3322,7 +3575,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           keysToMap();
         };
         const faceToward = (g: Vec3) => {
-          for (const p of facing!.entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
+          facing!.entries.forEach((p, i) => {
+            // Turned from where it was before: a doodad whose turn puts it on another grid point doesn't wander.
+            const [x, y] = facing!.before[i].position;
+            const at = ruledPose(p.id, x, y, Math.atan2(g[1] - y, g[0] - x));
+            const to = landed(facing!.before[i], at.x, at.y);
+            setPlacement(p, to.position, at.angle, to.flags);
+          });
           refreshGroupRings();
         };
         const endFacing = (apply: boolean) => {
@@ -3339,7 +3598,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const entries = selectedEntries();
           if (!entries.length) return;
           const before = entries.map(poseOf);
-          for (const e of entries) setPlacement(e, [...e.position], e.angle + (deg * Math.PI) / 180);
+          const rules = doodadRules();
+          entries.forEach((e, i) => {
+            // A doodad that turns only by quarters turns a quarter (doodadedit.ts doodadTurn).
+            const turned = isDoodadType(e.id) ? doodadTurn(rules, e.id, e.angle, (deg * Math.PI) / 180) : e.angle + (deg * Math.PI) / 180;
+            const at = ruledPose(e.id, e.position[0], e.position[1], turned);
+            const to = landed(before[i], at.x, at.y);
+            setPlacement(e, to.position, at.angle, to.flags);
+          });
+          // A doodad that turns only by quarters stays as it was: no step.
+          if (entries.every((e, i) => JSON.stringify(poseOf(e)) === JSON.stringify(before[i]))) return;
           moveEdits(entries, before);
         };
         /** Blocked ground and object footprints, built when placing needs it
@@ -3461,7 +3729,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selected = null;
           group = [];
           selInfo.className = "terrain-selection muted";
-          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : `Click a unit, item, doodad or destructable, or drag a box around several. Hold ${areaKeyName()} and drag for an area.`);
+          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : `Click a unit, item, doodad or destructable, or drag a box around several.${withAreaKey(" Hold {key} and drag for an area.") || " The Area button selects ground."}`);
           renderer.setSelection(null);
           redraw();
         };
@@ -3549,7 +3817,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const shown = rows.slice(0, 12);
           list.append(...shown.map((c) => {
             const name = h("span", {}, c.id);
-            loadKind(w3, c.kind).then((k) => { const n = k.names.get(c.id) ?? k.names.get(objCtx?.bases.get(c.id) ?? ""); if (n) name.textContent = n; }).catch(() => { /* id */ });
+            loadKind(w3, c.kind).then((k) => { const n = typeName(k.names, objCtx?.bases, c.id); if (n) name.textContent = n; }).catch(() => { /* id */ });
             return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name,
               h("button.icon-button.terrain-sel-open", {
                 title: `Open ${c.id} in the Object Editor`,
@@ -3677,8 +3945,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         function selectBar() {
-          const objectsOnly = h("button.chip", { title: `A drag selects objects. Hold ${areaKeyName()} and drag to select a block of ground`, onclick: () => setMode(false) }, "Objects");
-          const ground = h("button.chip", { title: `A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Holding ${areaKeyName()} and dragging does this in Objects too`, onclick: () => setMode(true) }, "Area");
+          const objectsOnly = h("button.chip", { title: `A drag selects objects (a box)${withAreaKey(". Hold {key} and drag to select a block of ground")}`, onclick: () => setMode(false) }, "Objects");
+          const ground = h("button.chip", { title: `A drag selects a block of ground, then Ctrl+C copies it. Esc clears it${withAreaKey(". Holding {key} and dragging does this in Objects too")}`, onclick: () => setMode(true) }, "Area");
           const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
             withObjects = standing.checked;
             if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
@@ -3835,7 +4103,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await savePlacedFile(w3, f);
           }
-          markMapEdge(next, complements);
+          markMapEdge(next, complements, true);
           await writeTerrainBytes(doc.path, writeW3e(next), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
@@ -3863,6 +4131,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // since the editor reopens on the new size only afterwards.
           const rf = (p: string) => readFile(w3, doc, p);
           const doodads = dooFile?.list ?? [];
+          // The terrain and doodads as written above, which what follows is made from (w3proj::derived).
+          const root = w3.workspace.project()?.root;
+          const sources = root ? await w3.backend.invoke<Record<string, string>>("derived_sources", { root }).catch(() => null) : null;
           const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"), specialsOf(dooFile?.doc));
           // Same size: the tool groups' own filters, as everywhere else.
           if (change.every((c) => c === 0)) filterPathing(wpm);
@@ -3871,6 +4142,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (pathingText !== null) await w3.workspace.writeText(".w3proj/pathing.json", pathingText);
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           await updateMinimapIcons(next);
+          if (root && sources && w3.workspace.project()?.root === root) await w3.backend.invoke("derived_record", { root, sources }).catch(() => {});
           return { removed };
         };
         const handle: TerrainEditorHandle = {
@@ -3941,12 +4213,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objects: {
             type: (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot } : null;
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
             },
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
-              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player, kind);
+              // A ship in water on the surface, as the World Editor saves it; anything else on the ground.
+              const moveType = kind === "w3u" ? (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.moveType : undefined;
+              const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
               entry.angle = at.angle;
               repositioned.add(entry);
               entryFile.set(entry, f);
@@ -3954,6 +4228,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
             buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
+            placedSpot: async (kind, id, x, y, angle) => {
+              if (kind === "w3u") { await loadCells(id).catch(() => { /* stays free */ }); const [gx, gy] = onGrid(id, x, y); return { x: gx, y: gy, angle }; }
+              if (kind !== "w3d" && kind !== "w3b") return { x, y, angle };
+              await loadDoodadCells(id).catch(() => { /* stays where it is put */ });
+              return ruledPose(id, x, y, angle);
+            },
+            settleDoodads: async (entries, what) => {
+              await Promise.all([...new Set(entries.map((e) => e.id))].filter(isDoodadType).map((id) => loadDoodadCells(id).catch(() => { /* stays where it is put */ })));
+              const rules = doodadRules();
+              for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what);
+            },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             inBounds: (x, y) => insideBounds(heldTo(), x, y),
             refusedOutside: refusedOutsideText,
@@ -3962,6 +4247,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void rebuildObjects();
             },
             insert: (entries) => {
+              // A new doodad on its grid and within its scale range, as the World Editor places it (doodadedit.ts). One put
+              // back by a redo already is: the rules change nothing then.
+              settleDoodads((entries as Placed[]).filter((e) => entryFile.get(e) === dooFile && !dooFile?.list.includes(e)), { place: true, scale: true });
               for (const e of entries) { const f = entryFile.get(e as Placed); if (f && !f.list.includes(e as Placed)) f.list.push(e as Placed); }
               objectsTouched = true;
               void rebuildObjects();
@@ -4036,8 +4324,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           pushEdit: (e) => pushEdit(e),
           cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
+          defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map())),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
+          setShapes: (triangles) => { renderer.setShapes("tab", triangles); redraw(); },
+          setRings: (rings) => { renderer.setRings("tab", rings ?? []); redraw(); },
+          project: (p) => {
+            const at = renderer.project(p), rect = canvas.getBoundingClientRect();
+            return at && [rect.left + at[0], rect.top + at[1]];
+          },
           setLabels: (list) => {
             labels = (list ?? []).map(({ x, y, text, rgb }) => ({ x, y, el: h("span.terrain-label", { style: rgb ? { color: `rgb(${rgb.join(",")})` } : {} }, text) }));
             labelLayer.replaceChildren(...labels.map((l) => l.el));
@@ -4051,8 +4346,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
           },
           focus: () => keysToMap(),
+          cycleRandomGroups,
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
           view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
+          aspect: () => (canvas.clientWidth > 0 && canvas.clientHeight > 0 ? canvas.clientWidth / canvas.clientHeight : 4 / 3),
           setView: (v) => {
             if (v.target) renderer.target = [...v.target];
             Object.assign(renderer, Object.fromEntries((["yaw", "pitch", "distance", "fov"] as const).filter((k) => v[k] !== undefined).map((k) => [k, v[k]])));
@@ -4066,7 +4363,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           sunShadows: () => ({ ...renderer.sunShadowState }),
           waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
-          drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
+          drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
+          drawnUnits: (group = "units") => renderer.batches.filter((b) => b.group === group).flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
           })),
@@ -4085,7 +4383,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const tabsEl = h("div.terrain-tabs");
         /** The hint for the left button's drag in the Select tab's mode, naming the area key in effect. */
-        const dragHintText = () => (areaMode ? "Drag: select an area" : `Drag: select box · Hold ${areaKeyName()} and drag: select an area`);
+        const dragHintText = () => (areaMode ? "Drag: select an area" : `Drag: select box${withAreaKey(" · Hold {key} and drag: select an area")}`);
         const dragHint = h("span", {}, dragHintText());
         /** The camera's mouse buttons, named as they are bound now. */
         const cameraHint = h("span", {}, cameraHelp());
@@ -4256,7 +4554,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return commitTerrain({ ...log.step(terrain), cliffs: true }) ? r : "Not done: the water would go past the game's limits.";
         };
         const wholeGroundCmds: WholeMapGround = {
-          resetHeightField: () => wholeGround((log) => resetHeightField(terrain, log)),
+          resetHeightField: (random) => wholeGround((log) => random ? randomizeHeightField(terrain, random, log) : resetHeightField(terrain, log)),
           adjustCliffLevels: (by) => wholeGround((log) => adjustCliffLevels(terrain, by, log)),
           range: () => cliffShiftRange(terrain),
         };
@@ -4349,6 +4647,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const GAME_VIEW_NOTE = "Game view is on (V): the view shows the map as the game does. Turn it off to change what the view shows.";
         viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = viewState[name]; box.disabled = gameViewOn(); }));
         const maxDistance = () => terrain.width * 300;
+        /** One step of the World Editor's zoom (a wheel notch, Ctrl+Up or Ctrl+Down): about its camera target, the point
+         *  at wheelzoom.ts zoomPivotRow, wherever the pointer is. */
+        const zoomView = (out: boolean) => {
+          const next = zoomStep({ width: canvas.clientWidth, height: canvas.clientHeight, target: renderer.target, distance: renderer.distance, ray: (x, y) => renderer.ray(x, y) }, out, 200, maxDistance());
+          renderer.target = next.target;
+          renderer.distance = next.distance;
+          redraw();
+        };
         const cornerHeights = (x0: number, y0: number, x1: number, y1: number) => {
           const zs: number[] = [];
           for (let y = Math.max(0, y0); y <= Math.min(terrain.height - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(terrain.width - 1, x1); x++) zs.push(terrain.corners[y * terrain.width + x].height);
@@ -4379,7 +4685,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  (`step` 1 Next, -1 Previous), panning over the ground under it and keeping its distance and angles (we-drive
          *  2026-11-12: the view came back to the very picture it had there); else it frames the area drawn on the ground. */
         const viewSelection = (step: 1 | -1 = 1): string | null => {
-          const entries = selectedEntries();
+          const selection = selectedEntries();
+          const entries = viewOrder(selection.map((p) => p.position), selection.map((p) => fileOf(p)?.list.indexOf(p) ?? -1)).map((k) => selection[k]);
           const i = cycleIndex(entries.length, viewedEntry ? entries.indexOf(viewedEntry) : -1, step);
           const [x, y] = entries[i]?.position ?? [];
           if (Number.isFinite(x) && Number.isFinite(y)) {
@@ -4428,11 +4735,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
           const failed = await runLayerJobs(() => {
             const on = groundLayersOn();
+            // The cameras aren't on the ground: one marker each, as the World Editor's (cameraMarkers).
+            if (!on.cameras) renderer.setShapes("cameras", null);
             if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
-            // Bottom to top: regions, ground pathing, heights, naval pathing, cameras.
-            const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null, null];
+            // Bottom to top: regions, ground pathing, heights, naval pathing.
+            const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
             const show = () => {
               if (!latest()) return;
               const rgba = composeLayers(parts);
@@ -4446,12 +4755,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
                 parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
-                // The edge brown where the terrain marks the tiles past the playable map, as the editor's naval view.
-                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: mapEdgeTiles(terrain), tilesX: terrain.width - 1 }) : null;
+                // The edge brown over the tiles past the playable map (as the border's shade: by the w3i), as the editor's naval view.
+                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 show();
               }));
             }
-            if (on.cameras) late.push(camerasNow().then((cams) => { parts[4] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (on.cameras) {
+              late.push(camerasNow().then((cams) => {
+                if (!latest()) return;
+                renderer.setShapes("cameras", cameraMarkers(cams, (x, y) => heightAt(terrain, x, y)));
+                redraw();
+              }));
+            }
             return late;
           }, latest, (busy) => { layerBusy.hidden = !busy; });
           if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
@@ -4504,7 +4819,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }
             }
           }
-          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)}`).join(";");
+          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)},${r.rgb.join(",")}`).join(";");
           if (key === lightsKey) return;
           lightsKey = key;
           renderer.setRings("lights", rings);
@@ -4596,6 +4911,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return on;
         };
         const viewCommands: ViewCommands = {
+          ready: () => ready(),
           viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
           keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || tabKeys([id]) || lateKeys([id], false)),
           listCommand: (cmd) => {
@@ -4608,6 +4924,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             showTab(group);
             return name === null ? null : g.itemAction(name, action, to);
           },
+          deletePlaced: (ref) => {
+            if (!editable) return "This terrain editor is read-only.";
+            if (refuseLost()) return "The terrain view was lost.";
+            const files = [dooFile, unitsFile].filter((f): f is PlacedFile => !!f);
+            for (const f of files) {
+              const at = matchPlaced(f.list as unknown as PlacedLike[], ref);
+              if (at >= 0) { deleteEntries([f.list[at]]); return null; }
+            }
+            return "That placed object isn't in the open terrain editor any more.";
+          },
           toggleSetting: async (which) => {
             const no = refusedInGameView();
             if (no) return no;
@@ -4619,7 +4945,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4723,8 +5049,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
               layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
-              layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
-              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
+              layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
+              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
               layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
               layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,
@@ -4774,22 +5100,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
         let drag: { x: number; y: number; mode: "translate" | "rotate" } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
-        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean; warned?: boolean } | null = null;
+        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
         const dragObjects = (p: Vec3) => {
           if (!objDrag) return;
-          // The group keeps its shape and stops at the map's edge (the playable part, for units), and at the camera bounds when enforced, together.
+          // The group keeps its shape and stops together at the map's edge (units and items with what they take up
+          // inside the playable part); not at the camera bounds, as in the World Editor.
           const [dx, dy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
             objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
-          if (!objDrag.warned && heldTo()) {
-            // Said once per drag, when the camera bounds (not the map's edge) are what stops it.
-            const [fx, fy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
-              objDrag.entries.map(moveBase), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
-            if (fx !== dx || fy !== dy) { objDrag.warned = true; void w3.window.showWarning(stoppedAtBoundsText(objDrag.entries.length)); }
-          }
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
-            const to = landed(objDrag!.before[i], x + dx, y + dy);
-            setPlacement(entry, to.position, entry.angle, to.flags);
+            // A doodad jumps from grid point to grid point while it's dragged, as in the World Editor.
+            const at = ruledPose(entry.id, x + dx, y + dy, objDrag!.before[i].angle);
+            const to = landed(objDrag!.before[i], at.x, at.y);
+            setPlacement(entry, to.position, at.angle, to.flags);
           });
           refreshGroupRings();
         };
@@ -4927,8 +5250,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         /** The key commands after a tab's own keys (`ids` as earlyKeys'): Space, Ctrl+F1, the View keys and any other
          *  command bound here, facing the pointer, deleting, the selection's keys, and last the camera's (as the World
-         *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection Ctrl
-         *  and the arrows nudge it instead). True when one did something. */
+         *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection the
+         *  number pad's 8 2 4 6 nudge it instead). True when one did something. */
         const lateKeys = (ids: readonly string[], repeat: boolean) => {
           // Escape with nothing else to end: facing the pointer, else the selection.
           if (ids.includes(CANCEL_COMMAND)) {
@@ -4961,7 +5284,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const move = cameraMoveOf(ids);
           if (!move) return false;
           if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
-          else if ("zoom" in move) { renderer.distance = Math.max(200, Math.min(maxDistance(), renderer.distance * move.zoom)); redraw(); }
+          else if ("zoom" in move) zoomView(move.zoom > 1);
           else { renderer.yaw += move.turn; redraw(); }
           return true;
         };
@@ -5039,8 +5362,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ids = w3.keybindings.mouseCommandsFor(e);
           const move = cameraMoveOf(ids);
           if (move && "zoom" in move) {
-            renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (move.zoom > 1 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM)));
-            redraw();
+            // About the World Editor's camera target, wherever the pointer is (zoomView).
+            zoomView(move.zoom > 1);
             return;
           }
           const others = ids.filter((id) => !HELD_COMMANDS.has(id));
@@ -5094,6 +5417,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
           if (canvas.clientWidth > 0 && due && !glDead) {
+            refreshStartPreviews();
             renderer.render();
             placeLabels();
             minimapOutline();
@@ -5107,9 +5431,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
          *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take()) => {
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take(), unsaved = false) => {
           const icons = units ?? unitsFile?.list;
           await writeDerived(w3, {
+            unsaved,
             now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
             units: unitsFile && icons ? icons : null,
             skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
@@ -5214,7 +5539,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           derive: async (from) => {
             await ready();
             minimapStale.set();
-            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
+            // With unsaved edits in the editor, what's made has them: not what the files hold.
+            const unsaved = mark.isDirty(at);
+            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
         };
@@ -5298,7 +5625,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           // One save at a time, each taking its own snapshot: a later write can't be overtaken by an older one.
           save: editable ? serial(async () => {
-            // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
+            // The map-edge marks are written from the w3i, as the World Editor's save does (we-drive, 2026-11-13: a copy
+            // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
             // The game won't start a map with no players, so one always gets Player 1's start.
@@ -5310,6 +5638,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
             if (objectsTouched) await settleMoved();
+            // Every unit at the height the World Editor's save gives it (setting Units on the Ground on Save). An item
+            // or a start location is drawn at its stored height: drawn again.
+            if (groundUnitsForSave()) { objectsTouched = true; void rebuildObjects(); }
             // Remove Unused Tiles on save (off unless chosen): an undo step of its own, so the save writes it and Undo
             // still takes it back. Not on a lost view, where nothing is edited.
             if (w3.settings.get<boolean>("terrain.removeUnusedTilesOnSave", false) === true && !lostViews.has(doc.path)) {
@@ -5337,8 +5668,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   const starts = t.starts;
                   let changes: string[] = [];
                   // What the Melee rules need besides the info: the gameplay constants, and the ground as saved here.
-                  const facts = await readMeleeFacts(w3.workspace, parseW3e(t.w3e));
-                  let unmelee: string[] = [];
+                  const facts = await readMeleeFacts(meleeFiles(w3), parseW3e(t.w3e), true);
+                  let unmelee: string[] = [], remelee = false;
                   await editDoc("war3map.w3i", (info) => {
                     changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
                     // The players' ally priorities follow their starts, as the World Editor's save works them out.
@@ -5348,13 +5679,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     let melee = false;
                     if (typeof info.flags === "number") {
                       const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
-                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; melee = true; }
+                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; remelee = !after.reasons.length; melee = true; }
                     }
                     return changes.length > 0 || priorities || melee;
                   });
                   savedStarts = starts;
                   if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
                   if (unmelee.length) void w3.window.showInfo(`This map is no longer a melee map (as the World Editor's save makes it): ${unmelee.join("; ")}.`);
+                  if (remelee) void w3.window.showInfo("This map is a melee map again: it meets the World Editor's melee rules, whose save makes it one.");
                 }
               },
               saved: () => doc.setDirty(mark.isDirty(at)),
@@ -5402,6 +5734,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopObjectWatch.dispose();
             objectReload.cancel();
             stopLightSettings.dispose();
+            clearInterval(cycleTimer);
             // The minimap panel's picture still due, or being made, isn't drawn any more.
             clearTimeout(minimapTimer);
             minimapSeq++;

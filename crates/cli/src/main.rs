@@ -13,6 +13,10 @@ macro_rules! print {
     ($($arg:tt)*) => { $crate::out(format_args!($($arg)*)) };
 }
 
+// After the macros: its reports end quietly on a closed pipe too.
+mod rebuild;
+mod check;
+
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
 static PIPE_CLOSED: AtomicBool = AtomicBool::new(false);
@@ -118,7 +122,7 @@ fn write_baseline(path: &std::path::Path, base: &Baseline) -> Result<()> {
             out.push_str(&format!("{map}\t{file}\t{codec}\n"));
         }
     }
-    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+    w3proj::atomic::write(path, out.as_bytes()).with_context(|| format!("writing {}", path.display()))
 }
 
 /// What changed from the baseline, one line per file.
@@ -152,7 +156,8 @@ fn is_misnamed_project_output(path: &std::path::Path) -> bool {
 /// its baseline key: the path below the given folder (`/`-separated), or the file name. Projects
 /// found below a given folder (folders holding `w3proj.toml`) are left out, with their outputs
 /// under other names (`is_misnamed_project_output`): their `build/` maps and checkpoints are made
-/// by packing, not maps of their own. A project folder given directly is searched.
+/// by packing, not maps of their own. Any folder named `build` below a given folder is left out too (the
+/// user's rebuilt maps would make the baseline stale). A folder given directly is searched, even one named `build`.
 fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>, top: bool) -> Result<()> {
         if !top && dir.join(w3proj::project::MANIFEST).is_file() {
@@ -165,6 +170,10 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
         entries.sort();
         for p in entries {
             if p.is_dir() {
+                // A folder named `build` holds what packing wrote (the user's rebuilt maps), not maps of the corpus.
+                if p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("build")) {
+                    continue;
+                }
                 walk(&p, out, false)?;
             } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["w3x", "w3m", "w3n"].contains(&e.to_ascii_lowercase().as_str()))
                 && !is_misnamed_project_output(&p)
@@ -287,6 +296,38 @@ fn check_trigger_data(file: &Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Pathing, shadows and the minimap that no longer follow the terrain and doodads (`w3proj::derived`) stop a pack, in the
+/// project and its chapter maps: the app makes them again a moment after an edit, this program can't.
+fn check_derived(project: &std::path::Path) -> Result<()> {
+    use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
+    let mut projects = vec![(String::new(), project.to_path_buf())];
+    let maps = project.join(w3proj::project::MAPS_DIR);
+    if let Ok(entries) = std::fs::read_dir(&maps) {
+        let mut chapters: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().join(w3proj::project::MANIFEST).is_file())
+            .map(|e| (format!("{}/{}/", w3proj::project::MAPS_DIR, e.file_name().to_string_lossy()), e.path()))
+            .collect();
+        chapters.sort();
+        projects.extend(chapters);
+    }
+    let again = "`w3proj rebuild` makes them again (W3Proj Studio does a few seconds after an edit made there and on every \
+                 terrain save), then pack again; --force-stale packs them as they are";
+    for (at, dir) in projects {
+        match check(&dir).with_context(|| format!("checking {}", dir.display()))? {
+            Freshness::Fresh | Freshness::Unknown => {}
+            Freshness::Stale(files) => {
+                let files = files.iter().map(|f| format!("{at}map/{f}")).collect::<Vec<_>>().join(", ");
+                anyhow::bail!("{files} changed since {DERIVED} were made from them: {again}");
+            }
+            Freshness::Unreadable(why) => {
+                anyhow::bail!("{at}{why}, so it can't be told whether {DERIVED} follow the terrain and doodads: {again} (that writes {at}{STAMP_FILE} anew)");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `file`: a TriggerData.txt to use instead of the game's (the tests bring a made-up one).
 fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>, file: &Option<PathBuf>) -> Registry {
     if let Some(file) = file.clone() {
@@ -333,11 +374,77 @@ enum Cmd {
         trigger_data: Option<PathBuf>,
     },
     /// Pack a project folder into a .w3x (the release step).
+    ///
+    /// Strings nothing refers to are left out of war3map.wts, as the World Editor's save and the
+    /// app's packing drop them (the project's files stay as they are; chapter maps and
+    /// war3campaign.wts aren't pruned).
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Pack war3map.wts as it is, unused strings included.
+        #[arg(long)]
+        keep_unused_strings: bool,
+        /// Pack pathing, shadows and the minimap as they are, even when the terrain or doodads
+        /// changed since they were made (the app makes them again a moment after an edit).
+        #[arg(long)]
+        force_stale: bool,
+    },
+    /// Make a project's derived files again from its files, as W3Proj Studio makes them: pathing
+    /// (war3map.wpm), shadows (war3map.shd), the minimap (war3mapMap.blp, war3map.mmp) and the map
+    /// script (war3map.j / war3map.lua from the triggers).
+    ///
+    /// Runs the app's own code in Node.js (22 or newer; W3PROJ_NODE names another node). Without
+    /// --only: pathing, shadows and the minimap when the terrain or doodads changed since they were
+    /// made (then `w3proj pack` takes them again), and the script. Shadows are calculated in whole,
+    /// as Calculate Shadows does. A script that isn't the one Studio wrote last (edited by hand,
+    /// from the World Editor with other code) is kept, and vJASS isn't compiled.
+    Rebuild {
+        project: PathBuf,
+        /// Only these parts, comma-separated: wpm, shd, minimap, script.
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// Make pathing, shadows and the minimap even when they follow the terrain and doodads.
+        #[arg(long)]
+        force: bool,
+        /// Game install folder: its tables, models and textures go into the files.
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
+        game: String,
+        /// Art set (sd, hd or de) instead of the project's game.graphicsMode setting (default hd, as the app).
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// Check a project as W3Proj Studio does: the Problems view's checks, check_melee and check_path.
+    ///
+    /// Prints one line per report (severity, check, location, message) and how many the project's
+    /// .w3proj/problems-ignore.json left out. Exits with 1 when there are errors (with
+    /// --warnings-fail also on warnings). Without --only: the Problems checks, check_melee when the
+    /// map's war3map.w3i has the Melee flag, and check_path when --path gives its points. Runs the
+    /// app's own code in Node.js (22 or newer; W3PROJ_NODE names another node); writes nothing.
+    Check {
+        project: PathBuf,
+        /// Only these, comma-separated: problems, melee (also on a map without the Melee flag), path.
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// check_path from one point to another, in world coordinates: x1,y1:x2,y2.
+        #[arg(long, allow_hyphen_values = true)]
+        path: Option<String>,
+        /// Collision size of the unit check_path and check_melee walk with (default 32, as the MCP tools).
+        #[arg(long)]
+        unit_size: Option<f64>,
+        /// Fail (exit 1) on warnings too.
+        #[arg(long)]
+        warnings_fail: bool,
+        /// The whole report as JSON (the Problems checks by check, check_melee's and check_path's answers as the MCP tools give them).
+        #[arg(long)]
+        json: bool,
+        /// Game install folder: its tables, models and textures.
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
+        game: String,
+        /// Art set (sd, hd or de) instead of the project's game.graphicsMode setting (default hd, as the app).
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Check that maps survive unpack → pack unchanged (in memory).
     Verify {
@@ -502,10 +609,26 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
         }
-        Cmd::Pack { project, output } => {
+        Cmd::Pack { project, output, keep_unused_strings, force_stale } => {
+            if !force_stale {
+                check_derived(&project)?;
+            }
             let codecs = Registry::for_project(&project, &extra)?;
-            let r = w3proj::pack(&project, output.as_deref(), &codecs)
+            let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };
+            let r = pack(&project, output.as_deref(), &codecs)
                 .with_context(|| format!("packing {}", project.display()))?;
+            if let Some(s) = &r.strings {
+                let list = |v: &[w3proj::wts::StringNum]| v.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+                if let Some(why) = &s.kept {
+                    println!("unused strings kept in war3map.wts: {why}");
+                }
+                if !s.restored.is_empty() {
+                    println!("restored {} string(s) an earlier pack dropped and the map refers to again: {}", s.restored.len(), list(&s.restored));
+                }
+                if !s.dropped.is_empty() {
+                    println!("left {} unused string(s) out of war3map.wts: {}", s.dropped.len(), list(&s.dropped));
+                }
+            }
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, baseline, update_baseline, quiet, game, trigger_data } => {
@@ -586,6 +709,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             if failed + changed > 0 {
                 return Ok(ExitCode::FAILURE);
             }
+        }
+        Cmd::Rebuild { project, only, force, game, mode } => {
+            return rebuild::run(rebuild::Options { project, only, force, game, mode, formats: extra });
+        }
+        Cmd::Check { project, only, path, unit_size, warnings_fail, json, game, mode } => {
+            return check::run(check::Options { project, only, path, unit_size, warnings_fail, json, game, mode, formats: extra });
         }
         Cmd::Mcp => mcp::run()?,
         Cmd::Ls { map } => {

@@ -12,12 +12,27 @@
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path)
 //   --work DIR          scratch folder (default: target/we-drive of this checkout): map copies, the editor's log
 //   --timeout S         how long --wait-ready and --close wait (default 300)
-//   --mode sd|hd        the editor's graphics (default hd): written into its preferences before the start
+//   --screen WxH        the hidden display's size (default 1600x1000; the positions below are measured there). The
+//                       editor sizes its main window by the display, the terrain view following it, which gives
+//                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
+//                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
+//   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
+//   --save-accept T1,T2  titles of dialogs --save answers with Return besides "Reminder" (e.g. "Warning": the notice that the
+//                       map is no longer a melee map); another dialog still stops the save
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
 // Steps (in the order given; each prints one JSON line):
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
+//                       Another --map while the editor runs opens the map in it (as --open; if that fails, the editor is
+//                       stopped and started again with the map: "via": "open" or "restart" says which); after a --close
+//                       it starts the editor again. One display, one lock, one setup for several maps (we-compare.mjs);
+//                       the --look cameras go into the first map only
+//   --open FILE         open this map in the running editor (a copy in the prefix's Documents/Warcraft III/Maps; Ctrl+O, its row in
+//                       the editor's Open list, OK;
+//                       a "Save changes?" question about the map before is answered No: put --save before it to keep
+//                       that map's changes), then --wait-ready as after --map. Each further map costs its load time,
+//                       not an editor start
 //   --start             start the editor without a map
 //   --wait-ready        wait until the map is shown: the main window has the map's name, no dialog is open, and the
 //                       terrain view has drawn. A dialog that stays open (an error, "no longer a melee map", …) is
@@ -38,11 +53,16 @@
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
-//   --key KEY           press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names)
+//   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
+//                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
-//   --drag X,Y:X,Y      press the left button at the first position, move to the second and let go (a box select)
+//   --double-click X,Y  the same, twice in a row (a list row's own dialog: Advanced > Adjust Map String IDs)
+//   --drag X,Y:X,Y[@MS] press the left button at the first position, move to the second in 20 steps over MS (400) and
+//                       let go (a box select, a doodad move)
+//   --drag-mod MOD      hold alt, shift or ctrl during the next --drag (e.g. Alt-move on the Select tab)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
-//   --wheel N           turn the mouse wheel over the terrain view: N notches, positive zooms in
+//   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
+//                       positive zooms in
 //   --windows           list the editor's windows: title, rect, and which are dialogs
 //   --game-view STATE   "on", "off" or "status": the state of View > Lock to Game View Settings, read from the
 //                       picture of the View menu's check mark; on/off press V until it matches, and check again.
@@ -55,7 +75,11 @@
 //   --sleep MS          wait
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
+//   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
+//                       Area Only); the TGA it writes is copied to FILE. Another dialog is reported, not answered
+//   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it
 //   --close             quit without saving: closes the main window and answers "don't save" questions
+//                       (a crash-report dialog is never answered: the editor is killed, "crashed": true, nothing sent)
 //
 // Whatever happens, the editor (wineserver -k for its prefix) and the Xvfb display are stopped at the end.
 //
@@ -73,7 +97,7 @@
 //   node scripts/we-drive.mjs --map m.w3x --compare-ready --look center --shot c.png --look 1000,-500 --shot d.png --close
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -94,6 +118,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VIEW_INSET = { x: 152, y: 49, w: 168, h: 93 };
 // The View menu: its title in the menu bar, and the check mark of "Lock to Game View Settings" in the open menu.
 const VIEW_MENU = { x: 78, y: 11 };
+/** File > Export Minimap… (from the main window's corner), and in its dialog (from the dialog's corner) the Image File
+ *  button and OK (measured 2026-11-13). The dialog opens with the editor's defaults: 256, terrain, water, doodads,
+ *  Playable Area Only. */
+const EXPORT_MINIMAP = { file: { x: 14, y: 11 }, item: { x: 61, y: 168 }, imageFile: { x: 39, y: 20 }, ok: { x: 225, y: 291 } };
 /** The check-mark column of the open View menu, from the menu's corner, and a row's half height. */
 const VIEW_CHECK = { x: 2, w: 18, half: 8 };
 /**
@@ -140,8 +168,12 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--drag", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
+
+/** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
+const OPEN_DIALOG = "Open Document";
+const OPEN_LIST = { row: { x: 88, y: 105 }, ok: { x: 482, y: 787 } };
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
 const PROGRESS_TITLE = "Progress";
@@ -154,8 +186,105 @@ export function questionDialogs(unknown) {
   return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE);
 }
 
+/**
+ * What --map does: "start" when no editor is running, "open" (File > Open in the running editor, with a restart as the
+ * fallback when that fails) when one is. `running`: an editor was started and hasn't exited.
+ */
+export function mapAction(running) {
+  return running ? "open" : "start";
+}
+
+/**
+ * What File > Open does with the dialogs it meets (`dialogs` without the file dialog and the loading window): the
+ * question "Save changes?" (a message box titled "Warning") is answered "n" (No), or "y" with `save`; any other titled
+ * dialog is an error of the open. Returns { answer: { dialog, key } } , { error: dialog } or {} for nothing to do.
+ */
+export function openQuestion(dialogs, save = false) {
+  const open = questionDialogs(dialogs);
+  const q = open.find((d) => d.title === "Warning");
+  if (q) return { answer: { dialog: q, key: save ? "y" : "n" } };
+  return open.length ? { error: open[0] } : {};
+}
+
+/**
+ * Whether a window is the editor's crash-report dialog (it has "Send to Blizzard" ticked and a text box; we-drive must
+ * never type into it or send it). By title or class, or by the program that owns it (`program`, the file name of the
+ * owning process's argv[0], best effort). Deliberately broad: a false hit only costs the run, a miss could send
+ * something to Blizzard.
+ *
+ * Seen for real (2026-11-13, View > Light Ranges on, then the main window closed): the dialog is titled exactly
+ * "Warcraft III World Editor", its class is the editor's own ("steam_app_<appid>"), and it belongs to BlizzardError.exe
+ * (`-product Warcraft III World Editor -reopen …\Warcraft III Launcher.exe -attachment …\War3.dmp …`); it comes
+ * after the main window is gone. So the program is what tells it apart; title and class are a fallback. A title's
+ * "[…]" part (the map's path in the main window's title) is left out, and so is everything but the program's own
+ * name: a folder called "we-crash-dialog" in the map's or the farm's path once made the main window count as a crash.
+ */
+const CRASH_TITLE = /crash|error report|bug ?report|bugsplat|blizzard error|send .*(report|blizzard)|unhandled|unexpected error|fatal|has stopped|stopped working|assert/i;
+const CRASH_CLASS = /crash|blizzard.?error|bugsplat|error.?report|bug.?report/i;
+const CRASH_PROCESS = /blizzarderror|blizzardcrash|crashpad|crash.?report|crash.?handler|bugsplat|errorreport|werfault/i;
+export function isCrashDialog(w, program = "") {
+  if (!w || w.overrideRedirect) return false;
+  const title = (w.title ?? "").replace(/\[.*\]/g, "");
+  return CRASH_TITLE.test(title) || CRASH_CLASS.test(w.class ?? "") || CRASH_PROCESS.test(program ?? "");
+}
+
+/** The file name of a program from a process's NUL-separated /proc/PID/cmdline (its argv[0]; Wine's are Windows
+ *  paths, "Z:\…\BlizzardError.exe"). Its arguments are left out: they hold paths that may say anything. */
+export function programName(cmdline) {
+  const argv0 = (cmdline ?? "").split("\0")[0];
+  return argv0.split(/[\\/]/).pop();
+}
+
+/** The crash dialogs among the raw window list (`programOf` gives the program name of a window's process). */
+export function crashDialogs(windows, programOf = () => "") {
+  return windows.filter((w) => !w.overrideRedirect && w.rect[2] > 1 && w.rect[3] > 1 && isCrashDialog(w, programOf(w)));
+}
+
+/**
+ * What --close does with a dialog, `main` being the editor's main window or null. A window of another process than the
+ * main window's is never answered ("crash": the real crash dialog has the editor's title and class). "Save changes?"
+ * (titled "Warning") gets "n"; an untitled one or one titled like the editor gets "n" only while the editor's main
+ * window is still there. With the main window gone it could be a crash reporter nobody recognised: "crash", nothing is
+ * typed into it and the editor is killed. Anything else is "report".
+ */
+export function closeAction(dialog, main) {
+  if (main && dialog.pid && main.pid && dialog.pid !== main.pid) return "crash";
+  if (dialog.title === "Warning") return "no";
+  const editorLike = dialog.title === "" || dialog.title.startsWith("Warcraft III World Editor");
+  if (editorLike) return main ? "no" : "crash";
+  return "report";
+}
+
+/** The line we-drive prints when it found the crash dialog. */
+export const CRASH_MESSAGE = "the World Editor crashed; report dismissed without sending";
+
+export class EditorCrashed extends Error {
+  constructor(dialogs, screen) {
+    super(CRASH_MESSAGE);
+    this.crashed = true;
+    this.dialogs = dialogs;
+    this.screen = screen;
+  }
+}
+
+function programOfPid(w) {
+  if (!w.pid) return "";
+  try { return programName(readFileSync(`/proc/${w.pid}/cmdline`, "utf8")); } catch { return ""; }
+}
+
+/** "X,Y:X,Y[@MS]" of --drag into { from, to, ms }; the pointer positions are whole numbers of the display. */
+export function parseDrag(arg) {
+  const m = /^(\d+),(\d+):(\d+),(\d+)(?:@(\d+))?$/.exec(arg ?? "");
+  if (!m) throw new Error("--drag wants X,Y:X,Y[@MS]");
+  const ms = m[5] === undefined ? 400 : Number(m[5]);
+  if (ms < 20 || ms > 60000) throw new Error("--drag: MS must be 20 to 60000");
+  return { from: `${m[1]},${m[2]}`, to: `${m[3]},${m[4]}`, ms };
+}
+
+export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
+
 export function parseArgs(argv) {
-  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed" };
+  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
   let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
@@ -168,6 +297,12 @@ export function parseArgs(argv) {
     else if (a === "--work") opts.work = resolve(value());
     else if (a === "--timeout") opts.timeout = Number(value());
     else if (a === "--mode") opts.mode = value();
+    else if (a === "--save-accept") opts.saveAccept.push(...value().split(",").filter(Boolean));
+    else if (a === "--screen") {
+      const m = /^(\d+)x(\d+)$/.exec(value());
+      if (!m) throw new Error("--screen wants WxH");
+      opts.screen = [Number(m[1]), Number(m[2])];
+    }
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
@@ -177,6 +312,20 @@ export function parseArgs(argv) {
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
     throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
   }
+  // --drag-mod belongs to the next --drag; each --drag is parsed (and refused) here.
+  let pendingMod = null;
+  for (let i = 0; i < steps.length; i++) {
+    const [step, v] = steps[i];
+    if (step === "--drag-mod") {
+      if (!DRAG_MODS.includes(v)) throw new Error(`--drag-mod wants ${DRAG_MODS.join(", ")}`);
+      pendingMod = v;
+      steps.splice(i--, 1);
+    } else if (step === "--drag") {
+      steps[i] = [step, { ...parseDrag(v), ...(pendingMod ? { mod: pendingMod } : {}) }];
+      pendingMod = null;
+    }
+  }
+  if (pendingMod) throw new Error("--drag-mod needs a --drag after it");
   // Every look's camera goes into the map before the editor starts: parsed (and refused) here, numbered by order.
   const looks = steps.filter(([s]) => s === "--look").map(([, v]) => parseLook(v));
   if (looks.length > MAX_LOOKS) throw new Error(`at most ${MAX_LOOKS} --look steps in one run`);
@@ -184,6 +333,8 @@ export function parseArgs(argv) {
     throw new Error("--look needs --map before it (its cameras go into the map)");
   }
   if (looks.length && !steps.some(([s]) => s === "--map")) throw new Error("--look needs --map (its cameras go into the map)");
+  const firstOpen = steps.findIndex(([s]) => s === "--open"), firstStart = steps.findIndex(([s]) => s === "--map" || s === "--start");
+  if (firstOpen >= 0 && (firstStart < 0 || firstStart > firstOpen)) throw new Error("--open needs --map or --start before it (it opens the map in the running editor)");
   const firstSave = steps.findIndex(([s]) => s === "--save"), firstMap = steps.findIndex(([s]) => s === "--map");
   if (firstSave >= 0 && (firstMap < 0 || firstMap > firstSave)) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
   return { opts, steps, looks };
@@ -242,6 +393,10 @@ export function protonFor(game) {
 }
 
 /** A Linux path as the Windows program sees it. */
+/** The folder the editor's Open list shows: the prefix's Documents/Warcraft III/Maps. */
+export const openMapsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "steamuser", "Documents", "Warcraft III", "Maps");
+/** The name of the n-th opened copy there: unique per open, so the editor's title says which map it shows. */
+export const openCopyName = (n, map) => `we-open-${n}-${basename(map)}`;
 export const winePath = (p) => `Z:${p.split("/").join("\\")}`;
 
 /** The text locale the install has (from .build.info's tags, e.g. "enUS text?"), else enUS. */
@@ -261,18 +416,19 @@ const ASSET_KINDS = ["Buildings", "Environment", "EnvOld", "Heroes", "Icons", "T
 
 /**
  * The [Misc] keys we-drive sets in WorldEditPreferences.txt: no first-start questions, no interface sounds, the
- * graphics mode (`sd` or `hd`: assetMode, hd and the per-kind switches; see TESTING.md for how that was told apart),
+ * graphics mode (`sd`, `hd` or `de`: assetMode 0, 1, 2 decides, hd and the per-kind switches follow; see TESTING.md),
  * and whether the editor's day and night turn (`cycle`) or stand still (`fixed`).
  */
 export function editorPrefs(mode, dayNight) {
-  if (mode !== "sd" && mode !== "hd") throw new Error("--mode wants sd or hd");
+  if (!["sd", "hd", "de"].includes(mode)) throw new Error("--mode wants sd, hd or de");
   if (dayNight !== "cycle" && dayNight !== "fixed") throw new Error("--day-night wants cycle or fixed");
-  const on = mode === "hd" ? "1" : "0";
+  const on = mode === "sd" ? "0" : "1";
+  const am = mode === "de" ? "2" : on;
   return {
     "Has Been Run": "true",
     "Editor User Interface Sound": "0",
     "Play Splash Sound": "0",
-    assetMode: on,
+    assetMode: am,
     hd: on,
     ...Object.fromEntries(ASSET_KINDS.map((k) => [k, on])),
     "Fixed Day Night Cycle": dayNight === "fixed" ? "1" : "0",
@@ -336,7 +492,8 @@ class Session {
   }
 
   async startDisplay() {
-    const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${SIZE[0]}x${SIZE[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+    const size = this.opts.screen ?? SIZE;
+    const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${size[0]}x${size[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
     this.xvfb = xvfb;
     const n = await new Promise((ok, fail) => {
       let got = "";
@@ -358,7 +515,9 @@ class Session {
     const fdArgs = Buffer.from(ro.flatMap((p) => ["--ro-bind", p, p]).map((s) => `${s}\0`).join(""));
     const bw = ["--bind", "/", "/", "--dev-bind", "/dev", "/dev", "--proc", "/proc",
       // No sound: no ALSA devices, no PulseAudio or PipeWire sockets.
-      "--tmpfs", "/dev/snd"];
+      "--tmpfs", "/dev/snd",
+      // No network: nothing of this machine (a crash report included) can leave it. The editor works offline.
+      "--unshare-net"];
     for (const p of ["pulse"]) if (existsSync(join(run, p))) bw.push("--tmpfs", join(run, p));
     for (const p of ["pipewire-0", "pipewire-0-manager"]) if (existsSync(join(run, p))) bw.push("--ro-bind", "/dev/null", join(run, p));
     bw.push("--args", "3", join(this.proton.tool, "proton"), "run", program, ...args);
@@ -430,9 +589,23 @@ class Session {
     if (after !== before) writeFileSync(file, after);
   }
 
+  /** An editor was started and hasn't exited. */
+  running() {
+    return !!this.editor && !this.editorExited;
+  }
+
   /** Starts the editor, with a copy of `map` if given; `looks` are the run's --look cameras to put into the copy. */
   async start(map, looks = []) {
-    if (this.editor) throw new Error("the editor is already running (one map per run)");
+    if (this.editor && !this.editorExited) {
+      // A close that finished has stopped the editor's processes; its exit event may come a moment later.
+      for (let i = 0; i < 100 && !this.editorExited; i++) await sleep(100);
+      if (!this.editorExited) throw new Error("the editor is still running: add --close before another --map");
+    }
+    // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
+    this.editor = null;
+    this.editorExited = false;
+    this.answered = [];
+    this.copy = null;
     const exe = join(farmDir(), "_retail_", "x86_64", "World Editor.exe");
     const args = ["-launch"];
     if (map) {
@@ -452,8 +625,30 @@ class Session {
     this.editor.on("exit", () => { this.editorExited = true; });
   }
 
+  /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
+   *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
   windows() {
-    return classify(x11(this.display, "windows").windows);
+    const all = x11(this.display, "windows").windows;
+    const crash = crashDialogs(all, programOfPid);
+    if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
+    return classify(all);
+  }
+
+  /** The crash dialog was seen: a picture of the screen (read from the X server, nothing sent to the dialog), then the
+   *  editor is killed and EditorCrashed thrown. */
+  crashed(dialogs) {
+    let screen;
+    try { screen = this.dialogShot("crash"); } catch { /* the picture is a bonus; the kill isn't */ }
+    this.killEditor();
+    this.crash = dialogs;
+    throw new EditorCrashed(dialogs, screen);
+  }
+
+  /** Kills everything the editor started (its crash reporter too) instead of answering anything. */
+  killEditor() {
+    this.wineserver("-k");
+    try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
+    this.editorExited = true;
   }
 
   viewRect(main) {
@@ -498,6 +693,76 @@ class Session {
     const file = join(this.opts.work, `dialog-${name}-${Date.now()}.png`);
     this.shot(file);
     return file;
+  }
+
+  /**
+   * Opens `map` in the running editor, as File > Open: Ctrl+O shows the editor's own "Open Document" list (no file name
+   * box: its Directory field is read-only and Browse is a folder tree), which lists the prefix's Documents/Warcraft III/Maps.
+   * So a copy of the map goes there under a name of its own (the copies of earlier opens are removed first: the new one is the
+   * list's only row), its row is clicked and OK pressed. A "Save changes?" question about the map before (a "Warning") is
+   * answered "No": --save before --open keeps that map's changes. Returns when the editor has begun to load the map
+   * (its loading window, a new title, or 8 s after the list closed); --wait-ready waits for the rest. Throws when the
+   * list doesn't open or another dialog stays: --map then restarts the editor instead.
+   */
+  async openMap(map, looks = []) {
+    if (!this.editor || this.editorExited) throw new Error("the editor isn't running");
+    this.opens = (this.opens ?? 0) + 1;
+    const dir = openMapsDir();
+    mkdirSync(dir, { recursive: true });
+    for (const f of readdirSync(dir)) if (/^we-open-/.test(f)) rmSync(join(dir, f), { force: true });
+    const copy = join(dir, openCopyName(this.opens, map));
+    copyFileSync(map, copy);
+    const withLooks = looks.length ? addCamerasToMap(ensureCli(), copy, join(this.opts.work, "look-project"), looks) : null;
+    const { main } = this.mainOrThrow();
+    const beforeTitle = main.title;
+    const before = new Set(this.windows().dialogs.map((d) => d.id));
+    x11(this.display, "key", "--window", main.id, "ctrl+o");
+    const answered = [], asked = new Set();
+    let dialog = null;
+    for (const end = Date.now() + 20000; !dialog && Date.now() < end;) {
+      await sleep(250);
+      if (this.editorExited) throw new Error(`the editor exited (see ${this.log})`);
+      const fresh = this.windows().dialogs.filter((d) => !before.has(d.id));
+      dialog = fresh.find((d) => d.title === OPEN_DIALOG) ?? null;
+      const r = openQuestion(fresh.filter((d) => d !== dialog), false);
+      if (r.answer && !asked.has(r.answer.dialog.id)) {
+        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        asked.add(r.answer.dialog.id);
+        answered.push(r.answer.dialog.title);
+      } else if (r.error) throw new Error(`Ctrl+O met a dialog: "${r.error.title}"`);
+    }
+    if (!dialog) throw new Error(`no "${OPEN_DIALOG}" list opened for Ctrl+O`);
+    await sleep(500);
+    const at = (p) => `${dialog.rect[0] + p.x},${dialog.rect[1] + p.y}`;
+    x11(this.display, "click", at(OPEN_LIST.row));
+    await sleep(300);
+    x11(this.display, "click", at(OPEN_LIST.ok));
+    let loading = false, closedAt = 0;
+    for (const end = Date.now() + 40000; Date.now() < end;) {
+      await sleep(250);
+      if (this.editorExited) throw new Error(`the editor exited while opening (see ${this.log})`);
+      const w = this.windows();
+      if (w.dialogs.some((d) => d.title === PROGRESS_TITLE)) loading = true;
+      const r = openQuestion(w.dialogs.filter((d) => d.id !== dialog.id), false);
+      if (r.answer && !asked.has(r.answer.dialog.id)) {
+        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        asked.add(r.answer.dialog.id);
+        answered.push(r.answer.dialog.title);
+        continue;
+      }
+      if (r.error || r.answer) throw new Error(`the open met a dialog: "${(r.error ?? r.answer.dialog).title}"`);
+      if (w.dialogs.some((d) => d.id === dialog.id)) continue;
+      closedAt ||= Date.now();
+      if (loading || (w.main && w.main.title !== beforeTitle) || Date.now() - closedAt > 8000) {
+        this.copy = copy;
+        this.mapName = basename(copy);
+        this.answered = answered;
+        this.startedAt = Date.now();
+        if (withLooks) ({ looks: this.looks, parks: this.parks } = withLooks);
+        return { answered, loading, copy };
+      }
+    }
+    throw new Error(`the "${OPEN_DIALOG}" list stayed open`);
   }
 
   async waitReady() {
@@ -559,7 +824,9 @@ class Session {
       await sleep(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
       const questions = questionDialogs(this.windows().dialogs);
-      const reminder = questions.find((d) => d.title === "Reminder");
+      // The reminder about the default map name, and any dialog --save-accept names (e.g. "Warning", the "no longer
+      // considered a melee map" notice): answered with Return.
+      const reminder = questions.find((d) => d.title === "Reminder" || this.opts.saveAccept.includes(d.title));
       if (reminder) {
         x11(this.display, "key", "--window", reminder.id, "Return");
         answered.push(reminder.title);
@@ -579,6 +846,58 @@ class Session {
       }
     }
     return { saved: false, timeout: this.opts.timeout, screen: this.dialogShot("save") };
+  }
+
+  /**
+   * File > Export Minimap… with the dialog's defaults: Image File names a file in the work folder (typed into the
+   * "Save As" box), OK writes it, and the TGA is copied to `dest`. Done when the file stood still for 2 s and the
+   * dialog has closed; another dialog is reported with a picture of the screen, not answered.
+   */
+  async exportMinimap(dest) {
+    const { main } = this.mainOrThrow();
+    const waitFor = async (title) => {
+      for (let i = 0; i < 40; i++) {
+        await sleep(250);
+        const d = this.windows().dialogs.find((w) => w.title === title);
+        if (d) return d;
+      }
+      return null;
+    };
+    const at = (rect, p) => `${rect[0] + p.x},${rect[1] + p.y}`;
+    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.file));
+    await sleep(600);
+    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.item));
+    const dialog = await waitFor("Export Minimap");
+    if (!dialog) return { exported: false, error: "the Export Minimap dialog didn't open", screen: this.dialogShot("export") };
+    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.imageFile));
+    const saveAs = await waitFor("Save As");
+    if (!saveAs) return { exported: false, error: "the Save As box didn't open", screen: this.dialogShot("export") };
+    const file = join(resolve(this.opts.work), `minimap-${Date.now()}.tga`);
+    await sleep(300);
+    x11(this.display, "type", "--window", saveAs.id, winePath(file));
+    x11(this.display, "key", "--window", saveAs.id, "Return");
+    for (let i = 0; i < 20 && this.windows().dialogs.some((w) => w.title === "Save As"); i++) await sleep(250);
+    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.ok));
+    const deadline = Date.now() + this.opts.timeout * 1000;
+    let last = null, stillSince = 0;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      if (this.editorExited) throw new Error(`the editor exited while exporting (see ${this.log})`);
+      const others = questionDialogs(this.windows().dialogs).filter((d) => d.title !== "Export Minimap");
+      if (others.length) return { exported: false, dialogs: others.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("export") };
+      let now = null;
+      try { const s = statSync(file); now = `${s.mtimeMs}:${s.size}`; } catch { /* not yet */ }
+      if (now !== last) { last = now; stillSince = 0; continue; }
+      if (now && !this.windows().dialogs.some((d) => d.title === "Export Minimap")) {
+        stillSince ||= Date.now();
+        if (Date.now() - stillSince >= 2000) {
+          mkdirSync(dirname(resolve(dest)), { recursive: true });
+          copyFileSync(file, resolve(dest));
+          return { exported: true, file: resolve(dest), bytes: statSync(file).size };
+        }
+      }
+    }
+    return { exported: false, timeout: this.opts.timeout, screen: this.dialogShot("export") };
   }
 
   mainOrThrow() {
@@ -631,7 +950,7 @@ class Session {
       const menu = await this.openViewMenu();
       x11(this.display, "click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
       clicks++;
-      await sleep(this.opts.mode === "hd" ? 3000 : 1000);
+      await sleep(this.opts.mode !== "sd" ? 3000 : 1000);
       on = await state();
     }
     return { item: spec.item, state: on ? "on" : "off", clicks };
@@ -684,7 +1003,7 @@ class Session {
       row(this.looks.length + parked);
     }
     // The view draws about 14 frames a second in SD and 2 in HD.
-    await sleep(this.opts.mode === "hd" ? 4000 : 1500);
+    await sleep(this.opts.mode !== "sd" ? 4000 : 1500);
     let studio = null;
     try { studio = studioCamera(look); } catch { /* not fitted for this angle or field of view */ }
     const camera = studio && Object.entries(studio).map(([k, v]) => `${k}=${v}`).join(",");
@@ -695,6 +1014,15 @@ class Session {
   async close() {
     if (!this.editor || this.editorExited) return { closed: true, answered: [] };
     const answered = [];
+    try {
+      return await this.closeSteps(answered);
+    } catch (e) {
+      if (e instanceof EditorCrashed) return { closed: true, crashed: true, answered, dialogs: e.dialogs, message: CRASH_MESSAGE, screen: e.screen };
+      throw e;
+    }
+  }
+
+  async closeSteps(answered) {
     const { main } = this.windows();
     if (main) x11(this.display, "close", main.id);
     const deadline = Date.now() + Math.min(this.opts.timeout, 120) * 1000;
@@ -703,11 +1031,14 @@ class Session {
       const w = this.windows();
       if (!w.main && !w.dialogs.length && !w.palettes.length) {
         this.wineserver("-w");
+        this.editorExited = true;
         return { closed: true, answered };
       }
       for (const d of w.dialogs) {
         // "Save changes to …?" is a message box titled "Warning" (Yes, No, Cancel): "n" is its "No".
-        if (d.title === "Warning" || d.title.startsWith("Warcraft III World Editor") || d.title === "") {
+        const action = closeAction(d, w.main);
+        if (action === "crash") this.crashed([{ title: d.title, class: d.class, program: programOfPid(d) }]);
+        if (action === "no") {
           x11(this.display, "key", "--window", d.id, "n");
           answered.push(d.title || "(untitled)");
         } else {
@@ -761,7 +1092,7 @@ async function main() {
   const onSignal = () => { stopAll(); process.exit(130); };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  let failed = false, lookIndex = 0;
+  let failed = false, lookIndex = 0, mapsStarted = 0;
   try {
     await s.startDisplay();
     for (const [step, arg] of steps) {
@@ -769,8 +1100,26 @@ async function main() {
         if (step === "--map") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
-          await s.start(map, looks);
-          out({ step, map, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
+          const first = mapsStarted++ === 0, info = {};
+          let via = mapAction(s.running()), fellBack = null;
+          if (via === "open") {
+            try {
+              Object.assign(info, await s.openMap(map, first ? looks : []));
+            } catch (e) {
+              if (e instanceof EditorCrashed) throw e;
+              // The open failed: the editor is stopped and started again with the map.
+              fellBack = e.message;
+              s.killEditor();
+              via = "restart";
+            }
+          }
+          if (via !== "open") await s.start(map, first ? looks : []);
+          out({ step, map, via, ...(fellBack ? { openFailed: fellBack } : {}), ...info, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
+        } else if (step === "--open") {
+          const map = resolve(arg);
+          if (!existsSync(map)) throw new Error(`no map at ${map}`);
+          mapsStarted++;
+          out({ step, map, via: "open", ...(await s.openMap(map, [])), display: s.display });
         } else if (step === "--start") {
           await s.start(null);
           out({ step, display: s.display });
@@ -807,38 +1156,52 @@ async function main() {
         } else if (step === "--key") {
           // To the open dialog if there is one, else to the main window (without a window manager the keyboard
           // stays with whatever was clicked last, e.g. the tool palette).
+          // KEY@MS holds it down MS (the X server's autorepeat runs meanwhile).
+          const m = /^(.+?)(?:@(\d+))?$/.exec(arg);
           const w = s.windows();
           const to = w.dialogs.at(-1) ?? w.main;
-          x11(s.display, "key", ...(to ? ["--window", to.id] : []), arg);
+          x11(s.display, "key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
           await sleep(300);
-          out({ step, key: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
-        } else if (step === "--click") {
-          if (!/^\d+,\d+$/.test(arg)) throw new Error("--click wants X,Y");
-          x11(s.display, "click", arg);
+          out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--type") {
+          // Into the open dialog if there is one, else the main window, as --key.
+          const w = s.windows();
+          const to = w.dialogs.at(-1) ?? w.main;
+          x11(s.display, "type", ...(to ? ["--window", to.id] : []), arg);
+          await sleep(300);
+          out({ step, typed: arg.length, dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--export-minimap") {
+          const r = await s.exportMinimap(arg);
+          out({ step, ...r });
+          if (!r.exported) { failed = true; break; }
+        } else if (step === "--click" || step === "--double-click") {
+          if (!/^\d+,\d+$/.test(arg)) throw new Error(`${step} wants X,Y`);
+          x11(s.display, "click", arg, ...(step === "--double-click" ? ["--double"] : []));
           await sleep(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {
-          const m = /^(\d+,\d+):(\d+,\d+)$/.exec(arg);
-          if (!m) throw new Error("--drag wants X,Y:X,Y");
-          x11(s.display, "drag", m[1], m[2]);
+          x11(s.display, "drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []));
           await sleep(300);
-          out({ step, from: m[1], to: m[2], dialogs: s.windows().dialogs.map((d) => d.title) });
+          out({ step, from: arg.from, to: arg.to, ms: arg.ms, ...(arg.mod ? { mod: arg.mod } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--move") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
           x11(s.display, "move", arg);
           out({ step, at: arg });
         } else if (step === "--wheel") {
-          // Mouse wheel over the middle of the terrain view: positive zooms in (button 4), negative out (button 5).
-          const n = Number(arg);
-          if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0");
+          // Mouse wheel over the terrain view (its middle, or N@X,Y at a position of the display): positive zooms in
+          // (button 4), negative out (button 5).
+          const m = /^(-?\d+)(?:@(\d+),(\d+))?$/.exec(arg);
+          const n = m ? Number(m[1]) : NaN;
+          if (!Number.isInteger(n) || n === 0) throw new Error("--wheel wants a whole number of notches, not 0, and optionally @X,Y");
           const { main } = s.mainOrThrow();
           const [vx, vy, vw, vh] = s.viewRect(main);
+          const at = m[2] ? `${m[2]},${m[3]}` : `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`;
           for (let i = 0; i < Math.abs(n); i++) {
-            x11(s.display, "click", `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`, "--button", n > 0 ? 4 : 5);
+            x11(s.display, "click", at, "--button", n > 0 ? 4 : 5);
             await sleep(100);
           }
           await sleep(500);
-          out({ step, notches: n });
+          out({ step, notches: n, at });
         } else if (step === "--windows") {
           const w = s.windows();
           const brief = (x) => ({ title: x.title, rect: x.rect });
@@ -862,7 +1225,7 @@ async function main() {
         }
       } catch (e) {
         failed = true;
-        out({ step, arg, error: e.message });
+        out({ step, arg, error: e.message, ...(e.crashed ? { crashed: true, dialogs: e.dialogs, screen: e.screen } : {}) });
         break;
       }
     }

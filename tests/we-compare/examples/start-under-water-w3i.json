@@ -1,0 +1,22 @@
+[
+  {
+    "name": "start-in-deep-water-w3i",
+    "description": "p6 item 3: a start location under deep water takes the melee flag off (w3i flags 0x9c14 to 0x9c10 in both)",
+    "input": {
+      "new": { "name": "MeleeDeep", "width": 64, "height": 64 },
+      "steps": [{ "mcp": "set_water", "args": { "mode": "deep", "left": -384, "bottom": -640, "right": 128, "top": 128 } }]
+    },
+    "we": { "saveAccept": ["Warning"] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "start-in-shallow-water-w3i",
+    "description": "p6 item 3, shallow water",
+    "input": {
+      "new": { "name": "MeleeShallow", "width": 64, "height": 64 },
+      "steps": [{ "mcp": "set_water", "args": { "mode": "shallow", "left": -384, "bottom": -640, "right": 128, "top": 128 } }]
+    },
+    "we": { "saveAccept": ["Warning"] },
+    "compare": ["war3map.w3i"]
+  }
+]

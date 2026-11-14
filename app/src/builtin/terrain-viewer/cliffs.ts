@@ -15,9 +15,12 @@ import { rampSides } from "../../lib/terrain/cliffs";
 /** A Reforged cliff model's texture as drawn: its placeholders for the cliff type's HD set become that set
  *  (TerrainArt\CityScape\City_Cliff1_Diffuse.blp). The Cliffs models name Doodads\Terrain\#ignore_Cliffs\Cliff1_…,
  *  the City cliffs (CityCliffs) ReplaceableTextures\Cliff\Cliff1_…, a file the game doesn't have (drawn white
- *  before: OrcX02_03's city walls). Other paths stay. */
-export function cliffRetexture(path: string, type: Pick<CliffType, "texDir" | "texFile">): string {
-  return path.replace(/^.*(?:#ignore_Cliffs|ReplaceableTextures[\\/]Cliff)[\\/]Cliff\d+_(\w+)\.\w+$/i, `${type.texDir}\\${type.texFile}_$1.blp`);
+ *  before: OrcX02_03's city walls). Other paths stay. `slot` (hdSlots: "_Diffuse"…), when given, is the part of the
+ *  set: the placeholder's own name can be wrong (the HD cave CliffDoodadCave lists Cliff1_ORM in its diffuse slot and
+ *  Cliff1_Diffuse in its ORM slot, which drew it white). */
+export function cliffRetexture(path: string, type: Pick<CliffType, "texDir" | "texFile">, slot?: string): string {
+  return path.replace(/^.*(?:#ignore_Cliffs|ReplaceableTextures[\\/]Cliff)[\\/]Cliff\d+_(\w+)\.\w+$/i,
+    (_m, own: string) => `${type.texDir}\\${type.texFile}${slot ?? `_${own}`}.blp`);
 }
 
 export interface CliffType {
@@ -31,6 +34,14 @@ export interface CliffType {
   groundTile: string;
 }
 
+/** The cliff type number (in `list`, cliffList's) the World Editor's cliff palette starts on: the tileset's second cliff
+ *  texture (texFile …_Cliff1). Seen: Grass Cliff on Lordaeron Summer, with the w3e's cliff list either way round
+ *  (we-compare water-brush-swapped, 2026-11-13; the status bar says "Grass Cliff" on a new map), and CAgr on Ashenvale
+ *  (tests/fixtures/water-brush/ash-shallow.w3e). -1 when the map has no such cliff. */
+export function weDefaultCliffType(list: readonly CliffType[]): number {
+  return list.findIndex((c) => /_cliff1$/i.test(c.texFile));
+}
+
 /** A cliff model and the tiles (y × (width-1) + x) it covers. */
 export type CliffRequest = ModelRequest & { tiles: number[] };
 
@@ -38,6 +49,8 @@ export interface CliffPlan {
   requests: CliffRequest[];
   /** Corner index → ground texture index: corners touching a cliff show its ground tile. */
   groundOverrides: Map<number, number>;
+  /** Cliff tiles left without a model (`hidden`): no ground is drawn there either. */
+  hiddenTiles: number[];
 }
 
 /** The cliff types a corner's cliff texture index refers to. The list stored
@@ -48,8 +61,11 @@ export function cliffList(t: Terrain, types: Map<string, CliffType>): CliffType[
   return t.groundTiles.map((g) => byGround.get(g)).filter((c): c is CliffType => !!c);
 }
 
-/** `exists` tells whether a game path is present (to pick a variation that has a file). */
-export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (path: string) => boolean): CliffPlan {
+/** `exists` tells whether a game path is present (to pick a variation that has a file). `hidden`: tiles (y ×
+ *  (width-1) + x) another model stands for (special doodads): no cliff or ramp model there, and they are listed as
+ *  the plan's `hiddenTiles` when they are cliff tiles, whose ground isn't drawn either. */
+export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (path: string) => boolean,
+  hidden: ReadonlySet<number> = new Set()): CliffPlan {
   const list = cliffList(t, types);
   const byPath = new Map<string, CliffRequest>();
   const groundOverrides = new Map<number, number>();
@@ -60,7 +76,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
     const key = `${path}|${texture}`;
     const req = byPath.get(key) ?? {
       path, replaceable: { 11: texture }, instances: [], tiles: [],
-      retexture: (p: string) => cliffRetexture(p, type),
+      retexture: (p: string, slot?: string) => cliffRetexture(p, type, slot),
     };
     req.instances.push({ world, team: 0 });
     req.tiles.push(...tiles);
@@ -73,6 +89,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
   // cliffs, L/H/X for ramp corners 0/1/2 layers up. Pure ramp tiles (all
   // corners flagged) stay sloped ground.
   const covered = new Set<number>();
+  const hiddenTiles: number[] = [];
   // The blocks (rampSides) a model of the cliff type's ramp folder exists for; the others are ordinary cliffs.
   rampSides(t, ({ x: bx, y: by, w: bw, outer, base, tiles }) => {
     const name = outer.map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base]).join("");
@@ -80,6 +97,8 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
     if (!type?.rampModelDir) return false;
     const path = `Doodads\\Terrain\\${type.rampModelDir}\\${type.rampModelDir}${name}0.mdx`;
     if (!exists(path)) return false;
+    // A block a special covers part of is left to the ordinary cliffs below, which skip only the special's tiles.
+    if (tiles.some((i) => hidden.has(i))) return false;
     // Origin at the block's bottom-right corner, like cliff models.
     add(path, type, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.offsetX + (bx + bw) * 128, t.offsetY + by * 128, (base - 2) * 128, 1]), tiles);
     for (const i of tiles) covered.add(i);
@@ -116,8 +135,9 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
       const z = (base - 2) * 128;
       // The models span one tile to the -x side of their origin (bottom-right corner).
       const world: Mat4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.offsetX + (x + 1) * 128, t.offsetY + y * 128, z, 1]);
-      add(path, type, world, [y * tw + x]);
+      if (hidden.has(y * tw + x)) hiddenTiles.push(y * tw + x);
+      else add(path, type, world, [y * tw + x]);
     }
   }
-  return { requests: [...byPath.values()], groundOverrides };
+  return { requests: [...byPath.values()], groundOverrides, hiddenTiles };
 }

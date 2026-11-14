@@ -1,0 +1,55 @@
+[
+  {
+    "name": "cliff-adjust-dry-plus1",
+    "description": "test.md 'Dry corners wrap as in the WE': Advanced > Adjust Cliff Levels +1 on a map of dry corners whose water words run through the extremes of the 14 bits (fixtures/we-specs/dry-words.w3x, make-dry-words.mjs); w3e corner by corner: the dry word wraps as in the editor, layers and the rest move alike",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--click", "260,41"],
+        ["--sleep", "800"],
+        ["--click", "299,206"],
+        ["--sleep", "800"],
+        ["--key", "1"],
+        ["--key", "Return"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "command": "w3.terrain.adjustCliffLevels", "args": 1 },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 20
+  },
+  {
+    "name": "cliff-adjust-dry-minus3",
+    "description": "the same by -3: corners on levels 0-2 stop at level 0 (their water word moves only as far as their level did), the others' words wrap below 0 as in the editor",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--click", "260,41"],
+        ["--sleep", "800"],
+        ["--click", "299,206"],
+        ["--sleep", "800"],
+        ["--key", "minus"],
+        ["--key", "3"],
+        ["--key", "Return"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "command": "w3.terrain.adjustCliffLevels", "args": -3 },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 20
+  }
+]

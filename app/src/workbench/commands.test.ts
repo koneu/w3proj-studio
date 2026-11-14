@@ -37,3 +37,19 @@ test("the terrain view's keys stay with it while it has the keyboard; elsewhere 
   assert.ok(away && "binding" in away && away.binding.command === "workbench.reload" && !isViewBinding(away.binding, out.own));
   assert.equal(resolve(bindings, ["v"], {}), null, "plain keys aren't bound in the workbench");
 });
+
+test("in the terrain view Ctrl+Shift+B is Enforce Camera Bounds and Y Set Uniform Doodad Heights; elsewhere Ctrl+Shift+B packs", () => {
+  // Verification round 3 (2026-11-13): the World Editor's Ctrl+Shift+B toggles Enforce Camera Bounds, its Y sets the
+  // selected doodads to their mean height without a dialog.
+  const svc = new CommandService();
+  const read = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { contributes: { commands: { id: string; title: string; keybinding?: string }[]; keybindings?: { key: string; command: string; when?: string }[] } };
+  const project = read("src/builtin/map-project/extension.json"), terrain = read("src/builtin/terrain-viewer/extension.json");
+  for (const c of [...project.contributes.commands, ...terrain.contributes.commands]) svc.contribute("x", c);
+  const bindings = defaultBindings(svc.contributions(), [...(project.contributes.keybindings ?? []), ...(terrain.contributes.keybindings ?? [])]);
+  const inView = { terrainFocus: true, project: true, terrain: true };
+  const command = (chord: string, ctx: Record<string, boolean>) => { const r = resolve(bindings, [chord], ctx); return r && "binding" in r ? r.binding.command : null; };
+  assert.equal(command("ctrl+shift+b", inView), "w3.terrain.toggleEnforceCameraBounds");
+  assert.equal(command("ctrl+shift+b", { project: true, terrain: true }), "w3.project.pack", "outside the terrain view it packs");
+  assert.equal(command("y", inView), "w3.terrain.setUniformDoodadHeightsToMean");
+  assert.equal(command("ctrl+shift+h", inView), "w3.terrain.toggleResetFixedHeights");
+});

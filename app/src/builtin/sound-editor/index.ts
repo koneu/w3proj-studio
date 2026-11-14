@@ -16,9 +16,10 @@ import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
-import { askWtsCuts, WtsCutError } from "../../lib/formats/wts";
+import { askWtsCuts, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
-import { stringRefsInMap } from "../../lib/formats/mapdoc";
+import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
+import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
@@ -95,7 +96,7 @@ export function soundNameProblem(sounds: readonly Sound[], s: Sound, name: strin
 let playing: { audio: HTMLAudioElement; url: string } | null = null;
 const stopPlaying = () => { playing?.audio.pause(); if (playing) URL.revokeObjectURL(playing.url); playing = null; };
 
-/** The Sound Editor shown last, for the commands of the palette. */
+/** The Sound Editor shown (the active tab; the one opened last until a tab is switched), for the commands of the palette. */
 let current: SoundEditor | null = null;
 const needEditor = () => {
   if (!current) throw new Error("Open the Sound Editor and select a sound first.");
@@ -115,7 +116,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.sounds.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // The JSON form, else the raw file (decoded by the format engine); a map without sounds
-      // opens an empty list, and the file is created on the first save.
+      // opens an empty list, and the file is created on the first save. From the whole file list, not one still read.
+      await projectWithFiles(w3);
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
       await w3.editors.open(FILE, "w3.soundEditor");
@@ -200,12 +202,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (current === editor) edits.fire();
         });
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
-        // The TRIGSTR numbers the map's files refer to (new dialogue keys go after them, as Move Texts numbers), read in
-        // the background; the sounds' own keys come from the live list.
-        const otherRefs = strings && !doc.readOnly ? stringRefsInMap(w3, w3.workspace.files().map((f) => f.path)) : null;
+        // The TRIGSTR numbers the map's files refer to and those a pack dropped and recorded (new dialogue keys go after
+        // them, as Move Texts numbers), read in the background; the sounds' own keys come from the live list.
+        // Taken from the whole file list (right after an open it may still be read): a file not listed yet isn't none.
+        const otherRefs = strings && !doc.readOnly ? w3.workspace.filesReady().then(() => {
+          if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
+          return stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path));
+        }) : null;
         otherRefs?.catch(() => {});
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
+        // Switching tabs: the commands and the Object Manager follow the Sound Editor that is shown.
+        const activeSub = w3.editors.onDidChangeActive((a) => {
+          if (a?.editor !== "w3.soundEditor" || a.path !== doc.path || current === editor) return;
+          current = editor;
+          edits.fire();
+        });
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
@@ -239,6 +251,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dispose: () => {
             editor.dispose();
             unbindKeys();
+            activeSub.dispose();
             if (current === editor) { current = null; edits.fire(); }
           },
         };
@@ -271,6 +284,27 @@ async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
   }
   const merged = strings.merge(current);
   if (merged === null) return;
+  // The new strings go into the languages' tables too (lib/formats/localewts), all worked out before anything is
+  // written, and written first: a save that stops between leaves an unused string there, not a missing one.
+  const added = strings.added();
+  const locales: { path: string; text: string }[] = [];
+  if (added.length) {
+    // Every language's table, so the file list must have them all (a table not listed yet would miss the strings).
+    const root = w3.workspace.project()?.root;
+    await w3.workspace.filesReady();
+    if (w3.workspace.project()?.root !== root) throw new Error("Not saved: the project changed meanwhile.");
+    for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
+      const text = await w3.workspace.readText(path).catch((e) => {
+        throw new Error(`Not saved: ${path} can't be read (${errorText(e)}), so the new dialogue strings can't be added to it.`);
+      });
+      // A number the table has already came from an earlier save of these strings that stopped before war3map.wts was
+      // written (the numbers went past the table's when they were given): that copy stays.
+      const has = new StringTable(text);
+      const out = addLocaleStrings(path, text, added.filter((b) => !has.has(b.num)));
+      if (out !== text) locales.push({ path, text: out });
+    }
+  }
+  for (const l of locales) await w3.workspace.writeText(l.path, l.text);
   if (merged !== current) {
     await w3.workspace.writeText(WTS, merged);
     if (current === null) await w3.workspace.refresh();

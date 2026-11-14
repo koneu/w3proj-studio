@@ -5,10 +5,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { addCamerasToMap, classify, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
-import { compare, isCopied, takeLock, userCompatData } from "./we-setup.mjs";
+import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
 const PREFS = ["[Misc]", "assetMode=-1", "Has Been Run=false", "hd=1", "Undo Limit=0", "", "[Test Map]", "hd=0", "teen=0", ""].join("\r\n");
 
@@ -33,7 +35,12 @@ test("editorPrefs: sd turns the Reforged switches off, hd on; first-start questi
   assert.equal(sd["Editor User Interface Sound"], "0");
   assert.equal(sd["Fixed Day Night Cycle"], "0");
   assert.equal(hd["Fixed Day Night Cycle"], "1");
-  assert.throws(() => editorPrefs("ultra", "cycle"), /sd or hd/);
+  const de = editorPrefs("de", "fixed");
+  assert.equal(de.assetMode, "2", "de is the editor's third Asset Mode entry");
+  assert.equal(de.hd, "1");
+  assert.equal(editorPrefs("hd", "fixed").assetMode, "1");
+  assert.equal(editorPrefs("sd", "fixed").assetMode, "0");
+  assert.throws(() => editorPrefs("ultra", "cycle"), /sd, hd or de/);
   assert.throws(() => editorPrefs("hd", "noon"), /cycle or fixed/);
 });
 
@@ -94,8 +101,28 @@ test("parseArgs: the day and night fixed by default; --compare-ready refuses a t
   assert.throws(() => parseArgs(["--day-night", "cycle", "--map", "m.w3x", "--compare-ready"]), /day and night fixed/);
 });
 
-test("parseArgs: --drag takes its two positions as one value", () => {
-  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", "375,200:570,255"], ["--key", "ctrl+c"]]);
+test("parseArgs: --drag takes its two positions (and a duration) as one value; --drag-mod belongs to the next drag", () => {
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", { from: "375,200", to: "570,255", ms: 400 }], ["--key", "ctrl+c"]]);
+  assert.deepEqual(parseArgs(["--drag-mod", "alt", "--drag", "1,2:3,4@900", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 900, mod: "alt" }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  for (const bad of ["1,2", "1,2:3", "1,2:3,4@5", "1,2:3,4@x", "-1,2:3,4", ""]) assert.throws(() => parseArgs(["--drag", bad]), /--drag/, bad);
+  assert.throws(() => parseArgs(["--drag-mod", "meta", "--drag", "1,2:3,4"]), /--drag-mod wants/);
+  assert.throws(() => parseArgs(["--drag-mod", "alt"]), /needs a --drag/);
+});
+
+test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
+  const run = (...a) => spawnSync("python3", ["-I", join(dirname(fileURLToPath(import.meta.url)), "we-x11.py"), "drag", ...a, "--dry"], { encoding: "utf8" });
+  const probe = run("0,0", "1,1");
+  if (probe.status !== 0) return t.skip("python3 with Pillow isn't here");
+  const path = JSON.parse(run("100,100", "300,60", "--steps", "4").stdout).path;
+  assert.deepEqual(path, [[150, 90], [200, 80], [250, 70], [300, 60]]);
+  assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
+});
+
+test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
+  assert.equal(parseArgs(["--start"]).opts.screen, undefined);
+  assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
+  assert.throws(() => parseArgs(["--screen", "1200,700", "--start"]), /WxH/);
+  assert.deepEqual(parseArgs(["--start", "--key", "ctrl+Up@1500"]).steps, [["--start", null], ["--key", "ctrl+Up@1500"]]);
 });
 
 test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {
@@ -192,25 +219,152 @@ test("compare fails only on changes under the guarded paths", () => {
 
 test("the lock: a second run waits and gives up; a lock whose process is gone is taken over", async () => {
   const dir = mkdtempSync(join(tmpdir(), "we-lock-"));
-  const before = process.env.W3PROJ_WE_DIR;
-  process.env.W3PROJ_WE_DIR = dir;
+  const lock = join(dir, "machine.lock");
+  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
+  process.env.W3PROJ_WE_LOCK = lock;
   try {
+    // Two holders with different farm folders: the lock is the same one.
+    process.env.W3PROJ_WE_DIR = join(dir, "farm-a");
     const release = await takeLock(() => {});
-    assert.ok(existsSync(join(dir, "lock", "owner.json")));
+    assert.ok(existsSync(join(lock, "owner.json")));
+    process.env.W3PROJ_WE_DIR = join(dir, "farm-b");
     const said = [];
     await assert.rejects(takeLock((m) => said.push(m), 1500), /still holds/);
-    assert.match(said.join("\n"), /waiting for the World Editor run/);
+    assert.equal(said.length, 1, "said once");
+    assert.match(said[0], /waiting for the World Editor run of .*process \d+, since \d{4}-/);
     release();
-    assert.ok(!existsSync(join(dir, "lock")));
+    assert.ok(!existsSync(lock));
     // A process id that can't be running.
-    mkdirSync(join(dir, "lock"));
-    writeFileSync(join(dir, "lock", "owner.json"), JSON.stringify({ pid: 2 ** 22 + 12345, repo: "elsewhere", since: "then" }));
+    mkdirSync(lock);
+    writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2 ** 22 + 12345, repo: "elsewhere", since: "then" }));
     const took = [];
     const again = await takeLock((m) => took.push(m), 5000);
     assert.match(took.join("\n"), /took over the World Editor lock of elsewhere/);
     again();
   } finally {
-    if (before === undefined) delete process.env.W3PROJ_WE_DIR; else process.env.W3PROJ_WE_DIR = before;
+    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the lock's place is per user, outside every farm", () => {
+  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
+  delete process.env.W3PROJ_WE_LOCK;
+  try {
+    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-x");
+    const a = lockPath();
+    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-y");
+    assert.equal(lockPath(), a);
+    assert.ok(!a.startsWith(join(tmpdir(), "farm-")));
+  } finally {
+    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+});
+
+const win = (title, extra = {}) => ({ id: 1, title, class: null, rect: [0, 0, 400, 300], overrideRedirect: false, ...extra });
+
+test("isCrashDialog recognises the crash report by title, class or owning process, and nothing the editor shows itself", () => {
+  for (const t of ["Warcraft III Crash Report", "Blizzard Error", "Error Report", "BugSplat", "Send Error Report to Blizzard"]) {
+    assert.ok(isCrashDialog(win(t)), t);
+  }
+  assert.ok(isCrashDialog(win("", { class: "BlizzardError" })));
+  assert.ok(isCrashDialog(win("Report"), "BlizzardError.exe"), "by the owning program");
+  for (const t of ["Warning", "Progress", "Reminder", "Warcraft III World Editor - [x.w3x]", "Trigger Editor", "Terrain Palette", ""]) {
+    assert.ok(!isCrashDialog(win(t)), t);
+  }
+  assert.ok(!isCrashDialog(win("Crash", { overrideRedirect: true })), "a menu or tooltip is no dialog");
+  // Seen for real: a worktree called we-crash-dialog in the map's path made the main window a "crash".
+  assert.ok(!isCrashDialog(win("Warcraft III World Editor - [Z:/home/u/.worktrees/we-crash-dialog/target/maps/m.w3m]")), "the map's path");
+  assert.ok(isCrashDialog(win("Fatal error - [m.w3x]")), "control: the title outside the path still counts");
+  assert.ok(!isCrashDialog(null), "control: nothing");
+});
+
+test("crashDialogs picks the crash window out of a recorded list; classify keeps the rest", () => {
+  const main = win("Warcraft III World Editor - [m.w3x]", { id: 2, rect: [4, 30, 1352, 937] });
+  const crash = win("Blizzard Error", { id: 3 });
+  assert.deepEqual(crashDialogs([main, win("Warning", { id: 4 })]), []);
+  assert.deepEqual(crashDialogs([main, crash, win("Warning", { id: 4 })]).map((w) => w.id), [3]);
+  assert.deepEqual(crashDialogs([win("x", { id: 5 })], () => "crashpad_handler").map((w) => w.id), [5]);
+});
+
+// The window list and command lines recorded on 2026-11-13 (View > Light Ranges on, main window closed; paths shortened).
+const REAL_EDITOR_CMDLINE = ["Z:\\home\\u\\we-crash-dialog\\install\\_retail_\\x86_64\\World Editor.exe", "-launch", "-loadfile",
+  "Z:\\tmp\\crash-report\\maps\\light_map.w3m"].join("\0") + "\0";
+const REAL_CRASH_CMDLINE = ["Z:\\home\\u\\we-crash-dialog\\install\\_retail_\\x86_64\\BlizzardError.exe", "-product", "Warcraft III World Editor",
+  "-reopen", "Z:\\home\\u\\install\\Warcraft III Launcher.exe", "-attachment",
+  "C:/users/steamuser/Documents/Warcraft III/Errors/2026-11-13 06.24.35 fdb01594/War3.dmp"].join("\0") + "\0";
+const REAL_CRASH = { id: 37748737, title: "Warcraft III World Editor", class: "steam_app_4104009084", rect: [538, 306, 523, 414], pid: 3749590, overrideRedirect: false };
+const REAL_XALIA = { id: 27262981, title: "", class: "steam_app_4104009084", rect: [545, 427, 509, 158], pid: 3743617, overrideRedirect: true };
+const REAL_MAIN = { id: 33554433, title: "Warcraft III World Editor - [Z:/tmp/crash-report/maps/light_map.w3m]", class: "steam_app_4104009084", rect: [4, 30, 1352, 937], pid: 3743646, overrideRedirect: false };
+const REAL_PALETTE = { id: 33554434, title: "Tool Palette", class: "steam_app_4104009084", rect: [1356, 30, 240, 600], pid: 3743646, overrideRedirect: false };
+
+test("programName is argv[0]'s file name, whatever the arguments or folders say", () => {
+  assert.equal(programName(REAL_CRASH_CMDLINE), "BlizzardError.exe");
+  assert.equal(programName(REAL_EDITOR_CMDLINE), "World Editor.exe");
+  assert.equal(programName("/usr/bin/crashpad_handler\0--x\0"), "crashpad_handler");
+  assert.equal(programName(""), "");
+});
+
+test("the real crash dialog is found by its program, and the real editor's windows are not", () => {
+  const cmdlines = { 3749590: REAL_CRASH_CMDLINE, 3743646: REAL_EDITOR_CMDLINE, 3743617: "xalia.exe\0" };
+  const programOf = (w) => programName(cmdlines[w.pid] ?? "");
+  assert.deepEqual(crashDialogs([REAL_MAIN, REAL_PALETTE, REAL_XALIA], programOf), [], "a running editor, 'crash' in its folders and map path");
+  assert.deepEqual(crashDialogs([REAL_CRASH, REAL_XALIA], programOf).map((w) => w.id), [REAL_CRASH.id]);
+  assert.deepEqual(crashDialogs([REAL_CRASH, REAL_XALIA]), [], "control: its title and class alone are the editor's");
+  // With the whole command line instead of the program name, the editor's own folders would trip it.
+  assert.ok(isCrashDialog(REAL_MAIN, REAL_EDITOR_CMDLINE), "control: the arguments do mention crash-report");
+});
+
+test("closeAction never types into a dialog it can't vouch for", () => {
+  const main = win("Warcraft III World Editor - [m.w3x]", { pid: 10 });
+  assert.equal(closeAction(win("Warning"), main), "no");
+  assert.equal(closeAction(win("Warning"), null), "no");
+  assert.equal(closeAction(win(""), main), "no");
+  assert.equal(closeAction(win("Warcraft III World Editor"), main), "no");
+  assert.equal(closeAction(win("Warning", { pid: 10 }), main), "no", "the editor's own question");
+  assert.equal(closeAction(win(""), null), "crash", "an untitled dialog after the main window went is not the question");
+  assert.equal(closeAction(win("Warcraft III World Editor"), null), "crash");
+  assert.equal(closeAction(REAL_CRASH, null), "crash", "the real dialog, after the main window went");
+  assert.equal(closeAction(REAL_CRASH, REAL_MAIN), "crash", "the real dialog's title is the editor's, but its process isn't");
+  assert.equal(closeAction(win("Warning", { pid: 11 }), main), "crash", "another process's window is never answered");
+  assert.equal(closeAction(win("Something else"), main), "report", "control: unknown dialogs are reported, not answered");
+});
+
+test("EditorCrashed carries the message we-drive prints", () => {
+  const e = new EditorCrashed([{ title: "Blizzard Error" }]);
+  assert.equal(e.message, CRASH_MESSAGE);
+  assert.match(CRASH_MESSAGE, /crashed on close; report dismissed without sending|crashed; report dismissed without sending/);
+  assert.equal(e.crashed, true);
+});
+
+test("--open: parsed as a step, refused before any --map or --start; --map and --open mix", () => {
+  const r = parseArgs(["--map", "a.w3x", "--wait-ready", "--save", "a2.w3x", "--open", "b.w3x", "--wait-ready", "--map", "c.w3x", "--close"]);
+  assert.deepEqual(r.steps.map(([s]) => s), ["--map", "--wait-ready", "--save", "--open", "--wait-ready", "--map", "--close"]);
+  assert.deepEqual(r.steps[3], ["--open", "b.w3x"]);
+  assert.throws(() => parseArgs(["--open", "b.w3x"]), /--open needs --map or --start before it/);
+  assert.throws(() => parseArgs(["--open", "b.w3x", "--map", "a.w3x"]), /--open needs --map or --start before it/, "control: order matters");
+  assert.throws(() => parseArgs(["--map", "a.w3x", "--open"]), /--open needs a value/);
+  assert.doesNotThrow(() => parseArgs(["--start", "--open", "b.w3x"]));
+});
+
+test("--map: starts the editor when none runs, opens in it when one does", () => {
+  assert.equal(mapAction(false), "start");
+  assert.equal(mapAction(true), "open");
+});
+
+test("openQuestion: 'Save changes?' (Warning) is answered No, or Yes on request; other dialogs are errors; the loading window is ignored", () => {
+  const w = (title, id = 1) => ({ title, id, rect: [0, 0, 1, 1] });
+  assert.deepEqual(openQuestion([], false), {});
+  assert.deepEqual(openQuestion([w("Progress")], false), {}, "the loading window isn't a question");
+  assert.deepEqual(openQuestion([w("")], false), {}, "an untitled window isn't either");
+  assert.equal(openQuestion([w("Warning", 7)], false).answer.key, "n");
+  assert.equal(openQuestion([w("Warning", 7)], false).answer.dialog.id, 7);
+  assert.equal(openQuestion([w("Warning", 7)], true).answer.key, "y");
+  assert.equal(openQuestion([w("Error")], false).error.title, "Error", "control: an unknown dialog is reported, not answered");
+  assert.equal(openQuestion([w("Error"), w("Warning")], false).answer.key, "n", "the question wins when both are open");
+});
+
+test("openCopyName: one name per open (the editor's title names the map), the map's own name kept", () => {
+  assert.equal(openCopyName(1, "/x/y/R.w3x"), "we-open-1-R.w3x");
+  assert.notEqual(openCopyName(1, "/a/input.w3x"), openCopyName(2, "/b/input.w3x"), "control: the same file name twice still differs");
 });

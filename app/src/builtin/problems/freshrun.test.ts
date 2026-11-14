@@ -9,12 +9,13 @@ import type { W3Api } from "../../extensions/api";
 import type { ProblemsService } from "../../extensions/services";
 import { activate } from "./index";
 
-function setup() {
+/** `listing`: the project's file list is still read (as right after an open) until it resolves. */
+function setup(listing?: Promise<void>) {
   const services = new Map<string, unknown>();
   const none = { dispose() {} };
   // The built-in checks find nothing to work with in this stub and fail alone (one failing check stops no other).
   const w3 = {
-    workspace: { project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }), files: () => [], onDidChange: () => none },
+    workspace: { project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }), files: () => [], filesReady: async () => { await listing; }, onDidChange: () => none },
     settings: { get: () => undefined },
     statusBar: { add: () => ({ text: "", tooltip: "", dispose() {} }) },
     services: { provide: (id: string, impl: unknown) => { services.set(id, impl); return none; } },
@@ -26,6 +27,19 @@ function setup() {
   activate(w3, { extensionId: "w3.problems", extensionPath: null, subscriptions: [] });
   return services.get("w3.problems") as ProblemsService;
 }
+
+test("right after an open a run waits for the whole file list before any check runs", async () => {
+  let done!: () => void;
+  const service = setup(new Promise<void>((r) => { done = r; }));
+  let checked = 0;
+  service.registerCheck({ id: "t.listed", title: "listed", async run() { checked++; return []; } });
+  const run = service.run();
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(checked, 0, "no check judges an incomplete list");
+  done();
+  await run;
+  assert.equal(checked, 1);
+});
 
 test("a run asked for during another run starts after the ask and sees the change made in between", async () => {
   const service = setup();

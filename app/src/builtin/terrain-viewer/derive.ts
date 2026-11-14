@@ -10,7 +10,7 @@ import { readTerrainBytes } from "../../lib/terrain/w3etext";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { buildMinimap, buildMinimapIcons, graphicsMode, minimapSettings } from "./minimapgen";
 import { buildPathingMap, readMapJson, specialsOf, type SpecialDoodad } from "./pathmap";
-import { predictShadows } from "./shadowmap";
+import { predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile } from "./placement";
 import type { Placed, loadSkins } from "./objects";
@@ -70,12 +70,20 @@ export interface DeriveSources {
   minimapWritten?: () => void;
   /** False once the project the files are for was closed: nothing more is written. */
   stillOpen?: () => boolean;
+  /** Made from an editor's edits not saved yet: they don't follow the project's files, so that isn't recorded. */
+  unsaved?: boolean;
 }
 
-/** Writes pathing, shadows and the minimap as the settings ask; each failure is shown and the others go on. */
+/** Writes pathing, shadows and the minimap as the settings ask; each failure is shown and the others go on. When all
+ *  went through, records what terrain and doodad files they follow (w3proj::derived: `w3proj pack` outside the app
+ *  refuses them once those change again). */
 export async function writeDerived(w3: W3Api, s: DeriveSources) {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const gone = () => s.stillOpen?.() === false;
+  // Taken before anything is made: a terrain or doodad file written meanwhile shows as changed since.
+  const root = w3.workspace.project()?.root;
+  const sources = root && !s.unsaved ? await w3.backend.invoke<Record<string, string>>("derived_sources", { root }).catch(() => null) : null;
+  let failed = false;
   if (cfg<boolean>("pathing.regenerate")) try {
     const { wpm, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"), s.specials);
     await s.filterPathing(wpm);
@@ -87,6 +95,7 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
     ];
     if (said.length) w3.window.showWarning(`Pathing map: ${said.join("; ")}. The Problems view lists the object data that names them.`);
   } catch (e) {
+    failed = true;
     w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
   }
   // Shadows: only cells whose prediction changed since the last save.
@@ -99,6 +108,7 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
     if (gone()) return;
     if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
   } catch (e) {
+    failed = true;
     w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
   }
   // The minimap is redrawn when something changed since the last save (by default).
@@ -110,12 +120,16 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
       await w3.workspace.writeBytes("map/war3mapMap.blp", blp);
       s.minimapWritten?.();
     } catch (e) {
+      failed = true;
       w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
     }
   }
   // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
   // written only when they differ from the stored ones by more than order and rounding.
   if (minimapMode !== "never" && s.units && !gone()) await updateMinimapIcons(w3, s.now, s.units);
+  if (root && sources && !failed && !gone() && w3.workspace.project()?.root === root) {
+    await w3.backend.invoke("derived_record", { root, sources }).catch((e) => w3.window.showWarning(`Couldn't record what pathing, shadows and the minimap were made from (${(e as Error).message ?? e}): \`w3proj pack\` may take them for outdated.`));
+  }
 }
 
 /** Calculate Shadows (the World Editor's Calculate Shadows and Save Map): war3map.shd made again in whole from the
@@ -125,17 +139,19 @@ export async function fullShadows(w3: W3Api, opts: {
   terrainPath: string;
   objects: () => Promise<{ skins: Skins; baseOf: (id: string) => string | undefined }>;
   read: (path: string) => Promise<Uint8Array>;
-}): Promise<{ shd: Uint8Array; stored: Uint8Array | null }> {
+}): Promise<{ shd: Uint8Array; stored: Uint8Array | null; write: boolean; leftOut: number; problem?: string }> {
   const path = opts.terrainPath;
   const now = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
   // A doodads file that's there but can't be read stops it: shadows without its trees would be written over good ones.
   const [dooFile, objects] = await Promise.all([loadPlacedFile(w3, "war3map.doo", "doodads"), opts.objects()]);
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3));
+  const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3), stats);
+  const verdict = shadowVerdict(stats, dooFile?.list.length ?? 0, objects.skins.size);
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
   const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
-  return { shd, stored };
+  return { shd, stored, ...verdict };
 }
 
 /** The derived files of a project with no terrain editor open, from its saved files: what a tool's edit

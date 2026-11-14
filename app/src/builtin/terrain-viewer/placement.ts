@@ -73,11 +73,36 @@ function blankEntry(f: PlacedFile): Entry {
   return Object.assign(base, end(2));
 }
 
+/** The gold mine ability's (Agld) gold at level 1 (DataA1, field Gld1) in the game's AbilityData.slk. */
+export const DEFAULT_START_GOLD = 12500;
+
+interface GoldMod { field: string; level?: number; value: unknown }
+/** An object file (as JSON) as far as startGoldOf reads it. */
+export interface GoldObjectFile { original?: { id?: string; base: string; mods?: GoldMod[] }[] }
+
+/** The gold the World Editor gives every new placed unit (a gold mine's amount, and the same number on every other
+ *  unit): the gold mine ability's (Agld) Gld1 at level 1 as the object data sets it, else the game's 12500. `files`:
+ *  war3campaign.w3a, war3campaignSkin.w3a, war3map.w3a, war3mapSkin.w3a, as far as there are: a later one wins.
+ *  Real maps: 12500 on the placed units of every melee map in smoketest_maps; a Tides of Darkness chapter map's units
+ *  carry 99000, its campaign's Agld Gld1 (others 35000, which it was before). */
+export function startGoldOf(files: readonly (GoldObjectFile | null | undefined)[]): number {
+  let gold = DEFAULT_START_GOLD;
+  for (const f of files) {
+    for (const o of f?.original ?? []) {
+      if ((o.id ?? o.base) !== "Agld") continue;
+      const v = (o.mods ?? []).find((m) => m.field === "Gld1" && (m.level === undefined || m.level === 1))?.value;
+      if (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= 0x7fffffff) gold = v;
+    }
+  }
+  return gold;
+}
+
 /** A new entry of type `id` at a position, modelled on an existing entry (same id if there is
  *  one), or a blank one, so every field the file version needs is present; per-object data is
  *  reset. `kind` is the type's object kind: as in the World Editor's files, a plain doodad has life
- *  255 where a destructable has its 100 percent, and items belong to Neutral Passive. */
-export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number, kind?: string): Placed {
+ *  255 where a destructable has its 100 percent, and items belong to Neutral Passive. `startGold`: what a new
+ *  unit's gold is (startGoldOf); a start location and an item have 0. */
+export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number, kind?: string, startGold = DEFAULT_START_GOLD): Placed {
   const list = f.list as Entry[];
   const simple = (e: Entry) => e.randomType === undefined || e.randomType === 0;
   const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple) ?? blankEntry(f);
@@ -106,8 +131,9 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
     if (id !== template.id) {
       if ("level" in e) e.level = 1;
       for (const k of ["strength", "agility", "intelligence"]) if (k in e) e[k] = 0;
-      if ("gold" in e) e.gold = id === "ngol" ? 12500 : 0;
     }
+    // Every placed unit in a World Editor map has the start gold, a gold mine copied from one with its own amount too.
+    if ("gold" in e) e.gold = id === "sloc" ? 0 : startGold;
     // The World Editor's items have level 0 and target acquisition 0 (all 78 placed items on the
     // campaign maps and builds in smoketest_maps), not a unit's 1 and -1 (Normal).
     if (kind === "w3t") {
@@ -153,3 +179,14 @@ export const onBuildingGrid = (v: number, cells: number) => {
   const half = cells * 16;
   return Math.round((v - half) / 64) * 64 + half;
 };
+
+/** The building grid a start location stands on, as a 4×4 building's: the 64 grid. A start location has no pathing
+ *  texture, but the World Editor puts it there all the same (we-drive 2026-11-13, tests/we-compare/mine-start-grid.json:
+ *  placed from the palette at -1899.5, 500.3 it stood at -1920, 512; Alt-moved to about -1900, 500 and -2000, 900 at
+ *  -1920, 512 and -1984, 896; nudged from -2141, 675 at -2112, 768). A gold mine goes by its 16×16 texture, also 64n. */
+export const START_CELLS: readonly [number, number] = [4, 4];
+
+/** The building grid cells a unit type `id` snaps by: a start location's, else its pathing texture's size (`texture`;
+ *  null or missing: none, the unit stands where it is put). */
+export const unitGridCells = (id: string, texture: readonly [number, number] | null | undefined): readonly [number, number] | null =>
+  id === "sloc" ? START_CELLS : texture ?? null;

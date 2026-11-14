@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StringTable, askWtsCuts, checkStringIds, compactStringIds, importStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { StringTable, askWtsCuts, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+
+/** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
+const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
 
 const map = "STRING 1\r\n// Name\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nA hero\r\n}\r\n\r\nSTRING 3\r\n{\r\nKept\r\n}\r\n";
 
@@ -140,14 +145,61 @@ test("many unclosed blocks are read in one pass, not one search to the end each"
   let text = "";
   for (let i = 1; i <= n; i++) text += `STRING ${i}\r\n{\r\nName ${i}}\r\n\r\n`;
   text += "STRING 0\r\n{\r\nEnd\r\n}\r\n";
-  const t0 = Date.now();
+  const t0 = cpuMs();
   const table = new StringTable(text);
   assert.equal(table.get(n), `Name ${n}`);
   assert.equal(table.get(0), "End");
   assert.equal([...table.entries()].length, n + 1);
   table.set(n, "x");
   assert.ok(table.serialize().includes("x\r\n}"));
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+  // A search to the end per block takes minutes here; one pass takes well under a tenth of the limit.
+  assert.ok(cpuMs() - t0 < 4000, `took ${cpuMs() - t0} ms of processor time`);
+});
+
+test("the reader finds what the header, close and unclosed patterns find, on random text", () => {
+  // The patterns the reader replaced, as the specification it must match exactly.
+  const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
+  const CLOSE = /\r?\n\}/g;
+  const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/g;
+  const parts = ["STRING", "STRING ", "STRING\t", " ", "\t", "\n", "\r\n", "\r", " ", "　", "﻿", "1", "07", "x",
+    "{", "}", "//", "// c", "/", "STRING 1\n{\n", "STRING 2 // c\n{\r\n", "\n}", "}\n\nSTRING 3\n{\n"];
+  let seed = 12345;
+  const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const exec = (re: RegExp, text: string, from: number) => { re.lastIndex = from; return re.exec(text); };
+  for (let round = 0; round < 3000; round++) {
+    let text = "";
+    for (let i = rand(30); i >= 0; i--) text += parts[rand(parts.length)];
+    const r = new WtsReader(text);
+    for (let from = 0; from <= text.length; from++) {
+      const h = exec(HEADER, text, from), got = r.findHeader(from);
+      assert.deepEqual(got && [got.at, got.num, text.slice(got.digits, got.digitsEnd), got.end],
+        h && [h.index, Number(h[1]), h[1], h.index + h[0].length], JSON.stringify([text, from]));
+      const c = exec(CLOSE, text, from), gotC = r.findClose(from);
+      assert.deepEqual(gotC, c && { index: c.index, end: c.index + c[0].length }, JSON.stringify([text, from]));
+      assert.equal(r.findUnclosed(from), exec(UNCLOSED, text, from)?.index ?? null, JSON.stringify([text, from]));
+    }
+  }
+});
+
+test("a long run of comment lines is read once, however many headers start in it", () => {
+  // Every line starts a header (`STRING 2`) whose comment group runs to the end of the file, and none has a `{`.
+  // Read once per line, 30,000 lines take seconds and 200,000 minutes; read once, both take milliseconds.
+  for (const n of [30_000, 200_000]) {
+    const text = "STRING 1\n" + "// STRING 2 \n".repeat(n);
+    const t0 = cpuMs();
+    assert.deepEqual([...new StringTable(text).entries()], []);
+    assert.ok(cpuMs() - t0 < 3000, `${n} lines took ${cpuMs() - t0} ms of processor time to read`);
+    assert.deepEqual(wtsStrayLines(text), []);
+    assert.equal(renumberWts(text, new Map([[1, 5]])), text);
+    // The same run inside a block's text, and between two blocks.
+    const framed = `STRING 3\n{\n${text}}\n\nSTRING 4\n// one\n{\nlast\n}\n`;
+    const table = new StringTable(framed);
+    assert.deepEqual([...table.entries()].map(([k, v]) => [k, v.length]), [[3, text.length - 1], [4, 4]]);
+    table.set(4, "x");
+    assert.equal(table.serialize(), framed.replace("last", "x"));
+    assert.equal(removeStrings(framed, new Set([3])), "STRING 4\n// one\n{\nlast\n}\n");
+    assert.ok(cpuMs() - t0 < 3000, `${n} lines took ${cpuMs() - t0} ms of processor time`);
+  }
 });
 
 // A line that is just `}` (or starts with it) inside a text: the game ends the string there and drops the
@@ -236,4 +288,116 @@ test("Adjust Map String IDs: references follow with their padding; clashes and u
   checkStringIds(table, new Map([[1, 2], [2, 1]]));
   assert.deepEqual([...compactStringIds(new StringTable("STRING 4\n{\na\n}\nSTRING 9\n{\nb\n}\nSTRING 1\n{\nc\n}\n"))], [[4, 2], [9, 3]]);
   assert.deepEqual([...compactStringIds(table)], [], "already 1, 2, 3");
+});
+
+test("Adjust Map String IDs: a number a drop recorded (pruned-strings.json) isn't given to another string", () => {
+  // String 2 was dropped as unused and recorded: an editor's undo can bring a reference to it back, and the next pack
+  // restores it by that number. Another string must not take the number meanwhile.
+  const table = new StringTable("STRING 1\n{\na\n}\nSTRING 3\n{\nb\n}\nSTRING 7\n{\nc\n}\n");
+  const reserved = new Set([2, 5]);
+  assert.throws(() => checkStringIds(table, new Map([[3, 2]]), reserved), /2 .*dropped as unused/);
+  checkStringIds(table, new Map([[3, 2]])); // control: without the record it's allowed
+  checkStringIds(table, new Map([[3, 4]]), reserved);
+  // Renumbering all from 1 steps over the recorded numbers.
+  assert.deepEqual([...compactStringIds(table, 1, reserved)], [[7, 4]]);
+  assert.deepEqual([...compactStringIds(table)], [[3, 2], [7, 3]], "control: without the record 2 is taken");
+  checkStringIds(table, compactStringIds(table, 1, reserved), reserved);
+});
+
+// ---- Stray carriage returns (`\r\r\n`, `\r\r`) -------------------------------------------------
+
+/** tests/fixtures/wts-crcrlf/war3map.wts, found from where the tests run (app/ or the repository). The Rust port
+ *  reads the same file (crates/w3proj/src/wts.rs, `stray_carriage_returns_stay_where_they_are`). */
+function crcrlfFixture(): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const p = join(dir, "tests", "fixtures", "wts-crcrlf", "war3map.wts");
+    if (existsSync(p)) return readFileSync(p, "utf8");
+    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-crcrlf not found");
+  }
+}
+
+test("stray carriage returns: read as part of the text, kept byte for byte outside an edited string", () => {
+  // The four Chosen Ones campaigns' war3campaign.wts have `\r\r\n` inside a text, the Forsaken06/11Finale war3map.wts
+  // `\r\r` mid-line; the fixture has those, and one after a comment, before and after a `}` line, after a header.
+  const text = crcrlfFixture();
+  const CRCRLF = "\r\r\n";
+  assert.equal(text.split(CRCRLF).length - 1, 6, "the fixture has its six \\r\\r\\n");
+  const t = new StringTable(text);
+  assert.deepEqual([...t.entries()], [
+    [1, `The bounces does half the ${CRCRLF}damage of the original explosion.`],
+    [2, "To edit"],
+    [3, "for the first time in years. \r\rIn the quiet calm of..."],
+    [4, "ends in one\r"],
+    [5, "after a header"],
+    [6, "last"],
+  ]);
+  assert.equal(t.serialize(), text, "no change: the file's own bytes");
+  assert.deepEqual(wtsStrayLines(text), [], "the blank lines with a stray CR between blocks are no stray text");
+
+  // An edit of another string changes only that string's bytes.
+  const at = text.indexOf("To edit");
+  t.set(2, "Edited\ntwo lines");
+  assert.equal(t.serialize(), text.slice(0, at) + "Edited\r\ntwo lines" + text.slice(at + "To edit".length));
+  t.markSaved();
+  assert.equal(t.get(1), `The bounces does half the ${CRCRLF}damage of the original explosion.`, "the neighbours read the same");
+
+  // An edit of the string itself: what stays of the CRs is what the new text has. A text that still has them
+  // keeps them; plain line breaks (what a text box gives back) become the file's line ends.
+  const one = new StringTable(text);
+  const from = text.indexOf("The bounces"), to = text.indexOf("explosion.") + "explosion.".length;
+  one.set(1, `${one.get(1)!} More.`);
+  assert.equal(one.serialize(), text.slice(0, to) + " More." + text.slice(to));
+  one.set(1, "The bounces does half the \n\ndamage of the original explosion.");
+  assert.equal(one.serialize(), text.slice(0, from) + "The bounces does half the \r\n\r\ndamage of the original explosion." + text.slice(to));
+
+  // Merging another editor's change onto the file, importing a translation, dropping and renumbering keep them too.
+  const edited = new StringTable(text);
+  edited.set(6, "LAST");
+  assert.equal(StringTable.merge(text, edited, text), text.replace("last\r\n}", "LAST\r\n}"));
+  assert.equal(importStrings(text, "STRING 5\n{\nnach einem Kopf\n}\n").text, text.replace("after a header", "nach einem Kopf"));
+  const dropped = pruneStrings(text, new Set([1, 3, 5, 6]));
+  assert.deepEqual(dropped.dropped, [2, 4]);
+  const cut = (s: string, a: string, b: string) => s.slice(0, s.indexOf(a)) + s.slice(s.indexOf(b));
+  assert.equal(dropped.text, cut(cut(text, "STRING 2", "STRING 3"), "STRING 4", "STRING 5"));
+  assert.equal(renumberWts(text, new Map([[5, 50]])), text.replace(`STRING 5${CRCRLF}`, `STRING 50${CRCRLF}`));
+});
+
+test("a header written {\\r\\r\\n is a header: its string is read and a dropped neighbour doesn't take it along", () => {
+  // The Rust port reads it the same (crates/w3proj/src/wts.rs, a_header_with_a_stray_carriage_return_is_a_header).
+  const block = (n: number, s: string) => `STRING ${n}\r\n{\r\n${s}\r\n}\r\n\r\n`;
+  const second = "STRING 2\r\n{\r\r\nsecond\r\n}\r\n\r\n";
+  const text = block(1, "orphan") + second + block(3, "third");
+  const t = new StringTable(text);
+  assert.deepEqual([...t.entries()], [[1, "orphan"], [2, "second"], [3, "third"]]);
+  assert.equal(t.serialize(), text, "no change: the file's own bytes");
+  t.set(2, "Second\nline");
+  assert.equal(t.serialize(), text.replace("second", "Second\r\nline"), "an edit keeps the header's bytes");
+  const pruned = pruneStrings(text, new Set([2, 3]));
+  assert.deepEqual(pruned.dropped, [1]);
+  assert.equal(pruned.text, second + block(3, "third"));
+  assert.equal(removeStrings(text, new Set([1])), second + block(3, "third"));
+  assert.equal(renumberWts(text, new Map([[2, 20]])), text.replace("STRING 2\r\n", "STRING 20\r\n"));
+  // Any run of them, also on an LF line; anything else after the `{` is no header.
+  assert.equal(new StringTable("STRING 4\n{\r\r\r\nfour\n}\n").get(4), "four");
+  assert.equal(new StringTable("STRING 4\n{\r x\nfour\n}\n").has(4), false);
+  assert.equal(new StringTable("STRING 4\n{\r").has(4), false);
+});
+
+test("a text ending in a lone \\r can be saved: nothing in it is cut", () => {
+  assert.deepEqual(wtsCutLines("ends in one\r"), []);
+  assert.deepEqual(wtsCutLines("two\nlines\r"), []);
+  assert.deepEqual(wtsCuts([[4, "ends in one\r"]]), []);
+  // A CRLF file keeps the `\r` (the close is the file's `\r\n}`); an LF file loses only that `\r`.
+  const crlf = new StringTable("STRING 4\r\n{\r\nold\r\n}\r\n");
+  crlf.set(4, "ends in one\r");
+  const saved = crlf.serialize();
+  assert.equal(saved, "STRING 4\r\n{\r\nends in one\r\r\n}\r\n");
+  assert.equal(new StringTable(saved).get(4), "ends in one\r");
+  const lf = new StringTable("STRING 4\n{\nold\n}\n");
+  lf.set(4, "ends in one\r");
+  assert.equal(new StringTable(lf.serialize()).get(4), "ends in one");
+  // Control: a real cut is still refused, with either line end.
+  assert.deepEqual(wtsCutLines("a\n}b\r"), [2]);
+  assert.deepEqual(wtsCutLines("a}\r\nSTRING 2\r\n{\r\nb"), [1]);
+  assert.deepEqual(wtsCutLines("a}\nSTRING 2\n{\r\r\nb"), [1]);
 });

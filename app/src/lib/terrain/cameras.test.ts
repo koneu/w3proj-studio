@@ -1,30 +1,82 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraColors, cameraEye, DEPTH_OF_FIELD, LAYER_LOOK, nameDepthOfField, type CameraLook } from "./cameras";
+import { cameraMarkers, DEPTH_OF_FIELD, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance } from "./cameras";
 
-const cam = { targetX: 640, targetY: 640, rotation: 0, distance: 640, angleOfAttack: 0, fieldOfView: 60 };
-const W = 40, H = 40;
-const texel = (rgba: Uint8Array, x: number, y: number) => [...rgba.slice(((Math.floor(y / 32)) * W + Math.floor(x / 32)) * 4, ((Math.floor(y / 32)) * W + Math.floor(x / 32)) * 4 + 4)];
+/** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
+const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
+const corners = (data: number[]) => part(data, 0, 3);
+const normals = (data: number[]) => part(data, 3, 6);
+const colours = (data: number[]) => part(data, 6, 10);
 
-test("cameraColors: the target and the eye are drawn where the camera is, nothing elsewhere", () => {
-  assert.deepEqual(cameraEye(cam), [0, 640]);
-  const rgba = cameraColors([cam], W, H, 0, 0);
-  const at = (x: number, y: number) => texel(rgba, x, y)[3];
-  assert.equal(at(640, 640), 255);
-  assert.equal(at(16, 656), 255);
-  assert.ok(at(320, 656) > 0, "the line between them");
-  assert.equal(at(1200, 100), 0);
-  assert.equal(cameraColors([{ ...cam, fieldOfView: NaN }], W, H, 0, 0).every((v) => v === 0), true, "a camera with a broken value is left out whole");
+test("cameraMarkers: the World Editor's marker, an arrow from a small camera to the target, scaled by the distance", () => {
+  // Looking west along the ground (as we-drive's flat cameras of distance 500, 1000 and 2000): the arrow's tip on the
+  // target, the camera's back 0.365 of the distance east of it, nothing beyond (no footprint, no eye-to-target wedge).
+  for (const distance of [500, 1000, 2000]) {
+    const c = { targetX: -1200, targetY: 600, zOffset: 0, rotation: 180, angleOfAttack: 0, distance, fieldOfView: 70 };
+    const data = cameraMarkers([c], () => 50);
+    assert.equal(data.length % (3 * MARKER_STRIDE), 0, "whole triangles of 10 floats a corner");
+    const p = corners(data);
+    const xs = p.map((v) => v[0]), ys = p.map((v) => v[1]), zs = p.map((v) => v[2]);
+    assert.ok(Math.abs(Math.min(...xs) + 1200) < 1e-6, `the tip is the target (${Math.min(...xs)})`);
+    assert.ok(Math.abs(Math.max(...xs) - (-1200 + 0.365 * distance)) < 1e-6, `the back at 0.365 of ${distance} (${Math.max(...xs)})`);
+    // Narrow: the camera is about a fortieth of the distance across, standing on the target's height (the ground's 50).
+    assert.ok(Math.max(...ys.map((y) => Math.abs(y - 600))) <= 0.013 * distance + 1e-9);
+    assert.ok(Math.min(...zs) > 50 - 0.012 * distance && Math.max(...zs) < 50 + 0.03 * distance);
+  }
+  // The same marker twice as far is the same shape twice as big: world-sized, not a fixed size on screen.
+  const one = corners(cameraMarkers([{ targetX: 0, targetY: 0, rotation: 30, angleOfAttack: 304, distance: 800, fieldOfView: 70 }], () => 0));
+  const two = corners(cameraMarkers([{ targetX: 0, targetY: 0, rotation: 30, angleOfAttack: 304, distance: 1600, fieldOfView: 70 }], () => 0));
+  assert.equal(one.length, two.length);
+  one.forEach((v, i) => v.forEach((x, k) => assert.ok(Math.abs(x * 2 - two[i][k]) < 1e-6)));
 });
 
-test("cameraColors: each camera takes the look it is given, and the later one is drawn over the earlier", () => {
-  const blue: CameraLook = { fov: [0, 0, 200, 100], line: [0, 0, 200, 200], target: [0, 0, 255, 255], eye: [0, 0, 255, 255], targetRadius: 3, eyeRadius: 2 };
-  const other = { ...cam, name: "other" };
-  const rgba = cameraColors([cam, other], W, H, 0, 0, (c) => (c === other ? blue : LAYER_LOOK));
-  assert.deepEqual(texel(rgba, 640, 640), blue.target, "the second camera's target lies over the first's");
-  // A target radius of 3 reaches three cells out; the layer's own 2 doesn't.
-  assert.deepEqual(texel(rgba, 640 + 3 * 32, 640), blue.target);
-  assert.deepEqual(texel(cameraColors([cam], W, H, 0, 0), 640 + 3 * 32, 640), [0, 0, 0, 0]);
+test("cameraMarkers: the camera leans back up toward its eye, the target stands its height offset over the ground", () => {
+  // Rotation 90 and angle of attack 304 (the game camera, looking north and 56 degrees down): the camera lies south of
+  // the target and above it, as the eye.
+  const c = { targetX: 100, targetY: 200, zOffset: 30, rotation: 90, angleOfAttack: 304, distance: 1000, fieldOfView: 70 };
+  const p = corners(cameraMarkers([c], (x, y) => (x === 100 && y === 200 ? 64 : NaN)));
+  const top = p.reduce((a, b) => (b[2] > a[2] ? b : a)), tip = p.reduce((a, b) => (b[2] < a[2] ? b : a));
+  assert.ok(Math.hypot(tip[0] - 100, tip[1] - 200, tip[2] - 94) < 0.01 * 1000, `the lowest point is at the target, 64 + 30 high: ${tip}`);
+  assert.ok(top[1] < 200 - 150 && top[2] > 94 + 250, `the camera is south of the target and over it: ${top}`);
+  assert.ok(p.every((v) => Math.abs(v[0] - 100) < 15), "it stays in the camera's vertical plane, give or take its width");
+});
+
+test("cameraMarkers: one colour before light, unit normals pointing out of each part; a broken camera is left out", () => {
+  const c = { targetX: 0, targetY: 0, rotation: 0, angleOfAttack: 0, distance: 1000, fieldOfView: 70 };
+  const data = cameraMarkers([c], () => 0);
+  for (const col of colours(data)) assert.deepEqual(col, [...MARKER_RGB.map((v) => v / 255), 1], "the light is the renderer's, not baked in");
+  for (const n of normals(data)) assert.ok(Math.abs(Math.hypot(n[0], n[1], n[2]) - 1) < 1e-9, `a unit normal: ${n}`);
+  // Looking east along the ground: the arrowhead's base faces back (west of it is the tip, east the camera), the box's
+  // top faces up and its bottom down.
+  const ns = normals(data);
+  assert.ok(ns.some((n) => n[2] > 0.99) && ns.some((n) => n[2] < -0.99), "faces up and faces down");
+  assert.ok(ns.some((n) => n[1] > 0.99) && ns.some((n) => n[1] < -0.99), "faces to both sides");
+  // Every face points away from the inside of its part: the box's top corners (highest) have normals facing up.
+  const p = corners(data), top = Math.max(...p.map((v) => v[2]));
+  assert.ok(p.every((v, i) => v[2] < top - 1e-6 || ns[i][2] >= -1e-9), "no face at the very top points down");
+  assert.deepEqual(cameraMarkers([{ ...c, distance: NaN }, { ...c, distance: 0 }, { ...c, rotation: Infinity }, { ...c, zOffset: NaN }], () => 0), []);
+  assert.deepEqual(cameraMarkers([c], () => NaN), [], "a target off the ground's numbers");
+  assert.equal(cameraMarkers([c, { ...c, targetX: 500 }], () => 0).length, 2 * cameraMarkers([c], () => 0).length, "one marker per camera");
+});
+
+test("markerHandles: the arrow's tip on the target, the camera's box from its lens to its back, as drawn", () => {
+  const c = { targetX: -1200, targetY: 600, zOffset: 20, rotation: 180, angleOfAttack: 0, distance: 1000, fieldOfView: 70 };
+  const m = markerHandles(c, () => 50)!;
+  assert.deepEqual(m.target.map((v) => Math.round(v * 1e6) / 1e6), [-1200, 600, 70]);
+  // Looking west: the box lies east of the target, its back where the marker ends.
+  const xs = corners(cameraMarkers([c], () => 50)).map((v) => v[0]);
+  assert.ok(Math.abs(m.back[0] - Math.max(...xs)) < 1e-6, `${m.back[0]} against ${Math.max(...xs)}`);
+  assert.ok(m.front[0] > -1200 + 200 && m.front[0] < m.back[0], `the lens between: ${m.front[0]}`);
+  assert.ok(m.width > 10 && m.width < 40, `about a fortieth of the distance across: ${m.width}`);
+  assert.equal(markerHandles({ ...c, distance: 0 }, () => 0), null);
+  assert.equal(markerHandles(c, () => NaN), null);
+});
+
+test("segmentDistance: to the nearest point of the segment, its ends included", () => {
+  assert.equal(segmentDistance(5, 3, [0, 0], [10, 0]), 3);
+  assert.equal(segmentDistance(-4, 3, [0, 0], [10, 0]), 5);
+  assert.equal(segmentDistance(13, 4, [0, 0], [10, 0]), 5);
+  assert.equal(segmentDistance(3, 4, [0, 0], [0, 0]), 5, "a segment of no length is its point");
 });
 
 test("nameDepthOfField: older JSON's unknown becomes DoF Distance, DoF Scale and Pos Absolute Z", () => {

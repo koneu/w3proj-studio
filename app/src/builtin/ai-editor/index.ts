@@ -15,6 +15,7 @@ import {
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { callText, paramText, type DisplayContext } from "../../lib/triggers/display";
 import { CONDITION, parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -219,6 +220,9 @@ class AiView {
   async addToMap(): Promise<string | null> {
     const project = this.w3.workspace.project();
     if (!project) throw new Error("Open a map's project first: Add To Map puts the AI script into its imports.");
+    // The import list and the script are found by the file list: one still being read after an open lacks them, and
+    // the list would be written anew without its entries.
+    await projectWithFiles(this.w3, project.root);
     const busy = this.w3.editors.unsavedPaths().filter((p) => /^map\/war3map\.imp(\.json)?$/i.test(p));
     if (busy.length) throw new Error(`Save or discard the changes of ${busy.join(", ")} first.`);
     const base = this.baseName(), archive = `Scripts\\${base}.ai`;

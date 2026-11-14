@@ -21,7 +21,10 @@ export function startBuilding(player: number, race: number | undefined): string 
 }
 
 /** One preview per start location of a player: its race's town hall where the start location
- *  stands, facing as buildings do (270°). `races`: player id → race, from war3map.w3i. */
+ *  stands, facing as buildings do (270°). `races`: player id → race, from war3map.w3i. Whatever
+ *  the map's Melee flag: the World Editor drew them on fresh opens of maps with the flag off (also
+ *  with custom forces and fixed player settings, and for a computer player) and kept them after a
+ *  player's unit was pasted (we-drive, 2026-11-13; the user's decision the same day). */
 export function startPreviews(units: readonly Placed[], races: ReadonlyMap<number, number>): Placed[] {
   const out: Placed[] = [];
   for (const u of units) {
@@ -38,4 +41,9 @@ export function playerRaces(info: { players?: { id?: unknown; race?: unknown }[]
     if (typeof p?.id === "number" && typeof p.race === "number") out.set(p.id, p.race);
   }
   return out;
+}
+
+/** What the previews are made from: equal keys draw the same previews. */
+export function startPreviewKey(units: readonly Placed[], races: ReadonlyMap<number, number>): string {
+  return JSON.stringify(startPreviews(units, races).map((p) => [p.id, p.position[0], p.position[1], p.position[2]]));
 }

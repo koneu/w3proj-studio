@@ -20,6 +20,7 @@ serde_json.workspace = true
 mpq.workspace = true
 w3proj.workspace = true
 casc.workspace = true
+backend.workspace = true
 # The MCP server's pipe; the runtime itself comes with Tauri.
 tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 
@@ -28,5 +29,6 @@ tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# Job objects: tools run by tool_run end together with anything they started.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# Job objects: tools run by tool_run end together with anything they started. Registry and drives: the game folder
+# search (gamefind.rs: where Battle.net installed the game, and the fixed drives).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Registry", "Win32_Storage_FileSystem"] }

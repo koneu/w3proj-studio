@@ -47,6 +47,12 @@ export class Workbench {
   readonly game = new GameService(this.settings);
   readonly mcp = new McpTools({
     activate: (event) => this.host.fire(event),
+    // A list that couldn't be read is read once more; failing again, the tool runs all the same (project info, opening
+    // another project, reads): what decides by the list (projectWithFiles, the edit log's "absent") refuses on its own.
+    ready: async () => {
+      if (!this.workspace.project()) return;
+      await this.workspace.filesReady().catch(() => this.workspace.refresh().catch(() => {}));
+    },
     note: (name) => (name === "begin_edit" && this.settings.get<boolean>("mcp.ignoreUndoSteps", false) === true ? UNDO_NOTE : undefined),
     allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
       && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)
@@ -99,6 +105,14 @@ export class Workbench {
         if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
       key: (p) => this.workspace.key(p),
+      // A game file needs no project list. A project file whose list can't be read doesn't open (its editor couldn't
+      // tell new from unlisted); a virtual document or one outside the project (settings.json) opens all the same.
+      filesReady: async (p) => {
+        if (isGame(p) || !this.workspace.project()) return;
+        await this.workspace.filesReady().catch((e) => {
+          if (!p.startsWith("w3:") && !isFullPath(p)) throw e;
+        });
+      },
     }, this.workspace.pending);
     this.statusBar = new StatusBar((c) => this.run(c));
     this.progress = new Progress(this.statusBar.progress);
@@ -106,7 +120,7 @@ export class Workbench {
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
     // The menus show each command's key in effect (the user's, else its default).
     this.menuBar = new MenuBar(() => menuTree(this.commands.all().map((c) => ({ ...c, keybinding: this.keybindings.primaryKey(c.id) }))), (c) => this.run(c),
-      (when) => whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo() }));
+      (when) => this.blockedNow(when));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
     this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking(), () => this.editors.remember());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
@@ -152,13 +166,20 @@ export class Workbench {
       return root ? tabsKey(root) : null;
     };
     this.editors.memory = {
-      load: () => {
+      load: async () => {
+        // Right after a start or an open the file list may still be read: a tab whose file isn't listed yet isn't gone
+        // (taken so, every tab was dropped and the empty list stored over the remembered one). A list that can't be read
+        // tells nothing: the tabs all come back (their editors say why they can't open) and stay remembered.
+        const root = this.workspace.project()?.root;
+        if (!root) return null;
+        const listed = await this.workspace.filesReady().then(() => true, () => false);
+        if (this.workspace.project()?.root !== root) return null;
         const key = memoryKey();
         let state: OpenEditors | null = null;
         try { state = key ? JSON.parse(localStorage.getItem(key) ?? "null") : null; } catch { return null; }
         if (!state || !Array.isArray(state.tabs)) return null;
         const files = new Set(this.workspace.files().map((f) => f.path.toLowerCase()));
-        const exists = (p: string) => p.startsWith("w3:") || isGame(p) || isFullPath(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
+        const exists = (p: string) => !listed || p.startsWith("w3:") || isGame(p) || isFullPath(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
         return { tabs: state.tabs.filter((t) => typeof t.path === "string" && typeof t.editor === "string" && exists(t.path)), active: state.active };
       },
       store: (state) => {
@@ -338,6 +359,7 @@ export class Workbench {
         open: (p) => wb.workspace.open(p),
         close: () => wb.workspace.close(),
         files: () => wb.workspace.files(),
+        filesReady: () => wb.workspace.filesReady(),
         folders: () => wb.workspace.folders(),
         createFolder: (p) => wb.workspace.createFolder(p),
         removeFolder: (p) => wb.workspace.removeFolder(p),
@@ -403,6 +425,11 @@ export class Workbench {
     };
   }
 
+  /** Why a command with this `when` can't run now (menus and the palette); undefined when it can. */
+  private blockedNow(when: CommandContribution["when"]) {
+    return whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo(), terrain: this.editors.terrainActive() });
+  }
+
   private registerCoreCommands() {
     const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: Partial<Pick<CommandContribution, "keybinding" | "category" | "hidden" | "menu" | "when">> = {}) => {
       this.commands.contribute("core", { id, title, category: extra.category ?? "View", ...extra });
@@ -411,7 +438,8 @@ export class Workbench {
     c("workbench.commandPalette", "Show All Commands", async () => {
       const items = this.commands.all().map((cmd) => {
         const key = this.keybindings.primaryKey(cmd.id);
-        return { label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title, description: key ? keyLabel(key) : undefined, value: cmd.id };
+        const why = this.blockedNow(cmd.when);
+        return { label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title, description: key ? keyLabel(key) : undefined, value: cmd.id, ...(why ? { disabled: why } : {}) };
       });
       items.sort((a, b) => a.label.localeCompare(b.label));
       const pick = await this.quickInput.pick(items, { placeholder: "Type a command" });

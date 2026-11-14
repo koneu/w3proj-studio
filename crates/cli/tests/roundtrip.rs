@@ -502,21 +502,30 @@ fn verify_on_a_folder_leaves_out_the_projects_outputs() {
         let o = w3proj(&["verify", s(path), "--game", "none"]);
         (o.status.code(), text(&o))
     };
-    // Control: without its manifest the folder is no project, and its maps are read (and fail).
-    let (code, out) = verify(&maps);
-    assert_eq!(code, Some(1), "{out}");
-    assert!(outputs.iter().all(|o| out.contains(&*o.to_string_lossy())), "{out}");
+    // A folder named build is left out with or without a manifest; the same file elsewhere is read (and fails).
+    let (_, out) = verify(&maps);
+    assert!(outputs.iter().all(|o| !out.contains(&*o.to_string_lossy())), "{out}");
+    let other = project.join("other");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("proj.w3x"), b"this is not an archive").unwrap();
+    let (code2, out2) = verify(&maps);
+    assert_eq!(code2, Some(1), "{out2}");
+    assert!(out2.contains(&*other.join("proj.w3x").to_string_lossy()), "{out2}");
     if cfg!(unix) {
-        assert!(out.contains("07-11-21"), "{out}");
+        assert!(out2.contains("07-11-21"), "{out2}");
     }
+    fs::remove_dir_all(&other).unwrap();
     fs::write(project.join("w3proj.toml"), "").unwrap();
     let (code, out) = verify(&maps);
     assert_eq!(code, Some(0), "{out}");
     assert!(out.contains("real.w3x") && out.contains("1 ok"), "{out}");
-    // Given directly, a project's folder is searched.
+    // Given directly, a project's folder is searched, but its build folder is still left out.
+    fs::create_dir_all(project.join("other")).unwrap();
+    fs::write(project.join("other").join("x.w3x"), b"this is not an archive").unwrap();
     let (code, out) = verify(&project);
     assert_eq!(code, Some(1), "{out}");
-    assert!(out.contains("0 ok") && out.contains("2 failed"), "{out}");
+    assert!(out.contains("0 ok") && out.contains("1 failed"), "{out}");
+    assert!(outputs.iter().all(|o| !out.contains(&*o.to_string_lossy())), "{out}");
 }
 
 /// `verify` on all cores prints what one map after the other prints, in the same order, with the
@@ -620,4 +629,38 @@ fn an_unreadable_trigger_data_file_is_an_error_that_names_it() {
         }
     }
     assert!(!project.exists(), "work started before the file was checked");
+}
+
+/// Pathing, shadows and the minimap follow the terrain and doodads only through the app, a moment after an edit
+/// (once a stale war3map.wpm left a lake walkable). A pack outside the app right after an edit, before they were made
+/// again, stops and says why; `--force-stale` packs them as they are.
+#[test]
+fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
+    let dir = workdir("derived_stale");
+    let map = dir.join("map.w3x");
+    pack(&fixture(), &map);
+    let edits: [(&str, &str, &str); 2] = [
+        ("map/war3map.w3e.txt", "0*4 -12\n", "0*4 -11\n"),
+        ("map/war3map.doo.json", "64.0,", "96.0,"),
+    ];
+    for (file, from, to) in edits {
+        let (project, out) = (dir.join(format!("project-{}", file.len())), dir.join("out.w3x"));
+        unpack(&map, &project);
+        // Unpacked from a map, its derived files are the map's own: packed as they are.
+        pack(&project, &out);
+        let path = project.join(file);
+        let before = fs::read_to_string(&path).unwrap();
+        assert!(before.contains(from), "{file} no longer has {from:?}");
+        fs::write(&path, before.replacen(from, to, 1)).unwrap();
+        let _ = fs::remove_file(&out);
+        let o = w3proj(&["pack", s(&project), "-o", s(&out)]);
+        assert!(!o.status.success(), "a pack right after editing {file} went ahead: {}", text(&o));
+        assert!(!out.exists(), "the refused pack left a map behind");
+        let said = text(&o);
+        for words in ["war3map.wpm", file.trim_start_matches("map/"), "--force-stale"] {
+            assert!(said.contains(words), "the refusal doesn't name {words}: {said}");
+        }
+        ok(&["pack", s(&project), "-o", s(&out), "--force-stale"]);
+        assert!(out.exists());
+    }
 }

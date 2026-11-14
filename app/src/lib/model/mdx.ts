@@ -67,6 +67,9 @@ export interface Geoset {
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
+  /** The second texture coordinate set, when the geoset has one: layers with CoordId 1 use it (the classic cliff
+   *  doodads draw their rock overlay with it over the cliff texture). Further sets aren't kept. */
+  uvs2?: Float32Array;
   /** Triangle indices. */
   faces: Uint16Array;
   /** Per vertex: index into `groups` (classic skinning). */
@@ -200,6 +203,12 @@ export interface ModelLight {
   /** World units from the light: full strength up to the start, nothing past the end. */
   attenuationStart: number;
   attenuationEnd: number;
+  /** Its colour (0–1 each, in the file's order) and intensity: the fixed values (an animated one's first key), and
+   *  the tracks that animate them (KLAC, KLAI) when it has them. How bright it is sets how far the World Editor's Light Ranges ring reaches (viewmodes.ts lightRangeRadius). */
+  color: [number, number, number];
+  intensity: number;
+  colorTrack?: Track;
+  intensityTrack?: Track;
 }
 
 export interface Model {
@@ -331,22 +340,50 @@ function readNode(r: Reader, kind: string): Node {
   return { name, objectId, parentId, flags, kind, translation: tracks.KGTR, rotation: tracks.KGRT, scaling: tracks.KGSC };
 }
 
-/** A light's fixed values after its node, up to `end` (the light's end). Two layouts: the classic one (type,
- *  attenuation start and end, colour, intensity, ambient colour and intensity: 48 bytes) and the Reforged one, which
- *  has a word after the type and shadow and falloff values after the ambient intensity (72 bytes; every light of the
- *  game's version 1800 models). Told apart by what follows the classic part: a track's tag, or the end, is classic.
- *  Null when the values aren't readable or make no sense. */
-function readLight(r: Reader, node: Node, end: number): ModelLight | null {
-  const left = end - r.p;
-  if (left < 48) return null;
-  const trackAt = (at: number) => at + 4 <= end && /^K[A-Z]{3}$/.test(String.fromCharCode(r.u8[at], r.u8[at + 1], r.u8[at + 2], r.u8[at + 3]));
-  const classic = left < 72 || r.p + 48 === end || trackAt(r.p + 48);
+/** A light's fixed values after its node, up to `end` (the light's end). Three layouts, measured on the game's
+ *  models (versions 1600–1800) and on custom ones (800–1800): 44 bytes up to version 1100 (type, attenuation start
+ *  and end, colour, intensity, ambient colour and intensity), 48 in version 1200 (a shadow intensity after those) and
+ *  72 from 1600 on (a word after the type; shadow intensity, shadow casting start and end, two falloffs and a damping
+ *  after the ambient intensity: dnclight.ts). 1300–1500 weren't seen with lights. The version's layout is tried
+ *  first, then the others: the first after which the rest reads as tracks up to the light's end, exactly, is it; when
+ *  none does, the version's one is read without its tracks. Null when the values aren't readable or make no sense. */
+function readLight(r: Reader, node: Node, end: number, version: number): ModelLight | null {
+  const start = r.p;
+  const order = version < 1200 ? [44, 48, 72] : version < 1600 ? [48, 72, 44] : [72, 48, 44];
+  let size = 0;
+  let tracks: Record<string, Track> = {};
+  for (const n of order) {
+    if (start + n > end) continue;
+    r.p = start + n;
+    try {
+      tracks = readTracks(r, end);
+      size = n;
+      break;
+    } catch { /* not this layout */ }
+  }
+  if (!size) size = order.find((n) => start + n <= end) ?? 0;
+  if (!size) return null;
+  r.p = start;
   const type = r.u32();
-  if (!classic) r.u32();
+  if (size === 72) r.u32();
   const attenuationStart = r.f32(), attenuationEnd = r.f32();
+  const color: [number, number, number] = [r.f32(), r.f32(), r.f32()];
+  const intensity = r.f32();
   const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
   if (!ok(attenuationStart) || !ok(attenuationEnd) || type > 2) return null;
-  return { node, type, attenuationStart, attenuationEnd };
+  const light: ModelLight = { node, type, attenuationStart, attenuationEnd, color: color.every(Number.isFinite) ? color : [1, 1, 1], intensity: Number.isFinite(intensity) ? intensity : 0 };
+  // The tracks after the fixed values (none when they're damaged: the light keeps its fixed values). An animated
+  // value's fixed one isn't used: its first key stands in, as mdl.ts reads it.
+  const first = (t: Track, k: number) => (t.values.length > k && Number.isFinite(t.values[k]) ? t.values[k] : null);
+  if (tracks.KLAC?.size === 3) {
+    light.colorTrack = tracks.KLAC;
+    light.color = light.color.map((c, k) => first(tracks.KLAC, k) ?? c) as [number, number, number];
+  }
+  if (tracks.KLAI?.size === 1) {
+    light.intensityTrack = tracks.KLAI;
+    light.intensity = first(tracks.KLAI, 0) ?? light.intensity;
+  }
+  return light;
 }
 
 function readParticleEmitter2(r: Reader, end: number): ParticleEmitter2 {
@@ -434,17 +471,18 @@ function readGeoset(r: Reader, version: number): Geoset {
     r.p += wide ? n * 2 : n;
   }
   const sets = expect("UVAS");
-  let uvs = new Float32Array(0);
+  let uvs = new Float32Array(0), uvs2: Float32Array | undefined;
   for (let s = 0; s < sets; s++) {
     const n = expect("UVBS");
     const set = r.f32s(n * 2);
     if (s === 0) uvs = set;
+    else if (s === 1) uvs2 = set;
   }
   if (r.p !== end) throw new Error(`geoset: ${end - r.p} unread bytes`);
   const vertices = positions.length / 3;
   if (skin && skin.length !== vertices * 8) throw new Error("geoset: SKIN size mismatch");
   return {
-    positions, normals, uvs, faces: idx, materialId, lod, lodName, extent, groups, skin,
+    positions, normals, uvs, ...(uvs2 ? { uvs2 } : {}), faces: idx, materialId, lod, lodName, extent, groups, skin,
     vertexGroups: vertexGroups.length === vertices ? vertexGroups : new Uint8Array(vertices),
   };
 }
@@ -580,7 +618,7 @@ export function parseMdx(buf: Uint8Array): Model {
             const n = readNode(r, "lite");
             node(n);
             // A light whose values can't be read is left out; its node stays, as the other objects' do.
-            const light = readLight(r, n, oEnd);
+            const light = readLight(r, n, oEnd, model.version);
             if (light) (model.lights ??= []).push(light);
             r.p = oEnd;
           }

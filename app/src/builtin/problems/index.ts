@@ -6,7 +6,7 @@
 // checks first (map-project).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { PROBLEMS_SERVICE, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
+import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
@@ -25,7 +25,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let ran = false;
   /** The run going on: `root` is the project it checks, `adopted` whether its results became the
    *  shown ones (not when the project was closed or changed meanwhile). */
-  let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[] }> | null = null;
+  let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[] }> | null = null;
   /** What the checks of the running run share; outside a run, nothing is shared. */
   let scope = new RunScope(w3, false);
   const folded = new Set<string>();
@@ -66,13 +66,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     run() {
       return runCurrent().then((r) => r.problems);
     },
+    runChecked() {
+      return runCurrent().then((r) => ({ problems: r.problems, ignored: r.ignored, ignoreError: r.ignoreError, checks: r.checks }));
+    },
     problems: all,
   };
   /** Starts a run, or joins the one going on (which may be for the project open when it started). */
   const start = () => {
     running ??= (async () => {
       const root = w3.workspace.project()?.root ?? null;
-      if (!root) { groups = []; return { root, adopted: false, problems: [] }; }
+      if (!root) { groups = []; return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] }; }
+      // The checks judge by the file list (an import whose file isn't there, files nothing lists): only once it has
+      // every file. Right after an open each listed import would pass for missing, and a fix would drop it.
+      await w3.workspace.filesReady();
+      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] };
       const result: Group[] = [];
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
@@ -87,14 +94,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         performance.measure(`problems:${check.id}`, { start: started, end: performance.now() });
       }
       // The project was closed or changed while the checks ran: these results are not its own.
-      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [] };
+      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [], ignored: 0, ignoreError: null, checks: [] };
       groups = result;
       ignore = loaded.file;
       ignoreBad = loaded.bad;
       ranFor = root;
       ran = true;
       updateStatus();
-      return { root, adopted: true, problems: all() };
+      const byCheck = groups.map((g): CheckedGroup => {
+        const shown = visible(g);
+        return { id: g.check.id, title: g.check.title, problems: shown, ignored: g.problems.length - shown.length, ...(g.error ? { error: g.error } : {}) };
+      });
+      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck };
     })().finally(() => {
       // The run's documents aren't kept: the next run reads the files as they are then.
       scope = new RunScope(w3, false);

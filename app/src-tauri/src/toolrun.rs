@@ -423,3 +423,117 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
+
+
+/// The same cases on Windows, where the tool and what it starts are in a job that is closed (and so ended) with it
+/// (job.rs). cmd.exe stands for the tool (it starts at once: PowerShell took over 3 s on a CI machine, longer than the
+/// time without progress). What the tool starts is a cmd loop appending to a marker file outside the tool's folder
+/// (not progress of the tool): when the marker stops growing, it has been ended.
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    use std::sync::mpsc;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("w3proj-toolrun-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Runs `script` with `cmd /d /q /c` in `cwd` (passed as it is: cmd reads its own quotes), in its own thread; None
+    /// when it hasn't returned within `limit`. /q: no echo of the commands, which a `for` loop would print every round
+    /// (progress that never stops).
+    fn cmd(script: &str, cwd: &Path, guard: Option<Guard>, limit: Duration) -> Option<(Result<ToolResult, String>, Duration)> {
+        let mut c = Command::new("cmd.exe");
+        c.raw_arg("/d /q /c ").raw_arg(script).current_dir(cwd);
+        let (tx, rx) = mpsc::channel();
+        let cwd = cwd.to_path_buf();
+        std::thread::spawn(move || {
+            let t = Instant::now();
+            let r = run(c, "cmd", &cwd, None, guard.as_ref());
+            let _ = tx.send((r, t.elapsed()));
+        });
+        rx.recv_timeout(limit).ok()
+    }
+
+    /// The command that starts the child: a cmd loop appending a line to `marker` about every second, for a minute.
+    fn start_child(marker: &Path) -> String {
+        format!(r#"start "" /b cmd /d /q /c "for /l %i in (1,1,60) do (echo x>>"{m}" & ping -n 2 127.0.0.1 >nul)""#, m = marker.display())
+    }
+
+    fn size(p: &Path) -> u64 {
+        std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+    }
+
+    /// Whether the child writing `marker` has been ended: it wrote at least once, and nothing more within 3 s.
+    fn child_ended(marker: &Path) -> bool {
+        let t = Instant::now();
+        while size(marker) == 0 && t.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let before = size(marker);
+        std::thread::sleep(Duration::from_secs(3));
+        before > 0 && size(marker) == before
+    }
+
+    #[test]
+    fn a_tool_that_exits_gives_its_output_and_code() {
+        let dir = scratch("plain");
+        let guard = Guard { idle_ms: 10000, result_files: vec![], settle_ms: 3000 };
+        let (r, _) = cmd("echo out& echo err 1>&2& exit /b 3", &dir, Some(guard), Duration::from_secs(30)).unwrap();
+        let r = r.unwrap();
+        assert_eq!((r.code, r.stdout.trim(), r.stderr.trim(), r.killed.is_none()), (3, "out", "err", true));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// JassHelper's error window: started by the tool and left waiting for a click. Ended once the tool has exited.
+    #[test]
+    fn what_the_tool_starts_and_leaves_running_is_ended_after_it() {
+        let dir = scratch("window");
+        let marker = dir.with_extension("marker");
+        let _ = std::fs::remove_file(&marker);
+        let script = format!("{} & ping -n 2 127.0.0.1 >nul & echo errors& exit /b 1", start_child(&marker));
+        let (r, _) = cmd(&script, &dir, None, Duration::from_secs(30)).expect("waited for what the tool left running");
+        assert_eq!(r.unwrap().code, 1);
+        assert!(child_ended(&marker), "what the tool started was left running");
+        std::fs::remove_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    /// A tool that never exits and does nothing is ended after the time without progress, with what it started.
+    #[test]
+    fn a_tool_that_hangs_without_progress_is_ended_with_its_children() {
+        let dir = scratch("hang");
+        let marker = dir.with_extension("marker");
+        let _ = std::fs::remove_file(&marker);
+        let guard = Guard { idle_ms: 3000, result_files: vec!["output.j".into()], settle_ms: 500 };
+        let script = format!("{} & echo started& ping -n 60 127.0.0.1 >nul", start_child(&marker));
+        let (r, took) = cmd(&script, &dir, Some(guard), Duration::from_secs(40)).expect("a tool that never exits wasn't ended");
+        let r = r.unwrap();
+        assert_eq!(r.code, -1);
+        assert!(r.killed.as_deref().is_some_and(|k| k.contains("nothing happened")), "{:?}", r.killed);
+        assert_eq!(r.stdout.trim(), "started");
+        assert!(took >= Duration::from_millis(3000) && took < Duration::from_secs(30), "{took:?}");
+        assert!(child_ended(&marker), "the hung tool's child was left running");
+        std::fs::remove_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    /// Progress keeps a slow tool going past the time without progress; its result there and no exit ends it soon after.
+    #[test]
+    fn a_tool_making_progress_runs_on_and_one_that_wrote_its_result_but_doesnt_exit_is_ended() {
+        let dir = scratch("result");
+        let guard = Guard { idle_ms: 3000, result_files: vec!["output.j".into(), "logs/compileerrors.txt".into()], settle_ms: 1000 };
+        // About 6 s of work in steps of about a second (twice the time without progress), then the result, then no exit.
+        // The loop in parentheses: `for … do (…) & more` takes `& more` into the loop's body.
+        let script = r"mkdir logs & (for /l %i in (1,1,6) do (echo step %i>>logs\step.txt & ping -n 2 127.0.0.1 >nul)) & echo done>output.j & ping -n 60 127.0.0.1 >nul";
+        let (r, took) = cmd(script, &dir, Some(guard), Duration::from_secs(40)).expect("a tool that wrote its result but didn't exit wasn't ended");
+        let r = r.unwrap();
+        assert!(r.killed.as_deref().is_some_and(|k| k.contains("wrote output.j")), "{:?}", r.killed);
+        assert!(took >= Duration::from_secs(5) && took < Duration::from_secs(30), "{took:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("output.j")).unwrap().trim(), "done");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

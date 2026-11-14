@@ -38,7 +38,7 @@ class Bytes {
 /** A version 800 model: two sequences, a global sequence, a texture, a material whose layer's alpha is animated,
  *  a geoset of two triangles on two bone groups, two bones (one with a Hermite translation on the global sequence,
  *  a linear rotation), a helper, pivots. */
-function smallMdx(): Uint8Array {
+function smallMdx(uvSets: number[][] = [[0, 0, 1, 0, 0, 1, 1, 1]]): Uint8Array {
   const b = new Bytes();
   b.tag("MDLX");
   b.chunk("VERS", () => b.u32(800));
@@ -64,7 +64,8 @@ function smallMdx(): Uint8Array {
     b.tag("MTGC").u32(2).u32(1).u32(2);
     b.tag("MATS").u32(3).u32(0).u32(0).u32(1);
     b.u32(0).u32(0).u32(0).extent(1.5, [0, 0, 0], [1, 1, 0.5]).u32(1).extent(1, [0, 0, 0], [1, 1, 1]);
-    b.tag("UVAS").u32(1).tag("UVBS").u32(4); [0, 0, 1, 0, 0, 1, 1, 1].forEach((v) => b.f32(v));
+    b.tag("UVAS").u32(uvSets.length);
+    for (const set of uvSets) { b.tag("UVBS").u32(4); set.forEach((v) => b.f32(v)); }
   }));
   b.chunk("BONE", () => {
     b.sized(true, () => {
@@ -176,6 +177,7 @@ function writeMdl(m: Model): string {
     const rows = (a: ArrayLike<number>, size: number) => Array.from({ length: a.length / size }, (_, i) => `\t\t${vec(Array.from(a).slice(i * size, (i + 1) * size))},`);
     o.push("Geoset {", `\tVertices ${n} {`, ...rows(g.positions, 3), "\t}", `\tNormals ${n} {`, ...rows(g.normals, 3), "\t}");
     o.push(`\tTVertices ${g.uvs.length / 2} {`, ...rows(g.uvs, 2), "\t}");
+    if (g.uvs2) o.push(`\tTVertices ${g.uvs2.length / 2} {`, ...rows(g.uvs2, 2), "\t}");
     o.push("\tVertexGroup {", ...Array.from(g.vertexGroups, (v) => `\t\t${v},`), "\t}");
     if (g.skin) o.push(`\tSkinWeights ${n} {`, ...rows(g.skin, 8), "\t}");
     o.push(`\tFaces 1 ${g.faces.length} {`, "\t\tTriangles {", `\t\t\t${vec(g.faces)},`, "\t\t}", "\t}");
@@ -206,6 +208,8 @@ function writeMdl(m: Model): string {
     else if (n.kind === "lite") node("Light", n, () => {
       if (!l) return;
       o.push(`\t${["Omnidirectional", "Directional", "Ambient"][l.type]},`, `\tstatic AttenuationStart ${num(l.attenuationStart)},`, `\tstatic AttenuationEnd ${num(l.attenuationEnd)},`);
+      prop("Color", l.color, l.colorTrack, "\t");
+      prop("Intensity", l.intensity, l.intensityTrack, "\t");
     });
     else if (e) node("ParticleEmitter2", n, () => {
       o.push(...flags(n.flags, { Unshaded: 0x8000, SortPrimsFarZ: 0x10000, LineEmitter: 0x20000, Unfogged: 0x40000, ModelSpace: 0x80000, XYQuad: 0x100000 }).map((s) => s.slice(1)));
@@ -250,6 +254,15 @@ function comparable(m: Model) {
 }
 
 // --- tests ------------------------------------------------------------------------------------------------------
+
+test("a geoset's second texture coordinate set is kept for layers with CoordId 1 (the classic cliff doodads' overlay); a third isn't", () => {
+  const second = [0.5, 0.5, 0.25, 0.5, 0.5, 0.25, 0.75, 0.75];
+  const g = parseMdx(smallMdx([[0, 0, 1, 0, 0, 1, 1, 1], second, [9, 9, 9, 9, 9, 9, 9, 9]])).geosets[0];
+  assert.deepEqual([...g.uvs], [0, 0, 1, 0, 0, 1, 1, 1]);
+  assert.deepEqual([...(g.uvs2 ?? [])], second);
+  // One set: none.
+  assert.equal(parseMdx(smallMdx()).geosets[0].uvs2, undefined);
+});
 
 test("a model written as MDL text reads back as the MDX reader read it", () => {
   const fromMdx = parseMdx(smallMdx());
@@ -434,6 +447,7 @@ Geoset {
   assert.deepEqual(m.warnings, ["Wobble: block not read", "Geoset: Sparkle not read"]);
   const g = m.geosets[0];
   assert.deepEqual([...g.uvs], [0.5, 0.5], "the first coordinate set");
+  assert.deepEqual([...(g.uvs2 ?? [])], [9, 9], "the second, for layers with CoordId 1");
   assert.deepEqual([...g.skin!], [0, 1, 0, 0, 200, 55, 0, 0]);
   assert.deepEqual([g.lod, g.lodName], [1, "Body"]);
 });
@@ -522,7 +536,9 @@ function gameModels(names: string[]): { name: string; bytes: Uint8Array }[] {
   const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
   const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
   const gameFile = join(main, ".game-path");
-  const game = process.env.W3PROJ_GAME ?? (existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("#")) : undefined);
+  // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
+  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
+  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
   if (!bin) return [];
   const out: { name: string; bytes: Uint8Array }[] = [];
   for (const name of names) {

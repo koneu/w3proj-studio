@@ -11,7 +11,7 @@
 //   prefix/       the Wine prefix (STEAM_COMPAT_DATA_PATH); Proton fills it on the first start (about 0.6 GB).
 //   we-rofs.so    built from we-rofs.c: turns the editor's read-write opens of the read-only links into read-only ones.
 //   build.info    the game build the farm was made from; the farm is made again only when the game's differs.
-//   lock/         held while a World Editor runs in the prefix (one at a time), taken over if its process is gone.
+//   (the lock is not in here: see lockPath, one per user and machine, whatever the farm)
 //
 //   node scripts/we-setup.mjs [--game DIR]     set up (idempotent)
 //   node scripts/we-setup.mjs --clean          remove the farm, the prefix and the rest
@@ -28,6 +28,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -144,19 +145,32 @@ function ageMs(path) {
 }
 
 /**
- * Takes the lock folder next to the prefix (as the gate's coverage lock: a folder with the owner's process in it,
- * taken over when that process is gone). Waits while another run holds it, saying so every 30 s; gives up after
- * `timeoutMs`. Returns a function that lets it go.
+ * The lock folder: one per user and machine, shared by every worktree and every W3PROJ_WE_DIR (two farms still
+ * share the one display, GPU and CPU, and the editors disturb each other). W3PROJ_WE_LOCK overrides it (tests).
+ */
+export function lockPath() {
+  if (process.env.W3PROJ_WE_LOCK) return resolve(process.env.W3PROJ_WE_LOCK);
+  let user = "user";
+  try { user = userInfo().username.replace(/[^A-Za-z0-9._-]/g, "_"); } catch { /* no passwd entry */ }
+  const run = process.env.XDG_RUNTIME_DIR;
+  if (run && existsSync(run)) return join(run, "w3proj-we.lock");
+  return join(tmpdir(), `w3proj-we-${user}.lock`);
+}
+
+/**
+ * Takes the lock folder (as the gate's coverage lock: a folder with the owner's process in it, taken over when that
+ * process is gone). Waits while another run holds it, saying so once (who, since when); gives
+ * up after `timeoutMs`. Returns a function that lets it go.
  */
 export async function takeLock(say, timeoutMs = 30 * 60 * 1000) {
-  const dir = join(weDir(), "lock"), owner = join(dir, "owner.json");
-  mkdirSync(weDir(), { recursive: true });
+  const dir = lockPath(), owner = join(dir, "owner.json");
+  mkdirSync(dirname(dir), { recursive: true });
   const start = Date.now();
   let told = 0;
   for (;;) {
     try {
       mkdirSync(dir);
-      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, since: new Date().toISOString() }));
+      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, farm: weDir(), since: new Date().toISOString() }));
       return () => rmSync(dir, { recursive: true, force: true });
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -171,8 +185,8 @@ export async function takeLock(say, timeoutMs = 30 * 60 * 1000) {
         rmSync(gone, { recursive: true, force: true });
         continue;
       }
-      if (Date.now() - start > timeoutMs) throw new Error(`another World Editor run still holds ${dir} (${held ? `process ${held.pid} of ${held.repo}` : "no owner yet"})`);
-      if (Date.now() - told > 30000) {
+      if (Date.now() - start > timeoutMs) throw new Error(`another World Editor run still holds ${dir} (${held ? `process ${held.pid} of ${held.repo}, since ${held.since}` : "no owner yet"})`);
+      if (!told) {
         say(`waiting for the World Editor run of ${held ? `${held.repo} (process ${held.pid}, since ${held.since})` : "another session"}: ${dir}`);
         told = Date.now();
       }

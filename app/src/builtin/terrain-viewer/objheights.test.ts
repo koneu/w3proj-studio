@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
-import { heightAt, parseW3e } from "../../lib/terrain/w3e";
+import { heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 import { fragmentOf, turnFragment, type Turn } from "../../lib/terrain/fragment";
 import { copyCentre, pasteCentreAt } from "./placement";
@@ -104,6 +104,33 @@ test("moving a fixed doodad with Reset Fixed Object Heights on puts it on the gr
 test("moving a fixed doodad with Reset Fixed Object Heights off keeps its height and flags", () => {
   const rock = { position: [0, 0, 300], flags: 2 | FIXED_HEIGHT };
   assert.deepEqual(movedHeight(rock, 256, true, false), { z: 300, flags: 6 });
+});
+
+// Verification round 3 and we-drive 2026-11-13: a 64 x 64 map with a plateau at 256 (x 512..1664, y 256..1408), a ramp
+// rising 64 per 128 east (x -1536..-512), a lake with its bed at -128 and its water at the default level (x -1536..-256,
+// y -1664..-512); units stored at the heights below, the map saved by the World Editor and read back.
+test("savedUnitZ: the World Editor saves every unit on the ground, a ship in water on the surface", () => {
+  const N = 65, H = Array.from({ length: N }, () => new Array<number>(N).fill(0)), F = Array.from({ length: N }, () => new Array<number>(N).fill(0));
+  const ix = (x: number) => (x + 4096) / 128, row = (y: number) => 64 - (y + 4096) / 128;
+  for (let y = 256; y <= 1408; y += 128) for (let x = 512; x <= 1664; x += 128) H[row(y)][ix(x)] = 1024;
+  for (let y = 256; y <= 1408; y += 128) for (let x = -1536; x <= -512; x += 128) H[row(y)][ix(x)] = ((x + 1536) / 128) * 64;
+  for (let y = -1664; y <= -512; y += 128) for (let x = -1536; x <= -256; x += 128) { H[row(y)][ix(x)] = -512; F[row(y)][ix(x)] = 4; }
+  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt", "cliffs CLdi", "corners 65 65", "offset -4096 -4096",
+    "[height]", ...H.map((r) => r.join(" ")), "[water] all 0", "[water-bits] all 0", "[texture] all 0", "[variation] all 0",
+    "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags]", ...F.map((r) => r.map(String).join(""))].join("\n");
+  const terrain = parseW3e(w3eFromText(text));
+  const saved = (moveType: string | undefined, x: number, y: number) => Math.fround(savedUnitZ(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y)));
+  // [movetp, x, y, the height the World Editor wrote] (the stored heights, 0, 300 or 500, don't count).
+  const cases: [string | undefined, number, number, number][] = [
+    ["foot", 768, 1024, 256], ["foot", -1024, 768, 64], ["foot", -896, -1024, -128], ["foot", 2048, -1792, 0], ["foot", 128, -128, 0],
+    ["fly", 1024, 640, 256], ["fly", -512, -640, -128],
+    ["float", -768, -1152, -89.6], ["float", 2048, 2048, 0],
+    ["amph", -1152, -1280, -128], ["amph", -640, -768, -128],
+    ["_", 1152, 896, 256], ["_", 2560, -2048, 0],
+    // An item, a start location: no movement type.
+    [undefined, -512, -1408, -128], [undefined, 1280, 1280, 256], [undefined, -2176, 640, 0],
+  ];
+  for (const [m, x, y, z] of cases) assert.equal(saved(m, x, y), Math.fround(z), `${m} at ${x}, ${y}`);
 });
 
 // we-drive 2026-11-12 again, in a prefix of its own (the item checked by default): an empty 64 x 64 map whose ground rises

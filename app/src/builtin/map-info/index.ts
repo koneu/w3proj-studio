@@ -5,11 +5,11 @@ import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/f
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
-import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, projectWithFiles, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
-import { applySky, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
@@ -216,11 +216,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.settings.set("terrain.sky", skyPath);
       changes.push(`sky model in the terrain view (a view setting, not in the map, not undone by undo_last_edit): ${skyPath || "none"}`);
     }
-    return changes.length ? `Changed:\n- ${changes.join("\n- ")}` : "Nothing changed: the map already had these settings.";
+    const note = fogViewNote(args, w3.settings.get<boolean>("terrain.fog", false) === true);
+    const reply = changes.length ? `Changed:\n- ${changes.join("\n- ")}` : "Nothing changed: the map already had these settings.";
+    return note ? `${reply}\n${note}` : reply;
   }));
   /** Opens Map Properties (or shows the open one) at `section`, scrolled to `anchor` (a `data-anchor` in it). */
   const openAt = async (section?: SectionId, anchor?: string) => {
     if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+    // Right after an open the list may not have the file yet: that isn't "no war3map.w3i".
+    await projectWithFiles(w3);
     if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) {
       const raw = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.w3i");
       throw new Error(raw

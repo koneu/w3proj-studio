@@ -2,6 +2,7 @@ import type { ExtensionContext, FileInfo, W3Api } from "../../extensions/api";
 import { keyOf } from "../../lib/keys";
 import { joinPath } from "../../lib/paths";
 import { clickSelection } from "../../lib/selection";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { formatBytes, h } from "../../workbench/dom";
 import { planMoves } from "./moves";
 
@@ -83,12 +84,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   const unsaved = (files: string[]) => files.filter((f) => w3.editors.isDirty(f));
 
+  /** The project asked about (`root`), once its whole file list is read: "already exists" is told from it, and a
+   *  file not listed yet (right after an open) would be written over. */
+  const listedProject = (root: string | undefined) => projectWithFiles(w3, root);
   const newFile = async (folder: string) => {
+    const root = w3.workspace.project()?.root;
     const input = await w3.window.inputBox({ prompt: `New file in ${folder || "the project"} (a/b.txt makes folders)`, placeholder: "name.txt" });
     if (!input) return;
     const name = cleanPath(input);
     if (!name) throw new Error(`"${input}" isn't a valid file name.`);
     const path = folder ? `${folder}/${name}` : name;
+    await listedProject(root);
     if (w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) throw new Error(`${path} already exists.`);
     await w3.workspace.writeText(path, "");
     await w3.workspace.refresh();
@@ -98,11 +104,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.editors.open(path);
   };
   const newFolder = async (folder: string) => {
+    const root = w3.workspace.project()?.root;
     const input = await w3.window.inputBox({ prompt: `New folder in ${folder || "the project"} (a/b makes both)`, placeholder: "name" });
     if (!input) return;
     const name = cleanPath(input);
     if (!name) throw new Error(`"${input}" isn't a valid folder name.`);
     const path = folder ? `${folder}/${name}` : name;
+    await listedProject(root);
     if (isFolder(path) || w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) throw new Error(`${path} already exists.`);
     await w3.workspace.createFolder(path);
     for (let i = path.indexOf("/"); i > 0; i = path.indexOf("/", i + 1)) expanded.add(path.slice(0, i));

@@ -39,6 +39,10 @@ export class WtsSession {
   private saves = 0;
   /** Per save that is writing: the strings undo/redo put back since its strings were taken (typing takes one out). */
   private writes = new Set<Set<number>>();
+  /** The last write failed: the file as it was read for it (null: it was missing) and the text being written. A write
+   *  is not atomic (the file is emptied first), so a failure halfway (disk full) can leave the file cut short; the
+   *  next save tells that by the file being the start of `tried`, and merges onto `before` instead. */
+  private torn: { before: string | null; tried: string } | null = null;
   constructor(text: string) {
     this.saved = text;
     this.table = new StringTable(text);
@@ -56,8 +60,9 @@ export class WtsSession {
     this.table.set(n, text);
   }
 
-  /** Whether a string differs from the saved file. */
+  /** Whether a string differs from the saved file, or the last write failed and may have left the file cut short. */
   get dirty(): boolean {
+    if (this.torn) return true;
     for (const [n, v] of this.table.entries()) if (norm(v) !== norm(this.savedValues.get(n))) return true;
     return false;
   }
@@ -110,12 +115,20 @@ export class WtsSession {
         current = null;
       }
     }
+    // The last write failed and the file is the start of what it was writing (nothing else wrote it since): cut short
+    // by that write. The save goes on from the file as it was before it, and writes the whole file again.
+    const onDisk = current;
+    const torn = this.torn;
+    if (torn && current !== null && current !== torn.before && current.length < torn.tried.length && torn.tried.startsWith(current)) {
+      current = torn.before;
+    }
     if (current === null) {
       // Nothing on disk to merge with: the editor's table is the file.
       const text = this.table.serialize();
       const mine = new Map(this.table.entries());
-      return this.writing(async () => { await write(text); }, (restored) => ({ shown: this.took(text, mine, restored), recreated: true }));
+      return this.writing(async () => { await this.tryWrite(write, null, text); }, (restored) => ({ shown: this.took(text, mine, restored), recreated: true }));
     }
+    const before = current;
     const disk = new StringTable(current);
     // Another editor saved a string whose undo raced a save: whether to keep their text or write the editor's
     // can't be told, so nothing is written (the editor stays dirty) rather than overwrite theirs.
@@ -133,7 +146,17 @@ export class WtsSession {
       if (o.undone && disk.has(n) && norm(disk.get(n)) !== norm(this.savedValues.get(n))) edited.set(n, disk.get(n)!);
     }
     const merged = StringTable.merge(this.saved, edited, current);
-    return this.writing(async () => { if (merged !== current) await write(merged); }, (restored) => ({ shown: this.took(merged, mine, restored), recreated: false }));
+    return this.writing(async () => { if (merged !== onDisk) await this.tryWrite(write, before, merged); }, (restored) => ({ shown: this.took(merged, mine, restored), recreated: false }));
+  }
+
+  /** Writes `text` over the file read as `before`; a failure is noted (see `torn`) and thrown on. */
+  private async tryWrite(write: (text: string) => Promise<void>, before: string | null, text: string) {
+    try {
+      await write(text);
+    } catch (e) {
+      this.torn = { before, tried: text };
+      throw e;
+    }
   }
 
   /** Runs a save's write, noting the strings undo/redo put back meanwhile; then `done` with them. */
@@ -167,6 +190,7 @@ export class WtsSession {
     this.saved = merged;
     this.savedValues = new Map(new StringTable(merged).entries());
     this.saves++;
+    this.torn = null;
     return shown;
   }
 }

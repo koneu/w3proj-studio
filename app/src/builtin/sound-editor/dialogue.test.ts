@@ -98,6 +98,28 @@ test("new keys skip TRIGSTR numbers other files refer to: TRIGSTR_050 elsewhere,
   assert.deepEqual([t.speakerNameKey, t.dialogueTextKey], [10, 11]);
 });
 
+test("the strings a save adds, for the languages' tables: new ones only, with the text as typed now", () => {
+  const strings = new DialogueStrings(WTS);
+  const s = spoken();
+  // Past a German-only 50 (lib/formats/mapdoc stringNumbersTaken counts the languages' tables).
+  setDialogueString(s, "speaker", "Arthas", strings, [s], [50]);
+  setDialogueString(s, "text", "First.", strings, [s], [50]);
+  setDialogueString(s, "text", "Second.\r\nLine two.", strings, [s], [50]);
+  assert.deepEqual([s.speakerNameKey, s.dialogueTextKey], [51, 52]);
+  // An old string changed is no new string.
+  const old = spoken({ speakerNameKey: 7, dialogueTextKey: 8 });
+  setDialogueString(old, "text", "Changed.", strings, [s, old], [50]);
+  assert.deepEqual(strings.added(), [{ num: 51, text: "Arthas" }, { num: 52, text: "Second.\nLine two." }]);
+  const merged = strings.merge(WTS)!;
+  strings.saved(merged);
+  assert.deepEqual(strings.added(), [], "saved: in the table now");
+  // A new string typed and taken back before the save isn't one.
+  const again = new DialogueStrings(WTS), t = spoken();
+  setDialogueString(t, "speaker", "Uther", again, [t], []);
+  again.restore([]);
+  assert.deepEqual(again.added(), []);
+});
+
 test("a map without war3map.wts: the first text makes the file", () => {
   const strings = new DialogueStrings(null);
   const s = spoken();

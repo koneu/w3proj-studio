@@ -6,7 +6,7 @@ import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { compile, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -31,6 +31,24 @@ const WATER_SHADE: readonly [number, number, number] = [0.77, 0.69, 0.84];
  * 0.29, 0.48, 0.66, 0.77 there, and the colour the deep one throughout.
  */
 export const HD_WATER = { full: 100, power: 0.58, ramp: [10, 64] as const, shallow: [88, 104, 120] as const };
+/** HD water's dark edge: black up to the first of these distances (world units) inside the playable map, its colour
+ *  back in full at the second, by the pixel. The World Editor's HD water goes dark that far inside, hard, on all four
+ *  sides alike (we-drive, 2026-11-13, a copy of the empty map with lakes across each edge, from above at 1200: half its
+ *  colour 39 to 46 pixels inside, a tenth 24 to 29; about a pixel a unit there). */
+export const HD_WATER_EDGE = [10, 42] as const;
+
+/** The playable map's rectangle (left, bottom, right, top in world units) round the tiles `edge` leaves (1 per tile
+ *  past it, rows from the south); an empty one in the map's middle when there are none. */
+export function playRect(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, edge: ArrayLike<number>): [number, number, number, number] {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    if (edge[y * tilesX + x]) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + 1); y1 = Math.max(y1, y + 1);
+  }
+  if (x0 > x1) { const cx = t.offsetX + tilesX * 64, cy = t.offsetY + tilesY * 64; return [cx, cy, cx, cy]; }
+  return [t.offsetX + x0 * 128, t.offsetY + y0 * 128, t.offsetX + x1 * 128, t.offsetY + y1 * 128];
+}
 
 /** HD water at a depth (world units): how opaque, and how far its colour is from `shallow` to the deep colour (0–1).
  *  The water shader does the same. */
@@ -44,7 +62,7 @@ export function hdWaterAt(depth: number): { alpha: number; deep: number } {
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { cornerNormal, heightAt, mapEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { borderShade, darkWaterCorners } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
@@ -109,6 +127,20 @@ void main() { vColor = aColor; gl_Position = uViewProj * vec4(aPos, 1.0); gl_Poi
 const COLOR_FS = `#version 300 es
 precision mediump float; in vec4 vColor; out vec4 outColor;
 void main() { outColor = vColor; }`;
+/** Solid editor marks (setShapes): a colour per corner lit by the scene's light and fogged as a placed model is
+ *  (objectLight, in the graphics mode's tone), with no texture. */
+const SHAPE_VS = `#version 300 es
+in vec3 aPos; in vec3 aNormal; in vec4 aColor;
+uniform mat4 uViewProj;
+out vec4 vColor; out vec3 vNormal;
+${FOG_VS}
+void main() { vColor = aColor; vNormal = aNormal; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+const SHAPE_FS = `#version 300 es
+precision mediump float; in vec4 vColor; in vec3 vNormal; out vec4 outColor;
+uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
+${TONE_FS}
+${FOG_FS}
+void main() { outColor = vec4(fogged(toned(vColor.rgb, objectLight(uAmbient, uDiffuse, vNormal, uLightDir, 1.0))), vColor.a); }`;
 
 // Water: the tileset's animated texture (one copy per tile) under a colour that goes from
 // "shallow min" to "shallow max" as the water deepens to 64/128 of a cliff layer (from 10/128),
@@ -122,13 +154,13 @@ void main() { vUv = aUv; vDepth = aDepth; vDark = aDark; vWorld = aPos; gl_Posit
 const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
-// Past the playable map the water is black (vDark 1 at corners whose tiles are all past it: darkWaterCorners), its
-// colour fading in over the last tile there; uEdgeDark 0 when the border isn't shown.
-uniform float uEdgeDark;
+// Past the playable map the water is black: classic, vDark per corner (darkWaterCorners), fading over a tile; HD by the
+// pixel, hard, inside the playable rectangle uPlayRect (left, bottom, right, top: hdWaterEdge). uEdgeDark 0 when the
+// border isn't shown.
+uniform float uEdgeDark; uniform highp vec4 uPlayRect;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
-// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
-// texture gives only its brightness (tinted water).
-uniform vec3 uLight; uniform float uGrey;
+// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp).
+uniform vec3 uLight;
 // HD (uTone 2): the colour the editor shows (hdWaterColor), the texture only rippling it.
 uniform vec3 uHdWater; uniform float uWaterBrightness;
 // HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
@@ -168,10 +200,11 @@ void main() {
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its colour.
     vec3 shade = mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
-    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - vDark * uEdgeDark)), a);
+    highp vec2 inside = min(vWorld.xy - uPlayRect.xy, uPlayRect.zw - vWorld.xy);
+    float lit = smoothstep(${HD_WATER_EDGE[0].toFixed(1)}, ${HD_WATER_EDGE[1].toFixed(1)}, min(inside.x, inside.y));
+    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - (1.0 - lit) * uEdgeDark)), a);
     return;
   }
-  t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
   vec4 w = t * c;
   outColor = vec4(fogged(toned(w.rgb, uLight) * (1.0 - vDark * uEdgeDark)), w.a);
 }`;
@@ -243,17 +276,17 @@ export interface WaterLook {
 
 type WaterRamp = Pick<WaterLook, "shallowMin" | "shallowMax" | "deepMin" | "deepMax">;
 
-/** The colour ramp the water is drawn with (the shader multiplies the texture by it), and whether the
- *  texture gives only its brightness (`grey`). The map's water tint (war3map.w3i, stored blue, green,
- *  red, alpha; null when its tinting is off) takes the place of the colour, as the game's
- *  SetWaterBaseColor does: 03b_Water_Tint's red tint is plainly red in the game, not the ramp's blue
- *  darkened, nor the (blue) texture's colour under red. Its alpha scales the ramp's, so the shallows
- *  still fade out at the shore. */
-export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & { grey: boolean } {
-  if (!tint) return { shallowMin: look.shallowMin, shallowMax: look.shallowMax, deepMin: look.deepMin, deepMax: look.deepMax, grey: false };
+/** The colour ramp the water is drawn with (the shader multiplies the texture by it). The map's water tint
+ *  (war3map.w3i, stored blue, green, red, alpha; null when its tinting is off) multiplies the ramp, as the World
+ *  Editor draws it in SD: 03b_Water_Tint's red tint (255, 100, 100) over Lordaeron's blue ramp and texture is a dark
+ *  purple there (we-drive, SD, 2026-11-13: deep water 39, 19, 53 unlit; ramp times tint times the texture's mean
+ *  gives 39, 17, 54). The game draws it plainly red instead; the user chose the editor's look. Its alpha scales the
+ *  ramp's, so the shallows still fade out at the shore. */
+export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp {
+  if (!tint) return { shallowMin: look.shallowMin, shallowMax: look.shallowMax, deepMin: look.deepMin, deepMax: look.deepMax };
   const [b, g, r, a = 255] = tint;
-  const apply = (c: number[]) => [r / 255, g / 255, b / 255, c[3] * (a / 255)];
-  return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax), grey: true };
+  const apply = (c: number[]) => [c[0] * (r / 255), c[1] * (g / 255), c[2] * (b / 255), c[3] * (a / 255)];
+  return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax) };
 }
 
 /**
@@ -345,17 +378,21 @@ void main() { vW = aPos.xy; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth
 const GRID_FS = `#version 300 es
 precision highp float; in vec2 vW; uniform vec2 uOrigin; uniform float uSteps[3]; uniform int uLevels; uniform vec4 uColors[3]; out vec4 outColor;
 ${FOG_FS}
-float lineAt(float step) {
-  vec2 g = (vW - uOrigin) / step, w = max(fwidth(g), vec2(1e-6));
+// p: the point from the grid's origin; fw: fwidth(p), taken once in main. A derivative inside the loop below (it ends
+// on a uniform) is undefined on Direct3D, where Windows' WebGL runs (ANGLE): the lines came out faded to nothing there.
+// fwidth(p / step) is fwidth(p) / step, the step being the same for the whole draw.
+float lineAt(vec2 p, vec2 fw, float step) {
+  vec2 g = p / step, w = max(fw / step, vec2(1e-6));
   vec2 d = abs(fract(g - 0.5) - 0.5) / w;
   // About a pixel wide and solid, as the World Editor's lines (solid within 0.4 of a pixel, gone at 0.9).
   return clamp(2.0 * (0.9 - min(d.x, d.y)), 0.0, 1.0) * (1.0 - smoothstep(0.2, 0.45, max(w.x, w.y)));
 }
 void main() {
   vec3 rgb = vec3(0.0); float a = 0.0;
+  vec2 p = vW - uOrigin, fw = fwidth(p);
   for (int i = 0; i < 3; i++) {
     if (i >= uLevels) break;
-    float ai = uColors[i].a * lineAt(uSteps[i]);
+    float ai = uColors[i].a * lineAt(p, fw, uSteps[i]);
     rgb = uColors[i].rgb * ai + rgb * (1.0 - ai);
     a = ai + a * (1.0 - ai);
   }
@@ -458,6 +495,19 @@ export function castsSunShadow(b: Pick<ObjectBatch, "group" | "instances" | "tin
   return b.instances.length > 0 && !b.tint && !b.followGround && b.group !== "cliffs" && b.group !== "shoreline";
 }
 
+/** How a batch's models take the border's shade past the playable map (EdgeShade's mode). The World Editor (we-drive,
+ *  game view on and off, branch border-shade-models, 2026-11-13; TESTING.md "Border shade"): the cliffs and the special
+ *  doodads, which are the ground's, as the ground and per pixel ("pixel": a cliff fades across the edge as the ground,
+ *  three tiles past it a hollow keeps 0.146 of its colour, the SD ground 0.149); units, items and start locations black,
+ *  whole, when the tile under them lies past the edge ("tile": a footman at the edge's corner line is lit, one 64
+ *  further out black, in both modes); doodads and trees so in SD, and in HD the whole model as the ground at its origin
+ *  ("object": a tree on the corner line is shaded whole, a hay cart 32 inside lit; three tiles out a tree keeps 0.107,
+ *  a hay cart 0.071, the HD ground 0.088). The shore's waves lie on the border's black water: black. */
+export function edgeMode(b: Pick<ObjectBatch, "group" | "followGround">, tone: Tone): EdgeShade["mode"] {
+  if (b.group === "cliffs" || b.followGround) return "pixel";
+  return b.group === "doodads" && tone === 2 ? "object" : "tile";
+}
+
 interface Mesh {
   vao: WebGLVertexArrayObject;
   count: number;
@@ -478,6 +528,7 @@ export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
   private groundProg: WebGLProgram;
   private colorProg: WebGLProgram;
+  private shapeProg: WebGLProgram;
   private ground: WebGLVertexArrayObject;
   /** Index range per ground texture, in draw order. */
   private ranges: { texture: number; offset: number; count: number }[] = [];
@@ -535,6 +586,8 @@ export class TerrainRenderer {
   sky: { gpu: ModelGpu; radius: number } | null = null;
   showSky = true;
   private markers = new Map<string, Mesh>();
+  /** Named sets of solid editor marks (the Camera Objects layer's cameras): coloured triangles, see setShapes. */
+  private shapes = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
   /** The map's day/night lighting at the chosen hour: terrain (ground, cliffs, doodads) and
@@ -689,6 +742,7 @@ export class TerrainRenderer {
     this.gl = gl;
     this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
     this.colorProg = compile(gl, COLOR_VS, COLOR_FS);
+    this.shapeProg = compile(gl, SHAPE_VS, SHAPE_FS);
     this.waterProg = compile(gl, WATER_VS, WATER_FS);
     this.splatProg = compile(gl, SPLAT_VS, SPLAT_FS);
     this.waterWhite = gl.createTexture()!;
@@ -850,7 +904,7 @@ export class TerrainRenderer {
   private buildWater(): Mesh {
     const t = this.terrain, gl = this.gl, out: number[] = [];
     const surfaces = new Float32Array((t.width - 1) * (t.height - 1)).fill(NaN);
-    const dark = darkWaterCorners(t);
+    const dark = darkWaterCorners(t, this.edgeTiles());
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
@@ -1067,20 +1121,61 @@ export class TerrainRenderer {
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
   }
 
-  /** The border's shade, from the terrain's marks of the tiles past the playable map (area.ts borderShade): made
-   *  with the renderer and after each change of the corners; the editor calls it after it marks the edge anew. */
+  /** The w3i's camera complements (left, right, bottom, top, in tiles), which say where the playable map ends; null
+   *  until the editor has read them (or when the w3i can't say), and the terrain's own marks stand in. */
+  private complements: number[] | null = null;
+
+  /** The playable map as the w3i's camera complements leave it (null: the terrain's marks stand in). The border's
+   *  shade and its black water follow; nothing is made again when they didn't change. */
+  setPlayable(complements: readonly number[] | null) {
+    const next = complements ? [...complements] : null;
+    if (JSON.stringify(next) === JSON.stringify(this.complements)) return;
+    this.complements = next;
+    this.refreshBorder();
+    this.freeVao(this.water.vao);
+    this.water = this.buildWater();
+  }
+
+  /** The tiles past the playable map (1 per tile, rows from the south): by the w3i's complements, as the World Editor
+   *  draws them (w3e.ts playableEdgeTiles), else by the terrain's marks. */
+  edgeTiles(): Uint8Array {
+    return this.complements ? playableEdgeTiles(this.terrain, this.complements) : mapEdgeTiles(this.terrain);
+  }
+
+  /** The border's shade over the tiles past the playable map (edgeTiles, area.ts borderShade): made with the
+   *  renderer, after each change of the corners and when the playable map changes (setPlayable). */
   refreshBorder() {
     if (!this.overlayProgram()) return;
-    // Most edits leave the marks alone, and a big map's shade has millions of texels: made again only when they moved.
-    const marks = mapEdgeTiles(this.terrain);
+    // Most edits leave the edge alone, and a big map's shade has millions of texels: made again only when it moved.
+    const marks = this.edgeTiles();
     if (this.border && this.borderMarks && sameBytes(marks, this.borderMarks)) return;
     this.borderMarks = marks;
-    const { rgba, width, height } = borderShade(this.terrain);
+    this.playRect = playRect(this.terrain, marks);
+    const { rgba, width, height } = borderShade(this.terrain, marks);
     this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
     this.uploadOverlay(this.border.tex, rgba, width, height, true);
   }
   /** The marks the border's shade was made from. */
   private borderMarks: Uint8Array | null = null;
+  /** The playable rectangle round them, for HD water's dark edge (playRect). */
+  private playRect: [number, number, number, number] = [0, 0, 0, 0];
+
+  /** Where the border's texture lies in the world (x, y, width, height): its texels sit on the pathing cells' corners
+   *  (borderShade), half a cell past the terrain's rim. */
+  private borderRect(): [number, number, number, number] {
+    const t = this.terrain, half = 16;
+    return [t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half];
+  }
+
+  /** The border's shade for the placed models (EdgeShade: cliffs, doodads, specials, units, items, start locations,
+   *  the shore's waves), from the ground's own texture, so what's shaded as the ground fades out over the same first
+   *  playable cell; each batch takes it as edgeMode says. Null when the ground's shade isn't drawn (Boundary off, or
+   *  no textured ground). */
+  private edgeShade(textured: boolean): EdgeShade | null {
+    if (!textured || !this.showBorder || !this.border) return null;
+    // Four texels a tile (borderShade: one per pathing cell's corner).
+    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel" };
+  }
 
   /** The overlay program, compiled the first time; null once the context is gone (the editor closed
    *  while a file was still being read for a layer): a shader can't compile then, and nothing is drawn anyway. */
@@ -1162,6 +1257,37 @@ export class TerrainRenderer {
     const old = this.markers.get(name);
     if (old) this.freeVao(old.vao);
     this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
+  }
+
+  /** Replaces a named set of solid marks: triangles, 10 floats per corner (x, y, z, the face's normal, then r, g, b, a
+   *  in 0..1: the colour before light), drawn with depth over the ground and models and lit as the units are
+   *  (SHAPE_FS); null or [] removes it. Like the view layer, left out of showEverything's picture. */
+  setShapes(name: string, triangles: readonly number[] | null) {
+    const old = this.shapes.get(name);
+    if (old) this.freeVao(old.vao);
+    this.shapes.delete(name);
+    if (!triangles?.length) return;
+    const gl = this.gl, vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf(vao));
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(triangles), gl.STATIC_DRAW);
+    for (const [attr, size, at] of [["aPos", 3, 0], ["aNormal", 3, 12], ["aColor", 4, 24]] as const) {
+      const loc = gl.getAttribLocation(this.shapeProg, attr);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 40, at);
+    }
+    gl.bindVertexArray(null);
+    this.shapes.set(name, { vao, count: Math.floor(triangles.length / 10) });
+  }
+
+  /** How many corners each set of shapes has (for tests and the app's state). */
+  shapeCounts(): Record<string, number> {
+    return Object.fromEntries([...this.shapes].map(([name, m]) => [name, m.count]));
+  }
+
+  /** How many rings each named set has (setRings; for tests and the app's state). */
+  ringCounts(): Record<string, number> {
+    return Object.fromEntries([...this.ringSets].map(([name, rings]) => [name, rings.length]));
   }
 
   setGroundTexture(i: number, img: DecodedImage) {
@@ -1542,7 +1668,8 @@ export class TerrainRenderer {
     // What lies on the ground goes with it when the terrain is hidden.
     const onGround = this.groundLook !== "hidden";
     // The border's dark first: the View layers and the tools' marks go over it, as the World Editor's naval view
-    // lies over the map's edge.
+    // lies over the map's edge. They lie under the water, which is drawn later: the World Editor's Pathing - Ground
+    // vanishes under deep water too (viewcmds.ts groundPathingColors).
     for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer, this.overlay] : []) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
@@ -1550,9 +1677,9 @@ export class TerrainRenderer {
       // The border is part of the map, and fades with it. What a tool shows has to stay readable.
       setFog(gl, (name) => gl.getUniformLocation(this.overlayProg as WebGLProgram, name), layer === this.border ? fog : null);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
-      // The border's texels sit on the pathing cells' corners (borderShade), the layers' on the cells.
-      const half = layer === this.border ? 16 : 0;
-      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half);
+      // The border's texels sit on the pathing cells' corners (borderRect), the layers' on the cells.
+      const rect = layer === this.border ? this.borderRect() : [t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128];
+      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), rect[0], rect[1], rect[2], rect[3]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
@@ -1623,13 +1750,17 @@ export class TerrainRenderer {
     }
 
     // Placed objects (gathered and posed above): every opaque layer, then every blended one; each model once per layer
-    // for all its instances in view.
+    // for all its instances in view. Past the playable map they're shaded as the ground there, by the same texture.
+    const edge = this.edgeShade(textured);
+    const edges = new Map<EdgeShade["mode"], EdgeShade>();
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
         const light = (b.group === "units" ? unitLight : terrainLight) ?? undefined;
         // A see-through batch is blended whole, after everything opaque (which then shows through it).
         if (b.tint && pass === "opaque") continue;
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun });
+        const mode = edgeMode(b, this.tone);
+        const shade = edge && (edges.get(mode) ?? edges.set(mode, { ...edge, mode }).get(mode));
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun, edge: shade });
       }
     }
     if (this.showEffects || this.showWeather) {
@@ -1661,6 +1792,29 @@ export class TerrainRenderer {
       gl.bindVertexArray(m.vao);
       gl.drawArrays(gl.POINTS, 0, m.count);
     }
+    // Solid marks (camera objects): both sides of each face; not in a picture taken by showEverything.
+    if (this.shapes.size && !this.held) {
+      // The units' light as the lighting model gives it, without the HD picture's response to it (hdLight), which
+      // placed models get: so the World Editor's camera models come out (we-drive, 2026-11-13, HD), blue under
+      // 12b_RoC_Orc04Interlude's night and light cyan under cliff.w3m's strong sun; with the response one colour
+      // couldn't match both (25 levels off at best, against 12 without).
+      const light = this.unitLight ?? DEFAULT_LIGHT;
+      gl.useProgram(this.shapeProg);
+      const where = (name: string) => gl.getUniformLocation(this.shapeProg, name);
+      gl.uniformMatrix4fv(where("uViewProj"), false, viewProj);
+      setTone(gl, where, this.tone, light);
+      setFog(gl, where, fog);
+      gl.uniform3fv(where("uLightDir"), light.dir);
+      gl.uniform3fv(where("uDiffuse"), light.diffuse);
+      gl.uniform3fv(where("uAmbient"), light.ambient);
+      gl.disable(gl.CULL_FACE);
+      for (const m of this.shapes.values()) {
+        gl.bindVertexArray(m.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, m.count);
+      }
+      gl.enable(gl.CULL_FACE);
+      gl.useProgram(this.colorProg);
+    }
     if (this.showWater && this.water.count) {
       const look = this.waterLook, frame = this.waterFrame();
       this.waterFrameShown = frame;
@@ -1673,12 +1827,12 @@ export class TerrainRenderer {
       for (const [name, v] of [["uShallowMin", ramp.shallowMin], ["uShallowMax", ramp.shallowMax], ["uDeepMin", ramp.deepMin], ["uDeepMax", ramp.deepMax]] as const) {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
-      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uGrey"), ramp.grey ? 1 : 0);
       setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
       // The border's black water goes with the border's shade (the Boundary switch, and the textured ground it lies on).
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uEdgeDark"), this.showBorder && textured ? 1 : 0);
+      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uPlayRect"), this.playRect);
       const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
       // The models' depth picture (a texture of its own is always bound to the sampler, as for the shadow map).

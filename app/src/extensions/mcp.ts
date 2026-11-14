@@ -13,6 +13,10 @@ interface Declared { tool: McpToolContribution; extensionId: string; source: str
 export interface McpHostHooks {
   /** Activates the extensions answering an event ("onMcpTool:<name>"). */
   activate(event: string): Promise<void>;
+  /** What every call waits for before its tool runs (the open project's whole file list: tools decide by it whether
+   *  a file is there, and right after an open it may still be read). A rejection is the call's error, so a host lets
+   *  tools run that don't need what it waits for (the workbench's never rejects). */
+  ready?(): Promise<void>;
   /** Whether a tool may be used now (settings: project extensions' tools, writing tools). */
   allowed(declared: { source: string; readOnly: boolean; needs?: string }): boolean;
   /** What the user wants a tool's description to say besides, right now. */
@@ -104,6 +108,7 @@ export class McpTools {
       if (!this.handlers.has(name)) await this.hooks.activate(`onMcpTool:${name}`);
       const handler = this.handlers.get(name);
       if (!handler) return failed(this.hooks.whyUnavailable(d.extensionId) ?? `${d.extensionId} didn't register the tool ${name}.`);
+      await this.hooks.ready?.();
       return { content: toContent(await handler(args)) };
     } catch (e) {
       return failed(mcpErrorText(e));

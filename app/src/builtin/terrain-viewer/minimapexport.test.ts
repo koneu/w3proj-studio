@@ -256,7 +256,8 @@ test("cliff.w3m against the World Editor's Export Minimap: colours, the lighter 
   const report = `ours ${c.ours.map((v) => v.toFixed(1))}, the editor's ${c.editor.map((v) => v.toFixed(1))}, pixels ${c.mad.toFixed(2)} apart, 4 × 4 squares ${c.blockMad.toFixed(2)}`;
   t.diagnostic(report);
   for (let k = 0; k < 3; k++) assert.ok(Math.abs(c.ours[k] - c.editor[k]) < 2, `channel ${k}: ${report}`);
-  assert.ok(c.blockMad < 4, report);
+  // 1.35 with the editor's sampling and one softening pass (2026-11-13); 2.01 with centre sampling and two.
+  assert.ok(c.blockMad < 1.7, report);
   // The plateau (grass cliffs and the ground around them) is lighter than the grass, in both.
   const plateau = [40, 36, 20, 8], grass = [5, 60, 20, 30];
   const inOurs = (r: number[]) => [r[0] + CROP.x, r[1] + CROP.y, r[2], r[3]];
@@ -372,7 +373,8 @@ test("HillsbradCreek against its own war3mapMap.blp: water, the rocks without a 
   for (let k = 0; k < 3; k++) assert.ok(Math.abs(water.ours[k] - water.editor[k]) < 3, `water, channel ${k}: ${water.text}`);
   // Cliffs covered with rocks, in their models' grey and green.
   for (let k = 0; k < 3; k++) assert.ok(Math.abs(cliffs.ours[k] - cliffs.editor[k]) < 3, `cliffs, channel ${k}: ${cliffs.text}`);
-  assert.ok(whole.blockMad < 5, whole.text);
+  // 4.15 since 2026-11-13 (the editor's sampling, one softening pass, bigger dots, cut values); 4.84 before.
+  assert.ok(whole.blockMad < 4.5, whole.text);
   // Control: the rocks left out (as before), the cliffs show their own colour, far lighter than the editor's.
   const bare = compareWhere(cliff, (await hillsbrad({})).rgba);
   t.diagnostic(`cliffs without the rocks: ${bare.text}`);

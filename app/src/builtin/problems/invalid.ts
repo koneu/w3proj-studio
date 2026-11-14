@@ -4,8 +4,10 @@
 
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "../../lib/objects/metadata";
-import { readMapDocStrict } from "../../lib/formats/mapdoc";
+import { parseRandomId } from "../../lib/objects/randomids";
+import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 /** How a kind's game data is loaded (a parameter so tests can stand in for the game). */
 export type KindLoader = (w3: W3Api, kind: string) => Promise<{ baseIds: string[] }>;
@@ -16,9 +18,9 @@ interface PlacedEntry { id: string; position: number[] }
 /** The placement files: where each kind of object lives. */
 export const PLACEMENT_FILES = [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const;
 
-/** Random units/items/buildings ("uDNR", "iDNR", "bDNR") and random items by level ("YiI1"): no type
- *  of their own, the game makes the choice. */
-export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.test(id);
+/** Random units/items/buildings ("uDNR", "iDNR", "bDNR") and the random-by-level ids `parseRandomId`
+ *  knows ("YYU3", "YYB/", "YiI1"): no type of their own, the game makes the choice. */
+export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || parseRandomId(id) !== undefined;
 
 /** Every type id placed objects may have, and which placement file each belongs in. `gameOk` is
  *  false when the game's object data could not be read: then "unknown" only means "not loaded". */
@@ -112,6 +114,18 @@ export async function editPlacedFile(w3: W3Api, file: string, change: (doc: Reco
   else await w3.backend.invoke("codec_write", { root, path: raw, text: JSON.stringify(doc) });
 }
 
+/** After placement files were changed with editPlacedFile: pathing, shadows and the minimap made again from the saved
+ *  files, and recorded as following them (else `w3proj pack` would refuse them as older than the doodads).
+ *  `doodadsBefore`: war3map.doo's list before the change, null when it didn't change. `root`: the project written in
+ *  (another one opened since is left alone). Without the terrain viewer (disabled) nothing is rebuilt; a failed
+ *  rebuild shows itself. */
+export async function rebuildDerived(w3: W3Api, doodadsBefore: unknown[] | null, root: string) {
+  const id = "w3.terrain.rebuildFromFiles";
+  await w3.commands.execute(id, doodadsBefore ?? undefined, root).catch((e) => {
+    if ((e instanceof Error ? e.message : String(e)) === commandNotFound(id)) return;
+  });
+}
+
 /** The question's text: what goes, in short. */
 export function describePlan(plan: InvalidPlan): string {
   const ids = [...plan.types].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -125,6 +139,8 @@ export function describePlan(plan: InvalidPlan): string {
  *  save its own copy over the result. */
 export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Promise<number> {
   if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+  // The map's own object types come from files found by the list: one not listed yet would make its objects "invalid".
+  await projectWithFiles(w3);
   const unsaved = w3.editors.unsavedPaths();
   if (unsaved.length) throw new Error(`Save or discard the changes of ${unsaved.join(", ")} first: Delete Invalid Objects works on the saved files.`);
   const plan = await planInvalid(w3, load);
@@ -135,12 +151,20 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
   if (!t.gameOk) throw new Error("The game's object data isn't available any more. Nothing was changed.");
   const checkpointed = await checkpointIfOn(w3, "Delete Invalid Objects");
   let removed = 0;
-  for (const { file, key } of plan.files) {
-    await editPlacedFile(w3, file, (doc) => {
-      const { keep, removed: gone } = splitInvalid(doc[key] ?? [], t.known);
-      removed += gone.length;
-      doc[key] = keep;
-    });
+  let doodadsBefore: unknown[] | null = null;
+  const root = w3.workspace.project()!.root;
+  try {
+    for (const { file, key } of plan.files) {
+      await editPlacedFile(w3, file, (doc) => {
+        const { keep, removed: gone } = splitInvalid(doc[key] ?? [], t.known);
+        removed += gone.length;
+        if (key === "doodads" && gone.length) doodadsBefore = doc[key] ?? [];
+        doc[key] = keep;
+      });
+    }
+  } finally {
+    // Also after a failure halfway: what was written is followed.
+    if (removed) await rebuildDerived(w3, doodadsBefore, root);
   }
   void w3.window.showInfo(`Deleted ${removed} invalid placed object${removed === 1 ? "" : "s"}.${checkpointed ? " The checkpoint made before is in Restore Checkpoint." : ""}`);
   return removed;

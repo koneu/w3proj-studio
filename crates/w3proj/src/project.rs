@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::Registry;
 use crate::header::MapHeader;
-use crate::{names, paths, Error, Result};
+use crate::{names, paths, wts, Error, Result};
 
 pub const MANIFEST: &str = "w3proj.toml";
 pub const MAP_DIR: &str = "map";
@@ -475,49 +475,20 @@ fn scan_nested_map(bytes: Vec<u8>, out: &mut BTreeSet<String>) {
     }
 }
 
+/// Replaces `path` with `bytes` in one step (`crate::atomic::write_lazily`: a file replaced is flushed
+/// to disk first, a new one isn't) unless it holds them already.
 fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     if fs::read(path).ok().as_deref() == Some(bytes) {
         return Ok(false);
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, bytes)?;
+    crate::atomic::write_lazily(path, bytes)?;
     Ok(true)
 }
 
-/// Replaces `path` in one step: the bytes go to a temporary file next to it (same folder, so the same
-/// file system), flushed to disk, then renamed over it. A crash mid-write leaves the old file whole
-/// (and maybe the temporary file), never a truncated one. `fs::rename` replaces an existing file on
-/// Windows too (MoveFileEx with MOVEFILE_REPLACE_EXISTING).
+/// Replaces `path` in one step (`crate::atomic`): a crash mid-write leaves the old file whole, never a
+/// truncated one.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    fs::create_dir_all(dir)?;
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    // One temporary name per process and call, so two writers never share one.
-    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
-    let done = (|| -> std::io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        // The new file is made with default permissions: the old file's go over to it (a manifest the
-        // user made private stays private). Unix only: on Windows the only one is read-only, which a
-        // rename over the file would fail on anyway.
-        #[cfg(unix)]
-        if let Ok(old) = fs::metadata(path) {
-            fs::set_permissions(&tmp, old.permissions())?;
-        }
-        fs::rename(&tmp, path)
-    })();
-    if let Err(e) = done {
-        let _ = fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
+    Ok(crate::atomic::write(path, bytes)?)
 }
 
 fn walk(root: &Path) -> Result<Vec<String>> {
@@ -532,6 +503,9 @@ fn walk(root: &Path) -> Result<Vec<String>> {
             let path = entry.path();
             if entry.file_type()?.is_dir() {
                 stack.push(path);
+            } else if crate::atomic::is_temp(&entry.file_name().to_string_lossy()) {
+                // A write in progress (or a crash's leftover): neither packed nor deleted by a sync.
+                continue;
             } else {
                 let rel = path.strip_prefix(root).unwrap();
                 let rel: Vec<String> = rel
@@ -711,7 +685,8 @@ const GITATTRIBUTES_V1: &str = "\
 *.toc diff
 ";
 
-const GITIGNORE: &str = "build/\n";
+/// `.*.tmp`: a file being saved (`crate::atomic`) or one a crash left half written.
+const GITIGNORE: &str = "build/\n.*.tmp\n";
 
 /// Writes an extracted archive into a project directory. Existing pack
 /// settings in the manifest are kept.
@@ -768,6 +743,8 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
     }
     let mut report = ex.report;
     sync_dir(&project.join(MAP_DIR), MAP_DIR, &ex.files, &mut report)?;
+    // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
+    crate::derived::record_now(project)?;
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
     // in one: then it stays as it is).
     let maps_dir = project.join(MAPS_DIR);
@@ -918,6 +895,9 @@ pub struct PackReport {
     pub output: PathBuf,
     pub files: usize,
     pub bytes: usize,
+    /// What `pack_pruned` did to war3map.wts; `None` for `pack`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strings: Option<wts::PruneOutcome>,
 }
 
 /// Project files (relative to `map/`) → archive files.
@@ -1068,7 +1048,28 @@ fn chapter_for<'a>(
 
 /// Builds a project's archive (chapter maps under `maps/` are packed into it first).
 fn pack_bytes(project: &Path, codecs: &Registry) -> Result<(Vec<u8>, usize)> {
-    let (manifest, prefix, files) = read_project(project)?;
+    pack_bytes_with(project, codecs, None)
+}
+
+/// The app's record of dropped strings: `None` when it isn't there, `Err` (why) when it is there
+/// and can't be read.
+fn read_pruned_record(project: &Path) -> std::result::Result<Option<String>, String> {
+    let path = project.join(wts::PRUNED_STRINGS_FILE);
+    match fs::read(&path) {
+        Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| format!("{} isn't UTF-8 text", wts::PRUNED_STRINGS_FILE)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{} is there but can't be read ({e})", wts::PRUNED_STRINGS_FILE)),
+    }
+}
+
+/// `prune`: the map's war3map.wts goes into the archive without the strings nothing refers to
+/// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
+/// Chapter maps are packed as they are.
+fn pack_bytes_with(project: &Path, codecs: &Registry, prune: Option<&mut wts::PruneOutcome>) -> Result<(Vec<u8>, usize)> {
+    let (manifest, prefix, mut files) = read_project(project)?;
+    if let Some(outcome) = prune {
+        *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
+    }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
     let maps_dir = project.join(MAPS_DIR);
     for dir in nested_projects(&maps_dir)? {
@@ -1101,23 +1102,48 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+/// Packs the project's files as they are (the app drops unused strings in the project first).
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
+    pack_to(project, output, codecs, false)
+}
+
+/// Packs with the strings nothing refers to left out of war3map.wts, as the World Editor's save
+/// and the app's packing drop them (`wts`); the project's files stay as they are. Chapter maps
+/// and war3campaign.wts aren't pruned.
+pub fn pack_pruned(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
+    pack_to(project, output, codecs, true)
+}
+
+/// Whether `project` is a chapter map of a campaign project (`<campaign>/maps/<chapter>`).
+fn is_chapter_project(project: &Path) -> bool {
+    let abs = project.canonicalize().unwrap_or_else(|_| project.to_path_buf());
+    abs.parent()
+        .filter(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(MAPS_DIR)))
+        .and_then(Path::parent)
+        .is_some_and(|campaign| campaign.join(MANIFEST).is_file())
+}
+
+fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool) -> Result<PackReport> {
     let manifest = Manifest::load(project)?;
-    let (bytes, count) = pack_bytes(project, codecs)?;
+    let mut outcome = wts::PruneOutcome::default();
+    // A chapter map packed on its own comes out as the campaign packs it (and the app exports it).
+    let chapter = prune && is_chapter_project(project);
+    if chapter {
+        outcome.kept = Some("a campaign's chapter maps aren't pruned".into());
+    }
+    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome))?;
     let output = match output {
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
     };
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = output.with_extension("w3x.tmp");
-    fs::write(&tmp, &bytes)?;
-    fs::rename(&tmp, &output)?;
+    // Flushed to disk before it takes the old archive's place, under a hidden temporary name
+    // (`crate::atomic`).
+    write_atomic(&output, &bytes)?;
     Ok(PackReport {
         output,
         files: count,
         bytes: bytes.len(),
+        strings: prune.then_some(outcome),
     })
 }
 

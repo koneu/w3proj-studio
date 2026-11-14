@@ -194,13 +194,14 @@ export function onBoundary(t: Terrain, x: number, y: number): boolean {
   return [[tx, ty], [tx + 1, ty], [tx, ty + 1], [tx + 1, ty + 1]].some(([cx, cy]) => t.corners[cy * t.width + cx].boundary);
 }
 
-/** Bit of the water word: the tile whose lower left corner this is lies past the playable map. The game
- *  and the World Editor darken those tiles. Measured: 14 of 14 maps, saved by the World Editor among them. */
+/** Bit of the water word: the tile whose lower left corner this is lies past the playable map. The World Editor
+ *  writes it from the w3i's camera complements on save; it doesn't draw by it (playableEdgeTiles). Measured: 14 of
+ *  14 maps carry it, saved by the World Editor among them. */
 const MAP_EDGE = 0x4000;
 
 /** Per tile (`width - 1` by `height - 1`, row 0 in the south), 1 where the tile lies past the playable map by the
- *  MAP_EDGE bit of its lower left corner, else 0: what the game and the World Editor darken (and the editor's naval
- *  view draws brown), whatever the w3i says. */
+ *  MAP_EDGE bit of its lower left corner, else 0. The border's shade goes by the w3i (playableEdgeTiles); these
+ *  marks stand in only when the w3i can't say. */
 export function mapEdgeTiles(t: Pick<Terrain, "width" | "height" | "corners">): Uint8Array {
   const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
   const out = new Uint8Array(tilesX * tilesY);
@@ -210,14 +211,37 @@ export function mapEdgeTiles(t: Pick<Terrain, "width" | "height" | "corners">): 
   return out;
 }
 
-/** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. */
-export function markMapEdge(t: Terrain, complements: readonly number[]) {
+/** Per tile (as mapEdgeTiles), 1 where the tile lies past the playable map the w3i's camera complements leave
+ *  (`complements`: left, right, bottom, top, in tiles). That is what the World Editor darkens: we-drive, 2026-11-13, on
+ *  copies of AutumnLeaves_S2 (margins 15) with one thing changed each: the complements' left at 23 moved the dark edge
+ *  8 tiles in; the MAP_EDGE marks' left at 23, the w3i's playable width or its camera bounds alone moved nothing. Its
+ *  save writes the marks from the complements again. */
+export function playableEdgeTiles(t: Pick<Terrain, "width" | "height">, complements: readonly number[]): Uint8Array {
   const [left, right, bottom, top] = complements;
-  const tilesX = t.width - 1, tilesY = t.height - 1;
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
+  const out = new Uint8Array(tilesX * tilesY);
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    if (x < left || x >= tilesX - right || y < bottom || y >= tilesY - top) out[y * tilesX + x] = 1;
+  }
+  return out;
+}
+
+/** The w3i's camera complements (left, right, bottom, top) when they can stand for the playable map: four whole
+ *  numbers from 0 up; else null. */
+export function validComplements(c: unknown): number[] | null {
+  return Array.isArray(c) && c.length === 4 && c.every((n) => Number.isInteger(n) && n >= 0) ? [...c] as number[] : null;
+}
+
+/** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. `keepOuter`: the
+ *  corners of the top row and right column, which no tile has as its lower left, keep their mark as they are, as the
+ *  World Editor's Map Size leaves them (we-drive 2026-11-13: after a cut of the top they are marked, the old row's
+ *  mark, after a growth and in a new map they aren't). */
+export function markMapEdge(t: Terrain, complements: readonly number[], keepOuter = false) {
+  const tilesX = t.width - 1, past = playableEdgeTiles(t, complements);
   for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
     const c = t.corners[y * t.width + x];
-    const past = x < tilesX && y < tilesY && (x < left || x >= tilesX - right || y < bottom || y >= tilesY - top);
-    c.rawWater = past ? c.rawWater | MAP_EDGE : c.rawWater & ~MAP_EDGE;
+    if (keepOuter && (x >= tilesX || y >= t.height - 1)) continue;
+    c.rawWater = x < tilesX && y < t.height - 1 && past[y * tilesX + x] ? c.rawWater | MAP_EDGE : c.rawWater & ~MAP_EDGE;
   }
 }
 

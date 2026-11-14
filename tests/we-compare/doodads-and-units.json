@@ -1,0 +1,218 @@
+[
+  {
+    "name": "doodad-flag-bits",
+    "description": "Fix Doodads on Load: flag bits above 4 (0x08 to 0xff, inside and outside the playable area): the editor's save keeps bits 0 to 3 only (0x1e to 0x0e, 0x80 to 0x02); Studio's fixed-on-load save does the same",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/flag-bits.w3x"
+    },
+    "we": {
+      "from": "input"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "expect": "match"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-scale-one-axis-zero",
+    "description": "Fix Doodads on Load: a scale with one or two axes at 0. Destructables (LTbr, LTcr) get one random scale for all axes only when x is 0 (x nonzero: clamped x for all); doodads (LOch) a random value for each zero axis. The random picks differ by design (ignored here: scales of destructables with x 0, zero axes of LOch); every other scale matches",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/scale-one-axis.w3x"
+    },
+    "we": {
+      "from": "input"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "doodads[0].scale",
+          "doodads[3].scale",
+          "doodads[4].scale",
+          "doodads[7].scale",
+          "doodads[8].scale",
+          "doodads[11].scale",
+          "doodads[12].scale",
+          "doodads[15].scale",
+          "doodads[16].scale[0]",
+          "doodads[17].scale[1]",
+          "doodads[18].scale[2]",
+          "doodads[19].scale[0]",
+          "doodads[19].scale[1]",
+          "doodads[20].scale[0]",
+          "doodads[21].scale[1]",
+          "doodads[21].scale[2]",
+          "doodads[22].scale[1]",
+          "doodads[22].scale[2]",
+          "doodads[23].scale[0]",
+          "doodads[23].scale[1]"
+        ]
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-scale-turned-range",
+    "description": "a 0 scale of LTt0 (range 1 to 0.8, turned; destructable) with references in and out of the range. The random picks of the three x=0 cases differ by design (ignored; both lie in 0.8..1.0); the others, 0.5 and 2 included, match",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/scale-turned-range.w3x"
+    },
+    "we": {
+      "from": "input"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "doodads[0].scale",
+          "doodads[1].scale",
+          "doodads[2].scale"
+        ]
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-studio-save-reopens",
+    "description": "Fix and Snap Doodads on Load: the map Studio saved after both is opened and re-saved by the editor: its doo must not change",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/reopen-base.w3x"
+    },
+    "we": {
+      "from": "studio"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "units-on-ground",
+    "description": "units on a slope, plateau, ramp, lake bed and in water (p8a: footmen, flyer, ship, barracks, start location): z of every unit as the editor saves it. The editor writes the newer format (subversion 11, itemTable and hero attributes), ignored here",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/units-p8a.w3m"
+    },
+    "we": {
+      "from": "input"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "subversion",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.001
+      }
+    ],
+    "limit": 40
+  }
+]

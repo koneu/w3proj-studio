@@ -66,6 +66,7 @@ function harness(files: Record<string, string>, problems: Problem[]) {
     workspace: {
       project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }),
       files: () => [],
+      filesReady: async () => {},
       resolve: (p: string) => `/p/${p}`,
       readText: async (p: string) => { if (p in files) return files[p]; throw new Error(`no ${p}`); },
       writeText: async (p: string, t: string) => { writes.push(p); files[p] = t; },
@@ -112,4 +113,37 @@ test("an ignore file that is there but broken hides nothing and is not written o
   const listed = await h.tools.get("list_problems")!({}) as Problem[];
   assert.deepEqual(h.mine(listed).map((p) => p.location), ["Quest A Completed"]);
   assert.deepEqual(h.writes, []);
+});
+
+test("runChecked (Build/pack) leaves ignored reports out, rules included, and counts them", async () => {
+  const f = withIgnored(emptyIgnore(), "mine", ["Other"]);
+  const text = serializeIgnore({ ...f, rules: ["bonusQuestLibrary"] });
+  const h = harness({ [IGNORE_FILE]: text }, [P("Other"), P("Kept")]);
+  h.service.registerCheck({ id: "triggerNoEvents", title: "T", run: async () => [P("Quest A Completed"), P("Quest B Update1"), P("Plain")] });
+  const r = await h.service.runChecked();
+  assert.deepEqual(h.mine(r.problems).map((p) => p.location), ["Kept"]);
+  assert.deepEqual(r.problems.filter((p) => /Quest|Plain/.test(p.location ?? "")).map((p) => p.location), ["Plain"]);
+  assert.equal(r.ignored, 3);
+  assert.equal(r.ignoreError, null);
+});
+
+test("runChecked by check (w3proj check): each check's own reports and ignored count, and a failed check's reason", async () => {
+  const h = harness({ [IGNORE_FILE]: serializeIgnore(withIgnored(emptyIgnore(), "mine", ["Other"])) }, [P("Other"), P("Kept")]);
+  h.service.registerCheck({ id: "broken", title: "Broken", run: async () => { throw new Error("can't read it"); } });
+  const r = await h.service.runChecked();
+  const mine = r.checks.find((c) => c.id === "mine")!;
+  assert.deepEqual(mine.problems.map((p) => p.location), ["Kept"]);
+  assert.equal(mine.ignored, 1);
+  assert.equal(mine.title, "Mine");
+  assert.equal(mine.error, undefined, "control: a check that ran has no error");
+  const broken = r.checks.find((c) => c.id === "broken")!;
+  assert.deepEqual([broken.problems.length, broken.error], [0, "can't read it"]);
+});
+
+test("control: runChecked with a broken ignore file hides nothing and says why", async () => {
+  const h = harness({ [IGNORE_FILE]: "{ broken" }, [P("A"), P("B")]);
+  const r = await h.service.runChecked();
+  assert.equal(h.mine(r.problems).length, 2);
+  assert.equal(r.ignored, 0);
+  assert.match(r.ignoreError ?? "", /can't be used/);
 });

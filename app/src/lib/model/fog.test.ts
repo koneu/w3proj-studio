@@ -15,6 +15,16 @@ test("the colour is stored blue first", () => {
   assert.deepEqual(fogOf({ flags: 0x2000, fog })?.color, [0, 128 / 255, 1]);
 });
 
+test("the far fog is the colour the World Editor draws for the w3i's bytes (we-drive, branch fog-rb-swap)", () => {
+  // Copies of cliff.w3m with linear fog 200–1500, game view on, SD: w3i bytes 40, 80, 220 drew 220, 80, 40 (red)
+  // in the editor's far fog, bytes 220, 80, 40 drew 40, 80, 220 (blue). The editor's own script for
+  // 02c_Fog_Linear_Near (bytes 220, 200, 190) says SetTerrainFogExV( …, 0.745, 0.784, 0.863 ): red 190 first.
+  const drawn = (bytes: number[]) => fogOf({ flags: 0x2000, fog: { ...fog, color: [...bytes, 255] } })!.color.map((c) => Math.round(c * 255));
+  assert.deepEqual(drawn([40, 80, 220]), [220, 80, 40]);
+  assert.deepEqual(drawn([220, 80, 40]), [40, 80, 220]);
+  assert.deepEqual(drawn([220, 200, 190]), [190, 200, 220]);
+});
+
 test("linear fog runs from start to end", () => {
   assert.equal(fogAmount(fog, 1000), 0);
   assert.equal(fogAmount(fog, 3000), 0);

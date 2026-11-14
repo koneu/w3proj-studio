@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, unitGridCells, type PlacedFile } from "./placement";
 import { fragmentOf } from "../../lib/terrain/fragment";
 import type { Placed } from "./objects";
 
@@ -68,6 +68,36 @@ test("a new item has the World Editor's level 0 and target acquisition 0, a unit
   assert.equal(blank.targetAcquisition, 0);
 });
 
+test("a new placed unit has the start gold the World Editor writes: 12500, or the map's Agld Gld1", () => {
+  // Real maps: 12500 on every placed unit of the melee maps in smoketest_maps (start locations and items 0); a Tides of
+  // Darkness chapter's units the campaign's Agld Gld1 (99000).
+  const f = file("units", 8, 11);
+  const mine = { ...(newEntry(f, "ngol", [0, 0, 0], 27, "w3u") as unknown as Record<string, unknown>), gold: 15000 };
+  f.list.push(mine as unknown as Placed);
+  assert.equal((newEntry(file("units", 8, 11), "hfoo", [0, 0, 0], 0, "w3u") as unknown as { gold: number }).gold, 12500, "a blank one");
+  assert.equal((newEntry(f, "hfoo", [0, 0, 0], 0, "w3u") as unknown as { gold: number }).gold, 12500, "copied from a mine with its own amount");
+  assert.equal((newEntry(f, "ngol", [0, 0, 0], 27, "w3u") as unknown as { gold: number }).gold, 12500, "a mine copied from one with 15000");
+  assert.equal((newEntry(f, "hfoo", [0, 0, 0], 0, "w3u", 99000) as unknown as { gold: number }).gold, 99000);
+  assert.equal((newEntry(f, "sloc", [0, 0, 0], 0, "w3u", 99000) as unknown as { gold: number }).gold, 0, "a start location");
+  assert.equal((newEntry(f, "ratc", [0, 0, 0], 0, "w3t", 99000) as unknown as { gold: number }).gold, 0, "an item");
+  // A copy keeps the copied unit's gold.
+  assert.equal((pastedEntry(f, { entry: mine, angle: 0 }, [64, 0, 0]) as unknown as { gold: number }).gold, 15000);
+});
+
+test("startGoldOf: Agld's Gld1 at level 1, a later file's winning, else 12500", () => {
+  const agld = (value: unknown, level?: number, field = "Gld1") => ({ original: [{ base: "Agld", mods: [{ field, level, value }] }] });
+  assert.equal(startGoldOf([]), DEFAULT_START_GOLD);
+  assert.equal(DEFAULT_START_GOLD, 12500);
+  assert.equal(startGoldOf([null, undefined, { original: [] }]), 12500);
+  assert.equal(startGoldOf([agld(99000, 1)]), 99000);
+  assert.equal(startGoldOf([agld(99000, 1), null, agld(35000, 1)]), 35000, "the map's over the campaign's");
+  assert.equal(startGoldOf([agld(35000, 1), agld(1, 1, "Gld3")]), 35000, "another field");
+  assert.equal(startGoldOf([agld(35000, 2)]), 12500, "another level");
+  assert.equal(startGoldOf([agld(35000)]), 35000, "no level");
+  for (const bad of [-1, 1.5, "35000", Number.NaN, 2 ** 31]) assert.equal(startGoldOf([agld(bad, 1)]), 12500, String(bad));
+  assert.equal(startGoldOf([{ original: [{ base: "Abgm", mods: [{ field: "Gld1", level: 1, value: 5 }] }] }]), 12500, "another ability");
+});
+
 test("a new unit copied from an uprooted Ancient isn't uprooted", () => {
   const ancient = { id: "eaow", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1], player: 1, playerFlags: 0x10000 } as Placed;
   const e = newEntry(file("units", 8, 11, {}, [ancient]), "eaow", [64, 0, 0]) as unknown as Record<string, unknown>;
@@ -120,6 +150,25 @@ test("buildings stand where real maps have them: their edges on the 64 grid", ()
   assert.equal(onBuildingGrid(-1000, 8) % 64, -0);
   for (const cells of [4, 6, 8, 12]) assert.equal(onBuildingGrid(onBuildingGrid(777, cells), cells), onBuildingGrid(777, cells), "stays put");
   assert.ok(Math.abs(onBuildingGrid(100, 6) - 100) <= 32, "the nearest spot");
+});
+
+test("a start location and a gold mine go on the 64 grid, as the World Editor puts them", () => {
+  // we-drive 2026-11-13 (tests/we-compare/mine-start-grid.json): what the editor saved after each placing or move.
+  const at = (id: string, texture: [number, number] | null, x: number, y: number) => {
+    const cells = unitGridCells(id, texture);
+    return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
+  };
+  // A start location has no pathing texture, but stands on the grid of a 4×4 building all the same.
+  assert.deepEqual(unitGridCells("sloc", null), [4, 4]);
+  assert.deepEqual(at("sloc", null, -1899.459, 500.25296), [-1920, 512], "placed from the palette");
+  assert.deepEqual(at("sloc", null, -2141, 675 + 64), [-2112, 768], "nudged up once from -2141, 675");
+  assert.deepEqual(at("sloc", null, -2000, 900), [-1984, 896], "Alt-moved");
+  // A gold mine by its 16×16 pathing texture (PathTextures\16x16Goldmine.tga).
+  assert.deepEqual(at("ngol", [16, 16], 1000 + 64, 300), [1088, 320], "nudged right once from 1000, 300");
+  assert.deepEqual(at("ngol", [16, 16], 1088, 320 + 64), [1088, 384], "then up");
+  // Control: a unit without a texture stays where it is put (the editor placed a Phoenix Egg at -1899.459, 500.25296).
+  assert.equal(unitGridCells("hpxe", null), null);
+  assert.deepEqual(at("hpxe", null, -1899.459, 500.25296), [-1899.459, 500.25296]);
 });
 
 test("a plain doodad has life 255, a destructable 100, also copied from each other", () => {

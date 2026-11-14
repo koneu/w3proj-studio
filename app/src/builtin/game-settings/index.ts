@@ -13,6 +13,7 @@ import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { settingsFiles, settingsOf } from "./files";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 
 type Mode = "misc" | "skin";
 
@@ -81,7 +82,7 @@ function loadFields(w3: W3Api, mode: Mode): Promise<Field[]> {
       };
       if (mode === "misc") {
         // Later files win (MiscGame over MiscData); per-object sections are in ItemFunc.txt.
-        const files = (await Promise.all(["Units\\MiscGame.txt", "Units\\MiscData.txt", "Units\\ItemFunc.txt"].map(text))).map(parseIni);
+        const files = (await Promise.all(["Units\\MiscGame.txt", "Units\\MiscData.txt", "Units\\ItemFunc.txt"].map(text))).map((t) => parseIni(t));
         return parseSlk(await text("Units\\MiscMetaData.slk")).filter((r) => r.field).map((r) => ({
           section: r.section, key: r.field, label: label(r.displayName, r.field), type: r.type,
           // Values may be followed by a comment ("0.75 // for cancelled construction").
@@ -122,8 +123,12 @@ function loadFields(w3: W3Api, mode: Mode): Promise<Field[]> {
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Opens the map's file, creating an empty one first (the game's values apply until one changes). */
-  const open = async (path: string) => {
+  const open = async (pick: (paths: string[]) => string) => {
     if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+    // Which file (the map's or the campaign's) and whether it's there come from the whole list: right after an open,
+    // a file not listed yet would be written over with an empty one.
+    await projectWithFiles(w3);
+    const path = pick(w3.workspace.files().map((f) => f.path));
     if (!w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) {
       await w3.workspace.writeText(path, "");
       await w3.workspace.refresh();
@@ -133,8 +138,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   ctx.subscriptions.push(
     // A campaign project has the campaign's files (war3campaignMisc.txt, war3campaignSkin.txt).
-    w3.commands.register("w3.gameplayConstants.open", () => open(settingsFiles(w3.workspace.files().map((f) => f.path)).misc)),
-    w3.commands.register("w3.gameInterface.open", () => open(settingsFiles(w3.workspace.files().map((f) => f.path)).skin)),
+    w3.commands.register("w3.gameplayConstants.open", () => open((paths) => settingsFiles(paths).misc)),
+    w3.commands.register("w3.gameInterface.open", () => open((paths) => settingsFiles(paths).skin)),
     w3.editors.registerProvider("w3.gameSettings", {
       async resolve(el, doc) {
         const { mode, wts, campaign } = settingsOf(doc.path);

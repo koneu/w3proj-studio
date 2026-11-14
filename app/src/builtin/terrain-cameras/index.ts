@@ -1,8 +1,9 @@
 // Camera Editor: camera objects (war3map.w3c, "gg_cam_<name>" in triggers) as
 // a tool group of the terrain editor (service "w3.terrain"). Cameras are
 // created from the current view and previewed through it; on the map each
-// shows its target, its eye and the field of view. Drag the target to move a
-// camera, the eye to turn it and change its distance. Shift+click selects several:
+// shows as the World Editor's camera model (a small camera with an arrow to its
+// target), a green circle round the selected one's target. Drag the arrow to move
+// a camera, its camera to turn it and change its distance. Shift+click selects several:
 // the panel then edits what they share; Duplicate copies the selected. A value
 // being typed shows through its camera at once, and is an edit once entered.
 // The file goes through the format engine ("cameras" definition).
@@ -11,18 +12,24 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView, type TriggersService } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
-import { CAMERA_CELL, cameraColors, cameraEye, nameDepthOfField, type CameraLook } from "../../lib/terrain/cameras";
+import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
+import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3c";
-/** Overlay cell size (world units). */
-const CELL = CAMERA_CELL;
+/** The shortest distance a drag leaves a camera (world units). */
+const CELL = 32;
 const RAD = Math.PI / 180;
-/** The cameras in the editor's overlay: blue, the selected one yellow and bigger. */
-const EDITOR_LOOK: CameraLook = { fov: [110, 200, 255, 110], line: [110, 200, 255, 220], target: [110, 200, 255, 220], eye: [110, 200, 255, 220], targetRadius: 2, eyeRadius: 1 };
-const SELECTED_LOOK: CameraLook = { fov: [255, 230, 90, 150], line: [255, 230, 90, 255], target: [255, 230, 90, 255], eye: [255, 255, 255, 255], targetRadius: 3, eyeRadius: 2 };
+/** The World Editor's circle round the selected camera's target (we-drive, 2026-11-13, cliff.w3m, cameras of
+ *  distance 1000 and 3000 seen from 2000): pure green, round the target on the ground (it follows the hills: 12b's
+ *  first camera), world-sized, its radius 0.096 of the camera's distance (95 and 288 units, fitted on its extent on
+ *  the picture within a pixel), as the model is scaled. */
+const SELECTED_RGB: [number, number, number] = [0, 255, 0];
+const SELECTED_RADIUS = 0.096;
+/** How near (CSS pixels) a click must come to a camera's model to take it. */
+const PICK_PX = 10;
 
 interface Camera {
   targetX: number;
@@ -56,8 +63,6 @@ const FIELDS: [keyof Camera, string, string][] = [
   ["dofDistance", "DoF", "Depth of field distance (the World Editor's DoF Distance)"], ["dofScale", "DoF ×", "Depth of field scale (DoF Scale)"],
   ["posAbsoluteZ", "Abs Z", "Absolute height of the camera's position (Pos Absolute Z)"],
 ];
-/** The game's field of view is horizontal at 4:3; the editor's is vertical. */
-const ASPECT = 4 / 3;
 
 const wrap = (a: number) => ((a % 360) + 360) % 360;
 
@@ -76,7 +81,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
 function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const t = ed.terrain;
-  const W = (t.width - 1) * 4, H = (t.height - 1) * 4;
   let doc: CamerasDoc = { version: 3, cameras: [] };
   /** Kept as map/war3map.w3c.json (else the raw file, through the backend). */
   let asJson = true, unsaved = false, active = false;
@@ -106,8 +110,10 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
 
   // ---- geometry ----------------------------------------------------------------------
   const ground = (x: number, y: number) => heightAt(t, x, y);
-  /** Where the camera stands, over the ground plane (x, y). */
-  const eyeOf = cameraEye;
+  /** How high a camera's target stands: its height offset over the ground. */
+  const targetZ = (c: Camera) => ground(c.targetX, c.targetY) + (c.zOffset ?? 0);
+  /** A camera whose target has numbers (else it has no marker or circle). */
+  const drawable = (c: Camera) => [c.targetX, c.targetY, targetZ(c), c.distance].every(Number.isFinite) && c.distance > 0;
   /** The editor view that shows what the camera sees (roll left out). */
   const toView = (c: Camera): TerrainView => {
     // The game camera looks along rotation/angle of attack; the view's yaw and
@@ -116,7 +122,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     return {
       target: [c.targetX, c.targetY, ground(c.targetX, c.targetY) + c.zOffset],
       yaw: (c.rotation + 180) * RAD, pitch, distance: c.distance,
-      fov: 2 * Math.atan(Math.tan((c.fieldOfView * RAD) / 2) / ASPECT),
+      fov: verticalFov(c.fieldOfView * RAD, ed.aspect()),
     };
   };
   const round = (v: number, k = 100) => Math.round(v * k) / k;
@@ -126,20 +132,21 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     return {
       targetX: round(v.target[0]), targetY: round(v.target[1]), zOffset: round(v.target[2] - ground(v.target[0], v.target[1])),
       rotation: round(wrap(v.yaw / RAD - 180)), angleOfAttack: round(wrap(-v.pitch / RAD)), distance: round(v.distance),
-      fieldOfView: round((2 * Math.atan(Math.tan(v.fov / 2) * ASPECT)) / RAD),
+      fieldOfView: round(horizontalFov(v.fov, ed.aspect()) / RAD),
     };
   };
 
   // ---- overlay -----------------------------------------------------------------------
+  /** Takes the tab's drawing out of the view. */
+  const clear = () => { ed.setShapes(null); ed.setRings(null); ed.setLabels(null); };
   const render = () => {
     if (!active) return;
     count.textContent = `${doc.cameras.length} cameras`;
-    if (previewing) { ed.setGroundOverlay(null); ed.setLabels(null); return; }
-    // The selected cameras last, so they lie over the others.
-    const picked = new Set<unknown>(selection);
-    const order = [...doc.cameras].sort((a, b) => Number(picked.has(a)) - Number(picked.has(b)));
-    const rgba = cameraColors(order, W, H, t.offsetX, t.offsetY, (c) => (picked.has(c) ? SELECTED_LOOK : EDITOR_LOOK));
-    ed.setGroundOverlay(rgba, W, H);
+    if (previewing) { clear(); return; }
+    // As the World Editor's camera mode: each camera's model (as the Camera Objects layer draws it), and a green
+    // circle round the target of each selected one.
+    ed.setShapes(cameraMarkers(doc.cameras, ground));
+    ed.setRings(selection.filter(drawable).map((c) => ({ x: c.targetX, y: c.targetY, r: SELECTED_RADIUS * c.distance, rgb: SELECTED_RGB })));
     ed.setLabels(doc.cameras.map((c) => ({ x: c.targetX, y: c.targetY, text: c.name })));
   };
 
@@ -213,18 +220,39 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
 
   // ---- pointer -----------------------------------------------------------------------
-  /** The camera handle under a point: its eye or its target. */
-  const hit = (x: number, y: number): { cam: Camera; part: "eye" | "target" } | null => {
+  /** The camera handle under the pointer: its model's camera (which aims it) or its arrow and target (which move it),
+   *  found on the view as drawn (`client`: the pointer on the page); else a target near the ground point (x, y). */
+  const hit = (x: number, y: number, client: [number, number]): { cam: Camera; part: "eye" | "target" } | null => {
     let best: { cam: Camera; part: "eye" | "target"; d: number } | null = null;
-    const reach = Math.max(96, ed.view().distance / 60);
+    const take = (cam: Camera, part: "eye" | "target", d: number) => {
+      if (!best || d < best.d || (d === best.d && cam === selected)) best = { cam, part, d };
+    };
+    const [px, py] = client;
+    const on = (p: number[]) => ed.project(p as [number, number, number]);
     for (const cam of doc.cameras) {
-      const [ex, ey] = eyeOf(cam);
-      for (const [part, px, py] of [["target", cam.targetX, cam.targetY], ["eye", ex, ey]] as const) {
-        const d = Math.hypot(x - px, y - py);
-        if (d < reach && (!best || d < best.d || (d === best.d && cam === selected))) best = { cam, part, d };
-      }
+      const m = markerHandles(cam, ground);
+      if (!m) continue;
+      const tip = on(m.target), front = on(m.front), back = on(m.back);
+      if (!tip || !front || !back) continue;
+      // The box's half width on the view, at its front: the reach round the camera.
+      const side = on(m.front.map((v, i) => v + (i === 2 ? m.width / 2 : 0)));
+      const reach = Math.max(PICK_PX, side ? Math.hypot(side[0] - front[0], side[1] - front[1]) : 0);
+      // The arrow first: where the two lie over each other (a camera seen along its view, as one just made from the
+      // view is), a drag moves the camera rather than turning it.
+      const arrowD = segmentDistance(px, py, tip, front);
+      if (arrowD <= PICK_PX) take(cam, "target", arrowD);
+      const camD = segmentDistance(px, py, front, back);
+      if (camD <= reach && !(arrowD <= PICK_PX && arrowD <= camD + 2)) take(cam, "eye", camD);
     }
-    return best;
+    if (best) return best;
+    // Near a target on the ground, as before the models (a target under other cameras' models).
+    const reach = Math.max(96, ed.view().distance / 60);
+    let near: { cam: Camera; d: number } | null = null;
+    for (const cam of doc.cameras) {
+      const d = Math.hypot(x - cam.targetX, y - cam.targetY);
+      if (d < reach && (!near || d < near.d)) near = { cam, d };
+    }
+    return near ? { cam: near.cam, part: "target" } : null;
   };
   /** A drag in progress: the target of every selected camera moves along, the eye turns the grabbed one only. */
   let drag: { part: "eye" | "target"; start: [number, number]; client: [number, number]; orig: Camera; others: Map<Camera, Camera>; moved: boolean } | null = null;
@@ -245,7 +273,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       ...doc.cameras.map((c, i) => [c, i] as const).sort(([a], [b]) => a.name.localeCompare(b.name)).map(([c, i]) => h("option", { value: String(i) }, c.name)));
     const c = selected, many = selection.length > 1;
     if (!c) {
-      panel.replaceChildren(h("span.muted", {}, "Click a camera's target or eye to select it, Shift+click for several · drag the target to move it, the eye to aim it · Del deletes"));
+      panel.replaceChildren(h("span.muted", {}, "Click a camera to select it, Shift+click for several · drag its arrow to move it, its camera to aim it · Del deletes"));
       return;
     }
     const name = many ? h("span.terrain-camera-count", { title: selection.map((x) => x.name).join(", ") }, `${selection.length} cameras`)
@@ -316,12 +344,12 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   return {
     toolbar,
     activate() { active = true; previewing = false; void load.then(() => { renderPanel(); render(); }); },
-    deactivate() { endTypedPreview(); active = false; drag = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
+    deactivate() { endTypedPreview(); active = false; drag = null; clear(); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       previewing = false;
       const [x, y] = p.ground;
-      const g = hit(x, y);
+      const g = hit(x, y, [p.event.clientX, p.event.clientY]);
       if (p.event.shiftKey) {
         // Shift+click adds a camera to the selection or takes it away; it doesn't drag.
         if (g) select(selection.includes(g.cam) ? selection.filter((c) => c !== g.cam) : [...selection, g.cam]);
@@ -341,8 +369,8 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!p.ground) return;
       const [x, y] = p.ground;
       if (!p.down || !drag || !selected) {
-        const g = hit(x, y);
-        hover.textContent = g ? `${g.cam.name} (${g.part})` : "";
+        const g = hit(x, y, [p.event.clientX, p.event.clientY]);
+        hover.textContent = g ? `${g.cam.name} (${g.part === "eye" ? "camera: drag to aim" : "target: drag to move"})` : "";
         ed.host.style.cursor = g ? (selection.includes(g.cam) ? "grab" : "pointer") : "";
         return;
       }
@@ -362,10 +390,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         c.targetY = round(o.targetY + dy);
         for (const [cam, was] of drag.others) { cam.targetX = round(was.targetX + dx); cam.targetY = round(was.targetY + dy); }
       } else {
-        // The eye turns around the target; its ground distance sets the distance.
-        const dx = o.targetX - x, dy = o.targetY - y;
-        c.rotation = round(wrap(Math.atan2(dy, dx) / RAD));
-        c.distance = round(Math.max(CELL, Math.hypot(dx, dy) / Math.max(0.05, Math.abs(Math.cos(o.angleOfAttack * RAD)))));
+        // The camera turns round the target as the pointer goes round it, and comes nearer or goes farther with it:
+        // the ground point under the pointer when the drag started (behind the model, which stands in the air) is
+        // its handle.
+        const r0 = Math.hypot(drag.start[0] - o.targetX, drag.start[1] - o.targetY), r1 = Math.hypot(x - o.targetX, y - o.targetY);
+        if (r0 < 1 || r1 < 1) return;
+        const turn = Math.atan2(y - o.targetY, x - o.targetX) - Math.atan2(drag.start[1] - o.targetY, drag.start[0] - o.targetX);
+        c.rotation = round(wrap(o.rotation + turn / RAD));
+        c.distance = round(Math.max(CELL, o.distance * (r1 / r0)));
       }
       render();
     },
@@ -446,6 +478,6 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (active) { renderPanel(); render(); }
       return true;
     },
-    dispose() { ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
+    dispose() { clear(); ed.host.style.cursor = ""; },
   };
 }

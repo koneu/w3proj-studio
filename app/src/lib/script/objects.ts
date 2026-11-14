@@ -83,24 +83,25 @@ export function customIdsOf(files: (ObjectFile | null)[]): Set<string> {
   return ids;
 }
 
-/** Team colours the game's unit types come with (the teamColor column of Units\unitUI.slk, parsed). */
-export function gameTeamColors(rows: Record<string, string>[]): Map<string, number> {
+/** Team colours the game's unit types come with (the teamColor column of Units\unitUI.slk, parsed). Items: the same
+ *  column of Units\ItemData.slk, with `idColumn` "itemID". */
+export function gameTeamColors(rows: Record<string, string>[], idColumn = "unitUIID"): Map<string, number> {
   const out = new Map<string, number>();
   for (const r of rows) {
     const v = Number(r.teamColor);
-    if (r.teamColor !== undefined && r.teamColor !== "" && v >= 0) out.set(r.unitUIID, v);
+    if (r.teamColor !== undefined && r.teamColor !== "" && v >= 0) out.set(r[idColumn], v);
   }
   return out;
 }
 
 /** Team colours of unit types: the game's, changed by the map (object data field utco). A custom
  *  unit without its own takes the one of its base. The World Editor writes them into the script
- *  as SetUnitColor. */
-export function teamColors(files: (ObjectFile | null | undefined)[], game: Map<string, number> = new Map()): Map<string, number> {
+ *  as SetUnitColor. Item types: `field` "itco" with the war3map.w3t files (the World Editor's BlzSetItemColor). */
+export function teamColors(files: (ObjectFile | null | undefined)[], game: Map<string, number> = new Map(), field = "utco"): Map<string, number> {
   const out = new Map(game);
   /** The object's own value; -1 means no colour, undefined that it doesn't say. */
   const own = (o: ObjectEntry) => {
-    const v = o.mods?.find((m) => m.field === "utco")?.value;
+    const v = o.mods?.find((m) => m.field === field)?.value;
     return typeof v === "number" ? v : undefined;
   };
   const put = (id: string, v: number | undefined) => { if (v === undefined || v < 0) out.delete(id); else out.set(id, v); };

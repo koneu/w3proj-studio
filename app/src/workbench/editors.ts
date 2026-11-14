@@ -66,6 +66,9 @@ export interface DocumentIO {
   /** The key a file is known by (the workspace's `key`: lower case only where the file system ignores case);
    *  without it, lower case. Saved and changed files are matched to tabs by it. */
   key?(path: string): string;
+  /** Resolves once the project's whole file list is read (at once when no project is open), so that an editor
+   *  deciding by it whether its file is there (new and empty, or read) never takes "not listed yet" for absent. */
+  filesReady?(path: string): Promise<void>;
 }
 
 /** Tabbed editor area. Picks an editor provider per file from the
@@ -92,17 +95,24 @@ export class EditorService {
   confirm: (message: string, ...actions: string[]) => Promise<string | undefined> = async () => undefined;
   /** Why an extension's editor isn't available (disabled, failed to activate). */
   whyUnavailable: (extensionId: string) => string | undefined = () => undefined;
-  /** Where the open tabs are remembered (per project; null: not remembered). */
-  memory: { load(): OpenEditors | null; store(state: OpenEditors): void } | null = null;
+  /** Where the open tabs are remembered (per project; null: not remembered). `load` may wait (for the project's file
+   *  list: a file not listed yet is no file that is gone). */
+  memory: { load(): OpenEditors | null | Promise<OpenEditors | null>; store(state: OpenEditors): void } | null = null;
   /** Off while tabs are closed for a project switch or restored. */
   private remembering = true;
   /** From startup, and whenever a project opens, until its tabs are restored: tabs closed
    *  meanwhile (the welcome page at startup) must not overwrite what is remembered. */
   private awaitingRestore = true;
+  /** Tabs the user closed while awaiting the restore: they stay closed when it brings the others back. */
+  private closedWhileAwaiting = new Set<string>();
+  /** Counts the projectOpened() calls: a restore that waited through another one is out of date. */
+  private openedGen = 0;
 
   /** A project was opened: the next restore() brings its tabs back; until then nothing is stored. */
   projectOpened() {
+    this.openedGen++;
     this.awaitingRestore = true;
+    this.closedWhileAwaiting.clear();
   }
 
   /** `pending`: where saves and the reloads after them are counted, for the workbench's settled(). */
@@ -217,6 +227,9 @@ export class EditorService {
     return this.active?.path ?? null;
   }
 
+  /** Whether the editor in front is the terrain editor (`when: "terrain"` commands act on it). */
+  terrainActive() { return this.active?.providerId === "w3.terrainViewer"; }
+
   /** What the active editor can do: the Welcome page is a tab, but has nothing to save. */
   canSave() { return !!this.active?.instance?.save; }
   canUndo() { return !!this.active?.instance?.undo; }
@@ -294,6 +307,7 @@ export class EditorService {
       if (e.button === 1) { e.preventDefault(); this.close(tab); }
       else if (e.button === 0) this.show(tab);
     });
+    if (this.remembering) this.closedWhileAwaiting.delete(path);
     this.tabs.push(tab);
     this.tabsEl.append(tab.tabEl);
     this.content.append(el);
@@ -323,13 +337,20 @@ export class EditorService {
   /** Reopens the tabs remembered for the current project (the active one is loaded, the
    *  others when they are first shown). Tabs already open stay. */
   async restore() {
+    // The memory may wait for the project's file list (right after a start or an open): until it has answered, tabs
+    // closed meanwhile (the welcome page at startup) are still noted, and nothing is stored over what is remembered.
+    const gen = this.openedGen;
+    const state = await this.memory?.load();
+    // Another project opened meanwhile: its own restore brings its tabs back.
+    if (gen !== this.openedGen) return;
     this.awaitingRestore = false;
-    const state = this.memory?.load();
+    const closed = this.closedWhileAwaiting;
+    this.closedWhileAwaiting = new Set();
     if (!state?.tabs.length) return;
     this.remembering = false;
     try {
       for (const { path, editor, view } of state.tabs) {
-        if (this.tabs.some((t) => t.path === path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
+        if (this.tabs.some((t) => t.path === path) || closed.has(path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
         const tab = this.addTab(path, editor);
         tab.pending = true;
         tab.view = keptView(view);
@@ -339,6 +360,8 @@ export class EditorService {
     }
     const active = this.tabs.find((t) => t.path === state.active) ?? this.tabs.find((t) => t.pending);
     if (active) this.show(active);
+    // Nothing left to show (all closed meanwhile): what is remembered is still the old set.
+    else if (closed.size) this.remember();
   }
 
   /** Stores the open tabs (with their editors' view states) for the project: on every tab change, and before the
@@ -375,6 +398,10 @@ export class EditorService {
     tab.failed = false;
     tab.missed = new Set();
     try {
+      // Right after an open the file list may still be read: an editor that started empty for a file not listed yet
+      // would write its empty document over the real one.
+      await this.io.filesReady?.(tab.path);
+      if (!this.tabs.includes(tab)) return;
       tab.stamp = await this.stampOf(tab.path);
       const instance = await tab.provider!.resolve(tab.el, tab.doc!);
       // The tab was closed while its editor loaded: nobody would dispose it (GPU buffers, timers, listeners).
@@ -648,6 +675,7 @@ export class EditorService {
     tab.el.remove();
     tab.tabEl.remove();
     this.tabs.splice(i, 1);
+    if (this.awaitingRestore && this.remembering) this.closedWhileAwaiting.add(tab.path);
     if (this.active === tab) {
       this.active = null;
       this.showActions();

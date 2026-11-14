@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { fogOf } from "../model/fog";
 import { applySky, NO_WEATHER, resolveChoice, resolveWeather } from "./atmosphere";
 
 const tilesets: [string, string][] = [["A", "Ashenvale"], ["L", "Lordaeron Summer"]];
@@ -9,6 +10,14 @@ const doc = () => ({
   fog: { style: 0, start: 3000, end: 5000, density: 0.5, color: [255, 255, 255, 255] },
   terrainFog: { style: 0, overSky: 0, linearStart: 0, linearEnd: 0, maxOpacity: 0, height: 0 },
   waterTint: [128, 255, 255, 255],
+});
+
+test("set_sky's fogColor is the colour the view draws, as \"#rrggbb\" and as [red, green, blue]", () => {
+  for (const fogColor of ["#dc5028", [220, 80, 40]]) {
+    const d = doc();
+    applySky(d, { fogColor }, { tilesets });
+    assert.deepEqual(fogOf(d)?.color.map((c) => Math.round(c * 255)), [220, 80, 40], JSON.stringify(fogColor));
+  }
 });
 
 test("a name is an id or a label in any case; an unknown one lists the choices", () => {
@@ -48,4 +57,13 @@ test("a refused call leaves the document as it was", () => {
   assert.throws(() => applySky({ ...doc(), version: 18 }, { fogEnd: 1 }, { tilesets }), /no light, fog/);
   const old = doc() as Record<string, unknown>; delete old.terrainFog;
   assert.throws(() => applySky(old, { overSky: 1 }, { tilesets }), /over sky/);
+});
+
+test("set_sky says the terrain view shows no fog while its Fog checkbox is off", async () => {
+  const { fogViewNote } = await import("./atmosphere");
+  assert.match(fogViewNote({ fogEnd: 4000 }, false), /Fog.*checkbox/);
+  assert.match(fogViewNote({ useFog: true }, false), /Fog/);
+  assert.equal(fogViewNote({ fogEnd: 4000 }, true), "", "view fog on: nothing to add");
+  assert.equal(fogViewNote({ useFog: false }, false), "", "fog turned off: nothing to add");
+  assert.equal(fogViewNote({ waterTint: "#fff" }, false), "", "no fog setting: nothing to add");
 });

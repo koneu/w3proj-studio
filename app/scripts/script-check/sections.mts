@@ -28,7 +28,9 @@ const light = (sec: string, t: string, kind: string) =>
 const balance = parseSlk(read("UnitBalance.slk"));
 const buildings = new Set(balance.filter((r: any) => r.isbldg === "1").map((r: any) => r.unitBalanceID));
 const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
-const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
+const itemRows = parseSlk(read("ItemData.slk"));
+const itemIds = new Set(itemRows.map((r: any) => r.itemID));
+const gameItemColors = O.gameTeamColors(itemRows, "itemID");
 const abilityRows = parseSlk(read("AbilityData.slk"));
 const abilityIds = new Set(abilityRows.map((r: any) => r.alias));
 const gameHeroAbilities = new Set<string>(abilityRows.filter((r: any) => r.hero === "1").map((r: any) => r.alias));
@@ -88,6 +90,7 @@ for (const m of maps) {
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.
   const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
   const colors = O.teamColors(unitFiles, gameColors), special = O.specialUnits(unitFiles);
+  const itemColors = O.teamColors([json(d, "war3map.w3t"), json(d, "war3mapSkin.w3t")], gameItemColors, "itco");
   const isBuilding = O.buildingTypes(unitFiles, buildings);
   const customAbilities = new Set<string>((json(d, "war3map.w3a")?.custom ?? []).map((o: any) => o.id));
   const heroAbility = O.heroAbilities([json(d, "war3map.w3a"), json(d, "war3mapSkin.w3a")], gameHeroAbilities);
@@ -102,7 +105,7 @@ for (const m of maps) {
   };
   const lt = (info.lightEnvironment || info.tileset) as string;
   const input = {
-    info, data, triggers, custom, kindOf, autocastOrders: O.autocastOrdersOf(orders, [json(d, "war3map.w3a"), json(d, "war3mapSkin.w3a")]), heroAbility, destructableTint, teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
+    info, data, triggers, custom, kindOf, autocastOrders: O.autocastOrdersOf(orders, [json(d, "war3map.w3a"), json(d, "war3mapSkin.w3a")]), heroAbility, destructableTint, teamColor: (id: string) => colors.get(id), itemColor: (id: string) => itemColors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
     customColor: O.customColorTypes(unitFiles, gameCustomColors),
     lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,

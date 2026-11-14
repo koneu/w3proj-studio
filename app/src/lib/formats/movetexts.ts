@@ -1,5 +1,5 @@
 // Move Texts to String Table: what the World Editor does to a map's texts when it saves it, as a command of its own
-// (Studio's save keeps every file as it is). Literal texts of some object fields and of the players' and forces' names
+// (Studio's save keeps the texts where they are; packing only drops unused strings: builtin/map-project/prunestrings.ts). Literal texts of some object fields and of the players' and forces' names
 // go into war3map.wts as new strings, the fields then refer to them ("TRIGSTR_007"), and strings nothing refers to any
 // more leave the table.
 //
@@ -8,37 +8,115 @@
 // races, target lists (umdl, urac, ua1p, atar), the map's name, author, description, suggested players, and the
 // loading-screen and prologue texts. Empty texts stay literal (Firebrand Exarchate Race, saved by it, has some).
 // Its new strings go on after the highest number; each object string gets a comment naming the kind, the object and
-// the field, as `// Units: h000 (Lit Unit), Tip (Tooltip - Basic)`; levels share it. Trigger strings aren't
-// covered (not checked in the World Editor yet).
+// the field, as `// Units: h000 (Lit Unit), Tip (Tooltip - Basic)`; levels share it. An upgrade's comment names the
+// game's upgrade it is based on (all its level names, "Iron Forged Swords,Steel Forged Swords,…"), even when the map
+// renames it.
+//
+// Triggers (we-drive, 2026-11-13, copies of cliff.w3m with GUI triggers holding literals of many parameter kinds;
+// evidence in target/evidence/movetexts-triggers of branch movetexts-triggers): every literal whose parameter is of
+// type StringExt moves, in events, conditions and actions alike, in calls (StringCase's text) and in If/Then/Else
+// branches, in disabled ECAs and disabled triggers, empty ones too, and each occurrence gets its own string (two
+// actions with the same text take two numbers). Their strings have no comment and come before the players' names and
+// the objects. Literals of type string (string comparisons, OperatorString's parts, Set Variable's value) and
+// stringnoformat (chat strings, game cache keys), file paths, custom script code, comments, variables' initial
+// values, trigger names and descriptions, and the custom texts (war3map.wct) stay as they are. The generated
+// war3map.j then says "TRIGSTR_003" where it said "lit display". The editor moves a text with a line starting with
+// "}" too, which cuts it in the table; here it stays literal.
+//
+// The full list of fields (we-drive, 2026-11-13, a literal in every text field of every kind, and in the art, tech
+// and data fields that take text; evidence in target/evidence/moveto-fields): the Text category of each kind, but
+// not the abilities' order strings (aord, aoru, aoro, aorf) nor the art one (uepa); and the upgrades' class and
+// effects (gcls, gef1-gef4), but not their codes (gco1-gco4). Icons, models, sounds, attachment points, tech lists,
+// tilesets, categories, races and an ability's data stay literal.
+//
+// A map's per-language string tables (`_Locales\deDE.w3mod\war3map.wts`, one per language; the game's own melee maps
+// carry eleven, each a full copy of war3map.wts with every number translated or not): the World Editor's save leaves
+// them byte for byte (we-drive, 2026-11-13, a copy of lit.w3m with a German table holding 1-3 and a German-only 50,
+// target/evidence/movetexts-locales): its new strings are missing there, the string it dropped from war3map.wts stays
+// there, and it numbers its new strings without looking at them, so its string 50 took the number of the German-only
+// one. (It keeps such a table only when war3map.imp lists it; one it doesn't list is gone after the save.) Move Texts
+// does better: its new strings go into every language's table too, with the same text and comment (to be translated
+// there; a table that replaces war3map.wts whole would otherwise show the bare reference), and they are numbered after
+// every number of every table. Strings it drops leave war3map.wts only: a language's table keeps its translations, and
+// its numbers stay taken.
 
 import { StringTable, appendStrings, removeStrings, wtsCutLines } from "./wts";
+import { addLocaleStrings, localeNumbers, wtsEol } from "./localewts";
+import type { TriggerData } from "../triggers/triggerdata";
+import type { Eca, Param, TriggerFile } from "../triggers/wtg";
+
+/** A trigger parameter typed in as text (wtg parameter type 3). */
+const LITERAL = 3;
+
+export { LOCALE_WTS } from "./localewts";
 
 /** The object fields whose literal texts move. */
-export const MOVED_FIELDS: ReadonlySet<string> = new Set(["unam", "utip", "utub", "upro", "uhot", "anam", "atp1", "aub1", "ansf"]);
+export const MOVED_FIELDS: ReadonlySet<string> = new Set([
+  // Units and items.
+  "unam", "unsf", "utip", "utub", "ides", "upro", "uhot", "utpr", "uawt", "ucun", "ucut",
+  // Destructables, doodads.
+  "bnam", "bsuf", "dnam",
+  // Abilities.
+  "anam", "ansf", "atp1", "aub1", "aut1", "auu1", "aret", "arut", "ahky", "auhk", "arhk",
+  // Buffs/effects.
+  "fnam", "fnsf", "ftip", "fube",
+  // Upgrades.
+  "gnam", "gnsf", "gtp1", "gub1", "ghk1", "gcls", "gef1", "gef2", "gef3", "gef4",
+]);
 
 /** The object kinds in the order their strings are numbered (the World Editor's Object Editor tabs). */
 export const OBJECT_KINDS = ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"] as const;
 
 /** A kind as the World Editor's comments name it. */
 export const KIND_LABELS: Record<string, string> = {
-  w3u: "Units", w3t: "Items", w3b: "Destructables", w3d: "Doodads", w3a: "Abilities", w3h: "Buffs/Effects", w3q: "Upgrades",
+  w3u: "Units", w3t: "Items", w3b: "Destructibles", w3d: "Doodads", w3a: "Abilities", w3h: "Buffs/Effects", w3q: "Upgrades",
 };
 
-/** The name field of each kind, for the object's name in a comment. */
-const NAME_FIELD: Record<string, string> = { w3u: "unam", w3t: "unam", w3b: "bnam", w3d: "dnam", w3a: "anam", w3h: "fnam", w3q: "gnam" };
+/** The name field of each kind, for the object's name in a comment. Upgrades have none: theirs is the game's. */
+const NAME_FIELD: Record<string, string | undefined> = { w3u: "unam", w3t: "unam", w3b: "bnam", w3d: "dnam", w3a: "anam", w3h: "fnam" };
 
 /** A field's metadata column and label as the World Editor's comments give them (English game data): for when the
  *  game's metadata can't be read. */
 export const FALLBACK_FIELDS: Record<string, { field: string; label: string }> = {
   unam: { field: "Name", label: "Name" },
+  unsf: { field: "EditorSuffix", label: "Name - Editor Suffix" },
   utip: { field: "Tip", label: "Tooltip - Basic" },
   utub: { field: "Ubertip", label: "Tooltip - Extended" },
+  ides: { field: "Description", label: "Description" },
   upro: { field: "Propernames", label: "Proper Names" },
   uhot: { field: "Hotkey", label: "Hotkey" },
+  utpr: { field: "Revivetip", label: "Tooltip - Revive" },
+  uawt: { field: "Awakentip", label: "Tooltip - Awaken" },
+  ucun: { field: "Casterupgradename", label: "Caster Upgrade Names" },
+  ucut: { field: "Casterupgradetip", label: "Caster Upgrade Tips" },
+  bnam: { field: "Name", label: "Name" },
+  bsuf: { field: "EditorSuffix", label: "Editor Suffix" },
+  dnam: { field: "Name", label: "Name" },
   anam: { field: "Name", label: "Name" },
+  ansf: { field: "EditorSuffix", label: "Editor Suffix" },
   atp1: { field: "Tip", label: "Tooltip - Normal" },
   aub1: { field: "Ubertip", label: "Tooltip - Normal - Extended" },
-  ansf: { field: "EditorSuffix", label: "Editor Suffix" },
+  aut1: { field: "Untip", label: "Tooltip - Turn Off" },
+  auu1: { field: "Unubertip", label: "Tooltip - Turn Off - Extended" },
+  aret: { field: "Researchtip", label: "Tooltip - Learn" },
+  arut: { field: "Researchubertip", label: "Tooltip - Learn - Extended" },
+  ahky: { field: "Hotkey", label: "Hotkey - Normal" },
+  auhk: { field: "Unhotkey", label: "Hotkey - Turn Off" },
+  arhk: { field: "Researchhotkey", label: "Hotkey - Learn" },
+  fnam: { field: "EditorName", label: "Name (Editor Only)" },
+  fnsf: { field: "EditorSuffix", label: "Editor Suffix" },
+  ftip: { field: "Bufftip", label: "Tooltip" },
+  fube: { field: "Buffubertip", label: "Tooltip - Extended" },
+  gnam: { field: "Name", label: "Name" },
+  gnsf: { field: "EditorSuffix", label: "Editor Suffix" },
+  gtp1: { field: "Tip", label: "Tooltip" },
+  gub1: { field: "Ubertip", label: "Tooltip - Extended" },
+  ghk1: { field: "Hotkey", label: "Hotkey" },
+  gcls: { field: "class", label: "Class" },
+  gef1: { field: "effect1", label: "Effect 1" },
+  gef2: { field: "effect2", label: "Effect 2" },
+  gef3: { field: "effect3", label: "Effect 3" },
+  gef4: { field: "effect4", label: "Effect 4" },
 };
 
 export interface TextMod { field: string; type?: string; level?: number; data?: number; value: unknown }
@@ -49,6 +127,9 @@ export interface TextMapInfo { players?: { name?: unknown }[]; forces?: { name?:
 export interface MoveTextsInput {
   /** war3map.wts, or null when the map has none (one is made). */
   wts: string | null;
+  /** The languages' string tables (`map/_Locales/deDE.w3mod/war3map.wts`), path as given: the new strings go into each
+   *  too, and no new string takes a number one of them has. */
+  locales?: { path: string; wts: string }[];
   /** war3map.w3i as its JSON, or null. */
   info: TextMapInfo | null;
   /** The object files as their JSON: main (war3map.w3u) and Skin (war3mapSkin.w3u) ones, any order. */
@@ -58,10 +139,16 @@ export interface MoveTextsInput {
   otherTexts: Iterable<string>;
   /** Strings referred to from files that can't be read as text (raw map files). */
   otherRefs?: Iterable<number>;
+  /** Numbers no new string may take, though nothing refers to them now: the strings an earlier drop recorded
+   *  (lib/formats/prunedstrings), which come back with their old texts when a reference does. */
+  reserved?: Iterable<number>;
   /** A field's metadata column and label (the game's metadata); FALLBACK_FIELDS where it gives none. */
   describe?(kind: string, field: string): { field: string; label: string } | undefined;
   /** A game object's name, for a comment on an object that doesn't name itself. */
   baseName?(kind: string, base: string): string | undefined;
+  /** war3map.wtg.json as its trigger file, with the game's TriggerData.txt for the parameters' types: its StringExt
+   *  literals move. */
+  triggers?: { path: string; doc: TriggerFile; data: Pick<TriggerData, "find"> } | null;
 }
 
 /** A text left literal, and why. */
@@ -70,8 +157,12 @@ export interface KeptText { where: string; why: string }
 export interface MoveTextsResult {
   /** The new war3map.wts, or null when it stays as it is. */
   wts: string | null;
+  /** The languages' tables that changed (paths as given): each with the new strings added. */
+  locales: { path: string; wts: string }[];
   /** The new war3map.w3i JSON, or null when it stays. */
   info: TextMapInfo | null;
+  /** The new trigger file (path as given), or null when it stays. */
+  triggers: { path: string; doc: TriggerFile } | null;
   /** The object files that changed (paths as given), with their new JSON. */
   objects: { path: string; doc: TextObjectFile }[];
   /** The new strings' numbers, in order. */
@@ -101,20 +192,26 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   const table = input.wts === null ? null : new StringTable(input.wts);
   const resolve = (v: string) => (table ? table.resolve(v) : v);
   const otherTexts = [...input.otherTexts];
-  // New numbers go on after the highest string, and after the highest reference too: a reference to a string the table
-  // lacks would otherwise come to show a new text.
+  // New numbers go on after the highest string, and after the highest reference and recorded dropped string too: a
+  // reference to a string the table lacks would otherwise come to show a new text.
   let next = 1;
   if (table) for (const [n] of table.entries()) next = Math.max(next, n + 1);
   const before = new Set<number>(input.otherRefs ?? []);
   for (const t of otherTexts) refsIn(t, before);
   refsIn(JSON.stringify(input.info ?? null), before);
   for (const f of input.objects) refsIn(JSON.stringify(f.doc), before);
+  if (input.triggers) refsIn(JSON.stringify(input.triggers.doc), before);
   for (const n of before) next = Math.max(next, n + 1);
+  for (const n of input.reserved ?? []) next = Math.max(next, n + 1);
+  // And after every number of the languages' tables: a string only one of them has would otherwise show there in place
+  // of the new one.
+  const locales = input.locales ?? [];
+  for (const n of localeNumbers(locales.map((l) => l.wts))) next = Math.max(next, n + 1);
   const blocks: { num: number; text: string; comment: string | null }[] = [];
   const kept: KeptText[] = [];
   /** The text's new reference, or null when it stays literal. */
-  const take = (value: unknown, comment: string | null, where: string): string | null => {
-    if (typeof value !== "string" || value === "" || StringTable.ref(value) !== null) return null;
+  const take = (value: unknown, comment: string | null, where: string, empty = false): string | null => {
+    if (typeof value !== "string" || (value === "" && !empty) || StringTable.ref(value) !== null) return null;
     const text = value.replace(/\r\n/g, "\n");
     if (wtsCutLines(text).length) {
       kept.push({ where, why: "a line of it starts with \"}\", where the game would end the string" });
@@ -124,6 +221,35 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
     blocks.push({ num, text, comment });
     return stringRef(num);
   };
+
+  // The triggers' StringExt literals first, without comments, empty ones too: trigger by trigger in the file's order, each
+  // ECA's parameters (and the calls in them, depth first) before its children.
+  let triggers: { path: string; doc: TriggerFile } | null = null;
+  if (input.triggers) {
+    const { path, data } = input.triggers;
+    const doc = structuredClone(input.triggers.doc);
+    let changed = false;
+    const param = (p: Param, type: string, where: string) => {
+      if (p.type === LITERAL && type === "StringExt") {
+        const ref = take(p.value, null, where, true);
+        if (ref) { p.value = ref; changed = true; }
+      }
+      if (p.call) {
+        const args = data.find(p.call.kind, p.call.name)?.args ?? [];
+        p.call.params.forEach((q, k) => param(q, args[k] ?? "", `${where} > ${p.call!.name}`));
+      }
+      if (p.index) param(p.index, "integer", where);
+    };
+    const eca = (e: Eca, where: string) => {
+      const args = data.find(e.kind, e.name)?.args ?? [];
+      e.params.forEach((p, k) => param(p, args[k] ?? "", `${where}: ${e.name}`));
+      for (const c of e.children ?? []) eca(c, where);
+    };
+    for (const item of doc.items) {
+      if ("ecas" in item) for (const e of item.ecas ?? []) eca(e, `${path}: ${oneLine(item.name)}`);
+    }
+    if (changed) triggers = { path, doc };
+  }
 
   // The players' and forces' names, without comments.
   let info: TextMapInfo | null = null;
@@ -159,7 +285,8 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
       for (const [k, parts] of byKey) {
         const nameField = NAME_FIELD[kind];
         // The Skin file's name is the one where both have it (as the World Editor reads them).
-        const named = [...parts].reverse().flatMap((p) => modsOf(p.o)).find((m) => m.field === nameField && typeof m.value === "string" && m.value !== "");
+        const named = nameField === undefined ? undefined
+          : [...parts].reverse().flatMap((p) => modsOf(p.o)).find((m) => m.field === nameField && typeof m.value === "string" && m.value !== "");
         const name = oneLine(named ? resolve(named.value as string) : (input.baseName?.(kind, parts[0].o.base) ?? parts[0].o.base));
         for (const { file, o } of parts) {
           for (const m of modsOf(o)) {
@@ -179,14 +306,14 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   for (const t of otherTexts) refsIn(t, refs);
   refsIn(JSON.stringify(info ?? input.info ?? null), refs);
   for (const f of copies) refsIn(JSON.stringify(f.doc), refs);
+  if (input.triggers) refsIn(JSON.stringify((triggers ?? input.triggers).doc), refs);
   const dropped = table ? [...table.entries()].map(([n]) => n).filter((n) => !refs.has(n)) : [];
   const droppedSet = new Set(dropped);
 
   let wts: string | null = null;
   if (blocks.length || dropped.length) {
     const base = input.wts ?? "﻿";
-    const eol = input.wts === null || input.wts.includes("\r\n") || !input.wts.includes("\n") ? "\r\n" : "\n";
-    const out = appendStrings(removeStrings(base, droppedSet), blocks, eol);
+    const out = appendStrings(removeStrings(base, droppedSet), blocks, wtsEol(input.wts));
     // Read back: every new string whole, every old one but the dropped as it was.
     const back = new StringTable(out);
     for (const b of blocks) {
@@ -199,8 +326,13 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
     }
     wts = out;
   }
+  // The languages' tables: the new strings added, nothing dropped (each keeps its translations).
+  const localeOut: { path: string; wts: string }[] = [];
+  if (blocks.length) {
+    for (const l of locales) localeOut.push({ path: l.path, wts: addLocaleStrings(l.path, l.wts, blocks) });
+  }
   return {
-    wts, info,
+    wts, locales: localeOut, info, triggers,
     objects: copies.filter((f) => f.changed).map((f) => ({ path: f.path, doc: f.doc })),
     added: blocks.map((b) => b.num), dropped, kept,
   };

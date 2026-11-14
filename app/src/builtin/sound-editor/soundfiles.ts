@@ -8,6 +8,7 @@ import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { soundVariants } from "../../lib/audio/variants";
 import { readImported } from "../../lib/imports";
+import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { SOUND_EXTENSIONS } from "./sounds";
 
 export const SOUND_FILTER = [{ name: "Sound files", extensions: ["flac", "wav", "mp3", "ogg"] }];
@@ -109,14 +110,18 @@ export function planReplace(opts: { soundFile: string; sourceName: string; proje
  *  written, null when cancelled. */
 export async function replaceSound(w3: W3Api, soundFile: string): Promise<string | null> {
   if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+  // The import list is read by what the file list has: one not listed yet would be written anew, empty.
+  const asked = (await projectWithFiles(w3)).root;
   const open = w3.editors.unsavedPaths().filter((p) => /^map\/war3map\.imp(\.json)?$/i.test(p));
   if (open.length) throw new Error(`Save or discard the changes of ${open.join(", ")} first.`);
   const source = await w3.window.pickFile({ title: "Replace Internal Sound", filters: SOUND_FILTER });
   if (!source) return null;
+  const changed = () => { if (w3.workspace.project()?.root !== asked) throw new Error("The project changed meanwhile; nothing was replaced."); };
+  changed();
   const name = source.split(/[\\/]/).pop()!;
   const listPath = "map/war3map.imp.json";
   const raw = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.imp") && !w3.workspace.files().some((f) => f.path.toLowerCase() === listPath);
-  const root = w3.workspace.project()!.root;
+  const root = asked;
   const text = w3.workspace.files().some((f) => f.path.toLowerCase() === listPath) ? await w3.workspace.readText(listPath)
     : raw ? await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }) : null;
   const doc = text === null ? { format: "w3proj.imports/1", version: 1, files: [] as ImportEntry[] } : JSON.parse(text) as { format?: string; version: number; files: ImportEntry[] };
@@ -124,6 +129,7 @@ export async function replaceSound(w3: W3Api, soundFile: string): Promise<string
   const plan = planReplace({ soundFile, sourceName: name, projectFiles: w3.workspace.files().map((f) => f.path), imports: doc.files });
   const what = plan.inMap ? `The map's ${toArchiveName(plan.write.slice(4))} is replaced` : `The game's ${soundFile} is overridden by a file of the map at ${plan.archive}`;
   if (!(await w3.window.confirm(`Replace the sound ${soundFile} with ${name}? ${what}${plan.remove ? `, and ${toArchiveName(plan.remove.slice(4))} removed` : ""}. A checkpoint is made first, to come back to, where they're enabled.`, "Replace", 60_000))) return null;
+  changed();
   await checkpointIfOn(w3, "Replace Internal Sound");
   await w3.workspace.copy(source, plan.write);
   if (plan.remove) await w3.workspace.delete(plan.remove);

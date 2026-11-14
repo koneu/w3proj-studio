@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRandom, cycledId, levelBytes, levelOf, positionsFor, randomName, randomOf, randomWhatOf, rollLook, type LookOptions } from "./randomplace";
+import { applyRandom, autoCycleAfterPlace, cycledId, levelBytes, levelOf, positionsFor, randomName, randomOf, placeAngle, randomWhatOf, rollLook, type LookOptions } from "./randomplace";
 
 const tree = { numVar: 10, randScale: true, minScale: 0.8, maxScale: 1.2, fixedRot: null };
 const plain: LookOptions = { variation: null, randomVariation: false, randomRotation: false, randomScale: "off" };
@@ -119,4 +119,24 @@ test("Cycle Random Groups shows each line's object, wrapping, and leaves the res
   assert.equal(cycledId({ ...u, randomGroup: 5 }, groups, 0), undefined);
   assert.equal(cycledId({ ...u, randomType: 0 }, groups, 0), undefined);
   assert.equal(cycledId({ id: "hfoo", randomType: 1, randomGroup: 2 }, groups, 0), undefined);
+});
+
+test("scatter and stroke facing follow the same rule as single placement (placeAngle)", () => {
+  const unit = { ...tree, kind: "w3u" };
+  const r = seq(0.25);
+  assert.ok(near(placeAngle(tree, true, r), Math.PI / 2), "doodad rotates randomly when on");
+  assert.ok(near(placeAngle(unit, true, r), (270 * Math.PI) / 180), "unit keeps 270 even when on");
+  assert.ok(near(placeAngle(tree, false, r), (270 * Math.PI) / 180), "doodad keeps 270 when off");
+  assert.ok(near(placeAngle({ ...tree, fixedRot: 90 }, true, r), Math.PI / 2), "fixed rotation wins");
+});
+
+test("Auto Cycle Random Groups cycles after a random-group placement only, and only when on", () => {
+  const group = { what: "unit", by: "group", group: 1, position: 0 } as const;
+  const steps: number[] = [];
+  assert.equal(autoCycleAfterPlace(group, true, (s) => steps.push(s)), true);
+  assert.deepEqual(steps, [1]);
+  assert.equal(autoCycleAfterPlace(group, false, (s) => steps.push(s)), false);
+  assert.equal(autoCycleAfterPlace({ what: "unit", by: "level", level: -1 }, true, (s) => steps.push(s)), false);
+  assert.equal(autoCycleAfterPlace(undefined, true, (s) => steps.push(s)), false);
+  assert.deepEqual(steps, [1]);
 });

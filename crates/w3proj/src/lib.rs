@@ -1,7 +1,9 @@
 //! Warcraft III map projects: unpack a `.w3x` into a git-friendly folder and
 //! pack it back as a release step.
 
+pub mod atomic;
 pub mod codec;
+pub mod derived;
 pub mod format;
 pub mod header;
 pub mod lossless;
@@ -15,6 +17,7 @@ pub mod w3o;
 pub mod w3e;
 pub mod wct;
 pub mod wtg;
+pub mod wts;
 
 /// The pipe between `w3proj mcp` and the running app. Per user: two people's apps don't meet.
 /// Windows: a named pipe. Elsewhere: a Unix socket in a folder only this user can open
@@ -89,7 +92,7 @@ pub fn private_dir(dir: &std::path::Path) -> std::result::Result<(), String> {
 
 pub use codec::{Codec, Registry};
 pub use project::{
-    create, pack, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
+    create, pack, pack_pruned, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
 };
 
 #[derive(Debug, thiserror::Error)]

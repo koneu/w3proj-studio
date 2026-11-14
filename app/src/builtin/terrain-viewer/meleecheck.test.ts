@@ -38,7 +38,7 @@ test("a fair map has no errors or warnings", () => {
 
 test("every answer says how far to trust it, the Camp range above all", () => {
   const { accuracy } = checkMelee(map());
-  assert.ok(accuracy.some((n) => /Camp mode shortens/.test(n) && /worst case/.test(n)));
+  assert.ok(accuracy.some((n) => /Camp mode counts as 200/.test(n)));
   assert.ok(accuracy.some((n) => /calls others within 600/.test(n)));
   assert.ok(accuracy.some((n) => /sleep at night/.test(n)));
   assert.ok(accuracy.some((n) => /fun/.test(n)));
@@ -105,10 +105,13 @@ test("a route past creeps not on Camp mode is sure; past camped ones it's the wo
   const hit = checkMelee(sure).findings.find((x) => x.rule === "aggro")!;
   assert.equal(hit.severity, "error");
   assert.match(hit.message, /They'll attack/);
-  const soft = { ...map(camp(0, 400)), routes: sure.routes };
+  // Camp mode sight is 200, not the type's own range (usually 500): 400 away is out of it, 150 is in.
+  const far = { ...map(camp(0, 400)), routes: sure.routes };
+  assert.ok(!checkMelee(far).findings.some((x) => x.rule === "aggro"));
+  const soft = { ...map(camp(0, 150)), routes: sure.routes };
   const maybe = checkMelee(soft).findings.find((x) => x.rule === "aggro")!;
   assert.equal(maybe.severity, "warning");
-  assert.match(maybe.message, /may well stay put/);
+  assert.match(maybe.message, /Camp mode sight \(200\)/);
 });
 
 test("a creep's own range counts, in both directions", () => {

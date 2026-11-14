@@ -4,6 +4,7 @@
 // No editor state here: the viewer passes what it has, the tests pass made-up values.
 
 import type { GridSize } from "./viewcmds";
+import { WHEEL_ZOOM } from "./wheelzoom";
 
 export type TerrainLook = "textured" | "wireframe" | "hidden";
 export const TERRAIN_LOOKS: readonly TerrainLook[] = ["textured", "wireframe", "hidden"];
@@ -107,25 +108,69 @@ export function groundLayersDrawn(shown: Pick<ViewSet, GroundLayer>, activeGroup
 /** A circle on the ground: centre, radius, colour 0–255. */
 export interface RangeRing { x: number; y: number; r: number; rgb: [number, number, number] }
 
-/** The World Editor's Light Ranges colour (green). */
-export const LIGHT_RANGE_RGB: [number, number, number] = [60, 255, 60];
+/** What lightRings needs of a model's light (lib/model/mdx.ts ModelLight). */
+export interface RangeLight {
+  color: readonly number[];
+  intensity: number;
+  colorTrack?: { values: ArrayLike<number>; size: number };
+  intensityTrack?: { values: ArrayLike<number>; size: number };
+}
+
+/** The mean of a track's keys, component `k` of `size`; null without keys. */
+function keyMean(track: { values: ArrayLike<number>; size: number } | undefined, k: number): number | null {
+  if (!track || track.size < 1) return null;
+  const n = Math.floor(track.values.length / track.size);
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += track.values[i * track.size + k];
+  return n > 0 && Number.isFinite(sum) ? sum / n : null;
+}
+
+/** A light's colour (as stored, 0–1 each) and intensity, the mean of their keys when they're animated. */
+function lightLook(light: RangeLight): { color: [number, number, number]; intensity: number } {
+  const color = [0, 1, 2].map((k) => keyMean(light.colorTrack?.size === 3 ? light.colorTrack : undefined, k) ?? light.color[k] ?? 1) as [number, number, number];
+  return { color, intensity: keyMean(light.intensityTrack, 0) ?? light.intensity };
+}
+
+/**
+ * How far the World Editor's Light Ranges ring reaches from a light (world units) whose brightness is `brightness`:
+ * its intensity times the length of its colour (lightBrightness). Neither the attenuation start and end nor the
+ * object's scale change it. Measured with we-drive (branch light-radius, 2026-11-13, HD, top-down cameras, Ruins
+ * Brazier copies with one value changed each; target/evidence/light-radius): brightness 0.17, 0.43, 0.81, 1.5, 3.2,
+ * 6.4, 12.9 and 83 drew rings of 206, 278, 332, 376, 441, 493, 543 and 658. The ring is where the logarithm of the
+ * brightness, a quadratic of the distance, reaches 0: ln b = -3.8 + 0.009197 r + 4.883e-6 r² (within 2.3% of every
+ * measurement). 0 for a light too dim to reach anywhere.
+ */
+export function lightRangeRadius(brightness: number): number {
+  const c0 = -3.8, c1 = 0.009197, c2 = 4.883e-6;
+  if (!(brightness > 0) || !Number.isFinite(brightness)) return 0;
+  const disc = c1 * c1 - 4 * c2 * (c0 - Math.log(brightness));
+  return disc > c1 * c1 ? (-c1 + Math.sqrt(disc)) / (2 * c2) : 0;
+}
+
+/** A light's brightness for its Light Ranges ring: intensity times the colour's length (white of 1 is √3, pure red,
+ *  green or blue 1: those three drew the same ring, white one √3 times as bright, grey 0.5 at 3 the same as white at
+ *  1.5). */
+export function lightBrightness(light: RangeLight): number {
+  const { color, intensity } = lightLook(light);
+  return intensity * Math.hypot(...color);
+}
 
 /**
  * Light Ranges for one light of one placed object: a ring on the ground round where the light is (`pivot`, in the
- * model, through the object's `world` matrix: column-major 4×4) as far as it reaches (the attenuation's end, scaled
- * with the object), and a fainter one where it starts to fade, when that's nearer. None for a light that reaches nowhere.
+ * model, through the object's `world` matrix: column-major 4×4), as far as the World Editor draws it
+ * (lightRangeRadius: by the light's brightness, not by the object's size), in the light's colour (the file's order
+ * read as red, green, blue, as the editor shows it; brightest channel full). None for a light that reaches nowhere.
  */
-export function lightRings(world: ArrayLike<number>, pivot: readonly number[], light: { attenuationStart: number; attenuationEnd: number }): RangeRing[] {
+export function lightRings(world: ArrayLike<number>, pivot: readonly number[], light: RangeLight): RangeRing[] {
   const [px, py, pz] = [pivot[0] ?? 0, pivot[1] ?? 0, pivot[2] ?? 0];
   const x = world[0] * px + world[4] * py + world[8] * pz + world[12];
   const y = world[1] * px + world[5] * py + world[9] * pz + world[13];
-  // The object's size across: the length of its x axis.
-  const scale = Math.hypot(world[0], world[1], world[2]);
-  const end = light.attenuationEnd * scale, start = light.attenuationStart * scale;
-  if (!(end > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return [];
-  const rings: RangeRing[] = [{ x, y, r: end, rgb: LIGHT_RANGE_RGB }];
-  if (start > 0 && start < end) rings.push({ x, y, r: start, rgb: [30, 150, 30] });
-  return rings;
+  const r = lightRangeRadius(lightBrightness(light));
+  if (!(r > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return [];
+  const { color } = lightLook(light);
+  const top = Math.max(...color);
+  const rgb = (top > 0 ? color.map((c) => Math.round(255 * Math.max(0, c) / top)) : [255, 255, 255]) as [number, number, number];
+  return [{ x, y, r, rgb }];
 }
 
 // ---- keys --------------------------------------------------------------------------------------
@@ -150,10 +195,13 @@ export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: 
  * view about 5°, its left side away for Left. Studio with these steps at the same camera (app-drive --camera
  * we:center,2200): 53 (at 1/17.5) and 261 (at 4.4 times that) before they were tuned to these; zoom 12.7% at 1.12.
  * Alt with an arrow, Insert, Delete, Page Up and Down, Home and End don't move the camera (with something selected the
- * Page keys, Home and End change it: selectionkeys.ts; so do Ctrl and the arrows, which nudge it). The pointer at the
- * view's edge scrolls it too (edgeScroll, below).
+ * Page keys, Home and End change it: selectionkeys.ts; so do the number pad's 8 2 4 6, which nudge it). The pointer at the
+ * view's edge scrolls it too (edgeScroll, below). The zoom keys are exactly the wheel's step (WHEEL_ZOOM, 1.1, branch
+ * key-zoom: a key press and a notch back give the same picture) about the same point; the view does both by zoomStep.
+ * Held, they step once per key repeat: 400 ms held zoomed once, 1500 ms 22 times (the display's repeat starts after
+ * 660 ms, 25 a second). The number pad's + and -, and Ctrl+Page Up, don't zoom.
  */
-export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: 1.11, turn: (5 * Math.PI) / 180 };
+export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: WHEEL_ZOOM, turn: (5 * Math.PI) / 180 };
 
 const PAN = CAMERA_STEPS.pan, FAST = CAMERA_STEPS.pan * CAMERA_STEPS.fast;
 

@@ -2,13 +2,113 @@
 // Edits replace only the text of changed blocks, so the rest of the file
 // (comments, order, line endings) stays byte-identical.
 
-const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
-const CLOSE = /\r?\n\}/g;
-// A `}` that ends a text line, with the next block's header right after it (blank lines allowed).
-const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/g;
+/** A header `STRING <digits> [// …\n]* {` + `\r*\n`: where it starts, where its digits are, its number, where its
+ *  text starts. */
+interface Header { at: number; digits: number; digitsEnd: number; num: number; end: number }
 
-/** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it. */
-interface Block { num: number; from: number; to: number; end: number; closed: boolean }
+/** JavaScript's `\s` (all of it lies in the Basic Multilingual Plane, so one UTF-16 unit each). */
+function isSpace(c: number): boolean {
+  return c === 0x20 || (c >= 0x09 && c <= 0x0d) || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a)
+    || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff;
+}
+
+/** The parser's searches over one text, read by hand rather than by regex: they match exactly what these did
+ *  (each is deterministic, nothing to backtrack into)
+ *    header:   /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r*\n/
+ *    close:    /\r?\n\}/
+ *    unclosed: /\}(?=\r?\n(?:[ \t]*\r?\n)*<header>)/  (a `}` ending a text line, the next header right after it)
+ *  but a run of `//` lines is read once however many header searches meet it (every `STRING` inside the run starts
+ *  one; the regex read the rest of the run for each, quadratic time). The Rust port (crates/w3proj/src/wts.rs) is
+ *  the same reader. */
+export class WtsReader {
+  /** Start of a `//` line (as the header's comment group meets it) → where the run of them ends. */
+  private runs = new Map<number, number>();
+
+  constructor(private text: string) {}
+
+  private skipSpace(at: number): number {
+    const t = this.text;
+    while (at < t.length && isSpace(t.charCodeAt(at))) at++;
+    return at;
+  }
+
+  /** `(?:\/\/[^\n]*\n\s*)*` from `at`: where it ends. */
+  private comments(at: number): number {
+    const t = this.text;
+    const seen: number[] = [];
+    let p = at, end: number;
+    for (;;) {
+      const known = this.runs.get(p);
+      if (known !== undefined) { end = known; break; }
+      if (!t.startsWith("//", p)) { end = p; break; }
+      const nl = t.indexOf("\n", p + 2);
+      if (nl < 0) { end = p; break; }
+      seen.push(p);
+      p = this.skipSpace(nl + 1);
+    }
+    for (const s of seen) this.runs.set(s, end);
+    return end;
+  }
+
+  /** The header pattern anchored at `at`. */
+  headerAt(at: number): Header | null {
+    const t = this.text;
+    if (!t.startsWith("STRING", at)) return null;
+    const digits = this.skipSpace(at + 6);
+    if (digits === at + 6) return null;
+    let digitsEnd = digits;
+    while (digitsEnd < t.length && t.charCodeAt(digitsEnd) >= 0x30 && t.charCodeAt(digitsEnd) <= 0x39) digitsEnd++;
+    if (digitsEnd === digits) return null;
+    const p = this.comments(this.skipSpace(digitsEnd));
+    if (t.charCodeAt(p) !== 0x7b) return null; // {
+    // `\r*\n`: a stray carriage return before the line feed (`{\r\r\n`) still ends the header line, as the game reads it
+    let q = p + 1;
+    while (t.charCodeAt(q) === 0x0d) q++;
+    if (t.charCodeAt(q) !== 0x0a) return null;
+    return { at, digits, digitsEnd, num: Number(t.slice(digits, digitsEnd)), end: q + 1 };
+  }
+
+  /** The first header from `from`. */
+  findHeader(from: number): Header | null {
+    for (let i = this.text.indexOf("STRING", from); i >= 0; i = this.text.indexOf("STRING", i + 1)) {
+      const h = this.headerAt(i);
+      if (h) return h;
+    }
+    return null;
+  }
+
+  /** The first `\r?\n}` from `from`: where it starts and ends. */
+  findClose(from: number): { index: number; end: number } | null {
+    const i = this.text.indexOf("\n}", from);
+    if (i < 0) return null;
+    return i > from && this.text.charCodeAt(i - 1) === 0x0d ? { index: i - 1, end: i + 2 } : { index: i, end: i + 2 };
+  }
+
+  /** The first `}` from `from` with `\r?\n`, blank lines and a header right after it. */
+  findUnclosed(from: number): number | null {
+    const t = this.text;
+    for (let i = t.indexOf("}", from); i >= 0; i = t.indexOf("}", i + 1)) {
+      let p = i + 1;
+      if (t.charCodeAt(p) === 0x0d) p++;
+      if (t.charCodeAt(p) !== 0x0a) continue;
+      p++;
+      // (?:[ \t]*\r?\n)*
+      for (;;) {
+        let q = p;
+        while (t.charCodeAt(q) === 0x20 || t.charCodeAt(q) === 0x09) q++;
+        if (t.charCodeAt(q) === 0x0d) q++;
+        if (t.charCodeAt(q) !== 0x0a) break;
+        p = q + 1;
+      }
+      if (this.headerAt(p)) return i;
+    }
+    return null;
+  }
+}
+
+/** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it; `head`
+ *  its header. */
+interface Block { head: Header; num: number; from: number; to: number; end: number; closed: boolean }
 
 /** The blocks of a file. A block ends at the first line that starts with `}`. Some real files have
  *  a block whose `}` sits at the end of its last text line, with the next STRING block right after;
@@ -18,25 +118,24 @@ interface Block { num: number; from: number; to: number; end: number; closed: bo
  *
  *  The next `}` line and the next unclosed `}` are each searched for once and kept while they still
  *  lie ahead, so a file of many unclosed blocks is read in one pass. */
-function scan(text: string): Block[] {
+function scan(text: string, r = new WtsReader(text)): Block[] {
   const blocks: Block[] = [];
   let pos = 0;
-  let c: RegExpExecArray | null | undefined, u: RegExpExecArray | null | undefined; // undefined: not searched yet
+  let c: { index: number; end: number } | null | undefined, u: number | null | undefined; // undefined: not searched yet
   for (;;) {
-    HEADER.lastIndex = pos;
-    const h = HEADER.exec(text);
+    const h = r.findHeader(pos);
     if (!h) return blocks;
-    const from = h.index + h[0].length;
-    if (c === undefined || (c && c.index < from)) { CLOSE.lastIndex = from; c = CLOSE.exec(text); }
-    if (u === undefined || (u && u.index < from)) { UNCLOSED.lastIndex = from; u = UNCLOSED.exec(text); }
-    if (u && (!c || u.index < c.index)) {
-      blocks.push({ num: Number(h[1]), from, to: u.index, end: u.index + 1, closed: false });
-      pos = u.index + 1;
+    const from = h.end;
+    if (c === undefined || (c && c.index < from)) c = r.findClose(from);
+    if (u === undefined || (u !== null && u < from)) u = r.findUnclosed(from);
+    if (u !== null && (!c || u < c.index)) {
+      blocks.push({ head: h, num: h.num, from, to: u, end: u + 1, closed: false });
+      pos = u + 1;
     } else if (!c) {
       return blocks;
     } else {
-      blocks.push({ num: Number(h[1]), from, to: c.index, end: c.index + c[0].length, closed: true });
-      pos = c.index + c[0].length;
+      blocks.push({ head: h, num: h.num, from, to: c.index, end: c.end, closed: true });
+      pos = c.end;
     }
   }
 }
@@ -54,9 +153,15 @@ export function wtsCutLines(value: string): number[] {
   lines.forEach((l, i) => { if (l.startsWith("}")) out.push(i + 1); });
   if (out.length) return out;
   const norm = value.replace(/\r\n/g, "\n");
-  const back = new StringTable(`STRING 1\n{\n${norm}\n}\n`).get(1);
-  if (back === norm) return [];
-  return [Math.min(lines.length, (back ?? "").split("\n").length)];
+  // Read back as a file with either line end writes it. A text ending in a lone `\r` loses that `\r` to the `\r\n}` of
+  // a file with `\n` line ends (the close takes it): nothing is cut, so that isn't refused.
+  for (const eol of ["\n", "\r\n"]) {
+    const want = norm.replace(/\n/g, eol);
+    const back = new StringTable(`STRING 1${eol}{${eol}${want}${eol}}${eol}`).get(1);
+    if (back === want || (eol === "\n" && back !== undefined && `${back}\r` === want)) continue;
+    return [Math.min(lines.length, (back ?? "").split("\n").length)];
+  }
+  return [];
 }
 
 /** The text changed so it is read back whole: a space before every line that starts with `}`, and after a
@@ -113,11 +218,11 @@ export function wtsStrayLines(text: string): { line: number; text: string }[] {
   const out: { line: number; text: string }[] = [];
   let line = 1, counted = 0; // line of text[counted]
   const lineAt = (i: number) => { for (; counted < i; counted++) if (text.charCodeAt(counted) === 10) line++; return line; };
-  for (const b of scan(text)) {
+  const r = new WtsReader(text);
+  for (const b of scan(text, r)) {
     // the gap ends at the next header (the next block's, or one this parser couldn't close)
-    HEADER.lastIndex = b.end;
-    const h = HEADER.exec(text);
-    const gap = text.slice(b.end, h ? h.index : text.length);
+    const h = r.findHeader(b.end);
+    const gap = text.slice(b.end, h ? h.at : text.length);
     let at = b.end;
     for (const l of gap.split("\n")) {
       const t = l.trim();
@@ -230,11 +335,22 @@ export class StringTable {
 // ---- Adjust Map String IDs ---------------------------------------------------------------------
 
 /** The World Editor's Adjust Map String IDs: `ids` maps a string's number to its new one. Every number that stays or
- *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why. */
-export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>) {
+ *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why.
+ *  `reserved`: numbers no string may take, those an earlier drop recorded that the table doesn't have
+ *  (lib/formats/prunedstrings): a reference to one can come back, and must not show another string's text.
+ *  `localeOnly`: the numbers only a language's table has (lib/formats/localewts localeOnlyNumbers), with its path: no
+ *  string may take one either, or that language would show its string in place of the renumbered one. */
+export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>, reserved: ReadonlySet<number> = new Set(),
+  localeOnly: ReadonlyMap<number, string> = new Map()) {
   for (const [from, to] of ids) {
     if (!table.has(from)) throw new Error(`There's no string ${from}.`);
     if (!Number.isSafeInteger(to) || to < 0) throw new Error(`${to} isn't a string ID (a whole number from 0).`);
+    if (to !== from && reserved.has(to)) {
+      throw new Error(`String ${to} was dropped as unused when the map was packed, and comes back if something refers to it again, so another string can't take its ID.`);
+    }
+    if (to !== from && localeOnly.has(to)) {
+      throw new Error(`String ${to} is in ${localeOnly.get(to)} but not in war3map.wts (a language's own string), so another string can't take its ID.`);
+    }
   }
   const seen = new Map<number, number>();
   for (const [n] of table.entries()) {
@@ -246,26 +362,30 @@ export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, numb
 }
 
 /** The IDs from `start` up in the order of the current numbers (Adjust's renumbering of the whole table): only the
- *  strings whose number changes. */
-export function compactStringIds(table: StringTable, start = 1): Map<number, number> {
+ *  strings whose number changes. The `reserved` numbers (see checkStringIds; the languages' own numbers too) are
+ *  stepped over. */
+export function compactStringIds(table: StringTable, start = 1, reserved: ReadonlySet<number> = new Set()): Map<number, number> {
   const nums = [...table.entries()].map(([n]) => n).sort((a, b) => a - b);
-  return new Map(nums.map((n, i) => [n, start + i] as [number, number]).filter(([n, to]) => n !== to));
+  const out = new Map<number, number>();
+  let to = start;
+  for (const n of nums) {
+    while (reserved.has(to)) to++;
+    if (n !== to) out.set(n, to);
+    to++;
+  }
+  return out;
 }
 
 /** war3map.wts with the numbers of its STRING headers changed by `ids` (see checkStringIds); everything else, the
  *  texts and the order included, stays byte for byte. A zero-padded number keeps its width. */
 export function renumberWts(text: string, ids: ReadonlyMap<number, number>): string {
-  let out = "", at = 0, pos = 0;
+  let out = "", at = 0;
   for (const b of scan(text)) {
-    // The header scan read for this block: the first one from where the last block ended.
-    HEADER.lastIndex = pos;
-    const h = HEADER.exec(text)!;
-    pos = b.end;
     const to = ids.get(b.num);
     if (to === undefined || to === b.num) continue;
-    const digits = h.index + h[0].indexOf(h[1], 6);
-    out += text.slice(at, digits) + String(to).padStart(h[1].length, "0");
-    at = digits + h[1].length;
+    const { digits, digitsEnd } = b.head;
+    out += text.slice(at, digits) + String(to).padStart(digitsEnd - digits, "0");
+    at = digitsEnd;
   }
   return out + text.slice(at);
 }
@@ -293,18 +413,33 @@ export function appendStrings(text: string, blocks: readonly NewString[], eol: s
  *  file), so the blank line after it goes too. Everything else stays byte for byte. */
 export function removeStrings(text: string, nums: ReadonlySet<number>): string {
   if (!nums.size) return text;
-  let out = "", at = 0, pos = 0;
-  for (const b of scan(text)) {
-    HEADER.lastIndex = pos;
-    const h = HEADER.exec(text)!;
-    pos = b.end;
+  let out = "", at = 0;
+  const r = new WtsReader(text);
+  for (const b of scan(text, r)) {
     if (!nums.has(b.num)) continue;
-    HEADER.lastIndex = b.end;
-    const next = HEADER.exec(text);
-    out += text.slice(at, h.index);
-    at = next ? next.index : text.length;
+    const next = r.findHeader(b.end);
+    out += text.slice(at, b.head.at);
+    at = next ? next.at : text.length;
   }
   return out + text.slice(at);
+}
+
+/** war3map.wts without the strings nothing refers to (`referenced`: every TRIGSTR number the map's files use), as the
+ *  World Editor drops them on every save. The strings that stay keep their numbers, comments and order, and the rest
+ *  of the file stays byte for byte (the World Editor writes the whole file anew: no comments but its own, numbers in
+ *  order). `dropped`: the numbers that went, ascending; none gives `text` itself. Throws rather than give a table in
+ *  which a kept string doesn't read back as it was. */
+export function pruneStrings(text: string, referenced: ReadonlySet<number>): { text: string; dropped: number[] } {
+  const table = new StringTable(text);
+  const dropped = [...new Set(scan(text).map((b) => b.num))].filter((n) => !referenced.has(n)).sort((a, b) => a - b);
+  if (!dropped.length) return { text, dropped };
+  const out = removeStrings(text, new Set(dropped));
+  const back = new StringTable(out);
+  for (const [n, v] of table.entries()) {
+    if (referenced.has(n) && back.get(n) !== v) throw new Error(`string ${n} wouldn't stay as it is; no strings were dropped.`);
+  }
+  for (const n of dropped) if (back.has(n)) throw new Error(`string ${n} wouldn't go; no strings were dropped.`);
+  return { text: out, dropped };
 }
 
 /** A text with its TRIGSTR_ references changed by `ids` (JSON, scripts, custom text): a zero-padded number keeps its

@@ -1,0 +1,131 @@
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
+
+> w3proj-studio@0.1.0 build
+> tsc --noEmit && node scripts/check-imports.mjs && vite build
+
+module boundaries ok
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 382 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                           0.40 kB │ gzip:   0.27 kB
+dist/assets/index-BMA_BRKz.css           65.52 kB │ gzip:  13.08 kB
+dist/assets/variants-BgYaLzks.js          0.17 kB │ gzip:   0.15 kB
+dist/assets/names-C1_JOhwO.js             0.19 kB │ gzip:   0.18 kB
+dist/assets/listeners-D3al_puR.js         0.21 kB │ gzip:   0.16 kB
+dist/assets/services-DXNGrP1A.js          0.25 kB │ gzip:   0.18 kB
+dist/assets/oserror-BmVfV4rg.js           0.27 kB │ gzip:   0.18 kB
+dist/assets/modecache-Bf8XhLN-.js         0.28 kB │ gzip:   0.19 kB
+dist/assets/selection-BapOtF_M.js         0.32 kB │ gzip:   0.22 kB
+dist/assets/contextloss-CYFZWCX7.js       0.36 kB │ gzip:   0.21 kB
+dist/assets/refs-BL7Ve4Ev.js              0.42 kB │ gzip:   0.29 kB
+dist/assets/tilesets-Df5FlAD3.js          0.48 kB │ gzip:   0.32 kB
+dist/assets/skies-DJ0hGSTt.js             0.49 kB │ gzip:   0.38 kB
+dist/assets/objectlist-UQEhxPAG.js        0.53 kB │ gzip:   0.31 kB
+dist/assets/strokepath-33zVcGph.js        0.53 kB │ gzip:   0.32 kB
+dist/assets/waterrim-1fNXD7Nk.js          0.56 kB │ gzip:   0.37 kB
+dist/assets/index-CLWZRlf2.js             0.68 kB │ gzip:   0.45 kB
+dist/assets/refs-B7iPFUay.js              0.73 kB │ gzip:   0.42 kB
+dist/assets/busyqueue-DZXavAQC.js         0.83 kB │ gzip:   0.40 kB
+dist/assets/entryids-DJntRZEH.js          0.83 kB │ gzip:   0.44 kB
+dist/assets/lossless-B2QXX5M5.js          0.89 kB │ gzip:   0.55 kB
+dist/assets/checkpoint-JanMmwD2.js        0.97 kB │ gzip:   0.49 kB
+dist/assets/syncdeletes-CD-O9e3V.js       1.01 kB │ gzip:   0.56 kB
+dist/assets/index-Up-XbhQ6.js             1.01 kB │ gzip:   0.66 kB
+dist/assets/archivepath-Dk1N6Kzz.js       1.09 kB │ gzip:   0.65 kB
+dist/assets/renamed-Cni3-eLS.js           1.10 kB │ gzip:   0.58 kB
+dist/assets/astext-Ct31WbKd.js            1.18 kB │ gzip:   0.67 kB
+dist/assets/undo-B-N9a27w.js              1.26 kB │ gzip:   0.60 kB
+dist/assets/iniedit-F1DiEAJF.js           1.35 kB │ gzip:   0.66 kB
+dist/assets/rename-BiDZ_CJy.js            1.37 kB │ gzip:   0.69 kB
+dist/assets/campaign-hXk53U-Z.js          1.41 kB │ gzip:   0.75 kB
+dist/assets/text-BsKMUwjn.js              1.55 kB │ gzip:   0.75 kB
+dist/assets/display-Dr8H6-VN.js           1.56 kB │ gzip:   0.82 kB
+dist/assets/randomids-BRj9w6TV.js         1.65 kB │ gzip:   0.83 kB
+dist/assets/owner-BTLdwppJ.js             1.72 kB │ gzip:   0.83 kB
+dist/assets/index-Bwf5upa5.js             1.82 kB │ gzip:   0.91 kB
+dist/assets/dxt-CT2l4zk9.js               1.85 kB │ gzip:   0.90 kB
+dist/assets/lib-gykNbtvn.js               1.89 kB │ gzip:   0.95 kB
+dist/assets/index-C1c9pv7z.js             1.91 kB │ gzip:   0.95 kB
+dist/assets/check-Q7n4C25m.js             1.93 kB │ gzip:   0.91 kB
+dist/assets/startlocations-t10uurDs.js    2.11 kB │ gzip:   0.98 kB
+dist/assets/index-COyJCLYv.js             2.45 kB │ gzip:   1.18 kB
+dist/assets/area-DK2w2rtZ.js              2.48 kB │ gzip:   1.32 kB
+dist/assets/triggerdata-CxW8Pd7V.js       2.60 kB │ gzip:   1.24 kB
+dist/assets/defaults-B57SoNqK.js          2.64 kB │ gzip:   1.23 kB
+dist/assets/guard-Bvtbknjb.js             2.67 kB │ gzip:   1.40 kB
+dist/assets/cameras-rxbcUzC2.js           2.79 kB │ gzip:   1.38 kB
+dist/assets/objects-BfI48z2H.js           2.85 kB │ gzip:   1.17 kB
+dist/assets/index-CEeGpQS-.js             3.09 kB │ gzip:   1.59 kB
+dist/assets/randomplace-D64VkqCO.js       3.27 kB │ gzip:   1.54 kB
+dist/assets/index-CM6N6u4j.js             3.38 kB │ gzip:   1.61 kB
+dist/assets/pathing-Dh6tviLg.js           3.40 kB │ gzip:   1.75 kB
+dist/assets/resizeundo-DelQ9ZnT.js        3.73 kB │ gzip:   1.63 kB
+dist/assets/preview-B56FweOH.js           3.85 kB │ gzip:   1.65 kB
+dist/assets/weather-0UzqG3Ux.js           3.86 kB │ gzip:   1.82 kB
+dist/assets/index-ntznrx1u.js             4.10 kB │ gzip:   1.95 kB
+dist/assets/resize-CzKv55nK.js            4.11 kB │ gzip:   1.97 kB
+dist/assets/encode-BhCJ6mP9.js            4.23 kB │ gzip:   2.08 kB
+dist/assets/index-DALdFnUi.js             4.26 kB │ gzip:   1.85 kB
+dist/assets/imports-Drg2ok_L.js           4.36 kB │ gzip:   1.96 kB
+dist/assets/meleesave-Dcyw69B5.js         4.39 kB │ gzip:   1.93 kB
+dist/assets/symbols-nmpTc2Q8.js           5.02 kB │ gzip:   2.27 kB
+dist/assets/index-BbrLII8d.js             5.71 kB │ gzip:   2.67 kB
+dist/assets/w3e-Dy2VsP_n.js               6.09 kB │ gzip:   2.61 kB
+dist/assets/cliffs-DBpweYsC.js            6.22 kB │ gzip:   2.73 kB
+dist/assets/index-8bscJHSO.js             6.42 kB │ gzip:   2.61 kB
+dist/assets/wts-NOtbhYFp.js               7.21 kB │ gzip:   2.94 kB
+dist/assets/index-toZ4_W3u.js             7.25 kB │ gzip:   3.03 kB
+dist/assets/w3etext-CCjpnmmA.js           7.27 kB │ gzip:   3.30 kB
+dist/assets/index-nVU9Lyj2.js             7.52 kB │ gzip:   3.20 kB
+dist/assets/index-CwPgYhHQ.js             7.54 kB │ gzip:   3.47 kB
+dist/assets/index-BYePIGZ0.js             8.14 kB │ gzip:   3.58 kB
+dist/assets/index-BLK1UHSw.js             8.72 kB │ gzip:   3.77 kB
+dist/assets/dnclight-DyZyXF3C.js          9.23 kB │ gzip:   3.60 kB
+dist/assets/metadata-ceyDGtaJ.js         10.03 kB │ gzip:   4.05 kB
+dist/assets/mapdoc-CaO5UofV.js           10.12 kB │ gzip:   3.92 kB
+dist/assets/mdx-D4BxUGGp.js              10.23 kB │ gzip:   4.12 kB
+dist/assets/index-LaJuB8jc.js            10.35 kB │ gzip:   4.28 kB
+dist/assets/index-mbYOldu9.js            10.65 kB │ gzip:   4.59 kB
+dist/assets/index-Dpf64nGa.js            10.92 kB │ gzip:   4.07 kB
+dist/assets/index-DB49UGt_.js            11.26 kB │ gzip:   4.85 kB
+dist/assets/wtg-B-XD4-pG.js              11.52 kB │ gzip:   3.97 kB
+dist/assets/triggers-CvWpa4f7.js         12.35 kB │ gzip:   4.34 kB
+dist/assets/index-C1u7Zsmf.js            12.73 kB │ gzip:   5.73 kB
+dist/assets/index-HsHe_5WX.js            12.97 kB │ gzip:   5.19 kB
+dist/assets/index-DHeeosyY.js            14.28 kB │ gzip:   5.81 kB
+dist/assets/index-DpNcQ6JK.js            15.64 kB │ gzip:   6.09 kB
+dist/assets/index-BwqrYq4B.js            17.21 kB │ gzip:   6.70 kB
+dist/assets/index-Du0DHr_x.js            17.28 kB │ gzip:   6.29 kB
+dist/assets/texpath-DMTQNE9w.js          17.70 kB │ gzip:   6.23 kB
+dist/assets/index-BwMwzqh8.js            18.24 kB │ gzip:   7.22 kB
+dist/assets/index-jp_V6CHk.js            18.37 kB │ gzip:   7.38 kB
+dist/assets/env-DO5IDceD.js              18.94 kB │ gzip:   5.35 kB
+dist/assets/index-CUzNOtGK.js            20.42 kB │ gzip:   7.73 kB
+dist/assets/index-D_J2_9vP.js            21.72 kB │ gzip:   8.89 kB
+dist/assets/index-L4sQPMKg.js            23.11 kB │ gzip:   8.32 kB
+dist/assets/index-DE59slOF.js            28.17 kB │ gzip:   9.96 kB
+dist/assets/index-BFkJ8PPJ.js            29.03 kB │ gzip:   9.90 kB
+dist/assets/index-B_GfEwPX.js            31.78 kB │ gzip:  10.92 kB
+dist/assets/jass-DVwGJjkG.js             33.34 kB │ gzip:  11.33 kB
+dist/assets/index-86MltetC.js            34.35 kB │ gzip:  12.06 kB
+dist/assets/index-8M6tSDix.js            39.71 kB │ gzip:  14.28 kB
+dist/assets/renderer-BBMiVeSm.js         49.90 kB │ gzip:  18.80 kB
+dist/assets/index-BLefr3WZ.js            52.59 kB │ gzip:  20.56 kB
+dist/assets/index-Dkqt4_Cv.js            55.38 kB │ gzip:  18.25 kB
+dist/assets/index-7SKCPw7_.js            59.57 kB │ gzip:  19.80 kB
+dist/assets/index-CeUibaXL.js            64.98 kB │ gzip:  23.26 kB
+dist/assets/index-hGPJxRIu.js            90.80 kB │ gzip:  31.03 kB
+dist/assets/index-BxA2OL2w.js           115.09 kB │ gzip:  40.75 kB
+dist/assets/index-Dy3sgmNZ.js           231.39 kB │ gzip:  65.47 kB
+dist/assets/index-CkenINR_.js           302.13 kB │ gzip:  98.68 kB
+dist/assets/index-DnAF0fpT.js           414.11 kB │ gzip: 148.03 kB
+✓ built in 4.72s
+   Compiling w3proj-studio v0.1.0 (/home/koneu/Code/w3proj-studio/.worktrees/user-decisions-ui/app/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.65s
+       Built application at: /home/koneu/Code/w3proj-studio/.worktrees/user-decisions-ui/target/debug/w3proj-studio
+  took 34.3 s: importWarnings
+app smoke ok
+exit 0

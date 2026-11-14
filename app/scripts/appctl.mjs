@@ -15,7 +15,10 @@ export const LINUX = process.platform === "linux";
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const repo = resolve(app, "..");
 const exeName = process.platform === "win32" ? ".exe" : "";
-export const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
+/** The app to start: W3_APP_BIN (a build made elsewhere, e.g. by verify-build.mjs; nothing is built then), else this
+ *  checkout's debug build. */
+export const appExe = () => (process.env.W3_APP_BIN ? resolve(process.env.W3_APP_BIN) : join(repo, "target", "debug", `w3proj-studio${exeName}`));
+export const prebuilt = () => Boolean(process.env.W3_APP_BIN);
 export const cliPath = () => process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
 
 /** The smoke build's identifier: W3_SMOKE_ID, else one per checkout (as the gate uses), so runs in two
@@ -30,15 +33,18 @@ export function configDir(id) {
   return join(base ?? "", id);
 }
 
-/** Builds the smoke app (debug, no bundle) with this identifier; incremental, so cheap when nothing changed. */
-export function buildApp(id, work) {
-  const conf = JSON.parse(readFileSync(join(app, "src-tauri", "tauri.conf.json"), "utf8"));
+/** Builds the smoke app (debug, no bundle) with this identifier; incremental, so cheap when nothing changed.
+ *  `appDir` is the app/ folder to build in (default: this checkout's; verify-build.mjs gives its archive's).
+ *  Does nothing when W3_APP_BIN names a prebuilt app. */
+export function buildApp(id, work, appDir = app) {
+  if (prebuilt() && appDir === app) return;
+  const conf = JSON.parse(readFileSync(join(appDir, "src-tauri", "tauri.conf.json"), "utf8"));
   // Linux runs it inside xvfb-run, a display nobody sees, where the window has to be shown to be drawn.
   const windows = conf.app.windows.map((w) => ({ ...w, visible: LINUX }));
   mkdirSync(work, { recursive: true });
   const patch = join(work, "tauri.smoke.json");
   writeFileSync(patch, JSON.stringify({ identifier: id, app: { windows }, build: { beforeBuildCommand: "npm run build" } }));
-  const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: app, shell: true, stdio: ["ignore", process.stderr, process.stderr] });
+  const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: appDir, shell: true, stdio: ["ignore", process.stderr, process.stderr] });
   if (r.status !== 0) throw new Error("the app build failed");
 }
 
@@ -66,8 +72,11 @@ function freePort() {
  * Returns { page, stop, exited }; `stop` ends the app and removes its settings folder.
  */
 export async function startApp({ id, work, game, settings = {}, env = {} }) {
+  const exe = appExe();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: build it first`);
-  const dir = configDir(id);
+  // Settings in the run's own folder (W3PROJ_CONFIG_DIR, else under `work`) and the webview's storage too (Linux), so
+  // two runs of one build, or of a prebuilt one, never share them.
+  const dir = process.env.W3PROJ_CONFIG_DIR ? resolve(process.env.W3PROJ_CONFIG_DIR) : join(work, "config");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "settings.json"), JSON.stringify({
@@ -76,7 +85,10 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
     ...(game ? { "game.installDir": game } : {}), "game.askForFolder": false,
     ...settings,
   }));
-  const appEnv = { W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt"), ...env };
+  const appEnv = {
+    W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt"), W3PROJ_CONFIG_DIR: dir,
+    ...(LINUX ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}), ...env,
+  };
   let page, stop, exited;
   if (LINUX) {
     ({ page, stop, exited } = await launch(exe, appEnv));

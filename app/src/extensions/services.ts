@@ -178,16 +178,29 @@ export interface TerrainEditorHandle {
   setBrush(ring: { x: number; y: number; r: number; rgb: [number, number, number]; square?: boolean } | null): void;
   /** RGBA texture over the whole map (rows from the south); null removes it. */
   setGroundOverlay(rgba: Uint8Array | null, width?: number, height?: number): void;
+  /** Solid marks in the view (the Cameras tab's camera models): triangles, 10 floats per corner (x, y, z, the face's
+   *  normal, r, g, b, a: the colour before light), lit as placed models are; null removes them. */
+  setShapes(triangles: readonly number[] | null): void;
+  /** Rings in the view, drawn over everything (the selected cameras' circles): `z` keeps a ring at that height, else
+   *  it follows the ground; null removes them. */
+  setRings(rings: { x: number; y: number; r: number; z?: number; rgb: [number, number, number] }[] | null): void;
+  /** Where a world point is on the screen (CSS pixels, as a mouse event's clientX and clientY), or null behind the
+   *  camera. */
+  project(p: [number, number, number]): [number, number] | null;
   /** Names drawn over the map at world points (regions, cameras); null removes them. */
   setLabels(labels: { x: number; y: number; text: string; rgb?: [number, number, number] }[] | null): void;
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */
   pathing(opts?: { filtered?: boolean }): Promise<{ cells: Uint8Array; width: number; height: number }>;
   focus(): void;
+  /** Cycle Random Groups - Next (1) or Previous (-1) (the same as the commands): says what is shown now. */
+  cycleRandomGroups(step: 1 | -1): Promise<string>;
   /** Moves the camera to look at a world point. */
   lookAt(x: number, y: number): void;
   /** The view camera: it looks at `target` from `distance` away, `yaw` (radians)
    *  points from the target to the eye, `pitch` lifts the eye, `fov` is vertical. */
   view(): TerrainView;
+  /** The view's width / height as drawn now (4:3 while it has no size). */
+  aspect(): number;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
@@ -205,8 +218,10 @@ export interface TerrainEditorHandle {
    *  For tests and measuring. */
   /** The special doodads (cliff and cave models placed by tile) drawn now: type id, position and model. They can't be
    *  selected. For tests and measuring. */
+  /** The see-through start buildings drawn now (one per start location), where they stand. For tests. */
+  drawnStartBuildings(): { x: number; y: number }[];
   drawnSpecials(): { id: string; x: number; y: number; z: number; model: string }[];
-  drawnUnits(): { id: string; x: number; y: number; z: number; team: number; model: string }[];
+  drawnUnits(group?: "units" | "doodads"): { id: string; x: number; y: number; z: number; team: number; model: string }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
@@ -216,6 +231,8 @@ export interface TerrainEditorHandle {
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean;
   /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];
+  /** The cliff type number the World Editor's cliff palette starts on, for new cliffs and water (-1: none known). */
+  defaultCliffType(): number;
   /** The game's tilesets with their own ground tiles (the tile list New Map gives them). */
   tilesets(): Promise<{ id: string; name: string; tiles: string[] }[]>;
   /** Changes the terrain's tileset (water, lighting, blight follow); one undo step. */
@@ -278,6 +295,8 @@ export interface TerrainObjectType {
   maxScale: number;
   /** Fixed facing in degrees, or null. */
   fixedRot: number | null;
+  /** A unit type's movement type (UnitData.slk `movetp`: "foot", "fly", "float", …); absent for other kinds. */
+  moveType?: string;
 }
 
 export interface TerrainObjects {
@@ -295,6 +314,14 @@ export interface TerrainObjects {
   occupancy(): Promise<TerrainOccupancy>;
   /** Where a unit type lands near a point: buildings go on the building grid, others stay. */
   buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
+  /** Where an object of `kind`/`id` placed at (x, y) facing `angle` (radians) lands, and its facing then: a building
+   *  on the building grid, a doodad or destructable on its own grid and, with a texture that isn't square, at a
+   *  quarter turn (Snap Doodads on Load); anything else as asked. */
+  placedSpot(kind: string, id: string, x: number, y: number, angle: number): Promise<{ x: number; y: number; angle: number }>;
+  /** Gives doodads and destructables among `entries` (placed, moved or scaled by a tool) the place and facing
+   *  (`place`) and the scale (`scale`) the World Editor gives them, in place: on their grid (Snap Doodads on Load),
+   *  the scale within their type's range (Fix Doodads on Load). Part of the caller's edit; units are left alone. */
+  settleDoodads(entries: PlacedEntry[], what: { place?: boolean; scale?: boolean }): Promise<void>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
   /** Whether an object may stand here: false past the camera bounds while Enforce Camera Bounds is on. */
@@ -545,12 +572,21 @@ export interface TriggerGuiService {
 
 export const TRIGGER_GUI_SERVICE = "w3.triggers.gui";
 
+/** One check's part of a Problems run: what it reported (without the ignored), how many the ignore file left out,
+ *  and why it failed if it did. */
+export interface CheckedGroup { id: string; title: string; problems: Problem[]; ignored: number; error?: string }
+
 /** "w3.problems", provided by the Problems view: checks of the open project (like compiler
  *  errors), shown in a list and run before packing. Extensions add their own checks. */
 export interface ProblemsService {
   registerCheck(check: ProblemCheck): { dispose(): void };
   /** Runs every check; the view shows the result. Resolves with all problems found. */
   run(): Promise<Problem[]>;
+  /** Like `run`, and says how many reports the project's ignore file (.w3proj/problems-ignore.json) left out of
+   *  the result, and why it was not applied if that file is there but can't be read (then nothing is left out).
+   *  `checks`: the same by check, with the reason of a check that failed (it found nothing, which isn't "no
+   *  problems"); `w3proj check` prints them. Empty when the run's results weren't the open project's. */
+  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[] }>;
   /** The result of the last run. */
   problems(): Problem[];
 }

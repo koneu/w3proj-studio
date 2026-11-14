@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { borderShade, darkWaterCorners } from "./area";
-import { mapEdgeTiles, markMapEdge, onBoundary, setWaterLevel, type Corner, type Terrain } from "./w3e";
+import { mapEdgeTiles, markMapEdge, onBoundary, playableEdgeTiles, setWaterLevel, validComplements, type Corner, type Terrain } from "./w3e";
 
 /** A terrain of `tilesX` by `tilesY` tiles, its map edge marked for these complements (left, right, bottom, top). */
 function marked(tilesX: number, tilesY: number, complements: number[]): Terrain {
@@ -13,7 +13,7 @@ function marked(tilesX: number, tilesY: number, complements: number[]): Terrain 
 
 test("the border's shade covers the tiles the terrain marks as past the playable map, fading over the first playable cell", () => {
   // Left 1, right 2, bottom 1, top 0, on 5 by 3 tiles: texels on the pathing cells' corners, 21 by 13.
-  const { rgba, width, height } = borderShade(marked(5, 3, [1, 2, 1, 0]));
+  const { rgba, width, height } = borderShade({ width: 6, height: 4 }, playableEdgeTiles({ width: 6, height: 4 }, [1, 2, 1, 0]));
   assert.deepEqual([width, height], [21, 13]);
   const a = (x: number, y: number) => rgba[(y * width + x) * 4 + 3];
   // Row 8 (inside the bottom border's reach): dark up to the corner on the playable edge (x 4), clear from the first
@@ -27,24 +27,41 @@ test("the border's shade covers the tiles the terrain marks as past the playable
   assert.ok([...rgba].every((v, i) => i % 4 === 3 || v === 0), "black");
 });
 
-test("no marks, no shade, whatever the w3i says: the editor goes by the terrain's marks", () => {
-  // HillsbradCreek-like: a border in the w3i, but these corners carry no mark (a map made before Studio marked them).
-  const t = marked(4, 4, [0, 0, 0, 0]);
-  assert.equal(borderShade(t).rgba.some((v) => v !== 0), false);
-  assert.equal(mapEdgeTiles(t).some((v) => v !== 0), false);
-  // A stale mark inside the playable part (corner 2, 2) darkens that tile all the same.
-  t.corners[2 * 5 + 2].rawWater |= 0x4000;
-  assert.deepEqual([...mapEdgeTiles(t)].map((v, i) => (v ? i : -1)).filter((i) => i >= 0), [2 * 4 + 2]);
-  assert.ok(borderShade(t).rgba[(10 * 17 + 10) * 4 + 3] > 0);
+test("the tiles past the playable map come from the w3i's complements, whatever the terrain's marks say", () => {
+  // As the World Editor (we-drive, AutumnLeaves_S2 with the w3i's left margin 23 and the marks' 15, and the other way
+  // round: the dark edge followed the w3i both times). 6 by 4 tiles; the w3i says left 2, right 1, bottom 1, top 0.
+  const t = marked(6, 4, [0, 0, 0, 0]);
+  t.corners[2 * 7 + 3].rawWater |= 0x4000; // A stale mark inside.
+  const rows = (tiles: Uint8Array) => [3, 2, 1, 0].map((y) => [...tiles.slice(y * 6, y * 6 + 6)].map((v) => (v ? "#" : ".")).join(""));
+  assert.deepEqual(rows(playableEdgeTiles(t, [2, 1, 1, 0])), ["##...#", "##...#", "##...#", "######"]);
+  assert.deepEqual(rows(mapEdgeTiles(t)), ["......", "...#..", "......", "......"], "the marks are another thing");
+  // Agreeing marks give the same tiles (markMapEdge writes them from the same rule).
+  assert.deepEqual(mapEdgeTiles(marked(6, 4, [2, 1, 1, 0])), playableEdgeTiles(t, [2, 1, 1, 0]));
+  // The shade covers what it's given, not the marks.
+  const shade = borderShade(t, playableEdgeTiles(t, [2, 1, 1, 0])).rgba, width = 6 * 4 + 1;
+  assert.equal(shade[(10 * width + 2) * 4 + 3], 218, "west border");
+  assert.equal(shade[(10 * width + 14) * 4 + 3], 0, "the stale mark's tile stays lit");
+  // Margins wider than the map leave nothing playable; an empty w3i rule nothing past it.
+  assert.ok(playableEdgeTiles(t, [9, 9, 9, 9]).every((v) => v === 1));
+  assert.ok(playableEdgeTiles(t, [0, 0, 0, 0]).every((v) => v === 0));
 });
 
-test("the border's water is black at corners whose tiles are all past the playable map, lit on the playable edge", () => {
+test("only four whole numbers from 0 up stand for the playable map", () => {
+  assert.deepEqual(validComplements([15, 15, 15, 15]), [15, 15, 15, 15]);
+  for (const bad of [undefined, null, [1, 2, 3], [1, 2, 3, 4, 5], [1, 2, -1, 4], [1, 2, 3.5, 4], ["1", 2, 3, 4], { 0: 1 }]) {
+    assert.equal(validComplements(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("the classic water is black at corners whose north-east tile is past the playable map, as the editor's", () => {
   // 6 by 4 tiles, left 2, right 1, bottom 1, top 1.
   const t = marked(6, 4, [2, 1, 1, 1]);
-  const dark = darkWaterCorners(t);
+  const dark = darkWaterCorners(t, mapEdgeTiles(t));
   const rows = [4, 3, 2, 1, 0].map((y) => [0, 1, 2, 3, 4, 5, 6].map((x) => (dark[y * 7 + x] ? "#" : ".")).join(""));
-  // Corner columns 0 and 1 (left of the playable edge at 2), 6 and the outer rim on the right; rows 0 and 4.
-  assert.deepEqual(rows, ["#######", "##....#", "##....#", "##....#", "#######"]);
+  // West and south: the corners on the playable edge (column 2, row 1) lit, so the fade lies in the last border tile.
+  // East and north: the corners on the playable edge (column 5, row 3) dark, so it lies in the last playable tile.
+  assert.deepEqual(rows, ["#######", "#######", "##...##", "##...##", "#######"]);
+  assert.equal(darkWaterCorners({ width: 1, height: 1 }, new Uint8Array(0)).length, 1, "no tiles");
 });
 
 test("the map edge marks each tile past the playable map at its lower left corner, as the World Editor's maps do", () => {

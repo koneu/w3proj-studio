@@ -1,12 +1,12 @@
 {
   "name": "w3proj-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && node scripts/check-imports.mjs && vite build",
-    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && node scripts/check-imports.mjs && node scripts/check-keys.mjs && node scripts/check-scripts.mjs",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.headless.json && node scripts/check-imports.mjs && node scripts/check-keys.mjs && node scripts/check-scripts.mjs",
     "test": "node scripts/test.mjs",
     "coverage": "node scripts/coverage.mjs",
     "ui-smoke": "node scripts/ui-smoke.mjs",

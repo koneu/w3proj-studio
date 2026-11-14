@@ -12,7 +12,7 @@ import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
 import { skinTextures } from "../../lib/model/replaceable";
-import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
+import { bounds, hdSlots, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { artValue } from "../../lib/objects/artset";
 import { SKIN_KINDS, SkinIds } from "../../lib/objects/skinids";
@@ -211,7 +211,11 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   const rowsOf = new Map<string, Record<string, string>[]>();
   const rows = (table: string) => rowsOf.get(table) ?? rowsOf.set(table, parseSlk(tables.get(table) ?? "")).get(table)!;
   for (const [f, kind] of SKIN_FILES) {
-    const sections = parseIni(tables.get(f) ?? "");
+    // In the doodad and destructable tables a key given twice keeps its first value, as the World Editor reads them:
+    // the tree bridges' minScale and maxScale (0.8 and 1, then 1 and 0.8) are 0.8 to 1 (doodadrules.ts). Their only
+    // other twice-given key is DoodadSkins.txt's defScale, unused here. UnitSkin.txt's twice-given modelScales weren't
+    // compared with the editor: they keep the last.
+    const sections = parseIni(tables.get(f) ?? "", { firstWins: kind === "w3d" || kind === "w3b" });
     const own = new Map<string, Skin>();
     for (const [id, sec] of sections) {
       const get = (k: string) => artValue((key) => sec.get(key), k, mode);
@@ -345,6 +349,15 @@ export function scaleRange(skin: Pick<Skin, "kind" | "minScale" | "maxScale">): 
   return Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi >= lo ? [lo, hi] : undefined;
 }
 
+/** The range a doodad's or destructable's scale is saved within (doodadrules.ts ScaleRule), its type's minScale and
+ *  maxScale, also the wrong way round (then the least wins); undefined for units, items and ranges that aren't two
+ *  positive numbers. */
+export function savedScaleRange(skin: Pick<Skin, "kind" | "minScale" | "maxScale">): readonly [number, number] | undefined {
+  if (skin.kind !== "w3d" && skin.kind !== "w3b") return undefined;
+  const { minScale: lo, maxScale: hi } = skin;
+  return Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi > 0 ? [lo, hi] : undefined;
+}
+
 /** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than
  *  the stored one (a ship on the water, see unitDrawHeight). `range`: the scales it's drawn within (scaleRange). */
 export function placement(p: Placed, extraScale: number, z = p.position[2], range?: readonly [number, number]): Mat4 {
@@ -365,8 +378,17 @@ export interface ModelRequest {
   instances: ObjectInstance[];
   /** The look to stand in (Animprops). */
   props?: readonly string[];
-  /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders). */
-  retexture?: (path: string) => string;
+  /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders); `slot`: the texture's place in the
+   *  model's HD layers (hdSlots), when it has one. */
+  retexture?: (path: string, slot?: string) => string;
+}
+
+/** Textures a placed object takes instead of its type's: replaceable id → path, and the swap of an HD model's
+ *  placeholder paths (a special doodad's cliff texture). `key` tells such looks of one model apart. */
+export interface PlacedTextures {
+  key: string;
+  replaceable: Record<number, string>;
+  retexture?: (path: string, slot?: string) => string;
 }
 
 export interface LoadResult {
@@ -507,9 +529,10 @@ export class ObjectLoader {
         gpu.props = req.props ?? [];
         gpu.pose(standClock(model, gpu.props));
         const drawn = drawnTextures(model);
+        const slots = req.retexture ? hdSlots(model) : undefined;
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
           if (!p || !drawn.has(i)) return;
-          const tex = req.retexture?.(p) ?? p;
+          const tex = req.retexture?.(p, slots?.get(i)) ?? p;
           let users = this.textureUsers.get(tex.toLowerCase());
           if (!users) this.textureUsers.set(tex.toLowerCase(), (users = new Set()));
           users.add(req.path.toLowerCase());
@@ -571,11 +594,13 @@ export class ObjectLoader {
    *  use their base object's model (`baseOf`, from the map's object data). An object whose model doesn't load
    *  (or whose id is unknown) is drawn as the World Editor's checkered cube, a batch of its own in the group, and
    *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray.
-   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim"). */
+   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim").
+   *  `texturesOf`: textures a placed object takes instead of its type's (a special doodad's cliff texture). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
     placeholders = true, shownAs?: (p: Placed) => string | undefined,
-    looksOf?: (p: Placed, skin: Skin) => readonly string[]): Promise<LoadResult> {
+    looksOf?: (p: Placed, skin: Skin) => readonly string[],
+    texturesOf?: (p: Placed, skin: Skin) => PlacedTextures | undefined): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -593,11 +618,12 @@ export class ObjectLoader {
       const path = modelPath(skin, p.variation);
       const more = looksOf?.(p, skin).filter((l) => !skin.animProps?.includes(l)) ?? [];
       const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
-      const key = `${path}|${skin.texFile}|${props ?? ""}`;
+      const own = texturesOf?.(p, skin);
+      const key = `${path}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
-        const replaceable = skinTextures(skin);
-        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [] }, items: [] };
+        const replaceable = own?.replaceable ?? skinTextures(skin);
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(own?.retexture ? { retexture: own.retexture } : {}) }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);
@@ -617,13 +643,15 @@ export class ObjectLoader {
     const helpers = await this.clickHelpers(group, batches, (inst) => !!inst.pick && !!skinFor(inst.pick.id)?.clickHelper);
     if (helpers) batches.push(helpers);
     const strays = strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf);
-    if (!placeholders || !strays.length) return { batches, unresolved, strays, problems };
+    // A start location stays a marker and a stray (the game view leaves it out): no cube for it.
+    const starts = strays.filter((s) => s.inst.pick?.id === "sloc"), cubed = strays.filter((s) => s.inst.pick?.id !== "sloc");
+    if (!placeholders || !cubed.length) return { batches, unresolved, strays, problems };
     let gpu: ModelGpu;
     // A lost context can't compile the model shader: the objects stay markers (the view is reopened anyway).
     try { gpu = this.placeholder(); } catch { return { batches, unresolved, strays, problems }; }
-    const instances = placeholderInstances(strays, bounds(gpu.model));
+    const instances = placeholderInstances(cubed, bounds(gpu.model));
     const cubes = new Set(instances.map((inst) => inst.pick?.placed));
-    return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: [], problems };
+    return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: starts, problems };
   }
 
   /** The click helpers (CLICK_HELPER) of the batches' instances that `wanted` says have one: a batch of their own,
@@ -663,8 +691,8 @@ export function placeholderInstances(strays: readonly Stray[], box: { min: reado
  *  shows it, so selection works on this stand-in instance: its position and a small sphere. */
 export interface Stray { group: string; inst: ObjectInstance }
 
-/** Stand-ins for the unresolved objects of one group. Start locations are left out: they stay
- *  markers that can't be moved or deleted (a player needs one). */
+/** Stand-ins for the unresolved objects of one group, start locations too: a click, a box and Select All take them
+ *  (the game view leaves them out, see shownInstances in index.ts). */
 /**
  * The kind of a war3mapUnits.doo entry: its type's when known (`known`: "w3t" an item, any other a unit), else what the
  * record tells. The World Editor writes an item with hero level 0 and target acquisition 0, a unit with level 1 or more
@@ -680,7 +708,7 @@ export function unitsEntryKind(p: Placed & { level?: unknown; targetAcquisition?
 export function strayInstances(group: string, placed: readonly Placed[], unresolved: readonly Placed[], skins: Map<string, Skin>,
   teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Stray[] {
   const index = new Map(placed.map((p, i) => [p, i]));
-  return unresolved.filter((p) => p.id !== "sloc").map((p) => {
+  return unresolved.map((p) => {
     const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
     // A known type whose model didn't load stands where its model would (a ship on the water).
     const [x, y] = p.position, z = skin && heightOf ? heightOf(p, skin) : p.position[2];
@@ -692,6 +720,16 @@ export function strayInstances(group: string, placed: readonly Placed[], unresol
       },
     };
   });
+}
+
+/** Every doodad and unit of the groups not hidden, start locations among them: what Select All takes. */
+export function selectableObjects(sources: Iterable<Stray>, hidden: ReadonlySet<string>): { p: Placed; kind: string; id: string }[] {
+  const out: { p: Placed; kind: string; id: string }[] = [];
+  for (const { group, inst } of sources) {
+    if ((group !== "doodads" && group !== "units") || hidden.has(group)) continue;
+    if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
+  }
+  return out;
 }
 
 /** The placed objects whose position projects into a rectangle of the canvas (CSS pixels), among

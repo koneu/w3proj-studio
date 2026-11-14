@@ -1,0 +1,1 @@
+{"identifier":"dev.w3proj.studio.smoke.user-decisions-ui","app":{"windows":[{"label":"main","title":"W3Proj Studio","width":1400,"height":900,"minWidth":800,"minHeight":500,"decorations":false,"dragDropEnabled":false,"visible":true}]},"build":{"beforeBuildCommand":"npm run build"}}

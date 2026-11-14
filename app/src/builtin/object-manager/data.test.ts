@@ -129,6 +129,10 @@ test("Object Manager actions: rename and delete where the owning editor can, pla
   // A standard object's type: only going to it. A region: renamed and deleted in the terrain editor's Regions tab.
   assert.deepEqual(nodeActions(placedType), { edit: true, rename: false, remove: false, play: false });
   assert.deepEqual(nodeActions(region), { edit: true, rename: true, remove: true, play: false });
+  // A placed object: deleted in the terrain editor, not renamed (the World Editor has no rename for gg_unit_… names).
+  const placedOne = placedType.children![0];
+  assert.deepEqual(nodeActions(placedOne), { edit: true, rename: false, remove: true, play: false });
+  assert.equal(placedOne.placed, true);
   assert.deepEqual(region.item, { group: "regions", name: "Gate" });
   assert.deepEqual(nodeActions(trigger), { edit: true, rename: true, remove: true, play: false });
   assert.deepEqual(nodeActions(sound), { edit: true, rename: true, remove: true, play: true });
@@ -136,6 +140,15 @@ test("Object Manager actions: rename and delete where the owning editor can, pla
   assert.deepEqual(nodeActions(variable), { edit: true, rename: true, remove: true, play: false });
   // A group has nothing to go to.
   assert.deepEqual(nodeActions(tree[0]), { edit: false, rename: false, remove: false, play: false });
+});
+
+test("Object Manager: an import row can be renamed and removed (through the Import Manager); the group can't", () => {
+  const tree = buildTree(contents({ imports: ["war3mapImported\\a.mdx"] }));
+  const imp = tree.find((n) => n.label.startsWith("Imported files"))!.children![0];
+  assert.deepEqual(imp.target, { kind: "imports", path: "war3mapImported\\a.mdx" });
+  assert.deepEqual(nodeActions(imp), { edit: true, rename: true, remove: true, play: false });
+  // Control: a target without the path (nothing to name to the Import Manager) offers neither.
+  assert.deepEqual(nodeActions({ label: "x", target: { kind: "imports" } }), { edit: true, rename: false, remove: false, play: false });
 });
 
 test("Object Manager groups: Expand or Collapse, and the editor of their entries; cameras are renamed in their tab", () => {

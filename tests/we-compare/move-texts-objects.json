@@ -1,0 +1,26 @@
+{
+  "name": "move-texts-objects",
+  "description": "Move Texts to String Table (Studio's command w3.strings.moveToTable) against the WE's own save, which moves the texts of custom objects into war3map.wts: a unit with a Skin-only tooltip, an item with a description, an ability with level fields (tooltip and description at level 1 and 2); the string table with its comments, and the object files",
+  "input": {
+    "new": { "name": "MoveTexts", "width": 64, "height": 64 },
+    "steps": [
+      { "mcp": "create_object", "args": { "kind": "units", "base": "hfoo", "name": "Text Footman" } },
+      { "mcp": "create_object", "args": { "kind": "items", "base": "ratf", "name": "Text Claws" } },
+      { "mcp": "create_object", "args": { "kind": "abilities", "base": "AHhb", "name": "Text Heal" } }
+    ]
+  },
+  "studio": {
+    "settings": { "mcp.writeTools": true },
+    "steps": [
+      { "mcp": "save_project" },
+      { "command": "w3.strings.moveToTable" }
+    ]
+  },
+  "compare": [
+    { "file": "war3map.wts", "as": "text" },
+    { "file": "war3map.w3u", "as": "parsed" },
+    { "file": "war3map.w3t", "as": "parsed" },
+    { "file": "war3map.w3a", "as": "parsed" }
+  ],
+  "limit": 30
+}

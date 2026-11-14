@@ -7,7 +7,9 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
-import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
+import { checkStringIds, compactStringIds, renumberStringRefs, StringTable } from "../../lib/formats/wts";
+import { adjustStringTables, isLocaleWts, localeOnlyNumbers } from "../../lib/formats/localewts";
+import { readPrunedStrings, reservedStringIds } from "../../lib/formats/prunedstrings";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -15,7 +17,7 @@ import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
-import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
+import { mapStrings, projectWithFiles, requireProject } from "../../lib/formats/mapdoc";
 import { addScriptTrigger, addVariable, exportedTriggers, mapFileName, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
@@ -196,6 +198,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.services.provide(TRIGGERS_SERVICE, kinds),
     w3.commands.register("w3.triggers.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await projectWithFiles(w3);
       const path = triggerFile(w3);
       if (!path) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(path, "w3.triggerEditor");
@@ -243,6 +246,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     })),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await projectWithFiles(w3);
       const path = triggerFile(w3);
       if (!path) throw new Error("This project has no war3map.wtg.");
       startWithVariables = !openView;
@@ -305,7 +309,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return true;
     }),
     // Adjust Map String IDs: a string of war3map.wts gets another number (`ids` [[from, to], …], else asked), or all are
-    // numbered from 1 in order; every TRIGSTR_ reference in the map's text files follows. One edit of all the files (Undo
+    // numbered from 1 in order; every TRIGSTR_ reference in the map's text files follows, and so do the languages' tables
+    // (_Locales, lib/formats/localewts: their own numbers stay, and no string takes one). One edit of all the files (Undo
     // in the message, or the MCP edits' undo); refused while anything is unsaved. How many strings changed number.
     w3.commands.register("w3.triggers.adjustStringIds", async (ids?: unknown) => adjustStringIds(w3, ids)),
     w3.editors.registerProvider("w3.triggerEditor", {
@@ -322,8 +327,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const game = doc.path.startsWith("game:");
         const custom = game ? null : await readWctFile(w3.workspace, textTriggers(file).length);
-        const wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
-        const strings = wtsText !== null ? new StringTable(wtsText) : null;
+        let wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
         // Ids that show up later (new parameters) are looked up on demand; the view redraws once.
         const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
@@ -386,7 +391,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           save,
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
-          watches: game ? [] : [WCT_TEXT, WCT_RAW],
+          // The string table gives the texts of TRIGSTR_ parameters: saved by another editor, they are shown again
+          // in place (nothing is edited, selection and scroll stay). A table that can't be read keeps the old texts.
+          watches: game ? [] : [WCT_TEXT, WCT_RAW, WTS],
+          reloadFile: async (path: string) => {
+            if (path !== WTS) return false;
+            const text = await w3.workspace.readText(WTS).catch(() => null);
+            if (view.closed) return true;
+            if (text === null || text === wtsText) return true;
+            wtsText = text;
+            strings = new StringTable(text);
+            view.refresh();
+            return true;
+          },
           dispose: () => {
             view.dispose();
             if (openView === view) { openView = null; kinds.edits.fire(); }
@@ -434,6 +451,10 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
     }
     return { ...n, inEditor: true };
   }
+  // No trigger file listed is "no triggers to rename" only once the list has every file (right after an open it may not).
+  await w3.workspace.filesReady();
+  if (!same()) return null;
+  if (openView) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
   const path = wtgPath(w3.workspace.files());
   if (!path) return null;
   // A file that is there and can't be read stops here: it isn't written over.
@@ -466,13 +487,45 @@ const TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc)$/i;
 /** The map's own files kept raw (no codec): binary, so a reference in them can't be renumbered as text. */
 const RAW_MAP_FILE = /^map\/war3(map|campaign)[^/]*$/i;
 
+/** The terrain editor's files: they hold no string references (its w3i changes edit the file as it is then). */
+const TERRAIN_FILE = /^map\/war3map\.w3e(\.txt)?$/i;
+
+/** Opens the editors of the map's files again, those that can hold string references (TRIGSTR_): their undo history
+ *  holds the numbers as they were, and an undo would bring back a reference that now names another string (or none).
+ *  Adjust refuses while anything is unsaved, so they're all saved; one changed meanwhile keeps its history, and is
+ *  named. Editors of a file Adjust changed or watching war3map.wts may have opened again already: once more is safe. */
+async function forgetStringHistory(w3: W3Api) {
+  const kept: string[] = [];
+  for (const f of w3.workspace.files()) {
+    if (!(TEXT_FILE.test(f.path) || RAW_MAP_FILE.test(f.path)) || TERRAIN_FILE.test(f.path)) continue;
+    if ((await w3.editors.reopen(f.path)) > 0) kept.push(f.path);
+  }
+  if (kept.length) {
+    void w3.window.showWarning(`${kept.join(", ")} ${kept.length === 1 ? "was" : "were"} changed during Adjust Map String IDs and kept ${kept.length === 1 ? "its" : "their"} undo history: an undo there can bring back a string ID that names another string now.`);
+  }
+}
+
 /** See w3.triggers.adjustStringIds. */
 async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
-  requireProject(w3);
+  const asked = requireProject(w3).root;
+  // The tables and the files that refer to strings come from the file list: only once it has every file.
+  await w3.workspace.filesReady();
+  if (w3.workspace.project()?.root !== asked) throw new Error("Not changed: the project changed meanwhile.");
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === WTS);
   if (!listed) throw new Error("This map has no string table (war3map.wts).");
   // There but unreadable is an error, not an empty table.
   const table = new StringTable(await w3.workspace.readText(WTS));
+  // Numbers an earlier drop recorded stay free: a reference to one can come back (a record that can't be read refuses).
+  const reserved = reservedStringIds(await readPrunedStrings(w3), table);
+  // The languages' tables follow the same numbers (lib/formats/localewts); their own numbers stay, and stay free. One
+  // that is there but can't be read refuses: its numbers can't be told.
+  const localePaths = w3.workspace.files().map((f) => f.path).filter(isLocaleWts);
+  const locales: { path: string; wts: string }[] = [];
+  for (const path of localePaths) {
+    const wts = await w3.workspace.readText(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+    locales.push({ path, wts });
+  }
+  const localeOnly = localeOnlyNumbers(table, locales);
   let ids: Map<number, number>;
   if (given !== undefined) {
     if (!Array.isArray(given) || !given.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) {
@@ -488,7 +541,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
       ...nums.map((n) => ({ label: `STRING ${n}`, description: (table.get(n) ?? "").split(/\r?\n/)[0].slice(0, 80), value: n })),
     ], { placeholder: "Adjust Map String IDs: which string gets a new ID?" });
     if (picked?.value === undefined) return 0;
-    if (picked.value === ALL) ids = compactStringIds(table);
+    if (picked.value === ALL) ids = compactStringIds(table, 1, new Set([...reserved, ...localeOnly.keys()]));
     else {
       const typed = await w3.window.inputBox({ prompt: `New ID for string ${picked.value} (its references in the map follow)`, value: String(picked.value) });
       if (typed === undefined) return 0;
@@ -497,7 +550,7 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
     }
   }
   for (const [from, to] of [...ids]) if (from === to) ids.delete(from);
-  checkStringIds(table, ids);
+  checkStringIds(table, ids, reserved, localeOnly);
   if (!ids.size) { void w3.window.showInfo("Nothing to change: the strings keep their IDs."); return 0; }
   // A raw map file can't be changed as text: a reference in it would be left pointing at another string.
   const raw: string[] = [];
@@ -509,23 +562,39 @@ async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
   if (raw.length) throw new Error(`Not changed: ${raw.join(", ")} ${raw.length === 1 ? "is" : "are"} kept raw and refer${raw.length === 1 ? "s" : ""} to strings, which can't be renumbered there.`);
   const texts = w3.workspace.files().map((f) => f.path).filter((p) => TEXT_FILE.test(p));
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
-  let files = 0;
+  const root = asked;
+  let files = 0, languages = 0;
   const done = await edits.edit("Adjust Map String IDs", async (read) => {
+    // The lists above are that project's (the questions may have taken a while).
+    if (w3.workspace.project()?.root !== root) throw new Error("Not changed: the project changed meanwhile.");
     const wts = await read(WTS);
     if (wts === null) throw new Error("The map's string table (war3map.wts) is gone.");
-    // Read again: what was asked is checked against the table as it is now.
-    checkStringIds(new StringTable(wts), ids);
-    const out = [{ path: WTS, text: renumberWts(wts, ids) }];
+    // Read again: what was asked is checked against the tables and the record as they are now (a language's table gone
+    // meanwhile has nothing to follow).
+    const now = new StringTable(wts);
+    const localesNow: { path: string; wts: string }[] = [];
+    for (const path of localePaths) {
+      const text = await read(path).catch((e) => { throw new Error(`Not changed: ${path} can't be read (${errorText(e)}), so its strings can't follow the new IDs.`); });
+      if (text !== null) localesNow.push({ path, wts: text });
+    }
+    const adjusted = adjustStringTables(wts, localesNow, ids, reservedStringIds(await readPrunedStrings(w3), now));
+    const renumbered = adjusted.locales;
+    const out = [{ path: WTS, text: adjusted.wts }, ...renumbered.map((l) => ({ path: l.path, text: l.wts }))];
     for (const path of texts) {
       const text = await read(path);
       const next = text === null ? null : renumberStringRefs(text, ids);
       if (next !== null) out.push({ path, text: next });
     }
-    files = out.length;
+    languages = renumbered.length;
+    files = out.length - 1 - languages;
     return out;
+  }, async () => {
+    // After the edit and after its undo: the numbers changed under the editors' undo history.
+    if (w3.workspace.project()?.root === root) await forgetStringHistory(w3);
   });
   if (done) {
-    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts and ${files - 1} file${files === 2 ? "" : "s"} that refer to them.`, "Undo")
+    const tables = languages ? `, ${languages} language${languages === 1 ? "'s table" : "s' tables"}` : "";
+    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts${tables} and ${files} file${files === 1 ? "" : "s"} that refer to them. Open editors of the map's texts start a new undo history.`, "Undo")
       .then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
   }
   return done ? ids.size : 0;
@@ -988,7 +1057,11 @@ class TriggerView {
   }
 
   /** Redraws the selected item (e.g. after names were looked up). */
-  refresh() { this.renderDetail(); }
+  refresh() {
+    const top = this.detail.scrollTop;
+    this.renderDetail();
+    this.detail.scrollTop = top;
+  }
 
   // ---- undo -------------------------------------------------------------------------
   // A snapshot holds the tree's open and closed categories as they were. Undo and redo keep the tree as it is, except

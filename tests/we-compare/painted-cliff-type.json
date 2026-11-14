@@ -1,0 +1,97 @@
+[
+  {
+    "name": "painted-cliff-type-grass",
+    "description": "a Grass patch (size 3), a cliff pit (Apply Cliff, Decrease Two, size 3: 13 corners down; the 13 and the 24 round them on cliff tiles typed 1 = Grass Cliff, the palette's start), then a Dirt stroke (size 5) over the pit with Apply Cliff still on (Decrease Two, Grass Cliff); Studio: Paint Lgrs size 3, -2 size 3, Paint Ldrt size 5 at the same screen position. The editor re-types none of the 37 cliff corners (they stay 1), nor does Studio (2026-11-13; it used to re-type 36 to Dirt Cliff)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,144"],
+        ["--click", "1456,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,282"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,112"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-dirt",
+    "description": "the same with Dirt Cliff chosen as the cliff type before the Dirt stroke (Apply Cliff on, Decrease Two, Dirt Cliff): the editor still re-types none (37 stay 1)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,144"],
+        ["--click", "1456,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,282"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,112"],
+        ["--click", "1488,569"],
+        ["--click", "1441,367"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "painted-cliff-type-unticked",
+    "description": "the same with Apply Cliff unticked for the Dirt stroke (round 3's setup): the editor re-types none",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,144"],
+        ["--click", "1456,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,282"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1409,112"],
+        ["--click", "1488,569"],
+        ["--click", "1373,244"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 748, 500], ["tool", "−2:"], ["size", 3], ["click", 748, 500], ["tool", "Paint:"], ["texture", "Ldrt"], ["size", 5], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  }
+]

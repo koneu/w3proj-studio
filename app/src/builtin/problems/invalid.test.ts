@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { deleteInvalid, describePlan, planInvalid, splitInvalid, type KindLoader } from "./invalid";
+import { deleteInvalid, isRandomId, describePlan, planInvalid, splitInvalid, type KindLoader } from "./invalid";
 import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
 
@@ -23,6 +23,7 @@ function setup(files: Record<string, string>, opts: { answer?: boolean; unsaved?
   const w3 = {
     workspace: {
       project: () => ({ root: opts.root ?? "C:\\p" }),
+      filesReady: async () => {},
       resolve: (p: string) => p,
       readText: async (p: string) => { if (raw.has(p) || !fs.has(p)) throw new Error("no such file"); return fs.get(p)!; },
       writeText: async (p: string, t: string) => { log.push(`write ${p}`); fs.set(p, t); },
@@ -56,6 +57,15 @@ test("splitInvalid keeps known types, start locations, random objects and entrie
   assert.deepEqual(splitInvalid([], known), { keep: [], removed: [] });
 });
 
+test("random-by-level ids are kept by splitInvalid and are no unknown type for the Problems check (which asks isRandomId)", () => {
+  const ids = ["YYU3", "YYU/", "YYB/", "YiI2", "YiI/", "uDNR", "iDNR", "bDNR", "sloc"];
+  const { keep, removed } = splitInvalid([...ids, "zzzz"].map((id) => ({ id })), new Set());
+  assert.deepEqual(keep.map((p) => p.id), ids);
+  assert.deepEqual(removed.map((p) => p.id), ["zzzz"]);
+  for (const id of ids.filter((x) => x !== "sloc")) assert.ok(isRandomId(id), id);
+  for (const id of ["zzzz", "YYU ", "Y?I3", "uDNRx", ""]) assert.ok(!isRandomId(id), id);
+});
+
 test("the plan counts the unknown types per file, and only those", async () => {
   const { w3 } = setup({ [UNITS]: units("hfoo", "xxxx", "xxxx", "sloc", "ratf"), [DOODADS]: doodads("LTlt", "yyyy") });
   const plan = await planInvalid(w3, game);
@@ -81,7 +91,35 @@ test("it asks first, makes a checkpoint, removes them, and keeps everything else
   assert.equal(doc.format, "w3proj.units/1");
   assert.equal(doc.version, 8);
   assert.deepEqual(log.slice(0, 2), ["confirm", "command w3.checkpoints.create"], "asked, then checkpoint, before any write");
-  assert.deepEqual(log.slice(2), [`write ${UNITS}`, `write ${DOODADS}`]);
+  assert.deepEqual(log.slice(2), [`write ${UNITS}`, `write ${DOODADS}`, "command w3.terrain.rebuildFromFiles"]);
+});
+
+test("pathing, shadows and the minimap are rebuilt from the files after the writes, from the doodads before", async () => {
+  const { w3, log } = setup({ [UNITS]: units("hfoo", "xxxx"), [DOODADS]: doodads("LTlt", "yyyy") });
+  const given: unknown[] = [];
+  const execute = w3.commands.execute;
+  Object.assign(w3.commands, { execute: async (id: string, ...args: unknown[]) => { if (id === "w3.terrain.rebuildFromFiles") given.push(...args); return execute(id); } });
+  assert.equal(await deleteInvalid(w3, game), 2);
+  assert.equal(log.at(-1), "command w3.terrain.rebuildFromFiles", "after every write");
+  assert.deepEqual((given[0] as { id: string }[]).map((p) => p.id), ["LTlt", "yyyy"]);
+  assert.equal(given[1], "C:\\p", "for the project written in");
+  // Only units removed: the doodads didn't change, and none are given.
+  const units2 = setup({ [UNITS]: units("hfoo", "xxxx"), [DOODADS]: doodads("LTlt") });
+  const given2: unknown[] = [];
+  Object.assign(units2.w3.commands, { execute: async (id: string, ...args: unknown[]) => { given2.push([id, args[0]]); } });
+  await deleteInvalid(units2.w3, game);
+  assert.deepEqual(given2.at(-1), ["w3.terrain.rebuildFromFiles", undefined]);
+  // Declined: nothing is rebuilt.
+  const no = setup({ [UNITS]: units("hfoo", "xxxx") }, { answer: false });
+  await deleteInvalid(no.w3, game);
+  assert.ok(!no.log.includes("command w3.terrain.rebuildFromFiles"));
+});
+
+test("without the terrain viewer nothing is rebuilt, and the delete still goes through", async () => {
+  const { w3, fs } = setup({ [UNITS]: units("hfoo", "xxxx"), [DOODADS]: doodads("yyyy") });
+  Object.assign(w3.commands, { execute: async (id: string) => { if (id === "w3.terrain.rebuildFromFiles") throw new Error(commandNotFound(id)); } });
+  assert.equal(await deleteInvalid(w3, game), 2);
+  assert.deepEqual(idsOf(fs, DOODADS, "doodads"), []);
 });
 
 test("with the Checkpoints extension off it goes on, warns that no checkpoint was made, and doesn't point at one", async () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { playerRaces, startBuilding, startPreviews } from "./startpreview";
+import { playerRaces, startBuilding, startPreviewKey, startPreviews } from "./startpreview";
 import type { Placed } from "./objects";
 
 const sloc = (player: number | undefined, x: number, y: number): Placed => ({ id: "sloc", variation: 0, position: [x, y, 16], angle: 1, scale: [1, 1, 1], player });
@@ -35,4 +35,14 @@ test("races come from the map's players; anything else is left out", () => {
   assert.deepEqual([...races], [[0, 1], [1, 3]]);
   assert.deepEqual([...playerRaces(null)], []);
   assert.deepEqual([...playerRaces({})], []);
+});
+
+test("the key changes with a start's place, player and race, and not with other units", () => {
+  const units = [sloc(0, 1, 2), { ...sloc(0, 5, 5), id: "hfoo" }];
+  const key = startPreviewKey(units, new Map([[0, 1]]));
+  assert.equal(startPreviewKey([sloc(0, 1, 2)], new Map([[0, 1]])), key);
+  assert.notEqual(startPreviewKey([sloc(0, 1, 3)], new Map([[0, 1]])), key);
+  assert.notEqual(startPreviewKey([sloc(1, 1, 2)], new Map([[0, 1]])), key);
+  assert.notEqual(startPreviewKey(units, new Map([[0, 2]])), key);
+  assert.notEqual(startPreviewKey([], new Map()), key);
 });

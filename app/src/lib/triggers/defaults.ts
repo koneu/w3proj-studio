@@ -63,8 +63,34 @@ export function defaultWct(): Uint8Array {
 /** The default trigger file as the project keeps it (war3map.wtg.json). Its functions take no
  *  arguments, so it is read without the game's TriggerData. */
 export function defaultTriggerFile(root?: string): TriggerFile {
-  const noArgs = { find: () => ({ args: [] }) } as unknown as TriggerData;
-  return parseWtg(defaultWtg(root), noArgs);
+  return parseWtgWithoutArgs(defaultWtg(root));
+}
+
+/** A raw war3map.wtg read as if no function took arguments: right for the default trigger, and a file with arguments
+ *  comes out garbled or throws (enough to tell it isn't the default, see isDefaultTriggers). */
+export function parseWtgWithoutArgs(bytes: Uint8Array): TriggerFile {
+  return parseWtg(bytes, { find: () => ({ args: [] }) } as unknown as TriggerData);
+}
+
+/**
+ * Whether a trigger file holds nothing but the default: no variables, the category "Initialization" with the trigger
+ * "Melee Initialization" in it, enabled, not custom text, its event and melee actions in order, all enabled and without
+ * arguments. What the World Editor's save doesn't count as custom triggers (its WESTRING_NOTMELEE_CUSTOMTRIGGERS):
+ * renaming the trigger, dropping an action or disabling it counted, its description didn't (we-drive saves of World
+ * Editor 7003, 2026-11-09). Whatever wasn't tried (a renamed category, a trigger turned initially off) reads as not
+ * the default, so it never makes a map melee by mistake.
+ */
+export function isDefaultTriggers(file: TriggerFile): boolean {
+  if (file.variables.length) return false;
+  const items = file.items.filter((i) => i.type !== 1);
+  if (items.length !== 2) return false;
+  const [category, trigger] = items[0].type === 4 ? items : [items[1], items[0]];
+  if (category.type !== 4 || category.name !== "Initialization" || category.isComment) return false;
+  if (trigger.type !== 8 || trigger.name !== "Melee Initialization" || trigger.parent !== category.id) return false;
+  if (!trigger.enabled || trigger.isCustom || trigger.isComment || trigger.initiallyOff || trigger.runOnInit) return false;
+  const want = [{ kind: 0, name: "MapInitializationEvent" }, ...MELEE_ACTIONS.map((name) => ({ kind: 2, name }))];
+  return trigger.ecas.length === want.length && trigger.ecas.every((e, i) =>
+    e.kind === want[i].kind && e.name === want[i].name && e.enabled && !e.params.length && !e.children.length);
 }
 
 /**

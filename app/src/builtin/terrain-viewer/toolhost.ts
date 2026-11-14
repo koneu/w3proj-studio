@@ -1,5 +1,6 @@
 import type { PlacedRef } from "./pickmatch";
 import type { ReplaceTypes } from "./replace";
+import type { RandomHeights } from "../../lib/terrain/wholemap";
 import type { Shown, TerrainLook, ToggleLayer, ViewSet } from "./viewmodes";
 import type { MinimapPanel } from "./minimappanel";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
@@ -39,6 +40,10 @@ export interface ViewCommands {
   /** A named object of a tab's list (the Regions or Cameras tab, by its group id): the tab comes to the front and does
    *  the action (TerrainToolGroupInstance.itemAction); no name: only the tab. Null when done, else why not. */
   groupItemAction(group: string, name: string | null, action: "select" | "rename" | "delete", to?: string): Promise<string | null>;
+  /** Resolves once the placed objects are loaded (the first load and any reload after a save). */
+  ready(): Promise<void>;
+  /** Deletes one placed object (as the Delete key does: one undo step) found by id, creation number and position. Null when done, else why not. */
+  deletePlaced(ref: { id?: string; editorId?: number; x: number; y: number }): string | null;
   /** One of the view's key commands (camera, selection, clipboard: index.ts KEY_COMMANDS) as its key would do it,
    *  once; true when it did something. */
   keyCommand(id: string): boolean;
@@ -46,7 +51,11 @@ export interface ViewCommands {
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
   state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number; pitch: number; fov: number; aspect: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
     /** The minimap panel: shown, its picture in, the view's outline on it (picture pixels). */
-    minimap: ReturnType<MinimapPanel["state"]> };
+    minimap: ReturnType<MinimapPanel["state"]>;
+    /** Corners of the solid marks drawn per set (the Camera Objects layer's "cameras", the open tab's "tab"). */
+    shapes: Record<string, number>;
+    /** Rings drawn per named set (the light ranges' "lights", the open tab's "tab": the selected cameras' circles). */
+    rings: Record<string, number> };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
@@ -62,7 +71,8 @@ export interface HeightCommands {
 /** Reset Height Field and Adjust Cliff Levels on one open terrain editor's whole map, each one undo step: how many
  *  corners changed (0: nothing to do), or why it was refused (nothing changed then). */
 export interface WholeMapGround {
-  resetHeightField(): number | string;
+  /** Flat over the cliff levels, or with `random` the World Editor's Random (lib/terrain/wholemap.ts randomizeHeightField). */
+  resetHeightField(random?: RandomHeights | null): number | string;
   adjustCliffLevels(by: number): number | string;
   /** How far the cliff levels can move (lib/terrain/wholemap.ts cliffShiftRange). */
   range(): { min: number; max: number };

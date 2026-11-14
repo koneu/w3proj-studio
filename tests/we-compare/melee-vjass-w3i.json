@@ -1,0 +1,17 @@
+{
+  "name": "melee-vjass-w3i",
+  "description": "A melee map whose script is vJASS (the custom script header holds //! lines): the WE opens and saves it, Studio saves it after a harmless doodad edit; the w3i flags (melee 0x4) and the kept script header",
+  "input": {
+    "new": { "name": "MeleeVjass", "width": 64, "height": 64 },
+    "steps": [
+      { "mcp": "edit_text_file", "args": { "path": "map/war3map.wct.txt", "find": "//== header (no text) ==", "replace": "//== header ==\n//! zinc\n//! endzinc" } }
+    ]
+  },
+  "studio": {
+    "settings": { "mcp.writeTools": true },
+    "steps": [
+      { "mcp": "place_objects", "args": { "kind": "doodads", "objects": [{ "id": "LTlt", "x": 2000, "y": 2000 }] } }
+    ]
+  },
+  "compare": ["war3map.w3i", { "file": "war3map.wct.txt", "as": "text" }]
+}

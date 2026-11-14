@@ -137,3 +137,51 @@ test("which fields belong in the Skin file comes from the metadata's netsafe col
   assert.equal(skinPathOf("map/war3campaign.w3d.json"), "map/war3campaignSkin.w3d.json");
   assert.equal(listedPath(["map/war3mapskin.w3u.json"], "map/war3mapSkin.w3u.json"), "map/war3mapskin.w3u.json");
 });
+
+// --- the game's own metadata tables, when the game and the release CLI are here -----------------------------------
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+/** A game table's rows through the release CLI (`game slk`); null without the game or the CLI. */
+function gameTable(path: string, cols: string): Record<string, string>[] | null {
+  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
+  const repo = git("--show-toplevel"), common = git("--git-common-dir");
+  if (!repo) return null;
+  const main = common ? dirname(resolve(common)) : repo;
+  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
+  const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
+  const gameFile = join(main, ".game-path");
+  // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
+  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
+  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
+  if (!bin) return null;
+  const r = spawnSync(bin, ["game", "slk", path, "--col", cols, ...(game ? ["--install", game] : [])], { encoding: "utf8", maxBuffer: 1 << 26 });
+  if (r.status !== 0) return null;
+  const [head, ...rows] = r.stdout.split(/\r?\n/).filter((l) => l);
+  const names = head.split("\t");
+  return rows.map((l) => Object.fromEntries(l.split("\t").map((v, i) => [names[i], v])));
+}
+
+test("isSkinField on the game's real metadata tables: every netsafe value is understood and the known fields land right", (ctx) => {
+  const tables = ["Units/UnitMetaData.slk", "Units/AbilityMetaData.slk", "Units/UpgradeMetaData.slk", "Units/DestructableMetaData.slk", "Units/AbilityBuffMetaData.slk"];
+  const unit = gameTable(tables[0], "ID,field,netsafe");
+  if (!unit) return ctx.skip("no game or release CLI (.game-path, target/release/w3proj)");
+  const as = (r: Record<string, string>) => ({ id: r.ID, use: { netsafe: r.netsafe } }) as unknown as FieldMeta;
+  const byId = new Map(unit.map((r) => [r.ID, r]));
+  for (const id of ["unam", "uico", "umdl", "utip"]) assert.equal(isSkinField(as(byId.get(id)!)), true, `${id} belongs in the Skin file`);
+  for (const id of ["uhpm", "uabi"]) assert.equal(isSkinField(as(byId.get(id)!)), false, `${id} stays in the main file`);
+  let seen = 0;
+  for (const t of tables) {
+    const rows = gameTable(t, "ID,netsafe");
+    if (!rows) continue; // a table without the column fails the --col lookup
+    for (const r of rows) {
+      seen++;
+      assert.match(r.netsafe ?? "", /^(|0|1|11)$/, `${t} ${r.ID}: netsafe "${r.netsafe}" is not a value the rule knows`);
+    }
+  }
+  assert.ok(seen > 500, "the tables had rows");
+  // control: a value outside the known ones would be seen by the pattern above
+  assert.doesNotMatch("2", /^(|0|1|11)$/);
+});

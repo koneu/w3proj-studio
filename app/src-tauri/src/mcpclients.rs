@@ -358,12 +358,12 @@ fn replace(file: &Path, text: &str) -> Result<Option<PathBuf>, String> {
     if let Some(backup) = &backup {
         std::fs::copy(file, backup).map_err(|e| format!("Couldn't back up {}: {e}", file.display()))?;
     }
-    let temp = sibling("w3proj-temp");
-    let done = std::fs::write(&temp, text).and_then(|()| std::fs::rename(&temp, file));
-    if let Err(e) = done {
-        let _ = std::fs::remove_file(&temp);
-        return Err(format!("Couldn't write {}: {e}", file.display()));
-    }
+    // atomic::write makes a missing folder; the clients' own folder is theirs to make, so it stays an error.
+    let written = match file.parent().filter(|p| !p.as_os_str().is_empty()) {
+        Some(dir) if !dir.is_dir() => Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{} doesn't exist", dir.display()))),
+        _ => w3proj::atomic::write(file, text.as_bytes()),
+    };
+    written.map_err(|e| format!("Couldn't write {}: {e}", file.display()))?;
     Ok(backup)
 }
 
@@ -513,6 +513,48 @@ mod tests {
         assert_eq!(got["mcpServers"]["w3proj"], json!({ "command": "bridge.exe", "args": ["mcp"] }));
         let keys: Vec<_> = got.as_object().unwrap().keys().cloned().collect();
         assert_eq!(keys, ["theme", "mcpServers", "z"]);
+    }
+
+    #[test]
+    fn a_refused_write_leaves_the_old_file_and_no_temp_file() {
+        let home = Home::new();
+        let c = home.client("claudeDesktop");
+        let before = r#"{"theme":"dark"}"#;
+        home.write(&c, before);
+        let mut perm = std::fs::metadata(&c.config).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&c.config, perm.clone()).unwrap();
+        let err = set_up(&c, "bridge.exe").unwrap_err();
+        assert!(err.contains("Couldn't write"), "{err}");
+        assert_eq!(std::fs::read_to_string(&c.config).unwrap(), before);
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&c.config, perm).unwrap();
+        let names: Vec<_> = std::fs::read_dir(c.config.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.iter().all(|n| !n.ends_with(".tmp") && !n.ends_with("w3proj-temp")), "{names:?}");
+    }
+
+    #[test]
+    fn a_missing_folder_is_still_an_error_and_not_made() {
+        let home = Home::new();
+        let dir = home.0.join("nope");
+        let err = replace(&dir.join("c.json"), "{}").unwrap_err();
+        assert!(err.contains("Couldn't write"), "{err}");
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_write_keeps_the_files_permissions() {
+        let home = Home::new();
+        let c = home.client("claudeDesktop");
+        home.write(&c, "{}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&c.config, std::fs::Permissions::from_mode(0o600)).unwrap();
+            set_up(&c, "bridge.exe").unwrap();
+            assert_eq!(std::fs::metadata(&c.config).unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[test]

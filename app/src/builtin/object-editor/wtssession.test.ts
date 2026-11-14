@@ -691,3 +691,136 @@ test("another editor's line-ending-only rewrite of a string is not 'their text':
   await a.save(d.read, d.write);
   assert.equal(get(d.text, 1), "X");
 });
+
+// --- Two editors on one war3map.wts, interleaved ---
+// A is this session (the Object Editor); B is any other writer of the file: another session, the text editor, an
+// outside program. Neither may lose or change a string the other saved, nor bring back one the other deleted.
+
+const three = (a: string, b: string, c: string) => `STRING 1\n{\n${a}\n}\n\nSTRING 2\n{\n${b}\n}\n\nSTRING 3\n{\n${c}\n}\n`;
+const nums = (text: string) => [...new StringTable(text).entries()].map(([n]) => n);
+/** B deletes a string block from the file as it is now. */
+const deleteString = (text: string, n: number) => text.replace(new RegExp(`STRING ${n}\\n\\{\\n[^}]*\\}\\n\\n?`), "");
+
+test("two sessions: undo past a save while the other deleted the string leaves it deleted, and keeps the other's strings", async () => {
+  const d = disk(three("one", "two", "three"));
+  const a = new WtsSession(d.text), b = new WtsSession(d.text);
+  const a0 = a.snapshot();
+  a.set(1, "A1"); const a1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(2, "A2"); a.snapshot(); // unsaved: A's tab stays open with its history (a clean one would be opened again)
+  b.set(3, "B3"); b.snapshot(); await b.save(d.read, d.write);
+  d.text = deleteString(d.text, 1); // B (the text editor, say) deletes string 1, which A saved
+  assert.deepEqual(nums(d.text), [2, 3], "control: string 1 is gone");
+  a.restore(a1); a.restore(a0); // A undoes past its save: string 1 back to "one", string 2 back too
+  assert.equal(a.table.get(1), "one");
+  const r = await a.save(d.read, d.write);
+  assert.deepEqual(nums(d.text), [2, 3], "string 1 not brought back");
+  assert.deepEqual([get(d.text, 2), get(d.text, 3)], ["two", "B3"], "A's undo of string 2 and B's string 3 both there");
+  assert.equal(r.shown, true, "A shows string 1 no longer");
+  assert.equal(a.table.has(1), false);
+  assert.equal(a.dirty, false);
+  // Redo all the way: string 1 stays gone, string 2 is A's again.
+  a.restore(a1); a.restore(a.snapshot());
+  a.set(2, "A2"); a.snapshot();
+  await a.save(d.read, d.write);
+  assert.deepEqual(nums(d.text), [2, 3]);
+  assert.deepEqual([get(d.text, 2), get(d.text, 3)], ["A2", "B3"]);
+  // B, which still has string 1 in its table, saves something else: string 1 stays gone for B too.
+  b.set(2, "B2"); b.snapshot();
+  await b.save(d.read, d.write);
+  assert.deepEqual(nums(d.text), [2, 3]);
+  assert.equal(get(d.text, 2), "B2");
+});
+
+test("undo past a save, then the other deleted the string before A saved: still not brought back", async () => {
+  const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+  const a0 = a.snapshot();
+  a.set(1, "A1"); a.snapshot(); await a.save(d.read, d.write);
+  a.set(3, "A3"); a.snapshot();
+  a.restore(a0); // undone first ...
+  d.text = deleteString(d.text, 1); // ... deleted after
+  await a.save(d.read, d.write);
+  assert.deepEqual(nums(d.text), [2, 3]);
+  assert.equal(get(d.text, 3), "three");
+});
+
+test("undone while a save was writing, and the other deleted the string meanwhile: no refusal, nothing brought back", async () => {
+  const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+  a.set(1, "A1"); const a1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "A1b"); a.snapshot();
+  await a.save(d.read, async (t) => { a.restore(a1); await d.write(t); }); // the undo races the save (racy)
+  d.text = deleteString(d.text, 1);
+  await a.save(d.read, d.write);
+  assert.deepEqual(nums(d.text), [2, 3]);
+  assert.equal(a.dirty, false);
+});
+
+/** A write that fails after the file was cut short, as `std::fs::write` leaves it when the disk fills up: the file was
+ *  emptied when it was opened, and only the first `kept` characters of the new text arrived. */
+const tornWrite = (d: { text: string }, kept: (t: string) => number) => async (t: string) => {
+  d.text = t.slice(0, kept(t));
+  throw new Error("Auf dem Datenträger ist nicht genügend Speicherplatz vorhanden. (os error 112)");
+};
+
+test("a write that fails halfway (disk full): the retry writes every string again, none is lost", async () => {
+  for (const cut of [0, 9, 30, 40]) { // empty, inside string 1, between blocks, inside string 3
+    const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+    a.set(2, "A2"); a.snapshot();
+    await assert.rejects(a.save(d.read, tornWrite(d, () => cut)), /os error 112/);
+    assert.notDeepEqual(nums(d.text), [1, 2, 3], `control (cut at ${cut}): the failed write left the file short`);
+    assert.equal(a.dirty, true);
+    await a.save(d.read, d.write);
+    assert.equal(d.text, three("one", "A2", "three"), `cut at ${cut}: the whole file after the retry`);
+    assert.equal(a.dirty, false);
+  }
+});
+
+test("a write that fails halfway keeps A unsaved even after A undoes its edit, and the save repairs the file", async () => {
+  const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+  const a0 = a.snapshot();
+  a.set(2, "A2"); a.snapshot();
+  await assert.rejects(a.save(d.read, tornWrite(d, (t) => t.length - 12)));
+  a.restore(a0); // nothing of A's to write any more, but the file on disk is short
+  assert.equal(a.dirty, true, "unsaved: only a save puts the file right");
+  await a.save(d.read, d.write);
+  assert.equal(d.text, three("one", "two", "three"));
+  assert.equal(a.dirty, false);
+  // Edits after the repair save as usual.
+  a.set(3, "A3"); a.snapshot();
+  await a.save(d.read, d.write);
+  assert.equal(d.text, three("one", "two", "A3"));
+});
+
+test("a recreate whose write fails halfway is written whole by the retry", async () => {
+  const d = disk(""), a = new WtsSession(three("one", "two", "three"));
+  a.set(1, "A1"); a.snapshot();
+  let missing = true;
+  const read = async () => { if (missing) throw "os error 2"; return d.text; };
+  await assert.rejects(a.save(read, async (t) => { missing = false; await tornWrite(d, () => 20)(t); }, yes, 0));
+  await a.save(read, d.write, yes, 0);
+  assert.equal(d.text, three("A1", "two", "three"));
+});
+
+test("a write that fails halfway, then the other editor saves the short file: what the other wrote is kept", async () => {
+  const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+  a.set(1, "A1"); a.snapshot();
+  await assert.rejects(a.save(d.read, tornWrite(d, (t) => t.indexOf("STRING 3"))));
+  d.text = text_set(d.text, 2, "B2"); // B saved its string onto the short file: it is B's file now
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "A1");
+  assert.equal(get(d.text, 2), "B2", "B's text stays");
+});
+
+test("a write refused before anything was written (locked, denied) changes nothing, and the retry saves normally", async () => {
+  for (const error of ["Der Prozess kann nicht auf die Datei zugreifen. (os error 32)", "Zugriff verweigert (os error 5)"]) {
+    const d = disk(three("one", "two", "three")), a = new WtsSession(d.text);
+    a.set(1, "A1"); const snap = a.snapshot();
+    const before = d.text;
+    await assert.rejects(a.save(d.read, async () => { throw error; }));
+    assert.equal(d.text, before);
+    assert.deepEqual(a.snapshot(), snap);
+    assert.equal(a.dirty, true);
+    d.text = text_set(d.text, 3, "B3"); // another editor saves meanwhile
+    await a.save(d.read, d.write);
+    assert.equal(d.text, three("A1", "two", "B3"));
+  }
+});

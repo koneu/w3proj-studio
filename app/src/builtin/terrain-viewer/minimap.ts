@@ -19,7 +19,18 @@
 // - a doodad or destructable shown on the minimap (showInMM) is a dot in its
 //   minimap colour (useMMColor), else in its model's texture's smallest mip
 //   colour (the Lordaeron rocks grey, the Ruins rocks green), as big as its
-//   pathing texture (a 4×4 one, trees: about a tile; rock spires 12×12: three).
+//   pathing texture (a 4×4 one, trees: about a tile; rock spires 12×12: three);
+// - a gate, a wall or a rock spire (a pathing texture that isn't one full square) is drawn as its texture's cells
+//   (non-black ones, 4 per tile), turned by its angle (the textures are drawn for 270°): SnowareBay's gates are strips
+//   5 tiles by 1 and 22×22 diagonals in the editor's export (we-drive 2026-11-13, and on a probe map of isolated
+//   objects), in the colour of the gate model's wall texture, not a grey disc.
+// Where and how sharp, measured on the editor's Export Minimap of seven maps (2026-11-13: HillsbradCreek, TurtleRock,
+// MurgulOasis, Deadlock, SnowareBay, NorthernIsles, cliff.w3m; we-drive --export-minimap):
+// - the drawn area is whole pixels: the larger side fills the picture, the other is rounded down and centred;
+// - a pixel shows what lies under its bottom-left corner (a centre-sampled picture is half a pixel off wherever a
+//   tile isn't a whole number of pixels);
+// - one 3×3 tent pass softens it, inside the drawn area (the black bands keep a sharp edge);
+// - values are cut to whole numbers, not rounded.
 
 import { DEEP_WATER } from "../../lib/terrain/pathing";
 import type { Terrain } from "../../lib/terrain/w3e";
@@ -64,7 +75,12 @@ export interface MinimapInput {
   icons?: { x: number; y: number; image: { width: number; height: number; rgba: ArrayLike<number> }; tint?: Rgb }[];
 }
 
-export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number }
+/** A pathing texture's cells (4 per tile; row 0 north) that block something. */
+export interface PathMask { width: number; height: number; cells: Uint8Array }
+
+/** `mask` (the object's pathing texture) is drawn as it is, turned by `angle` (radians, as placed: the textures
+ *  are drawn for 270°); without it a dot of `size` tiles stands for the object. */
+export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number; mask?: PathMask; angle?: number }
 
 /** How big a preview icon is on a 256 pixel minimap. */
 export const ICON_SIZE = 16;
@@ -83,8 +99,8 @@ export interface MinimapParams {
 export const DEFAULT_MINIMAP: MinimapParams = {
   groundBrightness: 1,
   groundNoise: 0.1,
-  objectRadius: 0.6,
-  blurPasses: 2,
+  objectRadius: 0.7,
+  blurPasses: 1,
 };
 
 export const MINIMAP_SIZE = 256;
@@ -96,12 +112,20 @@ const WATER_ALPHA = 64 / 255;
 export function minimapFrame(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, margins: [number, number, number, number], size: number, wholeMap = false) {
   const [ml, mr, mb, mt] = wholeMap ? [0, 0, 0, 0] : margins;
   const N = Math.max(1, Math.round(size));
-  const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
-  const scale = N / Math.max(1, pw, ph);
-  const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
+  const pw = Math.max(1, t.width - 1 - ml - mr), ph = Math.max(1, t.height - 1 - mb - mt);
+  const scale = N / Math.max(pw, ph);
+  // The World Editor's box (measured on its exports of 130×136 and 108×86 playable areas): whole pixels, the larger
+  // side filling the picture, the other rounded down and centred, the odd pixel to the right or below.
+  const w = Math.min(N, Math.floor(pw * scale + 1e-6)), h = Math.min(N, Math.floor(ph * scale + 1e-6));
+  const left = Math.floor((N - w) / 2), top = Math.floor((N - h) / 2);
+  const sx = w / pw, sy = h / ph;
   return {
-    toPixel: (wx: number, wy: number): [number, number] => [((wx - t.offsetX) / 128 - ml) * scale + ox, N - (((wy - t.offsetY) / 128 - mb) * scale + oy)],
-    toWorld: (px: number, py: number): [number, number] => [((px - ox) / scale + ml) * 128 + t.offsetX, ((N - py - oy) / scale + mb) * 128 + t.offsetY],
+    /** The drawn area in pixels: left, top, width, height. */
+    box: [left, top, w, h] as [number, number, number, number],
+    /** Pixels per tile across and down. */
+    scale: [sx, sy] as [number, number],
+    toPixel: (wx: number, wy: number): [number, number] => [left + ((wx - t.offsetX) / 128 - ml) * sx, top + h - ((wy - t.offsetY) / 128 - mb) * sy],
+    toWorld: (px: number, py: number): [number, number] => [((px - left) / sx + ml) * 128 + t.offsetX, ((top + h - py) / sy + mb) * 128 + t.offsetY],
   };
 }
 
@@ -139,14 +163,14 @@ export function grainAt(x: number, y: number): number {
 /** RGBA pixels, rows top to bottom (north up). */
 export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const { terrain: t, tileColor, waterColor } = input;
-  const [ml, mr, mb, mt] = input.wholeMap ? [0, 0, 0, 0] : input.margins;
-  const P = { ...DEFAULT_MINIMAP, ...input.params };
+  const [ml, , mb] = input.wholeMap ? [0, 0, 0, 0] : input.margins;
+  const P ={ ...DEFAULT_MINIMAP, ...input.params };
   const N = Math.max(1, Math.round(input.size ?? MINIMAP_SIZE));
   const showGround = input.show?.terrain !== false, showWater = input.show?.water !== false;
   const overlay = input.overlay;
-  const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
-  const scale = N / Math.max(pw, ph); // pixels per tile
-  const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
+  const frame = minimapFrame(t, input.margins, N, input.wholeMap);
+  const [left, top, boxW, boxH] = frame.box;
+  const scale = Math.max(...frame.scale); // pixels per tile
   const clampX = (x: number) => Math.min(t.width - 1, Math.max(0, x)), clampY = (y: number) => Math.min(t.height - 1, Math.max(0, y));
   const C = (x: number, y: number) => t.corners[clampY(y) * t.width + clampX(x)];
   const waterAlpha = Math.min(1, Math.max(0, input.waterAlpha ?? WATER_ALPHA));
@@ -154,18 +178,18 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   /** Where the ground is drawn (the grain goes there, not on the black around it or on dots and squares). */
   const grain = new Uint8Array(N * N);
   const ground = showGround ? groundColors(t, tileColor, input.cliffColor, input.show?.blight ? input.blightColor : null) : null;
+  /** Where pixel (px, py) samples the map, in tiles from the drawn area's bottom-left: the pixel's bottom-left corner
+   *  (the World Editor's tile edges fall half a pixel right of and above a centre-sampled picture's). */
+  const sample = (px: number, py: number): [number, number] => [(px - left) / frame.scale[0], (top + boxH - 1 - py) / frame.scale[1]];
   /** Whether a pixel is in the drawn area (the playable area, or the whole map): objects past it aren't drawn, as the
    *  World Editor's Playable Area Only cuts the trees past the playable area's edges. */
-  const drawn = (px: number, py: number) => {
-    const fx = (px + 0.5 - ox) / scale, fy = (N - (py + 0.5) - oy) / scale;
-    return fx >= 0 && fy >= 0 && fx < pw && fy < ph;
-  };
+  const drawn = (px: number, py: number) => px >= left && py >= top && px < left + boxW && py < top + boxH;
 
   for (let py = 0; py < N; py++) {
     for (let px = 0; px < N; px++) {
       // Tiles from the playable area's bottom-left.
       if (!drawn(px, py)) continue;
-      const fx = (px + 0.5 - ox) / scale, fy = (N - (py + 0.5) - oy) / scale;
+      const [fx, fy] = sample(px, py);
       const gx = fx + ml, gy = fy + mb;
       const x0 = Math.floor(gx), y0 = Math.floor(gy), u = gx - x0, v = gy - y0;
       const q = [C(x0, y0), C(x0 + 1, y0), C(x0, y0 + 1), C(x0 + 1, y0 + 1)];
@@ -195,14 +219,33 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   }
 
   /** Pixel of a world point. */
-  const at = minimapFrame(t, input.margins, N, input.wholeMap).toPixel;
+  const at = frame.toPixel;
   const rad = P.objectRadius * scale;
   for (const o of input.objects) {
     const [cx, cy] = at(o.x, o.y);
+    const m = o.mask;
+    if (m) {
+      // The pathing texture's cells, each pixel by its sample point (its bottom-left corner), turned back by the angle.
+      const turn = o.angle === undefined ? 0 : o.angle + Math.PI / 2, cos = Math.cos(turn), sin = Math.sin(turn);
+      const reach = Math.hypot(m.width, m.height) / 8, rx = reach * frame.scale[0] + 1, ry = reach * frame.scale[1] + 1;
+      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+        for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+          if (x < 0 || y < 0 || x >= N || y >= N || !drawn(x, y)) continue;
+          const dx = (x - cx) / frame.scale[0], dy = (cy - (y + 1)) / frame.scale[1];
+          const lx = dx * cos + dy * sin, ly = dy * cos - dx * sin;
+          const col = Math.floor(lx * 4 + m.width / 2), row = Math.floor(m.height / 2 - ly * 4);
+          if (col < 0 || row < 0 || col >= m.width || row >= m.height || !m.cells[row * m.width + col]) continue;
+          img.set(o.rgb, (y * N + x) * 3);
+          grain[y * N + x] = 0;
+        }
+      }
+      continue;
+    }
     const rad = P.objectRadius * scale * (o.size ?? 1);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
-        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad || !drawn(x, y)) continue;
+        // The pixel's sample point (its bottom-left corner, as the ground's).
+        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x - cx, y + 1 - cy) > rad || !drawn(x, y)) continue;
         img.set(o.rgb, (y * N + x) * 3);
         grain[y * N + x] = 0;
       }
@@ -219,17 +262,18 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     }
   }
 
-  // Soften like the World Editor's render (3×3 tent filter).
+  // Soften like the World Editor's render (3×3 tent filter), inside the drawn area: the editor's black bands keep a
+  // sharp edge.
   for (let pass = 0; pass < P.blurPasses; pass++) {
     const src = img.slice();
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++) {
+    for (let y = top; y < top + boxH; y++) {
+      for (let x = left; x < left + boxW; x++) {
         for (let k = 0; k < 3; k++) {
           let sum = 0, weight = 0;
           for (let j = -1; j <= 1; j++) {
             for (let i = -1; i <= 1; i++) {
               const xx = x + i, yy = y + j;
-              if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue;
+              if (!drawn(xx, yy)) continue;
               const wt = (i ? 1 : 2) * (j ? 1 : 2);
               sum += src[(yy * N + xx) * 3 + k] * wt;
               weight += wt;
@@ -277,11 +321,13 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     }
   }
 
+  // Cut to whole values, not rounded: the World Editor's flat ground comes out 0.5–1.5 below the texture's colour
+  // (whole-tile means on seven maps, 2026-11-13).
   const out = new Uint8ClampedArray(N * N * 4);
   for (let i = 0; i < N * N; i++) {
-    out[i * 4] = img[i * 3];
-    out[i * 4 + 1] = img[i * 3 + 1];
-    out[i * 4 + 2] = img[i * 3 + 2];
+    out[i * 4] = Math.floor(img[i * 3]);
+    out[i * 4 + 1] = Math.floor(img[i * 3 + 1]);
+    out[i * 4 + 2] = Math.floor(img[i * 3 + 2]);
     out[i * 4 + 3] = 255;
   }
   return out;

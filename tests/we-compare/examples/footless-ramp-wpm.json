@@ -1,0 +1,7 @@
+{
+  "name": "footless-ramp-wpm",
+  "description": "verification round 3 p6 item 10: one-tile all-flagged ramps without a foot; Studio's rebuilt pathing map vs the one the World Editor saves (the input holds a stale one)",
+  "input": { "map": "${MAIN}/openpoints/verify-2026-11-13/p6/i10/R.w3x" },
+  "studio": { "steps": [{ "mcp": "rebuild_map" }] },
+  "compare": [{ "file": "war3map.wpm", "as": "wpm" }]
+}

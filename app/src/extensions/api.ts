@@ -18,7 +18,7 @@ export interface CommandContribution {
    *  not there yet is added. Without this it's in the command palette only. */
   menu?: string;
   /** What it needs to run; its menu entry is greyed out without it. */
-  when?: "project" | "editor" | "save" | "undo";
+  when?: "project" | "editor" | "save" | "undo" | "terrain";
 }
 
 export interface ViewContainerContribution {
@@ -204,6 +204,8 @@ export interface QuickPickItem<T = unknown> {
   description?: string;
   detail?: string;
   value?: T;
+  /** Greyed out with this reason; it can't be picked. */
+  disabled?: string;
 }
 
 export interface StatusBarItem extends Disposable {
@@ -350,7 +352,12 @@ export interface W3Api {
     project(): ProjectInfo | null;
     open(path: string): Promise<void>;
     close(): void;
+    /** The project's files as listed so far: right after an open the list may not be read yet (see filesReady). */
     files(): FileInfo[];
+    /** Resolves once files() lists every file of the open project; rejects when none is open or the list can't be
+     *  read. Whatever deletes, drops or renumbers by what files() holds (strings nothing refers to, a language's
+     *  table) waits for it first: a file not listed yet isn't an absent one. */
+    filesReady(): Promise<void>;
     /** The project's folders (forward slashes), empty ones too. */
     folders(): string[];
     /** Creates a project folder, with those above it. */

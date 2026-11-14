@@ -173,6 +173,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return;
     }
     if (!t) return;
+    // A placed object: deleted in the terrain editor's own edit path (undo there; unsaved).
+    if (n.placed && action === "delete" && t.kind === "point") {
+      await w3.commands.execute("w3.terrain.deletePlaced", t.x, t.y, { id: t.id, editorId: t.editorId });
+      hookTerrain();
+      reload();
+      return;
+    }
+    // An import: Change path (and its Update references question) or Remove (undoable) in the Import Manager.
+    if (t.kind === "imports") {
+      if (!t.path) return;
+      if (action === "rename") {
+        const to = (await w3.window.inputBox({ prompt: `New path for ${t.path}`, value: t.path }))?.trim();
+        if (!to || to === t.path || !guard.owns(rowsRoot, rootNow())) return;
+        await w3.commands.execute("w3.imports.renamePath", t.path, to);
+      } else if (action === "delete") await w3.commands.execute("w3.imports.removePath", t.path);
+      forgetSaved();
+      reload();
+      return;
+    }
     if (action === "play") { if (t.kind === "sounds" && t.file) await w3.commands.execute("w3.sounds.play", t.file); return; }
     let to: string | undefined;
     if (action === "rename") {
@@ -202,8 +221,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     if (items.length && (a.edit || a.rename || a.remove)) items.push("-");
     if (a.edit) items.push({ label: "Edit Object Properties", run: run(async () => { if (!guard.owns(rowsRoot, rootNow())) return; const sel = editCommand(n); if (sel) await w3.commands.execute(sel.command, ...sel.args); else if (n.target) await go(n.target); }) });
-    if (a.rename) items.push({ label: "Rename Object…", run: run(() => act(n, "rename", rowsRoot)) });
-    if (a.remove) items.push({ label: "Delete Object", run: run(() => act(n, "delete", rowsRoot)) });
+    const imp = n.target?.kind === "imports";
+    if (a.rename) items.push({ label: imp ? "Change Import Path…" : "Rename Object…", run: run(() => act(n, "rename", rowsRoot)) });
+    if (a.remove) items.push({ label: imp ? "Remove Import" : "Delete Object", run: run(() => act(n, "delete", rowsRoot)) });
     if (a.play) items.push("-", { label: "Play Sound", run: run(() => act(n, "play", rowsRoot)) });
     return items;
   };

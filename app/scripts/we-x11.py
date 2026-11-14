@@ -3,10 +3,15 @@
 its own), through python-xlib and its XTest extension. Every command prints one JSON line.
 
   we-x11.py --display :N windows                       mapped top-level windows: id, title, class, rect, pid, transient
-  we-x11.py --display :N key KEY [--window ID]         press and release a key ("v", "Escape", "ctrl+s", "alt+F4", "Return")
+  we-x11.py --display :N key KEY [--window ID] [--hold MS]  press and release a key ("v", "Escape", "ctrl+s", "alt+F4",
+                                                       "Return"), held MS (default 50)
+  we-x11.py --display :N type TEXT [--window ID]       type TEXT, with Shift where a character needs it (a path)
   we-x11.py --display :N click X,Y [--button 1|3] [--double]   click at a screen position
   we-x11.py --display :N move X,Y                      move the pointer
-  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3]  press at one point, move to the other, release
+  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--dry]
+                                                       press at one point, move to the other in steps over MS (default
+                                                       400), release; MOD held all the while; --dry only prints the
+                                                       pointer path (needs no display)
   we-x11.py --display :N shot FILE [--rect X,Y,W,H]    picture of the screen (or a part of it) as PNG
   we-x11.py --display :N focus ID                      give a window the keyboard focus and raise it
   we-x11.py --display :N close ID                      ask a window to close (WM_DELETE_WINDOW)
@@ -116,7 +121,7 @@ def keycode(d, name):
     return code
 
 
-def press_key(d, spec):
+def press_key(d, spec, hold_ms=50):
     from Xlib import X
     from Xlib.ext import xtest
     import time
@@ -128,11 +133,36 @@ def press_key(d, spec):
     d.sync()
     xtest.fake_input(d, X.KeyPress, key)
     d.sync()
-    time.sleep(0.05)
+    time.sleep(hold_ms / 1000)
     xtest.fake_input(d, X.KeyRelease, key)
     for m in reversed(mods):
         xtest.fake_input(d, X.KeyRelease, m)
     d.sync()
+
+
+def type_text(d, text):
+    """Types `text` character by character, with Shift where the keyboard map has the character on the shifted level
+    (a Windows path's ':' and capitals, a file dialog's name field)."""
+    from Xlib import X, XK
+    from Xlib.ext import xtest
+    import time
+    shift = keycode(d, "Shift_L")
+    for ch in text:
+        sym = XK.string_to_keysym({"\\": "backslash", " ": "space"}.get(ch, ch))
+        if sym == 0:
+            sym = ord(ch)
+        codes = list(d.keysym_to_keycodes(sym))
+        if not codes:
+            raise SystemExit(f"no keycode for {ch!r}")
+        code, index = min(codes, key=lambda c: c[1])
+        if index & 1:
+            xtest.fake_input(d, X.KeyPress, shift)
+        xtest.fake_input(d, X.KeyPress, code)
+        xtest.fake_input(d, X.KeyRelease, code)
+        if index & 1:
+            xtest.fake_input(d, X.KeyRelease, shift)
+        d.sync()
+        time.sleep(0.02)
 
 
 def move(d, x, y):
@@ -157,21 +187,41 @@ def click(d, x, y, button=1, double=False):
         time.sleep(0.05)
 
 
-def drag(d, a, b, button=1):
+def drag_path(a, b, steps):
+    """The pointer positions after the press: `steps` points on the line from a to b, the last one b."""
+    steps = max(1, steps)
+    return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
+
+
+def drag_path(a, b, steps):
+    """The pointer positions after the press: `steps` points on the line from a to b, the last one b."""
+    steps = max(1, steps)
+    return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
+
+
+def drag(d, a, b, button=1, ms=400, steps=20, mod=None):
     from Xlib import X
     from Xlib.ext import xtest
     import time
+    modkey = keycode(d, MODS[mod.lower()]) if mod else None
     move(d, *a)
     time.sleep(0.05)
-    xtest.fake_input(d, X.ButtonPress, button)
-    d.sync()
-    steps = 20
-    for i in range(1, steps + 1):
-        time.sleep(0.02)
-        move(d, a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps)
-    time.sleep(0.05)
-    xtest.fake_input(d, X.ButtonRelease, button)
-    d.sync()
+    try:
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyPress, modkey)
+            d.sync()
+            time.sleep(0.05)
+        xtest.fake_input(d, X.ButtonPress, button)
+        d.sync()
+        for p in drag_path(a, b, steps):
+            time.sleep(ms / 1000 / max(1, steps))
+            move(d, *p)
+        time.sleep(0.05)
+    finally:
+        xtest.fake_input(d, X.ButtonRelease, button)
+        if modkey is not None:
+            xtest.fake_input(d, X.KeyRelease, modkey)
+        d.sync()
 
 
 def grab(d, rect=None):
@@ -273,6 +323,18 @@ def main(argv):
         out(stats(img))
         return 0
 
+    if cmd == "drag" and flag("--dry"):
+        a = tuple(int(v) for v in rest[0].split(","))
+        b = tuple(int(v) for v in rest[1].split(","))
+        out({"path": drag_path(a, b, int(opt("--steps", "20")))})
+        return 0
+
+    if cmd == "drag" and flag("--dry"):
+        a = tuple(int(v) for v in rest[0].split(","))
+        b = tuple(int(v) for v in rest[1].split(","))
+        out({"path": drag_path(a, b, int(opt("--steps", "20")))})
+        return 0
+
     d = connect(disp)
     if cmd == "windows":
         out({"windows": windows(d)})
@@ -280,8 +342,15 @@ def main(argv):
         win = opt("--window")
         if win:
             focus(d, int(win, 0))
-        press_key(d, rest[0])
-        out({"key": rest[0]})
+        hold = int(opt("--hold", "50"))
+        press_key(d, rest[0], hold)
+        out({"key": rest[0], "holdMs": hold})
+    elif cmd == "type":
+        win = opt("--window")
+        if win:
+            focus(d, int(win, 0))
+        type_text(d, rest[0])
+        out({"typed": len(rest[0])})
     elif cmd == "click":
         button = int(opt("--button", "1"))
         double = flag("--double")
@@ -294,9 +363,12 @@ def main(argv):
         out({"move": [x, y]})
     elif cmd == "drag":
         button = int(opt("--button", "1"))
+        ms = int(opt("--ms", "400"))
+        steps = int(opt("--steps", "20"))
+        mod = opt("--mod")
         a = tuple(int(v) for v in rest[0].split(","))
         b = tuple(int(v) for v in rest[1].split(","))
-        drag(d, a, b, button)
+        drag(d, a, b, button, ms, steps, mod)
         out({"drag": [a, b], "button": button})
     elif cmd == "shot":
         rect = opt("--rect")

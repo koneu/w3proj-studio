@@ -8,7 +8,7 @@ import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPl
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { changesToA } from "./linediff";
+import { changesToA, eachChangeLastFirst } from "./linediff";
 import { getChunks, goToNextChunk, goToPreviousChunk, MergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -26,8 +26,8 @@ import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { readImported } from "../../lib/imports";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
-import type { MeleeInfo } from "../../lib/terrain/owner";
-import { savedMelee } from "../../lib/terrain/meleesave";
+import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
+import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -40,10 +40,11 @@ const STAMP = SCRIPT_STAMP;
 const DIFF = "w3:script-diff:";
 
 const INFO_JSON = "map/war3map.w3i.json";
-/** Files whose save can take the Melee flag off (lib/terrain/meleesave): the placed units, the map's info, its gameplay
- *  constants, and the ground (a start location under water). Looked at after every save, whatever
- *  script.generateOnSave says and whatever the script's language. */
-const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
+/** Files whose save can change the Melee flag (lib/terrain/meleesave): the placed units, the map's info, its gameplay
+ *  constants, and the ground (a start location under water) take it off; with the triggers and the doodads they can
+ *  also put it back. Looked at after every save, whatever script.generateOnSave says and whatever the script's
+ *  language. */
+const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
@@ -68,6 +69,8 @@ interface GameTables {
   heroAbilities: Set<string>;
   orders: Map<string, AbilityOrders>;
   unitColors: Map<string, number>;
+  /** The game's item types' team colours (ItemData teamColor). */
+  itemColors: Map<string, number>;
   /** The game's unit types that allow a custom team colour (lib/script/objects gameCustomColors). */
   customColors: Set<string>;
   worldEdit: Map<string, Map<string, string>>;
@@ -94,10 +97,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const orders = abilityOrders(await Promise.all(ABILITY_FUNC_FILES.map(async (f) => parseIni(await text(f)))));
       const abilityRows = parseSlk(await text("Units\\AbilityData.slk"));
       const unitUI = parseSlk(await text("Units\\unitUI.slk"));
+      const itemRows = parseSlk(await text("Units\\ItemData.slk"));
       return {
         data: parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")),
         buildings: new Set(balance.filter((r) => r.isbldg === "1").map((r) => r.unitBalanceID)),
-        items: new Set(parseSlk(await text("Units\\ItemData.slk")).map((r) => r.itemID)),
+        items: new Set(itemRows.map((r) => r.itemID)),
+        itemColors: gameTeamColors(itemRows, "itemID"),
         abilities: new Set(abilityRows.map((r) => r.alias)),
         heroAbilities: new Set(abilityRows.filter((r) => r.hero === "1").map((r) => r.alias)),
         orders,
@@ -119,7 +124,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** The Melee flag as the World Editor's save leaves it (lib/terrain/meleesave): set in `info`, the flags the script is
-   *  made with, and written into war3map.w3i.json unless `look`. Only ever off. Not written while Map Properties holds
+   *  made with, and written into war3map.w3i.json unless `look`. Off, or back on when Studio can tell every rule is met.
+   *  Not written while Map Properties holds
    *  unsaved changes (it gets its turn when that's saved), nor into a w3i kept raw (left as it is, as the placing tools
    *  do), nor into another project than `root` (the reads take a while). */
   const followMelee = async (info: { flags?: unknown }, look: boolean, root: string | undefined, reason?: string) => {
@@ -127,7 +133,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const flags = Number(info.flags);
     if (!Number.isFinite(flags)) return;
     const placed = (await json<{ units?: { id: string; player?: number; position?: number[] }[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    const melee = await savedMelee(w3.workspace, { ...info, flags } as MeleeInfo, placed);
+    const melee = await savedMelee(meleeFiles(w3), { ...info, flags } as MeleeInfo, placed);
     if (melee.flags === flags || w3.editors.isDirty(INFO_JSON)) return;
     info.flags = melee.flags;
     if (look) return;
@@ -140,7 +146,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: INFO_JSON, text: JSON.stringify(now) });
     if (w3.workspace.project()?.root !== root) return;
     await w3.workspace.writeText(INFO_JSON, canonical);
-    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`);
+    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: ${melee.flags & MELEE_MAP ? "a melee map again (it meets the World Editor's melee rules, whose save makes it one)"
+      : `not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`}`);
   };
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
@@ -186,6 +193,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       : json<ObjectFile>(`map/war3map${skin ? "Skin" : ""}.${kind}`)), campaign !== undefined);
     const unitFiles = objectFiles.w3u;
     const colors = teamColors(unitFiles, g.unitColors), special = specialUnits(unitFiles);
+    const itemColors = teamColors(objectFiles.w3t, g.itemColors, "itco");
     const isBuilding = buildingTypes(unitFiles, g.buildings);
     const customAbilities = customIdsOf(objectFiles.w3a), customItems = customIdsOf(objectFiles.w3t);
     const heroAbility = heroAbilities(objectFiles.w3a, g.heroAbilities);
@@ -214,7 +222,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const soundDuration = await soundDurations(sounds.map((s) => s.file), path, campaign);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), itemColor: (id) => itemColors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
       customColor: customColorTypes(unitFiles, g.customColors),
       lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
@@ -468,7 +476,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // each of which it diffs inside; the unchanged lines are folded once the chunks are known.
           view = new MergeView({ a: { doc: made.text, extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, gutter: true });
           const edits = changesToA(current ?? "", made.text);
-          if (edits.length) view.a.dispatch({ changes: edits });
+          // One transaction per hunk: many in one are merged by the merge view into a single chunk.
+          const typed = view;
+          eachChangeLastFirst(edits, (c) => typed.a.dispatch({ changes: c }));
           view.reconfigure({ collapseUnchanged: { margin: 3, minSize: 6 } });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };
