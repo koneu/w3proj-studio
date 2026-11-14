@@ -25,6 +25,8 @@ export interface ViewCommands {
   toggleSetting(which: "lighting" | "weather" | "fog"): Promise<boolean | string>;
   /** View > Terrain: textured, wireframe, hidden, and round again. Returns what it is now, or why not (game view). */
   cycleTerrain(): TerrainLook | string;
+  /** Sky: the next of the game's skies, none after the last. Null when done, else why not. */
+  cycleSky(): string | null;
   /** Lock to Game View Settings (V): returns whether game view is on now. */
   toggleGameView(): Promise<boolean>;
   /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now, or why not (game view). */

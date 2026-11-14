@@ -5008,6 +5008,90 @@ async function gridDefault(page, found) {
   }
 }
 
+/** The terrain view's toggles in three labelled groups (View, Overlays, Behaviour), each one also a command, and what
+ *  game view does to them: greyed with the note "Forced by game view", showing what the view draws then (Fog and
+ *  Effects on, Doodads on though the choice is off, Regions off). Nothing is edited; the map is left saved. */
+async function toggleGroups(page, found) {
+  const fail = (what) => found.push(`toggle groups: ${what}`);
+  const k = await heightKit(page, "ToggleGroups");
+  try {
+    const NOTE = "Forced by game view (V)";
+    const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
+    const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+    const box = (label) => page.evaluate(`(() => { const l = [...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === ${JSON.stringify(label)}); const i = l?.querySelector("input"); return i ? { checked: i.checked, disabled: i.disabled, title: l.title, group: l.closest("[data-group]")?.dataset.group ?? null } : null; })()`);
+    await until("the terrain view's toolbar", async () => (await state()) !== null && (await box("Doodads")) !== null, 20000);
+    if ((await state()).gameView) await run("w3.terrain.toggleGameView");
+    await until("game view off", async () => !(await state()).gameView, 5000);
+    // Groups and members.
+    const groups = JSON.parse(await page.evaluate(`JSON.stringify(Object.fromEntries([...document.querySelectorAll(".model-toggle-group")].map((g) => [g.dataset.group, { labels: [...g.querySelectorAll(".model-toggle")].map((l) => l.textContent.trim()), selects: g.querySelectorAll("select").length, title: g.querySelector(".model-toggle-group-title")?.textContent }])))`));
+    const WANT = {
+      View: ["Doodads", "Units", "Water", "Blight", "Cliffs", "Effects", "Animate", "Lighting", "Fog", "Weather", "Shadows", "Boundary", "Minimap"],
+      Overlays: ["Height map", "Ground pathing", "Naval pathing", "Regions", "Camera objects", "Light ranges", "Camera bounds", "Info"],
+      Behaviour: ["Water limits", "Keep pasted height", "Reset fixed heights", "Enforce camera bounds"],
+    };
+    const SELECTS = { View: 3, Overlays: 1, Behaviour: 0 };
+    if (JSON.stringify(Object.keys(groups)) !== JSON.stringify(Object.keys(WANT))) fail(`groups ${JSON.stringify(Object.keys(groups))}`);
+    for (const [g, want] of Object.entries(WANT)) {
+      const has = groups[g];
+      if (!has || JSON.stringify(has.labels) !== JSON.stringify(want)) fail(`${g} holds ${JSON.stringify(has?.labels)}, not ${JSON.stringify(want)}`);
+      if (has && (has.selects !== SELECTS[g] || has.title !== g)) fail(`${g}: ${has.selects} selects, title ${has.title}`);
+    }
+    // Every toggle is a command: the command flips its box, and the same command flips it back.
+    const COMMANDS = {
+      Doodads: "toggleDoodads", Units: "toggleUnits", Water: "toggleWater", Blight: "toggleBlight", Cliffs: "toggleCliffs", Effects: "toggleEffects",
+      Animate: "toggleAnimate", Lighting: "toggleLighting", Fog: "toggleFogEffects", Weather: "toggleWeather", Shadows: "toggleShadows", Boundary: "toggleBoundary", Minimap: "toggleMinimap",
+      "Height map": "toggleHeightMap", "Ground pathing": "toggleGroundPathing", "Naval pathing": "toggleNavalPathing", Regions: "toggleRegions", "Camera objects": "toggleCameraObjects",
+      "Light ranges": "toggleLightRanges", "Camera bounds": "toggleCameraBounds", Info: "toggleInfoDisplay",
+      "Water limits": "toggleEnforceWaterLimits", "Keep pasted height": "togglePreserveCopiedHeight", "Reset fixed heights": "toggleResetFixedHeights", "Enforce camera bounds": "toggleEnforceCameraBounds",
+    };
+    for (const [label, cmd] of Object.entries(COMMANDS)) {
+      const before = (await box(label))?.checked;
+      for (const [step, to] of [["on", !before], ["back", before]]) {
+        const err = await run(`w3.terrain.${cmd}`);
+        if (err) { fail(`${cmd}: ${err}`); break; }
+        await until(`${label} ${step}`, async () => (await box(label)).checked === to, 5000).catch(() => fail(`${cmd} didn't take the ${label} box ${step}`));
+      }
+    }
+    for (const [cmd, what] of [["cycleSky", "Sky"], ["nextTimeOfDay", "Time of day"], ["cycleTerrainDisplay", "Terrain"], ["cycleGrid", "Grid"]]) {
+      const err = await run(`w3.terrain.${cmd}`);
+      if (err) fail(`${cmd} (${what}): ${err}`);
+    }
+    await page.evaluate(`w3.settings.set("terrain.lighting.hour", undefined, "user")`);
+    for (let i = 0; i < 4; i++) await run("w3.terrain.cycleTerrainDisplay");
+    for (let i = 0; i < 4; i++) await run("w3.terrain.cycleGrid");
+    // Effects and Cliffs have a tooltip of their own.
+    for (const label of ["Effects", "Cliffs"]) if (!(await box(label))?.title) fail(`the ${label} box has no tooltip`);
+    // Game view: Doodads off and Fog off first; greyed, they show what is drawn.
+    await run("w3.terrain.toggleDoodads");
+    await page.evaluate(`w3.settings.set("terrain.fog", false, "user")`);
+    await until("Fog unchecked", async () => !(await box("Fog")).checked, 5000);
+    await run("w3.terrain.toggleGameView");
+    await until("game view on", async () => (await state()).gameView, 5000);
+    const GREYED = ["Doodads", "Units", "Water", "Blight", "Cliffs", "Effects", "Lighting", "Fog", "Weather", "Shadows", ...WANT.Overlays];
+    for (const label of Object.values(WANT).flat()) {
+      const b = await box(label);
+      const grey = GREYED.includes(label);
+      if (b.disabled !== grey) fail(`${label} is ${b.disabled ? "" : "not "}greyed in game view`);
+      if (grey && b.title !== NOTE) fail(`${label}'s tooltip in game view is "${b.title}"`);
+      if (!grey && (b.title === NOTE || !b.title)) fail(`${label} isn't greyed but its tooltip is "${b.title}"`);
+    }
+    for (const label of ["Doodads", "Units", "Water", "Blight", "Cliffs", "Effects", "Lighting", "Fog", "Weather"]) if (!(await box(label)).checked) fail(`${label} is greyed unchecked, but game view draws it`);
+    for (const label of WANT.Overlays) if ((await box(label)).checked) fail(`${label} is greyed checked, but game view doesn't draw it`);
+    // Back out: the choices are as they were, and the tooltips are the boxes' own.
+    await run("w3.terrain.toggleGameView");
+    await until("game view off", async () => !(await state()).gameView, 5000);
+    for (const label of ["Doodads", "Fog"]) {
+      const b = await box(label);
+      if (b.checked || b.disabled || b.title === NOTE || !b.title) fail(`${label} after game view: ${JSON.stringify(b)}`);
+    }
+    await run("w3.terrain.toggleDoodads");
+    await page.evaluate(`w3.settings.set("terrain.fog", undefined, "user")`);
+    await k.save();
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -12765,6 +12849,7 @@ async function run() {
         tileCleanup,
         tilesInPlace,
         tileTemplate,
+        toggleGroups,
         triggerMultiSelect,
         triggersAndAi,
         typedFieldSave,
@@ -12944,6 +13029,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "terrainSelectCameras", found);
   await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
   await leftOpen(page, "viewModes", found);
+  await toggleGroups(page, found).catch((e) => found.push(`toggle groups: ${e.message}`));
+  await leftOpen(page, "toggleGroups", found);
   // Here rather than in part 2, which starts only after part 1's build: the two halves end about together (batch run
   // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
   await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));

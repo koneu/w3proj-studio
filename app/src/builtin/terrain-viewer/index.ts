@@ -192,6 +192,9 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleWeather", async (v) => why(await v.toggleSetting("weather"))],
   ["w3.terrain.toggleFogEffects", async (v) => why(await v.toggleSetting("fog"))],
   ["w3.terrain.toggleCameraBounds", (v) => why(v.toggleLayer("cameraBounds"))],
+  ["w3.terrain.toggleCliffs", (v) => why(v.toggleLayer("cliffs"))],
+  ["w3.terrain.toggleEffects", (v) => why(v.toggleLayer("effects"))],
+  ["w3.terrain.cycleSky", (v) => v.cycleSky()],
   ["w3.terrain.cycleGrid", (v) => why(v.cycleGrid(), GRIDS)],
   ["w3.terrain.cycleTerrainDisplay", (v) => why(v.cycleTerrain(), ["textured", "wireframe", "hidden"])],
   ["w3.terrain.toggleGameView", async (v) => { await v.toggleGameView(); return null; }],
@@ -335,6 +338,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       void w3.window.showInfo(changed ? `Shadows calculated: ${changed} of the shadow map's cells changed (war3map.shd saved).` : "Shadows calculated: the shadow map was already up to date.");
       return changed;
     }),
+    // The view's own settings that no key takes: Animate and Boundary flip, the time of day goes on an hour.
+    ...([["w3.terrain.toggleAnimate", "terrain.animate"], ["w3.terrain.toggleBoundary", "terrain.boundary"]] as const)
+      .map(([id, key]) => w3.commands.register(id, () => w3.settings.set(key, w3.settings.get<boolean>(key, true) === false))),
+    w3.commands.register("w3.terrain.nextTimeOfDay", () => w3.settings.set("terrain.lighting.hour", (Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0) + 1) % 24)),
     // Window > Minimap: the minimap panel in every terrain view, on or off (a setting, kept for the next session).
     w3.commands.register("w3.terrain.toggleMinimap", async () => {
       const on = w3.settings.get<boolean>("terrain.minimap.panel", true) !== true;
@@ -1628,7 +1635,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
           const on = lightOn() || gameViewOn(), hour = lightHourNow();
-          lightBox.checked = lightOn();
+          // Greyed in game view, the box shows the lighting drawn then.
+          lightBox.checked = on;
           lightBox.disabled = gameViewOn();
           lightSelect.value = String(Math.floor(hour));
           lightSelect.disabled = !on || cycleOn();
@@ -1714,7 +1722,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "terrain.minimap.panel") minimapSetting();
           else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
-          if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights") viewSyncs.forEach((f) => f());
+          if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights" || key === "terrain.animate" || key === "terrain.boundary") viewSyncs.forEach((f) => f());
           if (key === "terrain.lighting.dayNightCycle") { cycleHour = lightHour(); cycleAt = 0; }
           if (key === "terrain.lighting.hour" && !cycleOn()) cycleHour = lightHour();
           if (key.startsWith("terrain.lighting.")) applyLight();
@@ -2048,7 +2056,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (box.checked !== viewState[name]) toggleLayer(name);
           } });
           markerBoxes.set(name, box);
-          return h("label.model-row", {}, box, h("span", {}, ` ${label}`), h("small.muted", {}, ` ${count.toLocaleString()}`));
+          const row = h("label.model-row", {}, box, h("span", {}, ` ${label}`), h("small.muted", {}, ` ${count.toLocaleString()}`));
+          greyTip(row, () => (gameViewOn() ? FORCED_NOTE : null));
+          return row;
         };
         const problems = h("div.model-list");
         const texInfo = h("div.muted");
@@ -4688,8 +4698,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Redraws the toolbar's boxes after a command changed what they show. */
         const viewSyncs: (() => void)[] = [];
         viewSyncsAfterTab = () => viewSyncs.forEach((f) => f());
+        const FORCED_NOTE = "Forced by game view (V)";
         const GAME_VIEW_NOTE = "Game view is on (V): the view shows the map as the game does. Turn it off to change what the view shows.";
-        viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = viewState[name]; box.disabled = gameViewOn(); }));
+        /** The tooltip of a greyed item (game view forces it, or the open tab does): `reason` is its text, null when it can be
+         *  used; the item's own tooltip comes back then (kept in data-was while the note shows). */
+        const greyTip = (el: HTMLElement, reason: () => string | null) => viewSyncs.push(() => {
+          const why = reason();
+          if (why !== null) { if (el.title !== why) { el.dataset.was = el.title; el.title = why; } }
+          else if (el.dataset.was !== undefined) { el.title = el.dataset.was; delete el.dataset.was; }
+        });
+        viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = gameViewOn() ? shown[name] : viewState[name]; box.disabled = gameViewOn(); }));
         const maxDistance = () => terrain.width * 300;
         /** One step of the World Editor's zoom (a wheel notch, Ctrl+Up or Ctrl+Down): about its camera target, the point
          *  at wheelzoom.ts zoomPivotRow, wherever the pointer is. */
@@ -4993,6 +5011,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await w3.settings.set(key, on);
             return on;
           },
+          cycleSky: () => {
+            // The skies as the box lists them: "No sky", then the game's, and round again.
+            const options = [...skySelect.options].map((o) => o.value);
+            if (options.length < 2) return "The game's skies aren't loaded (no game folder?).";
+            void w3.settings.set("terrain.sky", options[(Math.max(0, options.indexOf(skySelect.value)) + 1) % options.length]);
+            return null;
+          },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
@@ -5006,33 +5031,43 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const keyTitle = (title: string, command: string) => ({ title: withKey(title, command), "data-key-title": title, "data-key-command": command });
         /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
         const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
-          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
+          const box = h("input", { type: "checkbox", checked: viewState[layer as ToggleLayer], onchange: () => { if (viewState[layer as ToggleLayer] !== box.checked) toggleLayer(layer); keysToMap(); } });
           // The Regions, Pathing and Cameras tabs' own pictures are those layers: on, and not to be turned off, while the tab is open.
           const byTab = () => shownByTab(layer);
-          viewSyncs.push(() => { box.checked = viewState[layer] || byTab(); box.disabled = gameViewOn() || byTab(); });
-          return h("label.model-toggle", command ? keyTitle(title, command) : { title }, box, ` ${label}`);
+          // Greyed in game view, a box shows what the view draws then (the choice itself is kept for afterwards).
+          viewSyncs.push(() => { box.checked = gameViewOn() ? shown[layer as ToggleLayer] : viewState[layer as ToggleLayer] || byTab(); box.disabled = gameViewOn() || byTab(); });
+          const el = h("label.model-toggle", command ? keyTitle(title, command) : { title }, box, ` ${label}`);
+          greyTip(el, () => (gameViewOn() ? FORCED_NOTE : byTab() ? TAB_LAYERS[layer]!.note : null));
+          return el;
         };
         /** A box for one of the Advanced switches; the command and the box are the same setting. Game view greys it
          *  out when `forced` (View > Shadows in the World Editor). */
         const switchBox = (label: string, title: string, key: string, standard: boolean, forced = false) => {
           const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void setSwitch(w3, key, box.checked); keysToMap(); } });
           viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
-          return h("label.model-toggle", { title }, box, ` ${label}`);
+          const el = h("label.model-toggle", { title }, box, ` ${label}`);
+          if (forced) greyTip(el, () => (gameViewOn() ? FORCED_NOTE : null));
+          return el;
         };
         const gridSelect = h("select", { ...keyTitle("Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", "w3.terrain.cycleGrid"), onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
-        viewSyncs.push(() => { gridSelect.value = viewState.grid; gridSelect.disabled = gameViewOn(); });
+        viewSyncs.push(() => { gridSelect.value = shown.grid; gridSelect.disabled = gameViewOn(); });
+        greyTip(gridSelect, () => (gameViewOn() ? FORCED_NOTE : null));
         const terrainSelect = h("select", { ...keyTitle("Terrain: textured, as a wireframe, or hidden", "w3.terrain.cycleTerrainDisplay"), onchange: () => { if (!gameViewOn()) setTerrain(terrainSelect.value as TerrainLook); keysToMap(); } },
           ...TERRAIN_LOOKS.map((t) => h("option", { value: t }, t === "textured" ? "Terrain" : t === "wireframe" ? "Wireframe" : "No terrain")));
-        viewSyncs.push(() => { terrainSelect.value = viewState.terrain; terrainSelect.disabled = gameViewOn(); });
+        viewSyncs.push(() => { terrainSelect.value = shown.terrain; terrainSelect.disabled = gameViewOn(); });
+        greyTip(terrainSelect, () => (gameViewOn() ? FORCED_NOTE : null));
         const gameViewBox = h("input", { type: "checkbox", checked: gameViewOn(), onchange: () => { if (gameViewBox.checked !== gameViewOn()) void toggleGameView(); keysToMap(); } });
         viewSyncs.push(() => { gameViewBox.checked = gameViewOn(); });
 
         /** A box for a setting of the view's; game view greys it out when `forced`. */
-        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void, forced = false, title?: string | ReturnType<typeof keyTitle>) => {
+        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void, forced: false | (() => boolean) = false, title?: string | ReturnType<typeof keyTitle>) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); keysToMap(); } });
-          viewSyncs.push(() => { box.checked = get(); if (forced) box.disabled = gameViewOn(); });
-          return h("label.model-toggle", title === undefined ? {} : typeof title === "string" ? { title } : title, box, ` ${label}`);
+          // `forced`: what game view draws for it, which the greyed box shows instead of its own choice.
+          viewSyncs.push(() => { box.checked = forced && gameViewOn() ? forced() : get(); if (forced) box.disabled = gameViewOn(); });
+          const el = h("label.model-toggle", title === undefined ? {} : typeof title === "string" ? { title } : title, box, ` ${label}`);
+          if (forced) greyTip(el, () => (gameViewOn() ? FORCED_NOTE : null));
+          return el;
         };
 
         // ---- Minimap panel (minimappanel.ts) ----------------------------------------------------------------
@@ -5083,41 +5118,48 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         minimapSetting = applyMinimapSetting;
         applyMinimapSetting();
+        /** The toolbar's toggles in labelled groups (the World Editor's Layer menu is not copied as a menu). */
+        const toggleGroup = (name: string, hint: string, ...items: (HTMLElement | null)[]) =>
+          h("div.model-toggle-group", { role: "group", "aria-label": name, "data-group": name, title: hint }, h("span.model-toggle-group-title", {}, name), ...items.filter((x) => x));
+        const lightingLabel = h("label.model-toggle", keyTitle("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting"), lightBox, " Lighting");
+        greyTip(lightingLabel, () => (gameViewOn() ? FORCED_NOTE : null));
+        greyTip(lightSelect, () => (gameViewOn() ? FORCED_NOTE : null));
         el.append(h("div.model-viewer", {},
           h("div.model-main", {},
             h("div.model-toolbar", {},
               h("label.model-toggle", keyTitle("Game view: the map lit and fogged as the game shows it, without regions, cameras, start locations, pathing or grids", "w3.terrain.toggleGameView"), gameViewBox, " Game view"),
-              terrainSelect,
-              layerToggle("Doodads", "Doodads and destructables", "doodads", "w3.terrain.toggleDoodads"),
-              layerToggle("Units", "Units, items and start locations", "units", "w3.terrain.toggleUnits"),
-              layerToggle("Water", "Water and the shoreline's waves", "water", "w3.terrain.toggleWater"),
-              layerToggle("Blight", "Blighted ground (off: the ground's own tiles)", "blight", "w3.terrain.toggleBlight"),
-              toggle("Effects", () => viewState.effects, (v) => { viewState.effects = v; applyView(); }, true),
-              toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
-              h("label.model-toggle", keyTitle("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting"), lightBox, " Lighting"), lightSelect,
-              gridSelect,
-              layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights"),
-              layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
-              layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
-              layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
-              layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
-              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
-              layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
-              layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
-              layerBusy,
-              toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
-              toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, "The minimap in the view's corner: click or drag on it to move the view there"),
-              ...(editable ? [
+              toggleGroup("View", "What is drawn",
+                terrainSelect,
+                layerToggle("Doodads", "Doodads and destructables", "doodads", "w3.terrain.toggleDoodads"),
+                layerToggle("Units", "Units, items and start locations", "units", "w3.terrain.toggleUnits"),
+                layerToggle("Water", "Water and the shoreline's waves", "water", "w3.terrain.toggleWater"),
+                layerToggle("Blight", "Blighted ground (off: the ground's own tiles)", "blight", "w3.terrain.toggleBlight"),
+                layerToggle("Cliffs", "Cliffs (off: the ground alone)", "cliffs", "w3.terrain.toggleCliffs"),
+                layerToggle("Effects", "Effects: the particles and ribbons of placed models", "effects", "w3.terrain.toggleEffects"),
+                toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v), false, keyTitle("Placed objects play their Stand animation (off: they stand still)", "w3.terrain.toggleAnimate")),
+                lightingLabel, lightSelect,
+                toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", false) === true, (v) => { void w3.settings.set("terrain.fog", v); }, () => shown.fog, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
+                toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, () => shown.weather, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
+                switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
+                skySelect,
+                toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v), false, keyTitle("Darken the part of the map past the playable area", "w3.terrain.toggleBoundary")),
+                toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, keyTitle("The minimap in the view's corner: click or drag on it to move the view there", "w3.terrain.toggleMinimap"))),
+              toggleGroup("Overlays", "The editor's marks over the map",
+                gridSelect,
+                layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights", "w3.terrain.toggleHeightMap"),
+                layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
+                layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
+                layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
+                layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
+                layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
+                layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
+                layerToggle("Info", "Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
+                layerBusy),
+              ...(editable ? [toggleGroup("Behaviour", "How edits behave",
+                switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]),
                 switchBox("Reset fixed heights", "Reset Fixed Object Heights (Ctrl+Shift+H): a doodad with a height of its own that is moved lands on the ground and follows it again; with it off the doodad keeps its height", "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]),
-                switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
-                switchBox("Enforce camera bounds", "Enforce Camera Bounds: the Cameras tab makes no camera from a view outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]),
-              ] : []),
-              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", false) === true, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
-              toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
-              switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
-              skySelect,
-              toggle("Cliffs", () => viewState.cliffs, (v) => { viewState.cliffs = v; applyView(); }, true),
+                switchBox("Enforce camera bounds", "Enforce Camera Bounds: the Cameras tab makes no camera from a view outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]))] : []),
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),
               h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); keysToMap(); } }, "⛶"),
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
@@ -5130,7 +5172,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.dataset.keyContext = "terrainFocus";
         // Tooltips name the keys the commands have now.
         const stopKeyTitles = w3.keybindings.onDidChange(() => {
-          for (const n of el.querySelectorAll<HTMLElement>("[data-key-command]")) n.title = withKey(n.dataset.keyTitle ?? "", n.dataset.keyCommand ?? "");
+          for (const n of el.querySelectorAll<HTMLElement>("[data-key-command]")) {
+            // A greyed item shows its note; the new key goes back with its own tooltip.
+            const title = withKey(n.dataset.keyTitle ?? "", n.dataset.keyCommand ?? "");
+            if (n.dataset.was !== undefined) n.dataset.was = title; else n.title = title;
+          }
           dragHint.textContent = dragHintText();
           cameraHint.textContent = cameraHelp();
         });

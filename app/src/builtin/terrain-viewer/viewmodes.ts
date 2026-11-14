@@ -43,7 +43,7 @@ export interface ViewSet {
 export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 /** The layers a View command switches on and off. */
-export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info";
+export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info" | "effects" | "cliffs";
 
 export interface Shown extends ViewSet {
   /** The start locations and the start buildings drawn in their rings (with Info Display). */
