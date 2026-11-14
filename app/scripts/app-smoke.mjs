@@ -11968,6 +11968,36 @@ async function editorExtras(page, found) {
   }
 }
 
+/** The Object Manager sees what the Object Editor sees: a unit that only war3mapSkin.w3u has (name and a field naming a
+ *  main-file unit) is listed with its name, and deleting the main-file unit says the Skin-only one still names it.
+ *  Control: neither is so before the Skin file is there. */
+async function objectManagerSkin(page, found) {
+  const fail = (what) => found.push(`object manager skin: ${what}`);
+  const k = await heightKit(page, "OmSkin");
+  const listed = () => page.evaluate(`(async () => {
+    await w3.views.show("objectManager");
+    const s = document.querySelector(".om-search");
+    if (s && s.value !== "Om Skin Only") { s.value = "Om Skin Only"; s.dispatchEvent(new Event("input")); }
+    return [...document.querySelectorAll(".om-row .tree-label")].some((l) => l.textContent === "Om Skin Only Unit");
+  })()`);
+  try {
+    const main = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Om Main Unit" })).id;
+    await k.save();
+    await page.evaluate(`w3.commands.execute("w3.objectManager.refresh")`);
+    if (await until("the rows", async () => !(await listed()), 10000).then(() => false, () => true)) fail("control: the Skin-only unit is listed before its file exists");
+    const skin = { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "h0sk", mods: [
+      { field: "unam", type: "string", value: "Om Skin Only Unit" }, { field: "uabi", type: "string", value: main }] }] };
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3mapSkin.w3u.json", ${JSON.stringify(JSON.stringify(skin))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.commands.execute("w3.objectManager.refresh")`);
+    await until("the Skin-only unit listed", listed, 10000).catch(() => fail("the Object Manager doesn't list the unit only war3mapSkin.w3u has"));
+    const said = await k.tool("delete_object", { kind: "units", id: main });
+    if (!/h0sk/.test(said)) fail(`deleting ${main}: its use by the Skin-only unit isn't found (${said})`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** The World Editor's smaller items, through the app's own commands, keys and menus: a map saved as a folder imported
  *  as a project; Reset Standard Objects to Defaults in the Object Editor (asked, one undo step); the Trigger Editor's
  *  toolbar inside its column; Category is Comment (checked in the menu while on; the trigger stays in war3map.j, as the
@@ -12640,6 +12670,7 @@ async function run() {
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
+        objectManagerSkin,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
         paletteMouse,
@@ -12920,6 +12951,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
   await leftOpen(page, "objectManagerLive", found);
+  await objectManagerSkin(page, found).catch((e) => found.push(`object manager skin: ${e.message}`));
+  await leftOpen(page, "objectManagerSkin", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
   await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));

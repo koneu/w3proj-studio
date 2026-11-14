@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
 import type { EditFile, EditMod, EditObject } from "./objectedit";
-import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin } from "./skin";
+import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withSkin } from "./skin";
 import { mergeSkin } from "./w3o";
 
 const file = (custom: EditObject[], original: EditObject[] = [], version = 3): EditFile => ({ format: "w3proj.objects/1", version, original, custom });
@@ -184,4 +184,11 @@ test("isSkinField on the game's real metadata tables: every netsafe value is und
   assert.ok(seen > 500, "the tables had rows");
   // control: a value outside the known ones would be seen by the pattern above
   assert.doesNotMatch("2", /^(|0|1|11)$/);
+});
+
+test("withSkin: objects only the Skin file has are listed; neither file is null", () => {
+  const merged = withSkin(file([{ base: "hfoo", id: "h000", mods: [] }]), file([{ base: "hbar", id: "h001", mods: [s("unam", "Only Skin")] }]))!;
+  assert.deepEqual(merged.custom.map((o) => o.id), ["h000", "h001"]);
+  assert.equal(withSkin(null, file([{ base: "hbar", id: "h001", mods: [s("unam", "x")] }]))!.custom[0].id, "h001");
+  assert.equal(withSkin(null, null), null);
 });

@@ -354,7 +354,8 @@ async function contents(w3: W3Api, live: LiveSources, saved: Map<string, Promise
   // built goes first.
   const kindData = new Map(KINDS.map(([ext]) => [ext, loadKind(w3, ext, { background: true }).catch(() => null)]));
   const savedKinds = new Map<string, KindData | null>();
-  for (const [ext] of KINDS) savedKinds.set(ext, await json<KindData>(`war3map.${ext}`));
+  // With the Skin file's fields and objects (names, art live there in Reforged maps), as the Object Editor shows them.
+  for (const [ext] of KINDS) savedKinds.set(ext, await cached(`kind:${ext}`, () => (objects ? objects.savedObjects(ext).catch(() => null) : json<KindData>(`war3map.${ext}`))) as KindData | null);
   const wtg = wtgPath(w3.workspace.files());
   const savedTriggers = wtg
     ? await cached(`wtg:${wtg}`, () => readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null))

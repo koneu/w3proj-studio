@@ -22,6 +22,9 @@ export interface ObjectsService {
   icon(kind: string, id: string): Promise<string | null>;
   /** Display name of an object id (custom objects: the map's name), searching `kinds` (default: all). */
   name(id: string, kinds?: string[]): Promise<string | undefined>;
+  /** The map's saved object data of one kind ("w3u", …) as the Object Editor shows it: war3map.<kind> with the fields and
+   *  objects of its Skin file (war3mapSkin.<kind>); null when neither is there. Unsaved changes of an open editor aren't in it. */
+  savedObjects(kind: string): Promise<{ custom?: readonly unknown[]; original?: readonly unknown[] } | null>;
   /** The file browser: a model or image from the map's imports or the game; null when cancelled. */
   pickFile(host: HTMLElement, opts: { title: string; kind: "model" | "image"; current: string }): Promise<string | null>;
   /** The game's sound labels to choose from; null when cancelled. */

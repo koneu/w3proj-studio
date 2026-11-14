@@ -11,12 +11,13 @@ import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { StringTable } from "../../lib/formats/wts";
+import { readMapDoc } from "../../lib/formats/mapdoc";
 import { readImportedFor } from "../../lib/imports";
 import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { isNotFoundError } from "../../lib/oserror";
 import { joinPath } from "../../lib/paths";
 import { mergeSkin } from "./w3o";
-import { withLists } from "./skin";
+import { withLists, withSkin } from "./skin";
 import type { EditFile } from "./objectedit";
 
 const KIND_LABELS: Record<string, string> = {
@@ -180,6 +181,10 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
     pickSoundLabel: (host, opts) => pickLabel(w3, host, { ...opts, labels: () => soundLabels(w3) }),
     image: (path) => images(/\.\w+$/.test(path) ? path : `${path}.blp`),
     objectField: (host, opts) => objectEditor(service, host, opts.kinds, opts.list, opts.current, opts.onCommit),
+    async savedObjects(kind) {
+      const read = (name: string) => readMapDoc<EditFile>(w3, `map/${name}.${kind}.json`);
+      return withSkin(await read("war3map"), await read("war3mapSkin"));
+    },
     async name(id, kinds = Object.keys(KIND_LABELS)) {
       for (const kind of kinds) {
         const kd = await loadKind(w3, kind).catch(() => null);

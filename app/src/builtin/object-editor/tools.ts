@@ -20,10 +20,8 @@ import { parseWct, parseWctText, readWtgFile, textTriggers, WCT_RAW, WCT_TEXT, w
 import { addCustomObject, fieldLevel, fieldValue, NEGATIVE_REALS_SETTING, objectToEdit, rawOnlySkin, removeObject, setObjectField, type EditFile } from "./objectedit";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObject, type MapObjects } from "./objectinfo";
 import { campaignObjects, stripColors } from "./service";
-import { isSkinField, listedPath, skinChanged, skinWritable, splitSkin, withLists } from "./skin";
+import { isSkinField, listedPath, skinChanged, skinWritable, splitSkin, withLists, withSkin } from "./skin";
 import { mergeSkin } from "./w3o";
-
-const FORMAT = "w3proj.objects/1";
 
 /** Whether a project (its files) is a campaign: it has war3campaign.w3f, as the Campaign Editor decides. */
 export const isCampaignFiles = (files: readonly { path: string }[]) => files.some((f) => /^map\/war3campaign\.w3f(\.json)?$/i.test(f.path.replace(/\\/g, "/")));
@@ -98,7 +96,10 @@ export async function usesOf(w3: W3Api, id: string, prefix: string): Promise<Use
   for (const [label, ext] of Object.entries(OBJECT_KINDS)) {
     const name = `map/${prefix}.${ext}.json`;
     let doc: MapObjects | null;
-    try { doc = await readMapDocStrict<MapObjects>(w3, name); } catch { u.unchecked.push(name.slice(4).replace(/\.json$/, "")); continue; }
+    // With the Skin file's fields and objects, as the Object Editor shows them.
+    try {
+      doc = withSkin(await readMapDocStrict<EditFile>(w3, name), await readMapDocStrict<EditFile>(w3, `map/${prefix}Skin.${ext}.json`)) as MapObjects | null;
+    } catch { u.unchecked.push(name.slice(4).replace(/\.json$/, "")); continue; }
     for (const o of [...(doc?.custom ?? []), ...(doc?.original ?? [])]) {
       if (idsUsedBy(o as Parameters<typeof idsUsedBy>[0], ids).length) u.objects.push(`${o.id ?? o.base} (${label})`);
     }
@@ -175,7 +176,7 @@ export function registerObjectTools(w3: W3Api, ctx: ExtensionContext, deps: Obje
       mapStrings(w3, `map/${prefix}.wts`), prefix === "war3map" ? campaignOf(kind) : Promise.resolve(null),
     ]);
     // With the Skin file's fields (names, art), its values winning, as the World Editor shows them (skin.ts).
-    const file: MapObjects = main || skin ? mergeSkin(withLists(main ?? { format: FORMAT, version: skin!.version, original: [], custom: [] }), skin && withLists(skin), { addSkinOnly: true }) as MapObjects : {};
+    const file: MapObjects = (withSkin(main, skin) as MapObjects | null) ?? {};
     return { kind, data, file, resolve, campaign };
   };
   const inCampaign = (kind: string, id: string, what: string) =>

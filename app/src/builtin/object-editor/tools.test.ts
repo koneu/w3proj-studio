@@ -225,3 +225,15 @@ test("script lines: rawcodes and FourCC strings, whole ids only", () => {
   assert.deepEqual(scriptLines("a 'h000'\nFourCC(\"h000\")\n'h0001' h000\nx", "h000"), [1, 2]);
   assert.equal(describeUses("h000", { objects: [], placed: 0, guiTriggers: [], customScripts: [], mapScript: [], unchecked: [] }), "");
 });
+
+test("uses of an object are found in objects only the Skin file has (Object Editor's view)", async () => {
+  const root = "/proj";
+  const files = (skin: boolean): Record<string, string | null> => ({
+    [`${root}/map/war3map.w3u.json`]: objects([{ id: "h000", base: "hfoo", mods: [] }]),
+    ...(skin ? { [`${root}/map/war3mapSkin.w3u.json`]: objects([{ id: "h002", base: "hbar", mods: [mod("uabi", "h000", "string")] }]) } : {}),
+  });
+  const said = await project(root, files(true)).call("delete_object", { kind: "units", id: "h000" }) as string;
+  assert.match(said, /the object h002 \(units\)/);
+  // Control: without the Skin file nothing names it.
+  assert.doesNotMatch(await project(root, files(false)).call("delete_object", { kind: "units", id: "h000" }) as string, /h002/);
+});

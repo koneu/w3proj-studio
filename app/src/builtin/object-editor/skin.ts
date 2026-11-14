@@ -20,7 +20,7 @@
 
 import type { FieldMeta } from "../../lib/objects/metadata";
 import type { EditFile, EditMod, EditObject } from "./objectedit";
-import { pairing } from "./w3o";
+import { mergeSkin, pairing } from "./w3o";
 
 /** The Skin file of a main object file (war3map.w3u.json → war3mapSkin.w3u.json; war3campaign too); the path
  *  itself when it isn't one. */
@@ -156,6 +156,13 @@ export const listedPath = (paths: readonly string[], wanted: string) => paths.fi
 
 /** An object file with both lists (a file may leave out an empty one). */
 export const withLists = (f: EditFile): EditFile => ({ ...f, original: f.original ?? [], custom: f.custom ?? [] });
+
+/** The objects of a main file and its Skin file as the World Editor shows them (the Skin file's fields in them, objects
+ *  only it has added): what the Object Editor, its tools and the Object Manager read. null when neither exists. */
+export function withSkin(main: EditFile | null, skin: EditFile | null): EditFile | null {
+  if (!main && !skin) return null;
+  return mergeSkin(withLists(main ?? { format: "w3proj.objects/1", version: skin!.version, original: [], custom: [] }), skin && withLists(skin), { addSkinOnly: true });
+}
 
 /** Whether a split changed the Skin file: what is written only then, so an unchanged one keeps its bytes. */
 export function skinChanged(before: EditFile | null, after: EditFile | null): boolean {
