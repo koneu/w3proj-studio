@@ -708,6 +708,22 @@ mod classic_tests {
         assert_eq!(got["units"][0]["editorId"], 13);
     }
 
+    /// Import paths survive decode and encode. smoketest_maps' TurtleRock v2.0 (a W3Champions build) really stores
+    /// 66 entries of flag 0 and an empty path (140 bytes: version 1, count 66, then 00 00 per entry); its files are
+    /// named only by the archive's (listfile). The empty list must stay as it is, not be filled in or dropped.
+    #[test]
+    fn imports_keep_their_paths_and_blank_lists_stay_blank() {
+        let got = exact("imports", &[u(1), u(2), vec![13], z("war3mapImported\\a.blp"), vec![29], z("_HD.w3mod\\b.mdx")].concat());
+        assert_eq!(got["files"][0]["path"], "war3mapImported\\a.blp");
+        assert_eq!(got["files"][1]["flags"], 29);
+        let blank = [u(1), u(66), [0u8, 0].repeat(66)].concat();
+        assert_eq!(blank.len(), 140);
+        let got = exact("imports", &blank);
+        let files = got["files"].as_array().unwrap();
+        assert_eq!(files.len(), 66);
+        assert!(files.iter().all(|e| e["path"] == "" && e["flags"] == 0));
+    }
+
     #[test]
     fn version_18_map_info_stops_short() {
         let bytes = [
