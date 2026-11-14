@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadStays, newCliffVariation, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitHalf, unitStays } from "./resize";
+import { cameraBounds, doodadStays, limitResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -405,4 +405,56 @@ test("Map Size cutting the top: the top row keeps the old row's edge bit, as the
   const plain = resizeTerrain(t, [0, 0, 0, -4]);
   markMapEdge(plain, [6, 6, 4, 8]);
   assert.equal(top(plain, 10), false, "control: the plain mark leaves the top row clear");
+});
+
+test("Map Size at the coordinate limit: growth past ±32256 moves the playable edge out instead", () => {
+  // we-drive 2026-11-14 (tests/we-compare/map-size-limits.json): a new 64x64 map (borders 6 6 4 8, -4096..4096) grown
+  // by 56 clicks on one side stopped at 32256, 284 tiles, the last click's 4 tiles taken from that side's border.
+  const t = { offsetX: -4096, offsetY: -4096, width: 65, height: 65 };
+  const b: Sides = [6, 6, 4, 8];
+  assert.deepEqual(limitResize(t, [0, 224, 0, 0], b), { change: [0, 220, 0, 0], complements: [6, 2, 4, 8] }, "right");
+  assert.deepEqual(limitResize(t, [224, 0, 0, 0], b), { change: [220, 0, 0, 0], complements: [2, 6, 4, 8] }, "left");
+  assert.deepEqual(limitResize(t, [0, 0, 0, 224], b), { change: [0, 0, 0, 220], complements: [6, 6, 4, 4] }, "top");
+  assert.deepEqual(limitResize(t, [0, 0, 224, 0], b), { change: [0, 0, 220, 0], complements: [6, 6, 0, 8] }, "bottom");
+  assert.deepEqual(limitResize(t, [0, 220, 0, 0], b), { change: [0, 220, 0, 0], complements: b }, "control: up to the limit nothing changes");
+  assert.deepEqual(limitResize(t, [-4, 200, -8, 216], b), { change: [-4, 200, -8, 216], complements: b }, "control: cuts and growth within it");
+  // The widest map of the spec: right 56 clicks, then left 49 (480 wide): playable 472, camera right 31488.
+  const right = limitResize(t, [0, 224, 0, 0], b);
+  const wide = limitResize(t, [196, 224, 0, 0], b);
+  assert.deepEqual(wide, { change: [196, 220, 0, 0], complements: [6, 2, 4, 8] });
+  const [w] = resizedSize(t as Terrain, wide.change);
+  assert.equal(w, 480);
+  const next = { ...t, offsetX: -4096 - 196 * 128, width: 481 } as Terrain;
+  assert.equal(playableSize(next, wide.complements)[0], 472);
+  assert.equal(cameraBounds(next, wide.complements)[2], 31488);
+  assert.equal(cameraBounds(next, wide.complements)[0], -29184 + 10 * 128);
+  assert.equal(resizeProblem({ ...t, corners: [] } as unknown as Terrain, right.change, right.complements), null);
+  // The border goes down to 0 and no further; the rest is dropped, as the editor's arrows then do nothing (a 57th
+  // click: right border 2 to 0, playable 278, camera right 31744; at the bottom 0 stays 0).
+  assert.deepEqual(limitResize(t, [0, 228, 0, 0], b), { change: [0, 220, 0, 0], complements: [6, 0, 4, 8] });
+  assert.deepEqual(limitResize(t, [0, 0, 228, 0], b), { change: [0, 0, 220, 0], complements: [6, 6, 0, 8] });
+  assert.deepEqual(limitResize(t, [0, 0, 0, 400], b), { change: [0, 0, 0, 220], complements: [6, 6, 4, 0] });
+  // A 96 x 64 map: 51 clicks to the limit on the right.
+  assert.deepEqual(limitResize({ offsetX: -6144, offsetY: -4096, width: 97, height: 65 }, [0, 208, 0, 0], b), { change: [0, 204, 0, 0], complements: [6, 2, 4, 8] });
+  // A map already at the limit: growth there is all border.
+  const atLimit = { offsetX: -4096, offsetY: -4096, width: 285, height: 65 };
+  assert.deepEqual(limitResize(atLimit, [4, 4, 0, 0], b), { change: [4, 0, 0, 0], complements: [6, 2, 4, 8] });
+  // Applying it twice changes nothing more (the MCP tool and the editor both apply it).
+  assert.deepEqual(limitResize(t, right.change, right.complements), right);
+});
+
+test("Map Size moves a start location only when it's off the new map", () => {
+  // we-drive 2026-11-14, a new 64x64 map's start at 0, -256: cut by 32 at the top (map -4096..0 up, playable top
+  // -1024) the World Editor kept it there, flagged outside; cut by 32 on the right it stood on the new edge (x 0) and
+  // was made anew at a random place in the playable area.
+  const rect = { left: -4096, bottom: -4096, right: 4096, top: 0 };
+  const playable = { left: -3328, bottom: -3584, right: 3328, top: -1024 };
+  const bounds = [-2816, -3328, 2816, -1280];
+  assert.deepEqual(startAfterResize(0, -256, rect, playable, bounds), { kept: true, at: [0, -256], outside: true });
+  assert.deepEqual(startAfterResize(0, -2000, rect, playable, bounds), { kept: true, at: [0, -2000], outside: false }, "control: inside");
+  const right = { left: -4096, bottom: -4096, right: 0, top: 4096 };
+  assert.deepEqual(startAfterResize(0, -256, right, { left: -3328, bottom: -3584, right: -768, top: 3072 }, [-2816, -3328, -1280, 2816]),
+    { kept: false, at: [-1280, -256], outside: false }, "on the map's edge: moved into the camera bounds");
+  assert.deepEqual(startAfterResize(0, -256, { left: -4096, bottom: 0, right: 4096, top: 4096 }, { left: -3328, bottom: 512, right: 3328, top: 3072 }, [-2816, 768, 2816, 2816]),
+    { kept: false, at: [0, 768], outside: false }, "off the map");
 });

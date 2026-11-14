@@ -1,7 +1,7 @@
 [
  {
   "name": "mapsize-min",
-  "description": "Map Size: the smallest map (test.md): Modify Map Bounds ticked, the right edge's < and the top edge's v clicked 10 times each (4 tiles a click: 64 stops at 32, the dialog's Full label shows 32 x 32 and the arrows do nothing beyond); Studio's resize_map right -32, top -32 (its minimum is 32 as well)",
+  "description": "Map Size: the smallest map: Modify Map Bounds ticked, the right edge's < and the top edge's v clicked 10 times each (4 tiles a click: 64 stops at 32, the dialog's Full label shows 32 x 32 and the arrows do nothing beyond); Studio's resize_map right -32, top -32 (its minimum is 32 as well). The start (0, -256) is on the new right edge (x 0): the World Editor removes it and its save makes one at a random place (ignored), Studio moves it into the camera bounds",
   "input": {
    "new": {
     "name": "mapsize-min",
@@ -242,16 +242,26 @@
      "description",
      "suggestedPlayers",
      "loadingScreen.crestRace",
-     "gameDataSet"
-    ],
-    "expect": "differs"
+     "gameDataSet",
+     "players[].start"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed",
+    "ignore": [
+     "units[].position[0]",
+     "units[].position[1]",
+     "units[].hp",
+     "units[].mana"
+    ]
    }
   ],
   "limit": 20
  },
  {
   "name": "mapsize-max-width",
-  "description": "Map Size: the widest map: the right edge's > clicked 56 times (stops at map 32256, a coordinate limit), then the left edge's outward arrow (463,333) 60 times (stops at Full 480 x 64, map -29184 to 32256); Studio's resize_map left 196, right 220 (480 is its maximum too)",
+  "description": "Map Size: the widest map: the right edge's > clicked 56 times (the map stops at 32256 after 55, a coordinate limit; the 56th click moves the playable edge out instead, the right border 6 to 2), then the left edge's outward arrow (463,333) 60 times (stops at 480 x 64 after 49, map -29184 to 32256, playable 472); Studio's resize_map right 224 (limitResize: 220 and the border), left 196",
   "input": {
    "new": {
     "name": "mapsize-max-width",
@@ -1240,7 +1250,7 @@
      "mcp": "resize_map",
      "args": {
       "left": 196,
-      "right": 220
+      "right": 224
      }
     }
    ]
@@ -1248,8 +1258,7 @@
   "compare": [
    {
     "file": "war3map.w3e",
-    "as": "w3e",
-    "expect": "differs"
+    "as": "w3e"
    },
    {
     "file": "war3map.w3i",
@@ -1262,8 +1271,3874 @@
      "suggestedPlayers",
      "loadingScreen.crestRace",
      "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-limit-left",
+  "description": "Map Size at the coordinate limit on the left: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (left border 6 to 2)",
+  "input": {
+   "new": {
+    "name": "mslimitleft",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
     ],
-    "expect": "differs"
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "left": 224
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-limit-top",
+  "description": "Map Size at the coordinate limit on top: 56 clicks out, the map stops at 32256 after 55, the 56th moves the playable edge (top border 8 to 4)",
+  "input": {
+   "new": {
+    "name": "mslimittop",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "top": 224
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-limit-bottom",
+  "description": "Map Size at the coordinate limit at the bottom: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (bottom border 4 to 0)",
+  "input": {
+   "new": {
+    "name": "mslimitbottom",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "bottom": 224
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-limit-bottom57",
+  "description": "Map Size past the coordinate limit at the bottom: 57 clicks out, the 57th does nothing (the bottom border is 0 already)",
+  "input": {
+   "new": {
+    "name": "mslimitbottom5",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,467"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "bottom": 228
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-ns-limit-right",
+  "description": "Map Size past the coordinate limit on a 96 x 64 map: the right edge's > 54 times, the map stops at 32256 after 51 (204 tiles), the 52nd takes the right border from 6 to 2, the 53rd to 0, the 54th does nothing (playable 294)",
+  "input": {
+   "new": {
+    "name": "msnslimitright",
+    "width": 96,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "753,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "right": 216
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-cut-top-start",
+  "description": "Map Size, top cut by 32 on 64 x 64: the start (0, -256) is still on the map (top 0) but 768 past the playable edge: it stays, flagged outside (units flags 3), and Melee goes off (w3i flags)",
+  "input": {
+   "new": {
+    "name": "mscuttopstart",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,217"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "top": -32
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-cut-right-start",
+  "description": "Map Size, right cut by 32 on 64 x 64: the start (0, -256) is on the new right edge: removed by the World Editor and made anew at random (ignored), moved by Studio",
+  "input": {
+   "new": {
+    "name": "mscutrightstar",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "right": -32
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet",
+     "players[].start"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed",
+    "ignore": [
+     "units[].position[0]",
+     "units[].position[1]",
+     "units[].hp",
+     "units[].mana"
+    ]
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-cut-bottom-start",
+  "description": "Map Size, bottom cut by 32 on 64 x 64: the start (0, -256) is off the map: removed by the World Editor and made anew at random (ignored), moved by Studio",
+  "input": {
+   "new": {
+    "name": "mscutbottomsta",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "608,447"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "bottom": -32
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet",
+     "players[].start"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed",
+    "ignore": [
+     "units[].position[0]",
+     "units[].position[1]",
+     "units[].hp",
+     "units[].mana"
+    ]
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-start-edge",
+  "description": "Map Size on 96 x 64 with the start moved to (4800, 0): right cut by 8, left grown by 8: the start stays on the map, past the new playable edge (4352): flagged outside, Melee off",
+  "input": {
+   "new": {
+    "name": "msstartedge",
+    "width": 96,
+    "height": 64
+   },
+   "steps": [
+    {
+     "mcp": "move_object",
+     "args": {
+      "kind": "units",
+      "index": 0,
+      "id": "sloc",
+      "x": 4800,
+      "y": 0
+     }
+    },
+    {
+     "mcp": "save_project"
+    }
+   ]
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "left": 8,
+      "right": -8
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-start-off",
+  "description": "Map Size on 96 x 64 with the start moved to (5248, -2048): right cut by 8 (map edge 5120): the start is off the map: made anew at random by the World Editor (ignored), moved by Studio",
+  "input": {
+   "new": {
+    "name": "msstartoff",
+    "width": 96,
+    "height": 64
+   },
+   "steps": [
+    {
+     "mcp": "move_object",
+     "args": {
+      "kind": "units",
+      "index": 0,
+      "id": "sloc",
+      "x": 5248,
+      "y": -2048
+     }
+    },
+    {
+     "mcp": "save_project"
+    }
+   ]
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "right": -8
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet",
+     "players[].start"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed",
+    "ignore": [
+     "units[].position[0]",
+     "units[].position[1]",
+     "units[].hp",
+     "units[].mana"
+    ]
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-min-ns",
+  "description": "Map Size, 96 x 64 cut by 32 on the left and the right to 32 x 64: the start at the middle stays",
+  "input": {
+   "new": {
+    "name": "msminns",
+    "width": 96,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "482,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "733,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "left": -32,
+      "right": -32
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-grow-left4",
+  "description": "Map Size, one click out on the left (4 tiles): borders kept",
+  "input": {
+   "new": {
+    "name": "msgrowleft4",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "463,333"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "left": 4
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mapsize-grow-top4",
+  "description": "Map Size, one click out on top (4 tiles): borders kept",
+  "input": {
+   "new": {
+    "name": "msgrowtop4",
+    "width": 64,
+    "height": 64
+   },
+   "steps": []
+  },
+  "we": {
+   "steps": [
+    [
+     "--click",
+     "165,41"
+    ],
+    [
+     "--sleep",
+     "500"
+    ],
+    [
+     "--click",
+     "210,112"
+    ],
+    [
+     "--sleep",
+     "1500"
+    ],
+    [
+     "--click",
+     "444,536"
+    ],
+    [
+     "--sleep",
+     "300"
+    ],
+    [
+     "--click",
+     "608,197"
+    ],
+    [
+     "--sleep",
+     "60"
+    ],
+    [
+     "--click",
+     "819,831"
+    ],
+    [
+     "--sleep",
+     "4000"
+    ]
+   ],
+   "saveAccept": [
+    "Warning"
+   ]
+  },
+  "studio": {
+   "settings": {
+    "mcp.writeTools": true,
+    "mcp.confirmResize": false
+   },
+   "steps": [
+    {
+     "mcp": "save_project"
+    },
+    {
+     "mcp": "resize_map",
+     "args": {
+      "top": 4
+     }
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3map.w3e",
+    "as": "w3e"
+   },
+   {
+    "file": "war3map.w3i",
+    "as": "parsed",
+    "ignore": [
+     "saves",
+     "name",
+     "author",
+     "description",
+     "suggestedPlayers",
+     "loadingScreen.crestRace",
+     "gameDataSet"
+    ]
+   },
+   {
+    "file": "war3mapUnits.doo",
+    "as": "parsed"
    }
   ],
   "limit": 20

@@ -8,7 +8,7 @@
 // vertically (all 116 game maps).
 
 import { randomVariation, type Corner, type Terrain } from "./w3e";
-import type { Area } from "./area";
+import { inArea, type Area } from "./area";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -18,6 +18,33 @@ export const MIN_SIZE = 32, MAX_SIZE = 480, SIZE_STEP = 4;
 /** Map size in tiles after `change` (whole map, unplayable border included). */
 export function resizedSize(t: Terrain, change: Sides): [number, number] {
   return [t.width - 1 + change[0] + change[1], t.height - 1 + change[2] + change[3]];
+}
+
+/** How far from 0 a map's outer edge may lie, in world units, as the World Editor's Map Size lets it grow (we-drive
+ *  2026-11-14, a 64 × 64 map grown 56 clicks each way: every side stopped at ±32256, 220 tiles out; the 56th click
+ *  moved that side's camera bounds and playable edge out by 4 more tiles instead, its border going from 6 to 2 on the
+ *  left and right, 8 to 4 on top and 4 to 0 at the bottom; a 57th took the right border from 2 to 0 and left the
+ *  bottom's 0; a 96 × 64 map stopped at 32256 too, after 51 clicks on the right). */
+export const COORD_LIMIT = 32256;
+
+/** `change` and `complements` as the World Editor applies them at the coordinate limit: growth that would take a side's
+ *  outer edge past COORD_LIMIT stops there (in whole SIZE_STEP clicks) and the rest moves that side's playable edge
+ *  out instead, taking it from the border down to 0; what the border can't take is dropped, as the editor's arrows
+ *  then do nothing (we-drive 2026-11-14, see COORD_LIMIT: playable width and camera bounds were those of the unlimited
+ *  growth while the border lasted). Sides within the limit, and cuts, are unchanged. Maps whose edges aren't a whole
+ *  number of clicks from the limit weren't measured (Studio's new maps all are). */
+export function limitResize(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">, change: Sides, complements: Sides): { change: Sides; complements: Sides } {
+  const ch: Sides = [...change], co: Sides = [...complements];
+  const r = worldRect(t);
+  // How far each side's new edge reaches out from 0.
+  const reach = [-(r.left - change[0] * 128), r.right + change[1] * 128, -(r.bottom - change[2] * 128), r.top + change[3] * 128];
+  for (let k = 0; k < 4; k++) {
+    if (!(change[k] > 0) || reach[k] <= COORD_LIMIT) continue;
+    const over = Math.min(change[k], Math.ceil((reach[k] - COORD_LIMIT) / 128 / SIZE_STEP) * SIZE_STEP);
+    ch[k] -= over;
+    co[k] = Math.max(0, co[k] - over);
+  }
+  return { change: ch, complements: co };
 }
 
 /** Why `change` can't be applied, or null. */
@@ -125,6 +152,22 @@ export const doodadStays = (x: number, y: number, rect: Area) => x > rect.left &
  *  between 616 (kept) and 1258. Start locations aren't asked: they are moved. */
 export const unitStays = (x: number, y: number, half: readonly [number, number], playable: Area) =>
   x - half[0] >= playable.left && x + half[0] <= playable.right && y - half[1] >= playable.bottom && y + half[1] <= playable.top;
+
+/** Where a start location at x, y is after Map Size (we-drive 2026-11-14, a 64 × 64 map's start at 0, -256 cut by 32
+ *  tiles on each side and on two): one strictly inside the new map (`rect`, as doodadStays) stays where it is, also past
+ *  the playable edge (`playable`; the top cut left it at -256, 768 past it, with the "outside" flag, and the save took
+ *  Melee off); one on or past the map's edge is removed by the World Editor, whose save then makes a new one at a
+ *  random place in the playable area (six cuts: -1344, -2944 and -2688, -2176 for the same cut, all on the 64 grid; the
+ *  w3i's player start a few units beside it). Studio moves it into the camera bounds (`bounds`, as stored: left,
+ *  bottom, right, top first) instead, the nearest point there. The new one's hit points and mana are 0 where a placed
+ *  one's are -1 (the editor's save turns a 0 into -1 before it makes the new start): Studio's save keeps its -1.
+ *  `outside`: past the playable edge where it ends up. */
+export function startAfterResize(x: number, y: number, rect: Area, playable: Area, bounds: readonly number[]): { kept: boolean; at: [number, number]; outside: boolean } {
+  const kept = doodadStays(x, y, rect);
+  const at: [number, number] = kept ? [x, y] : [Math.min(Math.max(x, bounds[0]), bounds[2]), Math.min(Math.max(y, bounds[1]), bounds[3])];
+  const outside = !inArea(at[0], at[1], playable);
+  return { kept, at, outside };
+}
 
 /** What a unit type takes up for unitStays, half across and half up in world units: a building its pathing texture
  *  (`cells`, its width and height; 16 world units per half cell), any other unit its collision size (a radius, from the

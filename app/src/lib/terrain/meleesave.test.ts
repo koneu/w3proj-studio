@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtgJson } from "../triggers/wtg";
-import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
-import { writeW3e, type Corner, type Terrain } from "./w3e";
+import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startsPastPlayable, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** Rows from the north, a char per corner: `w` ground at -100 under water at 50, `.` dry ground at 0. */
 function lake(rows: string[]): Terrain {
@@ -43,6 +43,20 @@ test("a start location under water is in an invalid position; one on dry ground 
   assert.equal(startsUnderWater(t, [start(2 * 128 + 64, 64)]), false, "control: dry ground");
   assert.equal(startsUnderWater(t, [{ id: "hfoo", player: 0, position: [64, 64, 0] }]), false, "only start locations count");
   assert.equal(startsUnderWater(t, [{ id: "sloc", player: 0 }]), false, "no position");
+});
+
+test("a start on a tile past the playable map is in an invalid position; one on the playable edge isn't", () => {
+  const t = lake(["....", "....", "....", "...."]);
+  // The rightmost tile column is past the playable map (its lower left corners carry the map-edge bit).
+  markMapEdge(t, [0, 1, 0, 0]);
+  assert.equal(startsPastPlayable(t, [start(320, 64)]), true, "in the marked column");
+  assert.equal(startsPastPlayable(t, [start(256, 64)]), false, "on the playable edge: inside");
+  assert.equal(startsPastPlayable(t, [start(200, 64)]), false, "control: inside");
+  assert.equal(startsPastPlayable(t, [start(-10, 64)]), true, "off the map");
+  assert.equal(startsPastPlayable(t, [{ id: "hfoo", player: 0, position: [320, 64, 0] }]), false, "only start locations count");
+  // we-drive 2026-11-14: a start left 768 past the playable edge by a Map Size cut took Melee off at the save.
+  assert.deepEqual(meleeAfterSave({ flags: MELEE }, [start(320, 64)], { customConstants: false, terrain: t }), { flags: MELEE & ~4, reasons: ["Start locations are in invalid positions"] });
+  assert.ok(meleeSetBlockers({ flags: MELEE & ~4 }, [start(320, 64)], { customConstants: false, terrain: t }).includes("Start locations are in invalid positions"), "nor put back on");
 });
 
 test("the save's melee rules take the facts: constants, starts under water, a player's unit", () => {

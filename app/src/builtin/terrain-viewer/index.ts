@@ -49,8 +49,8 @@ import { doodadSnaps, mixedPicture, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
+import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
@@ -98,7 +98,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, doodadStays, limitResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -748,15 +748,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("resize_map", async ({ left, right, bottom, top, border, dryRun }) => {
       const side = (n: unknown) => (n === undefined ? 0 : n);
-      const change = [left, right, bottom, top].map(side) as Sides;
-      if (!change.every((n) => Number.isInteger(n))) throw new Error("left, right, bottom and top must be whole numbers of tiles.");
+      const asked = [left, right, bottom, top].map(side) as Sides;
+      if (!asked.every((n) => Number.isInteger(n))) throw new Error("left, right, bottom and top must be whole numbers of tiles.");
       if (border !== undefined && !(Array.isArray(border) && border.length === 4 && border.every((n) => Number.isInteger(n) && n >= 0))) throw new Error("border must be [left, right, bottom, top].");
       requireProject(w3);
       // A dry run only reads; the resize itself is refused on a lost view (before and after the question).
       const { handle } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
-      const complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
+      // Growth past the coordinate limit moves the playable edge instead (limitResize), as handle.resizeMap applies it.
+      const { change, complements } = limitResize(t, asked, (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides);
       const same = change.every((n) => n === 0) && complements.every((n, k) => n === info?.cameraComplements?.[k]);
       if (same) throw new Error("That changes nothing.");
       const problem = resizeProblem(t, change, complements);
@@ -4034,8 +4035,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
         const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
-        const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+        const resizeLocked = async (asked: Sides, askedBorder: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
+          // Growth past the coordinate limit moves the playable edge instead (limitResize).
+          const { change, complements } = limitResize(terrain, asked, askedBorder);
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
           // The messages already on screen: an undo withdraws only those the resize brought.
@@ -4090,7 +4093,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return { rect, edge, stays };
         };
         /** How many placed objects (special doodads included) a resize would remove; changes nothing. */
-        const resizeRemovals = async (change: Sides, complements: Sides): Promise<number> => {
+        const resizeRemovals = async (asked: Sides, askedBorder: Sides): Promise<number> => {
+          const { change, complements } = limitResize(terrain, asked, askedBorder);
           const [w, h] = resizedSize(terrain, change);
           const next = { offsetX: terrain.offsetX - change[0] * 128, offsetY: terrain.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
           const { stays } = await resizeRules(next, complements);
@@ -4103,15 +4107,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as unknown).catch(() => null);
           const plan = planPathingOverrides(stored, terrain, change);
           const { rect, edge, stays } = await resizeRules(next, complements);
-          const playable = (x: number, y: number) => inArea(x, y, edge);
-          // Start locations aren't removed but moved into the playable map (a player needs one). The World Editor
-          // removes them and asks on save whether to generate the missing ones.
+          // Start locations (startAfterResize): one still inside the map stays where it is, past the playable edge or
+          // not; one off the map is moved inside the camera bounds, where the World Editor removes it and its save
+          // makes a new one at a random place (a player needs one).
           const pb = cameraBounds(next, complements);
-          const clamp = (x: number, y: number): [number, number] => [Math.min(Math.max(x, pb[0]), pb[2]), Math.min(Math.max(y, pb[1]), pb[3])];
           let removed = 0;
           for (const f of [dooFile, unitsFile]) {
             if (!f) continue;
-            for (const p of f.list) if (p.id === "sloc" && !playable(p.position[0], p.position[1])) [p.position[0], p.position[1]] = clamp(p.position[0], p.position[1]);
+            for (const p of f.list) {
+              if (p.id !== "sloc") continue;
+              const s = startAfterResize(p.position[0], p.position[1], rect, edge, pb);
+              if (!s.kept) [p.position[0], p.position[1]] = s.at;
+              const flags = flagsOf(p);
+              if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, s.outside);
+            }
             const keep = f.list.filter((p) => stays(p, f === dooFile));
             removed += f.list.length - keep.length;
             f.list.splice(0, f.list.length, ...keep);
@@ -4138,7 +4147,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
             const zoom = resizedCameraZoom(info.cameraZoom as Parameters<typeof resizedCameraZoom>[0]);
             if (zoom) info.cameraZoom = zoom;
-            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!playable(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
+            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) {
+              const s = startAfterResize(pl.start[0], pl.start[1], rect, edge, pb);
+              if (!s.kept) [pl.start[0], pl.start[1]] = s.at;
+            }
+            // A start left past the playable edge is "in an invalid position": the World Editor's save takes Melee off.
+            if (typeof info.flags === "number" && startsPastPlayable(next, unitsFile?.list ?? [])) info.flags &= ~MELEE_MAP;
           });
           void loadBorder();
           // Regions are clipped to the map (those left outside go).
