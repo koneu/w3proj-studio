@@ -432,7 +432,7 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 /* Model viewer */
 .model-viewer { display: flex; height: 100%; }
 .model-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.model-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
+.model-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); flex: 0 0 auto; max-height: min(35%, 35vh); overflow-y: auto; }
 .model-scrub { width: 160px; }
 .model-frame { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 110px; }
 .model-toggle { display: inline-flex; align-items: center; gap: 2px; }
