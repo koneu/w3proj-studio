@@ -3236,6 +3236,45 @@ async function importArtReload(page, found) {
   }
 }
 
+/** Change path in the Import Manager on an imported model that is open in a tab: the tab follows to the new path (path,
+ *  title, the model read again from there), and undo takes it back. */
+async function importPathTab(page, found) {
+  try {
+  const fail = (what) => found.push(`import path tab: ${what}`);
+  const k = await heightKit(page, "ImportPathTab");
+  const OLD = "war3mapImported\\PathTabA.mdx", NEW = "Moved\\PathTabB.mdx";
+  const oldFile = "map/war3mapImported/PathTabA.mdx", newFile = "map/Moved/PathTabB.mdx";
+  const footman = await page.evaluate(`w3.game.read("Units\\\\Human\\\\Footman\\\\Footman.mdx").then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`);
+  await page.evaluate(`(async () => {
+    await w3.workspace.writeBytes(${JSON.stringify(oldFile)}, Uint8Array.from(atob(${JSON.stringify(footman)}), (c) => c.charCodeAt(0)));
+    await w3.workspace.writeText("map/war3map.imp.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [{ flags: 21, path: OLD }] }))});
+    await w3.workspace.refresh();
+    await w3.editors.open(${JSON.stringify(oldFile)});
+  })()`);
+  const tabs = () => page.evaluate(`w3.editors.openPaths().filter((p) => /PathTab/i.test(p))`);
+  const labels = () => page.evaluate(`[...document.querySelectorAll(".tab-label")].map((l) => l.textContent).filter((t) => /PathTab/i.test(t))`);
+  if (!(await soon(async () => (await tabs()).includes(oldFile), 20000))) return fail("the imported model doesn't open in a tab");
+  // The command is there once the Import Manager has been opened.
+  await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+  await settled(page);
+  const r = await page.evaluate(`w3.commands.execute("w3.imports.renamePath", ${JSON.stringify(OLD)}, ${JSON.stringify(NEW)}).then(() => null, (e) => String(e))`);
+  if (r) return fail(`Change path failed: ${r}`);
+  if (!(await soon(async () => (await tabs()).join() === newFile, 20000))) return fail(`after Change path the model tabs are ${JSON.stringify(await tabs())}, not ${newFile}`);
+  if (!(await labels()).every((t) => /PathTabB/i.test(t)) || !(await labels()).length) fail(`the tab title after Change path is ${JSON.stringify(await labels())}`);
+  if (await page.evaluate(`w3.editors.activePath()`) !== newFile) fail("the model at the new path isn't the active tab");
+  // Undo, from the Import Manager.
+  await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+  await settled(page);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  if (!(await soon(async () => (await tabs()).join() === oldFile, 20000))) fail(`after undo the model tabs are ${JSON.stringify(await tabs())}, not ${oldFile}`);
+  else if (!(await labels()).every((t) => /PathTabA/i.test(t))) fail(`the tab title after undo is ${JSON.stringify(await labels())}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.save();
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** A ground texture the map imports (map/<the tile's own path>) is drawn from the import, and another program overwriting
  *  it shows in the open view at the next focus, as the placed models do. */
 async function groundTextureReload(page, found) {
@@ -12668,6 +12707,7 @@ async function run() {
         heightsPreserve,
         heightsUniform,
         importArtReload,
+        importPathTab,
         importWarnings,
         itemDrops,
         itemTablesAccess,
@@ -12962,6 +13002,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "triggerMultiSelect", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
+  await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
+  await leftOpen(page, "importPathTab", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
   await leftOpen(page, "groundTextureReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));

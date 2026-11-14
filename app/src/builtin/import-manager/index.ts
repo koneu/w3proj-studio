@@ -419,7 +419,7 @@ class ImportView {
         for (const m of moves) {
           const f = this.fileOf(m.entry, files);
           const before = { path: m.entry.path, flags: m.entry.flags };
-          if (f) await this.w3.workspace.rename(f.path, projectPath(m.to));
+          if (f) await this.moveFile(f.path, projectPath(m.to));
           // A standard-path entry (name inside the import folder) now has a path of its own.
           if (m.entry.path !== m.from) m.entry.flags = CUSTOM_PATH_FLAGS;
           m.entry.path = m.to;
@@ -524,8 +524,19 @@ class ImportView {
       if (error) throw new Error(`${count} of ${total} removed, then: ${error}`);
     });
   }
+  /** Moves a project file; an editor tab open on it follows to the new path (closed and opened again), so it shows the file as it is there. Unsaved changes in it refuse the move. */
+  private async moveFile(from: string, to: string): Promise<void> {
+    const key = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+    const editors = this.w3.editors;
+    if (editors.isDirty(from)) throw new Error(`${from} has unsaved changes in an editor; save or close it first.`);
+    const tabs = editors.openPaths().filter((p) => key(p) === key(from));
+    for (const p of tabs) await editors.close(p);
+    try { await this.w3.workspace.rename(from, to); }
+    catch (e) { for (const p of tabs) await editors.open(p).catch(() => {}); throw e; }
+    if (tabs.length) await editors.open(to);
+  }
   private pathFs(): PathFs {
-    return { ...this.replaceFs(), rename: (a, b) => this.w3.workspace.rename(a, b), isDirty: (p) => this.w3.editors.isDirty(p) };
+    return { ...this.replaceFs(), rename: (a, b) => this.moveFile(a, b), isDirty: (p) => this.w3.editors.isDirty(p) };
   }
   /** The workspace as a replace uses it. */
   private replaceFs(): ReplaceFs {

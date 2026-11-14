@@ -81,6 +81,7 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
       activePath: () => null,
       // No editor holds anything: the files are all there is.
       isDirty: () => false,
+      openPaths: () => [],
       unsavedPaths: () => [],
       saveViewOnly: async () => 0,
       onDidChangeActive: () => none,
