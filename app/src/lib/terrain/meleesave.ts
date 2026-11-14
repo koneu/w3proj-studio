@@ -12,7 +12,7 @@ import { parseSlk } from "../formats/text";
 import { isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
-import { parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
+import { mapEdgeTiles, parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
 import { readTerrainBytes, terrainPath } from "./w3etext";
 
 interface PlacedLike { id: string; player?: number; position?: readonly number[] }
@@ -39,6 +39,25 @@ export function startsUnderWater(t: Terrain, placed: readonly PlacedLike[]): boo
   return placed.some((p) => p.id === "sloc" && Array.isArray(p.position) && p.position.length >= 2
     && Number.isFinite(p.position[0]) && Number.isFinite(p.position[1]) && waterSurfaceAt(t, p.position[0], p.position[1]) !== null);
 }
+
+/** Whether a start location stands on a tile past the playable map (the terrain's map-edge marks, which the saves
+ *  write from the w3i's camera complements): one of the World Editor's "start locations in invalid positions" (we-drive
+ *  2026-11-14: a 64 × 64 map cut by 32 at the top kept its start 768 past the playable edge and its save took Melee
+ *  off). A start on the playable edge itself is inside (as inArea); one off the map is past. */
+export function startsPastPlayable(t: Terrain, placed: readonly PlacedLike[]): boolean {
+  const edge = mapEdgeTiles(t), tilesX = t.width - 1, tilesY = t.height - 1;
+  const marked = (x: number, y: number) => x < 0 || y < 0 || x >= tilesX || y >= tilesY || edge[y * tilesX + x] === 1;
+  // The tiles a point touches along one axis: one, or the two it lies between.
+  const touching = (f: number) => (Number.isInteger(f) ? [f - 1, f] : [Math.floor(f)]);
+  return placed.some((p) => {
+    if (p.id !== "sloc" || !Array.isArray(p.position) || p.position.length < 2 || !Number.isFinite(p.position[0]) || !Number.isFinite(p.position[1])) return false;
+    const fx = (p.position[0] - t.offsetX) / 128, fy = (p.position[1] - t.offsetY) / 128;
+    return touching(fx).every((x) => touching(fy).every((y) => marked(x, y)));
+  });
+}
+
+/** Under water or past the playable map: the start-location reasons Studio can tell. */
+export const startsInvalidPlaces = (t: Terrain, placed: readonly PlacedLike[]) => startsUnderWater(t, placed) || startsPastPlayable(t, placed);
 
 /** A doodad's place: `reach` how far it may stand from it. */
 export interface DoodadSpot { x: number; y: number; reach: number }
@@ -194,7 +213,7 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
  *  those Studio can't rule out for sure. */
 export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): string[] {
   const t = facts.terrain;
-  const out = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, t ? startsUnderWater(t, placed) : false);
+  const out = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, t ? startsInvalidPlaces(t, placed) : false);
   if (facts.constantsKnown !== true) out.push("Gameplay constants not known");
   if (facts.customData !== false) out.push("Custom object data or game interface");
   if (facts.defaultTriggers !== true) out.push("Triggers other than the default Melee Initialization, or not known");
@@ -207,7 +226,7 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
  *  meleeBlockers, and back on only when meleeSetBlockers finds nothing; else the flag stays as it is. */
 export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): { flags: number; reasons: string[] } {
   if (!(info.flags & MELEE_MAP)) return { flags: meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP, reasons: [] };
-  const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, facts.terrain ? startsUnderWater(facts.terrain, placed) : false);
+  const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, facts.terrain ? startsInvalidPlaces(facts.terrain, placed) : false);
   return { flags: reasons.length ? info.flags & ~MELEE_MAP : info.flags, reasons };
 }
 
