@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, linearToSrgb, srgbToLinear, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import { gridDefault, boxOf, composeLayers, linearToSrgb, srgbToLinear, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import * as viewcmds from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
@@ -306,4 +306,13 @@ test("composeLayers, linear: regions under the pathing's blue mix in linear ligh
   const srgb = composeLayers([red, blue])!;
   const wrong = blend([1, 125, 0], srgb.subarray(i, i + 4));
   assert.ok(wrong.some((v, k) => Math.abs(v - twice[k]) > 4), `${wrong}`);
+});
+
+test("a new view's grid comes from the setting, large when it is missing or wrong", () => {
+  assert.equal(gridDefault("none"), "none");
+  assert.equal(gridDefault("small"), "small");
+  assert.equal(gridDefault("medium"), "medium");
+  assert.equal(gridDefault("large"), "large");
+  assert.equal(gridDefault(undefined), "large");
+  assert.equal(gridDefault("huge"), "large");
 });

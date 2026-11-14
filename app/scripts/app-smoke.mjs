@@ -1559,7 +1559,7 @@ async function terrainSelectCameras(page, found) {
  *  grids, B draws the camera bounds, F toggles Fog Effects, T turns the selection toward the pointer, the pointer at
  *  the view's side scrolls it; and none of it is an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
 /** The terrain view as these checks were written for: no grid, no camera-bounds outline and no minimap panel (a new view
- *  has the medium grid, the bounds and the panel, as a fresh World Editor's), by the commands and the setting. The
+ *  has the large grid, the bounds and the panel, as a fresh World Editor's), by the commands and the setting. The
  *  pictures are compared pixel for pixel, and the panel's own redraws after an edit would count as the map's. */
 async function plainGridView(page) {
   const view = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
@@ -4922,6 +4922,34 @@ function gridPixels(page, data) {
     }
     return { yellow, white };
   })()`);
+}
+
+/** The terrain view's starting grid is the setting terrain.grid.default (large unless changed): a view opened after the
+ *  change starts with it, one already open keeps its grid. */
+async function gridDefault(page, found) {
+  const fail = (what) => found.push(`gridDefault: ${what}`);
+  await heightKit(page, "GridDefault");
+  const TXT = "map/war3map.w3e.txt";
+  const grid = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(${JSON.stringify(TXT)})?.state()?.grid ?? null)()`);
+  const reopen = async () => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)}, "w3.terrainViewer")`);
+    await until("the reopened terrain view", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 30000);
+    await settled(page);
+  };
+  try {
+    await reopen();
+    if ((await grid()) !== "large") fail(`a fresh view starts with the grid ${await grid()}, not large`);
+    for (const g of ["none", "small", "medium"]) {
+      await page.evaluate(`w3.settings.set("terrain.grid.default", ${JSON.stringify(g)}, "user")`);
+      if (g === "none" && (await grid()) !== "large") fail(`the open view changed its grid with the setting: ${await grid()}`);
+      await reopen();
+      if ((await grid()) !== g) fail(`with the setting at ${g} a fresh view has the grid ${await grid()}`);
+    }
+  } finally {
+    await page.evaluate(`w3.settings.set("terrain.grid.default", "large", "user")`);
+    await restoreWindow(page);
+  }
 }
 
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
@@ -12496,6 +12524,7 @@ async function run() {
         flyingHeights,
         gameReadsOnce,
         graphicsModes,
+        gridDefault,
         groundTextureReload,
         heightsLimits,
         heightsPreserve,

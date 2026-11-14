@@ -132,6 +132,10 @@ export function viewOfMap(map: Box, playable: Box | null, fov: number, aspect: n
 // ---- grids -------------------------------------------------------------------------------
 
 export type GridSize = "none" | "small" | "medium" | "large";
+/** The grid a new terrain view starts with, from the setting terrain.grid.default (anything else: large). */
+export function gridDefault(value: unknown): GridSize {
+  return value === "none" || value === "small" || value === "medium" || value === "large" ? value : "large";
+}
 /** Distance between grid lines: small is the pathing cell, medium the tile, large four tiles. */
 export const GRID_STEP: Record<GridSize, number> = { none: 0, small: 32, medium: 128, large: 512 };
 
