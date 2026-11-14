@@ -252,7 +252,7 @@ function compareSpec(spec, cli, game, opts) {
     if (kind === "auto") kind = autoKind(c.file, we.unpackedAs(c.file) === "json" && studio.unpackedAs(c.file) === "json" ? "json" : we.unpackedAs(c.file) ?? studio.unpackedAs(c.file));
     const load = (r) => {
       if (!r.listed(c.file) && !r.has(c.file)) return null;
-      if (kind === "w3e" || kind === "w3e-spread") return { json: w3eView(kind, r.bytes(c.file)) };
+      if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(c.file)) };
       if (kind === "unit-heights") return r.unpackedAs(c.file) === "json" ? { json: unitHeights(r.json(c.file)) } : null;
       if (kind === "parsed") return r.unpackedAs(c.file) === "json" ? { json: r.json(c.file) } : null;
       if (kind === "text") return { text: r.text(c.file) };

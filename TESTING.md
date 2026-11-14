@@ -393,6 +393,8 @@ entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect":
 tests: `we-compare.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
 `W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
 
+Saved-file specs of package D (branch we-specs-d, 2026-11-14; `ramp-wpm`, `boundary-wpm`, `doodad-snap-custom`, `map-size-38x42`, `paint-variation`; inputs and generators `make-doodad-snap.mjs`, `make-odd-size.mjs` in `tests/fixtures/we-specs/`): compare kind `w3e-variation` (per texture the corner count and the ground variations that 5% of its corners wear: the draw is random). The editor's palette: Blight 1552,111, Boundary 1552,143, Remove Boundary 1552,175, Ramp 1505,311. Known differences recorded as `expect: differs`: its Boundary brush sits one corner row lower than Studio's and its wpm blocks the tile whose lower-left corner is painted (Studio's wpm ignores Boundary); its Ramp flags stand one corner column left of Studio's on the same click.
+
 Terrain specs (`we-compare-w3e.mjs`, `we-compare-ui.mjs`; specs `cliff-adjust-dry`, `unit-heights`, `water-brush-slope`,
 `water-brush-more`, `painted-cliff-type`, `height-random-stops` in `tests/we-compare/`, inputs and their generators in
 `tests/fixtures/we-specs/`): compare kind `w3e` (the binary w3e corner by corner, `corners.30,27.ground: WE 0, Studio -48`;

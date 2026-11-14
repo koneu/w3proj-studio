@@ -1,0 +1,26 @@
+[
+  {
+    "name": "paint-variation-grass8",
+    "description": "the ground variation of painted corners: Lgrs at size 8 (149 corners) on the blank map; compared are the corner counts per texture and the SET of variation values (the draw is random: a histogram of one stroke isn't stable); the counts per value of both saves are in the report of the round",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,144"],
+        ["--click", "1520,569"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 8], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e-variation" }],
+    "limit": 40
+  }
+]

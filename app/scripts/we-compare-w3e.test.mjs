@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { heightSpread, readW3e, unitHeights, w3eView } from "./we-compare-w3e.mjs";
+import { heightSpread, readW3e, unitHeights, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
@@ -92,4 +92,15 @@ test("the spec files in tests/we-compare/ that use these kinds parse", () => {
     parsed += specs.length;
   }
   assert.ok(parsed >= 5, `${parsed} specs parsed`);
+});
+
+test("variationSpread: the ground variations by texture, counted; w3e-variation compares the main values, not the counts", () => {
+  const run = (vars) => w3e(vars.length, 1, (x) => [0, 0, 0, vars[x], 0]);
+  assert.deepEqual(variationSpread(run([3, 3, 0x25])), { Ldrt: { corners: 3, ground: { 3: 2, 5: 1 }, cliff: { 0: 2, 1: 1 } } });
+  assert.deepEqual(w3eView("w3e-variation", run([3, 3, 5])), w3eView("w3e-variation", run([5, 3, 3])), "the order doesn't matter");
+  assert.deepEqual(w3eView("w3e-variation", run([3, 5, 5])), { Ldrt: { corners: 3, ground: [3, 5] } }, "the view: corners and the main values");
+  const many = (rare) => run([...Array(10).fill(4), ...Array(10).fill(8), rare]);
+  assert.deepEqual(w3eView("w3e-variation", many(1)).Ldrt.ground, [4, 8], "a value under 5% of the corners is left out");
+  assert.deepEqual(w3eView("w3e-variation", many(1)), w3eView("w3e-variation", many(2)), "so which rare value was drawn doesn't matter");
+  assert.notDeepEqual(w3eView("w3e-variation", run([3, 5])), w3eView("w3e-variation", run([3, 6])), "control: another set of values");
 });
