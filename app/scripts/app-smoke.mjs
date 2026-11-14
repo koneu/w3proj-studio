@@ -3692,26 +3692,28 @@ async function heightsLimits(page, found) {
   if (footman()?.position[0] !== lastFit) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor leaves it at ${lastFit}, the last step that fits (its collision size inside the playable edge ${pr})`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
 
-  // A paste outside the bounds.
-  await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await k.look(br + 400, 0);
-  await k.clearToasts();
+  // A paste outside the bounds is placed, with the switch on and off alike: the World Editor's pastes go past the
+  // camera bounds too (we-compare camera-bounds-paste). The switch is off here; each round turns it on, then off.
+  const pasteAt = async (x, y) => {
+    await k.look(x, y);
+    await k.clearToasts();
+    await k.focusMap();
+    await hands.key("v", "KeyV", 86, 2);
+    await k.clickMiddle();
+    await hands.key("Escape", "Escape", 27);
+    await k.save();
+  };
   const n0 = count();
-  await k.focusMap();
-  await hands.key("v", "KeyV", 86, 2);
-  await k.clickMiddle();
-  await k.save();
-  if (count() !== n0) fail("a paste outside the camera bounds placed a doodad with Enforce Camera Bounds on");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
-  // On the map and a doodad: only the camera bounds are the reason, and the word says no other.
-  if (/playable|off the map/.test(await k.toasts())) fail(`the refused paste names reasons that don't hold: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await hands.click(".model-stage canvas");
-  await k.save();
-  if (count() !== n0 + 1) fail(`the same paste with Enforce Camera Bounds off placed ${count() - n0} doodads`);
-  await hands.key("Escape", "Escape", 27);
+  if ((await k.setting("terrain.enforceCameraBounds")) !== true) fail("Enforce Camera Bounds isn't on for the paste");
+  await pasteAt(br + 500, 64);
+  if (count() !== n0 + 1) fail(`a paste outside the camera bounds placed ${count() - n0} doodads with Enforce Camera Bounds on (the World Editor places it)`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a paste outside the camera bounds was warned about: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await pasteAt(br + 500, 256);
+  if (count() !== n0 + 2) fail(`the same paste with Enforce Camera Bounds off placed ${count() - n0 - 1} doodads`);
 
-  // A placement from the Objects tab: inside the bounds it works (control), outside it's refused.
+  // A placement from the Objects tab: inside the bounds and outside them, the switch on; outside with it off.
   const edgeX = nearEdge().position[0];
   await k.look(edgeX, 0, { id: "LTlt", x: edgeX, y: 0 });
   await k.run("w3.terrain.selectInPalette");
@@ -3728,35 +3730,98 @@ async function heightsLimits(page, found) {
   await k.clearToasts();
   await hands.click(".model-stage canvas");
   await k.save();
-  if (count() !== n1 + 1) fail("a placement outside the camera bounds worked with Enforce Camera Bounds on");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused placement: "${await k.toasts()}"`);
+  if (count() !== n1 + 2) fail(`a placement outside the camera bounds placed ${count() - n1 - 1} doodads with Enforce Camera Bounds on (the World Editor places it; ${await k.toasts()})`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a placement outside the camera bounds was warned about: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await k.look(br + 600, 512);
   await hands.click(".model-stage canvas");
   await k.save();
-  if (count() !== n1 + 2) fail(`the same placement with Enforce Camera Bounds off placed ${count() - n1 - 1} doodads (${await k.toasts()})`);
+  if (count() !== n1 + 3) fail(`a placement outside the camera bounds with Enforce Camera Bounds off placed ${count() - n1 - 2} doodads (${await k.toasts()})`);
   await k.tab("Select");
 
-  // A typed position: inside the bounds it's taken. Once the bounds are narrowed in the w3i (saved elsewhere, so the
-  // editor has to read them again) the same kind of number is refused with a word, and the box shows the real position again.
+  // A typed position past the camera bounds is taken with the switch on: it holds no object.
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   const at = (x) => k.doodads().some((d) => d.position[0] === x && d.position[1] === 0);
   const typeX = async (x) => { await k.look(...(x.from)); await k.clearToasts(); await retype(hands, ".terrain-sel-triple input", String(x.to)); await k.save(); };
   await typeX({ from: [0, 0, { id: "LTlt", x: 0, y: 0 }], to: br - 300 });
   if (!at(br - 300)) fail("a typed X inside the camera bounds wasn't taken");
-  const w3i = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
-  const narrow = JSON.parse(w3i);
-  narrow.cameraBounds[2] = br - 400; narrow.cameraBounds[6] = br - 400;
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(narrow))})`);
-  await settled(page);
-  await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br - 100 });
-  if (at(br - 100) || !at(br - 300)) fail("a typed X past the narrowed camera bounds was taken: the editor still has the old bounds");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused position: "${await k.toasts()}"`);
-  const shown = await page.evaluate(`document.querySelector(".terrain-sel-triple input")?.value`);
-  if (Number(shown) !== br - 300) fail(`the position box kept the refused text: "${shown}"`);
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(w3i)})`);
-  await settled(page);
+  await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br + 300 });
+  if (!at(br + 300)) fail(`a typed X past the camera bounds wasn't taken with Enforce Camera Bounds on (${await k.toasts()})`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a typed X past the camera bounds was warned about: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await k.save();
+
+  // What the switch does, as the World Editor's (we-compare camera-bounds-create): on the Cameras tab, Create from view
+  // and Set from view refuse a view whose target is outside the camera bounds, in the editor's words; a target on the
+  // bound is inside. Off (as it is here), both take any view.
+  await k.tab("Cameras");
+  const camButton = (text) => page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-group-tools button")].find((b) => b.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  // (A map without cameras has no camera file yet.)
+  const savedCams = () => (existsSync(join(k.root, "map", "war3map.w3c.json")) ? k.read("war3map.w3c.json").cameras ?? [] : []);
+  const camFrom = async (x, button) => {
+    await k.look(x, 0);
+    await k.clearToasts();
+    if (!(await camButton(button))) fail(`the Cameras tab has no "${button}" button`);
+    await k.save();
+    return savedCams().map((c) => c.targetX);
+  };
+  const refusedWord = /outside of the world camera bounds/;
+  const cam0 = savedCams().length;
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  let cams = await camFrom(br + 200, "Create from view");
+  if (cams.length !== cam0) fail(`Create from view made a camera at ${cams.at(-1)}, past the camera bounds (${br}), with Enforce Camera Bounds on`);
+  if (!refusedWord.test(await k.toasts())) fail(`no word on the refused camera: "${await k.toasts()}"`);
+  cams = await camFrom(br, "Create from view");
+  if (cams.length !== cam0 + 1 || cams.at(-1) !== br) fail(`Create from view on the camera bound itself made ${cams.length - cam0} cameras (${cams.at(-1)}; ${await k.toasts()})`);
+  if (refusedWord.test(await k.toasts())) fail("a camera on the camera bound itself was warned about");
+  cams = await camFrom(br + 200, "Set from view");
+  if (cams.at(-1) !== br) fail(`Set from view took a view past the camera bounds with Enforce Camera Bounds on: the camera is at ${cams.at(-1)}`);
+  if (!refusedWord.test(await k.toasts())) fail(`no word on the refused Set from view: "${await k.toasts()}"`);
+  // A Target X typed past the bound lands on it (the World Editor's Camera Properties: 3100 became 2816), from inside
+  // (control: br - 100 is taken as typed); off, it is taken as typed.
+  const typeTargetX = async (x) => { await retype(hands, ".terrain-camera-field input", String(x)); await k.save(); return savedCams().at(-1)?.targetX; };
+  if ((await typeTargetX(br - 100)) !== br - 100) fail(`a Target X typed inside the camera bounds wasn't taken: the camera is at ${savedCams().at(-1)?.targetX}`);
+  if ((await typeTargetX(br + 250)) !== br) fail(`a Target X typed past the camera bounds left the camera at ${savedCams().at(-1)?.targetX}, not on the bound ${br}, with Enforce Camera Bounds on`);
+  const shownX = await page.evaluate(`document.querySelector(".terrain-camera-field input")?.value`);
+  if (Number(shownX) !== br) fail(`the Target X box shows "${shownX}" after the typed value was put on the bound ${br}`);
+  // A dragged target stops short of the bound (a step past it is refused, as the World Editor's); off, it goes past.
+  // The camera 200 inside the bound, its target in the view's middle, dragged right by far more than that.
+  const dragTarget = async () => {
+    await typeTargetX(br - 200);
+    await k.look(br - 200, 0);
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x, y: c.y }, { x: c.x + 350, y: c.y }, 30);
+    await k.save();
+    return savedCams().at(-1)?.targetX;
+  };
+  const draggedOn = await dragTarget();
+  if (!(draggedOn > br - 200 && draggedOn <= br)) fail(`a camera dragged from ${br - 200} past the camera bound ${br} is at ${draggedOn} with Enforce Camera Bounds on (wanted: moved, and not past the bound)`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  const draggedOff = await dragTarget();
+  if (!(draggedOff > br)) fail(`the same drag with Enforce Camera Bounds off left the camera at ${draggedOff}, not past the bound ${br}`);
+  if ((await typeTargetX(br + 250)) !== br + 250) fail(`a Target X typed past the camera bounds with Enforce Camera Bounds off left the camera at ${savedCams().at(-1)?.targetX}, not ${br + 250}`);
+  cams = await camFrom(br + 200, "Set from view");
+  if (cams.at(-1) !== br + 200) fail(`Set from view with Enforce Camera Bounds off left the camera at ${cams.at(-1)}, not ${br + 200} (${await k.toasts()})`);
+  cams = await camFrom(br + 300, "Create from view");
+  if (cams.length !== cam0 + 2 || cams.at(-1) !== br + 300) fail(`Create from view past the camera bounds with Enforce Camera Bounds off made ${cams.length - cam0 - 1} cameras (${cams.at(-1)}; ${await k.toasts()})`);
+
+  // The view stops at the map's edge as the World Editor's does, the switch on or off: held to the right from just
+  // inside the edge, the arrow key leaves the view looking at the edge (the camera bounds and the playable part are
+  // passed on the way: the look starts past both).
+  await k.tab("Select");
+  const mapRight = offsetX + (cornersX - 1) * 128;
+  const targetX = async () => (await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().camera.target ?? null)()`))?.[0];
+  for (const on of [true, false]) {
+    if (((await k.setting("terrain.enforceCameraBounds")) !== false) !== on) await k.run("w3.terrain.toggleEnforceCameraBounds");
+    await k.look(mapRight - 300, 0);
+    await k.focusMap();
+    await hands.key("ArrowRight", "ArrowRight", 39);
+    const one = await targetX();
+    if (!(one > mapRight - 300 && one <= mapRight)) fail(`one press of the right arrow took the view from ${mapRight - 300} to ${one} (Enforce Camera Bounds ${on ? "on" : "off"})`);
+    for (let i = 0; i < 12; i++) await hands.key("ArrowRight", "ArrowRight", 39);
+    const end = await targetX();
+    if (!(Math.abs(end - mapRight) < 0.5)) fail(`the right arrow held at the map's edge left the view at ${end}, not on the edge ${mapRight} (Enforce Camera Bounds ${on ? "on" : "off"})`);
+  }
 
   // Water: four raises of 1000 make a mound whose top is past 2048, where the stored level of a surface at its height ends.
   for (let i = 0; i < 4; i++) {
