@@ -1,0 +1,854 @@
+[
+  {
+    "name": "ramp-plateau-row",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), size 3, four clicks along the south face at y 630 (x 450, 600, 750, 900): one line of three corners each, columns 27, 29, 32, 35 (the high corner on row 27 and the two below it); the pathing map and the flags each editor saves",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "450,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "600,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "900,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              450,
+              630
+            ],
+            [
+              "click",
+              600,
+              630
+            ],
+            [
+              "click",
+              750,
+              630
+            ],
+            [
+              "click",
+              900,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-size8",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), size 8, one click at 750,630: the same single line (32, 25..27) as size 1 and 3: the size doesn't matter",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1520,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              8
+            ],
+            [
+              "click",
+              750,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-corner",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 350,630 (nearest the plateau's corner 25,27): the lines down both faces and the corners between, 23..25 x 25..27",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "350,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              350,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-corner-low",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 350,670 (nearest 25,26, below the corner): the line 25, 25..27 only; the editor's pathing map blocks the flat tile 24,25 beside it (low ground all along that side, the cliff across falling as the line does)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "350,670"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              350,
+              670
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-west",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 360,450 over the west face: a line westwards in both; DIFFERS (2026-11-14): the editor's is 23..25 x 31, Studio's 23..25 x 32 (its ground pick lands nearer row 32: the west face is turned away from the camera and the click is over the plateau's edge, where the editors' picks part; on the south face, turned to the camera, they agree), so the pathing maps differ in 32 cells too",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "360,450"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              360,
+              450
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-north",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 750,285 on the north face: the line northwards, 32 x 35..37",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "750,285"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              750,
+              285
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-drag",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), a drag along the south face from 600,630 to 900,630: a line at every corner it passes, columns 29..35",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--drag",
+          "600,630:900,630@1500"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "drag",
+              600,
+              630,
+              900,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-plateau-twice",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), two clicks at 750,630: DIFFERS (2026-11-14, on purpose): the editor keeps the line (32, 25..27) the first click built, Studio's second click on a ramp takes it off (its way to remove one; the editor's own isn't known)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              750,
+              630
+            ],
+            [
+              "click",
+              750,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-round-bend",
+    "description": "spec ramp-wpm's round plateau (Apply Cliff Increase One, size 5, one click at 748,500 on the blank 64x64 map) and Ramp clicks at 705,622 and 730,622 (nearest corners 31,27 and 32,27): nothing in either editor, as the cliff bends at 32,26 (a corner sticking out of the south face) and no line fits beside it",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1488,569"
+        ],
+        [
+          "--click",
+          "1505,282"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "705,622"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "730,622"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "+1:"
+            ],
+            [
+              "size",
+              5
+            ],
+            [
+              "click",
+              748,
+              500
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              705,
+              622
+            ],
+            [
+              "click",
+              730,
+              622
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  }
+]

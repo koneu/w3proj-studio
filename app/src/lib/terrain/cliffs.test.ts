@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rampSides, slopeBand, toggleRamp, widestRun } from "./cliffs";
+import { rampClick, rampSides, slopeBand, toggleRamp, widestRun } from "./cliffs";
 import type { Corner, Terrain } from "./w3e";
 
 /** Rows from the north, a digit per corner: its cliff level. */
@@ -252,6 +252,91 @@ test("a drag adds to a ramp, along the cliff, and going back over it takes nothi
   at(5);
   at(3);
   assert.equal(t.corners.filter((c) => c.ramp).length, more);
+});
+
+// The World Editor's size-5 Apply Cliff Increase One plateau (one click on the blank 64x64 map, spec ramp-wpm), as
+// it saves it: per row (y from 34 down to 26) the corners on level 3, x from..to. Here x 26..38 and y 23..36.
+const roundPlateau = () => {
+  const spans: Record<number, [number, number]> = { 34: [32, 32], 33: [30, 34], 32: [29, 35], 31: [29, 35], 30: [28, 36], 29: [29, 35], 28: [29, 35], 27: [30, 34], 26: [32, 32] };
+  const rows: string[] = [];
+  for (let y = 36; y >= 23; y--) {
+    let r = "";
+    for (let x = 26; x <= 38; x++) r += spans[y] && x >= spans[y][0] && x <= spans[y][1] ? "3" : "2";
+    rows.push(r);
+  }
+  return land(rows);
+};
+/** The flagged corners, as "x,y" in the map's corners (the window's offset added back). */
+const flagged = (t: Terrain, ox = 0, oy = 0) => t.corners.flatMap((c, i) => (c.ramp ? [`${(i % t.width) + ox},${Math.floor(i / t.width) + oy}`] : []));
+/** The middle of the corner (x, y) of the round plateau's window, in world units, and a bit off it. */
+const atCorner = (x: number, y: number, ox = 0, oy = 0): [number, number] => [(x - 26 + ox) * 128, (y - 23 + oy) * 128];
+
+test("a Ramp click flags the line of three corners down the cliff from the nearest corner, as the World Editor does", () => {
+  // The World Editor on its round plateau (we-drive 2026-11-14, spec ramp-wpm): its click at 653,622 lands nearest
+  // corner 30,27 and flags 30,27, 30,26 and 30,25, whatever the brush size; the line to the left (30,27 to 28,27)
+  // doesn't fit, as the cliff bends beside it (29,28 is high).
+  for (const off of [[0, 0], [0.3, 0.2], [-0.4, -0.45]]) {
+    const t = roundPlateau();
+    assert.deepEqual(rampClick(t, ...atCorner(30, 27, off[0], off[1]), log), { done: "built" });
+    assert.deepEqual(flagged(t, 26, 23), ["30,25", "30,26", "30,27"], `off ${off}`);
+  }
+  // The corner below the high one: the same line.
+  const mid = roundPlateau();
+  assert.equal(rampClick(mid, ...atCorner(30, 26), log).done, "built");
+  assert.deepEqual(flagged(mid, 26, 23), ["30,25", "30,26", "30,27"]);
+  // Beside the corner that sticks out at 32,26 nothing fits (its clicks at 680..730, 622 did nothing), nor on the
+  // plateau or the low ground further out.
+  for (const [x, y] of [[31, 27], [33, 27], [32, 27], [30, 28], [30, 25], [27, 24]]) {
+    const t = roundPlateau();
+    const r = rampClick(t, ...atCorner(x, y), log);
+    assert.equal(r.done, "none", `${x},${y}`);
+    assert.ok(r.problem, `${x},${y} says why`);
+    assert.deepEqual(flagged(t), [], `${x},${y}`);
+  }
+});
+
+// The plateau of tests/fixtures/we-specs/plateau.w3x, cut down: level 3 at x 2..10, y 3..7 of a 15x10 window.
+const rect = () => land([
+  "222222222222222",
+  "222222222222222",
+  "223333333332222",
+  "223333333332222",
+  "223333333332222",
+  "223333333332222",
+  "223333333332222",
+  "222222222222222",
+  "222222222222222",
+  "222222222222222",
+]);
+
+test("on a straight edge each click is one line, on a plateau's corner a 3x3 block, a drag a wider ramp", () => {
+  // The World Editor's clicks along plateau.w3x's south face flag one line each (p-row-a..c, p-s1, p-s3, p-s8), on
+  // its corners the lines down both faces and the corners between (p-corner-bl, p-corner-br), on the west face a
+  // line westwards (p-left-360).
+  const t = rect();
+  assert.equal(rampClick(t, 5 * 128, 3 * 128, log).done, "built");
+  assert.deepEqual(flagged(t), ["5,1", "5,2", "5,3"]);
+  assert.equal(rampClick(t, 6.4 * 128, 2.4 * 128, log, true).done, "built", "the next line, from the middle corner");
+  assert.deepEqual(flagged(t), ["5,1", "6,1", "5,2", "6,2", "5,3", "6,3"]);
+  const c = rect();
+  assert.equal(rampClick(c, 2 * 128, 3 * 128, log).done, "built");
+  assert.deepEqual(flagged(c), ["0,1", "1,1", "2,1", "0,2", "1,2", "2,2", "0,3", "1,3", "2,3"]);
+  const w = rect();
+  assert.equal(rampClick(w, 2 * 128, 5 * 128, log).done, "built");
+  assert.deepEqual(flagged(w), ["0,5", "1,5", "2,5"]);
+  const n = rect();
+  assert.equal(rampClick(n, 7 * 128, 7 * 128, log).done, "built");
+  assert.deepEqual(flagged(n), ["7,7", "7,8", "7,9"]);
+  // A drag over what's built adds nothing and takes nothing off; a click on it takes the ramp off (the World Editor
+  // leaves it: p-twice).
+  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log, true), { done: "none" });
+  assert.equal(flagged(t).length, 6);
+  assert.deepEqual(rampClick(t, 5 * 128, 3 * 128, log), { done: "removed" });
+  assert.deepEqual(flagged(t), []);
+  // A cliff two levels high has no ramp.
+  const tall = land(["4444", "4444", "2222", "2222", "2222"]);
+  assert.match(rampClick(tall, 128, 3 * 128, log).problem ?? "", /higher/);
+  assert.deepEqual(flagged(tall), []);
 });
 
 test("a click on a ramp still takes it off", () => {

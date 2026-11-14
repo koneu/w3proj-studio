@@ -119,6 +119,18 @@ export function generatePathing(input: PathingInput): Uint8Array {
     if (Math.abs(far[0].layer - far[1].layer) === 1) return true;
     // outer: bottom-left, top-left, top-right, bottom-right; the ramp corners are two of them along the long side.
     const ramps = s.outer.map((k, i) => (k.ramp ? i : -1)).filter((i) => i >= 0).join("");
+    // A ramp edge on a one-level cliff that runs on straight across it (the corners on the other side fall as the
+    // ramp's do: a line the World Editor's Ramp tool flags on its own at a plateau's corner, with low ground all along
+    // the far side): blocked too (we-drive 2026-11-14, specs ramp-wpm and ramp-plateau-corner-low). Stray flags with
+    // other ground across stay walkable (Autumn Leaves' tile 17,32, above).
+    const line: [number, number][] = s.w === 2
+      ? [0, 1, 2].map((i) => [s.x + i, ramps === "12" ? s.y + 1 : s.y])
+      : [0, 1, 2].map((i) => [ramps === "01" ? s.x : s.x + 1, s.y + i]);
+    const step: [number, number] = s.w === 2 ? [0, ramps === "12" ? 1 : -1] : [ramps === "01" ? -1 : 1, 0];
+    if (line.every(([x, y]) => {
+      const ox = x + step[0], oy = y + step[1];
+      return ox >= 0 && oy >= 0 && ox < t.width && oy < t.height && C(ox, oy).layer === C(x, y).layer;
+    })) return true;
     const across: [number, number][] = s.w === 2
       ? (ramps === "12" ? [[s.x, s.y + 1], [s.x + 1, s.y + 1]] : [[s.x, s.y - 1], [s.x + 1, s.y - 1]])
       : (ramps === "01" ? [[s.x - 1, s.y], [s.x - 1, s.y + 1]] : [[s.x + 1, s.y], [s.x + 1, s.y + 1]]);

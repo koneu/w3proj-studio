@@ -166,3 +166,17 @@ test("a ramp side piece's flat tile is blocked beside a ramp or a cliff, walkabl
   corner(t, 0, 0).layer = 3;
   assert.deepEqual(tile(t, 1, 0), Array(16).fill(CLIFF), "beside a cliff");
 });
+
+test("a ramp line at a plateau's corner blocks the flat tile beside it, as the World Editor saves it", () => {
+  // The World Editor's Ramp click at a plateau's corner (we-drive 2026-11-14, specs ramp-wpm and
+  // ramp-plateau-corner-low): the plateau is corners 2..4 × 3..4 here, the line 2,3 (high), 2,2 and 2,1. Low ground
+  // all along the far side (x 1), but across the line (x 3) the cliff falls as the line does: the editor blocks the
+  // flat tile (1, 1), its saved pathing map 0xca.
+  const t = ground();
+  for (let y = 3; y <= 4; y++) for (let x = 2; x <= 4; x++) corner(t, x, y).layer = 3;
+  for (let y = 1; y <= 3; y++) corner(t, 2, y).ramp = true;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(CLIFF));
+  // Control: with other ground across (3,3 low), the same flags leave it walkable, as beside stray flags.
+  corner(t, 3, 3).layer = 2;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_WATER));
+});

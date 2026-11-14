@@ -1,6 +1,6 @@
 {
   "name": "ramp-wpm",
-  "description": "a plateau (Apply Cliff Increase One, size 5, one click at 748,500) on the blank 64x64 map and a size-3 ramp on its lower left face (653,622); the pathing map and the ramp flags each editor saves (the WE's Ramp is the palette's 1505,311, Studio's Ramp tool); DIFFERS (2026-11-14): the ramp flags the editor saves are on corner column 30, rows 25-27 (3 corners), Studio's on column 31, same rows (WE 0, Studio 1 at 31,25..27); the pathing map differs in 32 cells: the editor's 0xca (blocked) on tile 30,26 (cells 120-123, 104-107) where Studio's is 0x40 and the other way on tile 29,25 (cells 116-119, 100-103); the plateau itself (size-5 Increase One) matches",
+  "description": "a plateau (Apply Cliff Increase One, size 5, one click at 748,500) on the blank 64x64 map and a size-3 ramp on its lower left face (653,622); the pathing map and the ramp flags each editor saves (the WE's Ramp is the palette's 1505,311, Studio's Ramp tool); both flag the line 30,27 (the high corner nearest the click), 30,26 and 30,25, not the line to the left (the cliff bends beside it: 29,28 is high), and block tile 29,25 beside it and tile 30,26 (a cliff with two flagged corners) in the pathing map (matches since branch ramp-we, 2026-11-14; before, Studio built a wider ramp on column 30-31)",
   "input": {
     "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
   },
@@ -98,13 +98,11 @@
   "compare": [
     {
       "file": "war3map.wpm",
-      "as": "wpm",
-      "expect": "differs"
+      "as": "wpm"
     },
     {
       "file": "war3map.w3e",
-      "as": "w3e",
-      "expect": "differs"
+      "as": "w3e"
     }
   ],
   "limit": 40

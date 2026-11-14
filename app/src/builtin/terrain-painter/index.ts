@@ -9,7 +9,7 @@ import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strok
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, toggleRamp, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, rampClick, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -33,7 +33,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
     ["cliffLevel", "Level", "Bring everything to the cliff level where the stroke starts"],
     ["cliffDown", "−1", "Lower a cliff level (one below where the stroke starts)"],
     ["cliffDown2", "−2", "Lower two cliff levels (two below where the stroke starts)"],
-    ["ramp", "Ramp", "Click a one-level cliff to build a ramp, as wide as fits up to Size; click a ramp to remove it"],
+    ["ramp", "Ramp", "Click the edge of a one-level cliff: the corner nearest the pointer and the two below it become ramp, as in the World Editor (Size doesn't matter); click or drag along the edge for a wider ramp; click a ramp to remove it"],
     ["shallow", "Shallow", "Shallow water: one level below where the stroke starts"],
     ["deep", "Deep", "Deep water: two levels below where the stroke starts"],
     ["dry", "Dry", "Remove water (use Cliffs +1 to raise the ground again)"],
@@ -340,12 +340,12 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const g = p.ground;
       if (tool === "ramp") {
         // The press builds or, on a ramp, takes it off; a drag goes on building from there.
-        const onRamp = terrain.corners[Math.round((g[1] - terrain.offsetY) / 128) * terrain.width + Math.round((g[0] - terrain.offsetX) / 128)]?.ramp ?? false;
         const s = new Stroke("ramp");
-        rampProblem = toggleRamp(terrain, g[0], g[1], size, s, true);
+        const r = rampClick(terrain, g[0], g[1], s);
+        rampProblem = r.problem ?? null;
         stroke = { s, target: 0, layer: { layer: 2 }, last: performance.now() };
-        rampDrag = !onRamp;
-        if (!rampProblem) ed.terrainChanged(true);
+        rampDrag = r.done !== "removed";
+        if (r.done !== "none") ed.terrainChanged(true);
         return true;
       }
       const start = async () => {
@@ -371,11 +371,11 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     pointerMove(p) {
       // The corner brush shows where it acts: round the nearest corner, half a tile past the corners it takes.
       const shown = p.ground && tool !== "ramp" ? brushOf(tool, terrain, p.ground[0], p.ground[1], size, square) : null;
-      ed.setBrush(p.ground ? { x: shown?.x ?? p.ground[0], y: shown?.y ?? p.ground[1], r: shown ? brushReach(shown) : size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
+      ed.setBrush(p.ground ? { x: shown?.x ?? p.ground[0], y: shown?.y ?? p.ground[1], r: shown ? brushReach(shown) : 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       if (tool === "ramp") {
         if (p.down && rampDrag && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) {
           stroke.last = performance.now();
-          if (toggleRamp(terrain, p.ground[0], p.ground[1], size, stroke.s, true, true) === null) { rampProblem = null; ed.terrainChanged(true); }
+          if (rampClick(terrain, p.ground[0], p.ground[1], stroke.s, true).done === "built") { rampProblem = null; ed.terrainChanged(true); }
         }
         return;
       }
