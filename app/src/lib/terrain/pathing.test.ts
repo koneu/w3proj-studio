@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BLOCKED, generatePathing, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "./pathing";
+import { BLIGHT, BLOCKED, generatePathing, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "./pathing";
 import type { Corner, Terrain } from "./w3e";
 
 /** Flat dry ground of 4 × 4 tiles at layer 2, no ramps. */
@@ -76,6 +76,33 @@ test("a tile with all four ramp flags that rises a layer with no ramp foot past 
   assert.deepEqual(tile(lone, 1, 1), Array(16).fill(CLIFF));
   corner(lone, 0, 1).ramp = true;
   assert.deepEqual(tile(lone, 1, 1), Array(16).fill(NO_WATER), "control: a foot corner on the low layer");
+});
+
+test("a tile whose lower-left corner is painted Boundary is blocked as the border is, whatever else it is", () => {
+  // we-drive on the World Editor's saves (2026-11-14, spec boundary-wpm): 0xce on the 16 cells of the tile whose
+  // lower-left corner is painted, over dry ground, a cliff and water alike (0xee with blight); its other tiles stay as
+  // they were.
+  const BORDER = BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK;
+  assert.equal(BORDER, 0xce);
+  const t = ground();
+  corner(t, 1, 1).boundary = true;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(BORDER));
+  for (const [x, y] of [[0, 0], [1, 0], [0, 1]]) assert.deepEqual(tile(t, x, y), Array(16).fill(NO_WATER), `tile ${x},${y} has the corner as another of its four`);
+  // Placing objects asks without it (doodads stand on Boundary).
+  const free = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map(), boundary: false });
+  assert.equal(free[16 + 4 * 16 + 4], NO_WATER, "boundary: false leaves the tile as it is");
+  // A cliff, water under the same tile: still the border's byte; blight stays on it (0xee).
+  for (const [x, y] of [[1, 1], [2, 1], [1, 2], [2, 2]]) corner(t, x, y).blight = true;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(BORDER | BLIGHT), "blight");
+  for (const [x, y] of [[1, 1], [2, 1], [1, 2], [2, 2]]) corner(t, x, y).blight = false;
+  corner(t, 2, 2).layer = 3;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(BORDER), "a cliff");
+  corner(t, 2, 2).layer = 2;
+  for (const k of t.corners) { k.hasWater = true; k.water = 40; }
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(BORDER), "water");
+  // Control: Remove Boundary gives the water tile back.
+  corner(t, 1, 1).boundary = false;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_BUILD));
 });
 
 test("the water's depth is measured from the tileset's own surface", () => {

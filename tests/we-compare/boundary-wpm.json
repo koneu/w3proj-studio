@@ -1,7 +1,7 @@
 [
   {
     "name": "boundary-partial-wpm",
-    "description": "Boundary (palette tile 1552,143) painted at size 1 (one corner: every tile it touches is partly painted); the pathing map and the corner flags each editor saves; DIFFERS (2026-11-14): the editor sets the flag on corner 32,29 (Studio on 32,30, where the click lands: every other brush matches there) and its saved pathing map blocks the painted corner's own tile, cells 128-131 x 116-119 (16 cells, 0xce) where Studio's stay 0x40",
+    "description": "Boundary (palette tile 1552,143) painted at size 1 (one corner: every tile it touches is partly painted); the pathing map and the corner flags each editor saves. The click lands at world tile 32.0,29.66: the editor's Boundary brush is centred on the corner below and left of the pointer (the lower-left corner of the tile under it: 32,29), not the nearest corner as its other brushes (measured 2026-11-14, branch boundary-we: 16 clicks at fractions 0.2/0.4/0.6/0.8 of a tile in x and y all flagged the floor corner). Its pathing map blocks the tile whose lower-left corner is painted, the 16 cells 128-131 x 116-119, at 0xce (the map margin's byte)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
     },
@@ -70,20 +70,18 @@
     "compare": [
       {
         "file": "war3map.wpm",
-        "as": "wpm",
-        "expect": "differs"
+        "as": "wpm"
       },
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 40
   },
   {
     "name": "boundary-full-wpm",
-    "description": "Boundary painted at size 3 (13 corners: four tiles fully painted, more partly); the pathing map and the corner flags each editor saves; DIFFERS (2026-11-14): the flags are one row lower in the editor (5 corners of 13 differ each way, centre 32,29 against Studio's 32,30) and its pathing map blocks 13 tiles, one per painted corner, 208 cells at 0xce: a tile is blocked when its lower-left corner is painted, whether its other three are or not; Studio's cells all stay 0x40",
+    "description": "Boundary painted at size 3 (13 corners: four tiles fully painted, more partly); the pathing map and the corner flags each editor saves. The editor's 13 corners are the circle of radius 2 round corner 32,29 (the lower-left corner of the tile under the pointer; sizes 2 and 5 measured the same way, 5 and 49 corners round the floor corner, 2026-11-14) and its pathing map blocks 13 tiles, one per painted corner, 208 cells at 0xce: a tile is blocked when its lower-left corner is painted, whether its other three are or not",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
     },
@@ -152,14 +150,49 @@
     "compare": [
       {
         "file": "war3map.wpm",
-        "as": "wpm",
-        "expect": "differs"
+        "as": "wpm"
       },
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "boundary-flags-wpm",
+    "description": "Boundary with other flags on the blank map (2026-11-14, branch boundary-we): size 3 at tile 28.4,30.4 (562,469) then Remove Boundary (1552,175) size 1 there: the floor corner 28,30 comes off and its tile is 0x40 again; Blight (1552,111) size 3 at 36.4,31.4 (970,428) then Boundary size 1 there (corner 36,31); then Shallow water (1473,310) picked while Boundary is still the chosen tile, size 2, one click at 36.3,26.3 (996,664): the editor applies both, water round the nearest corner 36,26 and Boundary round the floor corner, the same 5 corners (Studio: Boundary then Shallow, both size 2, at that point). A tile whose lower-left corner is painted is 0xce whatever else it is: a cliff (0xca without), or under water (0x08 without: a fully watered tile measured so on an earlier round); blighted it keeps the blight bit, 0xee (tile 36,31). The Boundary flags (18 corners) and the water match; DIFFERS in war3map.w3e only by the editor's Blight brush, not Boundary: it also turns 36 corners round the size-3 blight (tiles 33-40 x 28-35, an irregular set) to the map's second ground tile, Ldro, where Studio's Blight sets only the flag",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1552,143"], ["--click", "1456,569"], ["--click", "562,469"],
+        ["--click", "1552,175"], ["--click", "1392,569"], ["--click", "562,469"],
+        ["--click", "1552,111"], ["--click", "1456,569"], ["--click", "970,428"],
+        ["--click", "1552,143"], ["--click", "1392,569"], ["--click", "970,428"],
+        ["--click", "1473,310"], ["--click", "1424,569"], ["--click", "996,664"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"],
+          ["tool", "Boundary"], ["size", 3], ["click", 562, 469],
+          ["tool", "No boundary"], ["size", 1], ["click", 562, 469],
+          ["tool", "Blight"], ["size", 3], ["click", 970, 428],
+          ["tool", "Boundary"], ["size", 1], ["click", 970, 428],
+          ["tool", "Boundary"], ["size", 2], ["click", 996, 664],
+          ["tool", "Shallow"], ["size", 2], ["click", 996, 664]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.wpm", "as": "wpm" },
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
     ],
     "limit": 40
   }
