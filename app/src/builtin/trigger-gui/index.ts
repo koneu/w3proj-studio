@@ -13,10 +13,12 @@ import {
 import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
 import { keyOf } from "../../lib/keys";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
-import type { Eca, Param, TriggerItem } from "../../lib/triggers/wtg";
+import { createVariables, missingVariableNames, variablesOf } from "../../lib/triggers/pastevars";
+import type { Eca, Param, TriggerItem, Variable } from "../../lib/triggers/wtg";
 import { copyText, h } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { editParam, pickFunction } from "./dialogs";
+import { chosenFrom, clickSelection, holdOf, locateIn, setOf, type Chosen, type Held } from "./selection";
 import { argType, FUNCTION, isUnsetParam, newEca } from "./params";
 
 class ParamEditors implements TriggerGuiService {
@@ -48,23 +50,23 @@ const SECTIONS = [[EVENT, "Events"], [CONDITION, "Conditions"], [ACTION, "Action
 const KIND_NAMES = ["Event", "Condition", "Action"];
 type DropAt = { path: number[] } | { path: number[]; branch: number } | { section: number };
 
-/** Copied events/conditions/actions (shared by all triggers, also across maps). */
-let clipboard: Eca[] = [];
+/** The lines selected besides the one in `selection` (Shift/Ctrl-click, Select All), per trigger (see selection.ts). Any
+ *  edit ends it: paths move. */
+const multi = new Map<number, Held>();
+const setMulti = (t: TriggerItem, paths: number[][]) => { const h = holdOf(t, paths); if (h) multi.set(t.id, h); else multi.delete(t.id); };
+const primaryOf = (t: TriggerItem): number[] | null => {
+  const s = selection.get(t.id);
+  return s && "path" in s && s.branch === undefined ? s.path : null;
+};
+const chosenIn = (t: TriggerItem): Chosen[] => chosenFrom(t, primaryOf(t), multi.get(t.id));
+
+/** Copied events/conditions/actions with the variables they use (type, array, initial value), shared by all triggers,
+ *  also across maps: pasting into a map that lacks a variable can create it. */
+let clipboard: { ecas: Eca[]; variables: Variable[] } = { ecas: [], variables: [] };
 
 /** Blocks have child lists per branch (If/Then/Else, loops, And/Or). */
 const isBlock = (e: Eca) => /Multiple$/.test(e.name);
 
-/** The list holding the ECA at `path` in `t`, and its index there. */
-function locateIn(t: TriggerItem, path: number[]): { list: Eca[]; index: number; eca: Eca } | null {
-  let list = t.ecas;
-  for (let d = 0; d < path.length; d++) {
-    const eca = list[path[d]];
-    if (!eca) return null;
-    if (d === path.length - 1) return { list, index: path[d], eca };
-    list = eca.children;
-  }
-  return null;
-}
 /** Kind of the ECAs in a branch: the If part and And/Or take conditions. */
 const branchKind = (e: Eca, branch: number) =>
   (e.name.startsWith("IfThenElse") && branch === 0) || e.name === "AndMultiple" || e.name === "OrMultiple" ? CONDITION : ACTION;
@@ -82,17 +84,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       render: (el, t, ed) => {
         const view = new GuiView(w3, el, t, ed, editors);
         view.render();
-        return { keyDown: (e) => view.keyDown(e) };
+        return { keyDown: (e) => view.keyDown(e), run: (action) => view.run(action) };
       },
       reveal: (t, at) => {
         selection.set(t.id, { path: at.path });
+        multi.delete(t.id);
         flagged.set(t.id, at);
       },
-      selectedLines: (t) => {
-        const s = selection.get(t.id);
-        const eca = s && "path" in s && s.branch === undefined ? locateIn(t, s.path)?.eca : undefined;
-        return eca ? [eca] : [];
-      },
+      selectedLines: (t) => chosenIn(t).map((c) => c.eca),
     }));
   });
 }
@@ -104,12 +103,14 @@ class GuiView {
   private menu(e: MouseEvent, sel: Sel) {
     e.preventDefault();
     e.stopPropagation();
-    this.select(sel);
+    // A line of the selection keeps it: the menu then acts on all of them.
+    if (!("path" in sel && sel.branch === undefined && this.chosen().length > 1 && this.chosen().some((c) => c.path.join() === sel.path.join()))) this.select(sel);
     const items: MenuItem[] = [];
     const onEca = "path" in sel && sel.branch === undefined;
+    const many = onEca ? this.chosen().length : 1;
     if (!this.ed.editable) {
       // Read-only: copying and following references only.
-      if (onEca) items.push({ label: "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
+      if (onEca) items.push({ label: many > 1 ? `Copy ${many} lines` : "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
     } else if ("section" in sel) items.push({ label: `New ${KIND_NAMES[sel.section]}…`, run: () => void this.add(sel.section) });
     else if (sel.branch !== undefined) {
       const at = this.locate(sel.path);
@@ -121,15 +122,14 @@ class GuiView {
       // Inside a block only the branch's own kind fits; at the top level any kind (added in its section).
       const kinds = sel.path.length > 1 ? [at.eca.kind] : [EVENT, CONDITION, ACTION];
       items.push(...kinds.map((k) => ({ label: `New ${KIND_NAMES[k]}…`, run: () => void this.add(k) })), "-",
-        { label: at.eca.enabled ? "Disable" : "Enable", run: () => this.toggle() },
-        { label: "Move Up", run: () => this.move(-1) },
-        { label: "Move Down", run: () => this.move(1) }, "-",
-        { label: "Cut", hint: "Ctrl+X", run: () => this.copy(true) },
-        { label: "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
+        { label: this.chosen().some((c) => c.eca.enabled) ? "Disable" : "Enable", run: () => this.toggle() },
+        ...(many > 1 ? [] : [{ label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) }]), "-",
+        { label: many > 1 ? `Cut ${many} lines` : "Cut", hint: "Ctrl+X", run: () => this.copy(true) },
+        { label: many > 1 ? `Copy ${many} lines` : "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
     }
     if (this.ed.editable) {
-      if (clipboard.length) items.push(...(items.length ? ["-" as const] : []), { label: `Paste ${clipboard.length > 1 ? `${clipboard.length} lines` : KIND_NAMES[clipboard[0].kind]}`, hint: "Ctrl+V", run: () => this.paste() });
-      if (onEca) items.push("-", { label: "Delete", hint: "Del", run: () => this.remove() });
+      if (clipboard.ecas.length) items.push(...(items.length ? ["-" as const] : []), { label: `Paste ${clipboard.ecas.length > 1 ? `${clipboard.ecas.length} lines` : KIND_NAMES[clipboard.ecas[0].kind]}`, hint: "Ctrl+V", run: () => this.paste() });
+      if (onEca) items.push("-", { label: many > 1 ? `Delete ${many} lines` : "Delete", hint: "Del", run: () => this.remove() });
     }
     // The line onto the system clipboard, as the Trigger Editor words it or as script.
     if (onEca) items.push("-", { label: "Copy As Text", run: () => void this.copyAs("text") }, { label: "Copy As Script", run: () => void this.copyAs("script") });
@@ -152,7 +152,7 @@ class GuiView {
       const k = keyOf(e).toLowerCase();
       if (k === "c" && onEca) { this.copy(false); return true; }
       if (k === "x" && onEca && this.ed.editable) { this.copy(true); return true; }
-      if (k === "v" && this.ed.editable && clipboard.length) { this.paste(); return true; }
+      if (k === "v" && this.ed.editable && clipboard.ecas.length) { this.paste(); return true; }
       return false;
     }
     if (keyOf(e) !== "Delete" || !this.ed.editable || !onEca) return false;
@@ -161,9 +161,49 @@ class GuiView {
   }
 
   private get sel(): Sel | undefined { return selection.get(this.t.id); }
-  private select(s: Sel) { selection.set(this.t.id, s); flagged.delete(this.t.id); this.render(); }
-  /** An edit of the trigger: a problem's mark goes (its place may have moved). */
-  private edit(label: string, change: () => void) { flagged.delete(this.t.id); this.ed.edit(label, change); }
+  private select(s: Sel) { selection.set(this.t.id, s); multi.delete(this.t.id); flagged.delete(this.t.id); this.render(); }
+  /** The selected lines (see chosenIn). */
+  private chosen(): Chosen[] { return chosenIn(this.t); }
+  /** A click on a line: Ctrl toggles it in the selection, Shift selects the lines between the selected one and it (of
+   *  one list and kind), neither selects it alone. A line that doesn't fit the selection (another list or kind) starts a
+   *  new one. */
+  private click(e: MouseEvent, path: number[]) {
+    const now = this.chosen();
+    const anchor = now.length ? (this.sel as { path: number[] }).path : null;
+    const got = clickSelection(this.t, now.map((c) => c.path), anchor, path, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+    if (!got) { this.select({ path }); return; }
+    selection.set(this.t.id, { path: got.lead });
+    setMulti(this.t, got.paths);
+    flagged.delete(this.t.id);
+    this.render();
+  }
+  /** Select All (the lines of the selected line's list and kind, or of the selected section or branch), Clear, and
+   *  Toggle Function Enabled, as the editor's commands. False when there's nothing to act on. */
+  run(action: "selectAll" | "clear" | "toggleFunction"): boolean {
+    if (action === "toggleFunction") { if (!this.ed.editable || !this.chosen().length) return false; this.toggle(); return true; }
+    if (action === "clear") {
+      if (!this.sel) return false;
+      selection.delete(this.t.id);
+      multi.delete(this.t.id);
+      this.render();
+      return true;
+    }
+    const s = this.sel;
+    let paths: number[][] = [];
+    if (s && "section" in s) paths = this.t.ecas.flatMap((e, i) => (e.kind === s.section ? [[i]] : []));
+    else if (s && s.branch !== undefined) {
+      const at = this.locate(s.path);
+      paths = at ? at.eca.children.flatMap((c, i) => ((c.group ?? 0) === s.branch ? [[...s.path, i]] : [])) : [];
+    } else if (s) paths = setOf(this.t, s.path);
+    if (!paths.length) return false;
+    selection.set(this.t.id, { path: paths[0] });
+    setMulti(this.t, paths);
+    flagged.delete(this.t.id);
+    this.render();
+    return true;
+  }
+  /** An edit of the trigger: a problem's mark goes (its place may have moved), and so does a multi-selection. */
+  private edit(label: string, change: () => void) { flagged.delete(this.t.id); multi.delete(this.t.id); this.ed.edit(label, change); }
 
   /** The list holding the ECA at `path`, and its index there. */
   private locate(path: number[]): { list: Eca[]; index: number; eca: Eca } | null {
@@ -172,14 +212,14 @@ class GuiView {
 
   /** Copy As Text / Copy As Script of the selected line onto the system clipboard. */
   private async copyAs(as: "text" | "script") {
-    const s = this.sel;
-    const at = s && "path" in s && s.branch === undefined ? this.locate(s.path) : null;
-    if (!at) return;
-    const text = copyAs(as, this.ed, this.t, [at.eca]);
+    const lines = this.chosen();
+    if (!lines.length) return;
+    const text = copyAs(as, this.ed, this.t, lines.map((c) => c.eca));
     if (text === null) return;
     const how = as === "text" ? "as text" : "as script";
-    if (await copyText(text)) void this.w3.window.showInfo(`Copied a line of ${this.t.name} ${how}.`);
-    else void this.w3.window.showWarning(`The clipboard refused the copy of a line of ${this.t.name} ${how}.`);
+    const what = lines.length > 1 ? `${lines.length} lines` : "a line";
+    if (await copyText(text)) void this.w3.window.showInfo(`Copied ${what} of ${this.t.name} ${how}.`);
+    else void this.w3.window.showWarning(`The clipboard refused the copy of ${what} of ${this.t.name} ${how}.`);
   }
 
   render() {
@@ -200,12 +240,13 @@ class GuiView {
   private toolbar(): HTMLElement {
     const s = this.sel;
     const at = s && "path" in s && s.branch === undefined ? this.locate(s.path) : null;
+    const many = this.chosen().length > 1;
     return h("div.trig-gui-toolbar", {},
       ...SECTIONS.map(([kind]) => h("button", { title: `New ${KIND_NAMES[kind]} (after the selection)`, onclick: () => void this.add(kind) }, `+ ${KIND_NAMES[kind]}`)),
       h("button", { disabled: !at, title: "Delete (Del)", onclick: () => this.remove() }, "Delete"),
-      h("button", { disabled: !at, title: "Move up", onclick: () => this.move(-1) }, "↑"),
-      h("button", { disabled: !at, title: "Move down", onclick: () => this.move(1) }, "↓"),
-      h("button", { disabled: !at, title: "Enable or disable", onclick: () => this.toggle() }, at && !at.eca.enabled ? "Enable" : "Disable"));
+      h("button", { disabled: !at || many, title: "Move up", onclick: () => this.move(-1) }, "↑"),
+      h("button", { disabled: !at || many, title: "Move down", onclick: () => this.move(1) }, "↓"),
+      h("button", { disabled: !at, title: "Enable or disable", onclick: () => this.toggle() }, at && !this.chosen().some((c) => c.eca.enabled) ? "Enable" : "Disable"));
   }
 
   // ---- editing ----------------------------------------------------------------------
@@ -236,10 +277,10 @@ class GuiView {
   }
   /** Copies the selected ECA (with its contents); `cut` also removes it. */
   private copy(cut: boolean) {
-    const s = this.sel;
-    const at = s && "path" in s && s.branch === undefined ? this.locate(s.path) : null;
-    if (!at) return;
-    clipboard = [structuredClone(at.eca)];
+    const lines = this.chosen();
+    if (!lines.length) return;
+    const ecas = lines.map((c) => structuredClone(c.eca));
+    clipboard = { ecas, variables: variablesOf(this.ed.file, ecas) };
     if (cut) this.remove(); else this.render();
   }
   /** Where an ECA of `kind` goes for the current selection, or a reason it can't. */
@@ -265,33 +306,33 @@ class GuiView {
     return { list: this.t.ecas, index: last + 1, path: [last + 1] };
   }
   private paste() {
-    if (!clipboard.length) return;
-    const kind = clipboard[0].kind;
+    const clip = clipboard;
+    if (!clip.ecas.length) return;
+    const kind = clip.ecas[0].kind;
     const to = this.target(kind);
     if (typeof to === "string") { void this.w3.window.showWarning(`Can't paste a ${KIND_NAMES[kind].toLowerCase()} here. ${to}`); return; }
-    const missing = this.missingVariables(clipboard);
-    this.edit(`Paste ${KIND_NAMES[kind].toLowerCase()}`, () => {
-      const ecas = clipboard.map((e) => {
+    const missing = missingVariableNames(this.ed.file, clip.ecas);
+    const auto = missing.length > 0 && this.w3.settings.get<boolean>("triggers.autoCreateVariables") !== false;
+    let created: string[] = [], refused = "";
+    const label = clip.ecas.length > 1 ? `Paste ${clip.ecas.length} lines` : `Paste ${KIND_NAMES[kind].toLowerCase()}`;
+    this.edit(label, () => {
+      // The variables first, in the same step: one undo takes lines and variables back. A map that can't hold them
+      // (no category) gets the lines alone.
+      if (auto) {
+        try { created = createVariables(this.ed.file, clip.variables, missing); } catch (e) { refused = (e as Error).message; }
+      }
+      const ecas = clip.ecas.map((e) => {
         const c = structuredClone(e);
         if (to.group === undefined) delete c.group; else c.group = to.group;
         return c;
       });
       to.list.splice(to.index, 0, ...ecas);
       selection.set(this.t.id, { path: to.path });
+      setMulti(this.t, ecas.map((_, i) => [...to.path.slice(0, -1), to.path[to.path.length - 1] + i]));
     });
-    if (missing.length) void this.w3.window.showWarning(`The pasted lines use variables this map doesn't have: ${missing.join(", ")}.`);
-  }
-  /** Variables (udg_, not generated gg_ globals) the ECAs name that the map lacks. */
-  private missingVariables(ecas: Eca[]): string[] {
-    const have = new Set(this.ed.file.variables.map((v) => v.name)), out = new Set<string>();
-    const visitP = (p: Param) => {
-      if (p.type === 1 && p.value && !p.value.startsWith("gg_") && !have.has(p.value)) out.add(p.value);
-      p.call?.params.forEach(visitP);
-      if (p.index) visitP(p.index);
-    };
-    const visit = (e: Eca) => { e.params.forEach(visitP); e.children.forEach(visit); };
-    ecas.forEach(visit);
-    return [...out];
+    if (created.length) void this.w3.window.showInfo(`Created the variable${created.length > 1 ? "s" : ""} ${created.join(", ")} for the pasted lines.`);
+    const left = missing.filter((n) => !created.some((c) => c.toLowerCase() === n.toLowerCase()));
+    if (left.length) void this.w3.window.showWarning(`The pasted lines use variables this map doesn't have: ${left.join(", ")}.${refused ? ` ${refused}` : auto ? " The copy didn't carry them." : " Turn on the setting triggers.autoCreateVariables to create them with the lines."}`);
   }
 
   // ---- drag and drop ----------------------------------------------------------------
@@ -380,18 +421,18 @@ class GuiView {
   }
 
   private remove() {
-    const s = this.sel;
-    const at = s && "path" in s ? this.locate(s.path) : null;
-    if (!at || !s || !("path" in s)) return;
-    this.edit(`Delete ${at.eca.name}`, () => {
-      at.list.splice(at.index, 1);
+    const lines = this.chosen();
+    if (!lines.length) return;
+    this.edit(lines.length > 1 ? `Delete ${lines.length} lines` : `Delete ${lines[0].eca.name}`, () => {
+      // From the last: the indices before it stay.
+      for (const c of [...lines].reverse()) c.list.splice(c.index, 1);
       selection.delete(this.t.id);
     });
   }
   private move(dir: -1 | 1) {
     const s = this.sel;
     const at = s && "path" in s ? this.locate(s.path) : null;
-    if (!at || !s || !("path" in s)) return;
+    if (!at || !s || !("path" in s) || this.chosen().length > 1) return;
     // Neighbours of the same kind (top level) or branch (children).
     const same = (e: Eca) => (s.path.length === 1 ? e.kind === at.eca.kind : (e.group ?? 0) === (at.eca.group ?? 0));
     let j = at.index + dir;
@@ -403,9 +444,11 @@ class GuiView {
     });
   }
   private toggle() {
-    const s = this.sel;
-    const at = s && "path" in s ? this.locate(s.path) : null;
-    if (at) this.edit(at.eca.enabled ? "Disable" : "Enable", () => { at.eca.enabled = !at.eca.enabled; });
+    const lines = this.chosen();
+    if (!lines.length) return;
+    // Several: all off if any is on, else all on.
+    const to = lines.length > 1 ? !lines.some((c) => c.eca.enabled) : !lines[0].eca.enabled;
+    this.edit(`${to ? "Enable" : "Disable"}${lines.length > 1 ? ` ${lines.length} lines` : ""}`, () => { for (const c of lines) c.eca.enabled = to; });
   }
   private async editParamAt(owner: Param[], i: number, type: string, limits?: [number | null, number | null]) {
     const p = await editParam(this.ed, type, owner[i], this.editors.forType(type), limits);
@@ -461,11 +504,11 @@ class GuiView {
     const cat = f ? ed.data.categories.get(f.category) : undefined;
     void ed.icon(cat?.icon ?? "").then((url) => { if (url) img.src = url; else img.classList.add("none"); });
     const s = this.sel;
-    const active = !!s && "path" in s && s.branch === undefined && s.path.join() === path.join();
+    const active = !!s && "path" in s && s.branch === undefined && (s.path.join() === path.join() || this.chosen().some((c) => c.path.join() === path.join()));
     // The line of a found problem: marked itself when the problem isn't one parameter's.
     const flag = flagged.get(this.t.id), onFlag = !!flag && flag.path.join() === path.join();
     const line = h(`div.trig-eca.trig-pick${e.enabled ? "" : ".off"}${active ? ".active" : ""}${onFlag && !flag?.param ? ".trig-flagged" : ""}`, {
-      title: e.name, onclick: () => this.select({ path }), oncontextmenu: (ev: MouseEvent) => this.menu(ev, { path }),
+      title: e.name, onclick: (ev: MouseEvent) => this.click(ev, path), oncontextmenu: (ev: MouseEvent) => this.menu(ev, { path }),
       ...this.dnd({ path }, path),
     }, img, h("span", {}, ...(cat && !cat.hideName ? [`${cat.name} - `] : []), ...this.sentence(e.kind, e.name, e.params, onFlag ? [] : null)));
     if (!isBlock(e) && !e.children.length) return line;
