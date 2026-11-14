@@ -74,6 +74,7 @@ import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext
 import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
 import { MAP_INFO_SERVICE, MCP_EDITS_SERVICE, type MapInfoService, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
+import { HD_WATER_DEFAULTS } from "./hdwater";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
@@ -1657,6 +1658,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
           renderer.terrainLight = on && lighting?.terrain ? filled(lightAt(lighting.terrain, hour), lighting.own.terrain) : null;
           renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
+          renderer.hdWater = lighting?.water ?? HD_WATER_DEFAULTS;
           renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };

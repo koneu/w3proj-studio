@@ -4975,6 +4975,32 @@ async function viewCommands(page, fail, shots, size) {
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
   const [wetEdge, wetInside] = [await meanColour(page, wet, edgeBox), await meanColour(page, wet, insideBox)];
   if (lum(wetEdge) > 12 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
+  // HD water reflects a sky that is brighter in the west (hdwater.ts; we-drive, flat deep maps, View Entire Map,
+  // 2026-11-14: deep Lordaeron water 73, 87, 95 on the left, 46, 68, 82 on the right; Studio's was a flat 22, 57, 73).
+  // With the map's reflectivity 0 (war3map.w3i's water) it is the flat deep colour 0, 48, 69: the control that the
+  // difference is the reflection's.
+  const westBox = [0.2, 0.4, 0.3, 0.6], eastBox = [0.75, 0.4, 0.85, 0.6];
+  const reflecting = async (name) => {
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    await settled(page);
+    const shot = await picture(name);
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    return [await meanColour(page, shot, westBox), await meanColour(page, shot, eastBox)];
+  };
+  const [westLit, eastLit] = [await meanColour(page, wet, westBox), await meanColour(page, wet, eastBox)];
+  if (westLit[0] - eastLit[0] < 12 || westLit[0] < 45 || eastLit[0] > 60 || westLit.some((v, i) => i > 0 && v < westLit[0])) {
+    bad(`HD deep water isn't lighter in the west as the editor's: ${round(westLit)} in the west, ${round(eastLit)} in the east`);
+  }
+  const infoText = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+  const info = JSON.parse(infoText);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify({ ...info, water: { ...(info.water ?? {}), reflectivity: 0 } }, null, 2))})`);
+  await sleep(1500);
+  const [westFlat, eastFlat] = await reflecting("water-no-reflection");
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoText)})`);
+  await sleep(1500);
+  if (Math.abs(westFlat[0] - eastFlat[0]) > 4 || westFlat[0] > 8 || [westFlat, eastFlat].some((c) => Math.abs(c[1] - 48) > 8 || Math.abs(c[2] - 69) > 8)) {
+    bad(`with the map's reflectivity 0 the deep water isn't the editor's flat 0, 48, 69: ${round(westFlat)} in the west, ${round(eastFlat)} in the east`);
+  }
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
