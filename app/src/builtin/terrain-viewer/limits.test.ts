@@ -92,9 +92,12 @@ test("a nudge is held to the bounds with its steps: a step past the limit is ref
   assert.deepEqual(scaledNudge([[60, 50], [60, 50]], [bounds, bounds], [1, 2], [32, 0]), [[0, 0], [0, 0]]);
   assert.deepEqual(scaledNudge([[60, 50]], [bounds], [1], [32, 0]), [[32, 0]], "a step that fits is taken");
   // Not held back: the full steps.
-  assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[32, 0], [64, 0]]);
+  // The group moves by its longest step, all by the same shift (the editor: a pathless doodad with a tree goes 64).
+  assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[64, 0], [64, 0]]);
   assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, 0]], "50 above the bottom edge, 64 asked: refused, not cut to 50");
-  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [32, -32]), [[64, 0]], "per axis: the other still moves");
+  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [32, -32]), [[0, 0]], "a diagonal with one axis refused is refused whole (KP_9 at the edge)");
+  assert.deepEqual(scaledNudge([[10, 10]], [bounds], [2], [32, 32]), [[64, 64]], "a diagonal that fits is taken");
+  assert.deepEqual(scaledNudge([[60, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[0, 0], [0, 0]], "one member past the edge holds the group");
 });
 
 test("nudged to the edge a footman stops at 3296 and a doodad strictly inside the map (we-compare edge-last-step)", () => {
@@ -111,6 +114,20 @@ test("nudged to the edge a footman stops at 3296 and a doodad strictly inside th
   assert.equal(run(3584, doodad, 8, 8), 4032, "a tree on 64-steps: the next one is the edge");
   assert.equal(run(3584, doodad, 1, 8), 4088, "a doodad on 8-steps");
   assert.equal(run(-3584, doodad, 1, -8), -4088);
+});
+
+test("a drag's step is judged where a gridded doodad lands, not where the pointer is (edge-group-drag)", () => {
+  const strict = strictlyInside({ left: -4096, bottom: -4096, right: 4096, top: 4096 });
+  const grid = (_i: number, x: number, y: number): [number, number] => [Math.round(x / 64) * 64, Math.round(y / 64) * 64];
+  // The pointer is 4090, inside by itself, but the grid point is the edge 4096: refused, the last shift that fitted stays.
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0]), [506, 0], "without the grid it fits");
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0], grid), [440, 0]);
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 440, 0, [0, 0], grid), [440, 0], "4024 snaps to 4032, inside");
+  // Per axis, and a pointer that doesn't snap (a pathless doodad) is as before.
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 30, [0, 0], grid), [0, 30]);
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0], (_i, x, y) => [x, y]), [506, 0]);
+  // One member of a group that would land on the edge holds the whole group's axis.
+  assert.deepEqual(refuseShift([[3584, 0], [3000, 0]], [strict, strict], 506, 0, [0, 0], (i, x, y) => (i === 0 ? grid(i, x, y) : [x, y])), [0, 0]);
 });
 
 test("a paste's word on what it didn't place names each reason that holds, and no other", () => {

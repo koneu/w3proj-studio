@@ -515,6 +515,9 @@ export interface TriggerKind {
   /** Fills `el` with the trigger's body (below the host's name, flags and comment). */
   render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle):
     { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean;
+      /** The editor's commands on the body's lines (Select All, Clear, Toggle Function Enabled); false when the body has no
+       *  line for it. */
+      run?(action: "selectAll" | "clear" | "toggleFunction"): boolean;
       /** Applies text still waiting to be committed (a code editor's pause): the host calls it before a save, an
        *  undo or any other edit, so the save has it and its undo step comes first. */
       flush?(): void } | void;

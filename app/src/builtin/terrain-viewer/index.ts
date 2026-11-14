@@ -74,6 +74,7 @@ import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext
 import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
 import { MAP_INFO_SERVICE, MCP_EDITS_SERVICE, type MapInfoService, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
+import { HD_WATER_DEFAULTS } from "./hdwater";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
@@ -1657,6 +1658,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
           renderer.terrainLight = on && lighting?.terrain ? filled(lightAt(lighting.terrain, hour), lighting.own.terrain) : null;
           renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
+          renderer.hdWater = lighting?.water ?? HD_WATER_DEFAULTS;
           renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };
@@ -4742,23 +4744,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
             // Bottom to top: regions, ground pathing, heights, naval pathing.
             const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
+            // Regions and Pathing - Ground alone are blended over the picture (water too) in linear light, as the editor's;
+            // with the heights or the naval view they stay in the old alpha-over, under the water (not measured together).
+            const linear = !on.naval && !on.heights;
             const show = () => {
               if (!latest()) return;
               // Regions and Pathing - Ground over the border lie over the water too (the editor's); the naval view keeps its own.
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
               const top = !on.naval ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
-              const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts);
+              const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts, linear);
               const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
-              if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over); else renderer.setViewLayer(null);
+              if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over, linear); else renderer.setViewLayer(null);
               redraw();
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
-                parts[1] = fits && on.pathing ? groundPathingColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
+                parts[1] = fits && on.pathing ? groundPathingColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear) : null;
                 // The edge brown over the tiles past the playable map (as the border's shade: by the w3i), as the editor's naval view.
                 parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 show();
@@ -5115,7 +5120,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // inside the playable part); not at the camera bounds, as in the World Editor. A motion that would pass the
           // limit is refused: the group stays where the last one that fitted put it (we-compare edge-last-step).
           const [dx, dy] = refuseShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
-            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1], objDrag.shift ?? [0, 0]);
+            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1], objDrag.shift ?? [0, 0],
+            (i, x, y) => { const at = ruledPose(objDrag!.entries[i].id, x, y, objDrag!.before[i].angle); return [at.x, at.y]; });
           objDrag.shift = [dx, dy];
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;

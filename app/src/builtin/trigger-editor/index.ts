@@ -82,6 +82,9 @@ class KindRegistry implements TriggersService {
 }
 
 /** Copied tree items with their contents, custom text and variables (shared by all maps). */
+/** The commands bound to keys under this editor's context (extension.json): the view runs them itself. */
+const EDITOR_COMMANDS = new Set(["w3.triggers.selectAll", "w3.triggers.clearSelection", "w3.triggers.toggleFunctionEnabled",
+  "w3.triggers.toggleTriggerEnabled", "w3.triggers.toggleTriggerInitiallyOn", "w3.triggers.rename"]);
 let treeClipboard: { items: Item[]; texts: (string | null)[]; variables: Variable[] } | null = null;
 
 /** The open trigger editor (there is one war3map.wtg per project). */
@@ -244,6 +247,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!openView) throw new Error("Open the Trigger Editor and select a trigger first.");
       return openView.copyToClipboard(as, opts?.lines);
     })),
+    // Keys of the Trigger Editor (extension.json: bound while it has the focus): lines of the shown trigger and the selected trigger.
+    ...(["selectAll", "clear", "toggleFunction"] as const).map((a) => w3.commands.register(
+      a === "selectAll" ? "w3.triggers.selectAll" : a === "clear" ? "w3.triggers.clearSelection" : "w3.triggers.toggleFunctionEnabled", async () => {
+        if (!openView) throw new Error("Open the Trigger Editor first.");
+        openView.runOnLines(a);
+      })),
+    ...(["enabled", "initiallyOn"] as const).map((f) => w3.commands.register(f === "enabled" ? "w3.triggers.toggleTriggerEnabled" : "w3.triggers.toggleTriggerInitiallyOn", async () => {
+      if (!openView) throw new Error("Open the Trigger Editor first.");
+      openView.toggleTriggerFlag(f);
+    })),
+    w3.commands.register("w3.triggers.rename", async () => {
+      if (!openView) throw new Error("Open the Trigger Editor first.");
+      openView.focusName();
+    }),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       await projectWithFiles(w3);
@@ -676,7 +693,7 @@ class TriggerView {
    *  being an undo step. */
   private toggles = 0;
   private savedToggles = 0;
-  private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean; flush?(): void } | void = undefined;
+  private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean; run?(action: "selectAll" | "clear" | "toggleFunction"): boolean; flush?(): void } | void = undefined;
   private handle: TriggerEditorHandle;
   private vars: VariableHost;
   private unsubscribe: () => void;
@@ -687,6 +704,10 @@ class TriggerView {
     // Code editors have their own undo, copy and paste.
     if (e.target instanceof Element && e.target.closest(".cm-editor")) return;
     if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
+    // Keys bound to the editor's own commands (Select All, Toggle Function Enabled, Rename, …): the workbench leaves keys bound
+    // under the context of this element to it.
+    const own = this.w3.keybindings.commandsFor(e).find((c) => EDITOR_COMMANDS.has(c));
+    if (own) { e.preventDefault(); this.run(own); return; }
     if (keyOf(e) === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     const step = undoStepOf(this.w3.keybindings.commandsFor(e));
     if (step) { e.preventDefault(); this.step(step === "undo" ? -1 : 1); return; }
@@ -734,6 +755,7 @@ class TriggerView {
     };
     el.tabIndex = -1;
     addKeyContext(el, UNDO_CONTEXT);
+    addKeyContext(el, "triggerEditor");
     el.addEventListener("keydown", this.keydown);
     const treePane = h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, this.searchBox, editable ? this.toolbar() : null, this.tree);
     el.append(treePane, this.detail);
@@ -838,6 +860,29 @@ class TriggerView {
     const text = copyAs(as, src, it, picked);
     if (text === null) throw new Error(`${it.name} is custom text: Copy As Script copies it.`);
     return { text, what: picked.length ? `${picked.length === 1 ? "a line" : `${picked.length} lines`} of ${it.name}` : it.name };
+  }
+  /** The commands on the lines of the shown trigger (Select All, Clear, Toggle Function Enabled). */
+  runOnLines(action: "selectAll" | "clear" | "toggleFunction") {
+    if (this.mode !== "triggers" || !this.body?.run) { if (action === "clear") return; throw new Error("Select a GUI trigger first."); }
+    if (action === "toggleFunction" && !this.handle.editable) throw new Error("This trigger file can't be changed here.");
+    // Clear with nothing selected is nothing to do (Escape is bound to it).
+    if (!this.body.run(action) && action !== "clear") throw new Error(action === "toggleFunction" ? "Select a line first." : "Select a line, section or branch first.");
+  }
+  /** Toggle Trigger Enabled / Toggle Trigger Initially On on the selected trigger, as the flags beside its name do (one undo step). */
+  toggleTriggerFlag(flag: "enabled" | "initiallyOn") {
+    if (!this.handle.editable) throw new Error("This trigger file can't be changed here.");
+    const it = this.find(this.selected);
+    if (!it || !("ecas" in it) || it.type === 16 || (flag === "initiallyOn" && it.type !== 8)) throw new Error(flag === "enabled" ? "Select a trigger first." : "Select a trigger (not a script or comment) first.");
+    if (flag === "enabled") this.edit(it.enabled ? "Disable trigger" : "Enable trigger", () => { it.enabled = !it.enabled; });
+    else this.edit(it.initiallyOff ? "Turn trigger initially on" : "Turn trigger initially off", () => { it.initiallyOff = !it.initiallyOff; });
+  }
+  /** Rename: the selected item's name field, ready to type. */
+  focusName() {
+    const f = this.detail.querySelector<HTMLInputElement>("input.trig-name");
+    if (!f) throw new Error("Select a trigger, category or variable first.");
+    if (f.readOnly) throw new Error("This trigger file can't be changed here.");
+    f.focus();
+    f.select();
   }
   /** Copy As Text / Copy As Script (see copyText) onto the system clipboard, saying what was copied. The text. */
   async copyToClipboard(as: "text" | "script", lines?: boolean): Promise<string> {

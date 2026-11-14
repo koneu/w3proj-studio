@@ -453,53 +453,79 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** The list's order: as in the file, or by name. */
         let sortByName = false;
-        const inOrder = (objs: Obj[]) => (sortByName ? [...objs].sort((a, b) => nameOf(a).localeCompare(nameOf(b))) : objs);
-        const renderList = () => {
-          const group = (title: string, objs: Obj[], action?: HTMLElement) => {
-            const items = inOrder(objs).filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
-            return [
-              h("div.obj-group", {}, h("span", {}, `${title} (${items.length})`), action ?? null),
-              ...items.map((o) =>
-                h(`div.obj-item${selection.has(o) ? ".selected" : ""}`, { onclick: (e: MouseEvent) => clickItem(o, e), oncontextmenu: (e: MouseEvent) => itemMenu(o, e) },
-                  ICON_FIELD[kind] ? itemIcon(o) : null,
-                  h("code", {}, o.id ? `${o.id}` : o.base),
-                  o.id ? h("small", { title: stripColors(baseName(o)) }, `← ${o.base}`) : null,
-                  h("span", {}, nameOf(o)),
-                ),
-              ),
-            ];
-          };
-          const matchesFilter = (o: Obj) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter);
-          // With a filter, only the listed entries are cleaned up.
-          const unchanged = file.original.filter((o) => !hasMods(o) && matchesFilter(o)).length;
-          const cleanUp = unchanged
-            ? h("button.link-inline", {
-              title: filter ? "Remove the listed standard objects that have no modified fields" : "Remove standard objects that have no modified fields",
-              onclick: () => cleanUpStandard(matchesFilter),
-            }, `Clean up (${unchanged})`)
-            : undefined;
-          visible = [...inOrder(file.custom), ...inOrder(file.original)].filter(matchesFilter);
-          listEl.replaceChildren(...group("Custom", file.custom), ...group("Modified standard", file.original, cleanUp), ...campaignGroup());
-        };
-        /** A chapter map's campaign's objects: shown to look at, edited in the campaign. */
-        const campaignGroup = (): HTMLElement[] => {
-          if (campaignError) return [h("div.obj-group.obj-campaign-error", { title: campaignError }, h("span", {}, "Campaign: its object data can't be read"))];
-          if (!campaign) return [];
-          const sorted = sortByName ? [...campaignListed()].sort((a, b) => campaignName(a).localeCompare(campaignName(b))) : campaignListed();
-          const items = sorted.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${campaignName(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
-          return [
-            h("div.obj-group", { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` },
-              h("span", {}, `Campaign (${items.length})`)),
-            ...items.map((o) => h(`div.obj-item.obj-campaign${campaignShown === o ? ".selected" : ""}`, {
-              title: o.id ? "A custom object of the campaign" : "A game object the campaign changes",
-              onclick: () => { select(null); campaignShown = o; renderDetail(); },
-            },
+        /** The list's rows by object, with what each shows (`shows`). A click redraws the list with the detail, and a
+         *  row is made again only when what it shows changed: making all of them anew took a 1000-object list seconds
+         *  to lay out and paint on every click. */
+        const rows = new WeakMap<Obj, { shows: string; el: HTMLElement }>();
+        const rowOf = (o: Obj, name: string, ofCampaign: boolean, selected: boolean) => {
+          const base = stripColors(baseName(o));
+          const ownIcon = ICON_FIELD[kind] ? modLists(o).flatMap((l) => l.mods).find((m) => m.field === ICON_FIELD[kind] && typeof m.value === "string")?.value : undefined;
+          // The icon is the base's while the object has none of its own: the game data and the graphics mode decide it.
+          const shows = JSON.stringify([ofCampaign, o.id ?? null, o.base, name, base, ownIcon ?? null, !!kd, w3.settings.get<string>("game.graphicsMode") ?? ""]);
+          let row = rows.get(o);
+          if (row?.shows !== shows) {
+            const el = h(`div.obj-item${ofCampaign ? ".obj-campaign" : ""}`, ofCampaign
+              ? { title: o.id ? "A custom object of the campaign" : "A game object the campaign changes", onclick: () => { select(null); campaignShown = o; renderDetail(); } }
+              : { onclick: (e: MouseEvent) => clickItem(o, e), oncontextmenu: (e: MouseEvent) => itemMenu(o, e) },
             ICON_FIELD[kind] ? itemIcon(o) : null,
             h("code", {}, o.id ?? o.base),
-            o.id ? h("small", { title: stripColors(baseName(o)) }, `← ${o.base}`) : null,
-            h("span", {}, campaignName(o)),
-            h("span.badge", {}, "campaign"))),
+            o.id ? h("small", { title: base }, `← ${o.base}`) : null,
+            h("span", {}, name),
+            ofCampaign ? h("span.badge", {}, "campaign") : null);
+            rows.set(o, (row = { shows, el }));
+          }
+          row.el.classList.toggle("selected", selected);
+          return row.el;
+        };
+        /** The list's group headings, kept: their text and what stands beside it are set on each redraw. */
+        const heads = new Map<string, HTMLElement>();
+        const head = (key: string, text: string, opts: { title?: string; action?: HTMLElement; cls?: string } = {}) => {
+          let el = heads.get(key);
+          if (!el) heads.set(key, (el = h(`div.obj-group${opts.cls ?? ""}`)));
+          el.title = opts.title ?? "";
+          el.replaceChildren(h("span", {}, text), ...(opts.action ? [opts.action] : []));
+          return el;
+        };
+        /** Puts the rows in the list, touching only what differs from what is there. */
+        const putRows = (next: HTMLElement[]) => {
+          const now = listEl.children;
+          if (now.length !== next.length) { listEl.replaceChildren(...next); return; }
+          const differs = next.flatMap((el, i) => (now[i] === el ? [] : [i]));
+          // A few rows made anew (a name typed): each in its place. More, or rows that moved: all of it.
+          if (differs.length > 32 || differs.some((i) => next[i].parentNode === listEl)) { listEl.replaceChildren(...next); return; }
+          for (const i of differs) now[i].replaceWith(next[i]);
+        };
+        const renderList = () => {
+          // Each object's name is asked for several times (the order, the filter, the row).
+          const names = new Map<Obj, string>();
+          const named = (of: (o: Obj) => string) => (o: Obj) => { let n = names.get(o); if (n === undefined) names.set(o, (n = of(o))); return n; };
+          const listed = (objs: Obj[], name: (o: Obj) => string) => {
+            const sorted = sortByName ? [...objs].sort((a, b) => name(a).localeCompare(name(b))) : objs;
+            return sorted.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${name(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
+          };
+          const own = named(nameOf);
+          const custom = listed(file.custom, own), standard = listed(file.original, own);
+          // With a filter, only the listed entries are cleaned up.
+          const unchanged = standard.filter((o) => !hasMods(o));
+          const cleanUp = unchanged.length
+            ? h("button.link-inline", {
+              title: filter ? "Remove the listed standard objects that have no modified fields" : "Remove standard objects that have no modified fields",
+              onclick: () => { const going = new Set(unchanged); cleanUpStandard((o) => going.has(o)); },
+            }, `Clean up (${unchanged.length})`)
+            : undefined;
+          visible = [...custom, ...standard];
+          const out = [
+            head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o))),
+            head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o))),
           ];
+          // A chapter map's campaign's objects: shown to look at, edited in the campaign.
+          if (campaignError) out.push(head("campaign-error", "Campaign: its object data can't be read", { title: campaignError, cls: ".obj-campaign-error" }));
+          else if (campaign) {
+            const theirs = named(campaignName), items = listed(campaignListed(), theirs);
+            out.push(head("campaign", `Campaign (${items.length})`, { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` }),
+              ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
+          }
+          putRows(out);
         };
 
         const clickItem = (o: Obj, e: MouseEvent) => {
