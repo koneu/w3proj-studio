@@ -4766,23 +4766,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
             // Bottom to top: regions, ground pathing, heights, naval pathing.
             const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
+            // Regions and Pathing - Ground alone are blended over the picture (water too) in linear light, as the editor's;
+            // with the heights or the naval view they stay in the old alpha-over, under the water (not measured together).
+            const linear = !on.naval && !on.heights;
             const show = () => {
               if (!latest()) return;
               // Regions and Pathing - Ground over the border lie over the water too (the editor's); the naval view keeps its own.
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
               const top = !on.naval ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
-              const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts);
+              const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts, linear);
               const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
-              if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over); else renderer.setViewLayer(null);
+              if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over, linear); else renderer.setViewLayer(null);
               redraw();
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
-                parts[1] = fits && on.pathing ? groundPathingColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
+                parts[1] = fits && on.pathing ? groundPathingColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear) : null;
                 // The edge brown over the tiles past the playable map (as the border's shade: by the w3i), as the editor's naval view.
                 parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }) : null;
                 show();
