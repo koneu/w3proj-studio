@@ -57,7 +57,8 @@ export function wheelZoomTarget(target: Vec3, pivot: Vec3, distance: number, nex
  * on the edge. So the target (the middle of the view) moves back by what the pivot is outside.
  * we-drive 2026-11-14 (branch camera-bounds-we, the empty 64x64 map whose edge is 4096, camera bounds 2816, playable
  * part 3328): the arrow keys held right stop with the editor's target at 4096.0, held up at 4096.0 too, with Enforce
- * Camera Bounds on and off alike, in game view as well; neither the camera bounds nor the playable part stop it.
+ * Camera Bounds on and off alike (after V for game view too, its state not read back); neither the camera bounds nor
+ * the playable part stop it.
  */
 export function heldPan(target: Vec3, pivot: Vec3, map: { left: number; bottom: number; right: number; top: number }): Vec3 {
   const dx = Math.min(map.right, Math.max(map.left, pivot[0])) - pivot[0];

@@ -191,7 +191,7 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   Everything else is the same on and off: a paste past the bounds is placed (a footman at
   3070.8, 0, an LPcr at 3072.2, -510.5; spec `camera-bounds-paste`), objects already past them stay through a save, a
   unit pasted or nudged past the playable part is refused either way (footman stays at 3296), and the view: the arrow
-  keys stop with the camera target on the map's edge (4096.0 right, 4096.0 up; in game view too), a right-button drag
+  keys stop with the camera target on the map's edge (4096.0 right, 4096.0 up; after V for game view too, its state not read back), a right-button drag
   pans past the bounds (the middle button pans nothing), and a minimap click, View Entire Map and 20 wheel notches out
   give the same pictures (mean difference at most 0.06). Unit and Doodad Properties have no X or Y to type. The camera
   palette (`--key m`): Create Camera 1476,80, Create Free Camera 1476,100, View Selected Camera 1476,119, Set Camera To
