@@ -1,8 +1,8 @@
-// The model picker of the "Replace with a game model…" fix: a searchable list of the game's models
+// The model picker of the "Replace with a … game model…" fixes: a searchable list of the game's models
 // beside two live previews, the type's current (Reforged) model and the highlighted candidate. The
-// list is of one graphics mode at a time (Classic, Reforged DE or HD): a Classic model is used as
-// it is, a DE or HD one is converted to a Classic model. Resolves with the chosen path and the mode
-// it was chosen from, or null.
+// list is of one graphics mode at a time (Classic, Reforged DE or HD); what the caller does with the
+// choice is its own (the Classic fix converts a DE or HD model, the Reforged one uses it as it is).
+// Resolves with the chosen path and the mode it was chosen from, or null.
 
 import type { W3Api } from "../../extensions/api";
 import { keyOf } from "../../lib/keys";
@@ -18,14 +18,15 @@ export interface Picked { path: string; mode: PickMode }
 /** At most this many rows are listed (refine the search for the rest). */
 const SHOWN = 300;
 
-export function pickClassicModel(w3: W3Api, opts: { title: string; current: string | null; modes: ModeChoices[] }): Promise<Picked | null> {
+/** `modeTitle`: the mode list's tooltip (what happens to a model of each mode). */
+export function pickClassicModel(w3: W3Api, opts: { title: string; current: string | null; modes: ModeChoices[]; modeTitle?: string }): Promise<Picked | null> {
   return new Promise((resolve) => {
+    let mode = opts.modes[0];
     // The type's model as it is (only Reforged has it), the candidate as its mode shows it.
     const now = new ModelPreview(w3, { prefer: "reforged" });
-    const candidate = new ModelPreview(w3, { prefer: "classic" });
+    const candidate = new ModelPreview(w3, { prefer: mode.mode });
     now.show(opts.current);
-    let mode = opts.modes[0];
-    const modeSelect = h("select.model-pick-mode", { title: "The graphics mode to take the model from. A DE or HD model is converted to a Classic model in the map." },
+    const modeSelect = h("select.model-pick-mode", { title: opts.modeTitle ?? "The graphics mode to take the model from. A DE or HD model is converted to a Classic model in the map." },
       ...opts.modes.map((m) => h("option", { value: m.mode }, m.label))) as HTMLSelectElement;
     modeSelect.addEventListener("change", () => {
       mode = opts.modes.find((m) => m.mode === modeSelect.value) ?? mode;

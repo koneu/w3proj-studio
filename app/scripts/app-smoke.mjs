@@ -5664,6 +5664,47 @@ async function triggerByHand(page, hands, root, fail) {
   if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
+/** The Sound Editor's own keys with real key presses: Ctrl+Up/Down (Move Sound Variable), Ctrl+R (Sort), Ctrl+PageUp/Down
+ *  (sound volume), Ctrl+Shift+PageUp/Down (music volume). The workbench leaves keys bound under the element's context to it. */
+async function soundEditorKeys(page, found) {
+  try {
+  const fail = (what) => found.push(`sound editor keys: ${what}`);
+  const k = await heightKit(page, "SoundKeys");
+  try {
+  const { hands } = k;
+  const sound = (name) => ({
+    name, file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+    channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+    variableName: name, assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+    speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+  });
+  const w3s = "map/war3map.w3s.json";
+  await page.evaluate(`w3.editors.closeAll()`);
+  const body = { format: "w3proj.sounds/1", version: 3, sounds: ["gg_snd_Delta", "gg_snd_alpha", "gg_snd_Charlie"].map(sound) };
+  await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(w3s)}, ${JSON.stringify(JSON.stringify(body))}); await w3.workspace.refresh(); })()`);
+  await page.evaluate(`w3.editors.open(${JSON.stringify(w3s)})`);
+  await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 3`), 20000);
+  const shown = () => page.evaluate(`[...document.querySelectorAll("tr.snd-row")].map((r) => r.firstChild.textContent).join()`);
+  const toasts = () => page.evaluate(`document.body.innerText`);
+  const press = async (spec) => { await hands.chord(spec); await settled(page); };
+  const expectShown = async (what, want) => { const got = await shown(); if (got !== want) fail(`${what}: the list shows ${got}, not ${want}`); };
+  await hands.click("tr.snd-row:nth-child(2)");
+  await press("Ctrl+ArrowUp");
+  await expectShown("Ctrl+Up", "alpha,Delta,Charlie");
+  await press("Ctrl+ArrowDown");
+  await expectShown("Ctrl+Down", "Delta,alpha,Charlie");
+  await press("Ctrl+R");
+  await expectShown("Ctrl+R", "alpha,Charlie,Delta");
+  await press("Ctrl+PageUp");
+  if (!/Sound volume \d+%/.test(await toasts())) fail("Ctrl+PageUp gave no sound volume message");
+  await k.clearToasts();
+  await press("Ctrl+Shift+PageDown");
+  if (!/Music volume \d+%/.test(await toasts())) fail("Ctrl+Shift+PageDown gave no music volume message");
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally { await restoreWindow(page); }
+  } catch (e) { found.push(`sound editor keys: ${e.message}`); }
+}
+
 /** Ctrl+S with the cursor still in a field of an editor that takes a field's text when the field is left (its `change`
  *  event): the save has the typed text and leaves the tab saved. A key doesn't leave the field, so the save used to go
  *  without the text, and the tab stayed saved too until the field was left. The Object Editor (a value cell), Map
@@ -7530,8 +7571,10 @@ async function graphicsModes(page, found) {
     await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   };
   await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
-  // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models.
-  const TYPES = ["LCcb", "YSw5", "LCpt", "LCct"];
+  // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models; and the
+  // Exterior Wall, whose Classic model (RuinsWall0\RuinsWall0.mdx) no folder has while its HD art (file:hd,
+  // RuinTomb\…\ExteriorWall) is in both Reforged sets: Convert takes that.
+  const TYPES = ["LCcb", "YSw5", "LCpt", "LCct", "EW00"];
   const SPLIT_UNITS = ["ngrk", "nogm"];
   const make =(name, modes) => {
     const root = join(dir, name);
@@ -7555,7 +7598,8 @@ async function graphicsModes(page, found) {
     const r = packed.status === 0 ? spawnSync(cli, ["verify", map, "--game", game], { encoding: "utf8" }) : packed;
     const text = (r.stdout ?? "") + (r.stderr ?? "");
     if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(text)) fail(`${label}: verify: ${text.trim().slice(-400)}`);
-    else if (/missing|not found/i.test(text)) fail(`${label}: verify reports missing files: ${text.trim().slice(-400)}`);
+    // Without the map's own path, which may hold the words (a worktree named missing-…).
+    else if (/missing|not found/i.test(text.split(map).join(""))) fail(`${label}: verify reports missing files: ${text.trim().slice(-400)}`);
   };
   const check = () => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
@@ -7583,7 +7627,11 @@ async function graphicsModes(page, found) {
     if (!p.fixes.some((f) => /^Convert/.test(f))) fail(`no convert fix: ${p.message}`);
     if (p.fixes.some((f) => /^Use a Classic model/.test(f))) fail("the old \"Use a Classic model\" label is still there");
     if (!p.fixes.some((f) => /^Replace with a Classic game model/.test(f))) fail(`no "Replace with a Classic game model" fix: ${p.fixes.join(", ")}`);
+    // A Classic-only map has no Reforged mode to pick a Reforged model for.
+    if (p.fixes.some((f) => /^Replace with a Reforged game model/.test(f))) fail(`a Classic-only map offers "Replace with a Reforged game model": ${p.message}`);
   }
+  const wall = missing.find((p) => p.message.includes("(EW00)"));
+  if (wall && !/made from the (DE|HD) model Doodads.RuinTomb.Structures.ExteriorWall.ExteriorWall\.mdx/.test(wall.message)) fail(`the Exterior Wall isn't converted from its HD art: ${wall.message}`);
   // All at once, as a user clicking the buttons one after the other while the first still works:
   // they have to queue, or the import list and the object data lose entries.
   const errs = await Promise.all(TYPES.map((id) => fix(`(${id})`, "Convert")));
@@ -7595,7 +7643,7 @@ async function graphicsModes(page, found) {
     if (!w3d.original.some((o) => o.base === id && o.mods.some((m) => m.field === "dfil" && /^war3mapImported.Classic/.test(m.value)))) fail(`${id}'s model is not in the object data after converting all at once`);
   }
   // The exact files each conversion lists: its folder, its first variation, and a texture.
-  for (const [folder, first] of [["CapitalBridge", "CapitalBridge0"], ["CityWallEndcap", "CityWallEndcap0"], ["PillarTall", "PillarTall0"], ["CapitalTower", "CapitalTower"]]) {
+  for (const [folder, first] of [["CapitalBridge", "CapitalBridge0"], ["CityWallEndcap", "CityWallEndcap0"], ["PillarTall", "PillarTall0"], ["CapitalTower", "CapitalTower"], ["ExteriorWall", "ExteriorWall"]]) {
     const want = ["war3mapImported", "Classic", folder, first + ".mdx"].join(String.fromCharCode(92)).toLowerCase();
     if (!imports.includes(want)) fail(`${want} is missing from the import list after converting all at once`);
     const prefix = ["war3mapImported", "Classic", folder, ""].join(String.fromCharCode(92)).toLowerCase();
@@ -7664,6 +7712,36 @@ async function graphicsModes(page, found) {
   if (!dfil("LCct") || !dfil("LCcb") || dfil("LCct") === dfil("LCcb")) fail(`two models with one file name share a folder: ${dfil("LCct")} / ${dfil("LCcb")}`);
   const classicFiles = await page.evaluate(`w3.workspace.files().map((f) => f.path.toLowerCase()).filter((p) => p.includes("classic/grassbridgeextralarge45"))`);
   if (classicFiles.length < 3) fail(`the conversions left ${classicFiles.length} files in their folders`);
+
+  // ---- Classic and HD: another Reforged model, used as it is, for a type Classic has no model for ----
+  const both = make("both", 3);
+  await openProject(both);
+  list = await check();
+  const wallBoth = list.find((p) => p.message.includes("(EW00)"));
+  if (!wallBoth) fail(`Classic and HD: the Exterior Wall isn't reported: ${list.map((p) => p.message).join(" | ").slice(0, 300)}`);
+  else {
+    if (!wallBoth.fixes.some((f) => /^Convert/.test(f))) fail(`Classic and HD: no convert fix for the Exterior Wall: ${wallBoth.fixes.join(", ")}`);
+    if (!wallBoth.fixes.includes("Replace with a Reforged game model…")) fail(`Classic and HD: no "Replace with a Reforged game model…" for the Exterior Wall: ${wallBoth.fixes.join(", ")}`);
+    await page.evaluate(`(async () => {
+      const svc = await w3.services.get("w3.problems");
+      const p = svc.problems().find((q) => q.message.includes("(EW00)"));
+      window.__picked = p.fixes.find((f) => f.label === "Replace with a Reforged game model…").run().then(() => "done", (e) => String(e && e.message || e));
+    })()`);
+    await until("the Reforged picker", () => page.evaluate(`!!document.querySelector(".model-pick")`));
+    await page.evaluate(`(() => { const i = document.querySelector(".model-pick input.model-pick-search"); i.value = "exteriortower ruintomb"; i.dispatchEvent(new Event("input")); })()`);
+    const rows = await page.evaluate(`[...document.querySelectorAll(".model-pick .model-pick-row")].map((r) => r.title)`);
+    if (!rows.length) fail("the Reforged picker lists no ExteriorTower");
+    if (rows.some((r) => /^war3mapImported/i.test(r))) fail(`the Reforged picker lists the map's files: ${rows.join()}`);
+    await page.evaluate(`[...document.querySelectorAll(".model-pick button")].find((b) => /Use this model/.test(b.textContent)).click()`);
+    const done = await page.evaluate(`window.__picked`);
+    if (done !== "done") fail(`choosing a Reforged model failed: ${done}`);
+    const value = (await objectData(both)).original.find((o) => o.base === "EW00")?.mods.find((m) => m.field === "dfil")?.value ?? "";
+    if (!/^Doodads.RuinTomb.Structures.ExteriorTower.ExteriorTower(\.mdl)?$/i.test(value)) fail(`the Reforged model wasn't written as it is: ${value}`);
+    list = await check();
+    const after = list.find((p) => p.message.includes("(EW00)"));
+    // Classic still can't load it; HD can.
+    if (!after || !/no model in Classic graphics/.test(after.message) || /Reforged \(HD\)/.test(after.message)) fail(`after the Reforged model: ${after?.message ?? "not reported"}`);
+  }
 
   // ---- A fix does not write into another project opened since the check ------------------------
   const away = make("away", 1);
@@ -12577,6 +12655,7 @@ async function run() {
         scriptGuard,
         scriptQuestionsOnSwitch,
         shouldHaves,
+        soundEditorKeys,
         specialDoodads,
         staleEditors,
         startPreviewFollow,
@@ -12845,6 +12924,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
   await leftOpen(page, "byHand", found);
+  await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
+  await leftOpen(page, "soundEditorKeys", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));

@@ -18,7 +18,7 @@ import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { type ModeChoices, pickClassicModel } from "./modelpick";
 import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
-import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
+import { conversionPlans, conversionSources, missingTextures, type ModelArt, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName, variationFiles } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
@@ -103,14 +103,35 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
           return (await pathTables).get(base);
         };
         await files.prefetch(found.flatMap(({ p, what, variations }) => (what ? modelNames(p, Math.min(variations!, BATCH_VARIATIONS)).map((x): [string, FileKind] => [x, what]) : [])));
-        for (const { p, at, reveal, what, variations, pathing } of found) {
+        // The fixes of a type's own model: the project it was found in, the game's models, the map's graphics modes.
+        const root = w3.workspace.project()?.root;
+        let models: Promise<{ game: GameModels; supported: (typeof MODES)[number][] }> | null = null;
+        const modelFixes = async (owner: ModelOwner): Promise<ProblemFix[]> => {
+          models ??= (async () => {
+            const info = await s.doc<{ supportedModes?: number }>("map/war3map.w3i.json");
+            return { game: await runGameModels(w3, s), supported: MODES.filter((m) => (info?.supportedModes ?? 1) & m.bit) };
+          })();
+          // Without the game's file list the warning stays, without fixes.
+          const got = await models.catch(() => null);
+          if (!got) return [];
+          const { game, supported } = got;
+          const reforged = replaceWithReforged(w3, root, owner, supported, true, game.stored, game.reforgedModels);
+          return [{
+            label: "Replace with a Classic game model…",
+            title: "Pick one of the game's own Classic models for this type (every graphics mode can load those), or a Reforged one converted to Classic; it's written into the map's object data",
+            run: () => useClassicModel(w3, root, owner.kind, owner.base, owner.id, owner.name, owner.current, game.classicModels, game.reforgedModels, []),
+          }, ...(reforged ? [reforged] : [])];
+        };
+        for (const { p, at, reveal, what, variations, pathing, owner } of found) {
           if (!what) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
           else if (!(await modelExists(p, variations!, (x) => files.exists(x, what)))) {
             // What the pathing map does instead: the base type's own texture, else nothing blocks.
             const table = pathing ? (await ownPathTex(pathing.base))?.replace(/\\+/g, "\\") : undefined;
             const own = table && table !== "_" && table !== "-" && table.toLowerCase() !== "none" && table.toLowerCase() !== p.toLowerCase() && await files.exists(table, "texture") ? table : null;
             const instead = !pathing ? "" : own ? `; the pathing map uses its base type's ${own} instead` : "; placed ones leave no pathing (they don't block)";
-            out.push({ severity: "warning", message: `${files.notFound(p)}${instead}`, location: at, reveal });
+            // A type's own model, found nowhere: the same model fixes as "Graphics modes" offers (nothing to convert).
+            const fixes = owner && what === "model" ? await modelFixes({ ...owner, current: p }) : undefined;
+            out.push({ severity: "warning", message: `${files.notFound(p)}${instead}`, location: at, reveal, ...(fixes ? { fixes } : {}) });
           }
         }
         return capped(out, "missing files");
@@ -260,6 +281,8 @@ interface PathUse {
   /** A doodad's or destructable's pathing texture, with its base type's own (what the pathing map uses when the file
    *  isn't found, terrain-viewer/pathmap.ts placedImage). */
   pathing?: { base: string };
+  /** A unit's, item's, doodad's or destructable's own model field: the type its fixes change. */
+  owner?: Omit<ModelOwner, "current">;
 }
 /** Per run: two checks read the object data's paths. */
 const pathUses = new WeakMap<RunScope, Promise<PathUse[]>>();
@@ -315,10 +338,11 @@ async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
           const paths = (f.type.endsWith("List") ? m.value.split(",") : [m.value]).map((p) => p.trim())
             .filter((p) => p && p !== "_" && p !== "." && !/^none(\.\w+)?$/i.test(p));
           const pathing = (m.field === "dptx" || m.field === "bptx") ? { base: o.base } : undefined;
+          const owner = m.field === ART[kind]?.model && !m.level && paths.length === 1 ? { kind, base: o.base, id, name } : undefined;
           for (const p of paths) {
             const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
             const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
-            found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField), ...(pathing ? { pathing } : {}) });
+            found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField), ...(pathing ? { pathing } : {}), ...(owner ? { owner } : {}) });
           }
         }
       }
@@ -485,12 +509,23 @@ function gameModels(list: string[]): GameModels {
   return out;
 }
 
+/** Per run: "Graphics modes" and "Files used by object data" both want the game's models (one file list). */
+const runModels = new WeakMap<RunScope, Promise<GameModels>>();
+function runGameModels(w3: W3Api, s: RunScope): Promise<GameModels> {
+  let known = runModels.get(s);
+  if (!known) {
+    known = w3.game.list().then(gameModels);
+    runModels.set(s, known);
+  }
+  return known;
+}
+
 async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const readJson = <T>(_: W3Api, path: string) => s.doc<T>(path);
   const info = await readJson<{ supportedModes?: number }>(w3, "map/war3map.w3i.json");
   const supported = MODES.filter((m) => (info?.supportedModes ?? 1) & m.bit);
   if (!supported.length) return [];
-  const { stored, classicModels, reforgedModels } = gameModels(await w3.game.list());
+  const { stored, classicModels, reforgedModels } = await runGameModels(w3, s);
   const files = s.lookup();
   // The project the problems were found in: the fixes write into no other.
   const root = w3.workspace.project()?.root;
@@ -567,8 +602,20 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
       const base = custom.get(id)?.base ?? id;
       const name = kinds.get(kind)?.names.get(base) ?? id;
       const where = MODES.filter((m) => modes.has(m.name)).map((m) => m.name).join(", ");
-      // The Reforged sets that have every model of the type: a Classic model can be made from each.
-      const sources = conversionSources([...paths], (s, key) => stored.get(`_${s}`)!.has(key));
+      const has = (s: Source, key: string) => stored.get(`_${s}`)!.has(key);
+      // The Reforged sets a Classic model can be made from: the model the type reads in the set's own art (which
+      // the skin tables may name apart from the missing one), else in the other set's art (EW00 names file:hd only,
+      // and DE reads its plain Classic file: the DE set still has the HD art), else the missing model itself.
+      const artOf = (art: string): ModelArt | null => {
+        const model = value(id, kind, ART[kind].model, art);
+        if (!model || model === "_") return null;
+        return { model, variations: Number(ART[kind].variations ? value(id, kind, ART[kind].variations!, art) : 1) || 1 };
+      };
+      const missingArt = supported.filter((m) => modes.has(m.name)).map((m) => artOf(m.art)).filter((a): a is ModelArt => !!a);
+      const candidatesOf = (s: Source) => [artOf(s), artOf(s === "de" ? "hd" : "de"), ...missingArt].filter((a): a is ModelArt => !!a);
+      const plans = conversionPlans({ de: candidatesOf("de"), hd: candidatesOf("hd") }, has);
+      // Importing the Reforged model as it is helps only at the path the type reads: the missing models themselves.
+      const sources = conversionSources([...paths], has);
       // Models split over both sets: taken from whichever has each.
       if (!sources.length && [...paths].every(inReforged)) sources.push("de");
       const fixes: ProblemFix[] = [];
@@ -582,14 +629,12 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
         });
       }
       // One button per set to take the model from, when there is a choice.
-      for (const source of sources) {
-        const set = SOURCE_NAME[source], pick = sources.length > 1 ? ` from ${set}` : "";
+      for (const { source, model, variations } of plans) {
+        const set = SOURCE_NAME[source], pick = plans.length > 1 ? ` from ${set}` : "";
         fixes.push({
           label: `Convert${pick} to a Classic model`,
-          title: `Writes a Classic copy of the ${set} model (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)`,
+          title: `Writes a Classic copy of the ${set} model ${variationFiles({ model, variations })[0]} (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)`,
           run: () => serial(async () => {
-            const model = value(id, kind, ART[kind].model) ?? "";
-            const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
             const bytes = await convertToClassic(w3, root, kind, base, id, model, variations, source);
             void w3.window.showInfo(`Converted ${name} from the ${set} model to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
           }),
@@ -612,8 +657,11 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
       fixes.push({
         label: "Replace with a Classic game model…",
         title: "Pick one of the game's own Classic models for this type (every graphics mode can load those); it's written into the map's object data (a modified standard object), and the type's Reforged model is no longer used",
-        run: () => useClassicModel(w3, root, kind, base, id, name, [...paths][0] ?? "", classicModels, reforgedModels, sources),
-      }, {
+        run: () => useClassicModel(w3, root, kind, base, id, name, [...paths][0] ?? "", classicModels, reforgedModels, plans.map((p) => p.source)),
+      });
+      const reforgedFix = replaceWithReforged(w3, root, { kind, base, id, name, current: [...paths][0] ?? "" }, supported, modes.has("Classic"), stored, reforgedModels);
+      if (reforgedFix) fixes.push(reforgedFix);
+      fixes.push({
         label: `Remove the ${items.length} placed`,
         title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
         run: () => removePlaced(w3, file, key, id),
@@ -622,7 +670,7 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
         severity: "warning",
         message: `${name} (${id}): no model in ${where} graphics, invisible there; placed ${items.length}×`
           + (reforgedOnly ? ` (the map holds only the Reforged version, ${reforgedPathOf(reforgedOnly)})` : "")
-          + (sources.length ? `. ${sourcesText(sources, [...paths][0])}` : ""),
+          + (plans.length ? `. ${sourcesText(plans.map((p) => p.source), variationFiles(plans[0])[0])}` : ""),
         location: file.slice(4),
         reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
         fixes,
@@ -683,12 +731,7 @@ async function useClassicModel(
   w3: W3Api, root: string | undefined, kind: string, base: string, id: string, name: string, current: string,
   classic: Set<string>, reforged: Record<Source, Set<string>>, preferred: Source[],
 ) {
-  // Words of the current model's file name ("Wood_Debris_Barrels_01" → wood, debris, barrels).
-  const words = (current.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2);
-  const score = (p: string) => { const l = p.toLowerCase(); return words.reduce((n, w) => n + (l.includes(w) ? 1 : 0), 0); };
-  const choices = (models: Set<string>) => [...models].map((p) => ({ p, s: score(p) })).sort((x, y) => y.s - x.s || x.p.localeCompare(y.p)).map(({ p, s }) => ({
-    path: p, label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), detail: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""),
-  }));
+  const choices = (models: Set<string>) => modelChoices(current, models);
   const modes: ModeChoices[] = [{ mode: "classic", label: "Classic", choices: choices(classic) }];
   // The set the type's own Reforged model comes from first.
   for (const s of [...preferred, ...(["de", "hd"] as const).filter((x) => !preferred.includes(x))]) {
@@ -697,17 +740,80 @@ async function useClassicModel(
   const pick = await pickClassicModel(w3, { title: `Model for ${name} (${id})`, current: current || null, modes });
   if (!pick) return;
   if (pick.mode === "classic") {
-    await serial(async () => {
-      sameProject(w3, root);
-      const apply = await prepareModel(w3, kind, base, id, modelFieldValue(kind, pick.path), 1);
-      sameProject(w3, root);
-      await apply();
-      await w3.workspace.refresh();
-    });
+    await writeGameModel(w3, root, { kind, base, id, name, current }, pick.path);
     return;
   }
   const bytes = await serial(() => convertToClassic(w3, root, kind, base, id, pick.path, 1, pick.mode as Source));
   void w3.window.showInfo(`Converted ${pick.path.split("\\").pop()} from the ${SOURCE_NAME[pick.mode as Source]} files to a Classic model for ${name} (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+}
+
+/** The object type a missing-model fix changes: its kind, base, id, name, and the model it names now. */
+interface ModelOwner { kind: string; base: string; id: string; name: string; current: string }
+
+/** The game's Reforged models that every supported Reforged mode loads (from its own set or the Classic files), per
+ *  set of a supported Reforged mode: what "Replace with a Reforged game model…" lists. Empty when the map supports no
+ *  Reforged mode. */
+export function reforgedChoices(
+  supported: readonly { layer: string | null }[], stored: Map<string | null, Set<string>>, reforged: Record<Source, Set<string>>,
+): { source: Source; models: string[] }[] {
+  const layers = supported.map((m) => m.layer).filter((l): l is string => !!l);
+  const loads = (p: string) => { const k = p.replace(/\\/g, "/").toLowerCase(); return layers.every((l) => stored.get(l)?.has(k) || stored.get(null)?.has(k)); };
+  return (["hd", "de"] as const).filter((s) => layers.includes(`_${s}`)).map((source) => ({ source, models: [...reforged[source]].filter(loads) })).filter((c) => c.models.length);
+}
+
+/** Whether "Replace with a Reforged game model…" is offered: the map supports a Reforged mode, and no supported mode
+ *  that has a model now would lose it. The type's one model field names the model for every mode (the map's object
+ *  data has no per-mode model), so a Reforged model is invisible in Classic: offered on a map with Classic only while
+ *  Classic has no model anyway (then the title says Classic stays without one). */
+export function offersReforgedReplace(supported: readonly { layer: string | null }[], classicMissing: boolean): boolean {
+  return supported.some((m) => m.layer) && (classicMissing || !supported.some((m) => !m.layer));
+}
+
+/** The "Replace with a Reforged game model…" fix (see offersReforgedReplace), or null. */
+function replaceWithReforged(
+  w3: W3Api, root: string | undefined, owner: ModelOwner, supported: readonly (typeof MODES)[number][], classicMissing: boolean,
+  stored: Map<string | null, Set<string>>, reforged: Record<Source, Set<string>>,
+): ProblemFix | null {
+  if (!offersReforgedReplace(supported, classicMissing)) return null;
+  const choices = reforgedChoices(supported, stored, reforged);
+  if (!choices.length) return null;
+  const classic = supported.some((m) => !m.layer);
+  const modes = supported.filter((m) => m.layer).map((m) => m.name).join(" and ");
+  return {
+    label: "Replace with a Reforged game model…",
+    title: `Pick one of the game's own Reforged models that ${modes} graphics load; it's written into the map's object data as it is (not converted)`
+      + (classic ? ". Classic graphics can't load a Reforged model, so the type stays invisible there: Convert or a Classic game model fixes that" : ""),
+    run: () => pickModelFor(w3, root, owner, choices.map(({ source, models }) => ({ mode: source, label: `Reforged (${SOURCE_NAME[source]})`, choices: modelChoices(owner.current, models) })),
+      "The Reforged set to take the model from. It is used as it is: only Reforged graphics show it."),
+  };
+}
+
+/** The picker's rows of `models`, best name matches with `current` first. */
+function modelChoices(current: string, models: Iterable<string>) {
+  // Words of the current model's file name ("Wood_Debris_Barrels_01" → wood, debris, barrels).
+  const words = (current.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2);
+  const score = (p: string) => { const l = p.toLowerCase(); return words.reduce((n, w) => n + (l.includes(w) ? 1 : 0), 0); };
+  return [...models].map((p) => p.replace(/\//g, "\\")).map((p) => ({ p, s: score(p) })).sort((x, y) => y.s - x.s || x.p.localeCompare(y.p)).map(({ p, s }) => ({
+    path: p, label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), detail: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""),
+  }));
+}
+
+/** Asks for a model among `modes` and writes it, as it is, into the type's model field (variations 1). */
+async function pickModelFor(w3: W3Api, root: string | undefined, owner: ModelOwner, modes: ModeChoices[], modeTitle?: string) {
+  const pick = await pickClassicModel(w3, { title: `Model for ${owner.name} (${owner.id})`, current: owner.current || null, modes, modeTitle });
+  if (pick) await writeGameModel(w3, root, owner, pick.path);
+}
+
+/** Writes a game model's path into the type's model field (a modified standard object, or the custom object itself),
+ *  variations 1: only the type the fix was found for changes, and only in the project it was found in. */
+async function writeGameModel(w3: W3Api, root: string | undefined, owner: ModelOwner, path: string) {
+  await serial(async () => {
+    sameProject(w3, root);
+    const apply = await prepareModel(w3, owner.kind, owner.base, owner.id, modelFieldValue(owner.kind, path), 1);
+    sameProject(w3, root);
+    await apply();
+    await w3.workspace.refresh();
+  });
 }
 
 /** Works out a type's model edit (see planModelEdit) and returns the function that writes it: every

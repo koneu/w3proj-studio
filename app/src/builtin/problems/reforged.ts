@@ -23,6 +23,38 @@ export function conversionSources(paths: string[], has: (source: Source, key: st
   return (["de", "hd"] as const).filter((s) => paths.length > 0 && paths.every((p) => has(s, p.replace(/\\/g, "/").toLowerCase())));
 }
 
+/** A type's model as the object data names it (without the variation number) and its variation count. */
+export interface ModelArt { model: string; variations: number }
+/** A Classic model the "Convert" fix can make: from the set `source`, the model `model` with its variations. */
+export interface ConversionPlan extends ModelArt { source: Source }
+
+/** The files of a model with its variations (X.mdx, or X0.mdx, X1.mdx… when there are several). */
+export function variationFiles({ model, variations }: ModelArt): string[] {
+  const stem = model.replace(/\.(mdl|mdx)$/i, "");
+  const n = Math.max(1, variations);
+  return Array.from({ length: n }, (_, v) => `${stem}${n > 1 ? v : ""}.mdx`);
+}
+
+/** The Classic models the Convert fix can make, one per Reforged set (DE, then HD): the first of the set's
+ *  `candidates` whose every variation the set holds. A type's candidates are the model it reads in that set's own art
+ *  (the skin tables split it: the Exterior Wall EW00 reads RuinsWall0 in Classic, which no folder has, and
+ *  RuinTomb\…\ExteriorWall in HD and DE), then the model found missing. When no single set has all of a candidate,
+ *  but both together do, DE is the source (the files are read from whichever has each, layerOrder). */
+export function conversionPlans(candidates: Record<Source, ModelArt[]>, has: (source: Source, key: string) => boolean): ConversionPlan[] {
+  const keys = (a: ModelArt) => variationFiles(a).map((p) => p.replace(/\\/g, "/").toLowerCase());
+  const plans: ConversionPlan[] = [];
+  for (const source of ["de", "hd"] as const) {
+    const art = candidates[source].find((a) => a.model && keys(a).every((k) => has(source, k)));
+    if (art) plans.push({ source, ...art });
+  }
+  if (plans.length) return plans;
+  for (const source of ["de", "hd"] as const) {
+    const art = candidates[source].find((a) => a.model && keys(a).every((k) => has("de", k) || has("hd", k)));
+    if (art) return [{ source: "de", ...art }];
+  }
+  return [];
+}
+
 /** First readable of `candidates`, searched set by set. Returns the candidate's name and its bytes. */
 export async function readLayered(
   candidates: string[], source: Source, read: (fullPath: string) => Promise<Uint8Array>, what = candidates[0] ?? "",
