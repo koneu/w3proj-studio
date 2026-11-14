@@ -189,6 +189,8 @@ export interface EditorInstance {
    *  file always counts: saved by something else, it reopens, or asks when there are unsaved
    *  changes.) */
   watches?: string[];
+  /** Like `watches`, for a set of files a list can't name (the art a view draws): true for a watched project file's key. */
+  watchesPath?(key: string): boolean;
 }
 
 export interface EditorProvider {
