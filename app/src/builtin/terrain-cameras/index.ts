@@ -436,7 +436,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         const dx = x - drag.start[0], dy = y - drag.start[1];
         // Enforce Camera Bounds: a step that would take a dragged target past the camera bounds is refused, and the
         // cameras stay where the last step left them, as the World Editor's dragged camera does (we-drive 2026-11-14:
-        // dragged from 2700 toward 3100 it stopped at 2784.3 short of the bound 2816; off, it went past).
+        // the drag that took a camera from 2700 to 3117.1 with the switch off left it at 2805.0, short of the bound 2816).
         const held = enforcing() ? knownBounds : null;
         if (held && [o, ...drag.others.values()].some((was) => !viewInCameraBounds(held, round(was.targetX + dx), round(was.targetY + dy)))) return;
         c.targetX = round(o.targetX + dx);

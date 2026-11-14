@@ -186,7 +186,8 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   2816, 0; 2700, 0; 0, -3000 with the eye south of the map); off, all are made (specs `camera-bounds-create`,
   `camera-bounds-create-off`). Camera Properties puts a Target X typed past the bound on it without a word (3100 became
   2816; off it stayed 3100: spec `camera-bounds-typed`), and a camera dragged by its model (View > Camera Objects on, a
-  click on bare ground first) from 2700 toward 3100 stopped at 2784.3 (off: 3117.1; no spec, the drag's steps vary).
+  click on bare ground first) from 2700 to 3117.1 with the switch off stopped at 2805.0 with it on, the last step short
+  of the bound (2784.3 in a quicker drag: no spec, the steps the editor sees vary).
   Everything else is the same on and off: a paste past the bounds is placed (a footman at
   3070.8, 0, an LPcr at 3072.2, -510.5; spec `camera-bounds-paste`), objects already past them stay through a save, a
   unit pasted or nudged past the playable part is refused either way (footman stays at 3296), and the view: the arrow
