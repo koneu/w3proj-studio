@@ -3147,6 +3147,49 @@ async function artModeReload(page, found) {
   }
 }
 
+/** An imported model overwritten on disk by another program (the window comes back, the app sees the file changed): the
+ *  terrain view draws the new model, live. A focus with nothing changed leaves the drawing as it was (control). */
+async function importArtReload(page, found) {
+  try {
+  const fail = (what) => found.push(`import art reload: ${what}`);
+  const k = await heightKit(page, "ImportArtReload");
+  const MODEL = "map/war3mapimported/artreload.mdx";
+  const file = join(k.root, "map", "war3mapimported", "artreload.mdx");
+  const game = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  const footman = await game("Units\\Human\\Footman\\Footman.mdx"), other = await game("Units\\Human\\Peasant\\Peasant.mdx");
+  mkdirSync(dirname(file), { recursive: true });
+  await page.evaluate(`window.__artReloadGroup?.dispose()`);
+  try {
+    await page.evaluate(`w3.workspace.writeBytes(${JSON.stringify(MODEL)}, Uint8Array.from(atob(${JSON.stringify(footman.toString("base64"))}), (c) => c.charCodeAt(0)))`);
+    const id = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Art Reload" })).id;
+    await k.tool("set_object_fields", { kind: "units", id, changes: [{ field: "umdl", value: "war3mapImported\\ArtReload.mdl" }] });
+    await k.tool("place_objects", { objects: [{ id, x: 0, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await page.evaluate(`(async () => {
+      const s = await w3.services.get("w3.terrain");
+      window.__artReloadGroup = s.registerToolGroup({ id: "smoke-art-reload", title: "smoke-art-reload", order: 998, create: (ed) => { window.__artReloadEd = ed; return { toolbar: document.createElement("div") }; } });
+    })()`);
+    const radius = () => page.evaluate(`window.__artReloadEd?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)})?.radius ?? null`);
+    if (!(await soon(async () => (await radius()) !== null, 30000))) return fail("the unit with the imported model isn't drawn");
+    const was = await radius();
+    const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
+    await focus();
+    await new Promise((r) => setTimeout(r, 1500));
+    if ((await radius()) !== was) fail("a focus with no file changed changed the drawing (control)");
+    // Another program overwrites the model (a later time, so the change shows).
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(file, other);
+    await focus();
+    if (!(await soon(async () => { const r = await radius(); return r !== null && Math.abs(r - was) > 0.01; }, 20000))) fail(`the view still draws the old model after the file was overwritten outside (radius ${await radius()}, was ${was})`);
+  } finally {
+    await page.evaluate(`window.__artReloadGroup?.dispose(); window.__artReloadGroup = null; window.__artReloadEd = null;`);
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -11896,6 +11939,7 @@ async function run() {
         heightsLimits,
         heightsPreserve,
         heightsUniform,
+        importArtReload,
         importWarnings,
         itemDrops,
         itemTablesAccess,
@@ -12174,6 +12218,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
   await leftOpen(page, "editorExtras", found);
+  await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
+  await leftOpen(page, "importArtReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));

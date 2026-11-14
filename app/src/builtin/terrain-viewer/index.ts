@@ -4372,7 +4372,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
           drawnUnits: (group = "units") => renderer.batches.filter((b) => b.group === group).flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
-            return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
+            return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model, radius: i.bounds?.[3] }] : [];
           })),
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
@@ -5615,6 +5615,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         let changes: Promise<boolean> = Promise.resolve(true);
         const reloadFile = (path: string) => {
+          // Imported art changed on disk: the loaded models and textures go and the objects are drawn anew (no undo or selection change).
+          if (projectObjects && path !== doc.path.toLowerCase() && changesImports(path)) {
+            importsChanged = true;
+            objectReload.schedule();
+            return objectReload.settled().then(() => true);
+          }
           // One at a time, in order; tools wait for them through ready().
           changes = changes.catch(() => true).then(() => takeChange(path));
           objectsPlaced = Promise.all([objectsPlaced, changes]).then(() => {});
@@ -5632,6 +5638,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redo,
           reloadFile,
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
+          watchesPath: (key: string) => projectObjects && changesImports(key),
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           // One save at a time, each taking its own snapshot: a later write can't be overtaken by an older one.
           save: editable ? serial(async () => {

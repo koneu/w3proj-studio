@@ -389,7 +389,7 @@ export class EditorService {
 
   /** The files a tab's editor shows: its own and those it watches (`key`: a file's key). */
   private shows(t: Tab, key: string) {
-    return this.key(t.path) === key || !!t.instance?.watches?.some((w) => this.key(w) === key);
+    return this.key(t.path) === key || !!t.instance?.watches?.some((w) => this.key(w) === key) || !!t.instance?.watchesPath?.(key);
   }
 
   private async load(tab: Tab) {
