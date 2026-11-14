@@ -10058,6 +10058,89 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** "Check with JassHelper" on a vJASS text (Trigger Editor), with the game's jasshelper.exe (through Proton on Linux):
+ *  the text is compiled inside the map's script, so a library that requires another text's library and names a placed
+ *  unit's global has no errors, where the same text alone has two (the control: what the check did before). An error
+ *  in another text is told with that text's name and line; a line typed and not saved is checked too, and its error
+ *  told by the text's own line. Needs the game (W3PROJ_GAME). */
+async function vjassCheck(page, found) {
+  const fail = (what) => found.push(`vJASS check: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  try {
+    const k = await heightKit(page, "VjassCheck");
+    // A save whose script JassHelper refuses says so once (Map Script): expected here while Lib A is broken.
+    await page.evaluate(`(() => { window.__vjWarns = []; w3.window.showWarning = (m) => { window.__vjWarns.push(String(m)); }; })()`);
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    const footman = k.units().find((u) => u.id === "hfoo");
+    if (!footman) return fail("the placed footman isn't in the units file (control)");
+    const global = `gg_unit_hfoo_${String(footman.editorId).padStart(4, "0")}`;
+    const libA = (call) => `library A\r\n    function AF takes nothing returns nothing\r\n        call ${call}\r\n    endfunction\r\nendlibrary\r\n`;
+    const usesA = (requires) => `library B initializer Init${requires}\r\n    private function Init takes nothing returns nothing\r\n        call KillUnit(${global})\r\n    endfunction\r\nendlibrary\r\n`;
+    await k.tool("create_script_trigger", { name: "Lib A", script: libA("DoNothing()") });
+    await k.tool("create_script_trigger", { name: "Uses A", script: usesA(" requires A") });
+    await settled(page);
+    // The map's own compile takes it: this is right code for this map.
+    const made = readFileSync(join(k.root, "map", "war3map.j"), "latin1");
+    if (!/LIBRARY_B\s*=\s*true/.test(made) || !made.includes(global)) return fail(`the map's script wasn't compiled with the two libraries (control): ${JSON.stringify(await page.evaluate(`window.__vjWarns`))}`);
+
+    /** Shows a trigger in the Trigger Editor, presses Check with JassHelper and gives what it says. */
+    const check = async (name) => {
+      await page.evaluate(`w3.commands.execute("w3.triggers.reveal", ${JSON.stringify(name)})`);
+      await until(`the vJASS text ${name}`, () => page.evaluate(`document.querySelector("input.trig-name")?.value === ${JSON.stringify(name)} && !!document.querySelector("button.vjass-check")`), 20000);
+      return pressCheck();
+    };
+    const pressCheck = async () => {
+      await k.hands.click("button.vjass-check");
+      const said = () => page.evaluate(`document.querySelector(".vjass-check-status")?.textContent ?? ""`);
+      await until("JassHelper's answer", async () => { const s = await said(); return s !== "" && !/^Compiling/.test(s); }, 120000);
+      return said();
+    };
+    const clean = await check("Uses A");
+    if (!/^JassHelper: no errors/.test(clean)) fail(`a library that requires another text's library and names a placed unit's global: ${clean}`);
+    const tip = await page.evaluate(`document.querySelector("button.vjass-check").title`);
+    if (/text alone/.test(tip) || !/map's script/.test(tip)) fail(`the check's tooltip says: ${tip}`);
+
+    // Control: the same text alone, as the check compiled it before, has both errors (one per run: JassHelper stops
+    // at the first step that fails).
+    const alone = (text) => page.evaluate(`(async () => {
+      const stub = "function main takes nothing returns nothing\\r\\nendfunction\\r\\nfunction config takes nothing returns nothing\\r\\nendfunction\\r\\n";
+      const dir = await w3.backend.invoke("tool_temp_dir");
+      const put = (name, content) => w3.workspace.writeText(dir + "/" + name, content);
+      await put("common.j", await w3.game.readText("Scripts\\\\common.j"));
+      await put("Blizzard.j", await w3.game.readText("Scripts\\\\Blizzard.j"));
+      await put("input.j", ${JSON.stringify(text)} + stub);
+      const exe = w3.settings.get("game.installDir") + "/_retail_/x86_64/JassHelper/jasshelper.exe";
+      const r = await w3.backend.invoke("tool_run", { exe, args: ["--scriptonly", "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir, guard: { idleMs: 60000, resultFiles: ["output.j", "logs/compileerrors.txt"] } });
+      return w3.workspace.readText(dir + "/logs/compileerrors.txt").catch(() => "no errors written, exit code " + r.code);
+    })()`, { timeout: 120000 });
+    const noLibrary = await alone(usesA(" requires A")), noGlobal = await alone(usesA(""));
+    if (!/Missing requirement: A/.test(noLibrary)) fail(`the text alone compiled without the library it requires (control): ${noLibrary}`);
+    if (!noGlobal.includes(`Undeclared variable ${global}`)) fail(`the text alone compiled without the unit's global (control): ${noGlobal}`);
+
+    // An error in the other text: told with that text's name and line, not as this text's.
+    await k.tool("set_trigger_script", { name: "Lib A", script: libA("NoSuchFunction()") });
+    await settled(page);
+    const elsewhere = await check("Uses A");
+    if (!/outside this text/.test(elsewhere) || !/in "Lib A", line 3: Undeclared function NoSuchFunction/.test(elsewhere) || /^JassHelper: Line/.test(elsewhere)) fail(`with an error in the other library, the check says: ${elsewhere}`);
+
+    // A line typed and not saved: checked as typed, its error by the text's own line (its sixth; step 1
+    // fails before Lib A's error is reached). Left unsaved: closing drops it.
+    await page.evaluate(`w3.commands.execute("w3.triggers.reveal", "Uses A")`);
+    await until("the vJASS text's code editor", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Uses A" && !!document.querySelector(".trig-code .cm-content")`), 20000);
+    await k.hands.click(".trig-code .cm-content");
+    await k.hands.chord("Ctrl+End");
+    await k.hands.type("//! runtextmacro SmokeNoSuchMacro()");
+    const typed = await pressCheck();
+    if (!/^JassHelper: Line 6: Unable to find textmacro/.test(typed)) fail(`with a line typed and not saved, the check says: ${typed}`);
+    if (readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8").includes("SmokeNoSuchMacro")) fail("the check saved the typed line");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`))) fail("the typed line isn't an unsaved change (control)");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** A map script changed by hand inside the functions the generator writes (main) isn't overwritten by the next save: it
  *  stays, a warning says so once per project, Show Difference shows it against what the map's data makes, and Replace
  *  makes a checkpoint first and then regenerates it. A project without the stamp (a fresh import) whose script is what
@@ -12165,6 +12248,7 @@ async function run() {
         unitProperties,
         verify3Steps,
         viewModes,
+        vjassCheck,
         waterPathing,
         wholeMapGround,
         workbenchState,
@@ -12361,6 +12445,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "staleEditors", found);
   await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
   await leftOpen(page, "scriptGuard", found);
+  await vjassCheck(page, found).catch((e) => found.push(`vJASS check: ${e.message}`));
+  await leftOpen(page, "vjassCheck", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));

@@ -551,6 +551,9 @@ export interface TriggerEditorHandle {
   /** The trigger's custom script text (war3map.wct), or null. */
   customText(trigger: TriggerItem): string | null;
   setCustomText(trigger: TriggerItem, text: string | null): void;
+  /** All custom texts as the editor holds them now (unsaved changes included): the map header and one text per
+   *  trigger and script item, in the order of war3map.wct. A copy. */
+  customFile(): import("../lib/triggers/wtg").CustomTextFile;
   /** Runs `change` on the trigger data as one undo step (snapshot before and after) and redraws;
    *  `keepView` leaves the trigger's own view as it is (an editor committing while typing). */
   edit(label: string, change: () => void, opts?: { keepView?: boolean }): void;
@@ -603,6 +606,11 @@ export interface ScriptLanguagesService {
   register(language: ScriptLanguage): { dispose(): void };
   /** The registered languages (in registration order). */
   languages(): ScriptLanguage[];
+  /** The open JASS map's script as it is generated before any language compiles it (what a language's `compile`
+   *  gets), made from the project's saved files but with these triggers and custom texts in place of the saved
+   *  ones (a trigger editor's, unsaved changes included). Nothing is written. Throws for a Lua map, without a
+   *  project, or when the script can't be generated. */
+  source(held: { triggers: import("../lib/triggers/wtg").TriggerFile; custom: import("../lib/triggers/wtg").CustomTextFile | null }): Promise<string>;
 }
 
 export const SCRIPT_LANGUAGES_SERVICE = "w3.scriptLanguages";
