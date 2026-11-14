@@ -96,10 +96,85 @@ pub fn command(proton: &Proton, exe: &Path, args: &[String]) -> Command {
     cmd
 }
 
+/// Ends Wine's desktop process (`explorer.exe /desktop`) of `proton`'s prefix when the X display it was started on is
+/// gone. The first Windows program in a prefix starts it on that program's display, and every later program in the
+/// prefix waits on it; when that display has ended (a hidden Xvfb of a smoke run or tester app that stopped, while
+/// another app on another display uses the same prefix), the desktop stays but every later program hangs or exits
+/// having done nothing (JassHelper, 2026-11-14: "nothing happened for 60 s", or exit code 0 and no output). With it
+/// ended, the next program starts a new one on its own display. A desktop on a display that is there (the user's
+/// screen) is never touched.
+#[cfg(target_os = "linux")]
+pub fn end_stale_desktops(proton: &Proton) {
+    let prefix = proton.compat_data.join("pfx");
+    let x11 = Path::new("/tmp/.X11-unix");
+    let Ok(procs) = std::fs::read_dir("/proc") else { return };
+    for p in procs.flatten() {
+        let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else { continue };
+        let (Ok(cmdline), Ok(environ)) = (std::fs::read(p.path().join("cmdline")), std::fs::read(p.path().join("environ"))) else { continue };
+        if is_stale_desktop(&cmdline, &environ, &prefix, x11) {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
+/// Whether a process (its NUL-separated command line and environment) is the Wine desktop of `prefix` on an X
+/// display whose socket isn't in `x11` (/tmp/.X11-unix) any more.
+#[cfg(any(target_os = "linux", test))]
+fn is_stale_desktop(cmdline: &[u8], environ: &[u8], prefix: &Path, x11: &Path) -> bool {
+    let args: Vec<String> = cmdline.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).to_lowercase()).collect();
+    let is_desktop = args.first().is_some_and(|a| a.rsplit(['\\', '/']).next() == Some("explorer.exe")) && args.iter().skip(1).any(|a| a.starts_with("/desktop"));
+    if !is_desktop {
+        return false;
+    }
+    let var = |name: &str| environ.split(|b| *b == 0).find_map(|e| e.strip_prefix(format!("{name}=").as_bytes()).map(|v| String::from_utf8_lossy(v).into_owned()));
+    let Some(wine_prefix) = var("WINEPREFIX") else { return false };
+    if Path::new(wine_prefix.trim_end_matches('/')) != prefix {
+        return false;
+    }
+    var("DISPLAY").is_some_and(|d| display_gone(&d, x11))
+}
+
+/// Whether a local X display (`:N`, `:N.S`, `unix:N`) has no socket in `x11`; a display on another host is never gone.
+#[cfg(any(target_os = "linux", test))]
+fn display_gone(display: &str, x11: &Path) -> bool {
+    let local = display.strip_prefix("unix").unwrap_or(display);
+    let Some(number) = local.strip_prefix(':').map(|n| n.split('.').next().unwrap_or_default()) else { return false };
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    !x11.join(format!("X{number}")).exists()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A desktop is stale only when it is the prefix's explorer.exe /desktop and its local display's socket is gone.
+    #[test]
+    fn only_the_prefixs_desktop_on_a_display_that_is_gone_is_stale() {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let x11 = std::env::temp_dir().join(format!("w3proj-x11-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&x11);
+        std::fs::create_dir_all(&x11).unwrap();
+        std::fs::write(x11.join("X0"), "").unwrap();
+        let prefix = Path::new("/steam/steamapps/compatdata/1/pfx");
+        let desktop = b"C:\\windows\\system32\\explorer.exe\0/desktop\0";
+        let env = |display: &str, pfx: &str| format!("HOME=/h\0WINEPREFIX={pfx}\0DISPLAY={display}\0").into_bytes();
+        assert!(is_stale_desktop(desktop, &env(":101", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        assert!(is_stale_desktop(desktop, &env(":101.0", "/steam/steamapps/compatdata/1/pfx"), prefix, &x11));
+        // The control: the same on a display that is there (the user's screen).
+        assert!(!is_stale_desktop(desktop, &env(":0", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        assert!(!is_stale_desktop(desktop, &env(":0.0", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        // Another prefix's, another program, a remote display, none.
+        assert!(!is_stale_desktop(desktop, &env(":101", "/steam/steamapps/compatdata/2/pfx/"), prefix, &x11));
+        assert!(!is_stale_desktop(b"C:\\windows\\system32\\explorer.exe\0", &env(":101", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        assert!(!is_stale_desktop(b"C:\\windows\\system32\\services.exe\0", &env(":101", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        assert!(!is_stale_desktop(desktop, &env("otherhost:10.0", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        assert!(!is_stale_desktop(desktop, b"WINEPREFIX=/steam/steamapps/compatdata/1/pfx\0", prefix, &x11));
+        assert!(!is_stale_desktop(desktop, &env(":", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
+        let _ = std::fs::remove_dir_all(&x11);
+    }
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 

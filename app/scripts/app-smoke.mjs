@@ -8065,8 +8065,7 @@ async function gameReadsOnce(page, found) {
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   // The minimap panel is off for the first opening: it keeps the colours of the tiles' textures it made before (in a cache
   // of its own that the page can't empty), so what it reads depends on the checks before; its reads are counted apart below.
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
-  const root = join(work, "game-reads");
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);  const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
   // A tree, a goldmine (a ground mark) and a footman: models, textures and splats from the game.
@@ -10324,18 +10323,29 @@ async function vjassCheck(page, found) {
     if (/text alone/.test(tip) || !/map's script/.test(tip)) fail(`the check's tooltip says: ${tip}`);
 
     // Control: the same text alone, as the check compiled it before, has both errors (one per run: JassHelper stops
-    // at the first step that fails).
+    // at the first step that fails). Each run in a new folder; a run that wrote neither its output nor its errors did no
+    // work (seen through Proton with another JassHelper in the prefix, 2026-11-14) and is made again, as the app does
+    // (vjass/run.ts).
     const alone = (text) => page.evaluate(`(async () => {
       const stub = "function main takes nothing returns nothing\\r\\nendfunction\\r\\nfunction config takes nothing returns nothing\\r\\nendfunction\\r\\n";
-      const dir = await w3.backend.invoke("tool_temp_dir");
-      const put = (name, content) => w3.workspace.writeText(dir + "/" + name, content);
-      await put("common.j", await w3.game.readText("Scripts\\\\common.j"));
-      await put("Blizzard.j", await w3.game.readText("Scripts\\\\Blizzard.j"));
-      await put("input.j", ${JSON.stringify(text)} + stub);
-      const exe = w3.settings.get("game.installDir") + "/_retail_/x86_64/JassHelper/jasshelper.exe";
-      const r = await w3.backend.invoke("tool_run", { exe, args: ["--scriptonly", "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir, guard: { idleMs: 60000, resultFiles: ["output.j", "logs/compileerrors.txt"] } });
-      return w3.workspace.readText(dir + "/logs/compileerrors.txt").catch(() => "no errors written, exit code " + r.code);
-    })()`, { timeout: 120000 });
+      const said = [];
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const dir = await w3.backend.invoke("tool_temp_dir");
+        const put = (name, content) => w3.workspace.writeText(dir + "/" + name, content);
+        await put("common.j", await w3.game.readText("Scripts\\\\common.j"));
+        await put("Blizzard.j", await w3.game.readText("Scripts\\\\Blizzard.j"));
+        await put("input.j", ${JSON.stringify(text)} + stub);
+        const exe = w3.settings.get("game.installDir") + "/_retail_/x86_64/JassHelper/jasshelper.exe";
+        const r = await w3.backend.invoke("tool_run", { exe, args: ["--scriptonly", "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir, guard: { idleMs: 60000, resultFiles: ["output.j", "logs/compileerrors.txt"] } });
+        const log = await w3.workspace.readText(dir + "/logs/compileerrors.txt").catch(() => null);
+        if (log !== null) return log;
+        const compiled = await w3.backend.invoke("fs_exists", { path: dir + "/output.j" });
+        said.push("run " + attempt + ": no errors written, exit code " + r.code + (r.killed ? ", " + r.killed : "") + (compiled ? ", output.j written" : "") + " (" + dir + ")" + (r.stderr || r.stdout ? ": " + (r.stderr || r.stdout).trim().slice(-300) : ""));
+        if (compiled) break;
+        await new Promise((done) => setTimeout(done, 500 + Math.random() * 1500));
+      }
+      return said.join(" · ");
+    })()`, { timeout: 400000 });
     const noLibrary = await alone(usesA(" requires A")), noGlobal = await alone(usesA(""));
     if (!/Missing requirement: A/.test(noLibrary)) fail(`the text alone compiled without the library it requires (control): ${noLibrary}`);
     if (!noGlobal.includes(`Undeclared variable ${global}`)) fail(`the text alone compiled without the unit's global (control): ${noGlobal}`);

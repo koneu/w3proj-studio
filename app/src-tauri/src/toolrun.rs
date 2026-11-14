@@ -226,6 +226,27 @@ fn is_file_ci(dir: &Path, name: &str) -> bool {
     std::fs::read_dir(dir).is_ok_and(|es| es.flatten().any(|e| e.file_name().to_string_lossy().to_lowercase() == name && e.path().is_file()))
 }
 
+/// Waits until no other run of `program` holds its lock on this machine (any Studio, any user session sharing the temp
+/// folder), and holds it until the returned file is dropped; the system lets go of it when the process ends. Two
+/// JassHelpers at once in one Wine prefix (two apps, a smoke run's two parts and a tester, 2026-11-14): the second
+/// made an empty logs folder and exited 0 having done nothing. None when the lock can't be had (no wait then).
+#[cfg(unix)]
+pub fn one_at_a_time(program: &Path, folder: &Path) -> Option<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+    // FNV-1a of the program's path, case aside: one lock file per program.
+    let hash = program.to_string_lossy().to_lowercase().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+    std::fs::create_dir_all(folder).ok()?;
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(folder.join(format!("program-{hash:016x}.lock"))).ok()?;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Some(file);
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return None;
+        }
+    }
+}
+
 /// The run's stdout and stderr files, in a folder of their own that goes with it.
 struct Output {
     dir: PathBuf,
@@ -300,6 +321,28 @@ mod tests {
             assert!(t.elapsed() < Duration::from_secs(5), "no pid in {}", file.display());
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// A second run of the same program waits for the first's lock to go (the file dropped); another program doesn't.
+    #[test]
+    fn a_second_run_of_the_same_program_waits_for_the_first() {
+        let dir = scratch("lock");
+        let first = one_at_a_time(Path::new("/games/JassHelper/jasshelper.exe"), &dir).expect("the first lock");
+        let other = one_at_a_time(Path::new("/games/other.exe"), &dir);
+        assert!(other.is_some(), "another program waited");
+        let (tx, rx) = mpsc::channel();
+        let d = dir.clone();
+        let waiter = std::thread::spawn(move || {
+            let second = one_at_a_time(Path::new("/games/JASSHELPER/jasshelper.exe"), &d);
+            tx.send(second.is_some()).unwrap();
+        });
+        // The control: while the first holds it, the second hasn't got it.
+        assert!(rx.recv_timeout(Duration::from_millis(400)).is_err(), "the second run didn't wait for the first");
+        drop(first);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(true), "the second run didn't get the lock once the first let go");
+        waiter.join().unwrap();
+        drop(other);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Wine's services start with the first Windows program in a prefix, inherit its stdout and stderr, and may stay for

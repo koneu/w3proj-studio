@@ -14,6 +14,7 @@ import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
 import { checkMessages, markTexts, placeErrors } from "./check";
+import { runJassHelper } from "./run";
 import { vjassExports, vjassSymbols } from "./symbols";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments
@@ -61,32 +62,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) {
       throw new Error(`JassHelper not found (${path}). Set "vjass.jassHelper" to jasshelper.exe.`);
     }
-    const dir = await w3.backend.invoke<string>("tool_temp_dir");
-    await w3.workspace.writeText(joinPath(dir, "common.j"), commonJ);
-    await w3.workspace.writeText(joinPath(dir, "Blizzard.j"), blizzardJ);
-    await w3.workspace.writeText(joinPath(dir, "input.j"), script);
     const flags = [...(w3.settings.get<boolean>("vjass.debug") ? ["--debug"] : []), ...(w3.settings.get<boolean>("vjass.optimize") === false ? ["--nooptimize"] : [])];
-    // Ended when it goes this long without progress, or doesn't exit once its result is written (JassHelper in Wine
-    // has kept running after its work; toolrun.rs).
     const seconds = w3.settings.get<number>("vjass.timeout");
     const idleMs = Math.max(5, typeof seconds === "number" && Number.isFinite(seconds) ? seconds : 60) * 1000;
-    const r = await w3.backend.invoke<{ code: number; stdout: string; stderr: string; killed?: string }>("tool_run", {
-      exe: path, args: ["--scriptonly", ...flags, "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir,
-      guard: { idleMs, resultFiles: ["output.j", "logs/compileerrors.txt"] },
-    });
-    const errorsAt = joinPath(dir, "logs/compileerrors.txt");
-    if (r.killed) {
-      // Ended before it exited: its files say how it went. Errors written: those. Its output alone: the result.
-      if (await w3.backend.invoke<boolean>("fs_exists", { path: errorsAt })) r.code = 1;
-      else if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "output.j") })) return { output: await w3.workspace.readText(joinPath(dir, "output.j")) };
-      else throw new Error(`JassHelper didn't finish: ${r.killed}, and wrote no result (files in ${dir}). "vjass.timeout" sets the time.`);
-    }
-    if (r.code !== 0) {
-      // JassHelper writes its errors (its own, or pjass's) to logs\compileerrors.txt.
-      const log = await w3.workspace.readText(errorsAt).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
-      return { log, current: await w3.workspace.readText(joinPath(dir, "logs/currentmapscript.j")).catch(() => null), dir };
-    }
-    return { output: await w3.workspace.readText(joinPath(dir, "output.j")) };
+    const io = { invoke: <T>(cmd: string, args?: Record<string, unknown>) => w3.backend.invoke<T>(cmd, args), writeText: (p: string, t: string) => w3.workspace.writeText(p, t), readText: (p: string) => w3.workspace.readText(p) };
+    return runJassHelper(io, path, script, commonJ, blizzardJ, flags, idleMs);
   };
   const compile = async (script: string, commonJ: string, blizzardJ: string): Promise<string> => {
     const r = await run(script, commonJ, blizzardJ);

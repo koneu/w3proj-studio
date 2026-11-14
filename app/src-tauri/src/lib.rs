@@ -775,6 +775,8 @@ fn program(exe: &str, args: Vec<String>) -> CmdResult<Command> {
     #[cfg(not(windows))]
     if proton::is_windows_program(Path::new(exe)) {
         let p = proton::proton_for(Path::new(exe))?;
+        #[cfg(target_os = "linux")]
+        proton::end_stale_desktops(&p);
         let args: Vec<String> = args.iter().map(|a| proton::wine_path(a)).collect();
         return Ok(proton::command(&p, Path::new(exe), &args));
     }
@@ -875,6 +877,9 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String, guard: Option<too
         // A program given by its path (not one found on PATH, like git) has a folder its own programs come from.
         let own = Path::new(&exe);
         let own = own.is_absolute().then_some(own);
+        // A Windows program through Proton runs once at a time on this machine (toolrun::one_at_a_time).
+        #[cfg(not(windows))]
+        let _one = proton::is_windows_program(own.unwrap_or(Path::new(""))).then(|| toolrun::one_at_a_time(Path::new(&exe), &std::env::temp_dir().join("w3proj-studio"))).flatten();
         toolrun::run(cmd, &exe, Path::new(&cwd), own, guard.as_ref())
     })
     .await

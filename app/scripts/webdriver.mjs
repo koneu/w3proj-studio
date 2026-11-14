@@ -199,8 +199,11 @@ export async function launch(exe, env = {}, attempt = 1) {
   const missing = missingTools();
   if (missing.length) throw new Error(`missing for the Linux smoke test: ${missing.join(", ")} (run scripts/setup-linux.sh)`);
   const port = await freePort(), nativePort = await freePort();
+  // xvfb-run sets DISPLAY; a Wayland session's WAYLAND_DISPLAY would still lead the app (and what it starts, like
+  // JassHelper through Proton) to the user's screen, so it isn't passed on.
+  const { WAYLAND_DISPLAY: _wayland, ...inherited } = process.env;
   const driver = spawn("xvfb-run", ["-a", "-s", "-screen 0 1600x1000x24", "tauri-driver", "--port", String(port), "--native-port", String(nativePort)], {
-    stdio: ["ignore", "ignore", "pipe"], detached: true, env: { ...process.env, ...env },
+    stdio: ["ignore", "ignore", "pipe"], detached: true, env: { ...inherited, ...env },
   });
   let stderr = "";
   driver.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
