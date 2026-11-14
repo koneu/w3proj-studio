@@ -119,8 +119,8 @@ test("the map's custom script header goes under a second banner after the object
   const again = splitSections(script);
   assert.equal(again.get(HEADER_SECTION), generateSections(input({ triggers: wtg([]), custom, regions })).get(HEADER_SECTION));
   assert.ok(!again.get("Custom Script Code")!.includes("function H"));
-  // Without code no second banner.
-  const empty = generateScript(input({ triggers: wtg([]), custom: { ...custom, header: "\r\n" } }));
+  // An empty header makes no second banner; one of a line break does (header-newlines below).
+  const empty = generateScript(input({ triggers: wtg([]), custom: { ...custom, header: "" } }));
   assert.equal(empty.split("//*  Custom Script Code").length, 2);
 });
 
@@ -1138,7 +1138,7 @@ test("an initially off trigger with Run on Map Initialization isn't run at the s
   }
 });
 
-test("a header of only spaces is kept as a line; one of only line breaks makes nothing", () => {
+test("a header of only spaces is kept as a line", () => {
   const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });
   const regions = [{ name: "R", index: 0, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" }];
   const lua = luaScript(wtg([trigger("T", [])]), { custom: custom("   "), regions });
@@ -1146,5 +1146,21 @@ test("a header of only spaces is kept as a line; one of only line breaks makes n
   const lines = lua.split(EOL), at = lines.indexOf("   ");
   assert.ok(at > lines.indexOf("function CreateRegions()") && at < lines.indexOf("function Trig_T_Actions()"), lua);
   assert.equal(jassScript(wtg([]), { custom: custom("   "), regions }).split("//*  Custom Script Code").length, 3);
-  assert.equal(jassScript(wtg([]), { custom: custom("\r\n"), regions }).split("//*  Custom Script Code").length, 2);
+});
+
+test("a header of only line breaks gets its banner and its empty lines, as the World Editor's (control: an empty header none)", () => {
+  // we-compare header-newlines and header-newlines-lua (2026-11-14, branch water-low-header-we): the header "\n\n"
+  // came out as the second banner and three empty lines in war3map.j, and as three empty lines in war3map.lua.
+  const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });
+  const stars = "//" + "*".repeat(75);
+  const j = jassScript(wtg([]), { custom: custom("\n\n") });
+  assert.ok(j.includes(["//*  Custom Script Code", "//*", stars, "", "", "", stars].join(EOL)), j);
+  assert.equal(j.split("//*  Custom Script Code").length, 3);
+  assert.equal(jassScript(wtg([]), { custom: custom("") }).split("//*  Custom Script Code").length, 2, "an empty header: no banner");
+  const none = luaScript(wtg([trigger("T", [])]), { custom: custom("") }).split(EOL);
+  const lua = luaScript(wtg([trigger("T", [])]), { custom: custom("\n\n") }).split(EOL);
+  const k = lua.findIndex((l, n) => l !== none[n]);
+  assert.ok(k > 0, "the Lua script has the header's lines");
+  assert.deepEqual(lua.slice(k, k + 3), ["", "", ""]);
+  assert.deepEqual(lua.slice(k + 3), none.slice(k));
 });

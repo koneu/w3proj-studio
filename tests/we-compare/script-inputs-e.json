@@ -229,7 +229,7 @@
   },
   {
     "name": "header-newlines",
-    "description": "A header of line breaks only: Studio writes nothing for it. KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor writes the empty second Custom Script Code banner for it, Studio nothing (lib/script/jass.ts mapHeader)",
+    "description": "A header of line breaks only (\"\\n\\n\"): the editor writes the second Custom Script Code banner and three empty lines, and Studio too since branch water-low-header-we (lib/script/jass.ts mapHeader; the editor keeps the header's LF breaks, Studio writes CRLF, which a text compare doesn't see)",
     "input": {
       "new": {
         "name": "HeaderLines",
@@ -270,8 +270,127 @@
     "compare": [
       {
         "file": "war3map.j",
-        "as": "text",
-        "expect": "differs"
+        "as": "text"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "header-newlines-lua",
+    "description": "header-newlines in a Lua map (scriptType 1): the editor writes three empty lines for the header \"\\n\\n\" into war3map.lua, Studio too (branch water-low-header-we)",
+    "input": {
+      "new": {
+        "name": "HeaderLinesLua",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n\n\n"
+          }
+        },
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.w3i.json",
+            "find": "\"scriptType\": 0",
+            "replace": "\"scriptType\": 1"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.lua",
+        "as": "text"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "header-spaces-lua",
+    "description": "header-spaces in a Lua map (scriptType 1): a header of three spaces stays a line in war3map.lua, in the editor and in Studio (branch water-low-header-we)",
+    "input": {
+      "new": {
+        "name": "HeaderSpacesLua",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n   "
+          }
+        },
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.w3i.json",
+            "find": "\"scriptType\": 0",
+            "replace": "\"scriptType\": 1"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.lua",
+        "as": "text"
       },
       {
         "file": "war3map.wct.txt",

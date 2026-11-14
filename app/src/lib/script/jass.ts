@@ -259,12 +259,14 @@ export const HEADER_SECTION = "Custom Script Code (header)";
  *  map's objects (Regions, Cameras) and before the triggers, as the World Editor writes it; the first
  *  banner after the globals stays empty then (all six game maps with a header: War3XBonusCredits,
  *  Human06, WormWar, BomberCommand, AzerothGrandPrix, and the Lua map SilverpineSprint). The text as it
- *  is, its leading empty lines too (BomberCommand). Nothing for an empty header or one of only line breaks;
- *  one of spaces is written (war3map.lua, World Editor 2026-11-12: "   " stays a line; no game map has
- *  such a header, so JASS is taken to do the same). */
+ *  is, its leading empty lines too (BomberCommand). Nothing for an empty header; one of spaces is written
+ *  (war3map.lua, World Editor 2026-11-12: "   " stays a line), and so is one of line breaks only: the World Editor
+ *  wrote the banner, the two line breaks of a header "\n\n" and its own line break after them, in war3map.j and
+ *  war3map.lua alike (we-compare header-newlines and header-newlines-lua, 2026-11-14, branch water-low-header-we;
+ *  it keeps the header's own LF breaks, which Studio writes as CRLF). */
 export function mapHeader(i: ScriptInput): string {
   const text = i.custom?.header ?? "";
-  if (!/[^\r\n]/.test(text)) return "";
+  if (!text) return "";
   return banner("Custom Script Code").slice(0, -EOL.length) + codeLines(i, text);
 }
 
