@@ -361,7 +361,7 @@ test("the water words don't limit the shift of dry corners: theirs wrap round, a
 });
 
 /** The Area panel's Level +1/-1: Adjust Cliff Levels on a block of corners (inclusive corner numbers). */
-test("Adjust Cliff Levels on a block moves only its corners' layers and water: ramps and cliff types stay, the edge becomes a cliff", () => {
+test("Adjust Cliff Levels on a block moves only its corners' layers and water: cliff types stay, the edge becomes a cliff", () => {
   // make()'s corners 1 (land, x 1) and 2 (lake, x 2) on the bottom row, and the ramp corner 5 above corner 1.
   const before = make(), t = make(), undo = new CornerUndo();
   const block = { x0: 1, y0: 0, x1: 2, y1: 1 };
@@ -372,10 +372,10 @@ test("Adjust Cliff Levels on a block moves only its corners' layers and water: r
     assert.equal(c.layer, b.layer + (inside ? 1 : 0), `corner ${i}'s level`);
     assert.equal(c.rawWater, b.rawWater + (inside ? 0x200 : 0), `corner ${i}'s water word`);
     assert.equal(c.water, b.water + (inside ? 128 : 0), `corner ${i}'s water`);
-    const rest = (k: Corner) => ({ ...k, layer: 0, height: 0, rawWater: 0, water: 0 });
-    assert.deepEqual(rest(c), rest(b), `corner ${i}: nothing but the level and the water changes`);
+    const rest = (k: Corner) => ({ ...k, layer: 0, height: 0, rawWater: 0, water: 0, ramp: false });
+    assert.deepEqual(rest(c), rest(b), `corner ${i}: nothing but the level, the water and the ramp flag changes`);
   });
-  assert.equal(t.corners[5].ramp, true, "the ramp the block cuts through stays, as Adjust Cliff Levels keeps ramps");
+  assert.equal(t.corners[5].ramp, false, "the ramp the block's edge runs beside (corner 4 stays) loses its flag");
   const step = undo.step(t);
   assert.equal(step.corners.length, 4, "one step of the block's corners");
   step.undo();
@@ -402,16 +402,15 @@ test("Adjust Cliff Levels on a block keeps it within levels 0 to 14", () => {
   assert.equal(t.corners[3].layer, 2, "the corner beside the block stays");
 });
 
-test("Level +1 then -1 on a block of a real map gives the file back, and +1 changes only the block's layers and water words", (ctx) => {
+test("Level +1 then -1 on a block of a real map changes only the block's layers and water words and the flags of the ramps it cuts", (ctx) => {
   const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
-  let tried = 0;
+  let tried = 0, cut = 0;
   for (const name of maps) {
     const original = realW3e(name);
     if (!original) continue;
     tried++;
     const t = parseW3e(original);
-    // A block round the map's first ramp corner, its edge through the ramp, so that the old way (ramps cut through
-    // taken away, cliff types matched) would show; else the middle of the map.
+    // A block round the map's first ramp corner, its edge through the ramp; else the middle of the map.
     const ramp = t.corners.findIndex((c) => c.ramp);
     const cx = ramp >= 0 ? ramp % t.width : t.width >> 1, cy = ramp >= 0 ? Math.floor(ramp / t.width) : t.height >> 1;
     const block = { x0: Math.max(0, cx - 6), y0: Math.max(0, cy - 6), x1: cx, y1: Math.min(t.height - 1, cy + 6) };
@@ -419,15 +418,71 @@ test("Level +1 then -1 on a block of a real map gives the file back, and +1 chan
     const count = (block.x1 - block.x0 + 1) * (block.y1 - block.y0 + 1);
     assert.ok(cliffShiftRange(t, block).max >= 1, `${name}: the block has room to go up`);
     const undo = new CornerUndo();
-    assert.equal(adjustCliffLevels(t, 1, undo, block), count, name);
-    assert.equal(undo.step(t).corners.length, count, `${name}: one step of the block's corners`);
+    const flagged = t.corners.map((c) => c.ramp);
+    const n = adjustCliffLevels(t, 1, undo, block);
+    const dropped = flagged.flatMap((f, i) => (f && !t.corners[i].ramp ? [i] : []));
+    if (ramp >= 0 && dropped.length) cut++;
+    assert.ok(t.corners.every((c, i) => !c.ramp || flagged[i]), `${name}: no flag is added`);
+    assert.equal(n, count + dropped.filter((i) => !inside(i)).length, `${name}: the block's corners and the flags taken off past it`);
+    assert.equal(undo.step(t).corners.length, n, `${name}: one step of them`);
+    // With the flags it took off put back, the bytes are the World Editor's +1 of the block, and -1 gives the file.
+    for (const i of dropped) t.corners[i].ramp = true;
     const up = writeW3e(t);
     checkPlusOne(name, original, up, t, inside);
     const back = parseW3e(up);
-    assert.equal(adjustCliffLevels(back, -1, new CornerUndo(), block), count);
-    assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
+    assert.equal(adjustCliffLevels(back, -1, new CornerUndo(), block), n, `${name}: -1 moves the block back and cuts the same ramps`);
+    for (const i of dropped) back.corners[i].ramp = true;
+    assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file but for those flags`);
   }
   if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
+  else assert.ok(cut > 0, "a block's edge cut a ramp on one of the maps at least (control)");
+});
+
+/** Last Refuge's ramp (smoketest_maps/blizzard/(2)LastRefuge_S2_v1.5.w3x, corners x 27-32, y 25-30): a diagonal ramp
+ *  from level 2 up to level 3, its flags as the map has them, on level 2 ground with level 3 to the east. Rows north
+ *  first, x 22-38: a digit is the level, "r" a ramp flag. */
+const LAST_REFUGE = [
+  "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
+  "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
+  "2. 2. 2. 2. 2. 2r 2r 2r 2r 3r 3r 3. 3. 3. 2. 2. 2.",
+  "2. 2. 2. 2. 2. 2r 2r 2r 3r 3r 3. 3. 3. 3. 2. 2. 2.",
+  "2. 2. 2. 2. 2. 2r 2r 3r 3r 3. 3. 3. 3. 3. 3. 2. 2.",
+  "2. 2. 2. 2. 2. 2r 2r 3r 3. 3. 3. 3. 3. 3. 3. 2. 2.",
+];
+function lastRefuge(): Terrain {
+  const t = make(), width = 40, height = 40;
+  const proto = { ...t.corners[0], ramp: false, hasWater: false, layer: 2 };
+  t.width = width; t.height = height;
+  t.corners = Array.from({ length: width * height }, () => ({ ...proto }));
+  LAST_REFUGE.forEach((row, r) => row.split(" ").forEach((cell, k) => {
+    const c = t.corners[(30 - r) * width + 22 + k];
+    c.layer = Number(cell[0]);
+    c.ramp = cell[1] === "r";
+  }));
+  return t;
+}
+const flagsOf = (t: Terrain) => t.corners.flatMap((c, i) => (c.ramp ? [i] : []));
+
+test("Level ±1 on a block through Last Refuge's ramp takes its flags off, where the World Editor draws holes", () => {
+  // Through the ramp: Level +1 and -1 on x 29-32, y 27-30 (round 7's cut; the World Editor drew the w3e Studio saved
+  // then with black wedges: we-drive 2026-11-14), and +1 on the ramp alone, x 27-32, y 25-30 (cliffs beside it).
+  for (const [by, block] of [[1, { x0: 29, y0: 27, x1: 32, y1: 30 }], [-1, { x0: 29, y0: 27, x1: 32, y1: 30 }], [1, { x0: 27, y0: 25, x1: 32, y1: 30 }]] as const) {
+    const before = lastRefuge(), t = lastRefuge(), undo = new CornerUndo();
+    const n = adjustCliffLevels(t, by, undo, block);
+    assert.deepEqual(flagsOf(t), [], `${by} on ${JSON.stringify(block)}: every flag of the ramp goes`);
+    const step = undo.step(t);
+    assert.equal(step.corners.length, n);
+    step.undo();
+    assert.deepEqual(t.corners, before.corners, "one undo gives the levels and the flags back");
+  }
+  // A block that takes the ramp and the ground round it moves it whole: the ramp keeps its flags.
+  const t = lastRefuge(), was = flagsOf(t);
+  assert.equal(adjustCliffLevels(t, 1, new CornerUndo(), { x0: 25, y0: 23, x1: 34, y1: 32 }), 100);
+  assert.deepEqual(flagsOf(t), was);
+  // A block that leaves the ramp and its neighbours alone leaves the flags.
+  const far = lastRefuge();
+  adjustCliffLevels(far, 1, new CornerUndo(), { x0: 0, y0: 0, x1: 10, y1: 10 });
+  assert.deepEqual(flagsOf(far), was);
 });
 
 test("Reset Height Field Random keeps the ground words inside the 16-bit range near the height limits", () => {

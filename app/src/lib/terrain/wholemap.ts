@@ -2,7 +2,7 @@
 // Adjust Cliff Levels.
 // Each reports the corners it changes to a log first, so the caller makes one undo step of them.
 
-import type { CornerLog } from "./cliffs";
+import { dropCutRamps, type CornerLog } from "./cliffs";
 import type { CornerArea } from "./fragment";
 import { setGroundHeight, setLayer, type Terrain } from "./w3e";
 
@@ -157,7 +157,8 @@ const WATER_BITS = 0x3fff;
  *  writes, byte for byte.)
  *  `area`: only that block of corners (the Area panel's Level +1/-1). The editor has no such thing: its Adjust Cliff
  *  Levels shifts the whole map with a terrain selection as without one (we-drive 2026-11-13, cliff.w3m: the same file
- *  both ways), so the block follows the same rule, ramps left as they are, and a cliff appears at its edge.
+ *  both ways), so the block follows the same rule, and a cliff appears at its edge; ramps the block's edge cuts across
+ *  or runs beside lose their flags (dropCutRamps: the editor draws holes for them).
  *  Returns how many corners changed, or why nothing could be done. */
 export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog, area?: CornerArea): number | string {
   if (!Number.isInteger(by)) return "The adjustment is a whole number of cliff levels.";
@@ -177,14 +178,19 @@ export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog, area?:
   if (wrapped) {
     return `Not done: the water at ${wrapped} corner${wrapped === 1 ? "" : "s"} would go past the highest or lowest water height a map can store (the World Editor would wrap it round to the other end).`;
   }
+  const before = new Map<number, number>();
   for (const [i, layer] of moves) {
     const c = t.corners[i];
     log.touch(t, i);
+    before.set(i, c.layer);
     const was = c.rawWater & WATER_BITS;
     const level = (was + (layer - c.layer) * WATER_PER_LEVEL) & WATER_BITS;
     c.rawWater = (c.rawWater & ~WATER_BITS & 0xffff) | level;
     c.water += (level - was) / 4;
     setLayer(c, layer);
   }
-  return moves.length;
+  // A block's edge through or beside a ramp leaves it between the wrong levels. The whole map moves its ramps with
+  // the ground round them (the editor's Adjust Cliff Levels, byte for byte), so it keeps its flags.
+  const dropped = area ? dropCutRamps(t, before, log).filter((i) => !before.has(i)).length : 0;
+  return moves.length + dropped;
 }
