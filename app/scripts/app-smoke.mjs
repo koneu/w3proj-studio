@@ -2377,6 +2377,35 @@ async function techtreeRandomLevels(page, found) {
   }
 }
 
+/** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
+ *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
+async function mapInfoUndoKept(page, found) {
+  try {
+  const fail = (what) => found.push(`Map Properties undo: ${what}`);
+  const k = await heightKit(page, "MapInfoUndo");
+  const W3I = "map/war3map.w3i.json";
+  const field = `(() => { const l = [...document.querySelectorAll(".map-info label.form-row")].find((x) => x.querySelector(".form-label")?.textContent === "Name"); return l?.querySelector("input, textarea"); })()`;
+  const nameNow = () => page.evaluate(`${field}?.value ?? null`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`);
+  await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "description")`);
+  await until("Map Properties' name box", async () => (await nameNow()) !== null, 20000);
+  const before = await nameNow();
+  await page.evaluate(`(() => { const e = ${field}; e.value = "Undo Kept"; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  if (!(await dirty())) return fail("editing the name didn't mark Map Properties changed (control)");
+  await k.save();
+  if (await dirty() || (await nameNow()) !== "Undo Kept") return fail(`after its save: ${await dirty() ? "still changed" : `name ${await nameNow()}`}`);
+  // The terrain editor saves a sculpt: the terrain file it writes is one Map Properties shows.
+  await k.tool("sculpt_terrain", { mode: "raise", amount: 96, left: -512, bottom: -512, right: 512, top: 512 });
+  await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+  await k.save();
+  await page.evaluate(`w3.editors.open(${JSON.stringify(W3I)})`);
+  await until("Map Properties in front", async () => (await nameNow()) !== null, 20000);
+  if ((await nameNow()) !== "Undo Kept") return fail(`the edit was lost by the terrain save: name ${await nameNow()}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  if (!(await soon(async () => (await nameNow()) === before && (await dirty())))) fail(`undo after the terrain save did nothing: name ${await nameNow()}, changed ${await dirty()} (the History was thrown away)`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** Item tables for unit drops, reached from where they're used: the unit file's older layout (no item table field) offers
  *  only own sets and says why; with the newer layout and no tables, choosing "Map item table" offers to make one, which
  *  Map Properties makes (one undo step there) and opens for editing, and the footman then drops from it (one undo step in
@@ -12036,6 +12065,7 @@ async function run() {
         itemTablesAccess,
         keybindings,
         keyChords,
+        mapInfoUndoKept,
         mcpGuides,
         mcpLimits,
         mcpStartMove,
@@ -12271,6 +12301,8 @@ async function firstHalf(page, found) {
 async function secondHalf(page, found, project) {
   await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
   await leftOpen(page, "itemTablesAccess", found);
+  await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
+  await leftOpen(page, "mapInfoUndoKept", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
   await leftOpen(page, "itemDrops", found);
   await techtreeRandomLevels(page, found).catch((e) => found.push(`techtree random levels: ${e.message}`));

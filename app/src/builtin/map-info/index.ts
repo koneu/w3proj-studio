@@ -327,9 +327,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const v = info.version;
         // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
         const root = w3.workspace.project()!.root;
-        const unitsText = await w3.workspace.readText("map/war3mapUnits.doo.json")
-          .catch(() => w3.backend.invoke<string>("codec_decode", { root, path: "map/war3mapUnits.doo" })).catch(() => null);
-        const starts = startLocations(unitsText ? (JSON.parse(unitsText) as { units?: [] }).units ?? [] : []);
+        const readStarts = async () => {
+          const unitsText = await w3.workspace.readText("map/war3mapUnits.doo.json")
+            .catch(() => w3.backend.invoke<string>("codec_decode", { root, path: "map/war3mapUnits.doo" })).catch(() => null);
+          return startLocations(unitsText ? (JSON.parse(unitsText) as { units?: [] }).units ?? [] : []);
+        };
+        let starts = await readStarts();
 
         // Undo: the map info and the string table texts it refers to (the only ones edited here).
         const snapshot = () => {
@@ -713,6 +716,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Closed: the saved file is what there is again.
           dispose: () => { openEditors.delete(controller); unbindKeys(); edits.fire(); },
           // Strings shown here, and the start locations behind the player list.
+          // Terrain and units only feed the tileset hint and the start locations: taken in place, so the undo history stays.
+          reloadFile: async (path: string) => {
+            const units = path.startsWith("map/war3mapunits.doo");
+            if (!units && !path.startsWith("map/war3map.w3e")) return false;
+            if (units) {
+              const fresh = await readStarts().catch(() => null);
+              if (!fresh) return false;
+              starts = fresh;
+            }
+            show(section);
+            return true;
+          },
           watches: ["map/war3map.wts", "map/war3mapUnits.doo.json", "map/war3mapUnits.doo", "map/war3map.w3e", "map/war3map.w3e.txt"],
         };
       },
