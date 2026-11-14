@@ -62,7 +62,7 @@ export function hdWaterAt(depth: number): { alpha: number; deep: number } {
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { cornerNormal, heightAt, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { borderShade, darkWaterCorners } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
@@ -1381,20 +1381,7 @@ export class TerrainRenderer {
 
   /** Where a ray meets the ground, or null if it misses the map. */
   pickGround(ray: { origin: Vec3; dir: Vec3 }): Vec3 | null {
-    const { origin: o, dir: d } = ray;
-    const at = (t: number): Vec3 => [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
-    const above = (t: number) => { const p = at(t); return p[2] > this.groundHeight(p[0], p[1]); };
-    const step = 32, far = this.distance * 10;
-    let lo = 0;
-    for (let t = step; t < far; t += step) {
-      if (above(t)) { lo = t; continue; }
-      let hi = t;
-      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (above(mid)) lo = mid; else hi = mid; }
-      const p = at(hi), tt = this.terrain;
-      const inside = p[0] >= tt.offsetX && p[1] >= tt.offsetY && p[0] <= tt.offsetX + (tt.width - 1) * 128 && p[1] <= tt.offsetY + (tt.height - 1) * 128;
-      return inside ? p : null;
-    }
-    return null;
+    return pickGroundOn(this.terrain, ray, this.distance * 10);
   }
 
   /** Marks spots with rings that follow the ground; null or [] clears them. */

@@ -376,7 +376,7 @@
   },
   {
     "name": "ramp-plateau-west",
-    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 360,450 over the west face: a line westwards in both; DIFFERS (2026-11-14): the editor's is 23..25 x 31, Studio's 23..25 x 32 (its ground pick lands nearer row 32: the west face is turned away from the camera and the click is over the plateau's edge, where the editors' picks part; on the south face, turned to the camera, they agree), so the pathing maps differ in 32 cells too",
+    "description": "plateau.w3x (a rectangular level-3 plateau, corners 25..39 x 27..35, make-plateau.mjs); the Ramp (palette 1505,311), one click at 360,450 over the west face (turned away from the camera): a line westwards in both, 23..25 x 31. Studio's ground pick used to land at row 31.57 (corner row 32): the editor's picks over a cliff land about 0.125 tile nearer than the bilinear slope between its corners (pickHeightAt; measured 2026-11-14 with 14 clicks along x 360, y 380..540: rows 31 at 450..480, 30 at 484..500, 29 at 540), so the pathing maps match too",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
     },
@@ -449,13 +449,11 @@
     "compare": [
       {
         "file": "war3map.wpm",
-        "as": "wpm",
-        "expect": "differs"
+        "as": "wpm"
       },
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 40

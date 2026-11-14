@@ -321,6 +321,40 @@ export function heightAt(t: Terrain, wx: number, wy: number): number {
   return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
 }
 
+/** How far up the slope the pick looks (world units): 0.125 of a tile. */
+const PICK_REACH = 16;
+
+/** Ground height for picking with the pointer (`pickGround`): the height a little way up the slope, `reach` world
+ *  units along its steepest rise. The World Editor's cliff faces stand about that far ahead of the bilinear slope
+ *  between a cliff's corners, so its pick over a cliff lands nearer than the slope's; flat ground (and the foot of
+ *  a hill) is left as it is. */
+export function pickHeightAt(t: Terrain, wx: number, wy: number): number {
+  const e = 16, reach = PICK_REACH;
+  const gx = heightAt(t, wx + e, wy) - heightAt(t, wx - e, wy), gy = heightAt(t, wx, wy + e) - heightAt(t, wx, wy - e);
+  const len = Math.hypot(gx, gy);
+  if (len < 1e-6) return heightAt(t, wx, wy);
+  return heightAt(t, wx + (gx / len) * reach, wy + (gy / len) * reach);
+}
+
+/** Where a ray meets the ground as the pointer sees it (`pickHeightAt`), or null if it misses the map: marched in
+ *  steps of 32 units up to `far` along the ray, the last step halved 12 times. */
+export function pickGroundOn(t: Terrain, ray: { origin: readonly number[]; dir: readonly number[] }, far: number): [number, number, number] | null {
+  const { origin: o, dir: d } = ray;
+  const at = (s: number): [number, number, number] => [o[0] + d[0] * s, o[1] + d[1] * s, o[2] + d[2] * s];
+  const above = (s: number) => { const p = at(s); return p[2] > pickHeightAt(t, p[0], p[1]); };
+  const step = 32;
+  let lo = 0;
+  for (let s = step; s < far; s += step) {
+    if (above(s)) { lo = s; continue; }
+    let hi = s;
+    for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (above(mid)) lo = mid; else hi = mid; }
+    const p = at(hi);
+    const inside = p[0] >= t.offsetX && p[1] >= t.offsetY && p[0] <= t.offsetX + (t.width - 1) * 128 && p[1] <= t.offsetY + (t.height - 1) * 128;
+    return inside ? p : null;
+  }
+  return null;
+}
+
 /** Height of the water surface at a world position, as the terrain viewer draws it: a tile with water at a
  *  corner and above the ground at one, its dry corners at the wet ones' level, bilinear between. Null where
  *  no water is drawn, or where the ground there rises through the surface. Past the edge the nearest tile counts. */
