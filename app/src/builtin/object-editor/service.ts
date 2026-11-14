@@ -9,6 +9,7 @@ import { pickFile, pickLabel } from "./filepicker";
 import { pickObject } from "./picker";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
+import { levelFor } from "../../lib/model/gltexture";
 import { StringTable } from "../../lib/formats/wts";
 import { readImportedFor } from "../../lib/imports";
 import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
@@ -96,9 +97,14 @@ export async function campaignObjects(w3: W3Api, kind: string, root?: string): P
 /** Icon (command button art) field per object kind; destructables and doodads have none. */
 const ICON_FIELDS: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aart", w3h: "fart", w3q: "gar1" };
 
-/** Data URLs of object icons (map imports first, then the game), cached. */
-/** Images (icons, textures) as data URLs: the map's imports first, then the game's files (cached). */
-export function imageLoader(w3: W3Api): (path: string) => Promise<string | null> {
+/** The side of a list icon in pixels: rows show them at 20 to 24, doubled on a dense screen. A Reforged icon is
+ *  256 a side, and as a data URL of that size 100 KB that every row's picture decodes again. */
+export const LIST_ICON_SIZE = 64;
+
+/** Images (icons, textures) as data URLs: the map's imports first, then the game's files (cached). `maxSize`: the
+ *  picture is made no larger than about this a side (its first mip level at least that tall, scaled down if the
+ *  file has none that small). */
+export function imageLoader(w3: W3Api, maxSize?: number): (path: string) => Promise<string | null> {
   const cache = new Map<string, Promise<string | null>>();
   // Icons of a list fill in as they come: the reads someone waits on (a map opening) go first.
   const background = { background: true };
@@ -112,12 +118,18 @@ export function imageLoader(w3: W3Api): (path: string) => Promise<string | null>
         // Reforged its Reforged version (_HD.w3mod\) first.
         const own = project ? await readImportedFor(w3, path, w3.settings.get<string>("game.graphicsMode") ?? "hd").catch(() => null) : null;
         const bytes = own ?? await w3.game.read(path, background);
-        const mip = decodeImage(bytes, path).mip(0);
+        const image = decodeImage(bytes, path), mip = image.mip(maxSize ? levelFor(image, maxSize) : 0);
         const canvas = document.createElement("canvas");
         canvas.width = mip.width;
         canvas.height = mip.height;
         canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(mip.rgba), mip.width, mip.height), 0, 0);
-        return canvas.toDataURL();
+        if (!maxSize || mip.height <= maxSize * 2) return canvas.toDataURL();
+        // No small level in the file: scaled here.
+        const small = document.createElement("canvas");
+        small.height = maxSize;
+        small.width = Math.max(1, Math.round((mip.width * maxSize) / mip.height));
+        small.getContext("2d")!.drawImage(canvas, 0, 0, small.width, small.height);
+        return small.toDataURL();
       })().catch(() => null);
       cache.set(key, p);
     }
@@ -126,7 +138,7 @@ export function imageLoader(w3: W3Api): (path: string) => Promise<string | null>
 }
 
 export function iconLoader(w3: W3Api) {
-  const load = imageLoader(w3);
+  const load = imageLoader(w3, LIST_ICON_SIZE);
   /** Icon of object `id` of `kind` (custom objects: `base` and the map's own value in `custom`). */
   return (kd: KindData, kind: string, id: string, base?: string, custom?: string): Promise<string | null> => {
     const field = ICON_FIELDS[kind] && kd.fieldById.get(ICON_FIELDS[kind]);

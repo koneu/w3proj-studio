@@ -8725,6 +8725,51 @@ async function objectLayout(page, found, root) {
   }
 }
 
+/** Choosing another object in the Object Editor's list keeps the list's rows (it made all of them anew on every
+ *  click, which a long list took seconds to draw), and a model shown before is shown again from what the preview
+ *  kept: on the same canvas, with nothing to wait for. */
+async function objectListKept(page, found, root) {
+  const fail = (what) => found.push(`object list kept: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  try {
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    const shows = (id) => until(`${id} in the Object Editor`, () => page.evaluate(`(() => { const e = ${ed}; return !!e && [...e.querySelectorAll(".obj-item.selected code")].some((c) => c.textContent === ${JSON.stringify(id)}) && !!e.querySelector(".obj-table"); })()`), 30000);
+    const ready = (file) => until(`the preview of ${file}`, () => page.evaluate(`(() => { const s = JSON.parse(${ed}.querySelector(".obj-preview").dataset.state || "{}"); return s.ready && String(s.path).toLowerCase().endsWith(${JSON.stringify(file)}); })()`), 60000);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
+    await shows("hfoo");
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hkni")`);
+    await shows("hkni");
+    // Both in the list (showing one filtered the list to it).
+    await page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ""; s.dispatchEvent(new Event("input")); })()`);
+    const click = (id) => page.evaluate(`[...${ed}.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)}).click()`);
+    const rows = await page.evaluate(`(window.__smokeRows = [...${ed}.querySelectorAll(".obj-item")]).length`);
+    if (rows < 2) { fail(`the list has ${rows} rows, wanted the Footman and the Knight (control)`); return; }
+    await ready("knight.mdx");
+    await click("hfoo");
+    await shows("hfoo");
+    await ready("footman.mdx");
+    const r = await page.evaluate(`(() => {
+      const e = ${ed}, canvas = e.querySelector(".obj-preview canvas");
+      [...e.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === "hkni").click();
+      const now = [...e.querySelectorAll(".obj-item")], state = JSON.parse(e.querySelector(".obj-preview").dataset.state);
+      return {
+        kept: now.length === window.__smokeRows.length && now.every((x, i) => x === window.__smokeRows[i]),
+        selected: now.filter((x) => x.classList.contains("selected")).map((x) => x.querySelector("code").textContent),
+        sameCanvas: e.querySelector(".obj-preview canvas") === canvas,
+        path: String(state.path).toLowerCase(), ready: state.ready,
+      };
+    })()`);
+    if (!r.kept) fail("a click on another object made the list's rows anew");
+    if (r.selected.join() !== "hkni") fail(`after the click the list marks ${r.selected.join(", ") || "nothing"} as selected, wanted hkni`);
+    if (!r.path.endsWith("knight.mdx") || !r.ready) fail(`the Knight's model, shown a moment before, wasn't there at once (${r.path}, ready ${r.ready})`);
+    if (!r.sameCanvas) fail("showing a model again made a new canvas (a WebGL context per model)");
+  } finally {
+    await page.evaluate(`delete window.__smokeRows`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
@@ -12077,6 +12122,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectLayout: (p, f) => objectLayout(p, f, project),
+        objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
@@ -12391,6 +12437,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "playerStarts", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
   await leftOpen(page, "objectLayout", found);
+  await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
+  await leftOpen(page, "objectListKept", found);
   await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
   await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));

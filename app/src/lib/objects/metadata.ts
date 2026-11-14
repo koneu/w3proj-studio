@@ -340,6 +340,8 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     w3q: [[{ id: "race", label: "Race" }, (id) => raceLabel(row("UpgradeData", id).race)]],
   };
   const fns = facetFns[kind] ?? [];
+  /** searchText's answers: a filtered list asks for every row's on each key typed. */
+  const words = new Map<string, string>();
 
   return {
     kind,
@@ -349,7 +351,11 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     fieldById,
     names,
     westring: (value) => storedName(we, value),
-    searchText: (id) => englishWords([...tables.values()].flatMap((t) => { const r = t.get(id); return r ? [r] : []; })),
+    searchText: (id) => {
+      let text = words.get(id);
+      if (text === undefined) words.set(id, (text = englishWords([...tables.values()].flatMap((t) => { const r = t.get(id); return r ? [r] : []; }))));
+      return text;
+    },
     baseIds: [...main.keys()],
     levels(baseId) {
       if (kind === "w3a") return Math.max(1, Number(main.get(baseId)?.levels ?? 1));
