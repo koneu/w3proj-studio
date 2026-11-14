@@ -149,11 +149,13 @@ export function randomItemEntries(): { id: string; name: string }[] {
 
 /** "Random item" by class and level, and "Item table…" for the map's tables, beside the item browser: `onPick` gets the id. */
 function randomPicker(host: DropsUiHost, onPick: (id: string) => void, withTable = true): HTMLElement[] {
-  const cls = h("select", { "data-prop": "random-class", title: "Class of the random item" },
+  // In the Selection panel the data-props are their own: its Random Unit tab already uses random-class / random-level.
+  const pre = withTable ? "" : "block-";
+  const cls = h("select", { "data-prop": `${pre}random-class`, title: "Class of the random item" },
     ...ITEM_CLASSES.map((c, i) => h("option", { value: String(i) }, c.label)));
-  const lvl = h("select", { "data-prop": "random-level", title: "Level of the random item" },
+  const lvl = h("select", { "data-prop": `${pre}random-level`, title: "Level of the random item" },
     h("option", { value: "-1" }, "Any level"), ...Array.from({ length: MAX_ITEM_LEVEL + 1 }, (_, i) => h("option", { value: String(i) }, `Level ${i}`)));
-  return [h("span.drops-random", {}, cls, lvl, h("button", { "data-prop": "add-random", title: "Add a random item of this class and level, as the World Editor's Random item",
+  return [h("span.drops-random", {}, cls, lvl, h("button", { "data-prop": `${pre}add-random`, title: "Add a random item of this class and level, as the World Editor's Random item",
     onclick: () => onPick(randomObjectId({ kind: "item", level: Number(lvl.value), itemClass: Number(cls.value) })) }, "Add random item")),
   ...(withTable ? [h("button", { "data-prop": "item-tables", title: "Map Properties › Item tables", onclick: () => host.openItemTables() }, "Item table…")] : [])];
 }
