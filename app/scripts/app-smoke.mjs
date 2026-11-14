@@ -5320,6 +5320,25 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
     }
   }
+  // A Decrease that would go below level 0 is no stroke, as the World Editor's (we-compare cliff-floor, 2026-11-14):
+  // −2 of size 3 makes a pit on level 0; −2 of size 5 on its floor changes nothing and leaves no undo step.
+  const press = async (title, size) => {
+    await page.evaluate(`document.querySelector('button.tool-button[title^=${JSON.stringify(title)}]').click()`);
+    await setSize(size);
+    await hands.mouse("mouseMoved", canvas.x, canvas.y);
+    await hands.mouse("mousePressed", canvas.x, canvas.y, 1);
+    await hands.mouse("mouseReleased", canvas.x, canvas.y);
+    await sleep(100);
+    await save();
+  };
+  await press("−2:", 3);
+  const pit = changed("layer"), pitHash = hash(ground);
+  if (pit !== 13) fail(`a −2 click of size 3 changed ${pit} corners' layer, the World Editor's 13`);
+  await press("−2:", 5);
+  if (hash(ground) !== pitHash) fail(`a −2 click of size 5 on the floor of a level-0 pit changed the map (${changed("layer")} corners off the common level): the World Editor's does nothing`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("one undo after a pit and a refused −2 didn't give the map back: the refused click left an undo step"); return; }
   await setSize(2);
 }
 
