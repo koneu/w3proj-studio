@@ -9154,6 +9154,13 @@ async function placerAndCampaign(page, found) {
     if (boxes.some((b) => !b)) return fail(`the placer's Variation, Random rotation and Random scale controls: ${JSON.stringify(boxes)}`);
     // The choices taken (they're settings; the check below says if they aren't).
     await soon(async () => (await k.setting("terrain.placement.randomRotation")) === true && (await k.setting("terrain.placement.randomScale")) === "asymmetric", 5000);
+    // The setting changed from outside (the API) with the editor open: the select follows (control: it showed the old value).
+    await page.evaluate(`w3.settings.set("terrain.placement.randomScale", "z")`);
+    await soon(() => page.evaluate(`document.querySelector(".terrain-place-scale")?.value === "z"`), 5000);
+    const followed = await page.evaluate(`document.querySelector(".terrain-place-scale")?.value`);
+    if (followed !== "z") fail(`the Random scale select shows "${followed}" after the setting was changed to "z" through the API`);
+    await page.evaluate(`w3.settings.set("terrain.placement.randomScale", "asymmetric")`);
+    await soon(() => page.evaluate(`document.querySelector(".terrain-place-scale")?.value === "asymmetric"`), 5000);
     await settled(page);
     await click(512, 0);
     await k.save();
