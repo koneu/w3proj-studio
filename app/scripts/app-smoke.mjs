@@ -3677,7 +3677,7 @@ async function heightsLimits(page, found) {
   const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
   const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
   if (!Number.isFinite(pr)) return fail(`no playable edge from the terrain's head and the w3i (${pr})`);
-  // Placed with the switch off (a placement past the camera bounds is refused with it on), nudged with it on.
+  // Placed with the switch off (no object is held to the camera bounds), nudged with it on.
   await k.tool("place_objects", { objects: [{ id: "hfoo", x: pr - 100, y: 256, player: 1 }], ignoreRoom: true });
   await k.save();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
@@ -3929,47 +3929,38 @@ async function heightsLimits(page, found) {
   }
 }
 
-/** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts): each call is made with its
- *  switch on and off against the same input, which shows the switch made the difference. Camera bounds: place_objects
- *  skips what lands outside them, scatter_objects leaves those spots out and move_object refuses the place; water:
+/** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts). Camera bounds: place_objects,
+ *  scatter_objects and move_object work past them with the switch on and off alike (they hold no object); water:
  *  set_water on ground raised so high that the surface would pass the limit of the stored level is refused whole. */
 async function mcpLimits(page, found) {
   try {
   const fail = (what) => found.push(`mcp limits: ${what}`);
   const k = await heightKit(page, "McpLimits");
   const refusal = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
-  const allow = /turn off Enforce Camera Bounds to allow it/;
   try {
     const [, , br] = k.read("war3map.w3i.json").cameraBounds;
     const inside = { id: "LTlt", x: br - 256, y: 0 }, outside = { id: "LTlt", x: br + 384, y: 0 };
     const at = (x, y) => k.doodads().findIndex((d) => d.position[0] === x && d.position[1] === y);
-    // On by default: of two, the one outside is skipped with the editor's words; alone, nothing is placed.
+    // The camera bounds hold no object, the switch on (its default) or off: the same calls give the same result.
     if ((await k.setting("terrain.enforceCameraBounds")) === false) fail("Enforce Camera Bounds isn't on by default");
-    const two = JSON.parse(await k.tool("place_objects", { objects: [inside, outside], ignoreRoom: true }));
-    await settled(page);
-    if (two.placed !== 1 || two.skipped.length !== 1 || two.skipped[0].index !== 1 || !allow.test(two.skipped[0].reason)) fail(`place_objects across the camera bounds: ${JSON.stringify(two)}`);
-    if (at(inside.x, 0) < 0 || at(outside.x, 0) >= 0) fail("place_objects didn't place the one inside the camera bounds alone");
-    const doo = k.docHash();
-    const alone = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
-    if (!allow.test(alone ?? "") || k.docHash() !== doo) fail(`place_objects outside the camera bounds: ${alone ?? "placed"}`);
     const beyond = { ids: ["LTlt"], left: br + 128, bottom: -512, right: br + 768, top: 512, shape: "box", seed: 7 };
-    const scattered = await refusal("scatter_objects", beyond);
-    if (!allow.test(scattered ?? "") || k.docHash() !== doo) fail(`scatter_objects outside the camera bounds: ${scattered ?? "placed"}`);
-    const moved = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
-    if (!/Not done: .*turn off Enforce Camera Bounds to allow it/.test(moved ?? "") || k.docHash() !== doo) fail(`move_object outside the camera bounds: ${moved ?? "moved"}`);
-
-    // Off: the same calls do what they did before the switch was held to.
-    await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
-    const placed = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
-    await settled(page);
-    if (placed || at(outside.x, 0) < 0) fail(`place_objects outside the camera bounds with Enforce Camera Bounds off: ${placed ?? "not there"}`);
-    const spread = JSON.parse(await k.tool("scatter_objects", beyond));
-    if (!(spread.placed > 0) || spread.spotsOutsideCameraBounds !== undefined) fail(`scatter_objects with Enforce Camera Bounds off: ${JSON.stringify(spread)}`);
-    await settled(page);
-    const move = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
-    await settled(page);
-    if (move || at(outside.x, 256) < 0) fail(`move_object with Enforce Camera Bounds off: ${move ?? "not there"}`);
-
+    for (const on of [true, false]) {
+      const word = `with Enforce Camera Bounds ${on ? "on" : "off"}`;
+      await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", ${on})`);
+      const dy = on ? 0 : 640;
+      const out = { ...outside, y: dy };
+      const two = JSON.parse(await k.tool("place_objects", { objects: [{ ...inside, y: dy }, out], ignoreRoom: true }));
+      await settled(page);
+      if (two.placed !== 2 || two.skipped.length) fail(`place_objects across the camera bounds ${word}: ${JSON.stringify(two)}`);
+      if (at(inside.x, dy) < 0 || at(out.x, dy) < 0) fail(`place_objects didn't place both sides of the camera bounds ${word}`);
+      const spread = JSON.parse(await k.tool("scatter_objects", { ...beyond, seed: on ? 7 : 8 }));
+      await settled(page);
+      if (!(spread.placed > 0) || spread.spotsOutsideCameraBounds !== undefined || /camera bounds/i.test(JSON.stringify(spread))) fail(`scatter_objects past the camera bounds ${word}: ${JSON.stringify(spread)}`);
+      const ty = on ? 256 : 896;
+      const move = await refusal("move_object", { kind: "doodads", index: at(inside.x, dy), id: "LTlt", x: out.x, y: ty });
+      await settled(page);
+      if (move || at(out.x, ty) < 0) fail(`move_object past the camera bounds ${word}: ${move ?? "not there"}`);
+    }
     // Water: four raises of 1000 make a mound whose top is past where the stored level of a surface at its height ends.
     for (let i = 0; i < 4; i++) {
       const raise = await refusal("sculpt_terrain", { mode: "raise", amount: 1000, left: -2304, bottom: 256, right: -256, top: 2304, shape: "box" });
