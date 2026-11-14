@@ -710,6 +710,7 @@ class TriggerView {
       get file() { return view.file; }, data, display, editable, language,
       customText: (t) => this.texts.get(t) ?? null,
       setCustomText: (t, text) => { this.texts.set(t, text); },
+      customFile: () => this.customFile(),
       edit: (label, change, opts) => this.edit(label, change, opts),
       icon: (path) => icon(w3, path),
       openTrigger: (name) => {

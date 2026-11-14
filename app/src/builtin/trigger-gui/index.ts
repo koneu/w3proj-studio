@@ -30,7 +30,8 @@ class ParamEditors implements TriggerGuiService {
     // A trigger editor of no map: no variables, nothing to undo.
     const ed: TriggerEditorHandle = {
       file: { reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: [] }, data: opts.data, display: opts.display,
-      editable: true, language: "jass", customText: () => null, setCustomText: () => {}, edit: (_label, change) => change(),
+      editable: true, language: "jass", customText: () => null, setCustomText: () => {},
+      customFile: () => ({ reforged: true, version: 1, comment: "", header: null, texts: [] }), edit: (_label, change) => change(),
       icon: async () => null, openTrigger: () => false,
     };
     return editParam(ed, opts.type, opts.current, this.forType(opts.type), opts.limits, { variables: false });

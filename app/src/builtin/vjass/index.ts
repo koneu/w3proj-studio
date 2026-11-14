@@ -13,6 +13,7 @@ import { mapJass } from "../../lib/jass/env";
 import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
+import { checkMessages, markTexts, placeErrors } from "./check";
 import { vjassExports, vjassSymbols } from "./symbols";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments
@@ -23,8 +24,6 @@ const KEYWORDS = ["library", "endlibrary", "scope", "endscope", "struct", "endst
   "interface", "endinterface", "implement", "private", "public", "static", "stub", "operator", "thistype", "requires", "needs", "uses",
   "optional", "initializer", "delegate", "readonly", "extends", "array", "key", "hook", "textmacro", "endtextmacro", "runtextmacro",
   "allocate", "deallocate", "onInit", "onDestroy", "create", "destroy", "super", "defaults", "debug", "inject", "endinject", "zinc", "endzinc"];
-/** The functions a map script needs besides the checked text (JassHelper fails without main). */
-const STUB = "function main takes nothing returns nothing\r\nendfunction\r\nfunction config takes nothing returns nothing\r\nendfunction\r\n";
 /** A library name from an item name: JassHelper rejects underscores in library and scope names
  *  ("Untitled Script 001" → "UntitledScript001"). */
 export function libraryName(name: string): string {
@@ -55,7 +54,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const exe = () => w3.settings.get<string>("vjass.jassHelper")
     || joinPath(w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", "_retail_/x86_64/JassHelper/jasshelper.exe");
 
-  const compile = async (script: string, commonJ: string, blizzardJ: string): Promise<string> => {
+  /** Runs JassHelper on a whole map script: its output, or what it wrote about its errors (logs/compileerrors.txt,
+   *  and the script its failing step was reading). */
+  const run = async (script: string, commonJ: string, blizzardJ: string): Promise<{ output: string } | { log: string; current: string | null; dir: string }> => {
     const path = exe();
     if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) {
       throw new Error(`JassHelper not found (${path}). Set "vjass.jassHelper" to jasshelper.exe.`);
@@ -77,17 +78,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (r.killed) {
       // Ended before it exited: its files say how it went. Errors written: those. Its output alone: the result.
       if (await w3.backend.invoke<boolean>("fs_exists", { path: errorsAt })) r.code = 1;
-      else if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "output.j") })) return w3.workspace.readText(joinPath(dir, "output.j"));
+      else if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "output.j") })) return { output: await w3.workspace.readText(joinPath(dir, "output.j")) };
       else throw new Error(`JassHelper didn't finish: ${r.killed}, and wrote no result (files in ${dir}). "vjass.timeout" sets the time.`);
     }
     if (r.code !== 0) {
       // JassHelper writes its errors (its own, or pjass's) to logs\compileerrors.txt.
       const log = await w3.workspace.readText(errorsAt).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
-      // The log starts with the script's file name and ends with a count; the errors are between.
-      const lines = log.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^logs[\\/]/i.test(l) && !/^\d+$/.test(l));
-      throw new Error(`JassHelper: ${lines.slice(0, 8).join(" · ")} (files in ${dir})`);
+      return { log, current: await w3.workspace.readText(joinPath(dir, "logs/currentmapscript.j")).catch(() => null), dir };
     }
-    return w3.workspace.readText(joinPath(dir, "output.j"));
+    return { output: await w3.workspace.readText(joinPath(dir, "output.j")) };
+  };
+  const compile = async (script: string, commonJ: string, blizzardJ: string): Promise<string> => {
+    const r = await run(script, commonJ, blizzardJ);
+    if ("output" in r) return r.output;
+    // The log starts with the script's file name and ends with a count; the errors are between.
+    const lines = r.log.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^logs[\\/]/i.test(l) && !/^\d+$/.test(l));
+    throw new Error(`JassHelper: ${lines.slice(0, 8).join(" · ")} (files in ${r.dir})`);
+  };
+
+  /** "Check with JassHelper": the map's script as it would be generated with the editor's triggers and texts as they
+   *  are now, compiled, and what JassHelper says about it by the checked text's lines (check.ts). */
+  const checkText = async (ed: TriggerEditorHandle, t: TriggerItem): Promise<string> => {
+    if (!ed.file.items.includes(t)) throw new Error("This trigger is no longer in the map.");
+    const nonce = Math.random().toString(36).slice(2);
+    const texts = markTexts(ed.file, ed.customFile(), t, nonce);
+    const languages = await w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE);
+    const [script, commonJ, blizzardJ] = await Promise.all([
+      languages.source({ triggers: texts.triggers, custom: texts.custom }), w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
+    const r = await run(script, commonJ, blizzardJ);
+    if ("output" in r) return "JassHelper: no errors (compiled in the map's script).";
+    const { own, others } = checkMessages(placeErrors(r.log, script, r.current, nonce), texts);
+    const list = (lines: string[]) => `${lines.slice(0, 8).join(" · ")}${lines.length > 8 ? ` · and ${lines.length - 8} more` : ""}`;
+    if (own.length) return `JassHelper: ${list(own)}${others.length ? ` · Also outside this text: ${list(others)}` : ""}`;
+    return `JassHelper stopped at errors outside this text, before it was through with this one: ${list(others)} (files in ${r.dir})`;
   };
 
   void w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE).then((s) => {
@@ -129,17 +152,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ed.setCustomText(t, `library ${libraryName(t.name)} initializer Init\r\n\r\n    private function Init takes nothing returns nothing\r\n    endfunction\r\n\r\nendlibrary\r\n`);
       },
       render(el, t, ed) {
-        const status = h("span.muted");
-        const checkBtn = h("button", {
-          title: "Compiles this text alone with JassHelper (with common.j and Blizzard.j; the map's own globals and functions are unknown there).",
+        const status = h("span.muted.vjass-check-status");
+        let checking = false;
+        /** Commits what the code editor still holds back while typing pauses: the check is of the text as shown. */
+        let flush = () => {};
+        const checkBtn = h("button.vjass-check", {
+          title: "Compiles the map's script with this text in it, with JassHelper: the Trigger Editor's other texts and triggers as they are now (unsaved changes too), "
+            + "and the globals the saved map makes (gg_ variables of placed objects, regions, cameras and sounds; udg_ variables). "
+            + "Errors are told by this text's own lines; errors elsewhere in the map's script are named with where they are. "
+            + "A text that is switched off is checked as if it were on. Nothing is written.",
           onclick: async () => {
+            // One at a time: a second run's answer could come before the first's.
+            if (checking) return;
+            checking = true;
+            flush();
             status.textContent = "Compiling…";
+            const text = ed.customText(t);
             try {
-              const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
-              // JassHelper wants a whole map script: empty main and config after the text.
-              await compile(`${ed.customText(t) ?? ""}\r\n${STUB}`, commonJ, blizzardJ);
-              status.textContent = "JassHelper: no errors.";
-            } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); }
+              status.textContent = await checkText(ed, t);
+              if (ed.customText(t) !== text) status.textContent += " (The text has changed since.)";
+            } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); } finally { checking = false; }
           },
         }, "Check with JassHelper");
         el.append(h("div.trig-section", {}, "vJASS"));
@@ -167,6 +199,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });
+        flush = () => editor.flush();
         return { dispose: () => editor.dispose(), flush: () => editor.flush() };
       },
     }));
