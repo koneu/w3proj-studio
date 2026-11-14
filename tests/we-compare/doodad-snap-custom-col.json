@@ -1,0 +1,35 @@
+[
+  {
+    "name": "doodad-snap-custom-col",
+    "description": "the same with plain pictures (all red, all green, all blue, all black, all white: angle kept) and a magenta one with one red, green or blue pixel (turned) (make-doodad-snap.mjs col)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-col.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  }
+]

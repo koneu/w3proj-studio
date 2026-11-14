@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { doodadOnGrid, doodadSnaps, quarterTurn, type PathSize } from "./doodadgrid";
+import { doodadOnGrid, doodadSnaps, mixedPicture, quarterTurn, type PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 
 /** The pathing texture sizes of the measured types (the game's Doodads.slk and DestructableData.slk, the textures'
@@ -158,4 +158,39 @@ test("doodadSnaps turns a destructable to its type's fixed rotation and lists it
   const snaps = doodadSnaps([tree], () => ({ width: 4, height: 4 }), (id) => (id === "LTlt" ? 270 : null));
   assert.equal(snaps.length, 1);
   assert.equal(f32hex(snaps[0].angle), "e4cb9640");
+});
+
+// we-compare specs doodad-snap-custom-tex / -col / -more (2026-11-14): custom doodads and destructables at 0.4 and 1.2
+// (destructables 0.4 and 2.9) off their grids; the editor saved these angles.
+test("a square texture of more than one colour turns to the quarter, a plain one keeps the angle (measured)", () => {
+  const mixed: PathSize = { width: 4, height: 4, mixed: true };
+  for (const [size, a, saved] of [[mixed, 0.4, 0], [mixed, 1.2, 1.5707964], [{ width: 2, height: 2, mixed: true }, 0.4, 0], [{ width: 2, height: 2, mixed: true }, 1.2, 1.5707964],
+    [{ width: 4, height: 4 }, 0.4, 0.4], [{ width: 4, height: 4 }, 1.2, 1.2], [{ width: 16, height: 16 }, 1.2, 1.2]] as const) {
+    assert.equal(Math.fround(doodadOnGrid(0, 0, a, size).angle), Math.fround(saved), `${size.width}x${size.height} ${size.mixed ? "mixed" : "plain"} ${a}`);
+  }
+  // Its place still comes from the picture's size.
+  assert.deepEqual(doodadOnGrid(13.5, 21.25, 0.4, { width: 2, height: 2, mixed: true }), { x: 32, y: 32, angle: 0 });
+});
+
+test("mixedPicture: any pixel of another colour, alpha ignored", () => {
+  const px = (...c: number[][]) => c.flatMap(([r, g, b, a = 255]) => [r, g, b, a]);
+  assert.equal(mixedPicture(px([255, 0, 255], [255, 0, 255], [255, 0, 255])), false);
+  assert.equal(mixedPicture(px([255, 0, 255, 0], [255, 0, 255, 255])), false);
+  assert.equal(mixedPicture(px([255, 0, 255], [255, 0, 255], [255, 0, 0])), true, "control: one red pixel");
+  assert.equal(mixedPicture(px([0, 0, 0], [0, 0, 0])), false, "all black is one colour");
+  assert.equal(mixedPicture([]), false);
+});
+
+test("a destructable's fixed rotation holds only with a pathing texture (measured: bptx _ keeps 0.4 and 2.9)", () => {
+  const none = (fixed: number, a: number) => doodadOnGrid(0, 0, a, null, fixed).angle;
+  assert.equal(none(270, 0.4), 0.4);
+  assert.equal(none(90, 2.9), 2.9);
+  assert.equal(none(0, 0.4), 0.4);
+  assert.equal(none(-1, 2.9), 2.9);
+  // With a texture it faces the fixed rotation (2x2: 90 and 270; 4x4: 0), none (-1) keeps the angle.
+  const two = (fixed: number | null, a: number) => doodadOnGrid(0, 0, a, { width: 2, height: 2 }, fixed).angle;
+  assert.equal(two(90, 0.4), Math.fround(Math.PI / 2));
+  assert.equal(two(270, 2.9), Math.fround((270 * Math.PI) / 180));
+  assert.equal(two(-1, 2.9), 2.9);
+  assert.equal(doodadOnGrid(0, 0, 0.4, { width: 4, height: 4 }, 0).angle, 0);
 });
