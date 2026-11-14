@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, PINNED_PREFS, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -367,4 +367,18 @@ test("openQuestion: 'Save changes?' (Warning) is answered No, or Yes on request;
 test("openCopyName: one name per open (the editor's title names the map), the map's own name kept", () => {
   assert.equal(openCopyName(1, "/x/y/R.w3x"), "we-open-1-R.w3x");
   assert.notEqual(openCopyName(1, "/a/input.w3x"), openCopyName(2, "/b/input.w3x"), "control: the same file name twice still differs");
+});
+
+test("editorPrefs pins the persisted toggles to the editor's defaults, unless kept", () => {
+  const p = editorPrefs("hd", "fixed");
+  assert.equal(p["Enforce Water Limits"], "true");
+  assert.equal(p["Enforce Camera Boundaries"], "1");
+  const left = "[Misc]\nEnforce Water Limits=false\nEnforce Camera Boundaries=0\nhd=1\n";
+  const out = setPrefs(left, "Misc", p);
+  assert.match(out, /Enforce Water Limits=true/);
+  assert.match(out, /Enforce Camera Boundaries=1/);
+  const kept = editorPrefs("hd", "fixed", true);
+  for (const k of Object.keys(PINNED_PREFS)) assert.equal(k in kept, false, `${k} stays as it was with keep`);
+  assert.equal(parseArgs(["--keep-prefs"]).opts.keepPrefs, true);
+  assert.equal(parseArgs([]).opts.keepPrefs, undefined);
 });

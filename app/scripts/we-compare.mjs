@@ -62,6 +62,7 @@ function parseArgs(argv) {
     else if (a === "--json") o.json = resolve(value());
     else if (a === "--limit") o.limit = Number(value());
     else if (a === "--no-we") o.we = false;
+    else if (a === "--keep-prefs") o.keepPrefs = true;
     else if (a === "--restart-per-map") o.restart = true;
     else if (a === "-h" || a === "--help") o.help = true;
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a} (see the top of we-compare.mjs)`);
@@ -171,7 +172,7 @@ async function runStudio(specs, opts, game) {
 async function runWorldEditor(specs, opts, game, mode, saveAccept) {
   let rest = specs.filter((s) => !s.error);
   while (rest.length) {
-    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : [])];
+    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, ...(opts.keepPrefs ? ["--keep-prefs"] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : [])];
     // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
     // fails), the map before it was saved, so nothing is asked. Only the last map is followed by --close.
     // --restart-per-map (opts.restart) is the old way, an editor start per map, for timing the two.
