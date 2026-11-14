@@ -35,11 +35,13 @@ pub fn newer_first(a: &FoundGame, b: &FoundGame) -> std::cmp::Ordering {
 const WC3: &str = "Warcraft III";
 
 /// The game's names as Battle.net installs and registers it: the game and its public test realm.
+#[cfg_attr(not(windows), allow(dead_code))]
 const WINDOWS_NAMES: [&str; 2] = [WC3, "Warcraft III Public Test"];
 
 /// The folders that may hold the game on Windows, in this order: where Battle.net says it installed it (`registered`,
 /// from its entry among the installed programs, wherever that is), the Program Files folders (`program_files`), then
 /// the usual places on each fixed drive (`drives`, their roots): Program Files (x86), Program Files, the root, Games.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn windows_candidates(registered: &[PathBuf], program_files: &[PathBuf], drives: &[PathBuf]) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = registered.to_vec();
     for name in WINDOWS_NAMES {
@@ -236,15 +238,21 @@ mod tests {
 
     #[test]
     fn windows_looks_where_battle_net_registered_it_first_then_program_files_then_every_fixed_drive() {
+        // Paths compared as built with the same joins: on Linux, where this runs too, a join puts `/` after "D:\".
         let registered = [PathBuf::from(r"E:\Blizzard\Warcraft III")];
         let program_files = [PathBuf::from(r"C:\Program Files (x86)")];
-        let drives = [PathBuf::from(r"C:\"), PathBuf::from(r"D:\")];
-        let got = windows_candidates(&registered, &program_files, &drives);
-        let s: Vec<String> = got.iter().map(|p| p.to_string_lossy().replace('/', "\\")).collect();
-        assert_eq!(s[0], r"E:\Blizzard\Warcraft III", "the registered folder comes first");
-        assert_eq!(s[1], r"C:\Program Files (x86)\Warcraft III");
-        for want in [r"D:\Program Files (x86)\Warcraft III", r"D:\Program Files\Warcraft III", r"D:\Warcraft III", r"D:\Games\Warcraft III", r"D:\Games\Warcraft III Public Test"] {
-            assert!(s.iter().any(|p| p == want), "{want} isn't looked at: {s:?}");
+        let (c, d) = (PathBuf::from(r"C:\"), PathBuf::from(r"D:\"));
+        let got = windows_candidates(&registered, &program_files, &[c, d.clone()]);
+        assert_eq!(got[0], registered[0], "the registered folder comes first");
+        assert_eq!(got[1], program_files[0].join("Warcraft III"));
+        for want in [
+            d.join("Program Files (x86)").join("Warcraft III"),
+            d.join("Program Files").join("Warcraft III"),
+            d.join("Warcraft III"),
+            d.join("Games").join("Warcraft III"),
+            d.join("Games").join("Warcraft III Public Test"),
+        ] {
+            assert!(got.contains(&want), "{} isn't looked at: {got:?}", want.display());
         }
         // Nothing registered, no drives: the Program Files folders alone (as before).
         assert_eq!(windows_candidates(&[], &program_files, &[]).len(), 2);
