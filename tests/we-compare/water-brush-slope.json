@@ -49,7 +49,7 @@
   },
   {
     "name": "water-brush-slope-shallow-east",
-    "description": "the Shallow brush 100 px east of the middle, where the clicked corner's ground is 48 and its neighbours' 0 to 144: the editor sets all 47 corners to 48 (so the height is the clicked corner's, not the rim's nearest or the mean), and the 24 dry corners round the water get its level word (8240)",
+    "description": "the Shallow brush 100 px east of the middle, where the clicked corner's ground is 48 and its neighbours' 0 to 144: the editor sets all 47 corners to 48 (so the height is the clicked corner's, not the rim's nearest or the mean), and the 24 dry corners round the water get its level word (8240). Holds with the editor's Enforce Water Height Limits on (its default; matched again in a fresh prefix 2026-11-14); with it off, the editor leaves the dry corners' word at 8192",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
     "we": {
       "saveAccept": ["Warning"],
