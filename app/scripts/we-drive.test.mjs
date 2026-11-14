@@ -67,6 +67,7 @@ test("questionDialogs: the loading windows (untitled, \"Progress\") aren't quest
   assert.deepEqual(questionDialogs([d(""), d("Progress")]), [], "a big map's \"Loading Units n/300\" window is waited for");
   assert.deepEqual(questionDialogs([d("Progress"), d("Warning"), d("Warcraft III World Editor")]).map((x) => x.title), ["Warning", "Warcraft III World Editor"]);
   assert.deepEqual(questionDialogs([d("Progress report")]).map((x) => x.title), ["Progress report"], "only the loading window's own title");
+  assert.deepEqual(questionDialogs([d("Trigger Editor"), d("Object Editor"), d("Warning")]).map((x) => x.title), ["Warning"], "a module window open during a save isn't a question");
 });
 
 test("isReopenedModule: the modules the editor opens again, the Campaign Editor by the start of its title", () => {
