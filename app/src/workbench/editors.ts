@@ -205,6 +205,10 @@ export class EditorService {
     return [...new Set(this.tabs.filter((t) => this.unsaved(t)).map((t) => t.path))];
   }
 
+  openPaths(): string[] {
+    return this.tabs.map((t) => t.path);
+  }
+
   isDirty(path: string): boolean {
     const key = this.key(path);
     return this.tabs.some((t) => this.key(t.path) === key && this.unsaved(t));
