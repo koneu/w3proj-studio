@@ -275,9 +275,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => { history.undo(); },
           redo: () => { history.redo(); },
           async save() {
+            const taken = history.mark();
             await doc.writeText(writeLightMdl(model));
-            history.markSaved();
-            doc.setDirty(false);
+            history.markSaved(taken);
+            doc.setDirty(history.dirty);
           },
           dispose: unbindKeys,
         };

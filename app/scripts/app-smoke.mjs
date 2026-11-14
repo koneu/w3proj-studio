@@ -5639,6 +5639,94 @@ async function typedFieldSave(page, found) {
   }
 }
 
+/** A second value typed while a slow save is still writing the first: the tab stays unsaved, the field keeps the second
+ *  value, closing asks to save, and the next save writes it. Gameplay Constants, Map Properties and the AI Editor marked
+ *  the tab clean when the slow save ended (the typed value was lost on closing). */
+async function editDuringSave(page, found) {
+  const fail = (what) => found.push(`edit during save: ${what}`);
+  try {
+  const k = await heightKit(page, "EditDuringSave");
+  const { hands, root } = k;
+  const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
+  const mark = (expr) => page.evaluate(`(() => { const e = ${expr}; if (e) e.dataset.smoke = "typed"; return !!e; })()`);
+  const typeInto = async (expr, text) => {
+    await mark(expr);
+    await hands.click("[data-smoke=typed]");
+    await hands.chord("Ctrl+A");
+    await hands.type(text);
+  };
+  // Every write of an editor's document takes 2.5 s (the way the tester held a save open).
+  await page.evaluate(`(() => { const S = window.__slowSave = { on: false, started: 0, done: 0 }; const io = w3Workbench.editors.io;
+    for (const m of ["writeText", "writeBytes"]) { const o = (S["orig_" + m] = io[m]); io[m] = function (...a) {
+      if (!S.on) return o.apply(this, a);
+      S.started++; return new Promise((r) => setTimeout(r, 2500)).then(() => o.apply(this, a)).finally(() => { S.done++; }); }; } })()`);
+  const check = async (what, field, first, second, onDisk, path) => {
+    await until(what, () => mark(field), 20000);
+    await settled(page);
+    await typeInto(field, first);
+    await page.evaluate(`Object.assign(window.__slowSave, { on: true, started: 0, done: 0 })`);
+    await hands.chord("Ctrl+S");
+    await until(`${what}: the save held open`, () => page.evaluate(`window.__slowSave.started > 0`), 10000);
+    await typeInto(field, second);
+    await hands.key("Tab", "Tab", 9);
+    await until(`${what}: the slow save ended`, () => page.evaluate(`window.__slowSave.done >= window.__slowSave.started`), 20000);
+    await page.evaluate(`window.__slowSave.on = false`);
+    await settled(page);
+    const shown = await page.evaluate(`(${field})?.value`);
+    if (shown !== second) fail(`${what}: the field shows ${shown}, not ${second} (control)`);
+    if (onDisk && onDisk() !== first) fail(`${what}: the slow save wrote ${JSON.stringify(onDisk())}, not ${first} (control)`);
+    if (!(await dirty(path))) fail(`${what}: the tab says saved after the slow save though ${second} was typed meanwhile`);
+    // Closing asks (and Cancel keeps the tab).
+    await page.evaluate(`(() => { const ed = w3Workbench.editors; window.__slowAsked = []; window.__slowConfirm = ed.confirm; ed.confirm = async (m) => { window.__slowAsked.push(m); return "Cancel"; }; })()`);
+    try {
+      await page.evaluate(`w3Workbench.editors.closeActive()`);
+      await settled(page);
+      const asked = await page.evaluate(`window.__slowAsked`);
+      if (!asked.some((m) => /Save changes/.test(m))) fail(`${what}: closing the tab didn't ask to save: ${JSON.stringify(asked)}`);
+    } finally {
+      await page.evaluate(`(() => { w3Workbench.editors.confirm = window.__slowConfirm; delete window.__slowConfirm; })()`);
+    }
+    // The next save writes the second value.
+    await hands.chord("Ctrl+S");
+    await until(`${what}: the second save`, async () => !(await dirty(path)), 10000).catch(() => fail(`${what}: the second Ctrl+S left the tab unsaved`));
+    await settled(page);
+    if (onDisk && onDisk() !== second) fail(`${what}: the second save wrote ${JSON.stringify(onDisk())}, not ${second}`);
+  };
+  try {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.gameplayConstants.open")`);
+    const speed = `[...document.querySelectorAll(".gs-row")].find((r) => r.title.startsWith("Misc › MaxUnitSpeed "))?.querySelector("input.gs-input")`;
+    await until("Max Unit Speed", () => mark(speed), 20000);
+    const miscPath = await page.evaluate(`w3.editors.activePath()`);
+    const speedOnDisk = () => (/^MaxUnitSpeed=(\d+)/m.exec(readFileSync(join(root, ...miscPath.split("/")), "utf8")) ?? [])[1];
+    await check("Gameplay Constants", speed, "432", "433", speedOnDisk, miscPath);
+
+    await page.evaluate(`w3.editors.closeAll()`);
+    const w3i = "map/war3map.w3i.json";
+    await page.evaluate(`w3.editors.open(${JSON.stringify(w3i)})`);
+    await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Environment")?.click()`);
+    const startZ = `[...document.querySelectorAll(".map-info label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Start Z")?.querySelector("input")`;
+    await check("Map Properties", startZ, "1234", "1235", () => String(JSON.parse(readFileSync(join(root, w3i), "utf8")).fog?.start), w3i);
+
+    await page.evaluate(`w3.editors.closeAll()`);
+    const wai = join(root, "..", "Slow Raider.wai");
+    rmSync(wai, { force: true });
+    await page.evaluate(`(async () => { window.__slowPick = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+    try {
+      await until("the AI Editor", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "General"); b?.click(); return !!b; })()`), 20000);
+      const aiPath = await page.evaluate(`w3.editors.activePath()`);
+      await check("AI Editor", `document.querySelector("input.ai-text")`, "Slow One", "Slow Two", null, aiPath);
+    } finally {
+      await page.evaluate(`(() => { if (window.__slowPick) w3.window.pickSaveFile = window.__slowPick; delete window.__slowPick; })()`);
+    }
+  } finally {
+    await page.evaluate(`(() => { const S = window.__slowSave, io = w3Workbench.editors.io; if (S) for (const m of ["writeText", "writeBytes"]) if (S["orig_" + m]) io[m] = S["orig_" + m]; delete window.__slowSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } catch (e) { fail(e.message); }
+}
+
 /** Test Map when the game can't start: the user is told why, whichever way it was asked for, and
  *  nothing is left uncaught in the page (the run's `problems` list would show it). */
 async function testMapWithoutGame(page, found) {
@@ -11856,6 +11944,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
+        editDuringSave,
         tileCleanup,
         tilesInPlace,
         tileTemplate,
@@ -12094,6 +12183,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "byHand", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
+  await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));
+  await leftOpen(page, "editDuringSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
   await leftOpen(page, "moduleFunctions", found);
   await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));

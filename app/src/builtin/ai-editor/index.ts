@@ -14,6 +14,7 @@ import {
 } from "../../lib/ai/wai";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { StackSave } from "../../lib/undo";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { parseIni, parseSlk } from "../../lib/formats/text";
@@ -82,7 +83,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           undo: () => view.undo(),
           redo: () => view.redo(),
-          save: async () => { await doc.writeBytes(writeWai(view.ai)); view.saved(); },
+          save: async () => { const taken = view.take(); await doc.writeBytes(writeWai(view.ai)); view.saved(taken); },
           focus: () => el.focus(),
           dispose: () => { if (current === view) current = null; },
         };
@@ -171,7 +172,7 @@ class AiView {
   private undoStack: AiFile[] = [];
   private redoStack: AiFile[] = [];
   /** Undo depth at the last save (dirty when it differs). */
-  private savedAt = 0;
+  private mark = new StackSave();
   private sel: Selection = null;
   private cond = -1;
   private group = 0;
@@ -196,7 +197,7 @@ class AiView {
 
   /** Text typed into a field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
   private typing = false;
-  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.savedAt); }
+  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.mark.at); }
   /** The tab unsaved while `input` holds other text than it was drawn with (`change` commits it as one step). */
   private watchTyping(input: HTMLInputElement) {
     const drawn = input.value;
@@ -205,7 +206,8 @@ class AiView {
   }
 
   // Typing during the write stays unsaved.
-  saved() { this.savedAt = this.undoStack.length; this.showDirty(); }
+  take() { return this.mark.take(this.undoStack.length); }
+  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.showDirty(); }
 
   /** Runs a button's work; a failure is shown. */
   private act(f: () => Promise<unknown>) { f().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))); }
@@ -303,7 +305,7 @@ class AiView {
     this.undoStack.push(structuredClone(this.ai));
     this.redoStack = [];
     // A save point that was undone past can't be reached again.
-    if (this.savedAt > this.undoStack.length - 1) this.savedAt = -1;
+    this.mark.pushed(this.undoStack.length);
     fn();
     this.afterChange();
   }
@@ -315,6 +317,7 @@ class AiView {
   undo() {
     const prev = this.undoStack.pop();
     if (!prev) return;
+    this.mark.moved();
     this.redoStack.push(this.ai);
     this.ai = prev;
     this.afterChange();
@@ -322,6 +325,7 @@ class AiView {
   redo() {
     const next = this.redoStack.pop();
     if (!next) return;
+    this.mark.moved();
     this.undoStack.push(this.ai);
     this.ai = next;
     this.afterChange();

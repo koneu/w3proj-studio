@@ -9,6 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { StackSave } from "../../lib/undo";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
@@ -153,9 +154,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redo: () => view.redo(),
           save: async () => {
             await view.checkCuts();
+            const taken = view.take();
             await doc.writeText(view.text);
             await view.saveStrings();
-            view.saved();
+            view.saved(taken);
           },
           focus: () => el.focus(),
           watches: [wts],
@@ -177,7 +179,7 @@ class SettingsView {
   private changedOnly = false;
   private undoStack: State[] = [];
   private redoStack: State[] = [];
-  private savedAt = 0;
+  private mark = new StackSave();
   /** Edited texts of war3map.wts (written on save). */
   private texts = new Map<number, string>();
   private folded = new Set<string>();
@@ -202,7 +204,9 @@ class SettingsView {
     this.render();
   }
 
-  saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+  /** What the next save writes is of this point; `saved` with it once written (edits meanwhile stay unsaved). */
+  take() { return this.mark.take(this.undoStack.length); }
+  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.setDirty(this.undoStack.length !== this.mark.at); }
   /** Before a save: a text with a `}` line would be cut by the game, so it is changed (one undo step) or
    *  the save stops with the reason. */
   async checkCuts() {
@@ -229,9 +233,9 @@ class SettingsView {
     if (!this.editable) return;
     this.undoStack.push({ text: this.text, texts: new Map(this.texts) });
     this.redoStack = [];
-    if (this.savedAt > this.undoStack.length - 1) this.savedAt = -1;
+    this.mark.pushed(this.undoStack.length);
     fn();
-    this.setDirty(this.undoStack.length !== this.savedAt);
+    this.setDirty(this.undoStack.length !== this.mark.at);
     this.render();
   }
   undo() { this.step(this.undoStack, this.redoStack); }
@@ -239,10 +243,11 @@ class SettingsView {
   private step(from: State[], to: State[]) {
     const s = from.pop();
     if (!s) return;
+    this.mark.moved();
     to.push({ text: this.text, texts: new Map(this.texts) });
     this.text = s.text;
     this.texts = s.texts;
-    this.setDirty(this.undoStack.length !== this.savedAt);
+    this.setDirty(this.undoStack.length !== this.mark.at);
     this.render();
   }
 

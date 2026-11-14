@@ -7,6 +7,21 @@
 
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "./keybindings";
 
+/** The saved point of an editor that keeps its own undo stack of snapshots (dirty when the stack's depth differs from
+ *  `at`). `take` is called before a save writes, `saved` when it ends: an edit made while the save wrote stays unsaved
+ *  (the file holds the state of `take`), and an undo or redo meanwhile leaves the tab unsaved too. */
+export class StackSave {
+  /** Undo depth at the last save; -1: no depth is the saved one. */
+  at = 0;
+  private moves = 0;
+  take(depth: number) { return { depth, moves: this.moves }; }
+  /** An undo or redo ran. */
+  moved() { this.moves++; }
+  saved(taken: { depth: number; moves: number }) { this.at = taken.moves === this.moves ? taken.depth : -1; }
+  /** A change was pushed at `depth` (the stack's new length): a save point that was undone past can't be reached again. */
+  pushed(depth: number) { if (this.at > depth - 1) this.at = -1; }
+}
+
 export class History {
   private undoStack: string[] = [];
   private redoStack: string[] = [];
@@ -45,6 +60,8 @@ export class History {
 
   /** The current state is what's on disk now; `state`: the one taken when the save began (an edit made while it was
    *  writing stays unsaved). */
+  /** The state now, for `markSaved` once the save that took it ends. */
+  mark(): string { return this.current; }
   markSaved(state?: string) { this.saved = state ?? this.current; this.group = undefined; }
   get dirty(): boolean { return this.current !== this.saved; }
   get canUndo(): boolean { return this.undoStack.length > 0; }

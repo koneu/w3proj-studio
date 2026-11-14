@@ -10,6 +10,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { StackSave } from "../../lib/undo";
 import { BusyQueue } from "../../lib/busyqueue";
 import { joinPath } from "../../lib/paths";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
@@ -191,9 +192,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const save = async () => {
           const root = w3.workspace.project()!.root;
           await view.checkCuts();
+          const taken = view.take();
           await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(view.info) }));
           await view.saveStrings();
-          view.saved();
+          view.saved(taken);
         };
         const view: CampaignView = new CampaignView(w3, el, info, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), save);
         if (requested) { view.show(requested.section, requested.chapter); requested = null; }
@@ -221,7 +223,7 @@ class CampaignView {
   private texts = new Map<number, string>();
   private undoStack: State[] = [];
   private redoStack: State[] = [];
-  private savedAt = 0;
+  private mark = new StackSave();
   private selected = -1;
   /** The game's presets once read; until then (or without them) the screen sections show the numbers. */
   private presets: PresetLists | null = null;
@@ -239,10 +241,11 @@ class CampaignView {
 
   /** A number typed into its field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
   private typing = false;
-  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.savedAt); }
+  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.mark.at); }
 
   // A number typed during the write stays unsaved.
-  saved() { this.savedAt = this.undoStack.length; this.showDirty(); }
+  take() { return this.mark.take(this.undoStack.length); }
+  saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.showDirty(); }
 
   /** Shows a section (and selects a chapter button). */
   show(section: SectionId, chapter?: number) {
@@ -277,7 +280,7 @@ class CampaignView {
     if (!this.editable) return;
     this.undoStack.push({ ...this.snapshot(), files });
     this.redoStack = [];
-    if (this.savedAt > this.undoStack.length - 1) this.savedAt = -1;
+    this.mark.pushed(this.undoStack.length);
     fn();
     this.typing = false;
     this.showDirty();
@@ -305,6 +308,7 @@ class CampaignView {
       if (from.at(-1) !== s) return false;
     }
     from.pop();
+    this.mark.moved();
     to.push({ ...this.snapshot(), files: s.files });
     this.restore(s);
     this.typing = false;
@@ -445,7 +449,7 @@ class CampaignView {
    *  campaign saved first (opening the map closes this editor). */
   async newMap() {
     if (!this.editable) return;
-    if (this.undoStack.length !== this.savedAt) {
+    if (this.undoStack.length !== this.mark.at) {
       const c = await this.w3.window.showWarning("The campaign has unsaved changes. They are saved before the new map opens.", "Save and continue", "Cancel");
       if (c !== "Save and continue") return;
     }

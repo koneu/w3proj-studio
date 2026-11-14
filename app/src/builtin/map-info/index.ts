@@ -694,6 +694,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
             // undo isn't mixed up with the save.
+            const taken = history.mark();
             const saved = structuredClone(info);
             applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
@@ -706,8 +707,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               strings.rebase(merged);
               wtsBase = merged;
             }
-            history.markSaved();
-            doc.setDirty(false);
+            history.markSaved(taken);
+            doc.setDirty(history.dirty);
           },
           // Closed: the saved file is what there is again.
           dispose: () => { openEditors.delete(controller); unbindKeys(); edits.fire(); },
