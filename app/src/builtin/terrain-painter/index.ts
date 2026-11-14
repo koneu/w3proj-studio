@@ -9,7 +9,7 @@ import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strok
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, rampClick, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, strokeLayer, rampClick, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -359,8 +359,10 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         // Cliff tools step one level from the start point; water goes one or two levels below
         // it, with the surface the water offset (89.6) under its original ground, as the World
         // Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game maps).
-        const step = ({ cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 } as Partial<Record<Tool, number>>)[tool] ?? 0;
-        const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET), start: c.layer } : { layer: 2 };
+        // A Decrease from too low a level does nothing, as the editor's (strokeLayer): no stroke, no undo step.
+        const to = c && isLayerTool(tool) ? strokeLayer(tool, c.layer) : c?.layer;
+        if (to === null) return;
+        const layer: LayerTarget = c ? { layer: to ?? c.layer, waterLevel: waterLevelAt(c.height - WATER_OFFSET), start: c.layer } : { layer: 2 };
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g);
         else applyAt(g);
