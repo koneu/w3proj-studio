@@ -5128,6 +5128,40 @@ async function toggleGroups(page, found) {
   }
 }
 
+/** The terrain view's toolbar never takes the canvas away: with the view squeezed to a narrow column (the window itself
+ *  can't be resized from here, so the viewer's own box is) the toolbar keeps to its cap and scrolls, the canvas stays
+ *  at least 300 px high, the two don't overlap and the groups' boxes don't intersect. Nothing is edited. */
+async function toolbarNarrow(page, found) {
+  const fail = (what) => found.push(`toolbar narrow: ${what}`);
+  const k = await heightKit(page, "ToolbarNarrow");
+  try {
+    await until("the terrain view's toolbar", () => page.evaluate(`!!document.querySelector(".model-toolbar .model-toggle-group") && !!document.querySelector(".model-canvas")`), 20000);
+    const measure = () => page.evaluate(`(() => {
+      const v = document.querySelector(".model-viewer"), r = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+      return { viewer: r(v), toolbar: r(v.querySelector(".model-toolbar")), canvas: r(v.querySelector(".model-canvas")), groups: [...v.querySelectorAll(".model-toggle-group")].map((g) => ({ name: g.dataset.group, ...r(g) })),
+        scrolls: v.querySelector(".model-toolbar").scrollHeight > v.querySelector(".model-toolbar").clientHeight };
+    })()`).then((x) => x);
+    const squeeze = (w) => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); v.style.width = "${w}px"; v.style.height = "1000px"; v.style.maxHeight = "none"; v.style.overflow = "hidden"; v.style.flex = "none"; })()`);
+    const unsqueeze = () => page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); for (const p of ["width", "height", "maxHeight", "overflow", "flex"]) v.style[p] = ""; })()`);
+    const hit = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
+    for (const w of [800, 500, 400]) {
+      await squeeze(w);
+      await new Promise((r) => setTimeout(r, 400));
+      const m = await measure();
+      if (m.canvas.h < 300) fail(`${w} px wide: the canvas is ${m.canvas.w}x${m.canvas.h}, the toolbar ${m.toolbar.h} px high`);
+      if (m.toolbar.y + m.toolbar.h > m.canvas.y + 0.5) fail(`${w} px wide: the toolbar (to ${m.toolbar.y + m.toolbar.h}) overlaps the canvas (from ${m.canvas.y})`);
+      if (m.toolbar.h > 0.36 * m.viewer.h) fail(`${w} px wide: the toolbar takes ${m.toolbar.h} of ${m.viewer.h} px`);
+      for (let i = 0; i < m.groups.length; i++) for (let j = i + 1; j < m.groups.length; j++) if (hit(m.groups[i], m.groups[j])) fail(`${w} px wide: the ${m.groups[i].name} and ${m.groups[j].name} groups intersect`);
+      if (w === 400 && !m.scrolls) fail("at 400 px the toolbar doesn't scroll (control: it should have more than it shows)");
+    }
+    await unsqueeze();
+    await k.save();
+  } finally {
+    await page.evaluate(`(() => { const v = document.querySelector(".model-viewer"); if (v) for (const p of ["width", "height", "maxHeight", "overflow", "flex"]) v.style[p] = ""; })()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -12886,6 +12920,7 @@ async function run() {
         tilesInPlace,
         tileTemplate,
         toggleGroups,
+        toolbarNarrow,
         triggerMultiSelect,
         triggersAndAi,
         typedFieldSave,
@@ -13067,6 +13102,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "viewModes", found);
   await toggleGroups(page, found).catch((e) => found.push(`toggle groups: ${e.message}`));
   await leftOpen(page, "toggleGroups", found);
+  await toolbarNarrow(page, found).catch((e) => found.push(`toolbar narrow: ${e.message}`));
+  await leftOpen(page, "toolbarNarrow", found);
   // Here rather than in part 2, which starts only after part 1's build: the two halves end about together (batch run
   // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
   await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
