@@ -21,7 +21,9 @@ const more = process.argv[4] === "more";
 // "grid": doodad-snap-grid.w3x: all-magenta pictures of many widths and heights, each type at 16 offsets and two angles
 const grid = process.argv[4] === "grid";
 const SIZES = [[1, 1], [1, 2], [2, 1], [1, 3], [3, 1], [1, 4], [4, 1], [1, 8], [8, 1], [3, 3], [2, 3], [3, 2], [2, 4], [4, 2], [4, 4]];
-const tex4 = process.argv[4] === "tex" || process.argv[4] === "col" || grid;
+// "turn": doodad-turn.w3x: a few doodads and destructables standing on their grids at a quarter turn, for the turn keys and nudges
+const turn = process.argv[4] === "turn";
+const tex4 = process.argv[4] === "tex" || process.argv[4] === "col" || grid || turn;
 const colours = process.argv[4] === "col";
 if (!game) { console.error("usage: make-doodad-snap.mjs <w3proj cli> <game folder>"); process.exit(2); }
 const run = (...args) => {
@@ -36,7 +38,9 @@ const COLOURS = {
   "own-black4": ["....", "....", "....", "...."], "own-white4": ["WWWW", "WWWW", "WWWW", "WWWW"],
   "own-xr4": ["XXXX", "XXXX", "XXXX", "XXXR"], "own-xg4": ["XXXX", "XXXX", "XXXX", "XXXG"], "own-xb4": ["XXXX", "XXXX", "XXXX", "XXXB"],
 };
-const TEXTURES = grid ? Object.fromEntries(SIZES.map(([w, h]) => [`own-g${w}x${h}`, Array(h).fill("X".repeat(w))])) : colours ? COLOURS : {
+const TEXTURES = turn ? {
+  "own-ring4": ["XXXX", "X..X", "X..X", "XXXX"], "own-diag2": ["X.", ".X"], "own-full4": ["XXXX", "XXXX", "XXXX", "XXXX"],
+} : grid ? Object.fromEntries(SIZES.map(([w, h]) => [`own-g${w}x${h}`, Array(h).fill("X".repeat(w))])) : colours ? COLOURS : {
   "own-ring4": ["XXXX", "X..X", "X..X", "XXXX"], "own-corner4": ["X...", "....", "....", "...."], "own-row4": ["XXXX", "....", "....", "...."],
   "own-diag4": ["X...", ".X..", "..X.", "...X"], "own-half4": ["XX..", "XX..", "XX..", "XX.."], "own-diag2": ["X.", ".X"],
   "own-cross4": [".XX.", "XXXX", "XXXX", ".XX."], "own-full4": ["XXXX", "XXXX", "XXXX", "XXXX"], "own-quad4": ["XX..", "XX..", "..XX", "..XX"],
@@ -56,7 +60,7 @@ const DOODADS = tex4 ? Object.keys(TEXTURES).map((name, i) => [`D2${String(i).pa
   ["D004", "LOch", "12x4Default"], ["D005", "LOch", "1x1Default"], ["D006", "LOch", "_"],
 ];
 // [type id, base, texture name, fixed rotation (bfxr) or null to leave the base's]
-const DESTRUCTABLES = tex4 ? [] : more ? [
+const DESTRUCTABLES = turn ? [["B100", "LTlt", "_", 90], ["B102", "LTlt", "2x2Default", 90], ["B101", "LTlt", "_", -1]] : tex4 ? [] : more ? [
   ["B100", "LTlt", "_", 90], ["B101", "LTlt", "_", -1], ["B102", "LTlt", "2x2Default", 90], ["B103", "LTlt", "2x2Default", -1],
   ["B104", "LTlt", "1x1Default", 270], ["B105", "LTlt", "4x4Default", 0], ["B106", "LTlt", "_", 0], ["B107", "LTlt", "2x1Default", 90],
 ] : [["B000", "LTlt", "2x2Default"], ["B001", "LTlt", "4x4Default"], ["B002", "LTlt", "8x4Default"], ["B003", "LTlt", "_"]];
@@ -83,13 +87,23 @@ try {
   const put = (id, i, row, angle) => doc.doodads.push({
     id, variation: 0, position: [-1500 + i * 300 + 13.5, row + 21.25, 0], angle: f32(angle), scale: [1, 1, 1], skinId: id,
     preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [doc.doodads.length, 0, 0], extras: [] });
+  if (turn) {
+    // On their grids (4x4 on 64n, 2x2 on 64n+32) at 270 degrees, in a row each; destructables the same, 300 behind.
+    const stand = (id, x, y, angle) => doc.doodads.push({
+      id, variation: 0, position: [x, y, 0], angle: f32(angle), scale: [1, 1, 1], skinId: id,
+      preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [doc.doodads.length, 0, 0], extras: [] });
+    const half = (id) => (id === "D201" || id === "B102" ? 32 : 0);
+    DOODADS.forEach(([id], i) => stand(id, -768 + i * 512 + half(id), 0 + half(id), 3 * Math.PI / 2));
+    DESTRUCTABLES.forEach(([id], i) => stand(id, -768 + i * 512 + half(id), 512 + half(id), 0.4));
+  } else {
   if (grid) DOODADS.forEach(([id], i) => { for (let j = 0; j < 16; j++) for (const [k, a] of [[0, 0], [1, f32(Math.PI / 2)]]) doc.doodads.push({
     id, variation: 0, position: [-3500 + i * 450 + 13.5 + j * 8, -1500 + k * 1500 + 21.25 + j * 8, 0], angle: a, scale: [1, 1, 1], skinId: id,
     preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [doc.doodads.length, 0, 0], extras: [] }); });
   else DOODADS.forEach(([id], i) => { put(id, i, 500, 0.4); put(id, i, -500, 1.2); });
   DESTRUCTABLES.forEach(([id], i) => { put(id, i, 1000, 0.4); put(id, i, -1000, 2.9); });
+  }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, grid ? "doodad-snap-grid.w3x" : colours ? "doodad-snap-custom-col.w3x" : tex4 ? "doodad-snap-custom-tex.w3x" : more ? "doodad-snap-custom-more.w3x" : "doodad-snap-custom.w3x"), "--force-stale");
+  run("pack", dir, "-o", join(here, turn ? "doodad-turn.w3x" : grid ? "doodad-snap-grid.w3x" : colours ? "doodad-snap-custom-col.w3x" : tex4 ? "doodad-snap-custom-tex.w3x" : more ? "doodad-snap-custom-more.w3x" : "doodad-snap-custom.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
