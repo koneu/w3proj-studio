@@ -51,7 +51,7 @@
   },
   {
     "name": "water-limit-off-deep",
-    "description": "Enforce Water Height Limits off (the editor: Advanced, ctrl+shift+w; it stays off in that editor, so this spec is the file's last; Studio: terrain.enforceWaterLimits false): Deep Water, round (1392,624), size 1 at the middle of low-ground-b.w3x (the menu's check mark seen gone after the key, we-drive 2026-11-14). KNOWN DIFFERENCE (2026-11-14, two runs): the editor lifts the ground as with the limit on (corner 32,30 to -7168 stored, the cosine ring round it) and only leaves the dry corners round the water at the water word 8192; Studio lifts nothing with the limit off (-8000) and gives those corners 192",
+    "description": "Enforce Water Height Limits off (the editor: Advanced, ctrl+shift+w; it stays off in that editor, so this spec is the file's last; Studio: terrain.enforceWaterLimits false): Deep Water, round (1392,624), size 1 at the middle of low-ground-b.w3x (the menu's check mark seen gone after the key, we-drive 2026-11-14). The editor lifts the ground as with the limit on (corner 32,30 to -7168 stored, the cosine ring round it) and only leaves the dry corners round the water at the water word 8192 (2026-11-14, two runs); Studio the same since branch water-brush-we2 (before, it lifted nothing with the limit off and gave those corners 192)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
     "we": {
       "saveAccept": ["Warning", "Error"],
@@ -74,7 +74,32 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-limit-off-slope-east",
+    "description": "still with Enforce Water Height Limits off (water-limit-off-deep switched it off in this editor, so this one comes after it and presses no key): water-brush-slope-shallow-east (Shallow Water size 3 at 848,500 on slope.w3x): the editor flattens as with the limit on but leaves the 24 dry corners round the water at 8192, as Studio since branch water-brush-we2 (2026-11-14; before, Studio wrote 8240 there)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "848,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "settings": { "terrain.enforceWaterLimits": false },
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 848, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   }
 ]

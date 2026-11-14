@@ -265,7 +265,9 @@ test("a Decrease that would go below level 0 is no stroke at all, as the World E
   assert.equal(strokeLayer("cliffDown2", 2), 0);
   assert.equal(strokeLayer("cliffUp2", 2), 4);
   assert.equal(strokeLayer("cliffLevel", 3), 3);
-  assert.equal(strokeLayer("deep", 1), 0, "the water brushes keep to level 0");
+  assert.equal(strokeLayer("deep", 1), 1, "water that would go below 0 stays on the start's level (water-level1-deep)");
+  assert.equal(strokeLayer("shallow", 0), 0);
+  assert.equal(strokeLayer("shallow", 1), 0);
   assert.equal(strokeLayer("dry", 5), 5);
 });
 

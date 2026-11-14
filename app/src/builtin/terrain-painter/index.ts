@@ -6,10 +6,10 @@ import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type Te
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strokepath";
-import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
+import { groundHeight } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, strokeLayer, rampClick, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -112,6 +112,11 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     heightTick();
     holding = setInterval(heightTick, HEIGHT_TICK);
   };
+  /** The palette's cliff type as a number, or undefined for the ground tile's. */
+  const chosenCliffType = (): number | undefined => {
+    const type = cliffType === "default" ? ed.defaultCliffType() : cliffType;
+    return type >= 0 ? type : undefined;
+  };
   const endStroke = () => {
     heightTick();
     clearInterval(holding);
@@ -119,8 +124,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const s = stroke.s;
     stroke = null;
     // New cliffs and water take the chosen cliff type (or their ground tile's); painting ground re-types nothing.
-    const type = cliffType === "default" ? ed.defaultCliffType() : cliffType;
-    const chosen = isLayerTool(s.label as Tool) && type >= 0 ? type : undefined;
+    const chosen = isLayerTool(s.label as Tool) ? chosenCliffType() : undefined;
     const retyped = retypeCliffs(terrain, s, ed.cliffGroundTiles(), chosen);
     if (!s.finish(terrain)) return;
     ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
@@ -357,14 +361,11 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           paintTex = i;
           void fillPalette();
         }
-        const c = terrain.corners[Math.round((g[1] - terrain.offsetY) / 128) * terrain.width + Math.round((g[0] - terrain.offsetX) / 128)];
-        // Cliff tools step one level from the start point; water goes one or two levels below
-        // it, with the surface the water offset (89.6) under its original ground, as the World
-        // Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game maps).
-        // A Decrease from too low a level does nothing, as the editor's (strokeLayer): no stroke, no undo step.
-        const to = c && isLayerTool(tool) ? strokeLayer(tool, c.layer) : c?.layer;
-        if (to === null) return;
-        const layer: LayerTarget = c ? { layer: to ?? c.layer, waterLevel: waterLevelAt(c.height - WATER_OFFSET), start: c.layer } : { layer: 2 };
+        const cx = Math.round((g[0] - terrain.offsetX) / 128), cy = Math.round((g[1] - terrain.offsetY) / 128);
+        const c = terrain.corners[cy * terrain.width + cx];
+        // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
+        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType()) : { layer: c.layer };
+        if (layer === null) return;
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g);
         else applyAt(g);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { applyLayer, retypeCliffs, Stroke, cornerBrush } from "./tools";
+import { applyLayer, retypeCliffs, Stroke, cornerBrush, layerTarget } from "./tools";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { setGroundHeight, waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -156,7 +156,7 @@ function click(t: Terrain, c: SlopeClick) {
   const stroke = new Stroke(c.mode);
   const brush = cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, c.size);
   // Enforce Water Height Limits on, as the editor had it (we-drive pins it): the ground here is far above the floor.
-  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer }, stroke, true);
+  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer, cliffType: 1 }, stroke, true);
   retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
   return stroke;
 }
@@ -197,6 +197,73 @@ test("the water brush flattens round the clicked corner, not round the nearest w
   assert.equal(c.changes.filter(([, , g]) => g === 0).length, 47, "the fixture: the editor's 47 corners at 0");
 });
 
+/** tests/fixtures/water-brush/level-ramp-clicks.json: the World Editor's water clicks on a pit's floor (level 0 and 1),
+ *  beside plateau.w3x's edge with and without a ramp, and on low ground with Enforce Water Height Limits off. */
+interface LevelClick { name: string; input: "pit0" | "pit1" | "plateau" | "ramp" | "low"; mode: "shallow" | "deep"; size: number; centre: [number, number]; enforce: boolean; changes: number[][] }
+const levelClicks = json<{ pit0: number[][]; clicks: LevelClick[] }>("level-ramp-clicks.json");
+
+/** A level-ramp-clicks input as a terrain: flat.w3x (65 x 65, level 2, ground 0, cliff type 15) and what the input adds. */
+function levelInput(input: LevelClick["input"]): Terrain {
+  const t = emptyLordaeron();
+  const put = (x: number, y: number, ground: number, layer: number, wet: number, water: number, type: number, ramp: number) => {
+    const k = at(t, x, y);
+    k.rawHeight = ground + 0x2000; k.layer = layer; k.hasWater = wet === 1; k.rawWater = (k.rawWater & 0xc000) | water; k.cliffTexture = type; k.ramp = ramp === 1;
+  };
+  t.corners.forEach((k) => { k.rawWater = 8192; k.cliffTexture = 15; });
+  if (input === "pit0" || input === "pit1") {
+    for (const [x, y, g, l, w, wat, ty, r] of levelClicks.pit0) put(x, y, g, input === "pit1" && l === 0 ? 1 : l, w, wat, ty, r);
+  } else if (input === "plateau" || input === "ramp") {
+    // make-plateau.mjs: level 3 on corners 25..39 x 27..35, cliff type 1 on the corners of tiles across the edge.
+    const high = (x: number, y: number) => x >= 25 && x <= 39 && y >= 27 && y <= 35;
+    t.corners.forEach((k, i) => {
+      const x = i % t.width, y = Math.floor(i / t.width);
+      if (high(x, y)) k.layer = 3;
+      const onCliff = [[0, 0], [-1, 0], [0, -1], [-1, -1]].some(([dx, dy]) => {
+        const q = [high(x + dx, y + dy), high(x + dx + 1, y + dy), high(x + dx, y + dy + 1), high(x + dx + 1, y + dy + 1)];
+        return q.some(Boolean) && !q.every(Boolean);
+      });
+      if (onCliff) k.cliffTexture = 1;
+    });
+    if (input === "ramp") for (const y of [25, 26, 27]) at(t, 32, y).ramp = true;
+  } else {
+    t.corners.forEach((k) => { k.rawHeight = -8000 + 0x2000; });
+  }
+  // The world height with the new layers and grounds.
+  t.corners.forEach((k) => setGroundHeight(k, (k.rawHeight - 0x2000) / 4));
+  return t;
+}
+
+/** Not the World Editor's yet: a size-1 click on the plateau's high corner types the corners one row below the corners
+ *  it raised next to the water (row 25: Studio 1, the editor leaves 15); its size-3 Deep click there typed that row
+ *  (row 23), and no rule for both was found. */
+const LEVEL_NOT_YET = new Set(["water-plateau-on", "water-ramp-on"]);
+
+for (const c of levelClicks.clicks) {
+  const notYet = LEVEL_NOT_YET.has(c.name);
+  test(`${c.name}: ${c.mode} size ${c.size} at ${c.centre} (${c.input}${c.enforce ? "" : ", Enforce Water Height Limits off"}), as the World Editor${notYet ? " but the cliff types of the row below" : ""}`, () => {
+    const t = levelInput(c.input), want = levelInput(c.input);
+    for (const [x, y, ground, layer, wet, water, type, ramp] of c.changes) {
+      const k = at(want, x, y);
+      k.rawHeight = ground + 0x2000; k.layer = layer; k.hasWater = wet === 1; k.rawWater = (k.rawWater & 0xc000) | water; k.cliffTexture = type; k.ramp = ramp === 1;
+    }
+    // The painter's click (index.ts): the target from the clicked corner, the ramp's height counted in, Grass Cliff.
+    const [cx, cy] = c.centre;
+    const stroke = new Stroke(c.mode);
+    const target = layerTarget(t, c.mode, cx, cy, 1);
+    assert.ok(target);
+    applyLayer(t, cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, c.size), c.mode, target, stroke, c.enforce);
+    retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
+    const row = (k: Terrain["corners"][number], type = true) => [...fields(k).slice(0, type ? 5 : 4), k.ramp ? 1 : 0].join(" ");
+    const diffs = t.corners.flatMap((k, i) => row(k, !notYet) === row(want.corners[i], !notYet) ? []
+      : [`${i % t.width},${Math.floor(i / t.width)}: Studio ${row(k)}, WE ${row(want.corners[i])}`]);
+    assert.deepEqual(diffs, []);
+    if (notYet) {
+      const typed = t.corners.flatMap((k, i) => k.cliffTexture === want.corners[i].cliffTexture ? [] : [`${i % t.width},${Math.floor(i / t.width)}`]);
+      assert.deepEqual(typed, ["30,25", "31,25", "32,25", "33,25", "34,25"], "the known difference is all there (when it goes, take the click off LEVEL_NOT_YET)");
+    }
+  });
+}
+
 /** tests/fixtures/water-brush/low-ground-lift.json: the World Editor's water clicks on low flat ground. */
 interface LowGround { centre: [number, number]; cases: { ground: { rest: number; centre?: number; next?: number }; tool: "shallow" | "deep"; size: number; changes: number[][] }[] }
 const lowGround = json<LowGround>("low-ground-lift.json");
@@ -232,14 +299,22 @@ for (const c of lowGround.cases) {
   });
 }
 
-test("low ground: the lift is the switch's (off: the ground stays; control for the cases above)", () => {
+test("low ground: the lift is the same with Enforce Water Height Limits off; only the dry rim's water word is the switch's", () => {
+  // we-compare water-limit-off-deep (2026-11-14, branch water-brush-we2): with the switch off the editor lifted the
+  // ground as with it on and left the 8 corners round the water at 8192; water-limit-off-slope-east the same for the
+  // 24 round a size-3 click on the slope.
   const c = lowGround.cases.find((k) => k.ground.rest === -8160 && k.tool === "deep" && k.size === 1 && k.ground.centre === undefined)!;
   assert.equal(c.changes.length, 37, "the fixture: the editor lifted 37 corners");
-  const t = lowMap(c.ground, lowGround.centre);
-  lowClick(t, "deep", 1, lowGround.centre, false);
-  assert.equal(t.corners.every((k) => k.rawHeight - 0x2000 === -8160), true);
-  const on = lowMap(c.ground, lowGround.centre);
+  const heights = (t: Terrain) => t.corners.map((k) => k.rawHeight);
+  const off = lowMap(c.ground, lowGround.centre), on = lowMap(c.ground, lowGround.centre);
+  lowClick(off, "deep", 1, lowGround.centre, false);
   lowClick(on, "deep", 1, lowGround.centre, true);
-  assert.equal(at(on, ...lowGround.centre).height, -2048, "the clicked corner on the floor (waterrim.ts GROUND_FLOOR), its cliff level counted in");
-  assert.equal(at(on, ...lowGround.centre).rawHeight - 0x2000, -7168);
+  assert.deepEqual(heights(off), heights(on));
+  assert.equal(at(off, ...lowGround.centre).height, -2048, "the clicked corner on the floor (waterrim.ts GROUND_FLOOR), its cliff level counted in");
+  assert.equal(at(off, ...lowGround.centre).rawHeight - 0x2000, -7168);
+  const [cx, cy] = lowGround.centre;
+  const word = (t: Terrain) => at(t, cx + 1, cy).rawWater & 0x3fff;
+  assert.equal(at(on, cx, cy).rawWater & 0x3fff, at(off, cx, cy).rawWater & 0x3fff, "the water's own word either way");
+  assert.equal(word(off), 8192, "off: the dry corner next to the water keeps its word");
+  assert.notEqual(word(on), 8192, "on: it gets the water's (control)");
 });

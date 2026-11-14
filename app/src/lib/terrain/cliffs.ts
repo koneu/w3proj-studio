@@ -371,7 +371,8 @@ export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () =
  *    levels spanned exactly 1) and spans 0 or 2 after loses all its flags, also on corners the move didn't touch (the
  *    high corner raised: 2,2,4; lowered: 2,2,2; the two low ones raised: 3,3,3);
  *  - one that still climbs one level keeps them (the middle corner raised: 2,3,3), and so do runs across the ramp,
- *    which are level (the rows of a wide ramp beside a column it lost).
+ *    which are level (the rows of a wide ramp beside a column it lost); one that spans a level but goes up and down
+ *    again (2,3,2) loses them, as the water brushes' do (we-compare water-ramp-on).
  *  Left as they were, such flags make ramp tiles across two levels, which the editor draws with holes (black wedges).
  *  Returns the corners whose flag it cleared, each touched in `log` first. */
 export function dropBrokenRamps(t: Terrain, before: ReadonlyMap<number, number>, log: CornerLog): number[] {
@@ -394,7 +395,11 @@ export function dropBrokenRamps(t: Terrain, before: ReadonlyMap<number, number>,
         const ls = run.map(level);
         return Math.max(...ls) - Math.min(...ls);
       };
-      if (span((k) => before.get(k) ?? t.corners[k].layer) === 1 && span((k) => t.corners[k].layer) !== 1) for (const k of run) drop.add(k);
+      // A run that still spans one level but no longer climbs one way (2,3,2: a water brush on the high corner raised
+      // the middle one next to its water, we-compare water-ramp-on, 2026-11-14) is broken too.
+      const after = run.map((k) => t.corners[k].layer);
+      const oneWay = after.every((l, k) => k === 0 || l >= after[k - 1]) || after.every((l, k) => k === 0 || l <= after[k - 1]);
+      if (span((k) => before.get(k) ?? t.corners[k].layer) === 1 && (span((k) => t.corners[k].layer) !== 1 || !oneWay)) for (const k of run) drop.add(k);
     }
   }
   for (const k of drop) {

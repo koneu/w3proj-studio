@@ -6,8 +6,10 @@
 // - the ground of every corner within s + 1 of C (a disc: sizes 1, 2, 3, 5, 8 changed exactly those, 8 to 234
 //   corners), the water corners too and on any cliff level, becomes C's ground height;
 // - in the square of half side s + 1 round C, a dry corner next to (one of the 8 round) a water corner goes to C's
-//   level if it was lower and stays if higher; the others go to C's level. With a cliff edge two corners from C,
-//   higher side: the lower corners came up, lower side: the higher corners far from the water came down;
+//   level if it was lower and stays if higher; the others go to C's level only when a cliff of another type than the
+//   chosen one is in that square (foreignCliffNear). With a Dirt Cliff edge two corners from C, Grass Cliff chosen,
+//   higher side: the lower corners came up, lower side: the higher corners far from the water came down; beside
+//   plateau.w3x's Grass Cliff they stayed (water-brush-ramp.json, 2026-11-14);
 // - a corner that came up next to the water takes 140 stored units (35 world units) more ground than C (C at 48
 //   and at 96 stored, Shallow and Deep).
 // What is still not the World Editor's: Deep Water reaching over a one-level edge from below left one water corner
@@ -30,9 +32,10 @@ export const SHORE_LIFT = 35;
  *  `square` its shape, `level` the cliff level the stroke started on (the water one or two below it). `touch` is told
  *  of each corner before it changes. The changed corners. */
 export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number>, size: number, square: boolean, level: number,
-  touch: (i: number) => void): number[] {
+  touch: (i: number) => void, chosen?: number): number[] {
   const W = t.width, H = t.height, cx = centre % W, cy = Math.floor(centre / W);
   const ground = groundHeight(t.corners[centre]), reach = Math.max(1, Math.round(size)) + 1;
+  const levelAll = foreignCliffNear(t, cx, cy, reach, chosen);
   const byWater = (x: number, y: number) => {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const nx = x + dx, ny = y + dy;
@@ -48,7 +51,7 @@ export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number
       const dx = x - cx, dy = y - cy;
       const flat = square || dx * dx + dy * dy <= reach * reach;
       const shore = !own && byWater(x, y);
-      const to = own ? c.layer : shore ? Math.max(c.layer, level) : level;
+      const to = own ? c.layer : shore ? Math.max(c.layer, level) : levelAll ? level : c.layer;
       const h = flat ? (to > c.layer && shore ? ground + SHORE_LIFT : ground) : groundHeight(c);
       if (to === c.layer && h === groundHeight(c)) continue;
       touch(i);
@@ -58,6 +61,28 @@ export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number
     }
   }
   return changed;
+}
+
+/** Whether a cliff of another type than `chosen` (the palette's cliff type) is in the square of half side `reach` round
+ *  corner (cx, cy): a cliff tile (its corners not all on one level) whose bottom-left corner, which gives the tile its
+ *  type, has another type. Only then does the World Editor's water brush move the dry corners of that square that
+ *  aren't next to the water to the stroke's level: on slope-edge.w3x (a Dirt Cliff edge, Grass Cliff chosen) the low
+ *  corners came up and the high ones came down (water-brush-edge-*), on plateau.w3x (its edge Grass Cliff, the chosen
+ *  type) none moved, with or without a ramp there (we-compare water-plateau-on, -below, -deep and water-ramp-*,
+ *  2026-11-14, branch water-brush-we2), as its cliff brush does beside a foreign cliff (cliff-type-mixed). Without a
+ *  chosen type (the ground tile's) every square corner moves, the old rule (not measured). */
+function foreignCliffNear(t: Terrain, cx: number, cy: number, reach: number, chosen: number | undefined): boolean {
+  if (chosen === undefined) return true;
+  const W = t.width, H = t.height;
+  for (let y = Math.max(0, cy - reach); y <= Math.min(H - 2, cy + reach); y++) {
+    for (let x = Math.max(0, cx - reach); x <= Math.min(W - 2, cx + reach); x++) {
+      const c = t.corners[y * W + x];
+      const l = c.layer;
+      if (l === t.corners[y * W + x + 1].layer && l === t.corners[(y + 1) * W + x].layer && l === t.corners[(y + 1) * W + x + 1].layer) continue;
+      if (c.cliffTexture !== chosen) return true;
+    }
+  }
+  return false;
 }
 
 /** The lowest ground the World Editor's water brushes leave under Enforce Water Height Limits, in world units with the

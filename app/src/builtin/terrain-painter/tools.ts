@@ -3,7 +3,7 @@
 
 import { cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { liftToFloor, waterBasin } from "../../lib/terrain/waterrim";
-import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, rampLift, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
 
@@ -22,6 +22,8 @@ export interface LayerTarget {
   waterLevel?: number;
   /** The cliff level where the stroke started (water: one or two above `layer`, unless that went below 0). */
   start?: number;
+  /** The palette's cliff type (water: whether the corners round the new water come to its level, waterBasin). */
+  cliffType?: number;
 }
 
 const LAYER_STEPS: Partial<Record<LayerTool, number>> = { cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 };
@@ -31,11 +33,34 @@ const LAYER_STEPS: Partial<Record<LayerTool, number>> = { cliffUp: 1, cliffUp2: 
  *  would set is below 0: from a pit's floor at level 0 (Decrease One, Decrease Two) and from level 1 (Decrease Two)
  *  no corner moved and none was typed, at the pit's middle and on the floor's rim, with or without a tile picked
  *  beside it (we-compare cliff-floor and painted-cliff-type-grass, 2026-11-14, branch painted-cliff-type-we). Studio
- *  used to lower the whole brush to level 0 there. The water brushes weren't measured so low: they keep to level 0. */
+ *  used to lower the whole brush to level 0 there. A water brush whose level would be below 0 lowers nothing: the
+ *  corners turn wet on the level they are on (waterBelowFloor), so the level returned is the start's. */
 export function strokeLayer(tool: LayerTool, start: number): number | null {
   const to = start + (LAYER_STEPS[tool] ?? 0);
   if (to < 0 && (tool === "cliffDown" || tool === "cliffDown2")) return null;
+  if (waterBelowFloor(tool, start)) return start;
   return Math.max(0, Math.min(15, to));
+}
+
+/** What a cliff or water stroke started on corner (x, y) sets, or null when it does nothing there (strokeLayer). Cliff
+ *  tools step one level from the start point; water goes one or two levels below it, with the surface the water offset
+ *  (89.6) under its original ground, as the World Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game
+ *  maps). On a ramp's middle corner the water goes by the ramp's height, half a level up (rampLift): the editor's word
+ *  was 256 more there (we-compare water-ramp-below, 2026-11-14, branch water-brush-we2). `cliffType`: the palette's. */
+export function layerTarget(t: Terrain, tool: LayerTool, x: number, y: number, cliffType?: number): LayerTarget | null {
+  const c = t.corners[y * t.width + x];
+  const layer = strokeLayer(tool, c.layer);
+  if (layer === null) return null;
+  return { layer, waterLevel: waterLevelAt(c.height + rampLift(t, x, y) - WATER_OFFSET), start: c.layer, cliffType };
+}
+
+/** Whether a Shallow or Deep stroke started on cliff level `start` would put its water below level 0. The World
+ *  Editor's brush then only makes its corners wet where they are: Shallow on a level-0 pit floor, Deep on level 0 and
+ *  on level 1 left the clicked corner on its level, wet, with its own water word, and changed nothing round it: no
+ *  corner lowered, retyped or given the water word (we-compare water-level0-shallow, water-level0-deep,
+ *  water-level1-deep, 2026-11-14, branch water-brush-we2; Studio used to lower to level 0 and run waterBasin). */
+export function waterBelowFloor(tool: LayerTool, start: number): boolean {
+  return (tool === "shallow" || tool === "deep") && start + (LAYER_STEPS[tool] ?? 0) < 0;
 }
 
 export interface Brush {
@@ -193,16 +218,24 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
 export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerTarget, stroke: Stroke, enforceWater = false): boolean {
   let changed = false;
   const inside = cornersIn(t, b);
-  if ((tool === "shallow" || tool === "deep") && inside.length) {
+  const water = tool === "shallow" || tool === "deep";
+  const start = target.start ?? target.layer + (tool === "deep" ? 2 : tool === "shallow" ? 1 : 0);
+  /** The water would go below level 0: the corners only turn wet where they are (waterBelowFloor). */
+  const wetOnly = waterBelowFloor(tool, start);
+  /** Corner to its cliff level before this stamp moved it (the water brush's ramps: dropBrokenRamps). */
+  const moved = new Map<number, number>();
+  if (water && !wetOnly && inside.length) {
     // As the World Editor does, the ground and the cliff levels round the new water are made ready first (waterBasin).
     const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
     if (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height) {
-      const start = target.start ?? target.layer + (tool === "deep" ? 2 : 1);
       const brush = new Set(inside.map(({ i }) => i));
-      if (waterBasin(t, cy * t.width + cx, brush, b.radius + 1, !!b.square, start, (i) => stroke.touch(t, i)).length) changed = true;
+      const touch = (i: number) => {
+        stroke.touch(t, i);
+        if (!moved.has(i)) moved.set(i, t.corners[i].layer);
+      };
+      if (waterBasin(t, cy * t.width + cx, brush, b.radius + 1, !!b.square, start, touch, target.cliffType).length) changed = true;
     }
   }
-  const moved = new Map<number, number>();
   for (const { i } of inside) {
     const c = t.corners[i];
     if (tool === "dry") {
@@ -212,17 +245,18 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
       changed = true;
       continue;
     }
-    const water = tool === "shallow" || tool === "deep";
-    if (c.layer === target.layer && (!water || (c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel))) continue;
+    const layer = wetOnly ? c.layer : target.layer;
+    if (c.layer === layer && (!water || (c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel))) continue;
     stroke.touch(t, i);
-    if (c.layer !== target.layer) moved.set(i, c.layer);
-    setLayer(c, target.layer);
+    if (c.layer !== layer && !moved.has(i)) moved.set(i, c.layer);
+    setLayer(c, layer);
     if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel, waterOffsetOf(t));
     stroke.own.add(i);
     changed = true;
   }
-  if (enforceWater && (tool === "shallow" || tool === "deep")
-    && liftToFloor(t, inside.map(({ i }) => i), (i) => stroke.touch(t, i)).length) changed = true;
+  // The low ground comes up with the switch on or off: the editor's lift was the same with Enforce Water Height Limits
+  // off (we-compare water-limit-off-deep, 2026-11-14, branch water-brush-we2).
+  if (water && liftToFloor(t, inside.map(({ i }) => i), (i) => stroke.touch(t, i)).length) changed = true;
   if (CLIFF_TOOLS.has(tool) && moved.size) {
     // No cliff taller than two levels: the corners next to the brush come along to within two levels of it, as the
     // editor's do (we-compare cliff-reach: Increase Two, size 3, on plateau.w3x's edge, level 3 to 5, took the low
@@ -244,8 +278,9 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
       }
     }
   }
-  // The ramps the cliff brush breaks lose their flags, as the editor's do (dropBrokenRamps; not measured for water).
-  if (tool !== "shallow" && tool !== "deep" && moved.size) dropBrokenRamps(t, moved, stroke);
+  // The ramps the cliff and water brushes break lose their flags, as the editor's do (dropBrokenRamps; water: we-compare
+  // water-ramp-on, -below and -deep took the three flags of a ramp line off, 2026-11-14, branch water-brush-we2).
+  if (moved.size) dropBrokenRamps(t, moved, stroke);
   if (CLIFF_TOOLS.has(tool)) {
     // The corners round the centre the editor's cliff brush types, cliff or not (cliffTypeStencil); retypeCliffs types them.
     const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
@@ -257,9 +292,10 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     }
   }
   const level = target.waterLevel;
-  if ((tool === "shallow" || tool === "deep") && level !== undefined) {
+  if (water && !wetOnly && enforceWater && level !== undefined) {
     // The dry corners round the new water get its level word too, without the water flag: the World Editor's
-    // did (the 24 round a size 3 click, we-compare water-brush-slope-shallow-east, 2026-11-13).
+    // did (the 24 round a size 3 click, we-compare water-brush-slope-shallow-east, 2026-11-13), but only with Enforce
+    // Water Height Limits on (water-limit-off-deep: 8192 left, 2026-11-14) and not where the water went no lower.
     const brush = new Set(inside.map(({ i }) => i));
     for (const i of brush) {
       const x = i % t.width, y = Math.floor(i / t.width);
