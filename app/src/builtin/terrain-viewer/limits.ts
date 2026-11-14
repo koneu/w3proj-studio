@@ -71,13 +71,18 @@ export const clampPoint = (b: Bounds | null, x: number, y: number): [number, num
 
 /**
  * A nudge for a group, held to the bounds: a step that would pass one is refused (refuseShift), not cut back.
- * `steps` is how many nudges long each entry moves (a building goes twice as far, on its finer grid), so the
- * group's step is the longest one and each entry takes its share: nothing ends up past its bound, whatever its step.
+ * `steps` is how many nudges long each entry's own step is (a building goes twice as far, on its finer grid); the
+ * group moves by the longest one, all by the same shift, and what stands on a grid snaps to it afterwards (a pathless
+ * doodad with a tree goes 64, not 8: we-compare edge-group-nudge, the editor's probes with the pointer on either).
+ * A diagonal step with one axis refused is refused whole: at the east edge KP_9 moves nothing (the free axis doesn't
+ * move, we-compare edge-single-diagonal).
  */
 export function scaledNudge(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], steps: readonly number[], nudge: readonly [number, number]): [number, number][] {
   const longest = Math.max(1, ...steps);
-  const [dx, dy] = refuseShift(points, bounds, nudge[0] * longest, nudge[1] * longest);
-  return steps.map((s) => [(dx * s) / longest, (dy * s) / longest]);
+  const asked: [number, number] = [nudge[0] * longest, nudge[1] * longest];
+  let [dx, dy] = refuseShift(points, bounds, asked[0], asked[1]);
+  if (asked[0] !== 0 && asked[1] !== 0 && (dx === 0 || dy === 0)) { dx = 0; dy = 0; }
+  return steps.map(() => [dx, dy]);
 }
 
 /** Where a dragged or nudged object's centre may go so that what it takes up (`half`, across and up: a unit's

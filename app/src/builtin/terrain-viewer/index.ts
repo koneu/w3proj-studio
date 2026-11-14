@@ -5138,7 +5138,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // inside the playable part); not at the camera bounds, as in the World Editor. A motion that would pass the
           // limit is refused: the group stays where the last one that fitted put it (we-compare edge-last-step).
           const [dx, dy] = refuseShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
-            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1], objDrag.shift ?? [0, 0]);
+            objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1], objDrag.shift ?? [0, 0],
+            (i, x, y) => { const at = ruledPose(objDrag!.entries[i].id, x, y, objDrag!.before[i].angle); return [at.x, at.y]; });
           objDrag.shift = [dx, dy];
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;

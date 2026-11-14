@@ -166,8 +166,17 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
   goes past the playable part and stops with its centre strictly inside the map (tree and a 12x12 LZth 4032 on 64
   steps, a pathless LPcr 4088 on 8 steps). A step that would pass the limit is refused, the object stays at the last step that
-  fits (spec edge-last-step: footman 3296, farm 3264, tree 4032, LPcr 4088; selected one at a time: a group nudges all by 8 and a gridded doodad rounds back; a box select of the lower objects needs a box 200 px wide). The camera too scrolls past the camera bounds with the switch on. Studio:
+  fits (spec edge-last-step: footman 3296, farm 3264, tree 4032, LPcr 4088; selected one at a time here, groups below; a box select of the lower objects needs a box 200 px wide). The camera too scrolls past the camera bounds with the switch on. Studio:
   limits.ts `insetBy`, terrain-viewer `moveBounds`; app-smoke heightsLimits.
+  Groups and diagonals at the edge (branch edge-group-nudge-we, 2026-11-14; spec edge-group-nudge, whose first spec
+  switches Num Lock on for the file, so run it whole): the editor's d mode selects only doodads and u only units, so a
+  doodad and a unit are never one group. A group nudges all by the longest step (tree + pathless LPcr: both 64, a
+  footman + farm: both 64) and is refused whole when any member's step would pass its limit (tree 4032 with LPcr 4032;
+  footman 3264 with the farm 3200, not 3296 and 3264). In about 3 of 12 first runs of an editor a group stepped 8
+  instead (the tree stayed, LPcr went to 4088): not explained. A diagonal (KP_9) at the east edge moves nothing, the
+  free axis too, for one object and for a group. A tree dragged past the edge stops on the grid inside it (4032, 3968
+  or 3904 in different runs: the last motion that fits varies), never on 4096; the unit and group drags didn't press
+  reliably, so no drag spec. Studio: limits.ts `scaledNudge`, moveedit.ts `refuseShift` with `settle`.
 - **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
   through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
   the view at 156,79): the status bar read (3713.9, 515.4) where (3712, 512) was aimed (`proj.py` in that folder).
