@@ -1158,6 +1158,11 @@ pub struct VerifyReport {
     pub mismatches: Vec<String>,
     pub unnamed: usize,
     pub errors: Vec<(String, String)>,
+    /// `TRIGSTR_<n>` references whose string isn't in the map's war3map.wts (a campaign's own
+    /// files: war3campaign.wts), as `TRIGSTR_<n>`; chapter maps' as `<chapter folder>/TRIGSTR_<n>`.
+    pub unresolved_strings: Vec<String>,
+    /// Maps (`""`: the map itself, else the chapter folder) whose references couldn't be told, and why.
+    pub strings_unchecked: Vec<(String, String)>,
 }
 
 impl VerifyReport {
@@ -1203,9 +1208,52 @@ fn codec_use(ex: &Extracted, codecs: &Registry) -> Vec<(String, String)> {
     out
 }
 
+/// Errs when `ex` isn't a map or campaign: its info file (war3map.w3i, war3campaign.w3f) isn't
+/// there or can't be read. The archive reader takes what it can from a damaged file (protected
+/// maps carry bogus tables), so a truncated map opens as an archive with no files at all.
+fn check_readable(ex: &Extracted) -> Result<()> {
+    const INFO: [&str; 2] = ["war3map.w3i", "war3campaign.w3f"];
+    let is_info = |name: &str| INFO.iter().any(|i| name.eq_ignore_ascii_case(i));
+    if ex.report.files.iter().any(|f| is_info(&f.archive_name)) {
+        return Ok(());
+    }
+    if let Some((name, why)) = ex.report.errors.iter().find(|(name, _)| is_info(name)) {
+        return Err(Error::Format(format!("not a readable map: {name} can't be read ({why})")));
+    }
+    let (files, unnamed) = (ex.report.files.len(), ex.report.unnamed.len());
+    Err(Error::Format(if files + unnamed + ex.report.errors.len() == 0 {
+        "not a readable map: the archive lists no files (truncated or damaged)".into()
+    } else {
+        format!("not a readable map: no war3map.w3i or war3campaign.w3f among its {files} files ({unnamed} unnamed, {} unreadable)", ex.report.errors.len())
+    }))
+}
+
+/// `TRIGSTR_<n>` references of `ex` (chapter maps too) that its string table lacks, into
+/// `unresolved` with `at` before each; maps whose references can't be told into `unchecked`.
+fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &mut Vec<String>, unchecked: &mut Vec<(String, String)>) {
+    match wts::map_string_refs(&ex.files, codecs) {
+        Err(why) => unchecked.push((at.trim_end_matches('/').to_string(), why)),
+        Ok(refs) => {
+            let table = ex
+                .files
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("war3map.wts") || k.eq_ignore_ascii_case("war3campaign.wts"))
+                .map(|(_, bytes)| wts::strings(&String::from_utf8_lossy(bytes)))
+                .unwrap_or_default();
+            unresolved.extend(refs.iter().filter(|n| !table.contains_key(n)).map(|n| format!("{at}TRIGSTR_{:0>3}", n.to_string())));
+        }
+    }
+    for (dir, chapter) in &ex.nested {
+        unresolved_strings(chapter, codecs, &format!("{at}{dir}/"), unresolved, unchecked);
+    }
+}
+
 pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) -> Result<VerifyReport> {
     let archive = Archive::open(map)?;
     let ex = extract_named(&archive, codecs, more_names);
+    check_readable(&ex)?;
+    let (mut unresolved, mut strings_unchecked) = (Vec::new(), Vec::new());
+    unresolved_strings(&ex, codecs, "", &mut unresolved, &mut strings_unchecked);
     let packed = Archive::from_bytes(pack_extracted(&ex, codecs)?)?;
     let mut mismatches = Vec::new();
     compare(&archive, &packed, &ex, "", &mut mismatches);
@@ -1222,5 +1270,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
         mismatches,
         unnamed: ex.report.unnamed.len(),
         errors: ex.report.errors,
+        unresolved_strings: unresolved,
+        strings_unchecked,
     })
 }

@@ -482,7 +482,9 @@ w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or
 w3proj check MyMap/                 # the Problems view's checks (honouring .w3proj/problems-ignore.json) and
                                     # check_melee on melee maps; --only=problems,melee,path,
                                     # --path x1,y1:x2,y2 (check_path), --json, --warnings-fail; exit 1 on errors
-w3proj verify *.w3x                 # unpack→pack in memory, compare every file
+w3proj verify *.w3x                 # unpack→pack in memory, compare every file; a file that can't be read
+                                    # as a map (no war3map.w3i / war3campaign.w3f) fails; TRIGSTR references
+                                    # war3map.wts lacks are listed as warnings (exit 0; --warnings-fail: exit 1)
 w3proj ls MyMap.w3x                 # sizes, stored sizes, flags, table sizes
 w3proj cat MyMap.w3x war3map.j
 w3proj formats [--project MyMap/] [--show w3i]   # format definitions in use
