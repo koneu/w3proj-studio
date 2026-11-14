@@ -12746,6 +12746,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "mcpLimits", found);
   await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
   await leftOpen(page, "flyingHeights", found);
+  await gridDefault(page, found).catch((e) => found.push(`grid default: ${e.message}`));
+  await leftOpen(page, "gridDefault", found);
   await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
   await leftOpen(page, "specialDoodads", found);
   await startPreviewFollow(page, found).catch((e) => found.push(`start preview: ${e.message}`));
