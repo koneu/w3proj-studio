@@ -47,15 +47,25 @@ export function cornerBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, 
 }
 
 const HEIGHT_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower", "plateau", "smooth", "noise"]);
+const BOUNDARY_TOOLS: ReadonlySet<string> = new Set(["boundary", "unboundary"]);
 
 /** The brush a painter tool puts down for a pointer at (x, y) and the toolbar's Size (not Ramp's, which goes by the
  *  cliff): the World Editor's corner brush (cornerBrush). The height brushes leave its rim out: the World Editor's
  *  Raise (we-drive, one click each on flat ground, 2026-11-13, verify3-we-diffs) changed 1, 1, 9, 45, 145 corners at
  *  sizes 1, 2, 3, 5, 8, the corners strictly inside radius size − 1 round the nearest corner (size 1: that corner),
  *  fading to nothing at the rim. Cliffs, water and the ground textures (Blight and Boundary are tiles of its texture
- *  palette) take the rim too. */
+ *  palette) take the rim too. Boundary and Remove Boundary alone are centred on the lower-left corner of the tile
+ *  under the pointer instead of the nearest corner (the World Editor flags the tile there): we-drive, 2026-11-14,
+ *  branch boundary-we, 16 size-1 clicks at 0.2 to 0.8 of a tile in x and y each flagged that corner, and sizes 2, 3
+ *  and 5 took 5, 13 and 49 corners round it (spec tests/we-compare/boundary-wpm.json). */
 export function brushOf(tool: string, t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
   const b = cornerBrush(t, x, y, size, square);
+  if (BOUNDARY_TOOLS.has(tool)) {
+    // A pointer on a corner line (the view's centre column is one) counts as the tile past it, as the editor's does:
+    // the slack takes rounding in the pick.
+    const down = (v: number, o: number) => o + Math.floor((v - o) / 128 + 1e-6) * 128;
+    return { ...b, x: down(x, t.offsetX), y: down(y, t.offsetY) };
+  }
   return HEIGHT_TOOLS.has(tool) ? { ...b, open: true } : b;
 }
 

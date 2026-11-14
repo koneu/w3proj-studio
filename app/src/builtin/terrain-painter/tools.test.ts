@@ -80,9 +80,31 @@ test("cliff and texture brushes take the World Editor's corners: a disc of radiu
       const p = flatMap(), dirt = p.groundTiles.indexOf("Ldrt");
       paintTexture(p, brushOf("paint", p, x + dx, y + dy, size), dirt, new Stroke("paint"));
       assert.equal(p.corners.filter((c) => c.texture === dirt).length, want, `texture size ${size} at +${dx},${dy}`);
-      for (const tool of ["blight", "boundary", "cliffDown", "deep", "dry"]) assert.deepEqual(brushOf(tool, t, x + dx, y + dy, size), brushOf("paint", t, x + dx, y + dy, size), tool);
+      for (const tool of ["blight", "cliffDown", "deep", "dry"]) assert.deepEqual(brushOf(tool, t, x + dx, y + dy, size), brushOf("paint", t, x + dx, y + dy, size), tool);
     }
   }
+});
+
+test("Boundary brushes are centred on the lower-left corner of the tile under the pointer, as the World Editor's", () => {
+  // we-drive, 2026-11-14 (branch boundary-we): size-1 clicks at 0.2, 0.4, 0.6 and 0.8 of a tile in x and y each flagged
+  // the corner below and left of the pointer; sizes 2, 3 and 5 took 5, 13 and 49 corners round it.
+  for (const [size, want] of [[1, 1], [2, 5], [3, 13], [5, 49]]) {
+    for (const [fx, fy] of [[0.2, 0.8], [0.4, 0.6], [0.6, 0.4], [0.8, 0.2], [0, 0.66]]) {
+      const t = flatMap(), { x, y } = centre(t);
+      for (const tool of ["boundary", "unboundary"]) {
+        const b = brushOf(tool, t, x + fx * 128, y + fy * 128, size);
+        assert.deepEqual([b.x, b.y, b.radius], [x, y, size - 1], `${tool} size ${size} at ${fx},${fy} of the tile`);
+      }
+      paintBoundary(t, brushOf("boundary", t, x + fx * 128, y + fy * 128, size), true, new Stroke("boundary"));
+      assert.equal(t.corners.filter((c) => c.boundary).length, want, `size ${size}`);
+      assert.ok(t.corners[16 * t.width + 16].boundary, "the tile's lower-left corner is painted");
+    }
+  }
+  // On a corner line, a hair to the left of it by rounding in the pick: still the tile past the line (the World Editor's
+  // click at the view's centre column flagged column 32).
+  const t = flatMap(), { x, y } = centre(t);
+  assert.equal(brushOf("boundary", t, x - 1e-9, y + 40, 1).x, x);
+  assert.equal(brushOf("boundary", t, x - 10, y + 40, 1).x, x - 128, "a real step left is the tile to the left");
 });
 
 test("height brushes take the World Editor's corners: inside radius size − 1 round the nearest corner, not its rim", () => {
