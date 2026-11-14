@@ -4888,6 +4888,26 @@ function meanColour(page, data, box) {
   })()`);
 }
 
+/** A box of a picture (fractions of its size): its mean colour, and how far its green lies from the smooth picture
+ *  (the standard deviation of each pixel against the mean of its 32 × 32 block: a pattern, not a slow change). */
+function colourSpread(page, data, box) {
+  return page.evaluate(`(async () => {
+    const i = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + ${JSON.stringify(data)}; });
+    const c = document.createElement("canvas"); c.width = i.width; c.height = i.height;
+    const g = c.getContext("2d"); g.drawImage(i, 0, 0);
+    const [x0, y0, x1, y1] = ${JSON.stringify(box)}.map((f, k) => Math.round(f * (k % 2 ? i.height : i.width)));
+    const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0), p = g.getImageData(x0, y0, w, h).data, sum = [0, 0, 0];
+    for (let k = 0; k < p.length; k += 4) for (let ch = 0; ch < 3; ch++) sum[ch] += p[k + ch];
+    let apart = 0, n = 0;
+    for (let by = 0; by < h; by += 32) for (let bx = 0; bx < w; bx += 32) {
+      let s = 0, m = 0;
+      for (let y = by; y < Math.min(h, by + 32); y++) for (let x = bx; x < Math.min(w, bx + 32); x++) { s += p[(y * w + x) * 4 + 1]; m++; }
+      for (let y = by; y < Math.min(h, by + 32); y++) for (let x = bx; x < Math.min(w, bx + 32); x++) { apart += (p[(y * w + x) * 4 + 1] - s / m) ** 2; n++; }
+    }
+    return { mean: sum.map((s) => s / (p.length / 4)), spread: Math.sqrt(apart / n) };
+  })()`);
+}
+
 /** How many pixels of a picture are the grid's line colours: `yellow` (every 4 tiles), `white` (the tiles' lines). */
 function gridPixels(page, data) {
   return page.evaluate(`(async () => {
@@ -5083,6 +5103,31 @@ async function viewCommands(page, fail, shots, size) {
   await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleMediumGrid", "grid", "grid-medium", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleLargeGrid", "grid", "grid-large", 400);
+  // HD water has the editor's waves (hdwater.ts HD_WAVES; we-drive, 200 deep Lordaeron water, 2026-11-14: its green
+  // 2.6 to 4.6 levels apart round the smooth picture): open water beside the footman is patterned, and flat with the
+  // map's wave strength 0 (war3map.w3i's wavesNormalMapStrength), which is the control that the pattern is the
+  // waves' (and that this check can fail). Its mean colour is the same either way: the waves add as much as they take. The view's east side is open
+  // water (the footman, a tree and the start location lie in its middle and west).
+  const waveBox = [0.6, 0.1, 0.95, 0.9];
+  const waterShot = async (name) => {
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    await settled(page);
+    const shot = await picture(name);
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    return shot;
+  };
+  const waved = await colourSpread(page, await waterShot("water-waves"), waveBox);
+  const waveInfoText = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+  const waveInfo = JSON.parse(waveInfoText);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify({ ...waveInfo, water: { ...(waveInfo.water ?? {}), wavesNormalMapStrength: 0 } }, null, 2))})`);
+  await sleep(1500);
+  const still = await colourSpread(page, await waterShot("water-no-waves"), waveBox);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(waveInfoText)})`);
+  await sleep(1500);
+  const places = (c) => c.map((v) => v.toFixed(1)).join(",");
+  if (waved.spread < 2 || waved.spread > 7) bad(`HD water's waves aren't the editor's strength: green ${waved.spread.toFixed(2)} levels apart (colour ${places(waved.mean)})`);
+  if (still.spread > 1.2 || still.spread * 2.5 > waved.spread) bad(`with the map's wave strength 0 the water isn't flat: green ${still.spread.toFixed(2)} levels apart, ${waved.spread.toFixed(2)} with waves`);
+  if (waved.mean.some((v, i) => Math.abs(v - still.mean[i]) > 1.5)) bad(`the waves change the water's mean colour: ${places(still.mean)} without, ${places(waved.mean)} with`);
   // As the World Editor's grids (we-drive, 2026-11-12): the large one yellow every 4 tiles; the medium one keeps those
   // and adds the tiles' white lines (Studio's had the white only); the small one keeps both. The view looks at 256, 0,
   // so the yellow lines at x 0 and 512 and y 0 are in it.
