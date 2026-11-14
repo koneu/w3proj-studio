@@ -550,6 +550,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const written = await write("command");
       if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
+    // Export Script: the map script as it stands (a script still due from the last save is written first) copied byte for
+    // byte to a file the person picks. A map with a Lua script exports that; a missing script isn't an empty one.
+    w3.commands.register("w3.script.export", async () => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await w3.commands.execute("w3.script.settle");
+      const found = await exportableScript((p) => w3.workspace.readBytes(p));
+      if (!found) throw new Error("The map has no script yet: generate it first (Generate Map Script).");
+      const ext = found.path.endsWith(".lua") ? "lua" : "j";
+      const target = await w3.window.pickSaveFile({ title: "Export Script", defaultPath: found.path.slice(4), filters: [{ name: ext === "lua" ? "Lua script" : "JASS script", extensions: [ext] }] });
+      if (!target) return null;
+      await w3.backend.writeBytes(target, found.bytes);
+      void w3.window.showInfo(`Exported ${found.path.slice(4)} to ${target}`);
+      return target;
+    }),
     { dispose: () => { clearTimeout(timer); questions.abort(); } },
   );
+}
+
+/** The script Export Script writes: war3map.lua when the project has one, else war3map.j; null when neither is there.
+ *  A file that is there but can't be read is an error, not "no script". */
+export async function exportableScript(readBytes: (path: string) => Promise<Uint8Array>): Promise<{ path: string; bytes: Uint8Array } | null> {
+  for (const path of [scriptPath(true), scriptPath(false)]) {
+    try { return { path, bytes: await readBytes(path) }; } catch (e) { if (!isNotFoundError(e)) throw e; }
+  }
+  return null;
 }

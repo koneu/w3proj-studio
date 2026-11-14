@@ -128,6 +128,10 @@ test("parseArgs: --screen sets the display's size, a held key keeps its @MS in t
   assert.deepEqual(parseArgs(["--start", "--key", "ctrl+Up@1500"]).steps, [["--start", null], ["--key", "ctrl+Up@1500"]]);
 });
 
+test("parseArgs: --close-modules is a step without a value", () => {
+  assert.deepEqual(parseArgs(["--start", "--close-modules", "--sleep", "5"]).steps, [["--start", null], ["--close-modules", null], ["--sleep", "5"]]);
+});
+
 test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {
   const { looks, steps } = parseArgs(["--map", "m.w3x", "--wait-ready", "--look", "center", "--shot", "a.png", "--look", "100,200,2000"]);
   assert.deepEqual(looks.map((l) => [l.center, l.x, l.y, l.distance]), [[true, null, null, 3000], [false, 100, 200, 2000]]);

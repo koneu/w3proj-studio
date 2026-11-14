@@ -301,9 +301,9 @@ test("every default key of the built-in manifests can be read, and its command i
   for (const k of rules) {
     assert.ok(normalizeKey(k.key), `${k.key} isn't a key`);
     assert.ok(ids.has(k.command), `${k.command} isn't declared`);
-    // The terrain view's keys, and the Trigger Editor's (bound while it has the focus, not typing).
-    const own = k.command.startsWith("w3.triggers.") ? "triggerEditor && !inputFocus" : "terrainFocus";
-    assert.equal(k.when, own, `${k.key} ${k.command} applies in ${own === "terrainFocus" ? "the terrain view" : "the Trigger Editor"} only`);
+    // The terrain view's keys, and the Trigger Editor's and Sound Editor's (bound while it has the focus, not typing).
+    const own = k.command.startsWith("w3.triggers.") ? "triggerEditor && !inputFocus" : k.command.startsWith("w3.sounds.") ? "soundEditor && !inputFocus" : "terrainFocus";
+    assert.equal(k.when, own, `${k.key} ${k.command} applies in ${own === "terrainFocus" ? "the terrain view" : own.split(" ")[0]} only`);
   }
   assert.equal(defaultBindings([], rules).length, rules.length);
 });

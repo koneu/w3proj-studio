@@ -6921,6 +6921,48 @@ async function moduleFunctionsChecks(page, found) {
     verify(u, "unused-sounds");
   }
 
+  // ---- Sound Editor: Move Sound Variable Up/Down and Sort (one undo step each); Export Script --------------------
+  const o = join(dir, "sound-order");
+  cpSync(FIXTURE, o, { recursive: true });
+  {
+    const sound = (name) => ({
+      name, file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: name, assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    });
+    put(join(o, "map", "war3map.w3s.json"), { format: "w3proj.sounds/1", version: 3, sounds: ["gg_snd_Delta", "gg_snd_alpha", "gg_snd_Charlie"].map(sound) });
+    await openProject(o);
+    const shown = () => page.evaluate(`[...document.querySelectorAll("tr.snd-row")].map((r) => r.firstChild.textContent).join()`);
+    const stored = () => json(join(o, "map", "war3map.w3s.json")).sounds.map((x) => x.name.replace(/^gg_snd_/, "")).join();
+    const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(page); };
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 3`), 20000);
+    await page.evaluate(`document.querySelectorAll("tr.snd-row")[1].click()`);
+    await page.evaluate(`w3.commands.execute("w3.sounds.moveUp")`);
+    if ((await shown()) !== "alpha,Delta,Charlie") fail(`Move Sound Variable Up showed ${await shown()}`);
+    await page.evaluate(`w3.commands.execute("w3.sounds.sort")`);
+    if ((await shown()) !== "alpha,Charlie,Delta") fail(`Sort Sound Variables showed ${await shown()}`);
+    await undo();
+    if ((await shown()) !== "alpha,Delta,Charlie") fail(`one undo of Sort left ${await shown()}`);
+    await undo();
+    if ((await shown()) !== "Delta,alpha,Charlie") fail(`one undo of Move Up left ${await shown()}`);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("undoing the order changes left the Sound Editor unsaved");
+    await page.evaluate(`w3.commands.execute("w3.sounds.moveDown")`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until("the sounds saved", () => stored() === "Delta,Charlie,alpha", 10000).catch(() => fail(`the saved order: ${stored()}`));
+    await settled(page);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("Move Down then save left the Sound Editor unsaved");
+    // Export Script: the project's war3map.j, byte for byte, to the chosen file.
+    const out = join(dir, "exported-script.j");
+    await answer({ save: out });
+    const eerr = await run("w3.script.export");
+    if (eerr) fail(`Export Script: ${eerr}`);
+    else if (!existsSync(out) || !readFileSync(out).equals(readFileSync(join(o, "map", "war3map.j")))) fail("the exported script isn't the project's war3map.j");
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(o, "sound-order");
+  }
+
   // ---- Sound Editor: a dialogue's speaker name and text (strings of war3map.wts) ------------------
   // A sound with a speaker but no keys: typed, it gets speaker name n and text n + 1 after the table's highest string;
   // saved, the strings are in war3map.wts and the keys in the sound; opened again, the fields show the same. An edit of

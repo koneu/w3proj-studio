@@ -66,6 +66,8 @@
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
 //   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
 //                       positive zooms in
+//   --close-modules     close the module windows this run opened (Sound Editor after F5, …): the next map of a run
+//                       (--map/--open) starts from the map's own view, and a window left open ended one (sound-order-sort)
 //   --windows           list the editor's windows: title, rect, and which are dialogs
 //   --game-view STATE   "on", "off" or "status": the state of View > Lock to Game View Settings, read from the
 //                       picture of the View menu's check mark; on/off press V until it matches, and check again.
@@ -172,7 +174,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 const MAX_LOOKS = 16;
 
 const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
-const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
+const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
 const OPEN_DIALOG = "Open Document";
@@ -843,7 +845,8 @@ class Session {
     while (Date.now() < deadline) {
       await sleep(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
-      const questions = questionDialogs(this.windows().dialogs);
+      // A module window the run opened itself (the Sound Editor, F5) stays beside the map: not a question.
+      const questions = questionDialogs(this.windows().dialogs).filter((d) => !isReopenedModule(d.title));
       // The reminder about the default map name, and any dialog --save-accept names (e.g. "Warning", the "no longer
       // considered a melee map" notice): answered with Return.
       const reminder = questions.find((d) => d.title === "Reminder" || this.opts.saveAccept.includes(d.title));
@@ -1222,6 +1225,11 @@ async function main() {
           }
           await sleep(500);
           out({ step, notches: n, at });
+        } else if (step === "--close-modules") {
+          const mods = s.windows().dialogs.filter((d) => isReopenedModule(d.title));
+          for (const d of mods) x11(s.display, "close", d.id);
+          await sleep(1000);
+          out({ step, closed: mods.map((d) => d.title) });
         } else if (step === "--windows") {
           const w = s.windows();
           const brief = (x) => ({ title: x.title, rect: x.rect });
