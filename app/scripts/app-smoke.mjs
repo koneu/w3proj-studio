@@ -5664,6 +5664,47 @@ async function triggerByHand(page, hands, root, fail) {
   if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
+/** The Sound Editor's own keys with real key presses: Ctrl+Up/Down (Move Sound Variable), Ctrl+R (Sort), Ctrl+PageUp/Down
+ *  (sound volume), Ctrl+Shift+PageUp/Down (music volume). The workbench leaves keys bound under the element's context to it. */
+async function soundEditorKeys(page, found) {
+  try {
+  const fail = (what) => found.push(`sound editor keys: ${what}`);
+  const k = await heightKit(page, "SoundKeys");
+  try {
+  const { hands } = k;
+  const sound = (name) => ({
+    name, file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+    channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+    variableName: name, assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+    speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+  });
+  const w3s = "map/war3map.w3s.json";
+  await page.evaluate(`w3.editors.closeAll()`);
+  const body = { format: "w3proj.sounds/1", version: 3, sounds: ["gg_snd_Delta", "gg_snd_alpha", "gg_snd_Charlie"].map(sound) };
+  await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(w3s)}, ${JSON.stringify(JSON.stringify(body))}); await w3.workspace.refresh(); })()`);
+  await page.evaluate(`w3.editors.open(${JSON.stringify(w3s)})`);
+  await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 3`), 20000);
+  const shown = () => page.evaluate(`[...document.querySelectorAll("tr.snd-row")].map((r) => r.firstChild.textContent).join()`);
+  const toasts = () => page.evaluate(`document.body.innerText`);
+  const press = async (spec) => { await hands.chord(spec); await settled(page); };
+  const expectShown = async (what, want) => { const got = await shown(); if (got !== want) fail(`${what}: the list shows ${got}, not ${want}`); };
+  await hands.click("tr.snd-row:nth-child(2)");
+  await press("Ctrl+ArrowUp");
+  await expectShown("Ctrl+Up", "alpha,Delta,Charlie");
+  await press("Ctrl+ArrowDown");
+  await expectShown("Ctrl+Down", "Delta,alpha,Charlie");
+  await press("Ctrl+R");
+  await expectShown("Ctrl+R", "alpha,Charlie,Delta");
+  await press("Ctrl+PageUp");
+  if (!/Sound volume \d+%/.test(await toasts())) fail("Ctrl+PageUp gave no sound volume message");
+  await k.clearToasts();
+  await press("Ctrl+Shift+PageDown");
+  if (!/Music volume \d+%/.test(await toasts())) fail("Ctrl+Shift+PageDown gave no music volume message");
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally { await restoreWindow(page); }
+  } catch (e) { found.push(`sound editor keys: ${e.message}`); }
+}
+
 /** Ctrl+S with the cursor still in a field of an editor that takes a field's text when the field is left (its `change`
  *  event): the save has the typed text and leaves the tab saved. A key doesn't leave the field, so the save used to go
  *  without the text, and the tab stayed saved too until the field was left. The Object Editor (a value cell), Map
@@ -12602,6 +12643,7 @@ async function run() {
         scriptGuard,
         scriptQuestionsOnSwitch,
         shouldHaves,
+        soundEditorKeys,
         specialDoodads,
         staleEditors,
         startPreviewFollow,
@@ -12870,6 +12912,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
   await leftOpen(page, "byHand", found);
+  await soundEditorKeys(page, found).catch((e) => found.push(`sound editor keys: ${e.message}`));
+  await leftOpen(page, "soundEditorKeys", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));

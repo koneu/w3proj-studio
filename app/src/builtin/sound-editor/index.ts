@@ -91,7 +91,11 @@ async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null, m
   return { audio, url };
 }
 
+/** The commands whose keys the Sound Editor reads itself (bound under its context in extension.json). */
+const SOUND_KEY_COMMANDS = new Set(["w3.sounds.moveUp", "w3.sounds.moveDown", "w3.sounds.sort", "w3.sounds.volumeUp", "w3.sounds.volumeDown",
+  "w3.sounds.musicVolumeUp", "w3.sounds.musicVolumeDown"]);
 /** Why `name` (without gg_snd_) can't be the name of `s` among `sounds`, or null if it can. */
+
 export function soundNameProblem(sounds: readonly Sound[], s: Sound, name: string): string | null {
   const n = `gg_snd_${name.trim()}`;
   return !/^gg_snd_[A-Za-z][A-Za-z0-9_]*$/.test(n) || n.endsWith("_") || sounds.some((x) => x !== s && x.name === n)
@@ -233,7 +237,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           current = editor;
           edits.fire();
         });
-        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
+        const unbindUndo = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
+        // Keys bound under this element's context (Move Up/Down, Sort, the volumes) the workbench leaves to the element.
+        const onOwnKey = (e: KeyboardEvent) => {
+          const own = w3.keybindings.commandsFor(e).find((c) => SOUND_KEY_COMMANDS.has(c));
+          if (!own) return;
+          e.preventDefault();
+          w3.commands.execute(own).catch((err) => { w3.window.showError(String(err instanceof Error ? err.message : err)); });
+        };
+        el.addEventListener("keydown", onOwnKey);
+        const unbindKeys = () => { unbindUndo(); el.removeEventListener("keydown", onOwnKey); };
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
           undo: () => { history.undo(); },
