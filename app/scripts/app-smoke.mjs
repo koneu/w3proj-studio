@@ -3604,7 +3604,7 @@ async function heightsLimits(page, found) {
   await k.save();
   if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
 
-  // A unit nudged at the playable part's edge stops with its collision size inside it (a footman, 31), the switch on.
+  // A unit nudged at the playable part's edge stops at the last step that keeps its collision size inside it (a footman, 31), the switch on.
   const w3eHead = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
   const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
   const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
@@ -3619,7 +3619,9 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   for (let i = 0; i < 10; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (footman()?.position[0] !== pr - 31) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
+  // The World Editor refuses the step that would pass the limit: the last 8-step that fits (3296 from 3200).
+  const lastFit = fx0 + 8 * Math.floor((pr - 31 - fx0) / 8);
+  if (footman()?.position[0] !== lastFit) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor leaves it at ${lastFit}, the last step that fits (its collision size inside the playable edge ${pr})`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
 
   // A paste outside the bounds.
