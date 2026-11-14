@@ -60,6 +60,53 @@ export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number
   return changed;
 }
 
+/** The lowest ground the World Editor's water brushes leave under Enforce Water Height Limits, in world units with the
+ *  cliff level counted in (Corner.height): a stored height of 0 on level 2. */
+export const GROUND_FLOOR = -2048;
+/** How far the ring round a lifted corner reaches, per world unit of lift (measured: 3.46411 to 3.46417). */
+const LIFT_REACH = 3.46414;
+
+/** What the World Editor's Shallow and Deep brushes do with Enforce Water Height Limits on, after the brush's corners
+ *  (`brush`) have gone to the water's cliff level: every one of them lower than GROUND_FLOOR comes up to it, and the
+ *  corners round it are lifted on a cosine ring. Measured with we-drive (2026-11-14, branch water-low-header-we: flat
+ *  ground at 15 heights from -1795 to -2048 world units, sizes 1, 3 and 5, Deep and Shallow, and three uneven grounds;
+ *  tests/we-compare/water-limit-low.json): the brush corners are taken column by column from the west, each column from
+ *  the south; a corner D world units under the floor is set on it, and every other corner at a distance d (world
+ *  units) under R / 2 from it, R = 3.46414 * D, gets D * cos²(π d / 2R) more ground (a stored height floored, after
+ *  each corner), but only when that is at least its own height above the floor (its cliff level counted in). Sizes 1
+ *  and 3 came out exactly; size 5's stamps differ in up to 100 corners (some other order of the brush's corners). Not
+ *  measured: the square brush, ground that isn't flat beyond a step of a few corners, and the switch off (not done
+ *  then). `touch` is told of each corner before it changes. The changed corners. */
+export function liftToFloor(t: Terrain, brush: readonly number[], touch: (i: number) => void): number[] {
+  const W = t.width, H = t.height;
+  const order = [...brush].sort((a, b) => (a % W) - (b % W) || a - b);
+  const changed = new Set<number>();
+  for (const p of order) {
+    const c = t.corners[p];
+    const D = GROUND_FLOOR - c.height;
+    if (!(D > 0)) continue;
+    touch(p);
+    setGroundHeight(c, groundHeight(c) + D);
+    changed.add(p);
+    const R = LIFT_REACH * D, reach = Math.floor(R / 2 / 128);
+    const px = p % W, py = Math.floor(p / W);
+    for (let y = Math.max(0, py - reach); y <= Math.min(H - 1, py + reach); y++) {
+      for (let x = Math.max(0, px - reach); x <= Math.min(W - 1, px + reach); x++) {
+        const d = Math.hypot(x - px, y - py) * 128;
+        if (d === 0 || d >= R / 2) continue;
+        const i = y * W + x, q = t.corners[i];
+        const add = D * Math.cos((Math.PI * d) / (2 * R)) ** 2;
+        if (add < q.height - GROUND_FLOOR) continue;
+        touch(i);
+        q.rawHeight = Math.max(-0x8000, Math.min(0x7fff, Math.floor(q.rawHeight + add * 4)));
+        setGroundHeight(q, groundHeight(q));
+        changed.add(i);
+      }
+    }
+  }
+  return [...changed];
+}
+
 /** Levels the dry ground on the same cliff layer within two corners of `wet` (corner indices that are about to
  *  become water) to the height of the nearest of them. `skip` are corners to leave (the area's own). Call it
  *  before the layers change. `touch` is told of each corner before it changes. The changed corners. */

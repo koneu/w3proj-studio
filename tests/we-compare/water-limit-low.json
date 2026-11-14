@@ -1,7 +1,7 @@
 [
   {
     "name": "water-limit-low-a-deep",
-    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-a.w3x (ground at -1850 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-a.w3x (ground at -1850 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). The editor raises the ground under the brush to -2048 with the cliff level counted in (the clicked corner to -7168 stored for Deep, -7680 for Shallow) with a cosine ring round it; Studio does the same since branch water-low-header-we (waterrim.ts liftToFloor)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-a.w3x"
     },
@@ -71,8 +71,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 30
@@ -156,7 +155,7 @@
   },
   {
     "name": "water-limit-low-b-deep",
-    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). The editor raises the ground under the brush to -2048 with the cliff level counted in (the clicked corner to -7168 stored for Deep, -7680 for Shallow) with a cosine ring round it; Studio does the same since branch water-low-header-we (waterrim.ts liftToFloor)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x"
     },
@@ -226,15 +225,14 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 30
   },
   {
     "name": "water-limit-low-b-shallow",
-    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). The editor raises the ground under the brush to -2048 with the cliff level counted in (the clicked corner to -7168 stored for Deep, -7680 for Shallow) with a cosine ring round it; Studio does the same since branch water-low-header-we (waterrim.ts liftToFloor)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x"
     },
@@ -304,15 +302,14 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 30
   },
   {
     "name": "water-limit-low-c-deep",
-    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). The editor raises the ground under the brush to -2048 with the cliff level counted in (the clicked corner to -7168 stored for Deep, -7680 for Shallow) with a cosine ring round it; Studio does the same since branch water-low-header-we (waterrim.ts liftToFloor)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-c.w3x"
     },
@@ -382,15 +379,14 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 30
   },
   {
     "name": "water-limit-low-c-shallow",
-    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). The editor raises the ground under the brush to -2048 with the cliff level counted in (the clicked corner to -7168 stored for Deep, -7680 for Shallow) with a cosine ring round it; Studio does the same since branch water-low-header-we (waterrim.ts liftToFloor)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-c.w3x"
     },
@@ -460,8 +456,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ],
     "limit": 30
