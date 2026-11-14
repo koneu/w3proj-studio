@@ -2585,7 +2585,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (placedGroup) await rebuildObjects();
           if (lastGhost?.group) handle.objects.setGhost(lastGhost);
         };
-        const stopAutoCycle = startAutoCycle(() => autoCycleTick());
+        let stopAutoCycleTimer = startAutoCycle(() => autoCycleTick());
+        // Switched on: the first change comes 2 to 5 s later, not at whatever was left of the wait while it was off.
+        const stopAutoCycleSetting = w3.settings.onDidChange((key) => {
+          if (key !== "terrain.placement.autoCycleRandomGroups" || disposed || !autoCycleOn()) return;
+          stopAutoCycleTimer();
+          stopAutoCycleTimer = startAutoCycle(() => autoCycleTick());
+        });
+        const stopAutoCycle = () => { stopAutoCycleTimer(); stopAutoCycleSetting.dispose(); };
         const readRaces = async (): Promise<{ races: Map<number, number> } | null> => {
           const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           return info ? { races: playerRaces(info) } : null;
