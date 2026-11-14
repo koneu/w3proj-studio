@@ -65,7 +65,7 @@
   },
   {
     "name": "ramp-cliff-brush-up3",
-    "description": "the same ramp lines, then Apply Cliff Increase One size 3 at 750,700 (32,25 and 32,26 to level 3 and the ground round them): column 32 (3,3,3) loses its flags, 32,27 too though the brush left its level; column 29 and 35 beside the brush keep theirs. The ramp flags match since branch cut-ramp-wedges; known difference: the editor gives the plateau corners 31-33 x 28-29 above the raised patch cliff type 1, Studio leaves them 15 (before the fix too)",
+    "description": "the same ramp lines, then Apply Cliff Increase One size 3 at 750,700 (32,25 and 32,26 to level 3 and the ground round them): column 32 (3,3,3) loses its flags, 32,27 too though the brush left its level; column 29 and 35 beside the brush keep theirs. The ramp flags match since branch cut-ramp-wedges; the plateau corners 31-33 x 28-29 above the raised patch get cliff type 1 in both since branch cliff-type-we (2026-11-14; the size-3 brush's stencil, cliffTypeStencil; Studio left them 15 before)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -91,7 +91,7 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
