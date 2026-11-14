@@ -32,7 +32,7 @@ import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
-import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
+import { autoCycleLine, cycledId, startAutoCycle, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
 import { MinimapPanel, viewOutline } from "./minimappanel";
@@ -2184,6 +2184,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  and again after war3map.w3i is saved. A view setting: nothing in the map changes. */
         let groupCycle = 0;
         let randomGroups: RandomGroup[] = [];
+        /** The line is also on the canvas (data-random-line), for the smoke tests. */
+        const setGroupCycle = (n: number) => { groupCycle = n; canvas.dataset.randomLine = String(n); };
         /** What a placed unit or item is drawn as: a random group's line while cycling, else its skin (the World Editor
          *  draws a footman with a knight's skin as the knight: we-drive, 2026-11-10), else its own type. */
         const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined)
@@ -2560,11 +2562,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (disposed) return "";
           randomGroups = groups;
           const most = Math.max(0, ...groups.map((g) => g.lines?.length ?? 0));
-          if (!most) { groupCycle = 0; void rebuildObjects(); return "This map has no random groups with lines (Map Properties › Random Groups)."; }
-          groupCycle = (((groupCycle + step) % (most + 1)) + most + 1) % (most + 1);
+          if (!most) { setGroupCycle(0); void rebuildObjects(); return "This map has no random groups with lines (Map Properties › Random Groups)."; }
+          setGroupCycle((((groupCycle + step) % (most + 1)) + most + 1) % (most + 1));
           await rebuildObjects();
           return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
         };
+        const autoCycleOn = () => w3.settings.get<boolean>("terrain.placement.autoCycleRandomGroups", true) !== false;
+        const mostLines = (groups: readonly RandomGroup[]) => Math.max(0, ...groups.map((g) => g.lines?.length ?? 0));
+        /** The ghost last asked for, drawn again when the line it is shown as changes. */
+        let lastGhost: Parameters<typeof handle.objects.setGhost>[0] = null;
+        /** One tick of Auto Cycle Random Groups (the World Editor's timer): a random line of the groups. */
+        const autoCycleTick = async () => {
+          if (disposed || !autoCycleOn() || !objCtx) return;
+          const groups = (await readRandomGroups()) ?? randomGroups;
+          if (disposed || !autoCycleOn()) return;
+          randomGroups = groups;
+          const line = autoCycleLine(mostLines(groups));
+          if (line === groupCycle) return;
+          setGroupCycle(line);
+          // Only what is drawn from a group changes: no rebuild for a map without group objects.
+          const placedGroup = (unitsFile?.list ?? []).some((u) => (u as { randomType?: number }).randomType === 1);
+          if (placedGroup) await rebuildObjects();
+          if (lastGhost?.group) handle.objects.setGhost(lastGhost);
+        };
+        const stopAutoCycle = startAutoCycle(() => autoCycleTick());
         const readRaces = async (): Promise<{ races: Map<number, number> } | null> => {
           const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           return info ? { races: playerRaces(info) } : null;
@@ -2601,6 +2622,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (df && snapsDoodads()) await snapOnOpen(df);
             if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
             if (disposed) return;
+            // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
+            if (autoCycleOn()) {
+              const g = await readRandomGroups();
+              if (disposed) return;
+              if (g) { randomGroups = g; setGroupCycle(autoCycleLine(mostLines(g))); }
+            }
             await rebuildObjects();
           });
         }
@@ -4256,11 +4283,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
             setGhost: (g) => {
               ghostReq++;
+              lastGhost = g;
               if (!g) { renderer.ghost = null; redraw(); return; }
-              const skin = objCtx?.skins.get(g.id) ?? objCtx?.skins.get(objCtx.bases.get(g.id) ?? "");
+              const shown = (g.group && groupCycle > 0 ? cycledId({ id: g.id, randomType: 1, randomGroup: g.group.group, randomPosition: g.group.position }, randomGroups, groupCycle - 1) : undefined) ?? g.id;
+              const skin = objCtx?.skins.get(shown) ?? objCtx?.skins.get(objCtx.bases.get(shown) ?? "");
               if (!skin) { renderer.ghost = null; redraw(); return; }
               const req = ghostReq;
-              const entry = { id: g.id, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
+              const entry = { id: shown, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
               void loader.modelFor(skin, entry.variation).then((gpu) => {
                 if (req !== ghostReq) return;
                 renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType, skin), scaleRange(skin)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
@@ -5745,6 +5774,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             edgeAt = null;
             if (openedBy.get(doc.path) === record) openedBy.delete(doc.path);
             disposed = true;
+            stopAutoCycle();
             lastView = { key: viewKey, view: handle.view(), selection: selectionRefs() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();

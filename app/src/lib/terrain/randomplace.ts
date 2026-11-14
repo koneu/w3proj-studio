@@ -76,12 +76,26 @@ export type RandomChoice =
 
 export type RandomSpec = RandomChoice & { what: RandomWhat };
 
-/** Auto Cycle Random Groups: after a placement of a random-group unit or item (and only that) with the option on,
- *  `cycle` moves the view to the next group line, as Cycle Random Groups - Next. True when it was called. */
-export function autoCycleAfterPlace(random: RandomSpec | undefined, enabled: boolean, cycle: (step: 1) => unknown): boolean {
-  if (!enabled || random?.by !== "group") return false;
-  cycle(1);
-  return true;
+/** Auto Cycle Random Groups (the World Editor's, measured 2026-11-14): a timer. Every 2 to 5 s, with no input, what
+ *  the random-group objects are drawn as moves to a random line of the groups. */
+export const AUTO_CYCLE_MIN_MS = 2000;
+export const AUTO_CYCLE_MAX_MS = 5000;
+/** The wait before the next change. */
+export function autoCycleDelay(random: () => number = Math.random): number {
+  return AUTO_CYCLE_MIN_MS + random() * (AUTO_CYCLE_MAX_MS - AUTO_CYCLE_MIN_MS);
+}
+/** A random line (1-based) of `most` lines; 0 (the question mark) when there are none. */
+export function autoCycleLine(most: number, random: () => number = Math.random): number {
+  return most > 0 ? 1 + Math.min(most - 1, Math.floor(random() * most)) : 0;
+}
+/** Runs `tick` after each random wait until stopped; the clock and the random numbers can be injected. */
+export function startAutoCycle(tick: () => unknown, env: { random?: () => number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): () => void {
+  const random = env.random ?? Math.random;
+  const set = env.setTimer ?? ((f, ms) => setTimeout(f, ms)), clear = env.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
+  let timer: unknown, stopped = false;
+  const arm = () => { timer = set(() => { if (stopped) return; try { void Promise.resolve(tick()).catch(() => undefined); } catch { /* the next one still comes */ } arm(); }, autoCycleDelay(random)); };
+  arm();
+  return () => { stopped = true; clear(timer); };
 }
 
 /** What a random object's id places (uDNR, bDNR, iDNR), else undefined. */

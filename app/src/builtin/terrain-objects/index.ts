@@ -14,7 +14,7 @@ import {
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
-import { applyRandom, autoCycleAfterPlace, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { applyRandom, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { readArea } from "../../lib/terrain/area";
@@ -74,7 +74,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const showGhost = async (g: [number, number, number] | null) => {
     const seq = ++ghostSeq;
     if (!g || !placing || scatter) { ed.objects.setGhost(null); return; }
-    const { kind, id } = placing;
+    const { kind, id, random: spec } = placing;
     const type = ed.objects.type(id);
     // Where a click puts it: a building on its grid, a doodad on its own (turned by quarters if its footprint isn't square).
     const { x, y, angle } = await ed.objects.placedSpot(kind, id, g[0], g[1], next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING)));
@@ -84,7 +84,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ok = ed.objects.backdrop(kind, x, y) || await occ.fits(kind, id, x, y, angle);
     }
     if (seq !== ghostSeq) return;
-    ed.objects.setGhost({ id, x, y, angle, variation: next?.variation, player: kind === "w3u" ? owner : undefined, ok });
+    ed.objects.setGhost({ id, x, y, angle, variation: next?.variation, player: kind === "w3u" ? owner : undefined, group: spec?.by === "group" ? { group: spec.group, position: spec.position } : undefined, ok });
   };
 
   const START = { kind: "w3u", id: "sloc", name: "Start Location" };
@@ -176,7 +176,6 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       entries.push(e);
     }
     ed.objects.insert(entries);
-    autoCycleAfterPlace(random, autoCycle(), (step) => void ed.cycleRandomGroups(step).catch(() => undefined));
     if (stroke) stroke.entries.push(...entries);
     else {
       ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
@@ -307,7 +306,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
       () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
     sizeWrap, densityWrap,
-    toggle("Auto cycle random groups", "After placing a unit or item from a random group, show the next line of the groups, as Cycle Random Groups - Next; setting terrain.placement.autoCycleRandomGroups",
+    toggle("Auto cycle random groups", "Every 2 to 5 seconds the units and items from a random group are drawn as another, random line of the group, as the World Editor does; setting terrain.placement.autoCycleRandomGroups",
       () => autoCycle(), (v) => void w3.settings.set("terrain.placement.autoCycleRandomGroups", v)),
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),

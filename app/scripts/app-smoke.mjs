@@ -9556,8 +9556,16 @@ async function placerAndCampaign(page, found) {
     // They have a model (the question mark), not an unknown id.
     const warns = await page.evaluate(`[...document.querySelectorAll(".model-warn")].map((e) => e.textContent).join(" | ")`);
     if (/[ui]DNR/.test(warns)) fail(`the random objects are reported: ${warns}`);
-    // Cycle Random Groups: the group's lines, then the question mark again.
-    await k.clearToasts();
+    // Cycle Random Groups: the group's lines, then the question mark again. The map opened on a random line (Auto Cycle
+    // is on by default): go round to the question mark first.
+    const normalise = async () => {
+      for (let i = 0; i < 6 && await page.evaluate(`document.querySelector("canvas.model-canvas")?.dataset.randomLine`) !== "0"; i++) {
+        await k.run("w3.terrain.cycleRandomGroupsNext");
+        await settled(page);
+      }
+      await k.clearToasts();
+    };
+    await normalise();
     for (const want of ["line 1", "line 2", "question mark"]) {
       const err = await k.run("w3.terrain.cycleRandomGroupsNext");
       if (err) { fail(`Cycle Random Groups: ${err}`); break; }
@@ -9566,38 +9574,31 @@ async function placerAndCampaign(page, found) {
       await k.clearToasts();
     }
     if ((await page.evaluate(`w3.editors.unsavedPaths()`)).length) fail(`Cycle Random Groups left unsaved editors: ${await page.evaluate(`w3.editors.unsavedPaths()`)}`);
-    // Auto Cycle Random Groups: placing from a group moves on to line 1 (so Next says line 2) when on, and stays at the
-    // question mark (Next says line 1) when off; a random item by level doesn't cycle.
-    let guard = 0;
-    const nextSays = async () => {
-      await k.clearToasts();
-      const err = await k.run("w3.terrain.cycleRandomGroupsNext");
-      if (err) { fail(`Cycle Random Groups: ${err}`); return ""; }
-      await soon(async () => /line \d|question mark/.test(await k.toasts()), 5000);
-      return (await k.toasts()).match(/line \d|question mark/)?.[0] ?? "";
-    };
-    const placeGroupUnit = async () => {
-      await random(`set(".random-what", "unit"); set(".random-by-group"); set(".random-group", "7"); set(".random-position", "0")`);
-      await click(-512, -512);
-      await page.evaluate(`w3.commands.execute("workbench.undo")`);
-      await settled(page);
-    };
-    for (const [on, want] of [[false, "line 1"], [true, "line 2"]]) {
-      await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", ${on})`);
-      await placeGroupUnit();
-      const got = await nextSays();
-      if (got !== want) fail(`placing from a random group with Auto Cycle ${on ? "on" : "off"}, Next says "${got}", not "${want}"`);
-      // Back to the question mark for the next round.
-      guard = 0;
-      while (await nextSays() !== "question mark") if (++guard > 10) { fail("Cycle Random Groups never returned to the question mark"); break; }
-    }
+    // Auto Cycle Random Groups is the editor's timer (every 2 to 5 s a random line, no input, placing has no part in
+    // it): on, the drawn line (data-random-line) changes by itself; off, it stays (the control).
+    const lineNow = () => page.evaluate(`document.querySelector("canvas.model-canvas")?.dataset.randomLine ?? null`);
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", false)`);
+    await random(`set(".random-what", "unit"); set(".random-by-group"); set(".random-group", "7"); set(".random-position", "0")`);
+    await click(-512, -512);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await settled(page);
+    const held = await lineNow();
+    await sleep(12000);
+    if (await lineNow() !== held) fail(`with Auto Cycle Random Groups off the drawn line changed from ${held} to ${await lineNow()}`);
     await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", true)`);
+    const started = Date.now();
+    await soon(async () => await lineNow() !== held, 40000);
+    const now = await lineNow();
+    if (now === held) fail(`with Auto Cycle Random Groups on the drawn line stayed ${held} for 40 s, without any placement`);
+    else if (!/^[12]$/.test(now ?? "")) fail(`the timer put the line at ${now}, not one of the group's 2 lines`);
+    else if (Date.now() - started < 1500) fail(`the line changed after ${Date.now() - started} ms, before the 2 s the timer waits`);
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", false)`);
+    // A random item by level is no group object: the question mark stays out of it (nothing in the map changed).
     await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
     await click(-512, -512);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await settled(page);
-    if (await nextSays() !== "line 1") fail("placing a random item by level cycled the random groups");
-    await nextSays(); await nextSays();
+    await normalise();
     await k.save();
     // Through the codec and into the packed script.
     await k.verify(fail);

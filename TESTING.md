@@ -383,6 +383,7 @@ It never starts the game itself.
   on): with it on the drawn line changes by itself every 2 to 5 s with no input at all, both ways round the lines (15
   pictures 2.3 s apart: F F R K R R R F R F K K F F F), and stays after Ctrl+G turns it off (10 pictures alike). It is
   not tied to placing: pastes changed the line or not as the timer had it.
+  Studio: randomplace.ts `startAutoCycle` (2 to 5 s, uniform random line), the line starts random per open; app-smoke placerAndCampaign.
 - **Light Ranges** (branch light-radius, 2026-11-13, HD, `--look X,Y,3000,270,70,90` straight down, copies of the
   empty map with imported copies of the Ruins Brazier's HD model, one light value changed each; numbers in
   `target/evidence/light-radius/` of the main checkout): one ring per light on the ground under it, in the light's

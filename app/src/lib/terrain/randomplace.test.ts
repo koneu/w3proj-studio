@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRandom, autoCycleAfterPlace, cycledId, levelBytes, levelOf, positionsFor, randomName, randomOf, placeAngle, randomWhatOf, rollLook, type LookOptions } from "./randomplace";
+import { applyRandom, autoCycleDelay, autoCycleLine, startAutoCycle, cycledId, levelBytes, levelOf, positionsFor, randomName, randomOf, placeAngle, randomWhatOf, rollLook, type LookOptions } from "./randomplace";
 
 const tree = { numVar: 10, randScale: true, minScale: 0.8, maxScale: 1.2, fixedRot: null };
 const plain: LookOptions = { variation: null, randomVariation: false, randomRotation: false, randomScale: "off" };
@@ -130,13 +130,24 @@ test("scatter and stroke facing follow the same rule as single placement (placeA
   assert.ok(near(placeAngle({ ...tree, fixedRot: 90 }, true, r), Math.PI / 2), "fixed rotation wins");
 });
 
-test("Auto Cycle Random Groups cycles after a random-group placement only, and only when on", () => {
-  const group = { what: "unit", by: "group", group: 1, position: 0 } as const;
-  const steps: number[] = [];
-  assert.equal(autoCycleAfterPlace(group, true, (s) => steps.push(s)), true);
-  assert.deepEqual(steps, [1]);
-  assert.equal(autoCycleAfterPlace(group, false, (s) => steps.push(s)), false);
-  assert.equal(autoCycleAfterPlace({ what: "unit", by: "level", level: -1 }, true, (s) => steps.push(s)), false);
-  assert.equal(autoCycleAfterPlace(undefined, true, (s) => steps.push(s)), false);
-  assert.deepEqual(steps, [1]);
+test("Auto Cycle Random Groups is a timer: 2 to 5 s, a random line, stops when stopped", () => {
+  assert.equal(autoCycleDelay(() => 0), 2000);
+  assert.equal(autoCycleDelay(() => 0.5), 3500);
+  assert.ok(autoCycleDelay(() => 0.999999) < 5000);
+  assert.equal(autoCycleLine(0, () => 0.5), 0);
+  assert.deepEqual([0, 0.34, 0.67, 0.999999].map((r) => autoCycleLine(3, () => r)), [1, 2, 3, 3]);
+  // A fake clock: timers fire in order of their time.
+  let now = 0; const timers: { at: number; f: () => void; id: number }[] = []; let ids = 0;
+  const env = { random: () => 0.5, setTimer: (f: () => void, ms: number) => { const t = { at: now + ms, f, id: ++ids }; timers.push(t); return t; },
+    clearTimer: (t: unknown) => { const i = timers.indexOf(t as never); if (i >= 0) timers.splice(i, 1); } };
+  const advance = (ms: number) => { const end = now + ms; for (;;) { timers.sort((a, b) => a.at - b.at); const t = timers[0]; if (!t || t.at > end) break; timers.shift(); now = t.at; t.f(); } now = end; };
+  let ticks = 0;
+  const stop = startAutoCycle(() => { ticks++; }, env);
+  advance(3499); assert.equal(ticks, 0);
+  advance(1); assert.equal(ticks, 1);
+  advance(7000); assert.equal(ticks, 3);
+  stop(); advance(60000); assert.equal(ticks, 3);
+  // A tick that throws doesn't end the timer.
+  let n = 0; const stop2 = startAutoCycle(() => { n++; throw new Error("x"); }, env);
+  advance(3500); advance(3500); stop2(); assert.equal(n, 2);
 });

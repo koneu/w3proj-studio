@@ -342,7 +342,7 @@ export interface TerrainObjects {
    *  leaves these out: it blocks them at runtime, and frees the ground when they're destroyed. */
   destructables(): Promise<Uint8Array>;
   /** A see-through preview of an object at a spot (red when `ok` is false); null hides it. */
-  setGhost(ghost: { id: string; x: number; y: number; angle: number; variation?: number; player?: number; ok: boolean } | null): void;
+  setGhost(ghost: { id: string; x: number; y: number; angle: number; variation?: number; player?: number; group?: { group: number; position: number }; ok: boolean } | null): void;
 }
 
 export interface TerrainOccupancy {
