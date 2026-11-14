@@ -3190,6 +3190,45 @@ async function importArtReload(page, found) {
   }
 }
 
+/** A ground texture the map imports (map/<the tile's own path>) is drawn from the import, and another program overwriting
+ *  it shows in the open view at the next focus, as the placed models do. */
+async function groundTextureReload(page, found) {
+  try {
+  const fail = (what) => found.push(`ground texture reload: ${what}`);
+  const k = await heightKit(page, "GroundTexReload");
+  const game = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  try {
+    // The first tile's texture path is on its row in the side list (the title, once loaded).
+    const loaded = () => page.evaluate(`[...document.querySelectorAll(".model-row")].map((r) => r.title).find((t) => /\\.blp$/i.test(t)) ?? null`);
+    if (!(await soon(async () => (await loaded()) !== null, 30000))) return fail("the ground texture list never loaded");
+    const tile = (await loaded()).replace(/_Diffuse(\.blp)$/i, "$1");
+    const list = await page.evaluate(`w3.game.list()`);
+    const find = (re) => list.find((p) => re.test(p));
+    const aName = find(/TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i), bName = find(/TerrainArt[\\/][^\\/]*[\\/]Lords_Dirt\.(blp|dds)$/i);
+    if (!aName || !bName) return fail(`no two other ground textures in the game data (${aName}, ${bName})`);
+    const [a, b] = [await game(aName), await game(bName)];
+    if (a.equals(b)) return fail("the two textures are the same file (control)");
+    const file = join(k.root, "map", ...tile.split("\\"));
+    mkdirSync(dirname(file), { recursive: true });
+    const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
+    const plain = await mapPicture(page);
+    writeFileSync(file, a);
+    await focus();
+    const apart = (x) => mapPicture(page).then((y) => pixelsApart(page, x, y));
+    if (!(await soon(async () => (await apart(plain)) > 2000, 20000))) return fail("a ground texture imported under map/ isn't drawn");
+    const withA = await mapPicture(page);
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(file, b);
+    await focus();
+    if (!(await soon(async () => (await apart(withA)) > 2000, 20000))) fail("the view still draws the old ground texture after the file was overwritten outside");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -3604,7 +3643,7 @@ async function heightsLimits(page, found) {
   await k.save();
   if (nearEdge()?.position[0] !== br + 88) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 88}`);
 
-  // A unit nudged at the playable part's edge stops with its collision size inside it (a footman, 31), the switch on.
+  // A unit nudged at the playable part's edge stops at the last step that keeps its collision size inside it (a footman, 31), the switch on.
   const w3eHead = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
   const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
   const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
@@ -3619,7 +3658,9 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   for (let i = 0; i < 10; i++) await hands.key("6", "Numpad6", 102);
   await k.save();
-  if (footman()?.position[0] !== pr - 31) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor stops it at ${pr - 31} (its collision size inside the playable edge ${pr})`);
+  // The World Editor refuses the step that would pass the limit: the last 8-step that fits (3296 from 3200).
+  const lastFit = fx0 + 8 * Math.floor((pr - 31 - fx0) / 8);
+  if (footman()?.position[0] !== lastFit) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor leaves it at ${lastFit}, the last step that fits (its collision size inside the playable edge ${pr})`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
 
   // A paste outside the bounds.
@@ -5763,6 +5804,38 @@ async function editDuringSave(page, found) {
     } finally {
       await page.evaluate(`(() => { if (window.__slowPick) w3.window.pickSaveFile = window.__slowPick; delete window.__slowPick; })()`);
     }
+
+    // The Lighting Editor: the map's own copy of a game lighting model (Customize… in the Lighting view).
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(() => { window.__slowQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+    try {
+      await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+      await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector("input.lighting-num")`), 30000);
+      const lightPath = await page.evaluate(`w3.editors.activePath()`);
+      await check("Lighting Editor", `document.querySelector("input.lighting-num")`, "0.31", "0.32", null, lightPath);
+    } finally {
+      await page.evaluate(`(() => { if (window.__slowQuick) w3.window.quickPick = window.__slowQuick; delete window.__slowQuick; })()`);
+    }
+
+    // The Campaign Editor (a campaign project of its own, so last).
+    await page.evaluate(`w3.editors.closeAll()`);
+    const camp = join(work, "slow-campaign");
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Slow Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const w3f = "map/war3campaign.w3f.json";
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Slow Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const fogStyle = `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Fog style")?.querySelector("input")`;
+    await check("Campaign Editor", fogStyle, "1", "2", () => String(JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")).fogStyle), w3f);
   } finally {
     await page.evaluate(`(() => { const S = window.__slowSave, io = w3Workbench.editors.io; if (S) for (const m of ["writeText", "writeBytes"]) if (S["orig_" + m]) io[m] = S["orig_" + m]; delete window.__slowSave; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
@@ -11953,6 +12026,7 @@ async function run() {
         flyingHeights,
         gameReadsOnce,
         graphicsModes,
+        groundTextureReload,
         heightsLimits,
         heightsPreserve,
         heightsUniform,
@@ -12237,6 +12311,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "editorExtras", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
+  await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
+  await leftOpen(page, "groundTextureReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));

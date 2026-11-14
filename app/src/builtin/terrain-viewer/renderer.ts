@@ -1296,7 +1296,9 @@ export class TerrainRenderer {
   setGroundTexture(i: number, img: DecodedImage) {
     // Deeper mip levels would blend neighbouring cells together.
     const tex = createTexture(this.gl, img, { repeat: [false, false], maxLevel: Math.max(0, Math.log2(img.height / 4) - 3) });
+    const old = this.textures[i];
     this.textures[i] = { tex, extended: img.width > img.height };
+    if (old) this.gl.deleteTexture(old.tex);
   }
 
   /** Camera position. */

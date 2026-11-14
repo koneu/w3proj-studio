@@ -165,7 +165,8 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   Enforce Camera Bounds on (and off alike) drags and nudges go past the camera bounds; a unit stops with its collision
   size or half its footprint inside the playable part (footman, collision 31: 3296; farm, 4x4 cells: 3264); a doodad
   goes past the playable part and stops with its centre strictly inside the map (tree and a 12x12 LZth 4032 on 64
-  steps, a pathless LPcr 4088 on 8 steps). The camera too scrolls past the camera bounds with the switch on. Studio:
+  steps, a pathless LPcr 4088 on 8 steps). A step that would pass the limit is refused, the object stays at the last step that
+  fits (spec edge-last-step: footman 3296, farm 3264, tree 4032, LPcr 4088; selected one at a time: a group nudges all by 8 and a gridded doodad rounds back; a box select of the lower objects needs a box 200 px wide). The camera too scrolls past the camera bounds with the switch on. Studio:
   limits.ts `insetBy`, terrain-viewer `moveBounds`; app-smoke heightsLimits.
 - **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
   through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,

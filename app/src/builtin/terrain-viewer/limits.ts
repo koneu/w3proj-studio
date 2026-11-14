@@ -51,7 +51,7 @@ export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE
 /** The warning for objects a move held at the camera bounds. */
 export const stoppedAtBoundsText = (count: number) => `${count} object${count === 1 ? "" : "s"} stopped at the camera bounds (turn off Enforce Camera Bounds to go past them).`;
 
-import { clampShift, type Bounds } from "./moveedit";
+import { refuseShift, type Bounds } from "./moveedit";
 export type { Bounds };
 
 /** The camera bounds of a map's w3i (left, bottom, right, top first), or null if it has none to trust. */
@@ -70,13 +70,13 @@ export const clampPoint = (b: Bounds | null, x: number, y: number): [number, num
   b ? [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))] : [x, y];
 
 /**
- * A nudge for a group, held to the bounds. `steps` is how many nudges long each entry moves (a building goes
- * twice as far, on its finer grid), so the group is cut back by the longest step first and each entry takes its
- * share: nothing ends up past its bound, whatever its step.
+ * A nudge for a group, held to the bounds: a step that would pass one is refused (refuseShift), not cut back.
+ * `steps` is how many nudges long each entry moves (a building goes twice as far, on its finer grid), so the
+ * group's step is the longest one and each entry takes its share: nothing ends up past its bound, whatever its step.
  */
 export function scaledNudge(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], steps: readonly number[], nudge: readonly [number, number]): [number, number][] {
   const longest = Math.max(1, ...steps);
-  const [dx, dy] = clampShift(points, bounds, nudge[0] * longest, nudge[1] * longest);
+  const [dx, dy] = refuseShift(points, bounds, nudge[0] * longest, nudge[1] * longest);
   return steps.map((s) => [(dx * s) / longest, (dy * s) / longest]);
 }
 
@@ -114,4 +114,10 @@ export function pasteSkipText(total: number, s: PasteSkips): string | null {
     s.noFile ? `${s.noFile} ${s.noFile === 1 ? "has" : "have"} no placement file in this map` : "",
   ].filter(Boolean);
   return `${skipped} of ${total} pasted object${total === 1 ? "" : "s"} ${skipped === 1 ? "wasn't" : "weren't"} placed: ${reasons.join("; ")}.`;
+}
+
+/** The bounds with their edge left out: the World Editor keeps a doodad's centre strictly inside the map (4088 of 4096
+ *  on 8-steps), so a step onto the edge is refused as one past it. */
+export function strictlyInside(b: Bounds, eps = 1 / 1024): Bounds {
+  return { left: b.left + eps, right: b.right - eps, bottom: b.bottom + eps, top: b.top - eps };
 }

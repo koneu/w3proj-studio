@@ -35,3 +35,14 @@ export function clampShift(points: readonly (readonly [number, number])[], bound
   });
   return [Math.min(Math.max(dx, loX), hiX), Math.min(Math.max(dy, loY), hiY)];
 }
+
+/**
+ * The shift as the World Editor takes it at the limit: a step that would pass a bound isn't cut back, it's refused,
+ * and the object stays where it was (we-compare edge-last-step: a footman nudged by 8 stops at 3296, not at the
+ * limit 3297). Per axis: where the shift fits it is as asked, where it doesn't it is `held` (a drag: the shift of its
+ * last motion that fitted; a nudge: 0).
+ */
+export function refuseShift(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], dx: number, dy: number, held: readonly [number, number] = [0, 0]): [number, number] {
+  const [cx, cy] = clampShift(points, bounds, dx, dy);
+  return [cx === dx ? dx : held[0], cy === dy ? dy : held[1]];
+}

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, insetBy, pasteSkipText, scaledNudge, waterLimitHits } from "./limits";
+import { clampPoint, cameraRect, insideBounds, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterLimitHits } from "./limits";
 import { unitHalf } from "../../lib/terrain/resize";
-import { clampShift } from "./moveedit";
+import { clampShift, refuseShift } from "./moveedit";
+import type { Bounds } from "./moveedit";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, waterLevelAt } from "../../lib/terrain/w3e";
 
 const wet = (level: number) => ({ hasWater: true, rawWater: level });
@@ -60,6 +61,13 @@ test("a moved unit keeps what it takes up inside the playable part: the World Ed
   assert.deepEqual(insetBy({ left: 0, bottom: 0, right: 100, top: 1000 }, [80, 80]), { left: 50, right: 50, bottom: 80, top: 920 });
 });
 
+test("a drag motion past the limit is refused: the object stays where the last motion that fitted put it", () => {
+  const b = { left: 0, bottom: 0, right: 100, top: 100 };
+  assert.deepEqual(refuseShift([[60, 50]], [b], 30, 0), [30, 0]);
+  assert.deepEqual(refuseShift([[60, 50]], [b], 70, 0, [30, 0]), [30, 0], "70 would end at 130");
+  assert.deepEqual(refuseShift([[60, 50]], [b], 70, 20, [30, 10]), [30, 20], "per axis");
+});
+
 test("a group keeps its shape and stops at the map's edge, whatever the camera bounds", () => {
   const group: [number, number][] = [[10, 10], [60, 30]];
   const bounds = group.map(() => insetBy(map, [0, 0]));
@@ -77,16 +85,32 @@ test("water at the lowest stored level is a hit, one step above it is not", () =
   assert.deepEqual(waterLimitHits([at(-5000)], [at(-5000)]), [], "water that was at the limit already isn't a new hit");
 });
 
-test("a nudge is held to the bounds with its steps: a building, which goes twice as far, stops at the edge too", () => {
+test("a nudge is held to the bounds with its steps: a step past the limit is refused, the object stays", () => {
   const bounds = { left: 0, bottom: 0, right: 100, top: 100 };
-  // Both 40 from the right edge, nudged 32: a plain object ends 8 short of it, a building would be 24 past it.
-  const moves = scaledNudge([[60, 50], [60, 50]], [bounds, bounds], [1, 2], [32, 0]);
-  assert.ok(60 + moves[1][0] <= 100 && 60 + moves[0][0] <= 100, "neither passes the edge");
-  assert.equal(60 + moves[1][0], 100, "the building goes as far as the edge allows");
-  assert.equal(moves[0][0] * 2, moves[1][0], "and each keeps its share of the step");
+  // Both 40 from the right edge, nudged 32: a plain object fits (ends 8 short of it), a building would be 24 past it:
+  // the group's step is refused, as the World Editor refuses a step past the limit.
+  assert.deepEqual(scaledNudge([[60, 50], [60, 50]], [bounds, bounds], [1, 2], [32, 0]), [[0, 0], [0, 0]]);
+  assert.deepEqual(scaledNudge([[60, 50]], [bounds], [1], [32, 0]), [[32, 0]], "a step that fits is taken");
   // Not held back: the full steps.
   assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[32, 0], [64, 0]]);
-  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, -50]], "down to the bottom edge, 50 away, where 64 were asked");
+  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, 0]], "50 above the bottom edge, 64 asked: refused, not cut to 50");
+  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [32, -32]), [[64, 0]], "per axis: the other still moves");
+});
+
+test("nudged to the edge a footman stops at 3296 and a doodad strictly inside the map (we-compare edge-last-step)", () => {
+  const playable = { left: -3328, bottom: -3584, right: 3328, top: 3072 };
+  const footman = [insetBy(playable, unitHalf(null, 31))];
+  const farm = [insetBy(playable, unitHalf([4, 4], 72))];
+  const doodad = [strictlyInside({ left: -4096, bottom: -4096, right: 4096, top: 4096 })];
+  const run = (x: number, bounds: Bounds[], step: number, nudge: number) => {
+    for (let i = 0; i < 100; i++) x += scaledNudge([[x, 0]], bounds, [step], [nudge, 0])[0][0];
+    return x;
+  };
+  assert.equal(run(3200, footman, 1, 8), 3296, "not the limit 3297");
+  assert.equal(run(3136, farm, 2, 8), 3264);
+  assert.equal(run(3584, doodad, 8, 8), 4032, "a tree on 64-steps: the next one is the edge");
+  assert.equal(run(3584, doodad, 1, 8), 4088, "a doodad on 8-steps");
+  assert.equal(run(-3584, doodad, 1, -8), -4088);
 });
 
 test("a paste's word on what it didn't place names each reason that holds, and no other", () => {
