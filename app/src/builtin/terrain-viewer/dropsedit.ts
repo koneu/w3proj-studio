@@ -4,6 +4,7 @@
 // which makes each one undo step or refuses it whole (unitprops.ts checks, dropsview.ts works out bulk edits).
 
 import { h } from "../../workbench/dom";
+import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomObjectId } from "../../lib/objects/randomids";
 import { dropsText, dropsVariants, isEmptyItem, itemLabel, setHeading, setShares, type BulkDrops } from "./dropsview";
 import type { Placed } from "./objects";
 import { dropsOf, ownSetsOnly, redistribute, sameValue, setTotal, tableChoice, type DropItem } from "./unitprops";
@@ -134,6 +135,24 @@ function common(host: DropsUiHost, entries: readonly Placed[], wide: boolean) {
   return { drops, onlyOwn, parts };
 }
 
+/** The World Editor's built-in random item entries, class by class (any level first, then 0 to 8), with the ids it
+ *  writes ("YkI2" is a random Power Up of level 2). */
+export function randomItemChoices(): { id: string; label: string }[] {
+  return ITEM_CLASSES.flatMap((c, itemClass) => [-1, ...Array.from({ length: MAX_ITEM_LEVEL + 1 }, (_, i) => i)].map((level) => ({
+    id: randomObjectId({ kind: "item", level, itemClass }), label: `${c.label}, ${level < 0 ? "any level" : `level ${level}`}` })));
+}
+
+/** "Random item" by class and level, and "Item table…" for the map's tables, beside the item browser: `onPick` gets the id. */
+function randomPicker(host: DropsUiHost, onPick: (id: string) => void): HTMLElement[] {
+  const cls = h("select", { "data-prop": "random-class", title: "Class of the random item" },
+    ...ITEM_CLASSES.map((c, i) => h("option", { value: String(i) }, c.label)));
+  const lvl = h("select", { "data-prop": "random-level", title: "Level of the random item" },
+    h("option", { value: "-1" }, "Any level"), ...Array.from({ length: MAX_ITEM_LEVEL + 1 }, (_, i) => h("option", { value: String(i) }, `Level ${i}`)));
+  return [h("span.drops-random", {}, cls, lvl, h("button", { "data-prop": "add-random", title: "Add a random item of this class and level, as the World Editor's Random item",
+    onclick: () => onPick(randomObjectId({ kind: "item", level: Number(lvl.value), itemClass: Number(cls.value) })) }, "Add random item")),
+  h("button", { "data-prop": "item-tables", title: "Map Properties › Item tables", onclick: () => host.openItemTables() }, "Item table…")];
+}
+
 /** The Selection panel's Drops block: what the objects drop, readable in the narrow panel, and "Edit drops…" for the
  *  wide editor. The mode and the table can be chosen here. */
 export function dropsBlock(host: DropsUiHost, entries: readonly Placed[], editDrops: () => void): HTMLElement {
@@ -171,7 +190,7 @@ export function dropsEditor(host: DropsUiHost, entries: readonly Placed[]): HTML
         onclick: async () => {
           const id = await host.pickItem("A set for each of them: its item");
           if (id !== undefined) send(host, { op: "addSet", set: [{ id, chance: 100 }] });
-        } }, "Add a set to each…")));
+        } }, "Add a set to each…"), ...randomPicker(host, (id) => send(host, { op: "addSet", set: [{ id, chance: 100 }] }))));
   } else if (drops.mode === "custom") {
     const sets = drops.sets;
     const withSets = (change: (s: DropItem[][]) => void) => { const next = structuredClone(sets); change(next); send(host, { op: "same", drops: { mode: "custom", sets: next } }); };
@@ -201,7 +220,7 @@ export function dropsEditor(host: DropsUiHost, entries: readonly Placed[]): HTML
         h("div.drops-actions", {}, h("button", { "data-prop": `add-item-${k}`, onclick: async () => {
           const id = await host.pickItem(`Add an item to set ${k + 1}`);
           if (id !== undefined) withSets((x) => { x[k].push({ id, chance: x[k].length ? Math.max(0, 100 - setTotal(x[k])) : 100 }); });
-        } }, "Add item…")));
+        } }, "Add item…"), ...randomPicker(host, (id) => withSets((x) => { x[k].push({ id, chance: x[k].length ? Math.max(0, 100 - setTotal(x[k])) : 100 }); }))));
     }), h("div.drops-actions", {}, h("button", { "data-prop": "add-set", title: "Each set drops one of its items by chance", onclick: () => withSets((x) => { x.push([]); }) }, "Add set")));
   }
   return h("fieldset.drops-editor", { disabled: !!host.readOnly }, ...parts);
