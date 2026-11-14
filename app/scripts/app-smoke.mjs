@@ -3190,6 +3190,45 @@ async function importArtReload(page, found) {
   }
 }
 
+/** A ground texture the map imports (map/<the tile's own path>) is drawn from the import, and another program overwriting
+ *  it shows in the open view at the next focus, as the placed models do. */
+async function groundTextureReload(page, found) {
+  try {
+  const fail = (what) => found.push(`ground texture reload: ${what}`);
+  const k = await heightKit(page, "GroundTexReload");
+  const game = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  try {
+    // The first tile's texture path is on its row in the side list (the title, once loaded).
+    const loaded = () => page.evaluate(`[...document.querySelectorAll(".model-row")].map((r) => r.title).find((t) => /\\.blp$/i.test(t)) ?? null`);
+    if (!(await soon(async () => (await loaded()) !== null, 30000))) return fail("the ground texture list never loaded");
+    const tile = (await loaded()).replace(/_Diffuse(\.blp)$/i, "$1");
+    const list = await page.evaluate(`w3.game.list()`);
+    const find = (re) => list.find((p) => re.test(p));
+    const aName = find(/TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i), bName = find(/TerrainArt[\\/][^\\/]*[\\/]Lords_Dirt\.(blp|dds)$/i);
+    if (!aName || !bName) return fail(`no two other ground textures in the game data (${aName}, ${bName})`);
+    const [a, b] = [await game(aName), await game(bName)];
+    if (a.equals(b)) return fail("the two textures are the same file (control)");
+    const file = join(k.root, "map", ...tile.split("\\"));
+    mkdirSync(dirname(file), { recursive: true });
+    const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
+    const plain = await mapPicture(page);
+    writeFileSync(file, a);
+    await focus();
+    const apart = (x) => mapPicture(page).then((y) => pixelsApart(page, x, y));
+    if (!(await soon(async () => (await apart(plain)) > 2000, 20000))) return fail("a ground texture imported under map/ isn't drawn");
+    const withA = await mapPicture(page);
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(file, b);
+    await focus();
+    if (!(await soon(async () => (await apart(withA)) > 2000, 20000))) fail("the view still draws the old ground texture after the file was overwritten outside");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -11955,6 +11994,7 @@ async function run() {
         flyingHeights,
         gameReadsOnce,
         graphicsModes,
+        groundTextureReload,
         heightsLimits,
         heightsPreserve,
         heightsUniform,
@@ -12239,6 +12279,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "editorExtras", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
+  await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
+  await leftOpen(page, "groundTextureReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
