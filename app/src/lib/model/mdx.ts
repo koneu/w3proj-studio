@@ -244,6 +244,8 @@ const TRACK_SIZE: Record<string, number> = {
 /** Tracks stored as integers. */
 const INT_TRACKS = new Set(["KMTF", "KRTX"]);
 
+const LATIN1 = new TextDecoder("latin1");
+
 class Reader {
   p = 0;
   readonly b: DataView;
@@ -262,7 +264,7 @@ class Reader {
     const bytes = this.u8.subarray(this.p, this.p + n);
     this.p += n;
     const end = bytes.indexOf(0);
-    return new TextDecoder("latin1").decode(end < 0 ? bytes : bytes.subarray(0, end));
+    return LATIN1.decode(end < 0 ? bytes : bytes.subarray(0, end));
   }
   f32s(n: number) {
     // Copy: the source may not be 4-byte aligned.
@@ -431,19 +433,25 @@ function readGeoset(r: Reader, version: number): Geoset {
     if (t !== tag) throw new Error(`geoset: expected ${tag}, found ${JSON.stringify(t)} at ${r.p - 4}`);
     return r.u32();
   };
-  const positions = r.f32s(expect("VRTX") * 3);
-  const normals = r.f32s(expect("NRMS") * 3);
-  const types = r.u32s(expect("PTYP"));
-  const counts = r.u32s(expect("PCNT"));
-  const nIdx = expect("PVTX");
+  /** A count of the file's, of `bytes` each: checked against what is left before anything is made that large. */
+  const many = (tag: string, bytes: number) => {
+    const n = expect(tag);
+    r.need(n * bytes, `geoset ${tag}`);
+    return n;
+  };
+  const positions = r.f32s(many("VRTX", 12) * 3);
+  const normals = r.f32s(many("NRMS", 12) * 3);
+  const types = r.u32s(many("PTYP", 4));
+  const counts = r.u32s(many("PCNT", 4));
+  const nIdx = many("PVTX", 2);
   const idx = new Uint16Array(nIdx);
   for (let i = 0; i < nIdx; i++) { idx[i] = r.b.getUint16(r.p, true); r.p += 2; }
   // Only triangle lists (type 4) are used by the game's models.
   if (types.some((t) => t !== 4)) throw new Error(`geoset: unsupported primitive types ${[...types]}`);
   if (counts.reduce((a, b) => a + b, 0) !== nIdx) throw new Error("geoset: primitive counts don't match indices");
-  const vertexGroups = r.bytes(expect("GNDX"));
-  const groupSizes = r.u32s(expect("MTGC"));
-  const matrices = r.u32s(expect("MATS"));
+  const vertexGroups = r.bytes(many("GNDX", 1));
+  const groupSizes = r.u32s(many("MTGC", 4));
+  const matrices = r.u32s(many("MATS", 4));
   const groups: number[][] = [];
   let m = 0;
   for (const n of groupSizes) { groups.push([...matrices.subarray(m, m + n)]); m += n; }
@@ -454,12 +462,15 @@ function readGeoset(r: Reader, version: number): Geoset {
   if (version > 800) { lod = r.u32(); lodName = r.str(80); }
   const extent = r.extent();
   const extentCount = r.u32();
+  r.need(extentCount * 28, "geoset extents");
   r.p += extentCount * 28; // per-sequence extents
   let skin: Uint16Array | undefined;
   while (r.peekTag() === "TANG" || r.peekTag() === "SKIN") {
     const t = r.tag();
     const n = r.u32();
+    r.need(n, `geoset ${t}`);
     if (t === "TANG") {
+      r.need(n * 16, "geoset TANG");
       r.p += n * 16;
       continue;
     }
@@ -473,8 +484,7 @@ function readGeoset(r: Reader, version: number): Geoset {
   const sets = expect("UVAS");
   let uvs = new Float32Array(0), uvs2: Float32Array | undefined;
   for (let s = 0; s < sets; s++) {
-    const n = expect("UVBS");
-    const set = r.f32s(n * 2);
+    const set = r.f32s(many("UVBS", 8) * 2);
     if (s === 0) uvs = set;
     else if (s === 1) uvs2 = set;
   }

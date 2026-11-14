@@ -481,8 +481,8 @@ interface InstancedVao {
 interface GpuGeoset {
   vao: InstancedVao;
   indexCount: number;
-  wireVao: InstancedVao;
-  wireCount: number;
+  /** The wireframe's vertex array and index count: made at the first wireframe draw (few views ever show one). */
+  wire: () => { vao: InstancedVao; count: number };
   materialId: number;
   geosetId: number;
 }
@@ -500,6 +500,15 @@ export interface Stats {
 export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   const e = model.extent;
   if (e.max.some((v, i) => v > e.min[i])) return e;
+  let box = geosetBounds.get(model);
+  if (!box) geosetBounds.set(model, (box = boundsOfGeosets(model)));
+  return box;
+}
+
+/** The bind-pose boxes made so far: a walk over every vertex, asked for at each plan of the cliffs and the objects. */
+const geosetBounds = new WeakMap<Model, Pick<Extent, "min" | "max">>();
+
+function boundsOfGeosets(model: Model): Pick<Extent, "min" | "max"> {
   const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (const g of model.geosets) {
     if (g.lod > 0) continue;
@@ -727,7 +736,10 @@ export class ModelGpu {
     this.sh = shared(gl);
     this.textures = model.textures.map(() => null);
 
-    const maxId = Math.max(0, ...model.nodes.map((n, i) => (n ? i : 0)));
+    // The highest id in use. Not `Math.max(...nodes.map())`: a gap in the ids (a node chunk that only warned, collision
+    // shapes in between) is a hole in the array, which spreads as undefined and makes the maximum NaN.
+    let maxId = 0;
+    model.nodes.forEach((n, i) => { if (n && i > maxId) maxId = i; });
     const texels = (maxId + 1) * 4;
     this.boneData = new Float32Array(1024 * Math.ceil(texels / 1024) * 4);
     this.boneTex = gl.createTexture()!;
@@ -813,20 +825,27 @@ export class ModelGpu {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, g.faces, gl.STATIC_DRAW);
 
-    // Wireframe: same vertex buffers, line indices.
-    const lines = new Uint16Array(g.faces.length * 2);
-    for (let i = 0; i < g.faces.length; i += 3) {
-      const [a, b, c] = [g.faces[i], g.faces[i + 1], g.faces[i + 2]];
-      lines.set([a, b, b, c, c, a], i * 2);
-    }
-    const wireVao = gl.createVertexArray()!;
-    gl.bindVertexArray(wireVao);
-    attributes();
-    const lb = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
-    return { vao: { vao, buffer: null, first: -1 }, indexCount: g.faces.length, wireVao: { vao: wireVao, buffer: null, first: -1 }, wireCount: lines.length, materialId: g.materialId, geosetId };
+
+    // Wireframe: same vertex buffers, line indices.
+    let made: { vao: InstancedVao; count: number } | null = null;
+    const wire = () => {
+      if (made) return made;
+      const lines = new Uint16Array(g.faces.length * 2);
+      for (let i = 0, o = 0; i + 2 < g.faces.length; i += 3) {
+        const a = g.faces[i], b = g.faces[i + 1], c = g.faces[i + 2];
+        lines[o++] = a; lines[o++] = b; lines[o++] = b; lines[o++] = c; lines[o++] = c; lines[o++] = a;
+      }
+      const wireVao = gl.createVertexArray()!;
+      gl.bindVertexArray(wireVao);
+      attributes();
+      const lb = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
+      gl.bindVertexArray(null);
+      return (made = { vao: { vao: wireVao, buffer: null, first: -1 }, count: lines.length });
+    };
+    return { vao: { vao, buffer: null, first: -1 }, indexCount: g.faces.length, wire, materialId: g.materialId, geosetId };
   }
 
   /** Bone matrices and geoset animation state for a moment of an animation. */
@@ -1013,8 +1032,9 @@ export class ModelGpu {
       if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
       // Into the shadow map: depth only, every face (a leaf card or a cloak casts from both sides), always tested.
       if (shadow) { gl.disable(gl.BLEND); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); }
-      const v = opts.wireframe ? g.wireVao : g.vao;
-      const prim = opts.wireframe ? gl.LINES : gl.TRIANGLES, count = opts.wireframe ? g.wireCount : g.indexCount;
+      const wire = opts.wireframe ? g.wire() : null;
+      const v = wire ? wire.vao : g.vao;
+      const prim = wire ? gl.LINES : gl.TRIANGLES, count = wire ? wire.count : g.indexCount;
       gl.bindVertexArray(v.vao);
       if (!teamTexture && !orm && contiguous) {
         this.pointInstances(v, instances.buffer, runs[0].first);
