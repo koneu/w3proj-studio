@@ -9,7 +9,7 @@ import type { EditorInstance, W3Api } from "../../extensions/api";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { h } from "../../workbench/dom";
-import { dropsEditor, tableView, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
+import { dropsEditor, randomItemEntries, tableView, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import {
   MIDDLE_CAMP, TOUGH_CAMP, bulkDrops, campLevelText, creepLevel, dropsAnything, dropsText, groupDroppers, tableUse, type DropGroup, type DropperRow, type GroupBy,
 } from "./dropsview";
@@ -241,7 +241,7 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
         return named.length > 3 ? `${named.slice(0, 3).join(", ")} …` : named.join(", ");
       },
       itemIcon: (id) => objects().then((s) => s.icon("w3t", id)),
-      pickItem: (title) => objects().then((s) => s.pick(root, { title, kinds: ["w3t"] })).then((o) => o?.id),
+      pickItem: (title) => objects().then((s) => s.pick(root, { title, kinds: ["w3t"], extra: randomItemEntries() })).then((o) => o?.id),
       bulk: (edit) => {
         const r = bulkDrops(entries, edit);
         if ("error" in r) return r.error;

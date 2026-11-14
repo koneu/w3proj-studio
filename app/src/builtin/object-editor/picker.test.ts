@@ -60,3 +60,15 @@ test("types that fail to load leave the browser on raw values, without a redraw"
   assert.equal(redraws, 0);
   assert.equal(list.valueText(race, archer(list)), "Race: nightelf");
 });
+
+test("extra entries (random items) are listed first, found by words, and hidden while a facet or field filter is on", () => {
+  const extra = [{ id: "YkI2", name: "Random Level 2 Power Up Item" }, { id: "YYI/", name: "Random Any Level Item" }];
+  const list = pickerList(kd, { extra });
+  const found = (q: string) => { list.setQuery(q); return list.entries.filter((e) => list.matches(e)).map((e) => e.id); };
+  assert.deepEqual(found(""), ["YkI2", "YYI/", "earc", "hfoo"]);
+  assert.deepEqual(found("level 2 power"), ["YkI2"]);
+  assert.deepEqual(found("ykI2"), ["YkI2"]);
+  assert.deepEqual(found("race:human"), ["hfoo"]);
+  // Control: without the option there are none.
+  assert.deepEqual(pickerList(kd, {}).entries.map((e) => e.id), ["earc", "hfoo"]);
+});

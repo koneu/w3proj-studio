@@ -330,10 +330,10 @@ export function setUnitChoices(o: UnitChoices, e?: UnitEntry) {
   const drops = o.drops === undefined ? undefined : o.drops as { level?: unknown; kind?: unknown }[];
   if (drops !== undefined && !Array.isArray(drops)) throw new Error("drops must be a list of { level, kind }.");
   const sets = drops?.map(({ level, kind }) => {
-    if (!Number.isInteger(level) || (level as number) < 1 || (level as number) > 8) throw new Error("A drop's level goes from 1 to 8.");
+    if (level !== "any" && !(Number.isInteger(level) && (level as number) >= 0 && (level as number) <= 8)) throw new Error("A drop's level is 0 to 8, or \"any\".");
     const letter = DROP_LETTER[(kind ?? "any") as DropKind];
     if (!letter) throw new Error(`A drop's kind is one of ${Object.keys(DROP_LETTER).join(", ")}.`);
-    return [{ id: `Y${letter}I${level as number}`, chance: 100 }];
+    return [{ id: `Y${letter}I${level === "any" ? "/" : (level as number)}`, chance: 100 }];
   });
   if (!e) return;
   if (o.camp !== undefined) e.targetAcquisition = o.camp ? -2 : -1;

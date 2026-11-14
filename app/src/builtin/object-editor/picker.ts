@@ -16,6 +16,8 @@ interface Entry {
   base?: string;
   /** A custom object of the map's campaign (a chapter map's), not of the map itself. */
   campaign?: boolean;
+  /** A built-in entry the caller adds (a random item): listed first, found by words only, no facets or fields. */
+  extra?: boolean;
   name: string;
   facets: Record<string, string>;
   haystack: string;
@@ -38,6 +40,9 @@ export interface PickOptions {
   /** Kind tabs (e.g. Unit / Item / …): choosing another one closes the
    *  picker with `{ tab, query }` so the caller can reopen it for that kind. */
   tabs?: { labels: string[]; active: number };
+  /** Entries listed first as a group, not objects of the kind (the item browser's random items): found by name and
+   *  id, hidden while a facet or field filter is on. */
+  extra?: { id: string; name: string }[];
   /** Initial search text. */
   query?: string;
   /** Icon (data URL) of an entry, loaded as rows are shown. */
@@ -53,7 +58,7 @@ const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
 
 /** The browser's entries and what matches, without the DOM. `onTypes` runs when editor types given
  *  as a promise arrive (not when it fails), so the shown list can be filtered and drawn again. */
-export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pinned" | "editorTypes">, onTypes?: () => void) {
+export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pinned" | "editorTypes" | "extra">, onTypes?: () => void) {
   let types = opts.editorTypes instanceof Promise ? null : (opts.editorTypes ?? null);
   if (opts.editorTypes instanceof Promise) {
     opts.editorTypes.then((t) => { if (!t) return; types = t; onTypes?.(); }, () => {});
@@ -67,6 +72,7 @@ export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pin
     ...kd.baseIds.map((id) => entry(id, strip(kd.names.get(id) ?? id))),
   ];
   entries.sort((a, b) => (a.id === opts.pinned ? -1 : b.id === opts.pinned ? 1 : a.name.localeCompare(b.name)));
+  entries.unshift(...(opts.extra ?? []).map((x): Entry => ({ id: x.id, name: x.name, extra: true, facets: {}, haystack: `${x.name} ${x.id}`.toLowerCase() })));
 
   // Field values are looked up lazily and cached (level 1 for per-level fields).
   const valueCache = new Map<string, Map<string, string | undefined>>();
@@ -89,6 +95,7 @@ export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pin
     setQuery(text: string) { ({ words: list.words, filters: list.filters } = parseFilters(text, kd.fields)); },
     matches(e: Entry, skipFacet?: string) {
       if (!list.words.every((t) => e.haystack.includes(t))) return false;
+      if (e.extra) return list.filters.length === 0 && [...list.chosen.values()].every((v) => !v.size);
       for (const [fid, values] of list.chosen) {
         if (fid === skipFacet || !values.size) continue;
         if (!values.has(e.facets[fid])) return false;
@@ -204,8 +211,8 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
         // Counts respect the search and every *other* facet, so they show
         // what clicking a chip would leave.
         const counts = new Map<string, number>();
-        for (const e of entries) if (matches(e, f.id)) counts.set(e.facets[f.id], (counts.get(e.facets[f.id]) ?? 0) + 1);
-        const all = [...new Set(entries.map((e) => e.facets[f.id]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        for (const e of entries) if (!e.extra && matches(e, f.id)) counts.set(e.facets[f.id], (counts.get(e.facets[f.id]) ?? 0) + 1);
+        const all = [...new Set(entries.filter((e) => !e.extra).map((e) => e.facets[f.id]))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
         const sel = chosen.get(f.id)!;
         const chip = (value: string | null) =>
           h(`button.chip${(value === null ? !sel.size : sel.has(value)) ? ".on" : ""}`, {
@@ -240,9 +247,10 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           onclick: () => finish(e.id),
           onmouseenter: () => { active = i; for (const [j, r] of [...rowsEl.children].entries()) r.classList.toggle("active", j === i); },
         },
-          opts.iconOf ? icon(e) : null,
+          opts.iconOf ? (e.extra ? h("img.picker-icon.none", { alt: "" }) : icon(e)) : null,
           h("span.picker-name", {}, e.name),
           h("code", {}, e.id),
+          e.extra ? h("span.badge", { title: "Picked when the game starts" }, "random") : null,
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
           e.base ? (e.campaign ? h("span.badge.picker-campaign", { title: "Custom object of the campaign (war3campaign.*): edited in the campaign" }, `campaign · ${e.base}`)
             : h("span.badge", { title: "Custom object of this map" }, `custom · ${e.base}`)) : null,
