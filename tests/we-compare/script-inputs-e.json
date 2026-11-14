@@ -1,0 +1,283 @@
+[
+  {
+    "name": "melee-misc-w3i",
+    "description": "Custom gameplay constants clear the melee flag (test.md): melee-misc.w3x holds a war3mapMisc.txt with [Misc] ScaledAnimTime=75.0 and the Melee flag still on; the WE opens and saves it, Studio saves it after a harmless doodad edit; the w3i flags (melee 0x4)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/melee-misc.w3x"
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trigger-init-off",
+    "description": "Run on Map Init on an initially off trigger (test.md): the Melee Initialization trigger has Initially On off and Run on Map Initialization on; the input is a Studio new map with both flags edited into war3map.wtg.json; Studio sets the two flags in war3map.wtg.json and saves, the WE opens that save and saves it again; the trigger file",
+    "input": {
+      "new": {
+        "name": "TrigInitOff",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes('\"initiallyOff\": false')) throw new Error('no initiallyOff flag'); t = t.replace('\"initiallyOff\": false', '\"initiallyOff\": true'); if (!t.includes('\"runOnInit\": false')) throw new Error('no runOnInit flag'); t = t.replace('\"runOnInit\": false', '\"runOnInit\": true'); await w3.workspace.writeText(p, t);"
+        },
+        {
+          "command": "w3.script.generate"
+        },
+        {
+          "sleep": 1500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wtg",
+        "as": "parsed"
+      },
+      {
+        "file": "war3map.j",
+        "as": "text"
+      }
+    ],
+    "we": {
+      "from": "studio"
+    }
+  },
+  {
+    "name": "trigger-init-on",
+    "description": "The control of trigger-init-off: Run on Map Initialization on with the trigger initially on",
+    "input": {
+      "new": {
+        "name": "TrigInitOn",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes('\"runOnInit\": false')) throw new Error('no runOnInit flag'); t = t.replace('\"runOnInit\": false', '\"runOnInit\": true'); await w3.workspace.writeText(p, t);"
+        },
+        {
+          "command": "w3.script.generate"
+        },
+        {
+          "sleep": 1500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wtg",
+        "as": "parsed"
+      },
+      {
+        "file": "war3map.j",
+        "as": "text"
+      }
+    ],
+    "we": {
+      "from": "studio"
+    }
+  },
+  {
+    "name": "header-spaces",
+    "description": "Whitespace-only headers (test.md): a JASS map whose custom script header is three spaces; the WE saves its regenerated war3map.j, Studio its own after a harmless doodad edit",
+    "input": {
+      "new": {
+        "name": "HeaderSpaces",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n   "
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "header-tab-lines",
+    "description": "A header of a tab and a line of spaces after a blank line",
+    "input": {
+      "new": {
+        "name": "HeaderTabs",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n\n\t\n  "
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "header-newlines",
+    "description": "A header of line breaks only: Studio writes nothing for it. KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor writes the empty second Custom Script Code banner for it, Studio nothing (lib/script/jass.ts mapHeader)",
+    "input": {
+      "new": {
+        "name": "HeaderLines",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n\n\n"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text"
+      }
+    ],
+    "limit": 30
+  }
+]

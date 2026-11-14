@@ -1,0 +1,469 @@
+[
+  {
+    "name": "water-limit-low-a-deep",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-a.w3x (ground at -1850 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-a.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1441,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Deep:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-limit-low-a-shallow",
+    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-a.w3x (ground at -1850 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-a.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1473,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Shallow:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-limit-low-b-deep",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1441,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Deep:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-limit-low-b-shallow",
+    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1473,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Shallow:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-limit-low-c-deep",
+    "description": "Enforce Water Height Limits' lower end (test.md): deep water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-c.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1441,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Deep:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-limit-low-c-shallow",
+    "description": "Enforce Water Height Limits' lower end (test.md): shallow water brush size 1 at the middle of low-ground-c.w3x (ground at -2040 world units everywhere, fixtures/we-specs/make-low-ground.mjs): the water level lands at or near the lowest stored level (-2137.6); the editor's Enforce Water Limits is on (we-drive pins it). KNOWN DIFFERENCE (2026-11-14, branch we-specs-e): the editor raises the ground under the brush so the water stays above its lowest level (the clicked corner to -7168 stored for Deep, -7680 for Shallow, with a falling-off ring); Studio leaves the ground and cuts the water at the limit",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-c.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning",
+        "Error"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "1473,310"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Shallow:"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  }
+]
