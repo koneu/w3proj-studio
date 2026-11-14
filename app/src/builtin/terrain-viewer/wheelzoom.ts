@@ -51,6 +51,22 @@ export function wheelZoomTarget(target: Vec3, pivot: Vec3, distance: number, nex
   return [pivot[0] + (target[0] - pivot[0]) * k, pivot[1] + (target[1] - pivot[1]) * k, pivot[2] + (target[2] - pivot[2]) * k];
 }
 
+/**
+ * The camera target after a pan, held as the World Editor holds its view: its own camera target (`pivot`, the ground
+ * point at zoomPivotRow: wheelPivot) never leaves the map's rectangle, and a pan that would take it past an edge stops
+ * on the edge. So the target (the middle of the view) moves back by what the pivot is outside.
+ * we-drive 2026-11-14 (branch camera-bounds-we, the empty 64x64 map whose edge is 4096, camera bounds 2816, playable
+ * part 3328): the arrow keys held right stop with the editor's target at 4096.0, held up at 4096.0 too, with Enforce
+ * Camera Bounds on and off alike (after V for game view too, its state not read back); neither the camera bounds nor
+ * the playable part stop it.
+ */
+export function heldPan(target: Vec3, pivot: Vec3, map: { left: number; bottom: number; right: number; top: number }): Vec3 {
+  const dx = Math.min(map.right, Math.max(map.left, pivot[0])) - pivot[0];
+  const dy = Math.min(map.top, Math.max(map.bottom, pivot[1])) - pivot[1];
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return [...target];
+  return [target[0] + dx, target[1] + dy, target[2]];
+}
+
 /** What zoomStep needs of the view: its size in CSS pixels, its camera, and the ray through a point of it. */
 export interface ZoomView {
   width: number;

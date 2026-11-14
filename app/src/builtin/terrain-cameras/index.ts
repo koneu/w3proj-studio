@@ -13,8 +13,8 @@ import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type Terra
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
-import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance } from "../../lib/terrain/cameras";
-import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds } from "../../lib/terrain/cameras";
+import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
 
@@ -182,13 +182,61 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     while (taken.has(`Camera ${String(i).padStart(3, "0")}`)) i++;
     return `Camera ${String(i).padStart(3, "0")}`;
   };
-  const create = () => {
+  /** Set once the tab is gone with its view: a check still waiting then changes nothing. */
+  let gone = false;
+  /** Whether Enforce Camera Bounds is on (on until it is set, as in the World Editor). */
+  const enforcing = () => w3.settings.get<boolean>("terrain.enforceCameraBounds", true) !== false;
+  /** The map's camera bounds as its w3i has them; null without a w3i. A w3i that is there but can't be read holds
+   *  nothing back and is named (unless `quiet`): its bounds aren't known. */
+  const mapBounds = async (quiet = false): Promise<readonly number[] | null> => {
+    try { return (await readMapDocStrict<{ cameraBounds?: number[] }>(w3, "map/war3map.w3i.json"))?.cameraBounds ?? null; } catch (e) {
+      if (!quiet) w3.window.showWarning(`Enforce Camera Bounds couldn't be checked: ${(e as Error).message ?? e}`);
+      return null;
+    }
+  };
+  /** The bounds Enforce Camera Bounds holds a camera to; null with the switch off. */
+  const enforcedBounds = async () => (enforcing() ? mapBounds() : null);
+  /** The camera bounds a drag is held to, as last read (when the tab opens and at each press): a drag's steps can't
+   *  wait for a file. */
+  let knownBounds: readonly number[] | null = null;
+  const learnBounds = () => void mapBounds(true).then((b) => { if (!gone) knownBounds = b; });
+  /** Enforce Camera Bounds (lib/terrain/cameras.ts viewInCameraBounds): whether the view `v`, taken at the click,
+   *  may not become a camera; says so, in the World Editor's words. */
+  const viewRefused = async (v: Partial<Camera>): Promise<boolean> => {
+    if (viewInCameraBounds(await enforcedBounds(), v.targetX ?? 0, v.targetY ?? 0)) return false;
+    w3.window.showWarning(`${VIEW_OUTSIDE_BOUNDS} Turn off Enforce Camera Bounds to allow it.`);
+    return true;
+  };
+  /** A value typed into the panel for `cams`, as one undo step. A Target X or Y past the camera bounds lands on the
+   *  bound while Enforce Camera Bounds is on, as in the World Editor's Camera Properties (targetInCameraBounds);
+   *  cameras that went while the bounds were read are left out. */
+  const typeValue = async (cams: Camera[], key: keyof Camera, typed: number) => {
+    let v = typed;
+    if (key === "targetX" || key === "targetY") {
+      const [x, y] = targetInCameraBounds(await enforcedBounds(), typed, typed);
+      v = key === "targetX" ? x : y;
+      if (gone || !ed.editable) return;
+    }
+    const changing = cams.filter((x) => doc.cameras.includes(x) && x[key] !== v);
+    if (changing.length) updateAll(changing, { [key]: v });
+    // The box shows what the camera has, not what was typed.
+    else renderPanel();
+  };
+  const create = async () => {
     const v = fromView();
+    if (await viewRefused(v) || gone || !ed.editable) return;
     const c: Camera = {
       targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, nearZ: 100,
       ...v, farZ: Math.max(5000, Math.round((v.distance ?? 0) + 3000)), name: uniqueName(),
     };
     commit(doc.cameras, [...doc.cameras, c], [c]);
+  };
+  /** Set from view: the camera takes the view's values, unless Enforce Camera Bounds refuses the view. The camera may
+   *  have gone while the bounds were read (deleted, or put back by an undo): then nothing changes. */
+  const setFromView = async (c: Camera) => {
+    const v = fromView();
+    if (await viewRefused(v) || gone || !ed.editable || !doc.cameras.includes(c)) return;
+    update(c, v);
   };
   /** Duplicate: a copy of each selected camera with every value but its name (a new one, as Create gives), after the
    *  originals; the copies are selected. One undo step. */
@@ -299,8 +347,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
           endTypedPreview();
           const v = Number(input.value);
           if (input.value.trim() === "" || !Number.isFinite(v)) { renderPanel(); return; }
-          const changing = selection.filter((x) => x[key] !== v);
-          if (changing.length) updateAll(changing, { [key]: v });
+          void typeValue([...selection], key, v);
         },
       });
       return h("label.terrain-camera-field", { title }, label, input);
@@ -308,7 +355,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     panel.replaceChildren(name,
       h("button", { title: "Look through this camera", onclick: () => preview(c) }, "View"),
       // Several cameras made one by the view would be nothing but copies: this is for one.
-      ...(many ? [] : [h("button", { title: "Take target, angles, distance and field of view from the current view", onclick: () => update(c, fromView()) }, "Set from view")]),
+      ...(many ? [] : [h("button", { title: "Take target, angles, distance and field of view from the current view", onclick: () => void setFromView(c) }, "Set from view")]),
       h("button", { title: many ? "A copy of each selected camera, with a new name" : "A copy of this camera, with a new name", onclick: () => { if (ed.editable) duplicate(); } }, "Duplicate"),
       h("button", { title: many ? "Delete the selected cameras (Del)" : "Delete this camera (Del)", onclick: () => deleteSelected() }, "Delete"),
       ...fields);
@@ -338,15 +385,16 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     return null;
   };
   const toolbar = h("div.terrain-group-tools", {},
-    h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) create(); } }, "Create from view"),
+    h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) void create(); } }, "Create from view"),
     jump, count, hover, panel);
 
   return {
     toolbar,
-    activate() { active = true; previewing = false; void load.then(() => { renderPanel(); render(); }); },
+    activate() { active = true; previewing = false; learnBounds(); void load.then(() => { renderPanel(); render(); }); },
     deactivate() { endTypedPreview(); active = false; drag = null; clear(); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
+      learnBounds();
       previewing = false;
       const [x, y] = p.ground;
       const g = hit(x, y, [p.event.clientX, p.event.clientY]);
@@ -386,6 +434,11 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       const o = drag.orig, c = selected;
       if (drag.part === "target") {
         const dx = x - drag.start[0], dy = y - drag.start[1];
+        // Enforce Camera Bounds: a step that would take a dragged target past the camera bounds is refused, and the
+        // cameras stay where the last step left them, as the World Editor's dragged camera does (we-drive 2026-11-14:
+        // the drag that took a camera from 2700 to 3117.1 with the switch off left it at 2805.0, short of the bound 2816).
+        const held = enforcing() ? knownBounds : null;
+        if (held && [o, ...drag.others.values()].some((was) => !viewInCameraBounds(held, round(was.targetX + dx), round(was.targetY + dy)))) return;
         c.targetX = round(o.targetX + dx);
         c.targetY = round(o.targetY + dy);
         for (const [cam, was] of drag.others) { cam.targetX = round(was.targetX + dx); cam.targetY = round(was.targetY + dy); }
@@ -478,6 +531,6 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (active) { renderPanel(); render(); }
       return true;
     },
-    dispose() { clear(); ed.host.style.cursor = ""; },
+    dispose() { gone = true; clear(); ed.host.style.cursor = ""; },
   };
 }

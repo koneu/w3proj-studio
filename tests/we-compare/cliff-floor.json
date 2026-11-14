@@ -1,0 +1,119 @@
+[
+  {
+    "name": "cliff-floor-down2",
+    "description": "a pit at level 0 (Decrease Two, size 3, on level 2), then Decrease Two, size 5, on its middle: the editor does nothing (no corner moves, none is typed); Studio lowered the brush's 49 corners to level 0 before (branch painted-cliff-type-we, 2026-11-14); terrain-painter/tools.ts strokeLayer",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−2:"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-down1",
+    "description": "the same pit, then Decrease One, size 5, on its middle: nothing (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,282"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−1:"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-level1-down2",
+    "description": "a pit at level 1 (Decrease One, size 3), then Decrease Two, size 5, on its middle: nothing, not even down to level 0 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1488,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−1:"],["size",3],["click",748,500],["tool","−2:"],["size",5],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-rim",
+    "description": "the level-0 pit, then Decrease Two, size 3, on the east end of its floor: nothing, though the brush reaches level-2 ground (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1456,569"],["--click","860,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−2:"],["size",3],["click",860,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-down1-moved",
+    "description": "the level-0 pit, then Decrease One, size 5, on the floor one corner east of its middle (another pointer position than the pit's click): nothing (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,282"],["--click","1488,569"],["--click","800,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",748,500],["tool","−1:"],["size",5],["click",800,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-level1-down2-moved",
+    "description": "the level-1 pit, then Decrease Two, size 5, one corner east of its middle: nothing (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1409,282"],["--click","1488,569"],["--click","800,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−1:"],["size",3],["click",748,500],["tool","−2:"],["size",5],["click",800,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-floor-level1-down1",
+    "description": "the level-1 pit, then Decrease One, size 5, one corner east of its middle: that one goes down, to level 0 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1441,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1441,282"],["--click","1488,569"],["--click","800,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−1:"],["size",3],["click",748,500],["tool","−1:"],["size",5],["click",800,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-reach-up2-edge",
+    "description": "plateau.w3x (level 3 on 2): Increase Two, size 3, on the south edge (3 to 5): the low corners next to the brush come up to level 3, two below it, and the cliff round them is typed; Studio left them at 2 (a three-level cliff) before (branch painted-cliff-type-we, 2026-11-14); terrain-painter/tools.ts applyLayer",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1537,282"],["--click","1456,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+2:"],["size",3],["click",750,630]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-reach-down2-below",
+    "description": "plateau.w3x: Decrease Two, size 3, on the low ground below the south edge (2 to 0): the plateau's corners next to the brush come down to level 2 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1409,282"],["--click","1456,569"],["--click","750,700"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","−2:"],["size",3],["click",750,700]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-reach-up2-top",
+    "description": "plateau.w3x: Increase Two, size 1, in the plateau's middle (3 to 5): nothing else moves (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1537,282"],["--click","1392,569"],["--click","750,450"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+2:"],["size",1],["click",750,450]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-stack-up1-twice",
+    "description": "Increase One, size 3, twice at one spot: the second click raises again (centred one row south: the pointer is on the hill now) (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1505,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--click","1505,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+1:"],["size",3],["click",748,500],["tool","+1:"],["size",3],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-stack-up2-inside",
+    "description": "Increase Two, size 8, then Increase Two, size 3, on the plateau at 800,520: level 6 on level 4 (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1537,282"],["--click","1520,569"],["--click","748,500"],["--sleep","500"],["--click","1537,282"],["--click","1456,569"],["--click","800,520"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+2:"],["size",8],["click",748,500],["tool","+2:"],["size",3],["click",800,520]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e"}],
+    "limit": 40
+  },
+  {
+    "name": "cliff-stack-up2-same",
+    "description": "Increase Two, size 8, then Increase Two, size 3, at the very same pointer position 748,500 (the view's middle column): the editor's second click does nothing, three runs alike, as with size 8 and with Increase One there; at 800,520 it works (cliff-stack-up2-inside), so probably the editor's pick on that plateau; Studio raises (branch painted-cliff-type-we, 2026-11-14)",
+    "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
+    "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1537,282"],["--click","1520,569"],["--click","748,500"],["--sleep","500"],["--click","1537,282"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
+    "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+2:"],["size",8],["click",748,500],["tool","+2:"],["size",3],["click",748,500]]},{"sleep":1000}]},
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "limit": 40
+  }
+]

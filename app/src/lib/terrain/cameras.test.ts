@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraMarkers, DEPTH_OF_FIELD, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance } from "./cameras";
+import { cameraMarkers, DEPTH_OF_FIELD, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -95,4 +95,43 @@ test("nameDepthOfField: older JSON's unknown becomes DoF Distance, DoF Scale and
   nameDepthOfField(classic as Record<string, unknown>, true); // (deepEqual narrowed its type)
   assert.deepEqual(classic, { name: "c", dofDistance: 0, dofScale: 0, posAbsoluteZ: 0 });
   assert.deepEqual(DEPTH_OF_FIELD, ["dofDistance", "dofScale", "posAbsoluteZ"]);
+});
+
+test("viewInCameraBounds: Enforce Camera Bounds refuses a view whose target is outside the camera bounds, as the World Editor", () => {
+  // The empty 64x64 map's w3i: left, bottom; right, top; left, top; right, bottom.
+  const bounds = [-2816, -3328, 2816, 2816, -2816, 2816, 2816, -3328];
+  // The World Editor made these cameras (we-drive 2026-11-14)...
+  for (const [x, y] of [[2816, 0], [2700, 0], [0, 0], [0, -3000], [2700, 300]]) assert.ok(viewInCameraBounds(bounds, x, y), `${x}, ${y} is inside`);
+  // ...and refused these: inside the playable part (3328) and the map (4096), but past the camera bounds.
+  for (const [x, y] of [[3000, 0], [2820, 0], [4096, 0], [0, 2900]]) assert.ok(!viewInCameraBounds(bounds, x, y), `${x}, ${y} is outside`);
+  // Every edge is inside, a step past it isn't.
+  assert.ok(viewInCameraBounds(bounds, -2816, -3328) && viewInCameraBounds(bounds, 2816, 2816));
+  assert.ok(!viewInCameraBounds(bounds, -2816.5, 0) && !viewInCameraBounds(bounds, 0, -3328.5) && !viewInCameraBounds(bounds, 0, 2816.5));
+  // The corners in another order give the same rectangle.
+  assert.ok(!viewInCameraBounds([2816, 2816, -2816, -3328, 2816, -3328, -2816, 2816], 3000, 0));
+  // Only the first two corners (left, bottom, right, top).
+  assert.ok(!viewInCameraBounds([-100, -100, 100, 100], 101, 0) && viewInCameraBounds([-100, -100, 100, 100], 100, 0));
+  // No bounds to go by: nothing is refused.
+  for (const none of [null, undefined, [], [1, 2, 3], [0, 0, NaN, 5], [5, 5, 5, 5], "x" as unknown as number[]]) assert.ok(viewInCameraBounds(none, 1e9, -1e9));
+  assert.match(VIEW_OUTSIDE_BOUNDS, /outside of the world camera bounds/);
+});
+
+test("targetInCameraBounds: a typed target past the camera bounds lands on the bound, as in the World Editor's Camera Properties", () => {
+  const bounds = [-2816, -3328, 2816, 2816, -2816, 2816, 2816, -3328];
+  // The World Editor: Target X 3100 of a camera at 2700, -600 became 2816 with Enforce Camera Bounds on.
+  assert.deepEqual(targetInCameraBounds(bounds, 3100, -600), [2816, -600]);
+  // Inside, and on the bound, a target stays.
+  assert.deepEqual(targetInCameraBounds(bounds, 2700, -600), [2700, -600]);
+  assert.deepEqual(targetInCameraBounds(bounds, 2816, 2816), [2816, 2816]);
+  // Each side, and a corner: the bottom bound (-3328) isn't the top one (2816).
+  assert.deepEqual(targetInCameraBounds(bounds, -9000, 0), [-2816, 0]);
+  assert.deepEqual(targetInCameraBounds(bounds, 0, 3000), [0, 2816]);
+  assert.deepEqual(targetInCameraBounds(bounds, 0, -3000), [0, -3000]);
+  assert.deepEqual(targetInCameraBounds(bounds, 5000, -5000), [2816, -3328]);
+  // What it holds is what viewInCameraBounds lets through.
+  assert.ok(viewInCameraBounds(bounds, ...targetInCameraBounds(bounds, 1e6, -1e6)));
+  // The switch off (no bounds passed), a map without bounds, or no number: as typed.
+  assert.deepEqual(targetInCameraBounds(null, 3100, -600), [3100, -600]);
+  assert.deepEqual(targetInCameraBounds([1, 2, 3], 3100, -600), [3100, -600]);
+  assert.deepEqual(targetInCameraBounds(bounds, NaN, 5), [NaN, 5]);
 });
