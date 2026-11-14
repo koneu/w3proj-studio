@@ -4748,7 +4748,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
               const top = !on.naval ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
               const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts);
-              const over = top ? composeLayers([top[0]?.over ?? null, top[1]?.over ?? null]) : null;
+              const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
               if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over); else renderer.setViewLayer(null);
               redraw();
             };
