@@ -45,7 +45,7 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
-import { doodadSnaps, type PathSize } from "./doodadgrid";
+import { doodadSnaps, mixedPicture, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
@@ -2651,7 +2651,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const data = await pathingData;
           const info = data.placedTex(id);
           const image = info?.path ? (await data.placedImage(info)).image : null;
-          doodadCells.set(id, image ? { width: image.width, height: image.height } : null);
+          doodadCells.set(id, image ? { width: image.width, height: image.height, mixed: mixedPicture(image.rgba) } : null);
         };
         const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
         const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };

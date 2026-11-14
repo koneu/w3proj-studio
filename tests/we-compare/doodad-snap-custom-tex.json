@@ -1,0 +1,35 @@
+[
+  {
+    "name": "doodad-snap-custom-tex",
+    "description": "Snap Doodads on Load, doodads whose pathing texture is a 4x4 (2x2) file of the map with a pattern of magenta pixels (ring, corner, row, diagonal, half, cross, quadrants; all magenta): the editor turns every picture of more than one colour to the quarter, Studio does the same (fixtures/we-specs/make-doodad-snap.mjs tex)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-tex.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  }
+]

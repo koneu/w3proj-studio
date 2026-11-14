@@ -1,7 +1,7 @@
 [
   {
     "name": "doodad-snap-custom",
-    "description": "Snap Doodads on Load for custom types whose pathing texture the map's object data names: 7 custom doodads (w3d dptx 2x2, 4x4, 6x6, 8x4, 12x4, 1x1 Default and _) and 4 custom destructables (w3b bptx 2x2, 4x4, 8x4, _), each placed off its grid at two angles (fixtures/we-specs/make-doodad-snap.mjs); the editor opens the map and saves it, Studio opens it in the terrain view and saves; the 18 doodads and destructables on their grids match in position, angle, scale and life; the 4 whose angle differs are in doodad-snap-custom-angles",
+    "description": "Snap Doodads on Load for custom types whose pathing texture the map's object data names: 7 custom doodads (w3d dptx 2x2, 4x4, 6x6, 8x4, 12x4, 1x1 Default and _) and 4 custom destructables (w3b bptx 2x2, 4x4, 8x4, _), each placed off its grid at two angles (fixtures/we-specs/make-doodad-snap.mjs); the editor opens the map and saves it, Studio opens it in the terrain view and saves; the 18 doodads and destructables on their grids match in position, angle, scale and life; all 22 match since branch doodad-load-angles (2026-11-14): a destructable's fixed rotation holds only with a pathing texture, a square 1x1Default (2x2 picture, one magenta pixel) turns to the quarter",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom.w3x"
     },
@@ -27,47 +27,7 @@
     "compare": [
       {
         "file": "war3map.doo",
-        "as": "parsed",
-        "ignore": [
-          "doodads[10].angle",
-          "doodads[11].angle",
-          "doodads[20].angle",
-          "doodads[21].angle"
-        ]
-      }
-    ],
-    "limit": 40
-  },
-  {
-    "name": "doodad-snap-custom-angles",
-    "description": "the same map: DIFFERS (2026-11-14) in 4 angles only: the 1x1Default doodads (D005, at 32,544 and 32,-480) the editor turns to the quarter (0 and 1.5707964) and Studio leaves at 0.4 and 1.2; the destructables with no pathing texture (B003 on an LTlt base, fixedRot 270) Studio turns to 270 (4.712389) and the editor leaves at 0.4 and 2.9",
-    "input": {
-      "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom.w3x"
-    },
-    "studio": {
-      "steps": [
-        {
-          "setting": [
-            "script.generateOnSave",
-            false
-          ]
-        },
-        {
-          "terrain": true
-        },
-        {
-          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
-        },
-        {
-          "sleep": 2000
-        }
-      ]
-    },
-    "compare": [
-      {
-        "file": "war3map.doo",
-        "as": "parsed",
-        "expect": "differs"
+        "as": "parsed"
       }
     ],
     "limit": 40
