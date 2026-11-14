@@ -294,6 +294,8 @@ export interface W3Api {
     activePath(): string | null;
     /** Whether an editor of the file has unsaved changes. */
     isDirty(path: string): boolean;
+    /** The files with an open tab, in tab order. */
+    openPaths(): string[];
     /** The files with unsaved changes in an editor. */
     unsavedPaths(): string[];
     /** Saves the editors whose only unsaved change is view state (EditorInstance.viewOnlyUnsaved), the same save as

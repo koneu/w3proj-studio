@@ -326,6 +326,7 @@ export class Workbench {
         activePath: () => wb.editors.activePath(),
         onDidChangeActive: (l) => wb.editors.onDidChangeActive.on(l),
         isDirty: (p) => wb.editors.isDirty(p),
+        openPaths: () => wb.editors.openPaths(),
         unsavedPaths: () => wb.editors.unsavedPaths(),
         saveViewOnly: () => wb.editors.saveViewOnly(),
         closeAll: () => wb.editors.closeAll(),
