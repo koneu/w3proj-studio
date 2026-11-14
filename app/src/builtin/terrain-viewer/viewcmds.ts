@@ -188,14 +188,41 @@ export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): 
   return rgba;
 }
 
+/** Over the map's edge (past the playable part) the World Editor's Pathing - Ground is a flat grey whatever the cells
+ *  hold, water on or off (we-drive, border128x96, 2026-11-14: 137, 138, 137). */
+export const GROUND_EDGE: readonly number[] = [137, 138, 137, 255];
+/** Its regions are not dimmed there: the fill the playable part has, without the darker edge line (red 196, 27, 21 and
+ *  yellow 194, 194, 6 for pure red and yellow, same measurement). */
+const REGION_EDGE_ALPHA = 194;
+
+/** Whether pathing cell `i` (row-major, `edge.tilesX * 4` wide, rows from the south) lies on a tile past the playable map. */
+export function edgeCell(edge: EdgeTiles | null | undefined, i: number): boolean {
+  if (!edge || !(edge.tilesX > 0)) return false;
+  const width = edge.tilesX * 4;
+  return !!edge.tiles[Math.floor(i / width / 4) * edge.tilesX + ((i % width) >> 2)];
+}
+
+/** `rgba` (per pathing cell) cut in two at the map's edge: what lies over the playable part, and what lies over the
+ *  tiles past it (the other half left clear). The editor draws the edge's part over the water, the other under it. */
+export function splitEdge(rgba: Uint8Array, edge: EdgeTiles): { inside: Uint8Array; over: Uint8Array } {
+  const inside = new Uint8Array(rgba), over = new Uint8Array(rgba.length);
+  for (let i = 0; i < rgba.length / 4; i++) {
+    if (!edgeCell(edge, i)) continue;
+    over.set(rgba.subarray(i * 4, i * 4 + 4), i * 4);
+    inside.fill(0, i * 4, i * 4 + 4);
+  }
+  return { inside, over };
+}
+
 /** Pathing - Ground (per pathing cell, rows from the south), in the World Editor's colours: magenta where nothing
  *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). Deep
  *  water's cells are magenta too, but the editor lays the layer on the ground, under the water: deep water hides it
  *  in SD and HD alike, shallow water lets it show through faintly, and View > Water off shows it all (we-drive, a copy of
  *  (2)EchoIsles' south shore, 2026-11-13). The renderer draws the view layer before the water, so Studio does the same. */
-export function groundPathingColors(cells: ArrayLike<number>): Uint8Array {
+export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {
+    if (edgeCell(edge, i)) { rgba.set(GROUND_EDGE, i * 4); continue; }
     const c = cells[i];
     if (c & NO_WALK) rgba.set([230, 40, 230, 150], i * 4);
     else if (c & NO_BUILD) rgba.set([40, 90, 255, 140], i * 4);
@@ -207,7 +234,7 @@ export interface RegionBox { left: number; bottom: number; right: number; top: n
 
 /** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
  *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top. */
-export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number): Uint8Array {
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null): Uint8Array {
   const rgba = new Uint8Array(width * height * 4);
   const cell = 32;
   const area = (r: RegionBox) => (r.right - r.left) * (r.top - r.bottom);
@@ -218,8 +245,10 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
     const c = r.color ?? { red: 255, green: 255, blue: 255 };
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
-        const edge = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
-        rgba.set(edge ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, 170], (y * width + x) * 4);
+        const i = y * width + x;
+        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, REGION_EDGE_ALPHA], i * 4); continue; }
+        const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
+        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, 170], i * 4);
       }
     }
   }

@@ -573,8 +573,8 @@ export class TerrainRenderer {
   private border: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   showBorder = true;
   /** What the View toggles show over the ground (Height Map, Pathing - Naval, Camera Objects), one texture; tools keep `overlay`. */
-  private viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
-  private held: { viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null } | null = null;
+  private viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture } | null = null;
+  private held: { viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture } | null } | null = null;
   /** Grid lines every this many world units (0: none). */
   gridStep = 0;
   private gridProg: WebGLProgram | null = null;
@@ -1107,18 +1107,21 @@ export class TerrainRenderer {
   }
 
   /** The View toggles' picture (one texel per pathing cell, rows from the south); null removes it. */
-  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0) {
+  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0, top: Uint8Array | null = null) {
     const gl = this.gl;
     // While showEverything lasts the layer lives in `held`; the picture taken doesn't show it.
     const slot = this.held ?? (this as unknown as NonNullable<TerrainRenderer["held"]>);
     if (!rgba) {
-      if (slot.viewLayer) { this.freeVao(slot.viewLayer.vao); gl.deleteTexture(slot.viewLayer.tex); }
+      if (slot.viewLayer) { this.freeVao(slot.viewLayer.vao); gl.deleteTexture(slot.viewLayer.tex); if (slot.viewLayer.top) gl.deleteTexture(slot.viewLayer.top); }
       slot.viewLayer = null;
       return;
     }
     if (!this.overlayProgram()) return;
     slot.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
+    // `top`: the part drawn after the water (over the border: Pathing - Ground and Regions show over water there).
+    if (top) { slot.viewLayer.top ??= gl.createTexture()!; this.uploadOverlay(slot.viewLayer.top, top, width, height); }
+    else if (slot.viewLayer.top) { gl.deleteTexture(slot.viewLayer.top); slot.viewLayer.top = undefined; }
   }
 
   /** The w3i's camera complements (left, right, bottom, top, in tiles), which say where the playable map ends; null
@@ -1855,6 +1858,24 @@ export class TerrainRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.water.count);
       gl.depthMask(true);
       // The rings below use the colour program (its view matrix is still set).
+      gl.useProgram(this.colorProg);
+    }
+    // The View layers' part over the border, over the water too (setViewLayer's `top`).
+    if (onGround && this.viewLayer?.top && this.overlayProg) {
+      const layer = this.viewLayer, t = this.terrain, prog = this.overlayProg;
+      gl.useProgram(prog);
+      setFog(gl, (name) => gl.getUniformLocation(prog, name), null);
+      gl.uniformMatrix4fv(gl.getUniformLocation(prog, "uViewProj"), false, viewProj);
+      gl.uniform4f(gl.getUniformLocation(prog, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, layer.top!);
+      gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.bindVertexArray(layer.vao);
+      gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
+      gl.depthMask(true);
       gl.useProgram(this.colorProg);
     }
     // Rings stay visible through trees and water.
