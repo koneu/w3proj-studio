@@ -66,6 +66,12 @@ test("doodadTurn: the log turns a whole quarter per key (the World Editor: 0° t
   assert.equal(doodadTurn(rules(), "AOlg", 0, deg(-5)), -Math.PI / 2);
   assert.equal(doodadTurn(rules(), "LTbr", deg(270), deg(5)), deg(270) + deg(5));
   assert.equal(doodadTurn(rules(), "LPwh", 1, deg(5)), 1 + deg(5));
+  // A square picture of more than one colour turns a quarter too (the World Editor: a 4x4 ring 270° to 0° in one press,
+  // a 2x2 diagonal 270° to 90° in two), a one-colour one by the step (275°).
+  const mixed = { ...rules(), size: (id: string) => (id === "ring" ? { width: 4, height: 4, mixed: true } : id === "full" ? { width: 4, height: 4 } : SIZES[id]) };
+  assert.equal(doodadTurn(mixed, "ring", deg(270), deg(5)), deg(270) + Math.PI / 2);
+  assert.equal(doodadPose(mixed, "ring", -768, 0, doodadTurn(mixed, "ring", deg(270), deg(5))).angle, 0);
+  assert.equal(doodadTurn(mixed, "full", deg(270), deg(5)), deg(275));
   // Snapping off: the log turns by the step too.
   assert.equal(doodadTurn(rules(false), "AOlg", 0, deg(5)), deg(5));
 });

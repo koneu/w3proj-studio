@@ -1,0 +1,173 @@
+[
+  {
+    "name": "doodad-turn-we",
+    "description": "The turn and nudge keys and the palette on doodads, with Snap Doodads on Load (input: make-doodad-snap.mjs turn, doodad-turn.w3x: on their grids at 270 degrees a 4x4 ring picture D200, a 2x2 diagonal D201 and a plain 4x4 D202, destructables B100 (no texture, fixed rotation 90), B102 (2x2, fixed rotation 90) and B101 (no texture, none) at 0.4). WE: each box-selected, number pad / once (ring: 270 to 0, a quarter), twice (diagonal: 270 to 90), once (plain: 275, by the step); number pad 6 on each destructable (B100 and B101 move 8 with their angle left at 22.9, B102 moves 64 to the next grid point, angle 90); a B100 and a B102 from the Doodad palette at about 500,650 / 750,650 of the display (B100 gets a random angle, not its fixed 90; B102 its 90). Studio: the same by its selection keys and place_objects. Ignored: the placed ones' variation and scale and the B100's angle (random in both; the Studio step checks the angle isn't 90). Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-turn.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "steps": [
+        [
+          "--key",
+          "Num_Lock"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--drag",
+          "390,440:500,340"
+        ],
+        [
+          "--key",
+          "KP_Divide"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--drag",
+          "596,440:706,340"
+        ],
+        [
+          "--key",
+          "KP_Divide"
+        ],
+        [
+          "--key",
+          "KP_Divide"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--drag",
+          "790,440:900,340"
+        ],
+        [
+          "--key",
+          "KP_Divide"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--drag",
+          "420,290:530,180"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--drag",
+          "620,280:730,170"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--drag",
+          "800,290:910,180"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--click",
+          "1410,210"
+        ],
+        [
+          "--click",
+          "500,650"
+        ],
+        [
+          "--click",
+          "1410,236"
+        ],
+        [
+          "--click",
+          "750,650"
+        ],
+        [
+          "--key",
+          "Escape"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); const key = async (k, code) => { const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: k, code, bubbles: true })); await new Promise((r) => setTimeout(r, 300)); }; const go = async (id, x, y, k, code, n) => { await s.look.get('map/war3map.w3e.txt')(x, y, { id, x, y }); await new Promise((r) => setTimeout(r, 1000)); for (let i = 0; i < n; i++) await key(k, code); await key('Escape', 'Escape'); }; await go('D200', -768, 0, '/', 'NumpadDivide', 1); await go('D201', -224, 32, '/', 'NumpadDivide', 2); await go('D202', 256, 0, '/', 'NumpadDivide', 1); await go('B100', -768, 512, '6', 'Numpad6', 1); await go('B102', -224, 544, '6', 'Numpad6', 1); await go('B101', 256, 512, '6', 'Numpad6', 1); await w3.editors.saveAll();"
+        },
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "B100",
+                "x": -555.6814,
+                "y": -694.38403
+              },
+              {
+                "id": "B102",
+                "x": 20,
+                "y": -690
+              }
+            ],
+            "ignoreRoom": true
+          }
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); const o = s.placedObjects().doodads.find((d) => d.id === 'B100' && d.position[1] < 0); if (!o || Math.abs(o.angle - Math.PI / 2) < 0.001) throw new Error('a placed B100 (no texture) has its fixed rotation: ' + o?.angle); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "doodads[6].angle",
+          "doodads[6].variation",
+          "doodads[6].scale",
+          "doodads[7].variation",
+          "doodads[7].scale"
+        ]
+      }
+    ],
+    "limit": 30
+  }
+]

@@ -1035,6 +1035,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const room = place ? shared : shared?.scratch() ?? null;
         let placed = 0;
         for (const [i, o] of wanted.entries()) {
+          await handle.objects.ready(o.id as string);
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
           if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
           if (!insideBounds(held, x, y)) { skipped.push({ index: i, id, x, y, reason: OUTSIDE_BOUNDS }); continue; }
@@ -1130,6 +1131,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       let noRoom = 0, keptClear = 0, outside = 0;
       await editPlaced(`Scatter ${(ids as string[]).join(", ")} in ${area.name ?? "an area"}`, key, async (f) => {
         const room = await handle.objects.occupancy();
+        await Promise.all((ids as string[]).map((id) => handle.objects.ready(id)));
         const types = (ids as string[]).map((id) => {
           const type = handle.objects.type(id);
           if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
@@ -4231,8 +4233,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objects: {
             type: (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
+              // A destructable whose type has no pathing texture isn't turned to its fixed rotation by the World Editor
+              // (placed: any angle, as a doodad; moved: it stays; doodad-turn-we spec): none, once the texture is read (ready).
+              const fixedRot = skin?.kind === "w3b" && doodadCells.get(id) === null ? null : skin?.fixedRot ?? null;
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
             },
+            ready: async (id) => { if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* its type stays as it is */ }); },
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;

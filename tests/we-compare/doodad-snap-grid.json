@@ -1,0 +1,35 @@
+[
+  {
+    "name": "doodad-snap-grid",
+    "description": "Snap Doodads on Load, all-magenta pictures of 1x1 to 8x8 pixels at 16 offsets and two angles (make-doodad-snap.mjs grid): which grid the editor puts each size on",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-grid.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  }
+]

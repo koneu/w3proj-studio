@@ -314,6 +314,9 @@ export interface TerrainObjects {
   occupancy(): Promise<TerrainOccupancy>;
   /** Where a unit type lands near a point: buildings go on the building grid, others stay. */
   buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
+  /** Reads what `type(id)` needs of a doodad or destructable type's pathing texture (a destructable without one has no
+   *  fixed rotation to place at); resolves when it's read or can't be. Others: at once. */
+  ready(id: string): Promise<void>;
   /** Where an object of `kind`/`id` placed at (x, y) facing `angle` (radians) lands, and its facing then: a building
    *  on the building grid, a doodad or destructable on its own grid and, with a texture that isn't square, at a
    *  quarter turn (Snap Doodads on Load); anything else as asked. */

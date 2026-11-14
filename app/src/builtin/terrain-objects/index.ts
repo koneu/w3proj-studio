@@ -253,6 +253,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     placing = p;
     update();
     reroll();
+    // A destructable's fixed rotation depends on its pathing texture, which is read now: look again.
+    if (p) void ed.objects.ready(p.id).then(() => { if (placing === p) { update(); reroll(); } });
   };
   const choose = async () => {
     try {

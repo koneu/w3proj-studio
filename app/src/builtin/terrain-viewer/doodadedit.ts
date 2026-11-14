@@ -58,11 +58,12 @@ export function settleDoodad(entry: RuledEntry, rules: DoodadRuleSource, ground:
 }
 
 /** The facing a turn key gives a doodad of type `id` facing `angle`, turned by `by` (radians): one whose texture isn't
- *  square turns a whole quarter that way, as in the World Editor (three presses turned its log from 0° to 270°), where
- *  a smaller turn would round back; anything else by `by`. */
+ *  square, or a square one of more than one colour (`mixed`), turns a whole quarter that way, as in the World Editor
+ *  (three presses turned its log from 0° to 270°; one press of a 4×4 ring picture 270° to 0°, two of a 2×2 diagonal
+ *  270° to 90°, doodad-turn-we spec), where a smaller turn would round back; anything else by `by`. */
 export function doodadTurn(rules: DoodadRuleSource, id: string, angle: number, by: number): number {
   const size = rules.snap ? rules.size(id) : null;
-  const square = !size || !(size.width >= 1) || !(size.height >= 1) || size.width === size.height;
+  const square = !size || !(size.width >= 1) || !(size.height >= 1) || (size.width === size.height && !size.mixed);
   return square || by === 0 ? angle + by : angle + Math.sign(by) * (Math.PI / 2);
 }
 
