@@ -223,6 +223,12 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     onchange: () => { void w3.settings.set("terrain.placement.randomScale", scaleSel.value).then(reroll); ed.focus(); } },
     ...RANDOM_SCALES.map(([v, label]) => h("option", { value: v, selected: v === lookOptions().randomScale }, label)));
   const scaleWrap = h("label.terrain-tool-opt", {}, "Random scale ", scaleSel);
+  // The setting also changes from outside (the API, settings.json): the select follows, and the next look is rolled anew.
+  const scaleWatch = w3.settings.onDidChange((key) => {
+    if (key !== "terrain.placement.randomScale") return;
+    const now = lookOptions().randomScale;
+    if (scaleSel.value !== now) { scaleSel.value = now; reroll(); }
+  });
   /** The variations of the type being placed (and Random); what was chosen stays while the type does. */
   const fillVariations = () => {
     const n = placing && !isStart() ? ed.objects.type(placing.id)?.numVar ?? 1 : 1;
@@ -316,6 +322,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   return {
     toolbar,
     select,
+    dispose() { scaleWatch.dispose(); },
     // No activate: opening the tab asks nothing (the object browser lay over the view and this toolbar); Place… and
     // the hint are there.
     deactivate() { ed.setBrush(null); void showGhost(null); },

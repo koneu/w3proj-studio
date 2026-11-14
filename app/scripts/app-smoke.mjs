@@ -6083,6 +6083,16 @@ async function mineStartGrid(page, found) {
     if (!same(xy(mine()), [1472, 704])) fail(`move_object put the gold mine asked at 1500, 700 at ${xy(mine())}, not 1472, 704`);
     if (!same(xy(start()), [s0[0] + 128, s0[1] + 64])) fail(`move_object put the start location asked at ${s0[0] + 141}, ${s0[1] + 35} at ${xy(start())}, not ${s0[0] + 128}, ${s0[1] + 64}`);
 
+    // replace_objects: a footman standing free at -1000, -300 becomes a gold mine and goes onto its grid (-1024, -320).
+    await k.tool("place_objects", { kind: "units", objects: [{ id: "hfoo", x: -1000, y: -300, player: 1 }], ignoreRoom: true });
+    await k.save();
+    const foot = k.units().find((u) => u.id === "hfoo");
+    if (!same(xy(foot), [-1000, -300])) fail(`a footman isn't free at -1000, -300 (control): ${xy(foot)}`);
+    await k.tool("replace_objects", { kind: "units", swaps: { hfoo: "ngol" } });
+    await k.save();
+    const swapped = k.units().filter((u) => u.id === "ngol" && u.position[0] < 0);
+    if (swapped.length !== 1 || !same(xy(swapped[0]), [-1024, -320])) fail(`replace_objects turned a footman at -1000, -300 into a gold mine at ${swapped.map(xy)}, not -1024, -320`);
+
     await k.tab("Select");
     // The editor's handle, through a tool group of the smoke's own (made for the open editor at once).
     await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__gridGroup = s.registerToolGroup({ id: "smoke-grid", title: "SmokeGrid", order: 998, create: (ed) => { window.__gridEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
@@ -9154,6 +9164,13 @@ async function placerAndCampaign(page, found) {
     if (boxes.some((b) => !b)) return fail(`the placer's Variation, Random rotation and Random scale controls: ${JSON.stringify(boxes)}`);
     // The choices taken (they're settings; the check below says if they aren't).
     await soon(async () => (await k.setting("terrain.placement.randomRotation")) === true && (await k.setting("terrain.placement.randomScale")) === "asymmetric", 5000);
+    // The setting changed from outside (the API) with the editor open: the select follows (control: it showed the old value).
+    await page.evaluate(`w3.settings.set("terrain.placement.randomScale", "z")`);
+    await soon(() => page.evaluate(`document.querySelector(".terrain-place-scale")?.value === "z"`), 5000);
+    const followed = await page.evaluate(`document.querySelector(".terrain-place-scale")?.value`);
+    if (followed !== "z") fail(`the Random scale select shows "${followed}" after the setting was changed to "z" through the API`);
+    await page.evaluate(`w3.settings.set("terrain.placement.randomScale", "asymmetric")`);
+    await soon(() => page.evaluate(`document.querySelector(".terrain-place-scale")?.value === "asymmetric"`), 5000);
     await settled(page);
     await click(512, 0);
     await k.save();
