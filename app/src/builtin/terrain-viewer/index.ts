@@ -2478,7 +2478,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const imports = importsChanged, pathing = pathingChanged;
           importsChanged = pathingChanged = false;
           try {
-            if (imports) loader.reset();
+            if (imports) {
+              loader.reset();
+              // Ground textures the map imports: read again for the tiles, without touching the tile list itself.
+              tileImages.clear();
+              await syncTileList();
+            }
             // Footprints come from the object data, which the skins don't show: read them again.
             if (pathing) {
               pathingData = null;
