@@ -1,6 +1,6 @@
 {
   "name": "sound-order-move",
-  "description": "Sound Editor's Move Sound Variable Up/Down (Ctrl+Up, Ctrl+Down) against the WE's own save of war3map.w3s. Input sound-order.w3m (make-sound-order-input.mjs): Delta, alpha, Charlie, bravo, Echo with volumes 127, 100, 64, 3, 0. WE (Sound Editor, F5): Echo selected and moved up (above bravo); Delta selected, Up (the first: nothing), Down (below alpha); Ctrl+PgUp twice and Ctrl+PgDn once (the editor's playback volume: no sound has its volume changed, all five keep theirs). Studio: the same by w3.sounds.moveUp/moveDown/volumeUp/volumeDown. Expected MATCH",
+  "description": "Sound Editor's Move Sound Variable Up/Down (Ctrl+Up, Ctrl+Down) against the WE's own save of war3map.w3s. Input sound-order.w3m (make-sound-order-input.mjs): Delta, alpha, Charlie, bravo, Echo with volumes 127, 100, 64, 3, 0. WE (Sound Editor, F5): Echo selected and moved up (above bravo); Delta selected, Up (the first: nothing), Down (below alpha); Ctrl+PgUp twice and Ctrl+PgDn once (the editor's playback volume: no sound has its volume changed, all five keep theirs). Studio: the same by w3.sounds.moveUp/moveDown/volumeUp/volumeDown. Ignored: each sound's file (the editor saves an empty file for a game sound it doesn't find under that name, whatever its extension). Expected MATCH",
   "input": {
     "map": "${REPO}/tests/fixtures/we-compare/sound-order.w3m"
   },
@@ -58,6 +58,9 @@
       [
         "--sleep",
         "300"
+      ],
+      [
+        "--close-modules"
       ]
     ]
   },
@@ -98,7 +101,10 @@
   "compare": [
     {
       "file": "war3map.w3s",
-      "as": "parsed"
+      "as": "parsed",
+      "ignore": [
+        "sounds[].file"
+      ]
     }
   ],
   "limit": 30

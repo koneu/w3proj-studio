@@ -1,4 +1,4 @@
-// Makes sound-order.w3m, the input map of tests/we-compare/sound-order*.json, from random-group.w3m (a map the editor
+// Makes sound-order.w3m (sound-order-sort.w3m is a copy: two specs of one run can not share a file name), the input map of tests/we-compare/sound-order*.json, from random-group.w3m (a map the editor
 // saved): five imported-style sounds in a deliberately unsorted order, names with mixed case, different volumes
 // (127, 100, 64, 3, 0), as the editor writes new sounds (Sound Editor, Studio's newSound).
 //
@@ -16,9 +16,9 @@ const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
 };
-export const SOUNDS = [["gg_snd_Delta", "Sound\\Interface\\Error.flac", 127], ["gg_snd_alpha", "Sound\\Interface\\MouseClick1.flac", 100],
-  ["gg_snd_Charlie", "Sound\\Interface\\Warning.flac", 64], ["gg_snd_bravo", "Sound\\Interface\\QuestNew.flac", 3],
-  ["gg_snd_Echo", "Sound\\Interface\\QuestCompleted.flac", 0]];
+export const SOUNDS = [["gg_snd_Delta", "Sound\\Interface\\Error.ogg", 127], ["gg_snd_alpha", "Sound\\Interface\\MouseClick1.ogg", 100],
+  ["gg_snd_Charlie", "Sound\\Interface\\Warning.ogg", 64], ["gg_snd_bravo", "Sound\\Interface\\QuestNew.ogg", 3],
+  ["gg_snd_Echo", "Sound\\Interface\\QuestCompleted.ogg", 0]];
 const sound = ([name, file, volume]) => ({
   name, file, variableName: name, dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
   speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
