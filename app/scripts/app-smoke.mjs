@@ -3089,6 +3089,27 @@ async function pathingSquare(page, found) {
   await k.tab("Pathing");
   const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
   await until("the pathing overlay", async () => /cells overridden/.test(await overridden()), 20000);
+  // At 800 px (the window's minimum) with the sidebar open the bar wraps: every control lies inside it. The page's root is
+  // narrowed to that (the window itself can't be resized from here); a sidebar of another width is made up for.
+  try {
+    const out = await page.evaluate(`(async () => {
+      const side = [...document.querySelectorAll(".sidebar")].find((e) => e.offsetParent !== null)?.getBoundingClientRect().width ?? 0;
+      document.getElementById("app").style.width = (800 - 280 + side) + "px";
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const bar = document.querySelector(".pathing-bar");
+      // The bar's own edge and the toolbar row's around it: the controls have to be inside both.
+      const outer = bar.parentElement.getBoundingClientRect(), own = bar.getBoundingClientRect();
+      const box = { right: Math.min(own.right, outer.right) };
+      const controls = [...bar.querySelectorAll("button, input, select, label")];
+      return { side, n: controls.length, barRight: Math.round(box.right), app: Math.round(document.getElementById("app").getBoundingClientRect().right),
+        out: controls.filter((e) => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > box.right + 1)
+          .map((e) => (e.textContent.trim() || e.title || e.tagName).slice(0, 40) + " " + Math.round(e.getBoundingClientRect().right - box.right)) };
+    })()`);
+    if (out.side < 100 || out.n < 8) fail(`no sidebar (${out.side} px) or too few controls (${out.n}) to check (control)`);
+    if (out.out.length) fail(`at 800 px with the sidebar open these stick out of the bar (right edge ${out.barRight}): ${out.out.join(", ")}`);
+  } finally {
+    await page.evaluate(`document.getElementById("app").style.width = ""`).catch(() => {});
+  }
   await page.evaluate(`(() => {
     const bar = document.querySelector(".pathing-bar");
     const size = bar.querySelector("input[type=range]");

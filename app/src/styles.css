@@ -551,11 +551,11 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-tabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--border); }
 .terrain-tab { border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; background: none; padding: 4px 12px; color: var(--fg-muted); }
 .terrain-tab.on { background: var(--bg-3); border-color: var(--border); color: var(--fg); }
-.pathing-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pathing-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1 1 100%; min-width: 0; }
 .pathing-bar button.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
 .pathing-notice { color: var(--warning); }
 .pathing-notice:empty { display: none; }
-.pathing-legends { display: inline-flex; gap: 10px; margin-left: 8px; font-size: 11px; color: var(--fg-muted); }
+.pathing-legends { display: inline-flex; flex-wrap: wrap; min-width: 0; gap: 4px 10px; margin-left: 8px; font-size: 11px; color: var(--fg-muted); }
 .pathing-legend { display: inline-flex; gap: 4px; align-items: center; }
 .pathing-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .terrain-group-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
