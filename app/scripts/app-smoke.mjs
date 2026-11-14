@@ -4838,6 +4838,12 @@ async function viewCommands(page, fail, shots, size) {
   // The editor's 108, 55, 15 (viewcmds.ts NAVAL_EDGE), drawn over the edge's dark, not under it.
   if (edge1.some((v, i) => Math.abs(v - [108, 55, 15][i]) > 12) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's flat brown: ${round(edge0)} became ${round(edge1)}`);
   if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
+  // Pathing - Ground over the map's edge is the editor's flat grey (we-drive, border128x96, 2026-11-14: 137, 138, 137),
+  // water on and off, drawn over the border's dark and its water (Studio's was purple, and gone under deep water).
+  await run("w3.terrain.toggleGroundPathing");
+  const groundEdge = await meanColour(page, await picture("ground-edge"), edgeBox);
+  await run("w3.terrain.toggleGroundPathing");
+  if (groundEdge.some((v, i) => Math.abs(v - [137, 138, 137][i]) > 12)) bad(`Pathing - Ground over the map's edge isn't the editor's flat grey: ${round(groundEdge)}`);
   // As the World Editor's (we-drive, map 03 and HillsbradCreek, 2026-11-12): black past the map's edge (Studio's was
   // 28, 31, 36), the border's ground keeping about 15 % of its colour (Studio's kept 35 %), and the border's water black.
   const voidBox = [0.02, 0.4, Math.max(0.03, weMap.left - 0.03), 0.6], insideBox = [weMap.left + weMap.edge * 1.3, 0.4, weMap.left + weMap.edge * 1.7, 0.6];
