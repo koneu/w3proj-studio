@@ -76,30 +76,5 @@
     },
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
-  },
-  {
-    "name": "water-limit-off-slope-east",
-    "description": "still with Enforce Water Height Limits off (water-limit-off-deep switched it off in this editor, so this one comes after it and presses no key): water-brush-slope-shallow-east (Shallow Water size 3 at 848,500 on slope.w3x): the editor flattens as with the limit on but leaves the 24 dry corners round the water at 8192, as Studio since branch water-brush-we2 (2026-11-14; before, Studio wrote 8240 there)",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
-    "we": {
-      "saveAccept": ["Warning"],
-      "steps": [
-        ["--key", "t"],
-        ["--click", "1456,569"],
-        ["--click", "1473,310"],
-        ["--click", "848,500"],
-        ["--sleep", "1500"]
-      ]
-    },
-    "studio": {
-      "settings": { "terrain.enforceWaterLimits": false },
-      "steps": [
-        { "terrain": true },
-        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 848, 500]] },
-        { "sleep": 1000 }
-      ]
-    },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
-    "limit": 40
   }
 ]

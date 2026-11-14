@@ -301,8 +301,8 @@ for (const c of lowGround.cases) {
 
 test("low ground: the lift is the same with Enforce Water Height Limits off; only the dry rim's water word is the switch's", () => {
   // we-compare water-limit-off-deep (2026-11-14, branch water-brush-we2): with the switch off the editor lifted the
-  // ground as with it on and left the 8 corners round the water at 8192; water-limit-off-slope-east the same for the
-  // 24 round a size-3 click on the slope.
+  // ground as with it on and left the 8 corners round the water at 8192; so did the 24 round water-brush-slope-shallow-
+  // east's size-3 click with the switch off (one run; a spec for it after water-limit-off-deep found the switch on again).
   const c = lowGround.cases.find((k) => k.ground.rest === -8160 && k.tool === "deep" && k.size === 1 && k.ground.centre === undefined)!;
   assert.equal(c.changes.length, 37, "the fixture: the editor lifted 37 corners");
   const heights = (t: Terrain) => t.corners.map((k) => k.rawHeight);
