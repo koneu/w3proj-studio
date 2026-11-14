@@ -128,13 +128,17 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     else return "Click a straight cliff edge (not a corner) to build a ramp.";
     // The ramp's centre line runs through the click.
     const centre = along[0] ? Math.round((wy - t.offsetY) / 128) : Math.round((wx - t.offsetX) / 128);
+    const cell = (k: number, s: number): [number, number] => along[0] ? [start[0] + along[0] * s, centre + k] : [centre + k, start[1] + along[1] * s];
+    // A row whose middle corner isn't on the low layer is where the cliff bends (a corner sticking out of it). A
+    // ramp can't end beside one: its side piece's far edge falls one corner earlier than the cliff it meets, and
+    // that leaves a hole in the ground, black from the side. So the rows beside a bend don't fit.
+    const bend = (k: number) => { const c = at(...cell(k, 1)); return !!c && c.layer !== lo; };
     const rows: [number, number][][] = [];
     for (let k = -halfWidth; k <= halfWidth; k++) {
       const row: [number, number][] = [];
       let fits = true;
       for (let s = 0; s < 3; s++) {
-        const cx = along[0] ? start[0] + along[0] * s : centre + k;
-        const cy = along[0] ? centre + k : start[1] + along[1] * s;
+        const [cx, cy] = cell(k, s);
         const c = at(cx, cy);
         if (!c) { if (!asFarAsPossible) return "The ramp would leave the map."; fits = false; break; }
         if (c.layer !== (s === 0 ? hi : lo)) {
@@ -143,6 +147,10 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
           break;
         }
         row.push([cx, cy]);
+      }
+      if (fits && (bend(k - 1) || bend(k + 1))) {
+        if (!asFarAsPossible) return "The cliff isn't straight and level enough here for a ramp this wide (try a smaller Size).";
+        fits = false;
       }
       rows.push(fits ? row : []);
     }
