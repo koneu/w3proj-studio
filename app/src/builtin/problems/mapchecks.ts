@@ -125,10 +125,13 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         const terrain = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
         const ids = async (file: string, key: string) => new Set(parseSlk(await w3.game.readText(file, { background: true })).map((r) => r[key]));
         const ground = await ids("TerrainArt\\Terrain.slk", "tileID"), cliffs = await ids("TerrainArt\\CliffTypes.slk", "cliffID");
-        const unknown = (list: string[], known: Set<string>, what: string) => list.filter((id) => !known.has(id)).map((id): Problem => ({
-          severity: "error", message: `${what} ${id} isn't one of the game's`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
-        }));
-        return [...unknown(terrain.groundTiles, ground, "Ground tile"), ...unknown(terrain.cliffTiles, cliffs, "Cliff type")];
+        // A list entry no corner uses is only a warning: a stale slot in the file's list (the W3Champions TurtleRock's
+        // third cliff type is CLno, which the game doesn't define, and no corner has it).
+        const unknown = (list: string[], known: Set<string>, what: string, used: (index: number) => boolean) => list.flatMap((id, i): Problem[] => known.has(id) ? [] : [{
+          severity: used(i) ? "error" : "warning", message: `${what} ${id} isn't one of the game's${used(i) ? "" : " (no corner uses it)"}`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
+        }]);
+        const usedCliffs = new Set(terrain.corners.map((c) => c.cliffTexture));
+        return [...unknown(terrain.groundTiles, ground, "Ground tile", () => true), ...unknown(terrain.cliffTiles, cliffs, "Cliff type", (i) => usedCliffs.has(i))];
       },
     },
     {
