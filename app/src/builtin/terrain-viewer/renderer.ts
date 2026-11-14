@@ -366,6 +366,21 @@ precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
 ${FOG_FS}
 void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
+// The View layers of regions and Pathing - Ground: the World Editor blends them over the picture (water included) in
+// linear light, not in sRGB: a colour of alpha a over a pixel d comes out as enc((1 - a) dec(d) + a dec(c)) (we-drive,
+// 2026-11-14, regions of eight colours over land and water: 193 against 194 for pure colour at alpha 0.53 over black,
+// 208 against 209 over the grass's 125). The pixels under it are the picture so far, copied (TerrainRenderer.sceneCopy).
+const LINEAR_OVERLAY_FS = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; out vec4 outColor;
+vec3 dec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
+vec3 enc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
+void main() {
+  vec4 c = texture(uTex, vUV);
+  if (c.a < 0.01) discard;
+  vec3 d = texelFetch(uDst, ivec2(gl_FragCoord.xy), 0).rgb;
+  outColor = vec4(enc(mix(dec(d), dec(c.rgb), c.a)), 1.0);
+}`;
+
 // Grid lines over the ground, drawn per pixel so any map size costs the same: up to three sets of lines (finest first,
 // every uSteps[i] world units from the map's corner, in uColors[i]), each fading out once its cells are too small to tell
 // apart, the coarser lying over the finer.
@@ -524,6 +539,10 @@ export const BLIGHT_TEXTURE = 100;
 const WEATHER_CLOCK = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
 const WEATHER_NODES = [new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])];
 
+/** The View toggles' picture. `top`: the part drawn after the water at the border (alpha over). `linear`: `tex` itself is
+ *  drawn after the water too, blended in linear light over what is there (LINEAR_OVERLAY_FS). */
+interface ViewLayer { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture; linear?: boolean }
+
 export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
   private groundProg: WebGLProgram;
@@ -573,8 +592,8 @@ export class TerrainRenderer {
   private border: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   showBorder = true;
   /** What the View toggles show over the ground (Height Map, Pathing - Naval, Camera Objects), one texture; tools keep `overlay`. */
-  private viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture } | null = null;
-  private held: { viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture } | null } | null = null;
+  private viewLayer: ViewLayer | null = null;
+  private held: { viewLayer: ViewLayer | null } | null = null;
   /** Grid lines every this many world units (0: none). */
   gridStep = 0;
   private gridProg: WebGLProgram | null = null;
@@ -1107,7 +1126,7 @@ export class TerrainRenderer {
   }
 
   /** The View toggles' picture (one texel per pathing cell, rows from the south); null removes it. */
-  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0, top: Uint8Array | null = null) {
+  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0, top: Uint8Array | null = null, linear = false) {
     const gl = this.gl;
     // While showEverything lasts the layer lives in `held`; the picture taken doesn't show it.
     const slot = this.held ?? (this as unknown as NonNullable<TerrainRenderer["held"]>);
@@ -1119,6 +1138,7 @@ export class TerrainRenderer {
     if (!this.overlayProgram()) return;
     slot.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
+    slot.viewLayer.linear = linear;
     // `top`: the part drawn after the water (over the border: Pathing - Ground and Regions show over water there).
     if (top) { slot.viewLayer.top ??= gl.createTexture()!; this.uploadOverlay(slot.viewLayer.top, top, width, height); }
     else if (slot.viewLayer.top) { gl.deleteTexture(slot.viewLayer.top); slot.viewLayer.top = undefined; }
@@ -1660,9 +1680,9 @@ export class TerrainRenderer {
     // What lies on the ground goes with it when the terrain is hidden.
     const onGround = this.groundLook !== "hidden";
     // The border's dark first: the View layers and the tools' marks go over it, as the World Editor's naval view
-    // lies over the map's edge. They lie under the water, which is drawn later: the World Editor's Pathing - Ground
-    // vanishes under deep water too (viewcmds.ts groundPathingColors).
-    for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer, this.overlay] : []) {
+    // lies over the map's edge. They lie under the water, which is drawn later (but not Regions and Pathing - Ground
+    // alone: `linear`, drawn after the water, as the editor's lie over it at any depth).
+    for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer?.linear ? null : this.viewLayer, this.overlay] : []) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
@@ -1849,6 +1869,8 @@ export class TerrainRenderer {
       // The rings below use the colour program (its view matrix is still set).
       gl.useProgram(this.colorProg);
     }
+    // Regions and Pathing - Ground over the playable map: after the water, blended in linear light (setViewLayer's `linear`).
+    if (onGround && this.viewLayer?.linear) this.drawLinearLayer(viewProj);
     // The View layers' part over the border, over the water too (setViewLayer's `top`).
     if (onGround && this.viewLayer?.top && this.overlayProg) {
       const layer = this.viewLayer, t = this.terrain, prog = this.overlayProg;
@@ -1976,7 +1998,49 @@ export class TerrainRenderer {
     gl.depthMask(true);
   }
 
+  /** The picture so far, for the layers that blend over it themselves (drawLinearLayer); made the size of the canvas. */
+  private sceneCopy: { tex: WebGLTexture; width: number; height: number } | null = null;
+  private linearProg: WebGLProgram | null = null;
+
+  /** The view layer's `tex`, blended over the picture in linear light (LINEAR_OVERLAY_FS). */
+  private drawLinearLayer(viewProj: Mat4) {
+    const gl = this.gl, layer = this.viewLayer, t = this.terrain;
+    if (!layer || gl.isContextLost()) return;
+    const prog = (this.linearProg ??= compile(gl, OVERLAY_VS, LINEAR_OVERLAY_FS));
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    if (!this.sceneCopy || this.sceneCopy.width !== w || this.sceneCopy.height !== h) {
+      if (this.sceneCopy) gl.deleteTexture(this.sceneCopy.tex);
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      // RGB: the canvas has no alpha, and a copy into a texture with more channels than the framebuffer fails.
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, w, h, 0, gl.RGB, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this.sceneCopy = { tex, width: w, height: h };
+    }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneCopy.tex);
+    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    gl.useProgram(prog);
+    gl.uniformMatrix4fv(gl.getUniformLocation(prog, "uViewProj"), false, viewProj);
+    gl.uniform4f(gl.getUniformLocation(prog, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
+    gl.uniform1i(gl.getUniformLocation(prog, "uDst"), 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, layer.tex);
+    gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
+    gl.disable(gl.BLEND);
+    gl.depthMask(false);
+    gl.bindVertexArray(layer.vao);
+    gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
+    gl.depthMask(true);
+    gl.enable(gl.BLEND);
+    gl.useProgram(this.colorProg);
+  }
+
   dispose() {
+    if (this.sceneCopy) this.gl.deleteTexture(this.sceneCopy.tex);
+    this.sceneCopy = null;
     this.sunMap?.dispose();
     this.sunMap = null;
     this.waterDepth?.dispose();

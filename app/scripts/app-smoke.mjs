@@ -4954,8 +4954,13 @@ async function viewCommands(page, fail, shots, size) {
   // Pathing - Ground over the map's edge is the editor's flat grey (we-drive, border128x96, 2026-11-14: 137, 138, 137),
   // water on and off, drawn over the border's dark and its water (Studio's was purple, and gone under deep water).
   await run("w3.terrain.toggleGroundPathing");
-  const groundEdge = await meanColour(page, await picture("ground-edge"), edgeBox);
+  const groundPicture = await picture("ground-edge");
+  const groundEdge = await meanColour(page, groundPicture, edgeBox);
+  const groundWater = await meanColour(page, groundPicture, waterBox);
   await run("w3.terrain.toggleGroundPathing");
+  // The layer lies over the water, at any depth (we-drive, a flat map of eight depths, 2026-11-14: the same purple all
+  // over; the water's own blue-green is far from it), blended in linear light (viewcmds.ts GROUND_PATHING_ALPHA).
+  if (Math.max(...groundWater.map((v, i) => Math.abs(v - water0[i]))) < 25) bad(`Pathing - Ground doesn't show over the water: ${round(water0)} became ${round(groundWater)}`);
   if (groundEdge.some((v, i) => Math.abs(v - [137, 138, 137][i]) > 12)) bad(`Pathing - Ground over the map's edge isn't the editor's flat grey: ${round(groundEdge)}`);
   // As the World Editor's (we-drive, map 03 and HillsbradCreek, 2026-11-12): black past the map's edge (Studio's was
   // 28, 31, 36), the border's ground keeping about 15 % of its colour (Studio's kept 35 %), and the border's water black.

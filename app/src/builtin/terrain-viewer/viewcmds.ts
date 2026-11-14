@@ -195,6 +195,14 @@ export const GROUND_EDGE: readonly number[] = [137, 138, 137, 255];
  *  yellow 194, 194, 6 for pure red and yellow, same measurement). */
 const REGION_EDGE_ALPHA = 194;
 
+/** How the World Editor blends Regions and Pathing - Ground over the playable map: in linear light, over the picture with
+ *  its water, the colour's alpha as below (the renderer's LINEAR_OVERLAY_FS; we-drive, 2026-11-14, pure colours over
+ *  land, shallow and deep water: regions 0.533 (194 of 255 for a pure colour over black), pathing 0.26 of pure magenta
+ *  where nothing walks and pure blue where nothing can be built; regions under the pathing: red over grass 194, 86, 0,
+ *  with the blue 170, 75, 137, both as the two blends one after the other give). The colour functions below give these when asked for `linear`. */
+export const REGION_FILL_ALPHA = 136;
+export const GROUND_PATHING_ALPHA = 66;
+
 /** Whether pathing cell `i` (row-major, `edge.tilesX * 4` wide, rows from the south) lies on a tile past the playable map. */
 export function edgeCell(edge: EdgeTiles | null | undefined, i: number): boolean {
   if (!edge || !(edge.tilesX > 0)) return false;
@@ -216,16 +224,17 @@ export function splitEdge(rgba: Uint8Array, edge: EdgeTiles): { inside: Uint8Arr
 
 /** Pathing - Ground (per pathing cell, rows from the south), in the World Editor's colours: magenta where nothing
  *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). Deep
- *  water's cells are magenta too, but the editor lays the layer on the ground, under the water: deep water hides it
- *  in SD and HD alike, shallow water lets it show through faintly, and View > Water off shows it all (we-drive, a copy of
- *  (2)EchoIsles' south shore, 2026-11-13). The renderer draws the view layer before the water, so Studio does the same. */
-export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): Uint8Array {
+ *  water's cells are magenta too. The editor lays the layer over the water at every depth, deep water included
+ *  (we-drive, a flat map of eight depths down to 1300, 2026-11-14: the same purple all over; an earlier run on a copy of
+ *  (2)EchoIsles' south shore had seen deep water hide it), and View > Water off shows it too. `linear`: the colours
+ *  and alpha of its linear-light blend (GROUND_PATHING_ALPHA), else the old alpha-over ones. */
+export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {
     if (edgeCell(edge, i)) { rgba.set(GROUND_EDGE, i * 4); continue; }
     const c = cells[i];
-    if (c & NO_WALK) rgba.set([230, 40, 230, 150], i * 4);
-    else if (c & NO_BUILD) rgba.set([40, 90, 255, 140], i * 4);
+    if (c & NO_WALK) rgba.set(linear ? [255, 0, 255, GROUND_PATHING_ALPHA] : [230, 40, 230, 150], i * 4);
+    else if (c & NO_BUILD) rgba.set(linear ? [0, 0, 255, GROUND_PATHING_ALPHA] : [40, 90, 255, 140], i * 4);
   }
   return rgba;
 }
@@ -234,7 +243,7 @@ export interface RegionBox { left: number; bottom: number; right: number; top: n
 
 /** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
  *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top. */
-export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null): Uint8Array {
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(width * height * 4);
   const cell = 32;
   const area = (r: RegionBox) => (r.right - r.left) * (r.top - r.bottom);
@@ -248,18 +257,20 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
         const i = y * width + x;
         if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, REGION_EDGE_ALPHA], i * 4); continue; }
         const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
-        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, 170], i * 4);
+        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : 170], i * 4);
       }
     }
   }
   return rgba;
 }
 
-/** Layers of equal size laid over each other, the first at the bottom (alpha over); null leaves a layer out. Null when none is left. */
-export function composeLayers(layers: readonly (Uint8Array | null)[]): Uint8Array | null {
+/** Layers of equal size laid over each other, the first at the bottom (alpha over); null leaves a layer out. Null when none is left.
+ *  `linear`: the layers are mixed in linear light (their colours are sRGB), as the renderer's LINEAR_OVERLAY_FS blends the result. */
+export function composeLayers(layers: readonly (Uint8Array | null)[], linear = false): Uint8Array | null {
   const shown = layers.filter((l): l is Uint8Array => !!l);
   if (!shown.length) return null;
   if (shown.length === 1) return shown[0];
+  const to = linear ? srgbToLinear : (v: number) => v, from = linear ? linearToSrgb : (v: number) => v;
   const out = new Uint8Array(shown[0].length);
   for (let i = 0; i < out.length; i += 4) {
     let r = 0, g = 0, b = 0, a = 0;
@@ -267,9 +278,13 @@ export function composeLayers(layers: readonly (Uint8Array | null)[]): Uint8Arra
       const la = l[i + 3] / 255;
       if (!la) continue;
       const na = la + a * (1 - la);
-      r = (l[i] * la + r * a * (1 - la)) / na; g = (l[i + 1] * la + g * a * (1 - la)) / na; b = (l[i + 2] * la + b * a * (1 - la)) / na; a = na;
+      r = (to(l[i]) * la + r * a * (1 - la)) / na; g = (to(l[i + 1]) * la + g * a * (1 - la)) / na; b = (to(l[i + 2]) * la + b * a * (1 - la)) / na; a = na;
     }
-    out.set([Math.round(r), Math.round(g), Math.round(b), Math.round(a * 255)], i);
+    out.set([Math.round(from(r)), Math.round(from(g)), Math.round(from(b)), Math.round(a * 255)], i);
   }
   return out;
 }
+
+/** An sRGB byte as linear light 0..1, and back. */
+export const srgbToLinear = (v: number): number => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+export const linearToSrgb = (l: number): number => 255 * (l <= 0.0031308 ? l * 12.92 : 1.055 * Math.max(0, l) ** (1 / 2.4) - 0.055);
