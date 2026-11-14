@@ -690,9 +690,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const look = (id: string) => handle.objects.type(id);
       for (const to of Object.values(swaps)) if (!look(to)) throw new Error(`"${to}" isn't an object type here. list_objects gives them.`);
       let changed = 0;
-      await editPlaced(`Replace ${Object.keys(swaps).join(", ")}`, fileKey(args.kind ?? "doodads"), (f) => {
+      await editPlaced(`Replace ${Object.keys(swaps).join(", ")}`, fileKey(args.kind ?? "doodads"), async (f) => {
+        const was = new Map(f.list.map((p) => [p, p.id]));
         changed = replacePlaced(f.list as Parameters<typeof replacePlaced>[0], swaps, area, (id) => look(id)?.numVar ?? 1);
         if (!changed) throw new Error("Nothing placed matches that.");
+        // Swapped doodads go on their new grid, facing and scale range, as in the editor's Replace.
+        if (fileKey(args.kind ?? "doodads") === "doodads") await handle.objects.settleDoodads(f.list.filter((p) => was.get(p) !== p.id), { place: true, scale: true });
       });
       return { changed };
     }),
@@ -3152,6 +3155,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const swapped = entries.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id);
           if (!swapped.length) return 0;
           for (const id of new Set(swapped.map((p) => swaps[p.id]))) await loadCells(id).catch(() => { /* stays free */ });
+          for (const id of new Set(swapped.map((p) => swaps[p.id]))) if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* stays where it is */ });
           if (refuseLost()) return 0;
           type Look = Props & { id: string; skinId?: string };
           const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
@@ -3164,6 +3168,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
             if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
           }
+          // A doodad of another texture size has another grid, facing and scale range (as place and move do).
+          settleDoodads(swapped, { place: true, scale: true });
           const after = swapped.map(look);
           const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
           pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });

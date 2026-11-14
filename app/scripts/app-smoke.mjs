@@ -5888,6 +5888,30 @@ async function doodadRulesEdit(page, found) {
       await k.save();
       const moved = find("LTbr");
       if (!same(xy(moved), on ? [96, 96] : [100, 100]) || !same(sc(moved), on ? [f(1.1), f(1.1), f(1.1)] : [0.5, 0.5, 0.5])) say(`move_object to 100, 100 with scale 0.5 put the barrel at ${JSON.stringify(xy(moved))} with scale ${JSON.stringify(moved?.scale)}`);
+      // Replace (the Replace Doodads command, then replace_objects): the barrel (2×2 texture) becomes a hay cart (4×2)
+      // and stands on the cart's grid (x on 32 + 64n, y on 64n; off: where it was), facing and scale ruled, in the same
+      // undo step; undo puts the barrel back as it stood.
+      const pose = (d) => [d?.position[0], d?.position[1], d?.scale.map(f), d?.angle];
+      const at = k.doodads().findIndex((d) => d.id === "LTbr");
+      const standing = pose(find("LTbr"));
+      // The hay cart's 4×2 cells: turned a quarter, its 2 cells run along x.
+      const cartGrid = (d) => { const quarter = Math.abs(Math.sin(d.angle)) > 0.5; return (d.position[0] - (quarter ? 0 : 32)) % 64 === 0 && (d.position[1] - (quarter ? 32 : 0)) % 64 === 0; };
+      for (const how of ["command", "tool"]) {
+        const swap = async () => {
+          if (how === "command") { const e = await k.run("w3.terrain.replaceDoodads", { from: "LTbr", to: "LOch" }); if (e) say(`Replace Doodads: ${e}`); }
+          else await k.tool("replace_objects", { swaps: { LTbr: "LOch" } });
+          await k.save();
+        };
+        await swap();
+        const swapped = k.doodads()[at];
+        if (swapped?.id !== "LOch") { say(`${how}: the barrel didn't become a hay cart (${swapped?.id})`); break; }
+        if (on && !cartGrid(swapped)) say(`${how}: the replaced barrel is at ${JSON.stringify(xy(swapped))}, off the hay cart's grid`);
+        if (!on && !same(xy(swapped), xy({ position: standing }))) say(`${how}: with the rules off the replaced barrel moved to ${JSON.stringify(xy(swapped))}`);
+        if (how === "command") { await k.focusMap(); await k.run("workbench.undo"); } else await k.tool("undo_last_edit");
+        await k.save();
+        const back = k.doodads()[at];
+        if (back?.id !== "LTbr" || !same(pose(back), standing)) say(`${how}: undo after the replace left ${back?.id} at ${JSON.stringify(pose(back))}, not LTbr at ${JSON.stringify(standing)}`);
+      }
       await k.verify(say);
       await page.evaluate(`w3.editors.closeAll()`);
     }
