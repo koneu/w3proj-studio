@@ -214,8 +214,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         };
         // The game paths of every entry the map doesn't have, at once.
         const gamePaths: string[] = [];
+        // Entries stored without a name (some tools write the list that way, naming the files only in the archive's
+        // (listfile)) can't be looked up: one message per list for all of them, not one per entry.
+        const named = (entries: { flags: number; path: string }[] | undefined) => (entries ?? []).filter((e) => e.path !== "");
         for (const [list, folder] of lists) {
-          for (const e of (await s.doc<{ files?: { flags: number; path: string }[] }>(list))?.files ?? []) {
+          for (const e of named((await s.doc<{ files?: { flags: number; path: string }[] }>(list))?.files)) {
             const variants = variantsOf(e, folder);
             if (!variants.some((v) => files.inMap(v))) gamePaths.push(...variants);
           }
@@ -223,7 +226,9 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         await files.prefetchGame(gamePaths);
         for (const [list, folder] of lists) {
           const data = await s.doc<{ files?: { flags: number; path: string }[] }>(list);
-          for (const e of data?.files ?? []) {
+          const blank = (data?.files?.length ?? 0) - named(data?.files).length;
+          if (blank) out.push({ severity: "warning", message: blankMessage(blank), location: list.slice(4), reveal: { command: "w3.imports.open" } });
+          for (const e of named(data?.files)) {
             const variants = variantsOf(e, folder);
             if (variants.some((v) => files.inMap(v))) continue;
             let inGame = false;
@@ -322,6 +327,9 @@ async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
   return found;
 }
 
+/** The one message for an import list's nameless entries. */
+const blankMessage = (n: number) => `${n} import ${n === 1 ? "entry has" : "entries have"} no name (stored blank by the map's tool); the imported files can't be matched to the list`;
+
 /** Files in the project's map folder that the import list doesn't name (lib/imports.ts unlistedFiles, the rule the
  *  Import Manager shows them by): the map packs them and the game uses them all the same, and nothing but the Import
  *  Manager's last section says so. Each is named with what it stands for: the game's file of its path, which it
@@ -337,7 +345,10 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const folder = campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER;
   const list = await s.docStrict<{ files?: ImportEntry[] }>(listPath);
   if (list && !Array.isArray(list.files)) throw new Error(`${listPath} has no file list.`);
-  const unlisted = unlistedFiles(listed.map((f) => f.path), list?.files ?? [], folder);
+  const entries = list?.files ?? [];
+  // A list of nameless entries only (the imports check reports that): which files it stands for is unknown, so none is "unlisted".
+  if (entries.length && entries.every((e) => e.path === "")) return [];
+  const unlisted = unlistedFiles(listed.map((f) => f.path), entries.filter((e) => e.path !== ""), folder);
   if (!unlisted.length) return [];
   const archives = unlisted.map(archivePath);
   const lookup = s.lookup();

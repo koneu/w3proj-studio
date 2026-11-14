@@ -156,3 +156,18 @@ test("Delete file refuses a file the list names by now, and does nothing for one
   await q.fixes![1].run();
   assert.ok(!g.log.some((l) => /^(delete|w3\.checkpoints)/.test(l)));
 });
+
+test("a list of nameless entries gives no 'unlisted' warning per file; a list with names beside blank ones still does", async () => {
+  const blank = (n: number) => Array.from({ length: n }, () => ({ flags: 0, path: "" }));
+  assert.deepEqual(await fake({ imp: JSON.stringify({ files: blank(66) }) }).run(), []);
+  // Control: with a name in the list the real unlisted files are reported again.
+  const mixed = await fake({ imp: JSON.stringify({ files: [...blank(3), { flags: 21, path: "war3mapImported\\Listed.blp" }] }) }).run();
+  assert.ok(mixed.length > 0);
+});
+
+test("the imports check names blank entries once, not once per entry", async () => {
+  const f = fake({ imp: JSON.stringify({ files: Array.from({ length: 66 }, () => ({ flags: 0, path: "" })) }) });
+  const found = await builtinChecks(f.w3).find((c) => c.id === "imports")!.run();
+  assert.equal(found.length, 1);
+  assert.equal(found[0].message, "66 import entries have no name (stored blank by the map's tool); the imported files can't be matched to the list");
+});
