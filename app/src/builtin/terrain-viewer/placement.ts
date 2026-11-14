@@ -18,6 +18,9 @@ export interface PlacedFile {
   /** Kept as `map/<name>.json` in the project (else the raw file). */
   json: boolean;
   dirty: boolean;
+  /** The highest numbers newEntry has handed out (editorId, a v13 doodad's first trailer value): entries made before any
+   *  of them is put into `list` (a scatter fill makes them all, then inserts) still get one number each. */
+  issued?: { editorId?: number; trailer?: number };
 }
 
 export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "units"): Promise<PlacedFile | null> {
@@ -109,10 +112,17 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   const e = structuredClone(template) as Entry;
   // A new unit isn't placed uprooted because the one it's copied from was.
   delete e.playerFlags;
-  const nextOf = (get: (x: Entry) => unknown) => 1 + Math.max(-1, ...list.map((x) => Number(get(x)) || 0).filter((n) => n < UNSET));
+  // Above every number in the file and every one handed out before (not inserted yet, or taken out again by an undo):
+  // two objects with one number would share a gg_unit_ global and an Object Manager reference.
+  const issued = (f.issued ??= {});
+  const nextOf = (get: (x: Entry) => unknown, key: "editorId" | "trailer") => {
+    const n = 1 + Math.max(-1, issued[key] ?? -1, ...list.map((x) => Number(get(x)) || 0).filter((v) => v < UNSET));
+    issued[key] = n;
+    return n;
+  };
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });
   if ("skinId" in e) e.skinId = id;
-  if ("editorId" in e && e.editorId !== UNSET) e.editorId = nextOf((x) => x.editorId);
+  if ("editorId" in e && e.editorId !== UNSET) e.editorId = nextOf((x) => x.editorId, "editorId");
   if ("itemTable" in e) e.itemTable = -1;
   if ("itemSets" in e) e.itemSets = [];
   if (f.key === "doodads") {
@@ -120,7 +130,7 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
     if ("flags" in e) e.flags = 2;
     // v13: the first trailer dword is a sequential placement id.
     if (Array.isArray(e.trailer) && Number(f.doc.version) >= 13) {
-      e.trailer = [nextOf((x) => (x.trailer as number[] | undefined)?.[0]), ...(e.trailer as number[]).slice(1)];
+      e.trailer = [nextOf((x) => (x.trailer as number[] | undefined)?.[0], "trailer"), ...(e.trailer as number[]).slice(1)];
     }
   } else {
     Object.assign(e, { hp: -1, mana: -1, color: -1, waygate: -1, inventory: [], abilities: [] });

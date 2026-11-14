@@ -28,6 +28,23 @@ test("the second doodad continues from the first", () => {
   assert.deepEqual(e.trailer, [1, 0, 0]);
 });
 
+test("entries made before any is inserted get one number each (a scatter fill), and an undone one's isn't given again", () => {
+  const units = file("units", 8, 11);
+  units.list.push(newEntry(units, "hfoo", [0, 0, 0], 0, "w3u"));
+  const fill = [0, 1, 2].map((i) => newEntry(units, "uDNR", [64 * i, 0, 0], 0, "w3u") as unknown as { editorId: number });
+  assert.deepEqual(fill.map((e) => e.editorId), [1, 2, 3]);
+  // Taken out again (an undo), its numbers stay used: a redo puts the same objects back.
+  const later = newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as unknown as { editorId: number };
+  assert.equal(later.editorId, 4);
+  const doodads = file("doodads", 13, 11);
+  const trees = [0, 1, 2].map(() => newEntry(doodads, "LTlt", [0, 0, 0]) as unknown as { trailer: number[]; editorId: number });
+  assert.deepEqual(trees.map((t) => t.trailer[0]), [0, 1, 2]);
+  assert.ok(trees.every((t) => t.editorId === 0xffffffff), "a v13 doodad's editorId stays unset");
+  // A number already in the file above what was handed out still counts.
+  units.list.push({ ...(newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as object), editorId: 40 } as unknown as Placed);
+  assert.equal((newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as unknown as { editorId: number }).editorId, 41);
+});
+
 test("a blank entry has only what the version has", () => {
   const old = newEntry(file("doodads", 7, 9), "LTlt", [0, 0, 0]) as unknown as Record<string, unknown>;
   for (const k of ["skinId", "preFlags", "itemTable", "itemSets", "trailer", "extras"]) assert.ok(!(k in old), k);
