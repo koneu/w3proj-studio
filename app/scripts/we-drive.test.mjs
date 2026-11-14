@@ -107,6 +107,9 @@ test("parseArgs: --drag takes its two positions (and a duration) as one value; -
   for (const bad of ["1,2", "1,2:3", "1,2:3,4@5", "1,2:3,4@x", "-1,2:3,4", ""]) assert.throws(() => parseArgs(["--drag", bad]), /--drag/, bad);
   assert.throws(() => parseArgs(["--drag-mod", "meta", "--drag", "1,2:3,4"]), /--drag-mod wants/);
   assert.throws(() => parseArgs(["--drag-mod", "alt"]), /needs a --drag/);
+  assert.deepEqual(parseArgs(["--drag-button", "3", "--drag", "1,2:3,4", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, button: 3 }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  assert.throws(() => parseArgs(["--drag-button", "4", "--drag", "1,2:3,4"]), /--drag-button wants/);
+  assert.throws(() => parseArgs(["--drag-button", "2"]), /needs a --drag/);
 });
 
 test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
@@ -123,6 +126,10 @@ test("parseArgs: --screen sets the display's size, a held key keeps its @MS in t
   assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
   assert.throws(() => parseArgs(["--screen", "1200,700", "--start"]), /WxH/);
   assert.deepEqual(parseArgs(["--start", "--key", "ctrl+Up@1500"]).steps, [["--start", null], ["--key", "ctrl+Up@1500"]]);
+});
+
+test("parseArgs: --close-modules is a step without a value", () => {
+  assert.deepEqual(parseArgs(["--start", "--close-modules", "--sleep", "5"]).steps, [["--start", null], ["--close-modules", null], ["--sleep", "5"]]);
 });
 
 test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {

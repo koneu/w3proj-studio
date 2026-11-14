@@ -24,6 +24,20 @@ export interface LayerTarget {
   start?: number;
 }
 
+const LAYER_STEPS: Partial<Record<LayerTool, number>> = { cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 };
+
+/** The cliff level a cliff or water stroke sets, from the level `start` of the corner it starts on, or null when the
+ *  brush does nothing there. The World Editor's Decrease One and Decrease Two do nothing at all when the level they
+ *  would set is below 0: from a pit's floor at level 0 (Decrease One, Decrease Two) and from level 1 (Decrease Two)
+ *  no corner moved and none was typed, at the pit's middle and on the floor's rim, with or without a tile picked
+ *  beside it (we-compare cliff-floor and painted-cliff-type-grass, 2026-11-14, branch painted-cliff-type-we). Studio
+ *  used to lower the whole brush to level 0 there. The water brushes weren't measured so low: they keep to level 0. */
+export function strokeLayer(tool: LayerTool, start: number): number | null {
+  const to = start + (LAYER_STEPS[tool] ?? 0);
+  if (to < 0 && (tool === "cliffDown" || tool === "cliffDown2")) return null;
+  return Math.max(0, Math.min(15, to));
+}
+
 export interface Brush {
   /** World position of the brush centre. */
   x: number;
@@ -206,6 +220,27 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     stroke.own.add(i);
     changed = true;
   }
+  if (CLIFF_TOOLS.has(tool) && moved.size) {
+    // No cliff taller than two levels: the corners next to the brush come along to within two levels of it, as the
+    // editor's do (we-compare cliff-reach: Increase Two, size 3, on plateau.w3x's edge, level 3 to 5, took the low
+    // ground round the brush from 2 to 3; Decrease Two below the edge, 2 to 0, took the plateau round it from 3 to
+    // 2; 2026-11-14, branch painted-cliff-type-we). One ring was measured, not what a ring five levels off does.
+    const brush = new Set(inside.map(({ i }) => i));
+    for (const i of brush) {
+      const x = i % t.width, y = Math.floor(i / t.width);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy, n = ny * t.width + nx;
+        if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height || brush.has(n)) continue;
+        const c = t.corners[n];
+        const to = Math.max(target.layer - 2, Math.min(target.layer + 2, c.layer));
+        if (to === c.layer) continue;
+        stroke.touch(t, n);
+        moved.set(n, c.layer);
+        setLayer(c, to);
+        stroke.own.add(n);
+      }
+    }
+  }
   // The ramps the cliff brush breaks lose their flags, as the editor's do (dropBrokenRamps; not measured for water).
   if (tool !== "shallow" && tool !== "deep" && moved.size) dropBrokenRamps(t, moved, stroke);
   if (CLIFF_TOOLS.has(tool)) {
@@ -245,8 +280,12 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
  *  brush (size 3, Decrease Two, Grass Cliff) typed the 13 corners it lowered, the middle one with only the pit round
  *  it too, and the 24 round them on cliff tiles (we-compare painted-cliff-type, 2026-11-13); its cliff brushes also type
  *  the corners of their stencil round each stamp, cliff or not (cliffTypeStencil). A ground texture stroke
- *  re-types nothing: the editor's left all 37 of those cliff corners as they were under a Dirt stroke, with Apply
- *  Cliff on (Grass or Dirt Cliff chosen) or off (same spec). Whether a corner changed. */
+ *  re-types nothing: the editor's left all 37 of those cliff corners as they were under a Dirt stroke, and so did
+ *  its strokes narrower and wider than the pit (sizes 1, 3, 5, 8), over part of it, with Rock, with Grass over a
+ *  Dirt Cliff pit and over plateau.w3x's edge, whatever cliff type was chosen (painted-cliff-type-*, 2026-11-14,
+ *  branch painted-cliff-type-we). What re-types under the editor's tile stroke is its cliff brush: with Apply Cliff
+ *  left ticked one click paints and runs the cliff tool, the same as Studio's Paint stroke followed by its cliff
+ *  stroke there (painted-with-cliff-*). Whether a corner changed. */
 export function retypeCliffs(t: Terrain, stroke: Stroke, cliffGround: string[], chosen?: number): boolean {
   if (!LAYER_TOOLS.has(stroke.label)) return false;
   return matchCliffTypes(t, stroke.area(), cliffGround, stroke, chosen, stroke.own);

@@ -4,6 +4,7 @@ import { groundHeight, parseW3e, setGroundHeight, writeW3e, type Terrain } from 
 import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { HEIGHT_TICK, heightPerPoint, HeightStroke } from "../../lib/terrain/strokepath";
 import { applyHeight, applyLayer, brushOf, brushReach, matchCliffTypes, paintBoundary, paintTexture, retypeCliffs, Stroke } from "./tools";
+import * as painterTools from "./tools";
 
 /** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
  *  (15), as the World Editor's New Map makes it. */
@@ -251,6 +252,48 @@ test("a cliff pit gets its cliff type as the World Editor's, and a ground textur
   assert.equal(retypeCliffs(t, paint, CLIFF_GROUND), false, "no corner re-typed");
   assert.equal(retypeCliffs(t, paint, CLIFF_GROUND, 0), false, "not with a chosen type either");
   assert.equal(cliffTypes(t), PIT);
+});
+
+test("a Decrease that would go below level 0 is no stroke at all, as the World Editor's", () => {
+  // we-compare cliff-floor (2026-11-14): Decrease Two and Decrease One of size 5 on the floor of a level-0 pit, and
+  // Decrease Two on a level-1 floor, moved and typed nothing in the editor; Studio lowered the whole brush to level 0.
+  const { strokeLayer } = painterTools;
+  assert.equal(strokeLayer("cliffDown2", 0), null);
+  assert.equal(strokeLayer("cliffDown", 0), null);
+  assert.equal(strokeLayer("cliffDown2", 1), null, "not as far as it gets either");
+  assert.equal(strokeLayer("cliffDown", 1), 0);
+  assert.equal(strokeLayer("cliffDown2", 2), 0);
+  assert.equal(strokeLayer("cliffUp2", 2), 4);
+  assert.equal(strokeLayer("cliffLevel", 3), 3);
+  assert.equal(strokeLayer("deep", 1), 0, "the water brushes keep to level 0");
+  assert.equal(strokeLayer("dry", 5), 5);
+});
+
+test("the corners next to a cliff brush come along to within two levels of it, as the World Editor's", () => {
+  // we-compare cliff-reach-up2-edge and cliff-reach-down2-below (2026-11-14): on plateau.w3x (level 3 on 2) Increase
+  // Two of size 3 on the edge (3 to 5) took the low corners round the brush to 3, and Decrease Two below the edge (2
+  // to 0) the plateau's corners round the brush to 2. The plateau here: rows 17 and up.
+  const plateau = () => {
+    const t = flatMap();
+    for (let y = 17; y < t.height; y++) for (let x = 0; x < t.width; x++) t.corners[y * t.width + x].layer = 3;
+    return t;
+  };
+  const up = plateau(), s = new Stroke("cliffUp2");
+  assert.equal(applyLayer(up, brushOf("cliffUp2", up, centre(up).x, centre(up).y + 128, 3), "cliffUp2", { layer: 5 }, s), true);
+  assert.equal(layers(up), ["3335333", "3355533", "3555553", "3355533", "2335332", "2233322", "2222222"].join("\n"));
+  retypeCliffs(up, s, CLIFF_GROUND, 1);
+  assert.equal(up.corners[13 * up.width + 16].cliffTexture, 1, "the new cliff below the raised ring is typed");
+  assert.equal(s.finish(up), true);
+  s.undo(up);
+  assert.equal(layers(up), ["3333333", "3333333", "3333333", "2222222", "2222222", "2222222", "2222222"].join("\n"), "one undo step takes the ring back too");
+
+  const down = plateau();
+  assert.equal(applyLayer(down, brushOf("cliffDown2", down, centre(down).x, centre(down).y, 3), "cliffDown2", { layer: 0 }, new Stroke("cliffDown2")), true);
+  assert.equal(layers(down), ["3322233", "3220223", "2200022", "2000002", "2200022", "2220222", "2222222"].join("\n"));
+
+  const one = plateau();
+  applyLayer(one, brushOf("cliffUp", one, centre(one).x, centre(one).y + 128, 3), "cliffUp", { layer: 4 }, new Stroke("cliffUp"));
+  assert.equal(layers(one).split("\n")[4], "2224222", "two levels are a cliff the brush leaves");
 });
 
 test("a size-3 Increase One below a plateau types the plateau's corners 2 and 3 rows above the centre, as the World Editor's", () => {

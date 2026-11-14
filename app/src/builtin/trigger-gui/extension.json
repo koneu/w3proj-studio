@@ -6,6 +6,12 @@
   "activationEvents": ["onEditor:w3.triggerEditor"],
   "extensionDependencies": ["w3.triggerEditor"],
   "contributes": {
+    "configuration": {
+      "title": "GUI Triggers",
+      "properties": {
+        "triggers.autoCreateVariables": { "type": "boolean", "default": true, "description": "Create the variables pasted trigger lines use when the map has none of that name (type, array and initial value as in the map they were copied from), like the World Editor's \"Automatically create unknown variables while pasting trigger data\"." }
+      }
+    },
     "services": [{ "id": "w3.triggers.gui", "description": "Parameter editors for GUI triggers (registerParamEditor), and the parameter dialog for other function trees (editParam)." }]
   }
 }

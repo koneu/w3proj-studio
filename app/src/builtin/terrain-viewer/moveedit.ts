@@ -42,7 +42,20 @@ export function clampShift(points: readonly (readonly [number, number])[], bound
  * limit 3297). Per axis: where the shift fits it is as asked, where it doesn't it is `held` (a drag: the shift of its
  * last motion that fitted; a nudge: 0).
  */
-export function refuseShift(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], dx: number, dy: number, held: readonly [number, number] = [0, 0]): [number, number] {
+export function refuseShift(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], dx: number, dy: number, held: readonly [number, number] = [0, 0],
+  settle?: (i: number, x: number, y: number) => readonly [number, number]): [number, number] {
   const [cx, cy] = clampShift(points, bounds, dx, dy);
-  return [cx === dx ? dx : held[0], cy === dy ? dy : held[1]];
+  let fitsX = cx === dx, fitsY = cy === dy;
+  // A doodad on a grid is judged where it will stand, not where the pointer is: 4090 passes the bound, and is 4096 once
+  // snapped (we-compare edge-group-drag: the editor leaves a tree dragged past the edge on the grid point inside it).
+  if (settle) {
+    points.forEach(([x, y], i) => {
+      const b = bounds[i];
+      if (x < b.left || x > b.right || y < b.bottom || y > b.top) return;
+      const [sx, sy] = settle(i, x + dx, y + dy);
+      if (sx < b.left || sx > b.right) fitsX = false;
+      if (sy < b.bottom || sy > b.top) fitsY = false;
+    });
+  }
+  return [fitsX ? dx : held[0], fitsY ? dy : held[1]];
 }

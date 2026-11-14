@@ -141,7 +141,9 @@ export function objectEditor(objects: ObjectsService, host: HTMLElement, kinds: 
   const pick = async () => (await objects.pick(host, { title: list ? "Add" : "Choose", kinds }))?.id;
   const chip = (id: string, i: number) => {
     const name = h("span.obj-chip-name", {}, id);
-    void objects.name(id).then((n) => { if (n) name.textContent = `${n} (${id})`; });
+    // Among the field's own kinds: every kind asked had all seven kinds' game tables read for the first chip shown,
+    // and an id two kinds share (a buff and a destructable B000) took the other kind's name.
+    void objects.name(id, kinds).then((n) => { if (n) name.textContent = `${n} (${id})`; });
     return h("span.obj-chip", { title: id }, name,
       h("button.icon-button", { title: list ? "Remove from the list" : "Clear", onclick: () => onCommit(ids.filter((_, j) => j !== i).join(",")) }, "×"));
   };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterLimitHits } from "./limits";
+import { clampPoint, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterLimitHits } from "./limits";
 import { unitHalf } from "../../lib/terrain/resize";
 import { clampShift, refuseShift } from "./moveedit";
 import type { Bounds } from "./moveedit";
@@ -26,19 +26,9 @@ test("the unknown high bits of the word don't hide a limit, and dry corners aren
   assert.deepEqual(waterLimitHits([wet(0x2000)], [{ hasWater: false, rawWater: WATER_LEVEL_MAX }]), []);
 });
 
-test("camera bounds are the first four numbers of the w3i, if they make a box", () => {
-  assert.deepEqual(cameraRect({ cameraBounds: [-100, -50, 300, 200, -100, 200, 300, -50] }), { left: -100, bottom: -50, right: 300, top: 200 });
-  for (const bad of [undefined, {}, { cameraBounds: [] }, { cameraBounds: [1, 2, 3] }, { cameraBounds: [5, 0, 1, 10] }, { cameraBounds: [0, 5, 10, 1] }, { cameraBounds: [5, 0, 5, 10] }, { cameraBounds: [0, 5, 10, 5] }, { cameraBounds: [0, 0, NaN, 5] }]) {
-    assert.equal(cameraRect(bad as never), null, JSON.stringify(bad));
-  }
-});
-
 const box = { left: 0, bottom: 0, right: 100, top: 50 };
 
-test("a point is inside up to the edge; without bounds everything is", () => {
-  assert.ok(insideBounds(box, 0, 50) && insideBounds(box, 100, 0) && insideBounds(box, 50, 25));
-  assert.ok(!insideBounds(box, -0.1, 10) && !insideBounds(box, 10, 50.1) && !insideBounds(box, 101, 10));
-  assert.ok(insideBounds(null, 1e9, -1e9));
+test("a point is clamped into the bounds; without bounds it stays", () => {
   assert.deepEqual(clampPoint(box, 150, -20), [100, 0]);
   assert.deepEqual(clampPoint(box, 30, 20), [30, 20]);
   assert.deepEqual(clampPoint(null, 150, -20), [150, -20]);
@@ -92,9 +82,12 @@ test("a nudge is held to the bounds with its steps: a step past the limit is ref
   assert.deepEqual(scaledNudge([[60, 50], [60, 50]], [bounds, bounds], [1, 2], [32, 0]), [[0, 0], [0, 0]]);
   assert.deepEqual(scaledNudge([[60, 50]], [bounds], [1], [32, 0]), [[32, 0]], "a step that fits is taken");
   // Not held back: the full steps.
-  assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[32, 0], [64, 0]]);
+  // The group moves by its longest step, all by the same shift (the editor: a pathless doodad with a tree goes 64).
+  assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[64, 0], [64, 0]]);
   assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, 0]], "50 above the bottom edge, 64 asked: refused, not cut to 50");
-  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [32, -32]), [[64, 0]], "per axis: the other still moves");
+  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [32, -32]), [[0, 0]], "a diagonal with one axis refused is refused whole (KP_9 at the edge)");
+  assert.deepEqual(scaledNudge([[10, 10]], [bounds], [2], [32, 32]), [[64, 64]], "a diagonal that fits is taken");
+  assert.deepEqual(scaledNudge([[60, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[0, 0], [0, 0]], "one member past the edge holds the group");
 });
 
 test("nudged to the edge a footman stops at 3296 and a doodad strictly inside the map (we-compare edge-last-step)", () => {
@@ -113,14 +106,25 @@ test("nudged to the edge a footman stops at 3296 and a doodad strictly inside th
   assert.equal(run(-3584, doodad, 1, -8), -4088);
 });
 
+test("a drag's step is judged where a gridded doodad lands, not where the pointer is (edge-group-drag)", () => {
+  const strict = strictlyInside({ left: -4096, bottom: -4096, right: 4096, top: 4096 });
+  const grid = (_i: number, x: number, y: number): [number, number] => [Math.round(x / 64) * 64, Math.round(y / 64) * 64];
+  // The pointer is 4090, inside by itself, but the grid point is the edge 4096: refused, the last shift that fitted stays.
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0]), [506, 0], "without the grid it fits");
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0], grid), [440, 0]);
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 440, 0, [0, 0], grid), [440, 0], "4024 snaps to 4032, inside");
+  // Per axis, and a pointer that doesn't snap (a pathless doodad) is as before.
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 30, [0, 0], grid), [0, 30]);
+  assert.deepEqual(refuseShift([[3584, 0]], [strict], 506, 0, [440, 0], (_i, x, y) => [x, y]), [506, 0]);
+  // One member of a group that would land on the edge holds the whole group's axis.
+  assert.deepEqual(refuseShift([[3584, 0], [3000, 0]], [strict, strict], 506, 0, [0, 0], (i, x, y) => (i === 0 ? grid(i, x, y) : [x, y])), [0, 0]);
+});
+
 test("a paste's word on what it didn't place names each reason that holds, and no other", () => {
-  const none = { noFile: 0, offMap: 0, pastPlayable: 0, outsideBounds: 0 };
+  const none = { noFile: 0, offMap: 0, pastPlayable: 0 };
   assert.equal(pasteSkipText(3, none), null);
-  const bounds = pasteSkipText(3, { ...none, outsideBounds: 2 })!;
-  assert.match(bounds, /^2 of 3 pasted objects weren't placed: 2 would land outside the camera bounds/);
-  assert.doesNotMatch(bounds, /playable|off the map|placement file/);
-  const all = pasteSkipText(10, { noFile: 1, offMap: 2, pastPlayable: 3, outsideBounds: 4 })!;
-  assert.match(all, /^10 of 10 pasted objects weren't placed: 2 would land off the map; 3 are units or items past the playable part/);
-  assert.match(all, /; 4 would land outside the camera bounds .*; 1 has no placement file in this map\.$/);
+  const all = pasteSkipText(10, { noFile: 1, offMap: 2, pastPlayable: 3 })!;
+  assert.match(all, /^6 of 10 pasted objects weren't placed: 2 would land off the map; 3 are units or items past the playable part/);
+  assert.match(all, /; 1 has no placement file in this map\.$/);
   assert.match(pasteSkipText(1, { ...none, pastPlayable: 1 })!, /^1 of 1 pasted object wasn't placed: 1 is a unit or item past the playable part/);
 });

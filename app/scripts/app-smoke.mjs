@@ -3677,7 +3677,7 @@ async function heightsLimits(page, found) {
   const cornersX = Number(/^corners (\d+)/m.exec(w3eHead)?.[1]), offsetX = Number(/^offset (\S+)/m.exec(w3eHead)?.[1]);
   const pr = offsetX + (cornersX - 1 - k.read("war3map.w3i.json").cameraComplements[1]) * 128;
   if (!Number.isFinite(pr)) return fail(`no playable edge from the terrain's head and the w3i (${pr})`);
-  // Placed with the switch off (a placement past the camera bounds is refused with it on), nudged with it on.
+  // Placed with the switch off (no object is held to the camera bounds), nudged with it on.
   await k.tool("place_objects", { objects: [{ id: "hfoo", x: pr - 100, y: 256, player: 1 }], ignoreRoom: true });
   await k.save();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
@@ -3692,26 +3692,28 @@ async function heightsLimits(page, found) {
   if (footman()?.position[0] !== lastFit) fail(`ten nudges took the footman from ${fx0} to ${footman()?.position[0]}; the World Editor leaves it at ${lastFit}, the last step that fits (its collision size inside the playable edge ${pr})`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
 
-  // A paste outside the bounds.
-  await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await k.look(br + 400, 0);
-  await k.clearToasts();
+  // A paste outside the bounds is placed, with the switch on and off alike: the World Editor's pastes go past the
+  // camera bounds too (we-compare camera-bounds-paste). The switch is off here; each round turns it on, then off.
+  const pasteAt = async (x, y) => {
+    await k.look(x, y);
+    await k.clearToasts();
+    await k.focusMap();
+    await hands.key("v", "KeyV", 86, 2);
+    await k.clickMiddle();
+    await hands.key("Escape", "Escape", 27);
+    await k.save();
+  };
   const n0 = count();
-  await k.focusMap();
-  await hands.key("v", "KeyV", 86, 2);
-  await k.clickMiddle();
-  await k.save();
-  if (count() !== n0) fail("a paste outside the camera bounds placed a doodad with Enforce Camera Bounds on");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
-  // On the map and a doodad: only the camera bounds are the reason, and the word says no other.
-  if (/playable|off the map/.test(await k.toasts())) fail(`the refused paste names reasons that don't hold: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
-  await hands.click(".model-stage canvas");
-  await k.save();
-  if (count() !== n0 + 1) fail(`the same paste with Enforce Camera Bounds off placed ${count() - n0} doodads`);
-  await hands.key("Escape", "Escape", 27);
+  if ((await k.setting("terrain.enforceCameraBounds")) !== true) fail("Enforce Camera Bounds isn't on for the paste");
+  await pasteAt(br + 500, 64);
+  if (count() !== n0 + 1) fail(`a paste outside the camera bounds placed ${count() - n0} doodads with Enforce Camera Bounds on (the World Editor places it)`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a paste outside the camera bounds was warned about: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await pasteAt(br + 500, 256);
+  if (count() !== n0 + 2) fail(`the same paste with Enforce Camera Bounds off placed ${count() - n0 - 1} doodads`);
 
-  // A placement from the Objects tab: inside the bounds it works (control), outside it's refused.
+  // A placement from the Objects tab: inside the bounds and outside them, the switch on; outside with it off.
   const edgeX = nearEdge().position[0];
   await k.look(edgeX, 0, { id: "LTlt", x: edgeX, y: 0 });
   await k.run("w3.terrain.selectInPalette");
@@ -3728,35 +3730,98 @@ async function heightsLimits(page, found) {
   await k.clearToasts();
   await hands.click(".model-stage canvas");
   await k.save();
-  if (count() !== n1 + 1) fail("a placement outside the camera bounds worked with Enforce Camera Bounds on");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused placement: "${await k.toasts()}"`);
+  if (count() !== n1 + 2) fail(`a placement outside the camera bounds placed ${count() - n1 - 1} doodads with Enforce Camera Bounds on (the World Editor places it; ${await k.toasts()})`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a placement outside the camera bounds was warned about: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await k.look(br + 600, 512);
   await hands.click(".model-stage canvas");
   await k.save();
-  if (count() !== n1 + 2) fail(`the same placement with Enforce Camera Bounds off placed ${count() - n1 - 1} doodads (${await k.toasts()})`);
+  if (count() !== n1 + 3) fail(`a placement outside the camera bounds with Enforce Camera Bounds off placed ${count() - n1 - 2} doodads (${await k.toasts()})`);
   await k.tab("Select");
 
-  // A typed position: inside the bounds it's taken. Once the bounds are narrowed in the w3i (saved elsewhere, so the
-  // editor has to read them again) the same kind of number is refused with a word, and the box shows the real position again.
+  // A typed position past the camera bounds is taken with the switch on: it holds no object.
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   const at = (x) => k.doodads().some((d) => d.position[0] === x && d.position[1] === 0);
   const typeX = async (x) => { await k.look(...(x.from)); await k.clearToasts(); await retype(hands, ".terrain-sel-triple input", String(x.to)); await k.save(); };
   await typeX({ from: [0, 0, { id: "LTlt", x: 0, y: 0 }], to: br - 300 });
   if (!at(br - 300)) fail("a typed X inside the camera bounds wasn't taken");
-  const w3i = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
-  const narrow = JSON.parse(w3i);
-  narrow.cameraBounds[2] = br - 400; narrow.cameraBounds[6] = br - 400;
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(narrow))})`);
-  await settled(page);
-  await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br - 100 });
-  if (at(br - 100) || !at(br - 300)) fail("a typed X past the narrowed camera bounds was taken: the editor still has the old bounds");
-  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused position: "${await k.toasts()}"`);
-  const shown = await page.evaluate(`document.querySelector(".terrain-sel-triple input")?.value`);
-  if (Number(shown) !== br - 300) fail(`the position box kept the refused text: "${shown}"`);
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(w3i)})`);
-  await settled(page);
+  await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br + 300 });
+  if (!at(br + 300)) fail(`a typed X past the camera bounds wasn't taken with Enforce Camera Bounds on (${await k.toasts()})`);
+  if (/camera bounds/.test(await k.toasts())) fail(`a typed X past the camera bounds was warned about: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await k.save();
+
+  // What the switch does, as the World Editor's (we-compare camera-bounds-create): on the Cameras tab, Create from view
+  // and Set from view refuse a view whose target is outside the camera bounds, in the editor's words; a target on the
+  // bound is inside. Off (as it is here), both take any view.
+  await k.tab("Cameras");
+  const camButton = (text) => page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-group-tools button")].find((b) => b.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  // (A map without cameras has no camera file yet.)
+  const savedCams = () => (existsSync(join(k.root, "map", "war3map.w3c.json")) ? k.read("war3map.w3c.json").cameras ?? [] : []);
+  const camFrom = async (x, button) => {
+    await k.look(x, 0);
+    await k.clearToasts();
+    if (!(await camButton(button))) fail(`the Cameras tab has no "${button}" button`);
+    await k.save();
+    return savedCams().map((c) => c.targetX);
+  };
+  const refusedWord = /outside of the world camera bounds/;
+  const cam0 = savedCams().length;
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  let cams = await camFrom(br + 200, "Create from view");
+  if (cams.length !== cam0) fail(`Create from view made a camera at ${cams.at(-1)}, past the camera bounds (${br}), with Enforce Camera Bounds on`);
+  if (!refusedWord.test(await k.toasts())) fail(`no word on the refused camera: "${await k.toasts()}"`);
+  cams = await camFrom(br, "Create from view");
+  if (cams.length !== cam0 + 1 || cams.at(-1) !== br) fail(`Create from view on the camera bound itself made ${cams.length - cam0} cameras (${cams.at(-1)}; ${await k.toasts()})`);
+  if (refusedWord.test(await k.toasts())) fail("a camera on the camera bound itself was warned about");
+  cams = await camFrom(br + 200, "Set from view");
+  if (cams.at(-1) !== br) fail(`Set from view took a view past the camera bounds with Enforce Camera Bounds on: the camera is at ${cams.at(-1)}`);
+  if (!refusedWord.test(await k.toasts())) fail(`no word on the refused Set from view: "${await k.toasts()}"`);
+  // A Target X typed past the bound lands on it (the World Editor's Camera Properties: 3100 became 2816), from inside
+  // (control: br - 100 is taken as typed); off, it is taken as typed.
+  const typeTargetX = async (x) => { await retype(hands, ".terrain-camera-field input", String(x)); await k.save(); return savedCams().at(-1)?.targetX; };
+  if ((await typeTargetX(br - 100)) !== br - 100) fail(`a Target X typed inside the camera bounds wasn't taken: the camera is at ${savedCams().at(-1)?.targetX}`);
+  if ((await typeTargetX(br + 250)) !== br) fail(`a Target X typed past the camera bounds left the camera at ${savedCams().at(-1)?.targetX}, not on the bound ${br}, with Enforce Camera Bounds on`);
+  const shownX = await page.evaluate(`document.querySelector(".terrain-camera-field input")?.value`);
+  if (Number(shownX) !== br) fail(`the Target X box shows "${shownX}" after the typed value was put on the bound ${br}`);
+  // A dragged target stops short of the bound (a step past it is refused, as the World Editor's); off, it goes past.
+  // The camera 200 inside the bound, its target in the view's middle, dragged right by far more than that.
+  const dragTarget = async () => {
+    await typeTargetX(br - 200);
+    await k.look(br - 200, 0);
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x, y: c.y }, { x: c.x + 350, y: c.y }, 30);
+    await k.save();
+    return savedCams().at(-1)?.targetX;
+  };
+  const draggedOn = await dragTarget();
+  if (!(draggedOn > br - 200 && draggedOn <= br)) fail(`a camera dragged from ${br - 200} past the camera bound ${br} is at ${draggedOn} with Enforce Camera Bounds on (wanted: moved, and not past the bound)`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  const draggedOff = await dragTarget();
+  if (!(draggedOff > br)) fail(`the same drag with Enforce Camera Bounds off left the camera at ${draggedOff}, not past the bound ${br}`);
+  if ((await typeTargetX(br + 250)) !== br + 250) fail(`a Target X typed past the camera bounds with Enforce Camera Bounds off left the camera at ${savedCams().at(-1)?.targetX}, not ${br + 250}`);
+  cams = await camFrom(br + 200, "Set from view");
+  if (cams.at(-1) !== br + 200) fail(`Set from view with Enforce Camera Bounds off left the camera at ${cams.at(-1)}, not ${br + 200} (${await k.toasts()})`);
+  cams = await camFrom(br + 300, "Create from view");
+  if (cams.length !== cam0 + 2 || cams.at(-1) !== br + 300) fail(`Create from view past the camera bounds with Enforce Camera Bounds off made ${cams.length - cam0 - 1} cameras (${cams.at(-1)}; ${await k.toasts()})`);
+
+  // The view stops at the map's edge as the World Editor's does, the switch on or off: held to the right from just
+  // inside the edge, the arrow key leaves the view looking at the edge (the camera bounds and the playable part are
+  // passed on the way: the look starts past both).
+  await k.tab("Select");
+  const mapRight = offsetX + (cornersX - 1) * 128;
+  const targetX = async () => (await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().camera.target ?? null)()`))?.[0];
+  for (const on of [true, false]) {
+    if (((await k.setting("terrain.enforceCameraBounds")) !== false) !== on) await k.run("w3.terrain.toggleEnforceCameraBounds");
+    await k.look(mapRight - 300, 0);
+    await k.focusMap();
+    await hands.key("ArrowRight", "ArrowRight", 39);
+    const one = await targetX();
+    if (!(one > mapRight - 300 && one <= mapRight)) fail(`one press of the right arrow took the view from ${mapRight - 300} to ${one} (Enforce Camera Bounds ${on ? "on" : "off"})`);
+    for (let i = 0; i < 12; i++) await hands.key("ArrowRight", "ArrowRight", 39);
+    const end = await targetX();
+    if (!(Math.abs(end - mapRight) < 0.5)) fail(`the right arrow held at the map's edge left the view at ${end}, not on the edge ${mapRight} (Enforce Camera Bounds ${on ? "on" : "off"})`);
+  }
 
   // Water: four raises of 1000 make a mound whose top is past 2048, where the stored level of a surface at its height ends.
   for (let i = 0; i < 4; i++) {
@@ -3864,47 +3929,38 @@ async function heightsLimits(page, found) {
   }
 }
 
-/** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts): each call is made with its
- *  switch on and off against the same input, which shows the switch made the difference. Camera bounds: place_objects
- *  skips what lands outside them, scatter_objects leaves those spots out and move_object refuses the place; water:
+/** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts). Camera bounds: place_objects,
+ *  scatter_objects and move_object work past them with the switch on and off alike (they hold no object); water:
  *  set_water on ground raised so high that the surface would pass the limit of the stored level is refused whole. */
 async function mcpLimits(page, found) {
   try {
   const fail = (what) => found.push(`mcp limits: ${what}`);
   const k = await heightKit(page, "McpLimits");
   const refusal = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
-  const allow = /turn off Enforce Camera Bounds to allow it/;
   try {
     const [, , br] = k.read("war3map.w3i.json").cameraBounds;
     const inside = { id: "LTlt", x: br - 256, y: 0 }, outside = { id: "LTlt", x: br + 384, y: 0 };
     const at = (x, y) => k.doodads().findIndex((d) => d.position[0] === x && d.position[1] === y);
-    // On by default: of two, the one outside is skipped with the editor's words; alone, nothing is placed.
+    // The camera bounds hold no object, the switch on (its default) or off: the same calls give the same result.
     if ((await k.setting("terrain.enforceCameraBounds")) === false) fail("Enforce Camera Bounds isn't on by default");
-    const two = JSON.parse(await k.tool("place_objects", { objects: [inside, outside], ignoreRoom: true }));
-    await settled(page);
-    if (two.placed !== 1 || two.skipped.length !== 1 || two.skipped[0].index !== 1 || !allow.test(two.skipped[0].reason)) fail(`place_objects across the camera bounds: ${JSON.stringify(two)}`);
-    if (at(inside.x, 0) < 0 || at(outside.x, 0) >= 0) fail("place_objects didn't place the one inside the camera bounds alone");
-    const doo = k.docHash();
-    const alone = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
-    if (!allow.test(alone ?? "") || k.docHash() !== doo) fail(`place_objects outside the camera bounds: ${alone ?? "placed"}`);
     const beyond = { ids: ["LTlt"], left: br + 128, bottom: -512, right: br + 768, top: 512, shape: "box", seed: 7 };
-    const scattered = await refusal("scatter_objects", beyond);
-    if (!allow.test(scattered ?? "") || k.docHash() !== doo) fail(`scatter_objects outside the camera bounds: ${scattered ?? "placed"}`);
-    const moved = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
-    if (!/Not done: .*turn off Enforce Camera Bounds to allow it/.test(moved ?? "") || k.docHash() !== doo) fail(`move_object outside the camera bounds: ${moved ?? "moved"}`);
-
-    // Off: the same calls do what they did before the switch was held to.
-    await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
-    const placed = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
-    await settled(page);
-    if (placed || at(outside.x, 0) < 0) fail(`place_objects outside the camera bounds with Enforce Camera Bounds off: ${placed ?? "not there"}`);
-    const spread = JSON.parse(await k.tool("scatter_objects", beyond));
-    if (!(spread.placed > 0) || spread.spotsOutsideCameraBounds !== undefined) fail(`scatter_objects with Enforce Camera Bounds off: ${JSON.stringify(spread)}`);
-    await settled(page);
-    const move = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
-    await settled(page);
-    if (move || at(outside.x, 256) < 0) fail(`move_object with Enforce Camera Bounds off: ${move ?? "not there"}`);
-
+    for (const on of [true, false]) {
+      const word = `with Enforce Camera Bounds ${on ? "on" : "off"}`;
+      await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", ${on})`);
+      const dy = on ? 0 : 640;
+      const out = { ...outside, y: dy };
+      const two = JSON.parse(await k.tool("place_objects", { objects: [{ ...inside, y: dy }, out], ignoreRoom: true }));
+      await settled(page);
+      if (two.placed !== 2 || two.skipped.length) fail(`place_objects across the camera bounds ${word}: ${JSON.stringify(two)}`);
+      if (at(inside.x, dy) < 0 || at(out.x, dy) < 0) fail(`place_objects didn't place both sides of the camera bounds ${word}`);
+      const spread = JSON.parse(await k.tool("scatter_objects", { ...beyond, seed: on ? 7 : 8 }));
+      await settled(page);
+      if (!(spread.placed > 0) || spread.spotsOutsideCameraBounds !== undefined || /camera bounds/i.test(JSON.stringify(spread))) fail(`scatter_objects past the camera bounds ${word}: ${JSON.stringify(spread)}`);
+      const ty = on ? 256 : 896;
+      const move = await refusal("move_object", { kind: "doodads", index: at(inside.x, dy), id: "LTlt", x: out.x, y: ty });
+      await settled(page);
+      if (move || at(out.x, ty) < 0) fail(`move_object past the camera bounds ${word}: ${move ?? "not there"}`);
+    }
     // Water: four raises of 1000 make a mound whose top is past where the stored level of a surface at its height ends.
     for (let i = 0; i < 4; i++) {
       const raise = await refusal("sculpt_terrain", { mode: "raise", amount: 1000, left: -2304, bottom: 256, right: -256, top: 2304, shape: "box" });
@@ -4954,8 +5010,13 @@ async function viewCommands(page, fail, shots, size) {
   // Pathing - Ground over the map's edge is the editor's flat grey (we-drive, border128x96, 2026-11-14: 137, 138, 137),
   // water on and off, drawn over the border's dark and its water (Studio's was purple, and gone under deep water).
   await run("w3.terrain.toggleGroundPathing");
-  const groundEdge = await meanColour(page, await picture("ground-edge"), edgeBox);
+  const groundPicture = await picture("ground-edge");
+  const groundEdge = await meanColour(page, groundPicture, edgeBox);
+  const groundWater = await meanColour(page, groundPicture, waterBox);
   await run("w3.terrain.toggleGroundPathing");
+  // The layer lies over the water, at any depth (we-drive, a flat map of eight depths, 2026-11-14: the same purple all
+  // over; the water's own blue-green is far from it), blended in linear light (viewcmds.ts GROUND_PATHING_ALPHA).
+  if (Math.max(...groundWater.map((v, i) => Math.abs(v - water0[i]))) < 25) bad(`Pathing - Ground doesn't show over the water: ${round(water0)} became ${round(groundWater)}`);
   if (groundEdge.some((v, i) => Math.abs(v - [137, 138, 137][i]) > 12)) bad(`Pathing - Ground over the map's edge isn't the editor's flat grey: ${round(groundEdge)}`);
   // As the World Editor's (we-drive, map 03 and HillsbradCreek, 2026-11-12): black past the map's edge (Studio's was
   // 28, 31, 36), the border's ground keeping about 15 % of its colour (Studio's kept 35 %), and the border's water black.
@@ -4970,6 +5031,32 @@ async function viewCommands(page, fail, shots, size) {
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
   const [wetEdge, wetInside] = [await meanColour(page, wet, edgeBox), await meanColour(page, wet, insideBox)];
   if (lum(wetEdge) > 12 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
+  // HD water reflects a sky that is brighter in the west (hdwater.ts; we-drive, flat deep maps, View Entire Map,
+  // 2026-11-14: deep Lordaeron water 73, 87, 95 on the left, 46, 68, 82 on the right; Studio's was a flat 22, 57, 73).
+  // With the map's reflectivity 0 (war3map.w3i's water) it is the flat deep colour 0, 48, 69: the control that the
+  // difference is the reflection's.
+  const westBox = [0.2, 0.4, 0.3, 0.6], eastBox = [0.75, 0.4, 0.85, 0.6];
+  const reflecting = async (name) => {
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    await settled(page);
+    const shot = await picture(name);
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+    return [await meanColour(page, shot, westBox), await meanColour(page, shot, eastBox)];
+  };
+  const [westLit, eastLit] = [await meanColour(page, wet, westBox), await meanColour(page, wet, eastBox)];
+  if (westLit[0] - eastLit[0] < 12 || westLit[0] < 45 || eastLit[0] > 60 || westLit.some((v, i) => i > 0 && v < westLit[0])) {
+    bad(`HD deep water isn't lighter in the west as the editor's: ${round(westLit)} in the west, ${round(eastLit)} in the east`);
+  }
+  const infoText = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+  const info = JSON.parse(infoText);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify({ ...info, water: { ...(info.water ?? {}), reflectivity: 0 } }, null, 2))})`);
+  await sleep(1500);
+  const [westFlat, eastFlat] = await reflecting("water-no-reflection");
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoText)})`);
+  await sleep(1500);
+  if (Math.abs(westFlat[0] - eastFlat[0]) > 4 || westFlat[0] > 8 || [westFlat, eastFlat].some((c) => Math.abs(c[1] - 48) > 8 || Math.abs(c[2] - 69) > 8)) {
+    bad(`with the map's reflectivity 0 the deep water isn't the editor's flat 0, 48, 69: ${round(westFlat)} in the west, ${round(eastFlat)} in the east`);
+  }
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
@@ -5320,6 +5407,25 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }
     }
   }
+  // A Decrease that would go below level 0 is no stroke, as the World Editor's (we-compare cliff-floor, 2026-11-14):
+  // −2 of size 3 makes a pit on level 0; −2 of size 5 on its floor changes nothing and leaves no undo step.
+  const press = async (title, size) => {
+    await page.evaluate(`document.querySelector('button.tool-button[title^=${JSON.stringify(title)}]').click()`);
+    await setSize(size);
+    await hands.mouse("mouseMoved", canvas.x, canvas.y);
+    await hands.mouse("mousePressed", canvas.x, canvas.y, 1);
+    await hands.mouse("mouseReleased", canvas.x, canvas.y);
+    await sleep(100);
+    await save();
+  };
+  await press("−2:", 3);
+  const pit = changed("layer"), pitHash = hash(ground);
+  if (pit !== 13) fail(`a −2 click of size 3 changed ${pit} corners' layer, the World Editor's 13`);
+  await press("−2:", 5);
+  if (hash(ground) !== pitHash) fail(`a −2 click of size 5 on the floor of a level-0 pit changed the map (${changed("layer")} corners off the common level): the World Editor's does nothing`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("one undo after a pit and a refused −2 didn't give the map back: the refused click left an undo step"); return; }
   await setSize(2);
 }
 
@@ -6832,6 +6938,48 @@ async function moduleFunctionsChecks(page, found) {
     await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
     await page.evaluate(`w3.editors.closeAll()`);
     verify(u, "unused-sounds");
+  }
+
+  // ---- Sound Editor: Move Sound Variable Up/Down and Sort (one undo step each); Export Script --------------------
+  const o = join(dir, "sound-order");
+  cpSync(FIXTURE, o, { recursive: true });
+  {
+    const sound = (name) => ({
+      name, file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: name, assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    });
+    put(join(o, "map", "war3map.w3s.json"), { format: "w3proj.sounds/1", version: 3, sounds: ["gg_snd_Delta", "gg_snd_alpha", "gg_snd_Charlie"].map(sound) });
+    await openProject(o);
+    const shown = () => page.evaluate(`[...document.querySelectorAll("tr.snd-row")].map((r) => r.firstChild.textContent).join()`);
+    const stored = () => json(join(o, "map", "war3map.w3s.json")).sounds.map((x) => x.name.replace(/^gg_snd_/, "")).join();
+    const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(page); };
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 3`), 20000);
+    await page.evaluate(`document.querySelectorAll("tr.snd-row")[1].click()`);
+    await page.evaluate(`w3.commands.execute("w3.sounds.moveUp")`);
+    if ((await shown()) !== "alpha,Delta,Charlie") fail(`Move Sound Variable Up showed ${await shown()}`);
+    await page.evaluate(`w3.commands.execute("w3.sounds.sort")`);
+    if ((await shown()) !== "alpha,Charlie,Delta") fail(`Sort Sound Variables showed ${await shown()}`);
+    await undo();
+    if ((await shown()) !== "alpha,Delta,Charlie") fail(`one undo of Sort left ${await shown()}`);
+    await undo();
+    if ((await shown()) !== "Delta,alpha,Charlie") fail(`one undo of Move Up left ${await shown()}`);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("undoing the order changes left the Sound Editor unsaved");
+    await page.evaluate(`w3.commands.execute("w3.sounds.moveDown")`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until("the sounds saved", () => stored() === "Delta,Charlie,alpha", 10000).catch(() => fail(`the saved order: ${stored()}`));
+    await settled(page);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("Move Down then save left the Sound Editor unsaved");
+    // Export Script: the project's war3map.j, byte for byte, to the chosen file.
+    const out = join(dir, "exported-script.j");
+    await answer({ save: out });
+    const eerr = await run("w3.script.export");
+    if (eerr) fail(`Export Script: ${eerr}`);
+    else if (!existsSync(out) || !readFileSync(out).equals(readFileSync(join(o, "map", "war3map.j")))) fail("the exported script isn't the project's war3map.j");
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(o, "sound-order");
   }
 
   // ---- Sound Editor: a dialogue's speaker name and text (strings of war3map.wts) ------------------
@@ -8725,6 +8873,51 @@ async function objectLayout(page, found, root) {
   }
 }
 
+/** Choosing another object in the Object Editor's list keeps the list's rows (it made all of them anew on every
+ *  click, which a long list took seconds to draw), and a model shown before is shown again from what the preview
+ *  kept: on the same canvas, with nothing to wait for. */
+async function objectListKept(page, found, root) {
+  const fail = (what) => found.push(`object list kept: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  try {
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    const shows = (id) => until(`${id} in the Object Editor`, () => page.evaluate(`(() => { const e = ${ed}; return !!e && [...e.querySelectorAll(".obj-item.selected code")].some((c) => c.textContent === ${JSON.stringify(id)}) && !!e.querySelector(".obj-table"); })()`), 30000);
+    const ready = (file) => until(`the preview of ${file}`, () => page.evaluate(`(() => { const s = JSON.parse(${ed}.querySelector(".obj-preview").dataset.state || "{}"); return s.ready && String(s.path).toLowerCase().endsWith(${JSON.stringify(file)}); })()`), 60000);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
+    await shows("hfoo");
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hkni")`);
+    await shows("hkni");
+    // Both in the list (showing one filtered the list to it).
+    await page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ""; s.dispatchEvent(new Event("input")); })()`);
+    const click = (id) => page.evaluate(`[...${ed}.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)}).click()`);
+    const rows = await page.evaluate(`(window.__smokeRows = [...${ed}.querySelectorAll(".obj-item")]).length`);
+    if (rows < 2) { fail(`the list has ${rows} rows, wanted the Footman and the Knight (control)`); return; }
+    await ready("knight.mdx");
+    await click("hfoo");
+    await shows("hfoo");
+    await ready("footman.mdx");
+    const r = await page.evaluate(`(() => {
+      const e = ${ed}, canvas = e.querySelector(".obj-preview canvas");
+      [...e.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === "hkni").click();
+      const now = [...e.querySelectorAll(".obj-item")], state = JSON.parse(e.querySelector(".obj-preview").dataset.state);
+      return {
+        kept: now.length === window.__smokeRows.length && now.every((x, i) => x === window.__smokeRows[i]),
+        selected: now.filter((x) => x.classList.contains("selected")).map((x) => x.querySelector("code").textContent),
+        sameCanvas: e.querySelector(".obj-preview canvas") === canvas,
+        path: String(state.path).toLowerCase(), ready: state.ready,
+      };
+    })()`);
+    if (!r.kept) fail("a click on another object made the list's rows anew");
+    if (r.selected.join() !== "hkni") fail(`after the click the list marks ${r.selected.join(", ") || "nothing"} as selected, wanted hkni`);
+    if (!r.path.endsWith("knight.mdx") || !r.ready) fail(`the Knight's model, shown a moment before, wasn't there at once (${r.path}, ready ${r.ready})`);
+    if (!r.sameCanvas) fail("showing a model again made a new canvas (a WebGL context per model)");
+  } finally {
+    await page.evaluate(`delete window.__smokeRows`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
@@ -10013,6 +10206,89 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** "Check with JassHelper" on a vJASS text (Trigger Editor), with the game's jasshelper.exe (through Proton on Linux):
+ *  the text is compiled inside the map's script, so a library that requires another text's library and names a placed
+ *  unit's global has no errors, where the same text alone has two (the control: what the check did before). An error
+ *  in another text is told with that text's name and line; a line typed and not saved is checked too, and its error
+ *  told by the text's own line. Needs the game (W3PROJ_GAME). */
+async function vjassCheck(page, found) {
+  const fail = (what) => found.push(`vJASS check: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  try {
+    const k = await heightKit(page, "VjassCheck");
+    // A save whose script JassHelper refuses says so once (Map Script): expected here while Lib A is broken.
+    await page.evaluate(`(() => { window.__vjWarns = []; w3.window.showWarning = (m) => { window.__vjWarns.push(String(m)); }; })()`);
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    const footman = k.units().find((u) => u.id === "hfoo");
+    if (!footman) return fail("the placed footman isn't in the units file (control)");
+    const global = `gg_unit_hfoo_${String(footman.editorId).padStart(4, "0")}`;
+    const libA = (call) => `library A\r\n    function AF takes nothing returns nothing\r\n        call ${call}\r\n    endfunction\r\nendlibrary\r\n`;
+    const usesA = (requires) => `library B initializer Init${requires}\r\n    private function Init takes nothing returns nothing\r\n        call KillUnit(${global})\r\n    endfunction\r\nendlibrary\r\n`;
+    await k.tool("create_script_trigger", { name: "Lib A", script: libA("DoNothing()") });
+    await k.tool("create_script_trigger", { name: "Uses A", script: usesA(" requires A") });
+    await settled(page);
+    // The map's own compile takes it: this is right code for this map.
+    const made = readFileSync(join(k.root, "map", "war3map.j"), "latin1");
+    if (!/LIBRARY_B\s*=\s*true/.test(made) || !made.includes(global)) return fail(`the map's script wasn't compiled with the two libraries (control): ${JSON.stringify(await page.evaluate(`window.__vjWarns`))}`);
+
+    /** Shows a trigger in the Trigger Editor, presses Check with JassHelper and gives what it says. */
+    const check = async (name) => {
+      await page.evaluate(`w3.commands.execute("w3.triggers.reveal", ${JSON.stringify(name)})`);
+      await until(`the vJASS text ${name}`, () => page.evaluate(`document.querySelector("input.trig-name")?.value === ${JSON.stringify(name)} && !!document.querySelector("button.vjass-check")`), 20000);
+      return pressCheck();
+    };
+    const pressCheck = async () => {
+      await k.hands.click("button.vjass-check");
+      const said = () => page.evaluate(`document.querySelector(".vjass-check-status")?.textContent ?? ""`);
+      await until("JassHelper's answer", async () => { const s = await said(); return s !== "" && !/^Compiling/.test(s); }, 120000);
+      return said();
+    };
+    const clean = await check("Uses A");
+    if (!/^JassHelper: no errors/.test(clean)) fail(`a library that requires another text's library and names a placed unit's global: ${clean}`);
+    const tip = await page.evaluate(`document.querySelector("button.vjass-check").title`);
+    if (/text alone/.test(tip) || !/map's script/.test(tip)) fail(`the check's tooltip says: ${tip}`);
+
+    // Control: the same text alone, as the check compiled it before, has both errors (one per run: JassHelper stops
+    // at the first step that fails).
+    const alone = (text) => page.evaluate(`(async () => {
+      const stub = "function main takes nothing returns nothing\\r\\nendfunction\\r\\nfunction config takes nothing returns nothing\\r\\nendfunction\\r\\n";
+      const dir = await w3.backend.invoke("tool_temp_dir");
+      const put = (name, content) => w3.workspace.writeText(dir + "/" + name, content);
+      await put("common.j", await w3.game.readText("Scripts\\\\common.j"));
+      await put("Blizzard.j", await w3.game.readText("Scripts\\\\Blizzard.j"));
+      await put("input.j", ${JSON.stringify(text)} + stub);
+      const exe = w3.settings.get("game.installDir") + "/_retail_/x86_64/JassHelper/jasshelper.exe";
+      const r = await w3.backend.invoke("tool_run", { exe, args: ["--scriptonly", "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir, guard: { idleMs: 60000, resultFiles: ["output.j", "logs/compileerrors.txt"] } });
+      return w3.workspace.readText(dir + "/logs/compileerrors.txt").catch(() => "no errors written, exit code " + r.code);
+    })()`, { timeout: 120000 });
+    const noLibrary = await alone(usesA(" requires A")), noGlobal = await alone(usesA(""));
+    if (!/Missing requirement: A/.test(noLibrary)) fail(`the text alone compiled without the library it requires (control): ${noLibrary}`);
+    if (!noGlobal.includes(`Undeclared variable ${global}`)) fail(`the text alone compiled without the unit's global (control): ${noGlobal}`);
+
+    // An error in the other text: told with that text's name and line, not as this text's.
+    await k.tool("set_trigger_script", { name: "Lib A", script: libA("NoSuchFunction()") });
+    await settled(page);
+    const elsewhere = await check("Uses A");
+    if (!/outside this text/.test(elsewhere) || !/in "Lib A", line 3: Undeclared function NoSuchFunction/.test(elsewhere) || /^JassHelper: Line/.test(elsewhere)) fail(`with an error in the other library, the check says: ${elsewhere}`);
+
+    // A line typed and not saved: checked as typed, its error by the text's own line (its sixth; step 1
+    // fails before Lib A's error is reached). Left unsaved: closing drops it.
+    await page.evaluate(`w3.commands.execute("w3.triggers.reveal", "Uses A")`);
+    await until("the vJASS text's code editor", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Uses A" && !!document.querySelector(".trig-code .cm-content")`), 20000);
+    await k.hands.click(".trig-code .cm-content");
+    await k.hands.chord("Ctrl+End");
+    await k.hands.type("//! runtextmacro SmokeNoSuchMacro()");
+    const typed = await pressCheck();
+    if (!/^JassHelper: Line 6: Unable to find textmacro/.test(typed)) fail(`with a line typed and not saved, the check says: ${typed}`);
+    if (readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8").includes("SmokeNoSuchMacro")) fail("the check saved the typed line");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`))) fail("the typed line isn't an unsaved change (control)");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** A map script changed by hand inside the functions the generator writes (main) isn't overwritten by the next save: it
  *  stays, a warning says so once per project, Show Difference shows it against what the map's data makes, and Replace
  *  makes a checkpoint first and then regenerates it. A project without the stamp (a fresh import) whose script is what
@@ -10329,6 +10605,126 @@ async function staleEditors(page, found) {
     await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; if (!kept) return;
       ed.memory = kept.memory; delete ed.resolveTab; ed.confirm = kept.confirm; w3.window.showWarning = kept.warn; w3.window.pickSaveFile = kept.save; window.__open?.(); })()`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** The Trigger Editor's lines selected together: Shift/Ctrl-click, Select All and Clear (Ctrl+A, Escape), then Delete, Cut,
+ *  Copy and Paste (Ctrl+X/C/V) and Toggle Function Enabled (Ctrl+E) acting on all of them as one undo step each; a paste
+ *  into a map without the variables the lines use creates them (type, array, initial value) with the lines, in the same
+ *  step, unless the setting triggers.autoCreateVariables is off; Toggle Trigger Enabled by its command. */
+async function triggerMultiSelect(page, found) {
+  try {
+  const fail = (what) => found.push(`trigger multi-select: ${what}`);
+  const k = await heightKit(page, "TrigMulti");
+  const WTG = "map/war3map.wtg.json";
+  await page.evaluate(`(() => { window.__mw = { warn: w3.window.showWarning, info: w3.window.showInfo, said: [] };
+    w3.window.showWarning = async (m) => { window.__mw.said.push(String(m)); }; w3.window.showInfo = async (m) => { window.__mw.said.push(String(m)); }; })()`);
+  try {
+    await k.tool("add_trigger_variable", { name: "score", type: "integer", initialValue: "5" });
+    await k.tool("add_trigger_variable", { name: "marks", type: "real", array: true, size: 4 });
+    await k.tool("create_script_trigger", { name: "Multi", script: "" });
+    const wtg = k.read("war3map.wtg.json");
+    const t = wtg.items.find((i) => i.name === "Multi");
+    t.isCustom = false;
+    const nothing = (n) => ({ kind: 2, name: "DoNothing", enabled: true, params: [], children: [] });
+    t.ecas = [{ kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "score" }, { type: 3, value: "1" }], children: [] },
+      { kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "marks", index: { type: 3, value: "2" } }, { type: 3, value: "1.5" }], children: [] },
+      nothing(), nothing(), nothing()];
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(WTG)}, ${JSON.stringify(JSON.stringify(wtg, null, 2))})`);
+    await k.run("w3.triggers.reveal", "Multi");
+    await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 5`), 20000).catch(() => fail("the editor doesn't show Multi's five lines"));
+    const count = (sel) => page.evaluate(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
+    const click = (i, how = {}) => page.evaluate(`(() => { const el = document.querySelectorAll(".trig-eca")[${i}];
+      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: ${!!how.ctrl}, shiftKey: ${!!how.shift} })); })()`);
+    const key = (name, how = {}) => page.evaluate(`(() => { const el = document.querySelector(".trig-eca.active") ?? document.querySelector(".trig-eca");
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(name)}, ctrlKey: ${!!how.ctrl}, shiftKey: ${!!how.shift}, bubbles: true, cancelable: true })); })()`);
+    const active = () => page.evaluate(`[...document.querySelectorAll(".trig-eca")].flatMap((e, i) => (e.classList.contains("active") ? [i] : []))`);
+    const lines = () => count(".trig-eca");
+    const said = () => page.evaluate(`window.__mw.said.splice(0)`);
+    // The map's variables as saved (the tool reads the file).
+    const vars = async () => { await k.save(); return k.read("war3map.wtg.json").variables.map((v) => v.name); };
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const expectActive = async (what, want) => { const got = await active(); if (!same(got, want)) fail(`${what}: selected lines ${JSON.stringify(got)}, not ${JSON.stringify(want)}`); };
+
+    // Selecting: Shift for a range, Ctrl to add and to take out, Ctrl+A and Escape.
+    await click(0); await click(2, { shift: true });
+    await expectActive("a click and a Shift-click", [0, 1, 2]);
+    await click(4, { ctrl: true });
+    await expectActive("a Ctrl-click", [0, 1, 2, 4]);
+    await click(1, { ctrl: true });
+    await expectActive("a Ctrl-click on a selected line", [0, 2, 4]);
+    await click(3);
+    await expectActive("a plain click", [3]);
+    await key("a", { ctrl: true });
+    await expectActive("Ctrl+A", [0, 1, 2, 3, 4]);
+    await key("Escape");
+    await expectActive("Escape", []);
+
+    // Copy, then Delete: all selected lines go in one step, and one undo brings them all back.
+    await click(0); await click(1, { shift: true });
+    await key("c", { ctrl: true });
+    await click(0); await click(3, { ctrl: true });
+    await key("Delete");
+    if ((await lines()) !== 3) fail(`Delete of two lines left ${await lines()} lines, not 3`);
+    await key("z", { ctrl: true });
+    if ((await lines()) !== 5) fail(`one undo of the Delete left ${await lines()} lines, not 5`);
+    if (await page.evaluate(`!!document.querySelector(".trig-eca.active") && document.querySelectorAll(".trig-eca.active").length > 1`)) fail("undo left a stale multi-selection");
+
+    // Toggle Function Enabled on several: all off, one undo, all on again.
+    await click(2); await click(4, { shift: true });
+    await key("e", { ctrl: true });
+    if ((await count(".trig-eca.off")) !== 3) fail(`Ctrl+E on three lines turned off ${await count(".trig-eca.off")}`);
+    await key("z", { ctrl: true });
+    if ((await count(".trig-eca.off")) !== 0) fail("one undo of Toggle Function Enabled didn't turn all three back on");
+
+    // Cut: two lines onto the clipboard with their variables, the map's variables removed, then Paste creates them.
+    await click(0); await click(1, { shift: true });
+    await key("x", { ctrl: true });
+    if ((await lines()) !== 3) fail(`Cut of two lines left ${await lines()} lines, not 3`);
+    // The tool leaves a file with unsaved changes alone.
+    await k.save();
+    await k.tool("remove_trigger_variable", { name: "score" }).catch((e) => fail(`score is still used after the cut: ${e.message}`));
+    await k.tool("remove_trigger_variable", { name: "marks" }).catch((e) => fail(`marks is still used after the cut: ${e.message}`));
+    if ((await vars())?.includes("score")) fail("the variable score wasn't removed");
+    await said();
+    await click(1);
+    await key("v", { ctrl: true });
+    if ((await lines()) !== 5) fail(`Paste of two lines gave ${await lines()} lines, not 5`);
+    await expectActive("the lines just pasted", [2, 3]);
+    const have = await vars();
+    if (!have?.includes("score") || !have.includes("marks")) fail(`pasting didn't create the variables the lines use: ${JSON.stringify(have)}`);
+    await k.save();
+    const made = k.read("war3map.wtg.json").variables;
+    const score = made.find((v) => v.name === "score"), marks = made.find((v) => v.name === "marks");
+    if (score?.type !== "integer" || score.initialValue !== "5") fail(`the created score is ${JSON.stringify(score)}`);
+    if (marks?.type !== "real" || marks.isArray !== true || marks.arraySize !== 4) fail(`the created marks is ${JSON.stringify(marks)}`);
+    if (!(await said()).some((m) => /Created the variables? /.test(m))) fail("pasting said nothing about the variables it created");
+    // One undo takes lines and variables back together.
+    await key("z", { ctrl: true });
+    const after = await vars();
+    if ((await lines()) !== 3 || after?.includes("score") || after?.includes("marks")) fail(`one undo of the Paste left ${await lines()} lines and the variables ${JSON.stringify(after)}`);
+    // The setting off: the lines come, the variables don't, and the warning names them.
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", false)`);
+    await click(1);
+    await key("v", { ctrl: true });
+    const off = await vars();
+    if ((await lines()) !== 5 || off?.includes("score")) fail(`with the setting off, Paste gave ${await lines()} lines and the variables ${JSON.stringify(off)}`);
+    if (!(await said()).some((m) => /this map doesn't have: score, marks/.test(m))) fail("with the setting off, the warning doesn't name the variables");
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", undefined)`);
+
+    // Toggle Trigger Enabled by its command, one undo step.
+    const enabled = () => page.evaluate(`[...document.querySelectorAll(".trig-flag")].find((l) => l.textContent.trim() === "Enabled")?.querySelector("input")?.checked`);
+    if ((await enabled()) !== true) fail("the trigger doesn't start enabled");
+    if (await k.run("w3.triggers.toggleTriggerEnabled")) fail("Toggle Trigger Enabled was refused");
+    if ((await enabled()) !== false) fail("Toggle Trigger Enabled didn't turn the trigger off");
+    await key("z", { ctrl: true });
+    if ((await enabled()) !== true) fail("one undo of Toggle Trigger Enabled didn't turn it on");
+  } finally {
+    await page.evaluate(`(() => { w3.window.showWarning = window.__mw.warn; w3.window.showInfo = window.__mw.info; w3.settings.set("triggers.autoCreateVariables", undefined); w3.editors.closeAll(); })()`);
   }
   } finally {
     await restoreWindow(page);
@@ -12077,6 +12473,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectLayout: (p, f) => objectLayout(p, f, project),
+        objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
@@ -12114,11 +12511,13 @@ async function run() {
         tileCleanup,
         tilesInPlace,
         tileTemplate,
+        triggerMultiSelect,
         triggersAndAi,
         typedFieldSave,
         unitProperties,
         verify3Steps,
         viewModes,
+        vjassCheck,
         waterPathing,
         wholeMapGround,
         workbenchState,
@@ -12315,6 +12714,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "staleEditors", found);
   await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
   await leftOpen(page, "scriptGuard", found);
+  await vjassCheck(page, found).catch((e) => found.push(`vJASS check: ${e.message}`));
+  await leftOpen(page, "vjassCheck", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
@@ -12341,6 +12742,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
   await leftOpen(page, "editorExtras", found);
+  await triggerMultiSelect(page, found).catch((e) => found.push(`trigger multi-select: ${e.message}`));
+  await leftOpen(page, "triggerMultiSelect", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
@@ -12391,6 +12794,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "playerStarts", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
   await leftOpen(page, "objectLayout", found);
+  await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
+  await leftOpen(page, "objectListKept", found);
   await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
   await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));

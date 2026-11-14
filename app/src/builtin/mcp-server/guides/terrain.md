@@ -95,8 +95,7 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
 - Bare singles look lost. Set a rock beside a tree, and scrub and vines around rocks and trees.
 - Fill the border too. Past the playable map is the backdrop players see at the edge: 7 of 8 ladder maps
   have trees and doodads out there, up to a fifth of all they have. Units and items can't stand there.
-  While the user's setting Enforce Camera Bounds is on (the World Editor's default), nothing can be placed
-  outside the camera bounds: ask the user to turn it off for the backdrop.
+  Doodads and destructables can go anywhere on the map, outside the camera bounds too.
 - Don't overfill. Packing an area looks terrible and slows the game. Leave open ground where units fight.
 - Everything should have a reason to be there: treasure beside a Goblin Merchant, cages by dangerous creeps,
   no torches in the snow, no cage in the middle of nowhere. Keep to the tileset's theme.

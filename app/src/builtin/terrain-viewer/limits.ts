@@ -26,44 +26,14 @@ export function waterLimitHits(before: readonly WaterWord[], after: readonly Wat
 export const waterLimitText = (corners: number) =>
   `Not done: the water at ${corners} corner${corners === 1 ? "" : "s"} would go past the game's lowest or highest water height. Turn off Enforce Water Height Limits to have it cut off there.`;
 
-/** Where Enforce Camera Bounds keeps an object from going, as a paste and the AI tools say it. */
-export const OUTSIDE_BOUNDS = "outside the camera bounds (turn off Enforce Camera Bounds to allow it)";
-
-/**
- * Where a unit ends up once `snap` (a building's grid snap) has moved it, if that is still inside the bounds;
- * null if the snap pushed it out. The bounds are checked on the spot as given before the snap, and a spot
- * near the edge can leave them by a few units when it is snapped.
- */
-export async function snappedInside(b: Bounds | null, snap: (x: number, y: number) => Promise<readonly [number, number]>, x: number, y: number): Promise<[number, number] | null> {
-  const [sx, sy] = await snap(x, y);
-  return insideBounds(b, sx, sy) ? [sx, sy] : null;
-}
-
 /** Whether something fits where `snap` puts it: room is asked at the snapped spot, the one used. */
 export async function fitsSnapped(snap: (x: number, y: number) => Promise<readonly [number, number]>, fits: (x: number, y: number) => Promise<boolean>, x: number, y: number): Promise<boolean> {
   const [sx, sy] = await snap(x, y);
   return fits(sx, sy);
 }
 
-/** The warning for an edit Enforce Camera Bounds refused: `what` is the subject and verb, e.g. "that is". */
-export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE_BOUNDS}.`;
-
-/** The warning for objects a move held at the camera bounds. */
-export const stoppedAtBoundsText = (count: number) => `${count} object${count === 1 ? "" : "s"} stopped at the camera bounds (turn off Enforce Camera Bounds to go past them).`;
-
 import { refuseShift, type Bounds } from "./moveedit";
 export type { Bounds };
-
-/** The camera bounds of a map's w3i (left, bottom, right, top first), or null if it has none to trust. */
-export function cameraRect(info: { cameraBounds?: readonly number[] } | null | undefined): Bounds | null {
-  const b = info?.cameraBounds;
-  if (!Array.isArray(b) || b.length < 4 || !b.slice(0, 4).every((n) => Number.isFinite(n))) return null;
-  const [left, bottom, right, top] = b;
-  return left < right && bottom < top ? { left, bottom, right, top } : null;
-}
-
-/** Whether a point is inside the bounds (their edge too); everything is, without bounds. */
-export const insideBounds = (b: Bounds | null, x: number, y: number) => !b || (x >= b.left && x <= b.right && y >= b.bottom && y <= b.top);
 
 /** The point, or the nearest one inside the bounds. */
 export const clampPoint = (b: Bounds | null, x: number, y: number): [number, number] =>
@@ -71,13 +41,18 @@ export const clampPoint = (b: Bounds | null, x: number, y: number): [number, num
 
 /**
  * A nudge for a group, held to the bounds: a step that would pass one is refused (refuseShift), not cut back.
- * `steps` is how many nudges long each entry moves (a building goes twice as far, on its finer grid), so the
- * group's step is the longest one and each entry takes its share: nothing ends up past its bound, whatever its step.
+ * `steps` is how many nudges long each entry's own step is (a building goes twice as far, on its finer grid); the
+ * group moves by the longest one, all by the same shift, and what stands on a grid snaps to it afterwards (a pathless
+ * doodad with a tree goes 64, not 8: we-compare edge-group-nudge, the editor's probes with the pointer on either).
+ * A diagonal step with one axis refused is refused whole: at the east edge KP_9 moves nothing (the free axis doesn't
+ * move, we-compare edge-single-diagonal).
  */
 export function scaledNudge(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], steps: readonly number[], nudge: readonly [number, number]): [number, number][] {
   const longest = Math.max(1, ...steps);
-  const [dx, dy] = refuseShift(points, bounds, nudge[0] * longest, nudge[1] * longest);
-  return steps.map((s) => [(dx * s) / longest, (dy * s) / longest]);
+  const asked: [number, number] = [nudge[0] * longest, nudge[1] * longest];
+  let [dx, dy] = refuseShift(points, bounds, asked[0], asked[1]);
+  if (asked[0] !== 0 && asked[1] !== 0 && (dx === 0 || dy === 0)) { dx = 0; dy = 0; }
+  return steps.map(() => [dx, dy]);
 }
 
 /** Where a dragged or nudged object's centre may go so that what it takes up (`half`, across and up: a unit's
@@ -99,18 +74,15 @@ export interface PasteSkips {
   offMap: number;
   /** Units and items past the playable part. */
   pastPlayable: number;
-  /** Outside the camera bounds, with Enforce Camera Bounds on. */
-  outsideBounds: number;
 }
 
 /** What a paste says about the objects it didn't place, each reason on its own; null when it placed them all. */
 export function pasteSkipText(total: number, s: PasteSkips): string | null {
-  const skipped = s.noFile + s.offMap + s.pastPlayable + s.outsideBounds;
+  const skipped = s.noFile + s.offMap + s.pastPlayable;
   if (!skipped) return null;
   const reasons = [
     s.offMap ? `${s.offMap} would land off the map` : "",
     s.pastPlayable ? `${s.pastPlayable} ${s.pastPlayable === 1 ? "is a unit or item" : "are units or items"} past the playable part of the map, where they can't stand` : "",
-    s.outsideBounds ? `${s.outsideBounds} would land ${OUTSIDE_BOUNDS}` : "",
     s.noFile ? `${s.noFile} ${s.noFile === 1 ? "has" : "have"} no placement file in this map` : "",
   ].filter(Boolean);
   return `${skipped} of ${total} pasted object${total === 1 ? "" : "s"} ${skipped === 1 ? "wasn't" : "weren't"} placed: ${reasons.join("; ")}.`;

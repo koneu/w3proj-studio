@@ -97,6 +97,22 @@ export function newSound(name: string, file: string, opts: { music?: boolean; im
     coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "" };
 }
 
+// ---- order and preview volume ----------------------------------------------------------
+
+/** Sort Sound Variables: a new list ordered by SORT_KEY (a stable sort; equal names keep their order). */
+export function sortSounds<T extends { name: string }>(sounds: readonly T[]): T[] {
+  return sounds.map((s, i) => ({ s, i, k: SORT_KEY(s.name) })).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i - b.i)).map((e) => e.s);
+}
+/** The key Sort Sound Variables orders by. */
+export const SORT_KEY = (name: string) => name.toLowerCase();
+
+/** One step of Increase/Decrease Sound or Music Volume (of the editor's playback, not of a sound's own volume). */
+export const VOLUME_STEP = 0.1;
+/** A preview volume one step up or down, within 0 to 1 (rounded to a hundredth, so ten steps make a whole). */
+export function stepVolume(volume: number, dir: -1 | 1): number {
+  return Math.min(1, Math.max(0, Math.round((volume + dir * VOLUME_STEP) * 100) / 100));
+}
+
 // ---- where the map's sounds are used ---------------------------------------------------
 
 /** One place that names a sound. */

@@ -327,10 +327,6 @@ export interface TerrainObjects {
   settleDoodads(entries: PlacedEntry[], what: { place?: boolean; scale?: boolean }): Promise<void>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
-  /** Whether an object may stand here: false past the camera bounds while Enforce Camera Bounds is on. */
-  inBounds(x: number, y: number): boolean;
-  /** The warning for an object Enforce Camera Bounds refused; `what` is subject and verb, e.g. "that is". */
-  refusedOutside(what: string): string;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
    *  walking unit. Unlike occupancy(), units and items don't count. */
   blockers(): Promise<Uint8Array>;
@@ -519,6 +515,9 @@ export interface TriggerKind {
   /** Fills `el` with the trigger's body (below the host's name, flags and comment). */
   render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle):
     { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean;
+      /** The editor's commands on the body's lines (Select All, Clear, Toggle Function Enabled); false when the body has no
+       *  line for it. */
+      run?(action: "selectAll" | "clear" | "toggleFunction"): boolean;
       /** Applies text still waiting to be committed (a code editor's pause): the host calls it before a save, an
        *  undo or any other edit, so the save has it and its undo step comes first. */
       flush?(): void } | void;
@@ -551,6 +550,9 @@ export interface TriggerEditorHandle {
   /** The trigger's custom script text (war3map.wct), or null. */
   customText(trigger: TriggerItem): string | null;
   setCustomText(trigger: TriggerItem, text: string | null): void;
+  /** All custom texts as the editor holds them now (unsaved changes included): the map header and one text per
+   *  trigger and script item, in the order of war3map.wct. A copy. */
+  customFile(): import("../lib/triggers/wtg").CustomTextFile;
   /** Runs `change` on the trigger data as one undo step (snapshot before and after) and redraws;
    *  `keepView` leaves the trigger's own view as it is (an editor committing while typing). */
   edit(label: string, change: () => void, opts?: { keepView?: boolean }): void;
@@ -603,6 +605,11 @@ export interface ScriptLanguagesService {
   register(language: ScriptLanguage): { dispose(): void };
   /** The registered languages (in registration order). */
   languages(): ScriptLanguage[];
+  /** The open JASS map's script as it is generated before any language compiles it (what a language's `compile`
+   *  gets), made from the project's saved files but with these triggers and custom texts in place of the saved
+   *  ones (a trigger editor's, unsaved changes included). Nothing is written. Throws for a Lua map, without a
+   *  project, or when the script can't be generated. */
+  source(held: { triggers: import("../lib/triggers/wtg").TriggerFile; custom: import("../lib/triggers/wtg").CustomTextFile | null }): Promise<string>;
 }
 
 export const SCRIPT_LANGUAGES_SERVICE = "w3.scriptLanguages";

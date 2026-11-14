@@ -30,7 +30,7 @@ import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
+import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
 
 /** Hash of the script this app wrote last: a script that still has it holds nothing but what the
  *  map's triggers made, so it's replaced without looking (see lib/script/guard). */
@@ -86,6 +86,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { dispose: () => { const i = languages.indexOf(language); if (i >= 0) languages.splice(i, 1); } };
     },
     languages: () => [...languages],
+    source: async (held) => {
+      const root = requireProject(w3).root;
+      const made = await generate(true, held);
+      if (w3.workspace.project()?.root !== root) throw new Error("Another project is open now.");
+      if (made.path !== scriptPath(false)) throw new Error("This map's script is Lua.");
+      return made.text;
+    },
   };
   ctx.subscriptions.push(w3.services.provide(SCRIPT_LANGUAGES_SERVICE, languageService));
 
@@ -152,7 +159,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
  *  script is what the data makes): nothing is written, not even the melee flag a save turns off. */
-  const generate = async (look = false): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
+  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
     const root = w3.workspace.project()?.root;
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
@@ -167,15 +174,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // A broken file fails the generation; only a missing one means no triggers.
     const wtgJson = await w3.workspace.readText(WTG_JSON).catch(() => null);
     const wtg = wtgJson === null ? await bytes(WTG_RAW) : null;
-    const triggers = wtgJson !== null ? parseWtgJson(wtgJson) : wtg ? parseWtg(wtg, g.data) : undefined;
-    const custom = triggers ? await readWctFile(w3.workspace, textTriggers(triggers).length) : null;
+    const triggers = held ? held.triggers : wtgJson !== null ? parseWtgJson(wtgJson) : wtg ? parseWtg(wtg, g.data) : undefined;
+    const custom = held ? held.custom : triggers ? await readWctFile(w3.workspace, textTriggers(triggers).length) : null;
     // A language extension compiles maps written in it (JASS maps only); vJASS without one isn't
     // regenerated (the uncompiled text would break the map).
     const textList = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")];
     const texts = textList.join("\n");
     const current = await w3.workspace.readText(path).catch(() => "");
-    const language = info.scriptType === 1 ? undefined : languages.find((l) => l.detect({ texts: textList, script: current }));
-    if (!language && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
+    // `held`: the script before any language compiles it (ScriptLanguagesService.source).
+    const language = info.scriptType === 1 || held ? undefined : languages.find((l) => l.detect({ texts: textList, script: current }));
+    if (!language && !held && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
       return { path, text: "", vjass: VJASS_OUTPUT.test(current) ? "its script was compiled from vJASS" : "its triggers contain vJASS" };
     }
     const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
@@ -542,6 +550,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const written = await write("command");
       if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
+    // Export Script: the map script as it stands (a script still due from the last save is written first) copied byte for
+    // byte to a file the person picks. A map with a Lua script exports that; a missing script isn't an empty one.
+    w3.commands.register("w3.script.export", async () => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await w3.commands.execute("w3.script.settle");
+      const found = await exportableScript((p) => w3.workspace.readBytes(p));
+      if (!found) throw new Error("The map has no script yet: generate it first (Generate Map Script).");
+      const ext = found.path.endsWith(".lua") ? "lua" : "j";
+      const target = await w3.window.pickSaveFile({ title: "Export Script", defaultPath: found.path.slice(4), filters: [{ name: ext === "lua" ? "Lua script" : "JASS script", extensions: [ext] }] });
+      if (!target) return null;
+      await w3.backend.writeBytes(target, found.bytes);
+      void w3.window.showInfo(`Exported ${found.path.slice(4)} to ${target}`);
+      return target;
+    }),
     { dispose: () => { clearTimeout(timer); questions.abort(); } },
   );
+}
+
+/** The script Export Script writes: war3map.lua when the project has one, else war3map.j; null when neither is there.
+ *  A file that is there but can't be read is an error, not "no script". */
+export async function exportableScript(readBytes: (path: string) => Promise<Uint8Array>): Promise<{ path: string; bytes: Uint8Array } | null> {
+  for (const path of [scriptPath(true), scriptPath(false)]) {
+    try { return { path, bytes: await readBytes(path) }; } catch (e) { if (!isNotFoundError(e)) throw e; }
+  }
+  return null;
 }
