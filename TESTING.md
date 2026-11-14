@@ -338,6 +338,16 @@ It never starts the game itself.
   column's point at row 325.0 of an 844 high view, 222.6 of 592, 220.2 of 585 and 211.7 of 565, whatever the width:
   0.4057 h - 17.4 (within 0.3 px), not a share of the height (325.5 / 844 misses the small views by 6). Studio uses
   that row for wheel and keys (wheelzoom.ts `zoomPivotRow`).
+- **Random groups** (branch scatter-we, 2026-11-14, SD, `tests/fixtures/we-compare/random-group.w3m`: group 0 with lines
+  footman, knight, rifleman and one placed unit of it; spec `random-group-scatter`): the editor has no scatter brush for
+  units and no palette entry for a group (Neutral Hostile's palette has one Random Unit, by level, the red "?" at
+  1478,333); several group units at once come from a paste. Its save numbers every pasted object on (a two-unit paste:
+  editor ids 3 and 4), uDNR with random type 1, group, position. A placed group unit is drawn as one of its group's lines
+  under a "?" from the start (which one differs per start). Advanced (260,41) has Cycle Random Groups - Next / Previous
+  (Ctrl+= / Ctrl+-; `--key ctrl+equal` did nothing, the menu item 320,334 works) and Auto Cycle Random Groups (Ctrl+G,
+  on): with it on the drawn line changes by itself every 2 to 5 s with no input at all, both ways round the lines (15
+  pictures 2.3 s apart: F F R K R R R F R F K K F F F), and stays after Ctrl+G turns it off (10 pictures alike). It is
+  not tied to placing: pastes changed the line or not as the timer had it.
 - **Light Ranges** (branch light-radius, 2026-11-13, HD, `--look X,Y,3000,270,70,90` straight down, copies of the
   empty map with imported copies of the Ruins Brazier's HD model, one light value changed each; numbers in
   `target/evidence/light-radius/` of the main checkout): one ring per light on the ground under it, in the light's

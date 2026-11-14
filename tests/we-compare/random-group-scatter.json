@@ -1,0 +1,27 @@
+{
+  "name": "random-group-scatter",
+  "description": "bugs.md 'A scatter fill of random-group units gives its units only one editorId per fill'. Input: the empty 64x64 map with a random group 'Three' (number 0, one unit position, lines footman, knight, rifleman), one placed unit of it at 0, 0 and a camera at 0, 0 from 2000 (tests/fixtures/we-compare/make-random-group-input.mjs). The editor has no scatter brush for units and no palette entry for a group (Neutral Hostile's palette has only a Random Unit by level): its way of placing several group units at once is a paste. WE: the unit at 0, 0 copied and pasted once, then both box-selected, copied and pasted (two more in one paste); its save numbers every new object on, 0..4 in file order, each uDNR with random type 1, group 0, position 0. Studio: the placer's Random... from group 0 position 0, Scatter on, one click (a fill of several units in one step). Compared: editor ids unique and in order, and the kinds of object (unit-ids), not their number or places. Expected MATCH (before the fix Studio's fill gave all its units one editor id)",
+  "input": { "map": "${REPO}/tests/fixtures/we-compare/random-group.w3m" },
+  "we": {
+    "mode": "sd",
+    "steps": [
+      ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+      ["--key", "u"], ["--sleep", "500"],
+      ["--click", "749,395"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"], ["--sleep", "300"],
+      ["--move", "950,500"], ["--click", "950,500"], ["--sleep", "300"], ["--key", "Escape"], ["--sleep", "1000"],
+      ["--drag", "680,320:1020,560"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"], ["--sleep", "300"],
+      ["--move", "750,700"], ["--click", "750,700"], ["--sleep", "300"], ["--key", "Escape"], ["--sleep", "1000"]
+    ]
+  },
+  "studio": {
+    "steps": [
+      { "setting": ["script.generateOnSave", false] },
+      { "terrain": true },
+      { "ui": [["view", "we:0,0,2000"], ["tab", "Objects"]] },
+      { "eval": "document.querySelector('.terrain-place-random').click(); for (let i = 0; i < 50 && !document.querySelector('.random-dialog'); i++) await new Promise((r) => setTimeout(r, 200)); const d = document.querySelector('.random-dialog'); if (!d) throw new Error('no Random dialog'); const set = (sel, v) => { const s = d.querySelector(sel); if (!s) throw new Error('no ' + sel); if (s.type === 'radio') s.checked = true; else s.value = v; s.dispatchEvent(new Event('change')); }; set('.random-what', 'unit'); set('.random-by-group'); set('.random-group', '0'); set('.random-position', '0'); d.querySelector('.newmap-buttons button.primary').click(); if (document.querySelector('.random-dialog')) throw new Error('the Random dialog stayed open'); const box = [...document.querySelectorAll('label.terrain-place-opt')].find((l) => l.textContent.trim() === 'Scatter')?.querySelector('input'); if (!box) throw new Error('no Scatter box'); box.checked = true; box.dispatchEvent(new Event('change'));" },
+      { "ui": [["click", 749, 600], ["sleep", 1500]] },
+      { "eval": "const s = await w3.services.get('w3.terrain'); const n = (s.placedObjects()?.units ?? []).filter((u) => u.id === 'uDNR').length; if (n < 4) throw new Error('the scatter fill placed ' + (n - 1) + ' units');" }
+    ]
+  },
+  "compare": [{ "file": "war3mapUnits.doo", "as": "unit-ids" }]
+}

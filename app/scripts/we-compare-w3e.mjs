@@ -106,6 +106,22 @@ export function unitHeights(json) {
   return { units: (json.units ?? []).map((u) => ({ id: u.id, x: u.position[0], y: u.position[1], z: u.position[2] })) };
 }
 
+/** war3mapUnits.doo as the codecs' JSON, reduced to how its objects are numbered, for runs that place a different number
+ *  of objects at random spots (a scatter fill against the editor's pastes): whether every editor id is its own, whether
+ *  they run 0, 1, 2, … in file order, and the kinds of object there (id, and a random object's type, group and position),
+ *  not how many of each nor where. */
+export function unitIds(json) {
+  const units = json.units ?? [];
+  const ids = units.map((u) => u.editorId);
+  const kind = (u) => (!/^[uib]DNR$/.test(u.id) ? u.id
+    : u.randomType === 1 ? `${u.id} group ${u.randomGroup} position ${u.randomPosition}` : `${u.id} random type ${u.randomType}`);
+  return {
+    editorIdsUnique: new Set(ids).size === ids.length,
+    editorIdsInOrder: ids.every((n, i) => n === i),
+    kinds: [...new Set(units.map(kind))].sort(),
+  };
+}
+
 /** Per kind of "w3e…" compare: the parsed form of one save. */
 export function w3eView(kind, buf) {
   if (kind === "w3e") return readW3e(buf);

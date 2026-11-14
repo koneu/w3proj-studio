@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { heightSpread, readW3e, unitHeights, variationSpread, w3eView } from "./we-compare-w3e.mjs";
+import { heightSpread, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
@@ -76,6 +76,19 @@ test("unitHeights keeps id, x, y and z, in file order, and drops the rest of a u
   assert.notDeepEqual(unitHeights({ units: [unit("hfoo", 500), unit("hgry", 0)] }), a, "control: the height is");
 });
 
+test("unitIds: editor ids unique and in order, and the kinds of object, whatever their number and places", () => {
+  const sloc = { id: "sloc", randomType: 0, editorId: 0, position: [0, 0, 0] };
+  const group = (editorId, x = 0) => ({ id: "uDNR", randomType: 1, randomGroup: 0, randomPosition: 0, editorId, position: [x, 0, 0] });
+  const we = unitIds({ units: [sloc, group(1), group(2), group(3), group(4)] });
+  assert.deepEqual(we, { editorIdsUnique: true, editorIdsInOrder: true, kinds: ["sloc", "uDNR group 0 position 0"] });
+  assert.deepEqual(unitIds({ units: [sloc, group(1, 64), group(2, 128)] }), we, "the count and the places don't matter");
+  const dup = unitIds({ units: [sloc, group(1), group(1), group(2)] });
+  assert.equal(dup.editorIdsUnique, false, "control: a number given twice");
+  assert.equal(dup.editorIdsInOrder, false);
+  assert.equal(unitIds({ units: [sloc, group(2), group(1)] }).editorIdsInOrder, false, "control: out of order");
+  assert.deepEqual(unitIds({ units: [sloc, { ...group(1), randomType: 0 }] }).kinds, ["sloc", "uDNR random type 0"], "control: by level isn't a group");
+});
+
 test("the spec files in tests/we-compare/ that use these kinds parse", () => {
   // The tests run from a copy of the scripts: the folder is found from where they run (app/ or the repository).
   let dir = process.cwd();
@@ -84,14 +97,14 @@ test("the spec files in tests/we-compare/ that use these kinds parse", () => {
     dir = dirname(dir);
   }
   dir = join(dir, "tests", "we-compare");
-  const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json"];
+  const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json", "random-group-scatter.json"];
   let parsed = 0;
   for (const f of readdirSync(dir).filter((f) => names.includes(f))) {
     const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" });
     assert.ok(specs.length > 0, f);
     parsed += specs.length;
   }
-  assert.ok(parsed >= 5, `${parsed} specs parsed`);
+  assert.ok(parsed >= 6, `${parsed} specs parsed`);
 });
 
 test("variationSpread: the ground variations by texture, counted; w3e-variation compares the main values, not the counts", () => {

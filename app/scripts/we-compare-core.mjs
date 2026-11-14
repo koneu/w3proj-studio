@@ -3,7 +3,7 @@
 
 import { dirname, isAbsolute, resolve } from "node:path";
 
-const KINDS = ["auto", "parsed", "text", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights"];
+const KINDS = ["auto", "parsed", "text", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
 
 const isObject = (v) => v && typeof v === "object" && !Array.isArray(v);
@@ -233,7 +233,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
     return { file, kind, status: !we && !studio ? "MISSING" : "DIFFERS", count: 1, diffs: [{ text: `the file is in ${only === "neither" ? "neither map" : only === "WE only" ? "the World Editor's save only" : "Studio's save only"}` }] };
   }
   // The terrain's w3e and the units' heights: both sides are the reduced tables of we-compare-w3e.mjs, compared as parsed.
-  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation" || kind === "unit-heights") { const w = diffJson(we.json, studio.json, limit); return { file, kind, status: w.equal ? "MATCH" : "DIFFERS", ...w }; }
+  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation" || kind === "unit-heights" || kind === "unit-ids") { const w = diffJson(we.json, studio.json, limit); return { file, kind, status: w.equal ? "MATCH" : "DIFFERS", ...w }; }
   let r;
   if (kind === "parsed") r = diffJson(we.json, studio.json, limit, tolerance, ignore);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
