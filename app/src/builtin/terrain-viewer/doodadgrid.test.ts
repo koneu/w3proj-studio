@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, type PathSize } from "./doodadgrid";
+import { decodeImage } from "../../lib/image/index.ts";
+import { doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, snapSize, type PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 
 /** The pathing texture sizes of the measured types (the game's Doodads.slk and DestructableData.slk, the textures'
@@ -172,13 +173,62 @@ test("a square texture of more than one colour turns to the quarter, a plain one
   assert.deepEqual(doodadOnGrid(13.5, 21.25, 0.4, { width: 2, height: 2, mixed: true }), { x: 32, y: 32, angle: 0 });
 });
 
-test("mixedPicture: any pixel of another colour, alpha ignored", () => {
+test("mixedPicture: any pixel of another colour or another alpha", () => {
   const px = (...c: number[][]) => c.flatMap(([r, g, b, a = 255]) => [r, g, b, a]);
   assert.equal(mixedPicture(px([255, 0, 255], [255, 0, 255], [255, 0, 255])), false);
-  assert.equal(mixedPicture(px([255, 0, 255, 0], [255, 0, 255, 255])), false);
+  assert.equal(mixedPicture(px([255, 0, 255, 0], [255, 0, 255, 255])), true, "one colour, the alpha varies");
+  assert.equal(mixedPicture(px([255, 0, 255, 0], [255, 0, 255, 0])), false, "all of it transparent alike");
   assert.equal(mixedPicture(px([255, 0, 255], [255, 0, 255], [255, 0, 0])), true, "control: one red pixel");
   assert.equal(mixedPicture(px([0, 0, 0], [0, 0, 0])), false, "all black is one colour");
   assert.equal(mixedPicture([]), false);
+});
+
+/** A TGA as tests/fixtures/we-specs/make-doodad-snap.mjs writes it: rows top first, upper case opaque, lower case
+ *  alpha 0 (x magenta, r red, k black); 32-bit with `withAlpha`. */
+function tga(rows: string[], withAlpha: boolean): Uint8Array {
+  const h = rows.length, w = rows[0].length, head = new Uint8Array(18);
+  head[2] = 2; head[12] = w; head[14] = h; head[16] = withAlpha ? 32 : 24;
+  if (withAlpha) head[17] = 8;
+  const px: number[] = [];
+  for (const row of [...rows].reverse()) for (const c of row) {
+    px.push(...({ X: [255, 0, 255], R: [0, 0, 255] } as Record<string, number[]>)[c.toUpperCase()] ?? [0, 0, 0]);
+    if (withAlpha) px.push(c === c.toUpperCase() ? 255 : 0);
+  }
+  return new Uint8Array([...head, ...px]);
+}
+
+// we-compare spec doodad-snap-custom-alpha (2026-11-14, two runs): doodads 0-9 at 0.4 and 1.2 on these 32-bit
+// pictures, saved by the editor at 0 and 1.5707964; the control (two colours, opaque) the same.
+test("a one-colour picture whose alpha varies turns to the quarter (measured), decoded as the app reads it", () => {
+  const pictures: Record<string, string[]> = {
+    "own-a-xhalf4": ["xxXX", "xxXX", "xxXX", "xxXX"], "own-a-xone4": ["XXXX", "XXXX", "XXXX", "XXXx"],
+    "own-a-xring4": ["XXXX", "XxxX", "XxxX", "XXXX"], "own-a-rhalf4": ["rrRR", "rrRR", "rrRR", "rrRR"],
+    "own-a-khalf4": ["kkKK", "kkKK", "kkKK", "kkKK"], "own-a-mix4": ["XXRR", "XXRR", "XXRR", "XXRR"],
+  };
+  for (const [name, rows] of Object.entries(pictures)) {
+    const size = snapSize({ image: decodeImage(tga(rows, true), `Custom\\${name}.tga`).mip(0) });
+    assert.ok(size, name);
+    assert.equal(Math.fround(doodadOnGrid(-1486.5, 521.25, Math.fround(0.4), size).angle), 0, `${name} at 0.4`);
+    assert.equal(Math.fround(doodadOnGrid(-1186.5, 521.25, Math.fround(1.2), size).angle), Math.fround(1.5707964), `${name} at 1.2`);
+  }
+  // Control: the same magenta picture all opaque (32-bit) is one colour and keeps its angle.
+  const plain = snapSize({ image: decodeImage(tga(["XXXX", "XXXX", "XXXX", "XXXX"], true), "Custom\\plain.tga").mip(0) });
+  assert.equal(doodadOnGrid(0, 0, Math.fround(0.4), plain).angle, Math.fround(0.4));
+});
+
+// we-compare spec doodad-snap-custom-missing (2026-11-14, two runs): D300 and B300 (LTlt, fixed rotation 270) name
+// Custom\own-missing4.tga, which the map doesn't have; the editor saved doodads[0] where it stood, -1486.5, 521.25, 0.4.
+test("a type whose map-named pathing texture is missing stays where it stands (measured), though its type's own stands in", () => {
+  const standIn = { width: 4, height: 2, rgba: new Uint8ClampedArray(32).fill(255) };
+  assert.equal(snapSize({ image: standIn, fellBackTo: "PathTextures\\4x2Default.tga" }), null);
+  assert.equal(snapSize({ image: null }), null);
+  assert.deepEqual(snapSize({ image: standIn }), { width: 4, height: 2, mixed: false }, "control: the type's own texture");
+  const list = [
+    { id: "D300", position: [-1486.5, 521.25, 0], angle: Math.fround(0.4) },
+    { id: "B300", position: [-1486.5, 221.25, 0], angle: Math.fround(0.4) },
+  ] as unknown as Placed[];
+  const found = (id: string) => snapSize(id === "D300" || id === "B300" ? { image: standIn, fellBackTo: "PathTextures\\4x2Default.tga" } : { image: null });
+  assert.deepEqual(doodadSnaps(list, found, (id) => (id === "B300" ? 270 : null)), []);
 });
 
 test("a destructable's fixed rotation holds only with a pathing texture (measured: bptx _ keeps 0.4 and 2.9)", () => {

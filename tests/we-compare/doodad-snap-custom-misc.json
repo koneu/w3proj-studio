@@ -16,7 +16,7 @@
   },
   {
     "name": "doodad-snap-custom-missing",
-    "description": "the same map: a custom doodad (D300, flags 2, 0 and 1) and a custom destructable (B300) whose pathing texture the map names but doesn't have (Custom\\own-missing4.tga). KNOWN DIFFERENCE (2026-11-14, two runs): the editor leaves them where they stand, angle and place (doodads[0]: -1486.5, 521.25, angle 0.4); Studio snaps them to a grid and a quarter turn (-1504, 512, angle 0; the destructables to 4.712389)",
+    "description": "the same map: a custom doodad (D300, flags 2, 0 and 1) and a custom destructable (B300) whose pathing texture the map names but doesn't have (Custom\\own-missing4.tga). The editor leaves them where they stand, angle and place (2026-11-14, two runs; doodads[0]: -1486.5, 521.25, angle 0.4; the destructables keep theirs, not their type's fixed rotation), and so does Studio (doodadgrid.ts snapSize: no snap size when the type's own texture stands in)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-misc.w3x" },
     "studio": {
       "steps": [
@@ -26,7 +26,7 @@
         { "sleep": 2000 }
       ]
     },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }],
     "limit": 40
   }
 ]
