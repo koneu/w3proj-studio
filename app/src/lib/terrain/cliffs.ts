@@ -326,6 +326,87 @@ export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () =
   return out;
 }
 
+/** After corners moved to another cliff level (`before`: corner index to its level before the move), the ramp runs
+ *  through them that no longer climb are taken off, as the World Editor's cliff brush does (we-compare ramp-cliff-brush,
+ *  2026-11-14, plateau.w3x's south face with ramp lines of three corners, low, low, high):
+ *  - a run is an unbroken line of ramp-flagged corners along x or along y; one that climbed one level before (its
+ *    levels spanned exactly 1) and spans 0 or 2 after loses all its flags, also on corners the move didn't touch (the
+ *    high corner raised: 2,2,4; lowered: 2,2,2; the two low ones raised: 3,3,3);
+ *  - one that still climbs one level keeps them (the middle corner raised: 2,3,3), and so do runs across the ramp,
+ *    which are level (the rows of a wide ramp beside a column it lost).
+ *  Left as they were, such flags make ramp tiles across two levels, which the editor draws with holes (black wedges).
+ *  Returns the corners whose flag it cleared, each touched in `log` first. */
+export function dropBrokenRamps(t: Terrain, before: ReadonlyMap<number, number>, log: CornerLog): number[] {
+  const flagged = (x: number, y: number) => x >= 0 && y >= 0 && x < t.width && y < t.height && t.corners[y * t.width + x].ramp;
+  const drop = new Set<number>();
+  const seen = new Set<string>();
+  for (const i of before.keys()) {
+    if (!t.corners[i].ramp) continue;
+    const x0 = i % t.width, y0 = Math.floor(i / t.width);
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      let sx = x0, sy = y0;
+      while (flagged(sx - dx, sy - dy)) { sx -= dx; sy -= dy; }
+      const key = `${dx}:${sx},${sy}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const run: number[] = [];
+      for (let x = sx, y = sy; flagged(x, y); x += dx, y += dy) run.push(y * t.width + x);
+      if (run.length < 2) continue;
+      const span = (level: (k: number) => number) => {
+        const ls = run.map(level);
+        return Math.max(...ls) - Math.min(...ls);
+      };
+      if (span((k) => before.get(k) ?? t.corners[k].layer) === 1 && span((k) => t.corners[k].layer) !== 1) for (const k of run) drop.add(k);
+    }
+  }
+  for (const k of drop) {
+    log.touch(t, k);
+    t.corners[k].ramp = false;
+  }
+  return [...drop];
+}
+
+/** After a block of corners moved by cliff levels (`before`: corner index to its level before the move), every ramp
+ *  (corners joined by flags, side by side) the move didn't carry whole, with the ground round it, loses its flags:
+ *  the ramp itself and its 8 neighbours must all have moved by the same number of levels, or it no longer meets the
+ *  ground it was built between. Last Refuge's ramp cut by the Area panel's Level ±1 (2026-11-14) kept its flags with
+ *  the levels changed under part of it or beside it, which the World Editor draws with holes (black wedges) for that
+ *  w3e as Studio did; even the whole ramp raised with a cliff left beside it was one. Plain cliffs draw everywhere
+ *  (set_cliffs takes ramps away alike). Returns the corners whose flag it cleared, each touched in `log` first. */
+export function dropCutRamps(t: Terrain, before: ReadonlyMap<number, number>, log: CornerLog): number[] {
+  const delta = (k: number) => (before.has(k) ? t.corners[k].layer - (before.get(k) as number) : 0);
+  const near = (k: number) => {
+    const x = k % t.width, y = Math.floor(k / t.width), out: number[] = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if ((dx || dy) && nx >= 0 && ny >= 0 && nx < t.width && ny < t.height) out.push(ny * t.width + nx);
+    }
+    return out;
+  };
+  const side = (k: number) => near(k).filter((n) => n % t.width === k % t.width || Math.floor(n / t.width) === Math.floor(k / t.width));
+  const seen = new Set<number>(), drop: number[] = [];
+  for (const i of before.keys()) {
+    for (const start of [i, ...near(i)]) {
+      if (seen.has(start) || !t.corners[start].ramp) continue;
+      const group: number[] = [], todo = [start];
+      seen.add(start);
+      while (todo.length) {
+        const k = todo.pop() as number;
+        group.push(k);
+        for (const n of side(k)) if (!seen.has(n) && t.corners[n].ramp) { seen.add(n); todo.push(n); }
+      }
+      const by = delta(group[0]);
+      if (group.every((k) => delta(k) === by && near(k).every((n) => delta(n) === by))) continue;
+      drop.push(...group);
+    }
+  }
+  for (const k of drop) {
+    log.touch(t, k);
+    t.corners[k].ramp = false;
+  }
+  return drop;
+}
+
 /** The longest unbroken stretch of rows that fit, of two at least (one tile wide), nearest the middle one
  *  (`middle` is its index) when there are several as long. Null if none. */
 export function widestRun(fits: readonly boolean[], middle: number): [number, number] | null {
