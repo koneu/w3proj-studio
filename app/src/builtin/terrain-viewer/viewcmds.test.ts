@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, linearToSrgb, srgbToLinear, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import * as viewcmds from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
@@ -258,4 +258,52 @@ test("splitEdge: the border's cells go to one picture, the rest to the other", (
   const { inside, over } = viewcmds.splitEdge(rgba, EDGE);
   assert.equal(over[0], 9); assert.equal(inside[3], 0);
   assert.equal(over[4 * 4], 0); assert.equal(inside[4 * 4], 9);
+});
+
+// ---- the editor's linear-light blend (we-drive, regions of eight colours over land, shallow and deep water, 2026-11-14) ----
+
+// What the renderer's LINEAR_OVERLAY_FS does with one texel: the colour over the picture's pixel, in linear light.
+const blend = (dst: number[], c: ArrayLike<number>) => dst.map((d, i) => Math.round(linearToSrgb((1 - c[3] / 255) * srgbToLinear(d) + (c[3] / 255) * srgbToLinear(c[i]))));
+
+test("regionColors, linear: the fill's alpha and colour give the editor's pixels over grass, water and the pathing's blue", () => {
+  const region = (red: number, green: number, blue: number) => regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red, green, blue } }], 8, 4, -128, -64, null, true);
+  const fill = (rgba: Uint8Array) => [...rgba.subarray((1 * 8 + 3) * 4, (1 * 8 + 3) * 4 + 4)]; // an inside cell
+  // Measured in the editor: over land (1, 125, 0) pure red came out 194, 86, 0, green 0, 208, 0, grey 97, 127, 96, black 0, 86, 0.
+  const near = (got: number[], want: number[], tol = 4) => assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= tol), `${got} against ${want}`);
+  near(blend([1, 125, 0], fill(region(255, 0, 0))), [194, 86, 0]);
+  near(blend([1, 125, 0], fill(region(0, 255, 0))), [0, 208, 0]);
+  near(blend([1, 125, 0], fill(region(128, 128, 128))), [97, 127, 96]);
+  near(blend([1, 125, 0], fill(region(0, 0, 0))), [0, 86, 0]);
+  // Over deep water the same blend: yellow 196, 199, 54 measured over (44, 68, 81).
+  near(blend([44, 68, 81], fill(region(255, 255, 0))), [196, 199, 54]);
+  // Control: the old alpha-over fill is far from it.
+  const old = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
+  assert.ok(Math.abs(blend([1, 125, 0], [...old.subarray((1 * 8 + 3) * 4, (1 * 8 + 3) * 4 + 4)])[0] - 194) > 8);
+});
+
+test("groundPathingColors, linear: pure magenta and blue at the editor's alpha; the border and the old colours as before", () => {
+  const rgba = groundPathingColors([NO_WALK, NO_BUILD, 0, 0, 0, 0, 0, 0, 0, 0], null, true);
+  assert.deepEqual([...rgba.subarray(0, 4)], [255, 0, 255, 66]);
+  assert.deepEqual([...rgba.subarray(4, 8)], [0, 0, 255, 66]);
+  // Over land (1, 125, 0) blue came out 1, 109, 137; over deep water (59, 78, 88) magenta 144, 67, 153.
+  const near = (got: number[], want: number[]) => assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= 5), `${got} against ${want}`);
+  near(blend([1, 125, 0], rgba.subarray(4, 8)), [1, 109, 137]);
+  near(blend([59, 78, 88], rgba.subarray(0, 4)), [144, 67, 153]);
+  const cells = new Array(32).fill(NO_WALK);
+  assert.deepEqual([...groundPathingColors(cells, EDGE, true).subarray(0, 4)], [137, 138, 137, 255], "over the border as without linear");
+});
+
+test("composeLayers, linear: regions under the pathing's blue mix in linear light, as the editor's (red over grass, then blue: 170, 75, 137)", () => {
+  const red = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64, null, true);
+  const blue = groundPathingColors(new Array(32).fill(NO_BUILD), null, true);
+  const mixed = composeLayers([red, blue], true)!;
+  const i = (1 * 8 + 3) * 4;
+  const got = blend([1, 125, 0], mixed.subarray(i, i + 4));
+  assert.ok(got.every((v, k) => Math.abs(v - [170, 75, 137][k]) <= 4), `${got}`);
+  const twice = blend(blend([1, 125, 0], red.subarray(i, i + 4)), blue.subarray(i, i + 4));
+  assert.ok(got.every((v, k) => Math.abs(v - twice[k]) <= 2), `one blend of the mix ${got} against two ${twice}`);
+  // Control: mixed in sRGB it is far off the two blends.
+  const srgb = composeLayers([red, blue])!;
+  const wrong = blend([1, 125, 0], srgb.subarray(i, i + 4));
+  assert.ok(wrong.some((v, k) => Math.abs(v - twice[k]) > 4), `${wrong}`);
 });

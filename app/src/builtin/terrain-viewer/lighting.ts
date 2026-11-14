@@ -6,6 +6,7 @@
 import type { W3Api } from "../../extensions/api";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, type LightModel } from "../../lib/model/dnclight";
+import { hdWaterSettings, type HdWaterSettings } from "./hdwater";
 
 export interface MapLighting {
   terrain: LightModel | null;
@@ -17,6 +18,8 @@ export interface MapLighting {
   /** Map flags (war3map.w3i; 0 without) and the water tint as stored (b, g, r, a in 0–255). */
   flags: number;
   waterTint: number[] | null;
+  /** The map's HD water settings (war3map.w3i's `water`; the defaults without one). */
+  water: HdWaterSettings;
 }
 
 /** Map flags for water: tinting, waves (shoreline foam) on cliff shores and on rolling shores. */
@@ -37,7 +40,7 @@ interface Lights { terrainModel: string; unitModel: string; terrainEnabled: numb
 
 export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLighting> {
   const [info, lights, data] = await Promise.all([
-    readMapDoc<{ lightEnvironment?: string; flags?: number; waterTint?: number[] }>(w3, "war3map.w3i"),
+    readMapDoc<{ lightEnvironment?: string; flags?: number; waterTint?: number[]; water?: unknown }>(w3, "war3map.w3i"),
     readMapDoc<Lights>(w3, "war3map.w3l"),
     w3.game.readText("UI\\WorldEditData.txt").then(parseIni).catch(() => null),
   ]);
@@ -68,5 +71,6 @@ export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLi
     terrain, unit, own, source: notes.join(" · ") || "no lighting found (neutral light)",
     // Without map info (a game map viewed alone): the waves a new map has.
     flags: info?.flags ?? CLIFF_SHORE_WAVES | ROLLING_SHORE_WAVES, waterTint: info?.waterTint ?? null,
+    water: hdWaterSettings(info?.water),
   };
 }

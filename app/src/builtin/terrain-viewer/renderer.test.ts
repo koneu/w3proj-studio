@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
 import { borderShade } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
-import { castsSunShadow, edgeMode, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, playRect, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, meanBrightness, playRect, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -181,42 +181,6 @@ test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and 
     applySky(doc, { waterTint }, { tilesets: [] });
     assert.deepEqual(waterRamp(LORDAERON, doc.waterTint).shallowMin.slice(0, 3).map((c) => Math.round(c * 255)), [220, 80, 40], JSON.stringify(waterTint));
   }
-});
-
-test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-drive, 2026-11-08)", () => {
-  const rgb = (c: number[]) => c.map((v) => Math.round(v * 255));
-  // Measured in the deep middle of map 03's lake, and of the same map on Northrend and Barrens, game view on and off.
-  const within = (got: number[], lo: number[], hi: number[], what: string) =>
-    assert.ok(got.every((v, i) => v >= lo[i] - 3 && v <= hi[i] + 3), `${what}: ${got} outside ${lo}–${hi}`);
-  within(rgb(hdWaterColor("L", false)), [22, 54, 73], [23, 61, 73], "Lordaeron");
-  within(rgb(hdWaterColor("N", false)), [22, 48, 39], [23, 52, 41], "Northrend");
-  within(rgb(hdWaterColor("B", false)), [25, 41, 42], [26, 46, 44], "Barrens");
-  // OrcX02_03's city pool (Cityscape, game view, 2026-11-09): blue, not teal.
-  within(rgb(hdWaterColor("Y", false)), [50, 61, 121], [50, 61, 121], "Cityscape");
-  // Murgul Oasis (Sunken Ruins, the same HD Water.slk row as Cityscape) in game view, 2026-11-12: blue, not olive teal.
-  const ruins = rgb(hdWaterColor("Z", false));
-  within(ruins, [30, 94, 174], [30, 94, 174], "Sunken Ruins");
-  assert.ok(ruins[2] > ruins[1] && ruins[1] > ruins[0], `Sunken Ruins blue over green over red: ${ruins}`);
-  within(rgb(hdWaterColor("z", false)), ruins, ruins, "the tileset's letter in any case");
-  // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
-  within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
-});
-
-test("HD water over the ground as the editor's pools of set depths show it (we-drive, Lighting off)", () => {
-  // Five pools on map 03's flat grass (the ground there 3, 132, 0 with Water off): their mean colour in the editor.
-  const ground = [3, 132, 0];
-  const measured: [number, number[]][] = [[8, [23, 126, 29]], [16, [30, 119, 41]], [32, [34, 109, 51]], [48, [29, 92, 55]], [96, [25, 60, 69]]];
-  const deepColour = hdWaterColor("L", false).map((v) => v * 255);
-  for (const [depth, editor] of measured) {
-    const { alpha, deep } = hdWaterAt(depth);
-    const water = HD_WATER.shallow.map((s, k) => s + (deepColour[k] - s) * deep);
-    const got = ground.map((g, k) => g + (water[k] - g) * alpha);
-    assert.ok(got.every((v, k) => Math.abs(v - editor[k]) <= 5), `depth ${depth}: ${got.map(Math.round)} against the editor's ${editor}`);
-  }
-  // The shore fades in: barely any water at the very edge, all of it from the full depth on.
-  assert.equal(hdWaterAt(0).alpha, 0);
-  assert.equal(hdWaterAt(HD_WATER.full + 50).alpha, 1);
-  assert.ok(hdWaterAt(8).alpha < 0.3, "the outermost band is see-through");
 });
 
 test("a texture's mean brightness comes from a small mip level", () => {

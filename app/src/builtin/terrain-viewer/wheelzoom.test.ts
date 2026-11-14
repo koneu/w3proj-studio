@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Vec3 } from "../../lib/model/renderer";
 import { TerrainRenderer } from "./renderer";
-import { wheelPivot, wheelZoomDistance, wheelZoomTarget, zoomPivotRow, zoomStep } from "./wheelzoom";
+import { heldPan, wheelPivot,wheelZoomDistance, wheelZoomTarget, zoomPivotRow, zoomStep } from "./wheelzoom";
 
 test("one wheel notch changes the distance by 1.1", () => {
   assert.ok(Math.abs(wheelZoomDistance(1000, true, 200, 1e6) - 1100) < 1e-9);
@@ -108,4 +108,29 @@ test("a camera looking nearly level zooms about its target", () => {
   assert.deepEqual(wheelPivot({ origin: [0, 0, 100], dir: [0, 1, 0.1] }, t, 1e4), t, "the ray goes up");
   assert.deepEqual(wheelPivot({ origin: [0, 0, 100], dir: [0, 1, -1e-4] }, t, 1e4), t, "the ray meets the level too far away");
   assert.deepEqual(wheelZoomTarget(t, t, 1000, 1100), t);
+});
+
+test("a pan stops with the World Editor's camera target on the map's edge, past the camera bounds and the playable part", () => {
+  // The empty 64x64 map of the measurement: its edge at 4096 (camera bounds 2816, playable part 3328).
+  const map = { left: -4096, bottom: -4096, right: 4096, top: 4096 };
+  const pivotOf = (target: Vec3) => wheelPivot(camera(target, startD).ray(W / 2, zoomPivotRow(H)), target, startD * 20);
+  // The editor's camera at 3456, 0 (past the camera bounds and the playable part): nothing holds it.
+  const inside: Vec3 = [3456, -0.0993 * WE_D, 0];
+  assert.deepEqual(heldPan(inside, pivotOf(inside), map), inside);
+  // Panned far right and up: the editor's target (the pivot) stands on 4096, 4096, as the editor's status bar read.
+  const far: Vec3 = [9000, 7000, 0];
+  const held = heldPan(far, pivotOf(far), map);
+  const at = pivotOf(held);
+  assert.ok(Math.abs(at[0] - 4096) < 1e-6 && Math.abs(at[1] - 4096) < 1e-6, `the editor's target at ${at}`);
+  // Studio's own target is the middle of the view, south of the editor's by 0.0993 of its distance.
+  assert.ok(Math.abs(held[0] - 4096) < 1e-6 && Math.abs(held[1] - (4096 - 0.0993 * WE_D)) < 3, `Studio's target at ${held}`);
+  // The other two edges, and the height kept.
+  const low: Vec3 = [-9000, -7000, 12];
+  const heldLow = heldPan(low, pivotOf(low), map), atLow = pivotOf(heldLow);
+  assert.ok(Math.abs(atLow[0] - -4096) < 1e-6 && Math.abs(atLow[1] - -4096) < 1e-6 && heldLow[2] === 12);
+  // One axis past the edge leaves the other alone.
+  const side: Vec3 = [5000, 100, 0];
+  assert.equal(heldPan(side, pivotOf(side), map)[1], 100);
+  // A pivot that is no number moves nothing.
+  assert.deepEqual(heldPan(far, [NaN, 0, 0], map), far);
 });

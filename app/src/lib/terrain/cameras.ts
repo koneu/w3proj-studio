@@ -5,6 +5,48 @@
 /** The values of a camera object the drawing needs (the w3c entry has more). */
 export interface CameraObject { name?: string; targetX: number; targetY: number; zOffset?: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number }
 
+/** What the World Editor says when Enforce Camera Bounds refuses Create Camera or Set Camera To Current View (its
+ *  "Error" box, WESTRING_WARNING_CREATECAMOUTOFBOUNDS). */
+export const VIEW_OUTSIDE_BOUNDS = "The current camera position is outside of the world camera bounds.";
+
+/** The rectangle of a w3i's `cameraBounds` (four corners as x, y pairs; the first two are left, bottom and right,
+ *  top), or null when it has none to go by. */
+function boundsRect(cameraBounds: readonly number[] | null | undefined): { left: number; bottom: number; right: number; top: number } | null {
+  if (!Array.isArray(cameraBounds) || cameraBounds.length < 4) return null;
+  const xs = cameraBounds.filter((_, i) => i % 2 === 0), ys = cameraBounds.filter((_, i) => i % 2 === 1);
+  if (![...xs, ...ys].every((n) => Number.isFinite(n))) return null;
+  const left = Math.min(...xs), right = Math.max(...xs), bottom = Math.min(...ys), top = Math.max(...ys);
+  return left < right && bottom < top ? { left, bottom, right, top } : null;
+}
+
+/**
+ * Enforce Camera Bounds, what the World Editor's switch does for a new camera: whether a camera may be made from, or
+ * set to, a view whose target is `x`, `y`. With the switch on, Create Camera and Set Camera To Current View refuse a
+ * view whose target lies outside the map's camera bounds (`cameraBounds` of war3map.w3i) and show
+ * VIEW_OUTSIDE_BOUNDS; a target on the bounds' edge is inside. Where the eye is doesn't count. A map without camera
+ * bounds to go by refuses nothing.
+ * we-drive 2026-11-14 (branch camera-bounds-we, the empty 64x64 map: camera bounds x -2816..2816, y -3328..2816,
+ * playable part to 3328; views of distance 3000, angle of attack 304, rotation 90): refused at 3000, 0 (inside the
+ * playable part), 2820, 0, 4096, 0 and 0, 2900 (the eye inside the bounds); made at 2816, 0, 2700, 0, 0, 0 and
+ * 0, -3000 (the eye south of the whole map). With the switch off all were made.
+ */
+export function viewInCameraBounds(cameraBounds: readonly number[] | null | undefined, x: number, y: number): boolean {
+  const b = boundsRect(cameraBounds);
+  return !b || (x >= b.left && x <= b.right && y >= b.bottom && y <= b.top);
+}
+
+/**
+ * Enforce Camera Bounds for a camera's typed target: the World Editor's Camera Properties puts a Target X or Y typed
+ * past the camera bounds on the bound, without a word (we-drive 2026-11-14: Target X 3100 of a camera at 2700, -600
+ * became 2816 with the switch on, and stayed 3100 with it off). The target, or the nearest point of the bounds;
+ * the target as it is without bounds to go by, or when it is no number.
+ */
+export function targetInCameraBounds(cameraBounds: readonly number[] | null | undefined, x: number, y: number): [number, number] {
+  const b = boundsRect(cameraBounds);
+  if (!b || !Number.isFinite(x) || !Number.isFinite(y)) return [x, y];
+  return [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))];
+}
+
 /** Version 3's floats after the local angles: the World Editor's DoF Distance, DoF Scale and Pos Absolute Z, in the
  *  file's order (the codec's cameras definition). JSON written before they had names keeps them in `unknown`. */
 export const DEPTH_OF_FIELD = ["dofDistance", "dofScale", "posAbsoluteZ"] as const;
