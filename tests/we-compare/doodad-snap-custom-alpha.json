@@ -1,0 +1,32 @@
+[
+  {
+    "name": "doodad-snap-custom-alpha",
+    "description": "Snap Doodads on Load, doodads whose pathing texture is a 32-bit 4x4 file of the map of one colour whose alpha varies (magenta with half, one pixel or a ring transparent; red and black with half transparent), each at two angles (doodads 0-9; fixtures/we-specs/make-doodad-snap.mjs alpha): does the editor's mixed-picture rule look at the alpha (test.md)? KNOWN DIFFERENCE (2026-11-14, two runs): the editor turns all five to the quarter (doodads[0].angle 0, doodads[1] 1.5707964), as a picture of more than one colour; Studio keeps their angles (0.4, 1.2: doodadgrid.ts mixedPicture ignores alpha)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-alpha.w3x" },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "doodad-snap-custom-alpha-control",
+    "description": "the same map's control: a 32-bit picture of two colours (magenta and red), all opaque (doodads 10-11): turned to the quarter in both editors; the one-colour pictures (doodads 0-9) are doodad-snap-custom-alpha's",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-alpha.w3x" },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["doodads[0]", "doodads[1]", "doodads[2]", "doodads[3]", "doodads[4]", "doodads[5]", "doodads[6]", "doodads[7]", "doodads[8]", "doodads[9]"] }],
+    "limit": 40
+  }
+]

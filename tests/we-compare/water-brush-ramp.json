@@ -1,0 +1,86 @@
+[
+  {
+    "name": "water-ramp-on",
+    "description": "plateau.w3x (level 3 on 2, make-plateau.mjs): a Ramp, size 3, at 750,630 (column 32 down the south face, ramp-plateau-row), then Shallow Water size 1 on it at the same spot: does the editor take the ramp flags the water breaks off, as its cliff brush does (test.md)? KNOWN DIFFERENCE (2026-11-14, two runs): the editor takes the ramp's flags off (corners 32,25..27 ramp 0; Studio keeps 1), leaves row 25 at level 2 (Studio raises 30..34,25 to 3) and leaves the low rim untyped (cliffType 15; Studio 1)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "1473,310"],
+        ["--click", "1392,569"],
+        ["--click", "750,630"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 750, 630], ["tool", "Shallow:"], ["size", 1], ["click", 750, 630]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "water-ramp-below",
+    "description": "the same ramp, then Shallow Water size 3 on the low ground in front of it (750,700), the brush reaching the ramp's lower corners. KNOWN DIFFERENCE (2026-11-14, two runs): the editor takes the ramp's flags off (Studio keeps them), writes the water word 8448 on the dry corners round the water (Studio 8192) and raises corners of the plateau's south rim (28,27, 28..29,28: level 3; Studio 2)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "1473,310"],
+        ["--click", "1456,569"],
+        ["--click", "750,700"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 750, 630], ["tool", "Shallow:"], ["size", 3], ["click", 750, 700]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "water-ramp-deep",
+    "description": "the same ramp, then Deep Water size 3 on it (750,630). KNOWN DIFFERENCE (2026-11-14, two runs): the editor takes the ramp's flags off (Studio keeps them on 32,25..27); levels and cliff types round the water (rows 23..24 level 2 in the editor, 3 in Studio; cliffType 15 against 1 and the other way round)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "1441,310"],
+        ["--click", "1456,569"],
+        ["--click", "750,630"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 750, 630], ["tool", "Deep:"], ["size", 3], ["click", 750, 630]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  }
+]

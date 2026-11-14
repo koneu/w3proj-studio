@@ -511,6 +511,15 @@ pointer is at its own ticks, nothing in between (a 20 ms `--drag` of size 1 rais
 the press point), so a quick drag has gaps and two runs of it differ; at 3 s for 20 steps it sees every step and matches
 Studio's stroke (stamped along the way, `strokepath.ts`). The layer is the start's + 1 for the whole stroke, as Studio's.
 
+Water brush specs of round 14 (branch we-specs-r14, 2026-11-14; `water-brush-square`, `water-brush-low-level`,
+`water-brush-ramp`, `water-limit-square`): the palette's brush shape is under "Shape" at 1392,624 (circle) and 1424,624
+(square; the palette window cuts the buttons off at y 630, the top half takes the click), Studio's `ui` action
+`["shape","square"]`. Like the size, the shape stays as the last map left it in a running editor, so a spec after a
+square one clicks the circle. Advanced > Enforce Water Height Limits is ctrl+shift+w (its check mark seen gone after the
+key); it stays switched in that editor, so a spec that switches it off is the last of its file. With it off the editor
+still lifts low ground under the brush (as with it on) and only leaves the dry rim's water word at 8192
+(`water-limit-off-deep`, expect differs).
+
 ### Comparing pictures with Studio
 
 Both sides at the same size, camera and lighting, then `pic-compare.mjs`:

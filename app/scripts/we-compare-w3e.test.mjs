@@ -97,14 +97,15 @@ test("the spec files in tests/we-compare/ that use these kinds parse", () => {
     dir = dirname(dir);
   }
   dir = join(dir, "tests", "we-compare");
-  const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json", "random-group-scatter.json"];
+  const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json", "random-group-scatter.json",
+    "water-brush-low-level.json", "water-brush-ramp.json", "water-brush-square.json", "water-limit-square.json", "doodad-snap-custom-alpha.json", "doodad-snap-custom-misc.json"];
   let parsed = 0;
   for (const f of readdirSync(dir).filter((f) => names.includes(f))) {
     const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" });
     assert.ok(specs.length > 0, f);
     parsed += specs.length;
   }
-  assert.ok(parsed >= 6, `${parsed} specs parsed`);
+  assert.ok(parsed >= 12, `${parsed} specs parsed`);
 });
 
 test("variationSpread: the ground variations by texture, counted; w3e-variation compares the main values, not the counts", () => {

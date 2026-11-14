@@ -1,0 +1,80 @@
+[
+  {
+    "name": "water-limit-square-deep",
+    "description": "the ground lift of Enforce Water Height Limits (water-limit-low) with the square brush: Deep Water, square (1424,624), size 3 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere); Enforce Water Limits on (we-drive pins it): the same lift in both editors, here and with Shallow size 1 (2026-11-14, two runs)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
+    "we": {
+      "saveAccept": ["Warning", "Error"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1441,310"],
+        ["--click", "1424,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 3], ["shape", "square"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-limit-square-shallow",
+    "description": "the same with Shallow Water, square, size 1",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
+    "we": {
+      "saveAccept": ["Warning", "Error"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1392,569"],
+        ["--click", "1473,310"],
+        ["--click", "1424,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 1], ["shape", "square"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-limit-off-deep",
+    "description": "Enforce Water Height Limits off (the editor: Advanced, ctrl+shift+w; it stays off in that editor, so this spec is the file's last; Studio: terrain.enforceWaterLimits false): Deep Water, round (1392,624), size 1 at the middle of low-ground-b.w3x (the menu's check mark seen gone after the key, we-drive 2026-11-14). KNOWN DIFFERENCE (2026-11-14, two runs): the editor lifts the ground as with the limit on (corner 32,30 to -7168 stored, the cosine ring round it) and only leaves the dry corners round the water at the water word 8192; Studio lifts nothing with the limit off (-8000) and gives those corners 192",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
+    "we": {
+      "saveAccept": ["Warning", "Error"],
+      "steps": [
+        ["--key", "ctrl+shift+w"],
+        ["--sleep", "500"],
+        ["--key", "t"],
+        ["--click", "1392,569"],
+        ["--click", "1441,310"],
+        ["--click", "1392,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "settings": { "terrain.enforceWaterLimits": false },
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 1], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  }
+]

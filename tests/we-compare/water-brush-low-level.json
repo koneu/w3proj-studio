@@ -1,0 +1,138 @@
+[
+  {
+    "name": "water-level0-pit",
+    "description": "the control for the level-0 specs: the level-0 pit alone (Decrease Two, size 5, at 748,500 on flat.w3x)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,282"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−2:"], ["size", 5], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-level0-shallow",
+    "description": "flat.w3x (level 2): a level-0 pit (Decrease Two, size 5, at 748,500), then Shallow Water size 1 on its floor one corner east (800,500): does the editor refuse a water brush below level 0 as its cliff Decrease does (test.md)? It doesn't refuse: both editors make corner 33,31 wet on level 0 with the water word 7168. KNOWN DIFFERENCE (2026-11-14, two runs): the editor leaves the dry corners round it at 8192 and touches nothing else; Studio gives the 8 round it the water word 7168 and also pulls corner 35,33 down to level 0 and types 36,34 Grass Cliff (1; the editor leaves 15)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,282"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1473,310"],
+        ["--click", "1392,569"],
+        ["--click", "800,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−2:"], ["size", 5], ["click", 748, 500], ["tool", "Shallow:"], ["size", 1], ["click", 800, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "water-level0-deep",
+    "description": "the same level-0 pit, then Deep Water size 1 at 800,500. KNOWN DIFFERENCE (2026-11-14, two runs): the same as water-level0-shallow, the wet corner's word 7168 as for Shallow",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1409,282"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1441,310"],
+        ["--click", "1392,569"],
+        ["--click", "800,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−2:"], ["size", 5], ["click", 748, 500], ["tool", "Deep:"], ["size", 1], ["click", 800, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "water-level1-shallow",
+    "description": "a level-1 pit (Decrease One, size 5, at 748,500), then Shallow Water size 1 at 800,500: both editors lower corner 33,30 to level 0 under water 7680 and give the 8 round it that word (2026-11-14, two runs)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1441,282"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1473,310"],
+        ["--click", "1392,569"],
+        ["--click", "800,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["size", 5], ["click", 748, 500], ["tool", "Shallow:"], ["size", 1], ["click", 800, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-level1-deep",
+    "description": "the level-1 pit, then Deep Water size 1 at 800,500. KNOWN DIFFERENCE (2026-11-14, two runs): the editor refuses to lower (Deep from level 1 would go below 0, as its cliff Decrease Two refuses): corner 33,30 stays on level 1, wet, water word 7680, the corners round it dry at 8192; Studio lowers it to level 0 (the old clamp) and gives the 8 round it 7680",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1441,282"],
+        ["--click", "1488,569"],
+        ["--click", "748,500"],
+        ["--sleep", "500"],
+        ["--click", "1441,310"],
+        ["--click", "1392,569"],
+        ["--click", "800,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["size", 5], ["click", 748, 500], ["tool", "Deep:"], ["size", 1], ["click", 800, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  }
+]

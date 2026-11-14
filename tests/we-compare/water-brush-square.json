@@ -1,0 +1,102 @@
+[
+  {
+    "name": "water-square-shallow",
+    "description": "the palette's square brush shape (Shape, 1424,624; the circle is 1392,624): Shallow Water size 3 at the middle of slope.w3x (748,500), as water-brush-slope-shallow with the square shape: the square of half side 4 (79 corners change against 47 round) is the same in both editors, as in the other three specs (2026-11-14, two runs)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "1424,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["shape", "square"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-square-deep",
+    "description": "the same with Deep Water",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1441,310"],
+        ["--click", "1424,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 3], ["shape", "square"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-square-size1",
+    "description": "Shallow Water, square, size 1 at 748,500",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1392,569"],
+        ["--click", "1473,310"],
+        ["--click", "1424,624"],
+        ["--click", "748,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 1], ["shape", "square"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "water-square-size5-east",
+    "description": "Shallow Water, square, size 5, 100 px east of the middle (848,500, the clicked ground 48)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1488,569"],
+        ["--click", "1473,310"],
+        ["--click", "1424,624"],
+        ["--click", "848,500"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 5], ["shape", "square"], ["click", 848, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  }
+]
