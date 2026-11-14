@@ -1,0 +1,159 @@
+[
+  {
+    "name": "drag-stroke-slow",
+    "description": "a slowly dragged Apply Cliff Increase One stroke (size 3, 600,500 to 900,500 in 20 steps over 3 s) on the blank 64x64 map: the cliff layers and cliff types match (2026-11-14, branch drag-stroke-we). The editor stamps its brush only where the pointer is at its own ticks, with nothing between them (a 20 ms drag of size 1 raised one corner, size 3 one brush), and the layer is the start's + 1 for the whole stroke (no corner went to 4 over raised ground), as Studio's; at this speed it sees every step",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,282"
+        ],
+        [
+          "--drag",
+          "600,500:900,500@3000"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "+1:"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "drag",
+              600,
+              500,
+              900,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "drag-stroke-quick",
+    "description": "the same stroke dragged in 20 ms; DIFFERS by timing (2026-11-14, branch drag-stroke-we): the editor stamps its brush only where the pointer is at its own ticks, without filling in between, so it put down one brush (not at the press point) where Studio's stroke (stamped along the way, lib/terrain/strokepath.ts) covers the whole line. At 400 ms the editor's result varies from run to run (size 3: 0, 2, 14 and 58 differing fields in four runs; size 1: 4 to 6 corners against Studio's 12), so no spec can hold it",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,282"
+        ],
+        [
+          "--drag",
+          "600,500:900,500@20"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "+1:"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "drag",
+              600,
+              500,
+              900,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  }
+]

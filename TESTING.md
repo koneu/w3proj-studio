@@ -409,6 +409,10 @@ when the editor starts) / 1441,367 (Dirt Cliff), Apply Cliff box 1373,244, sizes
 260,41 (Adjust Cliff Levels 299,206, Reset Height Field 300,189: its Random box 589,429, Smoothing slider 592 to 773
 at y=534, Variation slider 589 to 773 at y=494, OK 669,573, "Continue anyway" 767,523). The editor's Create New Map
 dialog (`ctrl+n`) lists 22 tilesets and no Misc, so a Misc-tileset base tile can't be compared there.
+Dragged cliff strokes (branch drag-stroke-we, 2026-11-14, spec `drag-stroke`): the editor stamps its brush only where the
+pointer is at its own ticks, nothing in between (a 20 ms `--drag` of size 1 raised one corner, of size 3 one brush, not at
+the press point), so a quick drag has gaps and two runs of it differ; at 3 s for 20 steps it sees every step and matches
+Studio's stroke (stamped along the way, `strokepath.ts`). The layer is the start's + 1 for the whole stroke, as Studio's.
 
 ### Comparing pictures with Studio
 
