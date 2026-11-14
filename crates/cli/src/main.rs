@@ -446,7 +446,8 @@ enum Cmd {
         #[arg(long)]
         mode: Option<String>,
     },
-    /// Check that maps survive unpack → pack unchanged (in memory).
+    /// Check that maps survive unpack → pack unchanged (in memory), and warn about TRIGSTR
+    /// references their war3map.wts lacks. A file that can't be read as a map fails.
     Verify {
         /// Maps and campaigns, or folders searched for .w3x/.w3m/.w3n files.
         maps: Vec<PathBuf>,
@@ -457,9 +458,12 @@ enum Cmd {
         /// Write the checked maps' codec use into the baseline (other maps' lines stay).
         #[arg(long, requires = "baseline")]
         update_baseline: bool,
-        /// Only print failures and a summary.
+        /// Only print failures, warnings and a summary.
         #[arg(short, long)]
         quiet: bool,
+        /// Fail (exit 1) on warnings too (unresolved TRIGSTR references, references that can't be told).
+        #[arg(long)]
+        warnings_fail: bool,
         /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
         /// file names are tried when a map's names are missing (protected maps, files replacing
         /// the game's). "none" to skip both.
@@ -631,7 +635,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
-        Cmd::Verify { maps, baseline, update_baseline, quiet, game, trigger_data } => {
+        Cmd::Verify { maps, baseline, update_baseline, quiet, warnings_fail, game, trigger_data } => {
             check_trigger_data(&trigger_data)?;
             let maps = expand_maps(&maps)?;
             let mut base = match &baseline {
@@ -642,7 +646,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let game = lazy_game(&game);
             let codecs = with_trigger_data(Registry::with_formats(&extra)?, &game, &trigger_data);
             let names = game_names(&game);
-            let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
+            let (mut ok, mut failed, mut incomplete, mut warned) = (0, 0, 0, 0);
             // The maps are checked on all cores; their reports come back here in the order given,
             // so the output is the same as one map after the other.
             let paths: Vec<&std::path::Path> = maps.iter().map(|(p, _)| p.as_path()).collect();
@@ -663,7 +667,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         println!("new  {} — not in the baseline", map.display());
                     }
                 }
-                match report {
+                match &report {
                     Ok(r) if r.ok() => {
                         ok += 1;
                         let partial = r.unnamed + r.errors.len() > 0;
@@ -696,8 +700,23 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         println!("FAIL {} — {e}", map.display());
                     }
                 }
+                if let Ok(r) = report {
+                    warned += usize::from(!r.unresolved_strings.is_empty() || !r.strings_unchecked.is_empty());
+                    if !r.unresolved_strings.is_empty() {
+                        println!(
+                            "warn {} — {} TRIGSTR reference(s) not in war3map.wts: {}",
+                            map.display(),
+                            r.unresolved_strings.len(),
+                            r.unresolved_strings.join(", ")
+                        );
+                    }
+                    for (at, why) in &r.strings_unchecked {
+                        let at = if at.is_empty() { String::new() } else { format!(" ({at})") };
+                        println!("warn {}{at} — TRIGSTR references not checked: {why}", map.display());
+                    }
+                }
             });
-            println!("{ok} ok ({incomplete} incomplete), {failed} failed");
+            println!("{ok} ok ({incomplete} incomplete), {failed} failed, {warned} with warnings");
             if let Some(path) = &baseline {
                 if update_baseline {
                     write_baseline(path, &base)?;
@@ -706,7 +725,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     println!("{changed} with codec changes against the baseline");
                 }
             }
-            if failed + changed > 0 {
+            if failed + changed > 0 || (warnings_fail && warned > 0) {
                 return Ok(ExitCode::FAILURE);
             }
         }

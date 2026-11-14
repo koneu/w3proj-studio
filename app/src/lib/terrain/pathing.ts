@@ -49,6 +49,9 @@ export interface PathingInput {
    *  World Editor measures the depth from there: with 89.6, Ashenvale maps came out with thousands of deep cells
    *  walkable. */
   waterOffset?: number;
+  /** Whether painted Boundary blocks its tiles (default true, as the World Editor saves it). False for placing
+   *  objects: doodads can stand on Boundary, and units and items are kept off it by every corner (onBoundary). */
+  boundary?: boolean;
 }
 
 /** Water deeper than this (world units) can't be walked. */
@@ -184,9 +187,17 @@ export function generatePathing(input: PathingInput): Uint8Array {
   const stamps = input.stamps ?? [];
   // Cliff doodads change the ground itself: before the border, which stays as it is.
   for (const s of stamps) if (s.cliffDoodad) stamp(cells, w, h, t, s);
+  // The border; and a tile whose lower-left corner is painted Boundary, the other three corners painted or not: blocked
+  // as the border whatever else it is (a cliff, water), keeping only its blight (0xee); Remove Boundary frees it
+  // again. Measured with we-drive on the World Editor's saves (2026-11-14, branch boundary-we; spec
+  // tests/we-compare/boundary-wpm.json).
+  const BORDER = BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK;
+  const painted = input.boundary ?? true;
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {
-      if (cx < ml * 4 || cx >= w - mr * 4 || cy < mb * 4 || cy >= h - mt * 4) cells[cy * w + cx] = BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK;
+      const i = cy * w + cx;
+      if (cx < ml * 4 || cx >= w - mr * 4 || cy < mb * 4 || cy >= h - mt * 4) cells[i] = BORDER;
+      else if (painted && C(cx >> 2, cy >> 2).boundary) cells[i] = BORDER | (cells[i] & BLIGHT);
     }
   }
   for (const s of stamps) if (s.clear) stamp(cells, w, h, t, s);

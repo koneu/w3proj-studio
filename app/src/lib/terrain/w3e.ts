@@ -186,8 +186,9 @@ export function waterLevelAt(z: number, offset = WATER_OFFSET): number {
 }
 
 /** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
-/** Whether a point is on a tile painted as Boundary. Nothing walks there, though doodads can stand there:
- *  the game goes by the terrain, as the World Editor's pathing map leaves such tiles walkable. */
+/** Whether a point is on a tile painted as Boundary (any of its corners). Nothing walks there, though doodads can
+ *  stand there. The World Editor's pathing map blocks only the tiles whose lower-left corner is painted
+ *  (generatePathing). */
 export function onBoundary(t: Terrain, x: number, y: number): boolean {
   const tx = Math.floor((x - t.offsetX) / 128), ty = Math.floor((y - t.offsetY) / 128);
   if (tx < 0 || ty < 0 || tx >= t.width - 1 || ty >= t.height - 1) return false;

@@ -205,6 +205,62 @@ fn verify_fails_when_a_codec_stops_reading_a_file() {
     assert!(!o.status.success(), "{}", text(&o));
 }
 
+/// A cut-off map opens as an archive whose tables are gone (the reader clamps them for protected
+/// maps): verify said "ok, 0 files". It has to fail, as garbage does.
+#[test]
+fn verify_fails_a_map_that_cant_be_read() {
+    let dir = workdir("verify_unreadable");
+    let map = dir.join("mini.w3x");
+    pack(&fixture(), &map);
+    let bytes = fs::read(&map).unwrap();
+    let truncated = dir.join("truncated.w3x");
+    fs::write(&truncated, &bytes[..bytes.len().min(5000) / 2]).unwrap();
+    let garbage = dir.join("garbage.w3x");
+    fs::write(&garbage, (0..5000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect::<Vec<_>>()).unwrap();
+    // The whole map still passes (the control).
+    ok(&["verify", s(&map), "--game", "none"]);
+    for bad in [&truncated, &garbage] {
+        let o = w3proj(&["verify", s(bad), "--game", "none"]);
+        let out = text(&o);
+        assert_eq!(o.status.code(), Some(1), "{}: {out}", bad.display());
+        assert!(out.contains("FAIL") && !out.contains("0 files"), "{}: {out}", bad.display());
+        assert!(out.contains("0 ok"), "{}: {out}", bad.display());
+    }
+    let out = text(&w3proj(&["verify", s(&truncated), "--game", "none"]));
+    assert!(out.contains("not a readable map"), "{out}");
+}
+
+/// A map whose war3map.wts lacks strings its files refer to shows TRIGSTR_<n> in the game: verify
+/// lists them as a warning (exit 0, like an incomplete map), and fails with --warnings-fail.
+#[test]
+fn verify_warns_about_strings_the_wts_lacks() {
+    let dir = workdir("verify_strings");
+    let (map, project, broken) = (dir.join("mini.w3x"), dir.join("project"), dir.join("broken.w3x"));
+    pack(&fixture(), &map);
+    // The control: every string of the fixture is in its table.
+    let out = ok(&["verify", s(&map), "--game", "none", "--warnings-fail"]);
+    assert!(!out.contains("TRIGSTR"), "{out}");
+    assert!(out.contains("0 with warnings"), "{out}");
+
+    unpack(&map, &project);
+    let wts_path = project.join("map/war3map.wts");
+    let wts = fs::read_to_string(&wts_path).unwrap();
+    let start = wts.find("STRING 3").expect("the fixture has string 3");
+    let end = start + wts[start..].find('}').unwrap() + 1;
+    fs::write(&wts_path, format!("{}{}", &wts[..start], &wts[end..])).unwrap();
+    ok(&["pack", s(&project), "-o", s(&broken), "--keep-unused-strings"]);
+
+    let out = ok(&["verify", s(&broken), "--game", "none"]);
+    assert!(out.contains("warn") && out.contains("TRIGSTR_003"), "{out}");
+    assert!(!out.contains("TRIGSTR_001") && !out.contains("TRIGSTR_002"), "{out}");
+    assert!(out.contains("1 with warnings"), "{out}");
+    // Quiet still lists them.
+    let out = ok(&["verify", "-q", s(&broken), "--game", "none"]);
+    assert!(out.contains("TRIGSTR_003"), "{out}");
+    let o = w3proj(&["verify", s(&broken), "--game", "none", "--warnings-fail"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+}
+
 #[test]
 fn ls_and_cat_read_a_map() {
     let dir = workdir("read");
