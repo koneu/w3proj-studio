@@ -8756,6 +8756,51 @@ async function objectLayout(page, found, root) {
   }
 }
 
+/** Choosing another object in the Object Editor's list keeps the list's rows (it made all of them anew on every
+ *  click, which a long list took seconds to draw), and a model shown before is shown again from what the preview
+ *  kept: on the same canvas, with nothing to wait for. */
+async function objectListKept(page, found, root) {
+  const fail = (what) => found.push(`object list kept: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  try {
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    const shows = (id) => until(`${id} in the Object Editor`, () => page.evaluate(`(() => { const e = ${ed}; return !!e && [...e.querySelectorAll(".obj-item.selected code")].some((c) => c.textContent === ${JSON.stringify(id)}) && !!e.querySelector(".obj-table"); })()`), 30000);
+    const ready = (file) => until(`the preview of ${file}`, () => page.evaluate(`(() => { const s = JSON.parse(${ed}.querySelector(".obj-preview").dataset.state || "{}"); return s.ready && String(s.path).toLowerCase().endsWith(${JSON.stringify(file)}); })()`), 60000);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
+    await shows("hfoo");
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hkni")`);
+    await shows("hkni");
+    // Both in the list (showing one filtered the list to it).
+    await page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ""; s.dispatchEvent(new Event("input")); })()`);
+    const click = (id) => page.evaluate(`[...${ed}.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)}).click()`);
+    const rows = await page.evaluate(`(window.__smokeRows = [...${ed}.querySelectorAll(".obj-item")]).length`);
+    if (rows < 2) { fail(`the list has ${rows} rows, wanted the Footman and the Knight (control)`); return; }
+    await ready("knight.mdx");
+    await click("hfoo");
+    await shows("hfoo");
+    await ready("footman.mdx");
+    const r = await page.evaluate(`(() => {
+      const e = ${ed}, canvas = e.querySelector(".obj-preview canvas");
+      [...e.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === "hkni").click();
+      const now = [...e.querySelectorAll(".obj-item")], state = JSON.parse(e.querySelector(".obj-preview").dataset.state);
+      return {
+        kept: now.length === window.__smokeRows.length && now.every((x, i) => x === window.__smokeRows[i]),
+        selected: now.filter((x) => x.classList.contains("selected")).map((x) => x.querySelector("code").textContent),
+        sameCanvas: e.querySelector(".obj-preview canvas") === canvas,
+        path: String(state.path).toLowerCase(), ready: state.ready,
+      };
+    })()`);
+    if (!r.kept) fail("a click on another object made the list's rows anew");
+    if (r.selected.join() !== "hkni") fail(`after the click the list marks ${r.selected.join(", ") || "nothing"} as selected, wanted hkni`);
+    if (!r.path.endsWith("knight.mdx") || !r.ready) fail(`the Knight's model, shown a moment before, wasn't there at once (${r.path}, ready ${r.ready})`);
+    if (!r.sameCanvas) fail("showing a model again made a new canvas (a WebGL context per model)");
+  } finally {
+    await page.evaluate(`delete window.__smokeRows`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
@@ -10443,6 +10488,126 @@ async function staleEditors(page, found) {
     await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; if (!kept) return;
       ed.memory = kept.memory; delete ed.resolveTab; ed.confirm = kept.confirm; w3.window.showWarning = kept.warn; w3.window.pickSaveFile = kept.save; window.__open?.(); })()`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** The Trigger Editor's lines selected together: Shift/Ctrl-click, Select All and Clear (Ctrl+A, Escape), then Delete, Cut,
+ *  Copy and Paste (Ctrl+X/C/V) and Toggle Function Enabled (Ctrl+E) acting on all of them as one undo step each; a paste
+ *  into a map without the variables the lines use creates them (type, array, initial value) with the lines, in the same
+ *  step, unless the setting triggers.autoCreateVariables is off; Toggle Trigger Enabled by its command. */
+async function triggerMultiSelect(page, found) {
+  try {
+  const fail = (what) => found.push(`trigger multi-select: ${what}`);
+  const k = await heightKit(page, "TrigMulti");
+  const WTG = "map/war3map.wtg.json";
+  await page.evaluate(`(() => { window.__mw = { warn: w3.window.showWarning, info: w3.window.showInfo, said: [] };
+    w3.window.showWarning = async (m) => { window.__mw.said.push(String(m)); }; w3.window.showInfo = async (m) => { window.__mw.said.push(String(m)); }; })()`);
+  try {
+    await k.tool("add_trigger_variable", { name: "score", type: "integer", initialValue: "5" });
+    await k.tool("add_trigger_variable", { name: "marks", type: "real", array: true, size: 4 });
+    await k.tool("create_script_trigger", { name: "Multi", script: "" });
+    const wtg = k.read("war3map.wtg.json");
+    const t = wtg.items.find((i) => i.name === "Multi");
+    t.isCustom = false;
+    const nothing = (n) => ({ kind: 2, name: "DoNothing", enabled: true, params: [], children: [] });
+    t.ecas = [{ kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "score" }, { type: 3, value: "1" }], children: [] },
+      { kind: 2, name: "SetVariable", enabled: true, params: [{ type: 1, value: "marks", index: { type: 3, value: "2" } }, { type: 3, value: "1.5" }], children: [] },
+      nothing(), nothing(), nothing()];
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(WTG)}, ${JSON.stringify(JSON.stringify(wtg, null, 2))})`);
+    await k.run("w3.triggers.reveal", "Multi");
+    await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 5`), 20000).catch(() => fail("the editor doesn't show Multi's five lines"));
+    const count = (sel) => page.evaluate(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
+    const click = (i, how = {}) => page.evaluate(`(() => { const el = document.querySelectorAll(".trig-eca")[${i}];
+      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: ${!!how.ctrl}, shiftKey: ${!!how.shift} })); })()`);
+    const key = (name, how = {}) => page.evaluate(`(() => { const el = document.querySelector(".trig-eca.active") ?? document.querySelector(".trig-eca");
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(name)}, ctrlKey: ${!!how.ctrl}, shiftKey: ${!!how.shift}, bubbles: true, cancelable: true })); })()`);
+    const active = () => page.evaluate(`[...document.querySelectorAll(".trig-eca")].flatMap((e, i) => (e.classList.contains("active") ? [i] : []))`);
+    const lines = () => count(".trig-eca");
+    const said = () => page.evaluate(`window.__mw.said.splice(0)`);
+    // The map's variables as saved (the tool reads the file).
+    const vars = async () => { await k.save(); return k.read("war3map.wtg.json").variables.map((v) => v.name); };
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const expectActive = async (what, want) => { const got = await active(); if (!same(got, want)) fail(`${what}: selected lines ${JSON.stringify(got)}, not ${JSON.stringify(want)}`); };
+
+    // Selecting: Shift for a range, Ctrl to add and to take out, Ctrl+A and Escape.
+    await click(0); await click(2, { shift: true });
+    await expectActive("a click and a Shift-click", [0, 1, 2]);
+    await click(4, { ctrl: true });
+    await expectActive("a Ctrl-click", [0, 1, 2, 4]);
+    await click(1, { ctrl: true });
+    await expectActive("a Ctrl-click on a selected line", [0, 2, 4]);
+    await click(3);
+    await expectActive("a plain click", [3]);
+    await key("a", { ctrl: true });
+    await expectActive("Ctrl+A", [0, 1, 2, 3, 4]);
+    await key("Escape");
+    await expectActive("Escape", []);
+
+    // Copy, then Delete: all selected lines go in one step, and one undo brings them all back.
+    await click(0); await click(1, { shift: true });
+    await key("c", { ctrl: true });
+    await click(0); await click(3, { ctrl: true });
+    await key("Delete");
+    if ((await lines()) !== 3) fail(`Delete of two lines left ${await lines()} lines, not 3`);
+    await key("z", { ctrl: true });
+    if ((await lines()) !== 5) fail(`one undo of the Delete left ${await lines()} lines, not 5`);
+    if (await page.evaluate(`!!document.querySelector(".trig-eca.active") && document.querySelectorAll(".trig-eca.active").length > 1`)) fail("undo left a stale multi-selection");
+
+    // Toggle Function Enabled on several: all off, one undo, all on again.
+    await click(2); await click(4, { shift: true });
+    await key("e", { ctrl: true });
+    if ((await count(".trig-eca.off")) !== 3) fail(`Ctrl+E on three lines turned off ${await count(".trig-eca.off")}`);
+    await key("z", { ctrl: true });
+    if ((await count(".trig-eca.off")) !== 0) fail("one undo of Toggle Function Enabled didn't turn all three back on");
+
+    // Cut: two lines onto the clipboard with their variables, the map's variables removed, then Paste creates them.
+    await click(0); await click(1, { shift: true });
+    await key("x", { ctrl: true });
+    if ((await lines()) !== 3) fail(`Cut of two lines left ${await lines()} lines, not 3`);
+    // The tool leaves a file with unsaved changes alone.
+    await k.save();
+    await k.tool("remove_trigger_variable", { name: "score" }).catch((e) => fail(`score is still used after the cut: ${e.message}`));
+    await k.tool("remove_trigger_variable", { name: "marks" }).catch((e) => fail(`marks is still used after the cut: ${e.message}`));
+    if ((await vars())?.includes("score")) fail("the variable score wasn't removed");
+    await said();
+    await click(1);
+    await key("v", { ctrl: true });
+    if ((await lines()) !== 5) fail(`Paste of two lines gave ${await lines()} lines, not 5`);
+    await expectActive("the lines just pasted", [2, 3]);
+    const have = await vars();
+    if (!have?.includes("score") || !have.includes("marks")) fail(`pasting didn't create the variables the lines use: ${JSON.stringify(have)}`);
+    await k.save();
+    const made = k.read("war3map.wtg.json").variables;
+    const score = made.find((v) => v.name === "score"), marks = made.find((v) => v.name === "marks");
+    if (score?.type !== "integer" || score.initialValue !== "5") fail(`the created score is ${JSON.stringify(score)}`);
+    if (marks?.type !== "real" || marks.isArray !== true || marks.arraySize !== 4) fail(`the created marks is ${JSON.stringify(marks)}`);
+    if (!(await said()).some((m) => /Created the variables? /.test(m))) fail("pasting said nothing about the variables it created");
+    // One undo takes lines and variables back together.
+    await key("z", { ctrl: true });
+    const after = await vars();
+    if ((await lines()) !== 3 || after?.includes("score") || after?.includes("marks")) fail(`one undo of the Paste left ${await lines()} lines and the variables ${JSON.stringify(after)}`);
+    // The setting off: the lines come, the variables don't, and the warning names them.
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", false)`);
+    await click(1);
+    await key("v", { ctrl: true });
+    const off = await vars();
+    if ((await lines()) !== 5 || off?.includes("score")) fail(`with the setting off, Paste gave ${await lines()} lines and the variables ${JSON.stringify(off)}`);
+    if (!(await said()).some((m) => /this map doesn't have: score, marks/.test(m))) fail("with the setting off, the warning doesn't name the variables");
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", undefined)`);
+
+    // Toggle Trigger Enabled by its command, one undo step.
+    const enabled = () => page.evaluate(`[...document.querySelectorAll(".trig-flag")].find((l) => l.textContent.trim() === "Enabled")?.querySelector("input")?.checked`);
+    if ((await enabled()) !== true) fail("the trigger doesn't start enabled");
+    if (await k.run("w3.triggers.toggleTriggerEnabled")) fail("Toggle Trigger Enabled was refused");
+    if ((await enabled()) !== false) fail("Toggle Trigger Enabled didn't turn the trigger off");
+    await key("z", { ctrl: true });
+    if ((await enabled()) !== true) fail("one undo of Toggle Trigger Enabled didn't turn it on");
+  } finally {
+    await page.evaluate(`(() => { w3.window.showWarning = window.__mw.warn; w3.window.showInfo = window.__mw.info; w3.settings.set("triggers.autoCreateVariables", undefined); w3.editors.closeAll(); })()`);
   }
   } finally {
     await restoreWindow(page);
@@ -12191,6 +12356,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectLayout: (p, f) => objectLayout(p, f, project),
+        objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
@@ -12228,6 +12394,7 @@ async function run() {
         tileCleanup,
         tilesInPlace,
         tileTemplate,
+        triggerMultiSelect,
         triggersAndAi,
         typedFieldSave,
         unitProperties,
@@ -12458,6 +12625,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
   await leftOpen(page, "editorExtras", found);
+  await triggerMultiSelect(page, found).catch((e) => found.push(`trigger multi-select: ${e.message}`));
+  await leftOpen(page, "triggerMultiSelect", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));
   await leftOpen(page, "importArtReload", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
@@ -12508,6 +12677,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "playerStarts", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
   await leftOpen(page, "objectLayout", found);
+  await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
+  await leftOpen(page, "objectListKept", found);
   await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
   await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
