@@ -93,13 +93,14 @@ export function placeErrors(log: string, input: string, current: string | null, 
     if (!m) { step = l; other.push(l); continue; }
     const n = Number(m[1]);
     const message = m[2];
-    // Step 1 reads the input; so does everything when the script it read isn't there.
-    if (/\bStep 1\b/.test(step) || current === null) {
+    // Step 1 reads the input.
+    if (/\bStep 1\b/.test(step)) {
       const r = inRanges.find((x) => n >= x.first && n <= x.last);
       out.push(r ? { message, text: r.text, line: n - r.first + 1 } : { message, text: null, ...(inLines[n - 1]?.trim() ? { code: inLines[n - 1].trim() } : {}) });
       continue;
     }
-    out.push({ message, ...placeCompiled(split(current), n, inLines, inRanges, nonce) });
+    // A later step's lines are of the script it read; without that one they aren't taken for the input's.
+    out.push(current === null ? { message, text: null } : { message, ...placeCompiled(split(current), n, inLines, inRanges, nonce) });
   }
   // No line at all (JassHelper failed otherwise): what it said.
   if (!out.length && other.length) out.push({ message: other.join(" · "), text: null });

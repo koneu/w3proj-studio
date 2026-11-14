@@ -123,8 +123,10 @@ test("later steps and pjass: lines of the script after step 1, found by the libr
   const renamed = current.replace("        call KillUnit(gg_unit_hfoo_0001)", "        call B___Hidden()");
   assert.deepEqual(placeErrors(`logs\\currentmapscript.j\r\npjass.exe\r\nLine 15:  Undeclared function B___Hidden\r\n1\r\n`, input, renamed, NONCE),
     [{ message: "Undeclared function B___Hidden", text: 2, code: "call B___Hidden()" }]);
-  // The script it read is gone: the lines are taken for the input's rather than guessed.
-  assert.deepEqual(placeErrors(`x\r\npjass.exe\r\nLine 3:  Something\r\n1\r\n`, input, null, NONCE).map((e) => e.text), [null]);
+  // The script it read can't be read: its lines aren't taken for the input's (this one is the checked text's first there).
+  const first = lineOf(input, "library B requires A");
+  assert.deepEqual(placeErrors(`x\r\npjass.exe\r\nLine ${first}:  Something\r\n1\r\n`, input, null, NONCE), [{ message: "Something", text: null }]);
+  assert.equal(placeErrors(`x\r\nJASSHelper - Step 1 (textmacros, libraries, scopes)\r\nLine ${first}: Something\r\n1\r\n`, input, null, NONCE)[0].text, 2);
   // No line at all: what JassHelper said.
   assert.deepEqual(placeErrors("exit code 3", input, null, NONCE), [{ message: "exit code 3", text: null }]);
 });
