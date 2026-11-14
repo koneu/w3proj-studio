@@ -2,7 +2,7 @@
 // painting, applied to the corners inside a round or square brush, with undo.
 
 import { cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
-import { waterBasin } from "../../lib/terrain/waterrim";
+import { liftToFloor, waterBasin } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
@@ -188,8 +188,9 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
 
 /** One application of a cliff or water brush: corners under the brush move
  *  to the target layer; water tools also set the water flag and level, dry
- *  only clears the flag. Returns whether anything changed. */
-export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerTarget, stroke: Stroke): boolean {
+ *  only clears the flag. `enforceWater` (Enforce Water Height Limits): the new water's ground is kept from going
+ *  below the floor, as the World Editor's is (liftToFloor). Returns whether anything changed. */
+export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerTarget, stroke: Stroke, enforceWater = false): boolean {
   let changed = false;
   const inside = cornersIn(t, b);
   if ((tool === "shallow" || tool === "deep") && inside.length) {
@@ -220,6 +221,8 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     stroke.own.add(i);
     changed = true;
   }
+  if (enforceWater && (tool === "shallow" || tool === "deep")
+    && liftToFloor(t, inside.map(({ i }) => i), (i) => stroke.touch(t, i)).length) changed = true;
   if (CLIFF_TOOLS.has(tool) && moved.size) {
     // No cliff taller than two levels: the corners next to the brush come along to within two levels of it, as the
     // editor's do (we-compare cliff-reach: Increase Two, size 3, on plateau.w3x's edge, level 3 to 5, took the low

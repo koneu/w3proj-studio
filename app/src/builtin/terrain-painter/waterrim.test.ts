@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { applyLayer, retypeCliffs, Stroke, cornerBrush } from "./tools";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
-import { waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
+import { setGroundHeight, waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 
 /** A file of tests/fixtures/water-brush: the w3e of Ashenvale's 12a_RoC_Orc04Interlude_v0_control.w3m as it was, and
@@ -155,7 +155,8 @@ function click(t: Terrain, c: SlopeClick) {
   const [cx, cy] = c.centre, from = at(t, cx, cy);
   const stroke = new Stroke(c.mode);
   const brush = cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, c.size);
-  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer }, stroke);
+  // Enforce Water Height Limits on, as the editor had it (we-drive pins it): the ground here is far above the floor.
+  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer }, stroke, true);
   retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
   return stroke;
 }
@@ -194,4 +195,51 @@ test("the water brush flattens round the clicked corner, not round the nearest w
   assert.equal(at(t, 36, 30).rawHeight - 0x2000, 0, "four corners out");
   assert.equal(at(t, 37, 30).rawHeight - 0x2000, 120, "five out: as it was");
   assert.equal(c.changes.filter(([, , g]) => g === 0).length, 47, "the fixture: the editor's 47 corners at 0");
+});
+
+/** tests/fixtures/water-brush/low-ground-lift.json: the World Editor's water clicks on low flat ground. */
+interface LowGround { centre: [number, number]; cases: { ground: { rest: number; centre?: number; next?: number }; tool: "shallow" | "deep"; size: number; changes: number[][] }[] }
+const lowGround = json<LowGround>("low-ground-lift.json");
+
+/** The empty Lordaeron map with every stored ground height `rest`, the centre (or its four neighbours) set apart. */
+function lowMap(g: LowGround["cases"][number]["ground"], [cx, cy]: [number, number]): Terrain {
+  const t = emptyLordaeron();
+  t.corners.forEach((c, i) => {
+    const d = Math.abs((i % t.width) - cx) + Math.abs(Math.floor(i / t.width) - cy);
+    const h = d === 0 && g.centre !== undefined ? g.centre : d === 1 && g.next !== undefined ? g.next : g.rest;
+    setGroundHeight(c, h / 4);
+  });
+  return t;
+}
+
+/** The painter's click on the low map, Enforce Water Height Limits on or off. */
+function lowClick(t: Terrain, mode: "shallow" | "deep", size: number, [cx, cy]: [number, number], enforce: boolean) {
+  const from = at(t, cx, cy);
+  const brush = cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, size);
+  applyLayer(t, brush, mode, { layer: from.layer - (mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer }, new Stroke(mode), enforce);
+}
+
+for (const c of lowGround.cases) {
+  const g = c.ground;
+  const ground = g.centre !== undefined ? `${g.centre} at the centre, ${g.rest} round it` : g.next !== undefined ? `${g.next} next to the centre, ${g.rest} elsewhere` : `${g.rest}`;
+  test(`low ground (stored ${ground}): the ${c.tool} brush of size ${c.size} lifts the ground as the World Editor's (${c.changes.length} corners)`, () => {
+    const t = lowMap(g, lowGround.centre), want = lowMap(g, lowGround.centre);
+    for (const [x, y, h] of c.changes) at(want, x, y).rawHeight = h + 0x2000;
+    lowClick(t, c.tool, c.size, lowGround.centre, true);
+    const diffs = t.corners.flatMap((k, i) => k.rawHeight === want.corners[i].rawHeight ? []
+      : [`${i % t.width},${Math.floor(i / t.width)}: Studio ${k.rawHeight - 0x2000}, WE ${want.corners[i].rawHeight - 0x2000}`]);
+    assert.deepEqual(diffs, []);
+  });
+}
+
+test("low ground: the lift is the switch's (off: the ground stays; control for the cases above)", () => {
+  const c = lowGround.cases.find((k) => k.ground.rest === -8160 && k.tool === "deep" && k.size === 1 && k.ground.centre === undefined)!;
+  assert.equal(c.changes.length, 37, "the fixture: the editor lifted 37 corners");
+  const t = lowMap(c.ground, lowGround.centre);
+  lowClick(t, "deep", 1, lowGround.centre, false);
+  assert.equal(t.corners.every((k) => k.rawHeight - 0x2000 === -8160), true);
+  const on = lowMap(c.ground, lowGround.centre);
+  lowClick(on, "deep", 1, lowGround.centre, true);
+  assert.equal(at(on, ...lowGround.centre).height, -2048, "the clicked corner on the floor (waterrim.ts GROUND_FLOOR), its cliff level counted in");
+  assert.equal(at(on, ...lowGround.centre).rawHeight - 0x2000, -7168);
 });

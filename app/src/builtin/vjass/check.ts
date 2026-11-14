@@ -31,7 +31,7 @@ export interface MarkedTexts {
 export function markTexts(triggers: TriggerFile, custom: CustomTextFile, item: TriggerItem, nonce: string): MarkedTexts {
   const items = textTriggers(triggers);
   const mark = (text: string | null, k: number) => {
-    // A text of line breaks only makes no section of its own (lib/script/jass mapHeader): left as it is.
+    // A text of line breaks only holds no code to report on: left as it is.
     if (text === null || !/[^\r\n]/.test(text)) return text;
     // Whole lines of their own: without them the script is the map's, line for line.
     return `${MARK} ${nonce} ${k} begin\r\n${text}\r\n${MARK} ${nonce} ${k} end`;

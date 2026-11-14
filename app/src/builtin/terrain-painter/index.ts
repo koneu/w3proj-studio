@@ -71,6 +71,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** `px`: where on the page the pointer was at the last dab (clientX, clientY). */
   let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; height?: HeightStroke; px?: [number, number] } | null = null;
 
+  /** The World Editor's Enforce Water Height Limits (the terrain editor's switch, on unless set off). */
+  const enforceWater = () => w3.settings.get<boolean>("terrain.enforceWaterLimits", true) !== false;
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number, amount = strength): boolean => {
     if (!stroke) return false;
@@ -82,7 +84,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       : tool === "boundary" || tool === "unboundary"
       ? paintBoundary(terrain, brush, tool === "boundary", stroke.s)
       : isLayerTool(tool)
-      ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
+      ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s, enforceWater())
       : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : amount, stroke.s);
   };
   /** The brush at a ground point, and along the way from the last one. */
