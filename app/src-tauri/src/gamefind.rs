@@ -1,6 +1,7 @@
 //! Warcraft III installs in the usual places, for the first start (and whenever the configured folder
-//! doesn't open): the Windows default folders, and on Linux the Wine prefixes of Steam (Proton), Lutris
-//! and plain Wine. Only each install's `.build.info` is read, for its build; the storage isn't opened.
+//! doesn't open): on Windows where Battle.net registered it and the usual folders of every fixed drive, on
+//! Linux the Wine prefixes of Steam (Proton), Lutris and plain Wine. Only each install's `.build.info` is
+//! read, for its build; the storage isn't opened.
 
 use std::path::{Path, PathBuf};
 
@@ -33,18 +34,92 @@ pub fn newer_first(a: &FoundGame, b: &FoundGame) -> std::cmp::Ordering {
 
 const WC3: &str = "Warcraft III";
 
-/// The folders that may hold the game, for this home folder (Linux) or the Windows defaults.
-fn candidates(home: Option<&Path>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if cfg!(windows) {
-        for var in ["ProgramFiles(x86)", "ProgramFiles"] {
-            if let Ok(p) = std::env::var(var) {
-                out.push(PathBuf::from(p).join(WC3));
+/// The game's names as Battle.net installs and registers it: the game and its public test realm.
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOWS_NAMES: [&str; 2] = [WC3, "Warcraft III Public Test"];
+
+/// The folders that may hold the game on Windows, in this order: where Battle.net says it installed it (`registered`,
+/// from its entry among the installed programs, wherever that is), the Program Files folders (`program_files`), then
+/// the usual places on each fixed drive (`drives`, their roots): Program Files (x86), Program Files, the root, Games.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn windows_candidates(registered: &[PathBuf], program_files: &[PathBuf], drives: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = registered.to_vec();
+    for name in WINDOWS_NAMES {
+        out.extend(program_files.iter().map(|p| p.join(name)));
+        for d in drives {
+            for parent in [d.join("Program Files (x86)"), d.join("Program Files"), d.clone(), d.join("Games")] {
+                out.push(parent.join(name));
             }
         }
-        out.push(PathBuf::from(r"C:\Program Files (x86)").join(WC3));
-        return out;
     }
+    out
+}
+
+/// Where Battle.net installed the game (Windows): the InstallLocation of its uninstall entries, machine-wide (both
+/// registry views) and the user's own.
+#[cfg(windows)]
+fn registered_installs() -> Vec<PathBuf> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let mut out = Vec::new();
+    for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        for view in [r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"] {
+            for name in WINDOWS_NAMES {
+                let key = wide(&format!(r"{view}\{name}"));
+                let value = wide("InstallLocation");
+                let mut buf = vec![0u16; 1024];
+                let mut len = (buf.len() * 2) as u32;
+                // SAFETY: the key and value names are NUL-terminated, and `len` is the buffer's size in bytes.
+                let r = unsafe { RegGetValueW(root, key.as_ptr(), value.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
+                if r == 0 {
+                    let n = (len as usize / 2).saturating_sub(1).min(buf.len());
+                    let s = String::from_utf16_lossy(&buf[..n]);
+                    let s = s.trim_end_matches('\0').trim();
+                    if !s.is_empty() {
+                        out.push(PathBuf::from(s));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The roots of the fixed drives (Windows): no network, removable or optical drives, which can keep a look slow.
+#[cfg(windows)]
+fn fixed_drives() -> Vec<PathBuf> {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    const DRIVE_FIXED: u32 = 3;
+    // SAFETY: no arguments; the answer is a bit mask of drive letters.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|i| mask & (1 << i) != 0)
+        .map(|i| format!("{}:\\", (b'A' + i) as char))
+        .filter(|root| {
+            let w: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+            // SAFETY: a NUL-terminated root path.
+            unsafe { GetDriveTypeW(w.as_ptr()) == DRIVE_FIXED }
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// The folders that may hold the game: on Windows (the home folder isn't used), else in this home folder's Wine prefixes.
+#[cfg(windows)]
+fn candidates(_home: Option<&Path>) -> Vec<PathBuf> {
+    let program_files: Vec<PathBuf> = ["ProgramFiles(x86)", "ProgramFiles"].iter().filter_map(|v| std::env::var(v).ok()).map(PathBuf::from).collect();
+    windows_candidates(&registered_installs(), &program_files, &fixed_drives())
+}
+
+#[cfg(not(windows))]
+fn candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    prefix_candidates(home)
+}
+
+/// The game's folder in the Wine prefixes of this home folder: Steam (Proton, every library), Lutris, plain Wine.
+#[cfg_attr(windows, allow(dead_code))]
+fn prefix_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut out = Vec::new();
     let Some(home) = home else { return out };
     let in_prefix = |prefix: &Path| prefix.join("drive_c").join("Program Files (x86)").join(WC3);
 
@@ -72,6 +147,7 @@ fn candidates(home: Option<&Path>) -> Vec<PathBuf> {
 }
 
 /// The `"path"` entries of a Steam libraryfolders.vdf.
+#[cfg_attr(windows, allow(dead_code))]
 fn library_paths(vdf: &str) -> Vec<String> {
     vdf.lines()
         .filter_map(|l| {
@@ -92,7 +168,9 @@ pub fn find(home: Option<&Path>) -> Vec<FoundGame> {
         .into_iter()
         .filter_map(|dir| {
             let text = std::fs::read_to_string(dir.join(".build.info")).ok()?;
-            let real = std::fs::canonicalize(&dir).unwrap_or(dir);
+            // One spelling (links and short names resolved), without the `\\?\` canonicalize puts before a Windows path
+            // (the folder offered at start showed as "\\?\C:\Program Files (x86)\Warcraft III").
+            let real = PathBuf::from(backend::normal_path(&dir.to_string_lossy()));
             seen.insert(real.clone()).then(|| FoundGame { path: real.to_string_lossy().into_owned(), version: build_version(&text).unwrap_or_default() })
         })
         .collect();
@@ -156,6 +234,28 @@ mod tests {
         let mut list = [g("2.0.2.22796"), g(""), g("3.0.1.24371"), g("2.0.10.1")];
         list.sort_by(newer_first);
         assert_eq!(list.iter().map(|x| x.version.as_str()).collect::<Vec<_>>(), ["3.0.1.24371", "2.0.10.1", "2.0.2.22796", ""]);
+    }
+
+    #[test]
+    fn windows_looks_where_battle_net_registered_it_first_then_program_files_then_every_fixed_drive() {
+        // Paths compared as built with the same joins: on Linux, where this runs too, a join puts `/` after "D:\".
+        let registered = [PathBuf::from(r"E:\Blizzard\Warcraft III")];
+        let program_files = [PathBuf::from(r"C:\Program Files (x86)")];
+        let (c, d) = (PathBuf::from(r"C:\"), PathBuf::from(r"D:\"));
+        let got = windows_candidates(&registered, &program_files, &[c, d.clone()]);
+        assert_eq!(got[0], registered[0], "the registered folder comes first");
+        assert_eq!(got[1], program_files[0].join("Warcraft III"));
+        for want in [
+            d.join("Program Files (x86)").join("Warcraft III"),
+            d.join("Program Files").join("Warcraft III"),
+            d.join("Warcraft III"),
+            d.join("Games").join("Warcraft III"),
+            d.join("Games").join("Warcraft III Public Test"),
+        ] {
+            assert!(got.contains(&want), "{} isn't looked at: {got:?}", want.display());
+        }
+        // Nothing registered, no drives: the Program Files folders alone (as before).
+        assert_eq!(windows_candidates(&[], &program_files, &[]).len(), 2);
     }
 
     #[test]

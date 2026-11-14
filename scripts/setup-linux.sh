@@ -123,16 +123,21 @@ if [[ -x "$SCCACHE" ]]; then ok "sccache"; else
   miss "sccache"
   if (( ! CHECK_ONLY )); then cargo install sccache --locked --root "$REPO/target/tools"; fi
 fi
-if [[ -x "$SCCACHE" && ! -f "$REPO/.cargo/config.toml" ]] && (( ! CHECK_ONLY )); then
+# Its paths are relative to this checkout (cargo reads a path with a slash from the folder holding .cargo/), so one
+# file serves a checkout shared with a Windows machine (scripts/setup-windows.bat writes the same). An older file of
+# the setup scripts (absolute paths) is written again; a file written by hand is left alone.
+CARGO_CONFIG="$REPO/.cargo/config.toml"
+if [[ -x "$SCCACHE" ]] && (( ! CHECK_ONLY )) && { [[ ! -f "$CARGO_CONFIG" ]] || { grep -q 'written by scripts/setup-' "$CARGO_CONFIG" && ! grep -q '^rustc-wrapper = "target/' "$CARGO_CONFIG"; }; }; then
   mkdir -p "$REPO/.cargo"
-  cat > "$REPO/.cargo/config.toml" <<EOF
-# Local only (git-ignored), written by scripts/setup-linux.sh: a shared compiler cache for this checkout and every
-# worktree under .worktrees/ (cargo reads this file from the parent folders).
+  cat > "$CARGO_CONFIG" <<EOF
+# Local only (git-ignored), written by scripts/setup-linux.sh or scripts/setup-windows.bat: a shared compiler cache
+# for this checkout and every worktree under .worktrees/ (cargo reads this file from the parent folders). The paths
+# are relative to the checkout, so one file serves Linux and Windows; each needs sccache in target/tools/bin.
 [build]
-rustc-wrapper = "$SCCACHE"
+rustc-wrapper = "target/tools/bin/sccache"
 
 [env]
-SCCACHE_DIR = "$REPO/target/sccache"
+SCCACHE_DIR = { value = "target/sccache", relative = true }
 SCCACHE_CACHE_SIZE = "15G"
 EOF
   ok ".cargo/config.toml (sccache)"
@@ -210,7 +215,17 @@ find_games() {
 
 GAME_FILE="$REPO/.game-path"
 current=""
-[[ -f "$GAME_FILE" ]] && current="$(grep -v '^[[:space:]]*#' "$GAME_FILE" | head -1)"
+# One folder per line, the first that exists counts (tests/gamepath.mjs): a checkout shared with a Windows machine
+# keeps its line too. Lines of folders that aren't on this machine are kept when the file is written again.
+listed=()
+if [[ -f "$GAME_FILE" ]]; then
+  while IFS= read -r l || [[ -n "$l" ]]; do
+    l="${l%$'\r'}"; l="${l#"${l%%[![:space:]]*}"}"; l="${l%"${l##*[![:space:]]}"}"
+    [[ -n "$l" && "$l" != \#* ]] && listed+=("$l")
+  done < "$GAME_FILE"
+fi
+for l in "${listed[@]}"; do [[ -d "$l" ]] && { current="$l"; break; }; done
+[[ -z "$current" && ${#listed[@]} -gt 0 ]] && current="${listed[0]}"
 
 found=()
 while IFS= read -r g; do [[ -n "$g" ]] && found+=("$g"); done < <(find_games)
@@ -248,7 +263,11 @@ else
     echo "  note: a newer build ($newest_build) is at $newest; choose it with --game"
   fi
   if (( ! CHECK_ONLY )) && [[ "$pick" != "$current" ]]; then
-    printf '# The Warcraft III folder for the tests and tools (tests/gamepath.mjs). Written by scripts/setup-linux.sh.\n%s\n' "$pick" > "$GAME_FILE"
+    {
+      printf '# The Warcraft III folder for the tests and tools (tests/gamepath.mjs): the first line that exists counts.\n'
+      printf '# Written by scripts/setup-linux.sh and scripts/setup-windows.bat.\n%s\n' "$pick"
+      for l in "${listed[@]}"; do [[ "$l" != "$pick" && ! -d "$l" ]] && printf '%s\n' "$l"; done
+    } > "$GAME_FILE"
     echo "  wrote .game-path"
   elif (( CHECK_ONLY )) && [[ "$pick" != "$current" ]]; then
     miss ".game-path (run without --check to choose the folder above)"

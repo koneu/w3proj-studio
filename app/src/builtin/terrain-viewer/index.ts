@@ -4,7 +4,7 @@ import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
-import { mapObjectData, readFile, readImport, savedObjects } from "./projectfiles";
+import { mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
@@ -3094,7 +3094,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const kd = await loadKind(w3, k).catch(() => null);
             if (kd) for (const [id, n] of kd.names) names.set(id, n);
           }
-          const nameOf = (id: string) => names.get(id) ?? names.get(objCtx?.bases.get(id) ?? "") ?? id;
+          const nameOf = (id: string) => typeName(names, objCtx?.bases, id) ?? id;
           const found = allPlaced().filter((o) => boxKinds.has(o.kind) && test({ ...varsOf(o.p), id: o.id, kind: o.kind, name: nameOf(o.id) })).map((o) => o.p);
           selectEntries(found);
           if (!found.length) w3.window.showInfo("No objects match.");
@@ -3817,7 +3817,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const shown = rows.slice(0, 12);
           list.append(...shown.map((c) => {
             const name = h("span", {}, c.id);
-            loadKind(w3, c.kind).then((k) => { const n = k.names.get(c.id) ?? k.names.get(objCtx?.bases.get(c.id) ?? ""); if (n) name.textContent = n; }).catch(() => { /* id */ });
+            loadKind(w3, c.kind).then((k) => { const n = typeName(k.names, objCtx?.bases, c.id); if (n) name.textContent = n; }).catch(() => { /* id */ });
             return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name,
               h("button.icon-button.terrain-sel-open", {
                 title: `Open ${c.id} in the Object Editor`,

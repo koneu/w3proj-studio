@@ -395,6 +395,22 @@ cp target/release/w3proj "app/src-tauri/binaries/w3proj-$(rustc -vV | sed -n 's/
 cd app && npx tauri build --bundles deb --config src-tauri/tauri.release.conf.json
 ```
 
+### Windows
+
+```bat
+scripts\setup-windows.bat --check   :: what's there and what's missing; changes nothing
+scripts\setup-windows.bat           :: install what's missing (through winget)
+```
+
+It checks or installs the MSVC C++ build tools, the WebView2 runtime, Rust (rustup, the pinned version), Node 22,
+the optional sccache and actionlint (into `target/tools/bin/`, as on Linux), runs `npm ci` in `app/` (also when
+`node_modules` came from a Linux machine), and finds Warcraft III (`Program Files`, Battle.net's uninstall entry, the
+folder above the checkout) for `.game-path`. The work is in `scripts/setup-windows.ps1`; the `.bat` starts it.
+
+A checkout shared with a Linux machine works on both: `.game-path` lists each machine's folder and the first that
+exists counts, and `.cargo/config.toml` names sccache by a path relative to the checkout. The hidden World Editor
+(`we-drive.mjs`, `we-compare.mjs`) runs on Linux only and reports `skipped` on Windows.
+
 ### Linux
 
 On Debian/Ubuntu one script installs everything above, plus what the app smoke test needs on Linux:

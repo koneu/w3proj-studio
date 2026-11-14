@@ -153,7 +153,9 @@ function gameTable(path: string, cols: string): Record<string, string>[] | null 
   const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
   const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
   const gameFile = join(main, ".game-path");
-  const game = process.env.W3PROJ_GAME ?? (existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("#")) : undefined);
+  // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
+  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
+  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
   if (!bin) return null;
   const r = spawnSync(bin, ["game", "slk", path, "--col", cols, ...(game ? ["--install", game] : [])], { encoding: "utf8", maxBuffer: 1 << 26 });
   if (r.status !== 0) return null;
