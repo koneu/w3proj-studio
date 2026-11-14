@@ -8055,8 +8055,10 @@ async function paletteMouse(page, found) {
  *  turned on afterwards, its reads counted apart (PANEL_READS_MAX, alone 9 and 19; after other checks fewer: it keeps tile
  *  colours in a cache of its own). Branch reads-order-free. Two more read and asked since doodads are put on their grids
  *  when the map opens (branch doodad-snap-pref, doodadgrid.ts): the pathing textures PathTextures\4x2Default.tga and
- *  4x4Default.tga of the scene's doodads (with terrain.doodads.snapOnLoad off it is 114 and 139 again). */
-const GAME_READS_RECORDED = { reads: 116, asked: 141, textures: 139 };
+ *  4x4Default.tga of the scene's doodads (with terrain.doodads.snapOnLoad off it is 114 and 139 again). One more read,
+ *  asked and texture since HD water has waves (branch water-waves-we): the game's ReplaceableTextures\Water\Water_Normal.blp
+ *  (without that read: 116, 141, 139 again, measured alone 2026-11-14). */
+const GAME_READS_RECORDED = { reads: 117, asked: 142, textures: 140 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {
