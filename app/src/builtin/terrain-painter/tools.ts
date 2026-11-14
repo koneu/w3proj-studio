@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
-import { matchCliffTypes } from "../../lib/terrain/cliffs";
+import { dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { waterBasin } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
@@ -186,6 +186,7 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
       if (waterBasin(t, cy * t.width + cx, brush, b.radius + 1, !!b.square, start, (i) => stroke.touch(t, i)).length) changed = true;
     }
   }
+  const moved = new Map<number, number>();
   for (const { i } of inside) {
     const c = t.corners[i];
     if (tool === "dry") {
@@ -198,11 +199,14 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     const water = tool === "shallow" || tool === "deep";
     if (c.layer === target.layer && (!water || (c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel))) continue;
     stroke.touch(t, i);
+    if (c.layer !== target.layer) moved.set(i, c.layer);
     setLayer(c, target.layer);
     if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel, waterOffsetOf(t));
     stroke.own.add(i);
     changed = true;
   }
+  // The ramps the cliff brush breaks lose their flags, as the editor's do (dropBrokenRamps; not measured for water).
+  if (tool !== "shallow" && tool !== "deep" && moved.size) dropBrokenRamps(t, moved, stroke);
   const level = target.waterLevel;
   if ((tool === "shallow" || tool === "deep") && level !== undefined) {
     // The dry corners round the new water get its level word too, without the water flag: the World Editor's

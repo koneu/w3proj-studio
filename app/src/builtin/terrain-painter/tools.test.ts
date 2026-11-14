@@ -287,6 +287,61 @@ test("Noise keeps to the stored height range like the other height tools", () =>
   assert.deepEqual(writeW3e(parseW3e(writeW3e(t))), writeW3e(t));
 });
 
+/** A level-3 plateau north of row 16 with a wide ramp down its south face: the columns 13-19 flagged on rows 14-16
+ *  (low, low, high), as the World Editor's Ramp dragged along a face flags them (we-compare ramp-cliff-brush-wide). */
+function rampedPlateau(): Terrain {
+  const t = flatMap();
+  t.corners.forEach((c, i) => {
+    const x = i % t.width, y = Math.floor(i / t.width);
+    if (y >= 16) c.layer = 3;
+    c.ramp = x >= 13 && x <= 19 && y >= 14 && y <= 16;
+  });
+  return t;
+}
+/** Layer and ramp flag of the corners x 12-20, y 13-17, one row per line (north first): "3r" flagged, "3." not. */
+function ramps(t: Terrain): string[] {
+  const rows: string[] = [];
+  for (let y = 17; y >= 13; y--) {
+    let r = "";
+    for (let x = 12; x <= 20; x++) { const c = t.corners[y * t.width + x]; r += c.layer + (c.ramp ? "r" : ".") + " "; }
+    rows.push(r.trim());
+  }
+  return rows;
+}
+
+test("a cliff brush takes the flags off a ramp line it no longer lets climb one level, as the World Editor does", () => {
+  const at = (t: Terrain, x: number, y: number) => brushOf("cliffUp", t, t.offsetX + x * 128, t.offsetY + y * 128, 1);
+  // Increase One on the high corner of the middle column: that column alone loses its flags (2,2,4 climbs two); the
+  // rows across the ramp are level and keep theirs (the editor's save of ramp-cliff-brush-wide, 2026-11-14).
+  let t = rampedPlateau();
+  const s = new Stroke("cliffUp");
+  applyLayer(t, at(t, 16, 16), "cliffUp", { layer: 4 }, s);
+  assert.deepEqual(ramps(t), [
+    "3. 3. 3. 3. 3. 3. 3. 3. 3.",
+    "3. 3r 3r 3r 4. 3r 3r 3r 3.",
+    "2. 2r 2r 2r 2. 2r 2r 2r 2.",
+    "2. 2r 2r 2r 2. 2r 2r 2r 2.",
+    "2. 2. 2. 2. 2. 2. 2. 2. 2.",
+  ]);
+  s.undo(t);
+  assert.deepEqual(ramps(t), ramps(rampedPlateau()), "the stroke's undo gives the flags back");
+  // Decrease One there: 2,2,2 is level, the column goes too.
+  t = rampedPlateau();
+  applyLayer(t, at(t, 16, 16), "cliffDown", { layer: 2 }, new Stroke("cliffDown"));
+  assert.deepEqual(ramps(t)[1], "3. 3r 3r 3r 2. 3r 3r 3r 3.");
+  assert.deepEqual(ramps(t)[2], "2. 2r 2r 2r 2. 2r 2r 2r 2.");
+  // Increase One size 3 on the middle corner raises the two low ones: 3,3,3 is level, the column's high corner the
+  // brush left as it was loses its flag too (ramp-cliff-brush-up3, on separate lines there).
+  t = rampedPlateau();
+  applyLayer(t, brushOf("cliffUp", t, t.offsetX + 16 * 128, t.offsetY + 15 * 128, 3), "cliffUp", { layer: 3 }, new Stroke("cliffUp"));
+  assert.deepEqual([14, 15, 16].map((y) => t.corners[y * t.width + 16].ramp), [false, false, false]);
+  // Increase One on the middle corner: 2,3,3 still climbs one level, every flag stays (ramp-cliff-brush-wide-low).
+  t = rampedPlateau();
+  applyLayer(t, at(t, 16, 15), "cliffUp", { layer: 3 }, new Stroke("cliffUp"));
+  assert.deepEqual(ramps(t)[2], "2. 2r 2r 2r 3r 2r 2r 2r 2.");
+  assert.equal(t.corners.filter((c) => c.ramp).length, 21);
+});
+
 test("the terrain survives w3e and text round trips", () => {
   const t = flatMap();
   applyLayer(t, { ...centre(t), radius: 2 }, "cliffUp", { layer: 3 }, new Stroke("cliffUp"));

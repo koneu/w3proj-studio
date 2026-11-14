@@ -1,0 +1,177 @@
+[
+  {
+    "name": "ramp-cliff-brush-up",
+    "description": "ramp lines on plateau.w3x's south face (Ramp size 3 at 600, 750, 900 x 630, as ramp-plateau-row: columns 29, 32, 35 flagged on rows 25-27, low, low, high), then Apply Cliff Increase One size 1 at 750,630 (corner 32,27 to level 4): the editor takes the flags off column 32 (2,2,4 no longer climbs one level), the others stay; Studio the same since branch cut-ramp-wedges (2026-11-14; before, it kept all three flags: dropBrokenRamps)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "600,630"],
+        ["--sleep", "800"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "900,630"],
+        ["--sleep", "800"],
+        ["--click", "1392,569"],
+        ["--click", "1505,282"],
+        ["--click", "750,630"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 600, 630], ["click", 750, 630], ["click", 900, 630], ["tool", "+1:"], ["size", 1], ["click", 750, 630]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ramp-cliff-brush-down",
+    "description": "the same ramp lines, then Apply Cliff Decrease One size 1 at 750,630 (corner 32,27 to level 2): column 32 (2,2,2) loses its flags",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "600,630"],
+        ["--sleep", "800"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "900,630"],
+        ["--sleep", "800"],
+        ["--click", "1392,569"],
+        ["--click", "1441,282"],
+        ["--click", "750,630"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 600, 630], ["click", 750, 630], ["click", 900, 630], ["tool", "−1:"], ["size", 1], ["click", 750, 630]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ramp-cliff-brush-up3",
+    "description": "the same ramp lines, then Apply Cliff Increase One size 3 at 750,700 (32,25 and 32,26 to level 3 and the ground round them): column 32 (3,3,3) loses its flags, 32,27 too though the brush left its level; column 29 and 35 beside the brush keep theirs. The ramp flags match since branch cut-ramp-wedges; known difference: the editor gives the plateau corners 31-33 x 28-29 above the raised patch cliff type 1, Studio leaves them 15 (before the fix too)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "600,630"],
+        ["--sleep", "800"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "900,630"],
+        ["--sleep", "800"],
+        ["--click", "1505,282"],
+        ["--click", "750,700"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 600, 630], ["click", 750, 630], ["click", 900, 630], ["tool", "+1:"], ["size", 3], ["click", 750, 700]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ramp-cliff-brush-wide",
+    "description": "a wide ramp (Ramp size 3 clicked at 600 to 900 by 50 on row 630: columns 29-35 on rows 25-27; a drag left Studio's column 35 out in one run of two), then Apply Cliff Increase One size 1 at 750,630: only column 32 loses its flags, the rows across the ramp (level) keep theirs either side of it",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "600,630"],
+        ["--sleep", "800"],
+        ["--click", "650,630"],
+        ["--sleep", "800"],
+        ["--click", "700,630"],
+        ["--sleep", "800"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "800,630"],
+        ["--sleep", "800"],
+        ["--click", "850,630"],
+        ["--sleep", "800"],
+        ["--click", "900,630"],
+        ["--sleep", "800"],
+        ["--click", "1392,569"],
+        ["--click", "1505,282"],
+        ["--click", "750,630"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 600, 630], ["click", 650, 630], ["click", 700, 630], ["click", 750, 630], ["click", 800, 630], ["click", 850, 630], ["click", 900, 630], ["tool", "+1:"], ["size", 1], ["click", 750, 630]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 60
+  },
+  {
+    "name": "ramp-cliff-brush-wide-low",
+    "description": "the same wide ramp, then Apply Cliff Increase One size 1 at 750,720 (the middle corner 32,26 to level 3): 2,3,3 still climbs one level, every flag stays (matched before the fix too)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1505,311"],
+        ["--click", "600,630"],
+        ["--sleep", "800"],
+        ["--click", "650,630"],
+        ["--sleep", "800"],
+        ["--click", "700,630"],
+        ["--sleep", "800"],
+        ["--click", "750,630"],
+        ["--sleep", "800"],
+        ["--click", "800,630"],
+        ["--sleep", "800"],
+        ["--click", "850,630"],
+        ["--sleep", "800"],
+        ["--click", "900,630"],
+        ["--sleep", "800"],
+        ["--click", "1392,569"],
+        ["--click", "1505,282"],
+        ["--click", "750,720"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Ramp"], ["size", 3], ["click", 600, 630], ["click", 650, 630], ["click", 700, 630], ["click", 750, 630], ["click", 800, 630], ["click", 850, 630], ["click", 900, 630], ["tool", "+1:"], ["size", 1], ["click", 750, 720]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 60
+  }
+]
