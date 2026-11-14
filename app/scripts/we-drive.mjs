@@ -19,6 +19,8 @@
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
 //   --save-accept T1,T2  titles of dialogs --save answers with Return besides "Reminder" (e.g. "Warning": the notice that the
 //                       map is no longer a melee map); another dialog still stops the save
+//   --keep-prefs        leave Enforce Water Limits and Enforce Camera Boundaries in the preferences as they are (default:
+//                       written as the editor's defaults before each start, so a run doesn't depend on the last one)
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
@@ -303,6 +305,7 @@ export function parseArgs(argv) {
       if (!m) throw new Error("--screen wants WxH");
       opts.screen = [Number(m[1]), Number(m[2])];
     }
+    else if (a === "--keep-prefs") opts.keepPrefs = true;
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
@@ -419,7 +422,7 @@ const ASSET_KINDS = ["Buildings", "Environment", "EnvOld", "Heroes", "Icons", "T
  * graphics mode (`sd`, `hd` or `de`: assetMode 0, 1, 2 decides, hd and the per-kind switches follow; see TESTING.md),
  * and whether the editor's day and night turn (`cycle`) or stand still (`fixed`).
  */
-export function editorPrefs(mode, dayNight) {
+export function editorPrefs(mode, dayNight, keep = false) {
   if (!["sd", "hd", "de"].includes(mode)) throw new Error("--mode wants sd, hd or de");
   if (dayNight !== "cycle" && dayNight !== "fixed") throw new Error("--day-night wants cycle or fixed");
   const on = mode === "sd" ? "0" : "1";
@@ -432,8 +435,18 @@ export function editorPrefs(mode, dayNight) {
     hd: on,
     ...Object.fromEntries(ASSET_KINDS.map((k) => [k, on])),
     "Fixed Day Night Cycle": dayNight === "fixed" ? "1" : "0",
+    ...(keep ? {} : PINNED_PREFS),
   };
 }
+
+/**
+ * The [Misc] toggles a spec may change and the editor persists (Enforce Water Limits, Enforce Camera Boundaries),
+ * pinned to the editor's defaults before each start so a run doesn't depend on what the last one left. The editor
+ * writes a switched-off Enforce Water Limits as "false", so the default is written as "true". The other View menu
+ * toggles (Grid, Camera Bounds, pathing, ...) aren't kept in the preferences file: they start as the editor's own.
+ * `--keep-prefs` leaves these as they are.
+ */
+export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1" });
 
 /**
  * Sets keys in one section of an INI-like text (the editor's preferences): a key that is there gets the new value in
@@ -585,7 +598,7 @@ class Session {
     const file = join(dir, "WorldEditPreferences.txt");
     mkdirSync(dir, { recursive: true });
     const before = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const after = setPrefs(before, "Misc", editorPrefs(this.opts.mode, this.opts.dayNight));
+    const after = setPrefs(before, "Misc", editorPrefs(this.opts.mode, this.opts.dayNight, !!this.opts.keepPrefs));
     if (after !== before) writeFileSync(file, after);
   }
 

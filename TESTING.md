@@ -423,11 +423,12 @@ when the editor starts) / 1441,367 (Dirt Cliff), Apply Cliff box 1373,244, sizes
 260,41 (Adjust Cliff Levels 299,206, Reset Height Field 300,189: its Random box 589,429, Smoothing slider 592 to 773
 at y=534, Variation slider 589 to 773 at y=494, OK 669,573, "Continue anyway" 767,523). The editor's Create New Map
 dialog (`ctrl+n`) lists 22 tilesets and no Misc, so a Misc-tileset base tile can't be compared there.
-The water brush specs hold with the editor's Enforce Water Height Limits on, its default (`Enforce Water Limits=1` in
-WorldEditPreferences.txt). The shared prefix keeps whatever the last run left there, and we-drive doesn't set it. With it
-off (seen 2026-11-14), the editor leaves out the 35-unit lift next to the water and the dry rim's water word, so
-`water-brush-slope-shallow-east` and the `edge-high` specs differ. Run them with a `W3PROJ_WE_DIR` of your own
-(a fresh prefix) when in doubt.
+The water brush specs hold with the editor's Enforce Water Height Limits on, its default. we-drive now writes
+`Enforce Water Limits=true` and `Enforce Camera Boundaries=1` (`PINNED_PREFS`) before each editor start, so a run no
+longer depends on what the last one left in the shared prefix (with the limit off, seen 2026-11-14, the editor leaves out
+the 35-unit lift next to the water and the dry rim's water word). `--keep-prefs` (we-drive, we-compare) leaves them as
+they are. The other View toggles aren't in the preferences file. Within one running editor (several specs of a
+we-compare process share it) a toggle a spec switched stays until the editor restarts.
 Dragged cliff strokes (branch drag-stroke-we, 2026-11-14, spec `drag-stroke`): the editor stamps its brush only where the
 pointer is at its own ticks, nothing in between (a 20 ms `--drag` of size 1 raised one corner, of size 3 one brush, not at
 the press point), so a quick drag has gaps and two runs of it differ; at 3 s for 20 steps it sees every step and matches
