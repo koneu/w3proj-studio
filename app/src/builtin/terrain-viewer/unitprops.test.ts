@@ -1,4 +1,4 @@
-import { randomItemChoices } from "./dropsedit";
+import { randomItemChoices, randomItemEntries } from "./dropsedit";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -458,4 +458,12 @@ test("the random item entries offered are the World Editor's: every class by any
   // Ids TurtleRock's drops use.
   for (const id of ["YiI2", "YjI2"]) assert.ok(all.some((c) => c.id === id));
   assert.equal(all.some((c) => c.id === "YzI2"), false);
+});
+
+test("the item browser's random item group holds the same ids as the random controls, named as the World Editor does", () => {
+  const entries = randomItemEntries(), choices = randomItemChoices();
+  assert.deepEqual(entries.map((e) => e.id), choices.map((c) => c.id));
+  assert.deepEqual(entries[0], { id: "YYI/", name: "Random Any Level Item" });
+  assert.equal(entries.find((e) => e.id === "YkI2")?.name, "Random Level 2 Power Up Item");
+  assert.equal(entries.find((e) => e.id === "YiI0")?.name, "Random Level 0 Permanent Item");
 });

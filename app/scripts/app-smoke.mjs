@@ -2721,6 +2721,28 @@ async function itemDrops(page, found) {
   await k.save();
   if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("YkI2") || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the random power-up: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets])}`);
 
+  // The item browser itself lists the random items first, as a group: "Add a set to each…" opens it, a search for a
+  // level 2 power-up leaves that entry on top and Enter adds YkI2 to each troll as a set, one undo step.
+  await k.hands.click(T("[data-prop=\"add-set-each\"]"));
+  await until("the item browser with random items", () => page.evaluate(`document.querySelectorAll(".picker-rows > .picker-row .badge").length > 5`), 20000)
+    .catch(() => fail("the item browser has no random item group"));
+  const firstRows = await page.evaluate(`[...document.querySelectorAll(".picker-rows > .picker-row")].slice(0, 3).map((r) => [r.querySelector("code").textContent, r.querySelector(".picker-name").textContent])`);
+  if (JSON.stringify(firstRows[0]) !== JSON.stringify(["YYI/", "Random Any Level Item"])) fail(`the item browser's first rows: ${JSON.stringify(firstRows)}`);
+  await k.hands.click("input.picker-search");
+  await k.hands.type("level 2 power up");
+  await soon(() => page.evaluate(`document.querySelector(".picker-rows > .picker-row.active code")?.textContent === "YkI2"`), 5000);
+  await k.hands.key("Enter", "Enter", 13);
+  await redrawn();
+  await k.save();
+  for (const [x, y] of [[0, 0], [192, 0], [0, 192]]) {
+    const got = troll(x, y)?.itemSets, want = x === 0 && y === 0 ? [...pasted, power] : [power];
+    if (JSON.stringify(got) !== JSON.stringify(want)) fail(`the troll at ${x}, ${y} after a random power-up from the item browser: ${JSON.stringify(got)}`);
+  }
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await redrawn();
+  await k.save();
+  if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("YkI2")) fail("one undo after the item browser's random power-up left it in");
+
   // The ogres' camp: one drops from the table, so a set added to each is refused whole; then all get the table.
   await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
   await redrawn();
@@ -2782,6 +2804,20 @@ async function itemDrops(page, found) {
   // The panel shows the table by name and what it drops, not only its name.
   const ogreBlock = await text(".terrain-drops") ?? "";
   if (!/Ogre Loot \(#3\)/.test(ogreBlock) || !ogreBlock.includes(clawsName) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
+
+  // The Selection panel's Drops block has the random item control too, except for objects that drop from a table.
+  if (await has(".terrain-drops [data-prop=\"add-random\"]")) fail("the drops block offers a random set to an object that drops from a map item table");
+  await k.look(0, 0, { id: "nftt", x: 0, y: 0 });
+  await until("the troll's drops block with the random control", () => has(".terrain-drops [data-prop=\"add-random\"]"), 20000).catch(() => fail("the drops block has no random item control"));
+  await page.evaluate(`(() => { const s = (p, v) => { const e = document.querySelector('.terrain-drops [data-prop="' + p + '"]'); e.value = v; }; s("random-class", "3"); s("random-level", "0"); })()`);
+  await k.hands.click(".terrain-drops [data-prop=\"add-random\"]");
+  await redrawn();
+  await k.save();
+  if (JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify([...pasted, [{ id: "YkI0", chance: 100 }]])) fail(`the troll's drops after the block's random power-up, level 0: ${JSON.stringify(troll(0, 0)?.itemSets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await redrawn();
+  await k.save();
+  if (JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the block's random item: ${JSON.stringify(troll(0, 0)?.itemSets)}`);
 
   // The script: the trolls' own drop function with both items, the table's function.
   await k.save();

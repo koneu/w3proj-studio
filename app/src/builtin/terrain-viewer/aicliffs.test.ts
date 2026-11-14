@@ -403,7 +403,13 @@ test("a unit takes camp mode, gold and random drops", () => {
 test("wrong unit choices are refused before anything changes", () => {
   assert.throws(() => setUnitChoices({ camp: "yes" }), /camp must be/);
   assert.throws(() => setUnitChoices({ gold: -5 }), /gold must be/);
-  assert.throws(() => setUnitChoices({ drops: [{ level: 9 }] }), /level goes from 1 to 8/);
+  assert.throws(() => setUnitChoices({ drops: [{ level: 9 }] }), /level is 0 to 8/);
+  assert.throws(() => setUnitChoices({ drops: [{ level: -1 }] }), /level is 0 to 8/);
+  assert.throws(() => setUnitChoices({ drops: [{ level: "3" }] }), /level is 0 to 8/);
+  // Level 0 and any level, as the World Editor offers.
+  const e0: { itemSets?: { id: string; chance: number }[][] } = {};
+  setUnitChoices({ drops: [{ level: 0, kind: "powerup" }, { level: "any" }, { level: "any", kind: "artifact" }] }, e0);
+  assert.deepEqual(e0.itemSets, [[{ id: "YkI0", chance: 100 }], [{ id: "YYI/", chance: 100 }], [{ id: "YlI/", chance: 100 }]]);
   assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
   assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
 });

@@ -93,7 +93,7 @@ import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
-import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
+import { dropsBlock, randomItemEntries, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
@@ -3038,7 +3038,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             readOnly: !editable, tables: lists.tables, tablesUnsaved: !lists.tablesLive && w3.editors.isDirty("map/war3map.w3i.json"),
             itemName: (id) => objects().then((s) => s.name(id, ["w3t"])),
             itemIcon: (id) => objects().then((s) => s.icon("w3t", id)),
-            pickItem: (title) => objects().then((s) => s.pick(el, { title, kinds: ["w3t"] })).then((o) => o?.id),
+            pickItem: (title) => objects().then((s) => s.pick(el, { title, kinds: ["w3t"], extra: randomItemEntries() })).then((o) => o?.id),
             bulk: (edit) => {
               const r = bulkDrops(items.map((it) => it.entry), edit);
               if ("error" in r) return r.error;

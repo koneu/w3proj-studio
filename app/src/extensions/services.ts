@@ -17,7 +17,7 @@ export interface ObjectsService {
   /** The object browser (search, facets, field filters) over one or more
    *  object kinds ("w3u", "w3t", "w3b", "w3d", …) with a tab per kind,
    *  including the map's custom objects. Shown over `host`. */
-  pick(host: HTMLElement, opts: { title: string; kinds: string[] }): Promise<PickedObject | undefined>;
+  pick(host: HTMLElement, opts: { title: string; kinds: string[]; extra?: { id: string; name: string }[] }): Promise<PickedObject | undefined>;
   /** Icon of an object (custom ids use the map's own art, else their base's) as a data URL, or null. */
   icon(kind: string, id: string): Promise<string | null>;
   /** Display name of an object id (custom objects: the map's name), searching `kinds` (default: all). */

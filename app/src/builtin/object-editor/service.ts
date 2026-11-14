@@ -212,7 +212,7 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
         // Not awaited: the browser opens at once and labels its values when the types arrive.
         const editorTypes = loadEditorTypes(w3).catch(() => null);
         const r = await pickObject(host, kd, {
-          title: opts.title, custom, query, editorTypes,
+          title: opts.title, custom, query, editorTypes, extra: opts.extra,
           iconOf: (id, base) => icons(kd, kind, id, base, custom.find((c) => c.id === id)?.icon),
           tabs: opts.kinds.length > 1 ? { labels: opts.kinds.map((k) => KIND_LABELS[k] ?? k), active: tab } : undefined,
         });

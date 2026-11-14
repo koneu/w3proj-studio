@@ -4,7 +4,7 @@
 // which makes each one undo step or refuses it whole (unitprops.ts checks, dropsview.ts works out bulk edits).
 
 import { h } from "../../workbench/dom";
-import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomObjectId } from "../../lib/objects/randomids";
+import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomIdLabel, randomObjectId } from "../../lib/objects/randomids";
 import { dropsText, dropsVariants, isEmptyItem, itemLabel, setHeading, setShares, type BulkDrops } from "./dropsview";
 import type { Placed } from "./objects";
 import { dropsOf, ownSetsOnly, redistribute, sameValue, setTotal, tableChoice, type DropItem } from "./unitprops";
@@ -142,15 +142,20 @@ export function randomItemChoices(): { id: string; label: string }[] {
     id: randomObjectId({ kind: "item", level, itemClass }), label: `${c.label}, ${level < 0 ? "any level" : `level ${level}`}` })));
 }
 
+/** The item browser's group of random items at the top: the same ids as the random controls give. */
+export function randomItemEntries(): { id: string; name: string }[] {
+  return randomItemChoices().map((c) => ({ id: c.id, name: randomIdLabel(c.id) ?? c.label }));
+}
+
 /** "Random item" by class and level, and "Item table…" for the map's tables, beside the item browser: `onPick` gets the id. */
-function randomPicker(host: DropsUiHost, onPick: (id: string) => void): HTMLElement[] {
+function randomPicker(host: DropsUiHost, onPick: (id: string) => void, withTable = true): HTMLElement[] {
   const cls = h("select", { "data-prop": "random-class", title: "Class of the random item" },
     ...ITEM_CLASSES.map((c, i) => h("option", { value: String(i) }, c.label)));
   const lvl = h("select", { "data-prop": "random-level", title: "Level of the random item" },
     h("option", { value: "-1" }, "Any level"), ...Array.from({ length: MAX_ITEM_LEVEL + 1 }, (_, i) => h("option", { value: String(i) }, `Level ${i}`)));
   return [h("span.drops-random", {}, cls, lvl, h("button", { "data-prop": "add-random", title: "Add a random item of this class and level, as the World Editor's Random item",
     onclick: () => onPick(randomObjectId({ kind: "item", level: Number(lvl.value), itemClass: Number(cls.value) })) }, "Add random item")),
-  h("button", { "data-prop": "item-tables", title: "Map Properties › Item tables", onclick: () => host.openItemTables() }, "Item table…")];
+  ...(withTable ? [h("button", { "data-prop": "item-tables", title: "Map Properties › Item tables", onclick: () => host.openItemTables() }, "Item table…")] : [])];
 }
 
 /** The Selection panel's Drops block: what the objects drop, readable in the narrow panel, and "Edit drops…" for the
@@ -167,7 +172,8 @@ export function dropsBlock(host: DropsUiHost, entries: readonly Placed[], editDr
   } else if (drops.mode === "custom") {
     parts.push(...(drops.sets.length ? drops.sets.map((set, k) => setReadOnly(host, set, k, true)) : [h("div.muted", {}, "No sets: drops nothing.")]));
   }
-  const actions = h("div.drops-actions", {}, edit, ...(drops?.mode === "custom" && !onlyOwn
+  const random = drops?.mode === "table" ? [] : randomPicker(host, (id) => send(host, { op: "addSet", set: [{ id, chance: 100 }] }), false);
+  const actions = h("div.drops-actions", {}, edit, ...random, ...(drops?.mode === "custom" && !onlyOwn
     ? [h("button", { "data-prop": "use-map-table", title: "Map Properties › Techtree & Tables › Item tables: tables any object can drop from (choose Map item table above to use one)",
       onclick: () => host.openItemTables() }, "Map item tables…")] : []));
   return h("fieldset.terrain-props.terrain-drops", { disabled: !!host.readOnly, "data-prop": "drops-block" },
