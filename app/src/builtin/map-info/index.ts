@@ -754,18 +754,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
             // undo isn't mixed up with the save.
             const taken = history.mark();
+            // What is saved is taken now: an edit made while the save waits stays unsaved (and the editor dirty).
+            const saved = structuredClone(info);
+            const extraNow = JSON.stringify(extra);
             // The preferences on top of the file as it is now (its other lines stay); a file that has become
             // unreadable stops the save before anything is written.
-            const extraNow = JSON.stringify(extra);
             let extraWrite: string | null = null;
             if (extraNow !== extraSaved && !prefs.error) {
               const now = await readMapPrefs(w3);
               if (now.error) throw new Error(`war3mapExtra.txt couldn't be read (${now.error}); nothing was saved.`);
               const base = now.text ?? "";
-              const next = writeMapExtra(base, extra);
+              const next = writeMapExtra(base, JSON.parse(extraNow) as MapExtra);
               if (next !== base && !(now.text === null && next === "")) extraWrite = next;
             }
-            const saved = structuredClone(info);
             applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
             await doc.writeText(text);
