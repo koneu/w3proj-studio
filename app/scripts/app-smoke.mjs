@@ -11887,6 +11887,7 @@ async function run() {
         doodadRulesEdit,
         doodadSnapOnLoad,
         drawCalls,
+        editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
         flyingHeights,
@@ -11945,7 +11946,6 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        editDuringSave,
         tileCleanup,
         tilesInPlace,
         tileTemplate,
