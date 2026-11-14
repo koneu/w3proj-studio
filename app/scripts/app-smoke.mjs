@@ -2704,6 +2704,23 @@ async function itemDrops(page, found) {
   await k.save();
   if (troll(192, 0)?.itemSets.length || troll(0, 192)?.itemSets.length || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the paste: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets, troll(0, 192)?.itemSets])}`);
 
+  // A random power-up of level 2 from the picker's own class and level choice (the World Editor's "YkI2"): a set for each
+  // of the camp's trolls in one step, and one undo takes it back. Control: no YkI2 before the click.
+  if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("YkI2")) fail("a random power-up was in the drops before the picker added it");
+  await page.evaluate(`(() => { const s = (p, v) => { const e = document.querySelector('.drops-tab [data-prop="' + p + '"]'); e.value = v; }; s("random-class", "3"); s("random-level", "2"); })()`);
+  await k.hands.click(T("[data-prop=\"add-random\"]"));
+  await redrawn();
+  await k.save();
+  const power = [{ id: "YkI2", chance: 100 }];
+  for (const [x, y] of [[0, 0], [192, 0], [0, 192]]) {
+    const got = troll(x, y)?.itemSets, want = x === 0 && y === 0 ? [...pasted, power] : [power];
+    if (JSON.stringify(got) !== JSON.stringify(want)) fail(`the troll at ${x}, ${y} after a random power-up, level 2: ${JSON.stringify(got)}`);
+  }
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await redrawn();
+  await k.save();
+  if (JSON.stringify([troll(0, 0), troll(192, 0), troll(0, 192)]).includes("YkI2") || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the random power-up: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets])}`);
+
   // The ogres' camp: one drops from the table, so a set added to each is refused whole; then all get the table.
   await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
   await redrawn();

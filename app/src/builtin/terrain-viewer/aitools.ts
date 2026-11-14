@@ -314,8 +314,8 @@ export function setRamp(t: Terrain, x: number, y: number, width: number, remove:
   return [...log.corners];
 }
 
-export type DropKind = "any" | "permanent" | "charged" | "powerup" | "artifact";
-const DROP_LETTER: Record<DropKind, string> = { any: "Y", permanent: "i", charged: "j", powerup: "k", artifact: "l" };
+export type DropKind = "any" | "permanent" | "charged" | "powerup" | "artifact" | "purchasable" | "campaign" | "miscellaneous";
+const DROP_LETTER: Record<DropKind, string> = { any: "Y", permanent: "i", charged: "j", powerup: "k", artifact: "l", purchasable: "m", campaign: "n", miscellaneous: "o" };
 /** What a placed unit can be told besides where it stands. */
 export interface UnitChoices { camp?: unknown; acquireRange?: unknown; gold?: unknown; drops?: unknown }
 interface UnitEntry { targetAcquisition?: number; gold?: number; itemSets?: { id: string; chance: number }[][] }
