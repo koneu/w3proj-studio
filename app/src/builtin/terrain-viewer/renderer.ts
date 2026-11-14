@@ -12,7 +12,7 @@ import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
 import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
 import { ViewDepth } from "../../lib/model/viewdepth";
-import { HD_WATER_DEFAULTS, HD_WATER_GLSL, hdReflectScale, type HdWaterSettings } from "./hdwater";
+import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdReflectScale, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -140,12 +140,15 @@ in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
 // border isn't shown.
 uniform float uEdgeDark; uniform highp vec4 uPlayRect;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
-// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp).
-uniform vec3 uLight;
+// Classic: how bright the light makes the water (waterLight; the map's water tint is in the ramp: waterRamp).
+uniform float uLight;
 // HD (uTone 2): hdwater.ts in linear light over the picture so far (uBed, the scene copied before the water), the
-// tileset's deep colour uHdWater, the reflection's scale and dimming uReflect (hdReflectScale), the texture only rippling
-// the reflection.
-uniform vec3 uHdWater; uniform float uWaterBrightness; uniform sampler2D uBed; uniform vec2 uReflect;
+// tileset's deep colour uHdWater (uHdShallow in the shallows), the reflection's scale and dimming uReflect
+// (hdReflectScale), and the waves: the game's water normal map uWave, its two layers' sizes (world units per repeat)
+// and where they have drifted to (uWaveSize, uWaveShift), its mean red and green uWaveMean and the light a wave adds
+// (uWaveLight: hdWaveLight; 0 without the map).
+uniform vec3 uHdWater; uniform vec3 uHdShallow; uniform sampler2D uBed; uniform vec2 uReflect;
+uniform sampler2D uWave; uniform highp vec2 uWaveSize; uniform highp vec4 uWaveShift; uniform vec2 uWaveMean; uniform vec3 uWaveLight;
 // HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
 // the eye uEye looking along uForward with the projection's near and far planes (uNearFar).
 uniform highp sampler2D uScene; uniform float uSceneOn; uniform highp vec2 uViewSize;
@@ -177,13 +180,18 @@ void main() {
   if (uTone > 1.5) {
     // The bed, the deep colour and the sky's reflection by the depth (hdWaterAt), the depth being that of the water in
     // front of what's behind (seenDepth); the sky along the view reflected on the flat surface (hdSky).
-    vec3 w = hdWaterAt(seenDepth(vDepth * 128.0) * t.a);
+    float depth = seenDepth(vDepth * 128.0) * t.a;
+    vec3 w = hdWaterAt(depth);
     vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
-    float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     // In high precision: the squares of world distances overflow medium precision (16-bit floats on some drivers).
     highp vec3 view = normalize(vWorld - uEye);
-    vec3 sky = hdSky(vec3(view.xy, -view.z)) * uReflect.x * mix(1.0, ripple, 0.5);
-    vec3 own = w.y * srgbDec(uHdWater);
+    // The waves: the game's water normal map, two layers drifting against each other (hdwater.ts HD_WAVES), away
+    // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
+    highp vec2 p = vec2(vWorld.x, -vWorld.y);
+    vec2 lean = (texture(uWave, p / uWaveSize.x + uWaveShift.xy).rg + texture(uWave, p / uWaveSize.y + uWaveShift.zw).rg - 2.0 * uWaveMean) * 2.0;
+    vec3 sky = (hdSky(vec3(view.xy, -view.z)) + uWaveLight * hdWaveLean(lean, view)) * uReflect.x;
+    // The tileset's deep colour, towards its shallow colour in shallow water (the same where it has none).
+    vec3 own = w.y * mix(srgbDec(uHdWater), srgbDec(uHdShallow), hdShallowAt(depth));
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its own colour and reflection; past the
     // playable map those are black (the bed seen through stays the border's dark ground).
     vec3 shade = mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
@@ -196,14 +204,17 @@ void main() {
     outColor = vec4(mix(c, fogged(c), 1.0 - w.x), 1.0);
     return;
   }
-  vec4 w = t * c;
-  outColor = vec4(fogged(toned(w.rgb, uLight) * (1.0 - vDark * uEdgeDark)), w.a);
+  // Classic: the ramp's colour times the light's level (waterLight), no brighter than white, under the texture.
+  vec4 w = t * vec4(min(c.rgb * uLight, vec3(1.0)), c.a);
+  outColor = vec4(fogged(w.rgb * (1.0 - vDark * uEdgeDark)), w.a);
 }`;
 
 /** Texture unit of HD water's depth picture of the models (drawWaterDepth): beside SUN_UNIT (5). */
 const WATER_DEPTH_UNIT = 6;
 /** Texture unit of the picture HD water lies over (copyScene). */
 const WATER_BED_UNIT = 7;
+/** Texture unit of the normal map of HD water's waves (setWaterWave). */
+const WATER_WAVE_UNIT = 8;
 
 /** Tiles around a water tile whose models count as possibly under its surface (wetLevels), and how far above the
  *  surface a model's origin may be and still count (underWater). */
@@ -259,12 +270,32 @@ export function waterTile(cs: readonly WaterCorner[]): { z: number[]; depth: num
   };
 }
 
-/** A tileset's water: animation frames (by index; null until loaded), frames per second and
- *  the colour ramp (r, g, b, a in 0–1). */
+/** A tileset's water: animation frames (by index; null until loaded), frames per second, the colour ramp (r, g, b, a
+ *  in 0–1) and whether the map's lighting lights it (Water.slk's `lighting`: not Dungeon's, Underground's, Felwood's). */
 export interface WaterLook {
   frames: (WebGLTexture | null)[];
   rate: number;
   shallowMin: number[]; shallowMax: number[]; deepMin: number[]; deepMax: number[];
+  lit: boolean;
+}
+
+/**
+ * How bright a lighting model's light makes classic water: its ambient intensity plus its intensity by how steeply it
+ * shines down, without the light's colours, and of the unit light, not the terrain's. The ramp's colour times this, no
+ * brighter than white, goes under the texture (WATER_FS). As the World Editor draws it (we-drive, SD, 06:00, branch
+ * water-waves-we, 2026-11-14; deep Lordaeron water, 39, 46, 136 with View > Lighting off, under each tileset's lights
+ * through the w3i's light environment): Lordaeron's 43, 50, 149 (1.09 of unlit; 0.3 + 1.3 × 0.616 = 1.10), Ashenvale's
+ * 51, 59, 175 (1.30; 0.5 + 0.80), Felwood's 48, 55, 163 (1.20; 0.4 + 0.80), Dalaran's 60, 69, 181 (1.51; 0.7 + 0.80, the
+ * blue stopping at white: 192 × 1.5 > 255), Dungeon's and Underground's 17, 20, 55 (0.41; 0.4, their unit light shines
+ * upwards). The same grey in every channel although the lights' ambient colours differ, and the terrain lights
+ * (Dungeon's 1.41) don't fit. Night is not measured. A light without levels (not a lighting model's): its brightest
+ * channels. No light (View > Lighting off): 1.
+ */
+export function waterLight(light: SceneLight | null): number {
+  if (!light) return 1;
+  const up = Math.max(0, light.dir[2] / (Math.hypot(light.dir[0], light.dir[1], light.dir[2]) || 1));
+  const [ambient, diffuse] = light.levels ?? [Math.max(...light.ambient), Math.max(...light.diffuse)];
+  return Math.max(0, ambient) + Math.max(0, diffuse) * up;
 }
 
 type WaterRamp = Pick<WaterLook, "shallowMin" | "shallowMax" | "deepMin" | "deepMax">;
@@ -286,8 +317,8 @@ export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp {
  * The tileset's deep HD water colour (sRGB 0–255) without the sky's reflection (hdwater.ts adds that): the 200 and 800
  * deep bands of flat maps with the w3i's reflectivity 0, View Entire Map (we-drive, HD, branch water-render-we,
  * 2026-11-14; all eighteen tilesets of the editor's list; Felwood, Dungeon, Underground and Outland are black). The
- * same depth tables fit all (hdwater.ts: mostly within 3 levels; Underground's 109 deep 11 off in blue, Sunken Ruins'
- * 24 to 64 deep water up to 16 greener than they give). Reforged's water doesn't take its colour from Water.slk's HD
+ * same depth tables fit all (hdwater.ts: mostly within 3 levels; Underground's 109 deep 11 off in blue; Sunken Ruins'
+ * shallows have a colour of their own, HD_SHALLOW). Reforged's water doesn't take its colour from Water.slk's HD
  * ramp (Lordaeron's is green, 0, 200, 80; Northrend's near white; Barrens' pink). The colours measured before (map 03's lake 22, 57, 73; Cityscape's city pool
  * 50, 61, 121; Murgul Oasis) had the reflection in them.
  */
@@ -308,18 +339,33 @@ export function hdWaterColor(tileset: string, tinted: boolean): [number, number,
   return [own[0] / 255, own[1] / 255, own[2] / 255];
 }
 
-/** The brightness HD water's ripple is measured against until the texture is known (Lordaeron's Water00). */
-const WATER_BRIGHTNESS = 0.45;
+/**
+ * The tilesets whose shallow HD water has another colour than the deep (sRGB 0–255): Sunken Ruins' is turquoise over
+ * its blue. From the same pictures as HD_DEEP (its 12 to 96 deep bands, reflectivity 0, the bed's share taken away:
+ * the colour the water itself needs came out 0, 142, 181 at 12 deep, 0, 135, 176 at 38.4, 0, 95, 170 at 96); how
+ * much of it a depth has is hdwater.ts HD_SHALLOW_SHARE. The others' shallow bands fit their deep colour within 3
+ * levels (Cityscape's blue 5 at 64 deep).
+ */
+export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 142, 181] };
 
-/** An image's mean brightness (0–1, Rec. 601 weights), from a small mip level; null if it can't be decoded. */
-export function meanBrightness(img: DecodedImage): number | null {
+/** The water's shallow colour in HD (sRGB, 0–1): the tileset's where it has one (HD_SHALLOW), else its deep colour
+ *  (hdWaterColor: one colour at every depth), as with a map's water tint. */
+export function hdWaterShallow(tileset: string, tinted: boolean): [number, number, number] {
+  const own = tinted ? undefined : HD_SHALLOW[tileset.toUpperCase()];
+  return own ? [own[0] / 255, own[1] / 255, own[2] / 255] : hdWaterColor(tileset, tinted);
+}
+
+/** An image's mean red and green (0–1), from a small mip level; null if it can't be decoded. For the water's normal
+ *  map: the lean its waves go around (the game's is a little off the middle, 0.496 and 0.481). */
+export function meanRedGreen(img: DecodedImage): [number, number] | null {
   try {
     let level = 0;
     while (level + 1 < img.mipCount && img.height >> (level + 1) >= 16) level++;
     const { rgba } = img.mip(level);
-    let sum = 0;
-    for (let p = 0; p < rgba.length; p += 4) sum += 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2];
-    return rgba.length ? sum / (rgba.length / 4) / 255 : null;
+    let red = 0, green = 0;
+    for (let p = 0; p < rgba.length; p += 4) { red += rgba[p]; green += rgba[p + 1]; }
+    const n = (rgba.length / 4) * 255;
+    return rgba.length ? [red / n, green / n] : null;
   } catch {
     return null;
   }
@@ -327,7 +373,7 @@ export function meanBrightness(img: DecodedImage): number | null {
 
 /** Until the game's water is known: an untextured blue-grey ramp. */
 const WATER_DEFAULT: WaterLook = {
-  frames: [], rate: 1,
+  frames: [], rate: 1, lit: true,
   shallowMin: [0.12, 0.32, 0.5, 0.25], shallowMax: [0.12, 0.32, 0.5, 0.6], deepMin: [0.12, 0.32, 0.5, 0.6], deepMax: [0.1, 0.27, 0.45, 0.85],
 };
 
@@ -559,8 +605,9 @@ export class TerrainRenderer {
   private waterLook: WaterLook = WATER_DEFAULT;
   /** Water frame shown by the last render (the view redraws when it changes). */
   private waterFrameShown = -1;
-  /** Mean brightness of the water's first frame (meanBrightness): HD water ripples around it. */
-  private waterBrightness = WATER_BRIGHTNESS;
+  /** HD water's waves: the game's water normal map and its mean red and green (meanRedGreen); null until it's read
+   *  (and where the game has none): flat water. */
+  private waterWave: { tex: WebGLTexture; mean: [number, number] } | null = null;
   /** White texture for untextured water. */
   private waterWhite: WebGLTexture;
   /** The map's water tint as stored (b, g, r, a in 0–255; see waterRamp) when tinting is on; null: none. */
@@ -1059,7 +1106,13 @@ export class TerrainRenderer {
   setWaterFrame(i: number, img: DecodedImage) {
     if (i >= this.waterLook.frames.length) return;
     this.waterLook.frames[i] = createTexture(this.gl, img, { repeat: [true, true] });
-    if (i === 0) this.waterBrightness = meanBrightness(img) ?? WATER_BRIGHTNESS;
+  }
+
+  /** The normal map of HD water's waves (the game's ReplaceableTextures\Water\Water_Normal); null takes it away. */
+  setWaterWave(img: DecodedImage | null) {
+    if (this.waterWave) this.gl.deleteTexture(this.waterWave.tex);
+    const mean = img && meanRedGreen(img);
+    this.waterWave = img && mean ? { tex: createTexture(this.gl, img, { repeat: [true, true] }), mean } : null;
   }
 
   /** The water animation frame for now. */
@@ -1843,8 +1896,17 @@ export class TerrainRenderer {
       }
       setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
-      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
+      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdShallow"), hdWaterShallow(this.terrain.tileset, !!this.waterTint));
       gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uReflect"), hdReflectScale(this.hdWater));
+      // The waves' normal map, drifted to where it is now (a texture is always bound to the sampler).
+      const wave = this.waterWave;
+      gl.activeTexture(gl.TEXTURE0 + WATER_WAVE_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, wave?.tex ?? this.waterWhite);
+      gl.uniform1i(gl.getUniformLocation(this.waterProg, "uWave"), WATER_WAVE_UNIT);
+      gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uWaveSize"), HD_WAVES.map((l) => l.size));
+      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uWaveShift"), hdWaveShift(performance.now() / 1000));
+      gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uWaveMean"), wave?.mean ?? [0, 0]);
+      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uWaveLight"), wave ? hdWaveLight(this.hdWater) : [0, 0, 0]);
       // HD water blends over the picture so far itself, in linear light (hdwater.ts): a copy of it before the water.
       const hd = this.tone === 2;
       gl.activeTexture(gl.TEXTURE0 + WATER_BED_UNIT);
@@ -1853,8 +1915,7 @@ export class TerrainRenderer {
       // The border's black water goes with the border's shade (the Boundary switch, and the textured ground it lies on).
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uEdgeDark"), this.showBorder && textured ? 1 : 0);
       gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uPlayRect"), this.playRect);
-      const lit = this.flatLight(terrainLight);
-      gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uLight"), look.lit ? waterLight(this.unitLight ?? this.terrainLight) : 1);
       // The models' depth picture (a texture of its own is always bound to the sampler, as for the shadow map).
       const eye = this.eye(), forward = norm([this.target[0] - eye[0], this.target[1] - eye[1], this.target[2] - eye[2]]);
       gl.activeTexture(gl.TEXTURE0 + WATER_DEPTH_UNIT);

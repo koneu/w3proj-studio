@@ -76,6 +76,9 @@ test("lighting at an hour: colours BGR → RGB times intensity, hours over the d
   const night = lightAt(m, 0)!;
   near(night.diffuse, [0.125 * 1.95, 0.25 * 1.95, 0.5 * 1.95]);
   near(night.ambient, [0.6 * 0.3, 0.4 * 0.3, 0.2 * 0.3]);
+  // The intensities themselves, without the colours (classic water is lit by these).
+  near(night.levels!, [0.3, 1.95]);
+  near(noon.levels!, [0.3, 1.95]);
   // A light turned 90° about X shines from -Y.
   m.lights[0].rotation = { interp: 0, globalSeq: -1, keys: [{ time: 0, value: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] }] };
   near(lightAt(m, 6)!.dir, [0, -1, 0]);

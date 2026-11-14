@@ -2006,7 +2006,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           const argb = (k: string) => [`${k}_R`, `${k}_G`, `${k}_B`, `${k}_A`].map((c) => Number(row[c] ?? 255) / 255);
           const frames = Math.max(1, Number(row.numTex) || 1);
-          renderer.setWaterLook({ rate: Number(row.texRate) || 1, shallowMin: argb("Smin"), shallowMax: argb("Smax"), deepMin: argb("Dmin"), deepMax: argb("Dmax") }, frames);
+          // `lighting` 0 (Dungeon, Underground, Felwood): the map's lighting leaves the water as it is.
+          renderer.setWaterLook({ rate: Number(row.texRate) || 1, shallowMin: argb("Smin"), shallowMax: argb("Smax"), deepMin: argb("Dmin"), deepMax: argb("Dmax"), lit: Number(row.lighting ?? 1) !== 0 }, frames);
           for (let i = 0; i < frames; i++) {
             const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
             // The tileset's own water frames (`_Tilesets/<letter>.w3mod`) where it has them.
@@ -2015,6 +2016,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }).catch(() => { /* the default water colour */ }));
         };
         loadTilesetArt();
+        // HD water's waves: the game's water normal map (the HD art has one; without it the water is flat). The same
+        // for every tileset, so read once; a graphics mode change opens the editor again.
+        if (artMode() !== "sd") {
+          const path = "ReplaceableTextures\\Water\\Water_Normal.blp";
+          void artLoad(readFile(w3, doc, path).then((buf) => { renderer.setWaterWave(decodeImage(buf, path)); loadRedraw(); }, () => {}));
+        }
         const thumbCache = new Map<string, Promise<string | null>>();
         /** Data URL of a ground texture's first cell (the plain tile). */
         const tileThumb = (path: string) => {

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HD_REFLECT_DEPTH, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, hdReflectScale, hdSky, hdWaterAt, hdWaterPixel, hdWaterSettings } from "./hdwater";
-import { HD_DEEP, hdWaterColor } from "./renderer";
+import {
+  decode, HD_REFLECT_DEPTH, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, HD_WAVE_LIGHT, HD_WAVE_RED, HD_WAVES,
+  hdReflectScale, hdShallowAt, hdSky, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
+} from "./hdwater";
+import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
 // The World Editor's HD pictures these come from (we-drive, branch water-render-we, 2026-11-14; TESTING.md "HD water"):
 // flat 128 × 96 maps of eight depths in bands across the map, View Entire Map, mean colours of the bands in a west, a
@@ -47,10 +50,11 @@ test("HD water's tables: none of the water at 0, all of it from 200 deep, linear
 });
 
 test("the w3i's water settings: its reflectivity and environment map reflectivity, a new map's 10 and 100 otherwise", () => {
-  assert.deepEqual(hdWaterSettings({ reflectivity: 20, environmentMapReflectivity: 50, maxOpacity: 100 }), { reflectivity: 20, environment: 50 });
+  assert.deepEqual(hdWaterSettings({ reflectivity: 20, environmentMapReflectivity: 50, maxOpacity: 100 }), { reflectivity: 20, environment: 50, waves: 100 });
+  assert.deepEqual(hdWaterSettings({ wavesNormalMapStrength: 40 }), { ...HD_WATER_DEFAULTS, waves: 40 }, "the waves' strength");
   assert.deepEqual(hdWaterSettings(undefined), HD_WATER_DEFAULTS, "an older w3i without the block");
-  assert.deepEqual(hdWaterSettings({ reflectivity: "x", environmentMapReflectivity: Number.NaN }), HD_WATER_DEFAULTS, "not numbers");
-  assert.deepEqual(hdWaterSettings({ reflectivity: -3, environmentMapReflectivity: 100 }), { reflectivity: 0, environment: 100 }, "negative: none");
+  assert.deepEqual(hdWaterSettings({ reflectivity: "x", environmentMapReflectivity: Number.NaN, wavesNormalMapStrength: null }), HD_WATER_DEFAULTS, "not numbers");
+  assert.deepEqual(hdWaterSettings({ reflectivity: -3, environmentMapReflectivity: 100, wavesNormalMapStrength: -1 }), { reflectivity: 0, environment: 100, waves: 0 }, "negative: none");
   assert.deepEqual(hdReflectScale(HD_WATER_DEFAULTS), [1, 0.113]);
   assert.deepEqual(hdReflectScale({ reflectivity: 0, environment: 100 }), [0, 0], "reflectivity 0: no reflection, nothing dimmed");
 });
@@ -69,6 +73,30 @@ test("without the reflection (w3i reflectivity 0) HD water is the bed and the ti
   }
   // And deep: the tileset's colour itself.
   within(hdWaterPixel([255, 255, 255], 800, deep("B"), [0, 0, -1], off), [6, 31, 27], 0.5, "Barrens 800 deep");
+});
+
+test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: its own shallow colour by depth", () => {
+  // The editor's bands with the reflection off (wdZr0, View Entire Map, the middle column): [depth, bed, water].
+  const bands: [number, number[], number[]][] = [
+    [12, [137, 133, 74], [124, 127, 86]], [24, [137, 133, 74], [113, 122, 96]], [38.4, [137, 133, 74], [98, 117, 107]],
+    [64, [137, 132, 74], [71, 106, 125]], [96, [137, 133, 74], [29, 87, 147]], [200, [137, 133, 74], [0, 91, 170]],
+  ];
+  const off = { reflectivity: 0, environment: 100 };
+  const shallow = hdWaterShallow("Z", false);
+  for (const [d, bed, editor] of bands) within(hdWaterPixel(bed, d, deep("Z"), [0, 0, -1], off, shallow), editor, 3, `Z ${d} deep`);
+  // The control: with the deep colour alone the green is far short in the middle depths (the open point this closes).
+  const plain = hdWaterPixel([137, 132, 74], 64, deep("Z"), [0, 0, -1], off);
+  assert.ok(106 - plain[1] > 12, `one colour: ${plain.map(Math.round)} at 64 deep against the editor's 71, 106, 125`);
+  // Deep water has none of the shallow colour, the surface all of it; the shader holds the same table.
+  assert.ok(Math.abs(hdShallowAt(200)) < 1e-9 && hdShallowAt(5000) === 0);
+  assert.equal(hdShallowAt(0), 1);
+  assert.ok(Math.abs(hdShallowAt(38.4) - HD_SHALLOW_SHARE[4]) < 1e-9);
+  assert.ok(HD_WATER_GLSL.includes(HD_SHALLOW_SHARE.map((v) => (Number.isInteger(v) ? v.toFixed(1) : String(v))).join(", ")));
+  // A tileset without a shallow colour of its own keeps its deep colour at every depth, and so does a tinted map.
+  assert.deepEqual(hdWaterShallow("L", false), hdWaterColor("L", false));
+  assert.deepEqual(hdWaterShallow("z", false).map((v) => Math.round(v * 255)), [...HD_SHALLOW.Z], "the tileset's letter in any case");
+  assert.deepEqual(hdWaterShallow("Z", true), hdWaterColor("Z", true));
+  assert.deepEqual(hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off, hdWaterShallow("L", false)), hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off));
 });
 
 test("HD water reflects a sky that is brighter in the west: the editor's water lighter on the left of View Entire Map", () => {
@@ -122,6 +150,65 @@ test("the w3i's reflectivity scales the reflection, its environment map reflecti
     within(hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]), s), deepWater, 7, `reflectivity ${reflectivity}, environment ${environment}, deep`);
     within(hdWaterPixel([1, 125, 0], 38.4, deep("L"), ray(ENTIRE, COLS.west, ROWS[38.4]), s), shallow, 7, `reflectivity ${reflectivity}, environment ${environment}, 38.4 deep`);
   }
+});
+
+test("HD water's waves add to the reflection and take from it alike: the mean colour stays, as strong as the editor's", () => {
+  // The editor's opening camera over 200 deep Lordaeron water, the picture's middle (as the test above).
+  const cam = { target: [0, -298, -161.5], distance: 2738, yaw: (270 * Math.PI) / 180, pitch: 0.99833, fov: 0.71663 };
+  const view = ray(cam, 592, 422), black = [0, 0, 0];
+  const pixel = (lean: number, settings = HD_WATER_DEFAULTS, depth = 200) => hdWaterPixel(black, depth, deep("L"), view, settings, deep("L"), lean);
+  const flat = pixel(0);
+  assert.deepEqual(flat, hdWaterPixel(black, 200, deep("L"), view), "no lean: the water without waves");
+  // The lean's spread: two layers of the normal map's green, 0.079 each.
+  const spread = 0.079 * Math.SQRT2, up = pixel(spread), down = pixel(-spread);
+  flat.forEach((v, i) => assert.ok(Math.abs((decode(up[i]) + decode(down[i])) / 2 - decode(v)) < 1e-9, `channel ${i}: a wave and its opposite cancel in linear light`));
+  // The editor's contrast there: 2.6 to 4.6 levels of green (standard deviation), 0.003 to 0.008 in linear light.
+  const levels = (up[1] - down[1]) / 2, linear = (decode(up[1]) - decode(down[1])) / 2;
+  assert.ok(levels > 2.6 && levels < 4.6, `${levels} levels of green`);
+  assert.ok(linear > 0.005 && linear < 0.007, `${linear} in linear light`);
+  assert.ok(Math.abs((decode(up[0]) - decode(down[0])) / (decode(up[1]) - decode(down[1])) - 0.75) < 0.02, "red three quarters of green");
+  // The w3i's wave strength scales them (0: flat water), and they are the reflection's: none without it, few in the shallows.
+  assert.deepEqual(pixel(spread, { ...HD_WATER_DEFAULTS, waves: 0 }), flat);
+  assert.ok(Math.abs(decode(pixel(spread, { ...HD_WATER_DEFAULTS, waves: 50 })[1]) - (decode(up[1]) + decode(flat[1])) / 2) < 1e-9, "strength 50: half");
+  assert.deepEqual(hdWaveLight({ waves: 100 }), [...HD_WAVE_LIGHT]);
+  assert.deepEqual(hdWaveLight({ waves: 0 }), [0, 0, 0]);
+  const still = { ...HD_WATER_DEFAULTS, reflectivity: 0 };
+  assert.deepEqual(pixel(spread, still), pixel(0, still), "reflectivity 0: no waves either");
+  const shallowUp = pixel(spread, HD_WATER_DEFAULTS, 4), shallowFlat = pixel(0, HD_WATER_DEFAULTS, 4);
+  assert.ok(decode(shallowUp[1]) - decode(shallowFlat[1]) < 0.1 * (decode(up[1]) - decode(flat[1])) + 1e-9, "4 deep: a tenth of deep water's");
+});
+
+test("a wave's lean: the normal map's green alone seen straight down, its red too the more level the view", () => {
+  assert.equal(hdWaveLean(0.3, 0.1, [0, 0, -1]), 0.1);
+  assert.equal(hdWaveLean(0.3, 0.1, [0, 0, -500]), 0.1, "any length");
+  // Through the opening camera's middle (0.56 level): 1.5 times the red beside the green, scaled to keep the spread.
+  const share = HD_WAVE_RED * 0.56, norm = Math.sqrt(1 + (share * 0.67) ** 2);
+  const view = [0, 0.56, -Math.sqrt(1 - 0.56 ** 2)];
+  assert.ok(Math.abs(share - 1.5) < 0.02);
+  assert.ok(Math.abs(hdWaveLean(0.2, 0.1, view) - (0.1 + share * 0.2) / norm) < 1e-9);
+  // Red and green spread 0.67 to 1 and don't go together: the mix's spread is the green's.
+  const mixSpread = Math.hypot(1 / norm, (share * 0.67) / norm);
+  assert.ok(Math.abs(mixSpread - 1) < 1e-9);
+  // The shader holds the same numbers.
+  assert.ok(HD_WATER_GLSL.includes(`float share = ${HD_WAVE_RED} * length(view.xy);`));
+  assert.ok(HD_WATER_GLSL.includes(String(0.67 ** 2)));
+});
+
+test("the waves' two layers drift against each other, north-east and south-west, and come round again", () => {
+  const [a, b] = HD_WAVES;
+  assert.deepEqual([a.size, b.size], [1024, 1024]);
+  assert.deepEqual(a.drift.map((v) => -v), [...b.drift], "against each other");
+  assert.deepEqual(hdWaveShift(0), [0, 0, 0.25, 0.25]);
+  const near = (x: number[], y: number[], what: string) => assert.ok(x.every((v, i) => Math.abs(v - y[i]) < 1e-6 || Math.abs(Math.abs(v - y[i]) - 1) < 1e-6), `${what}: ${x} against ${y}`);
+  // After a second the first layer's pattern lies 45 units further east and north: the texture is read 45 / 1024 of a
+  // repeat back in x, and forward in y (which counts southwards).
+  const step = 45 / 1024;
+  near(hdWaveShift(1), [1 - step, step, 0.25 + step, 0.25 - step], "one second");
+  hdWaveShift(7.3).forEach((v) => assert.ok(v >= 0 && v < 1));
+  // A repeat takes 1024 / 45 seconds; a month of running time lands where its remainder does.
+  const period = 1024 / 45;
+  near(hdWaveShift(3 + period), hdWaveShift(3), "one repeat on");
+  near(hdWaveShift(3 + 114000 * period), hdWaveShift(3), "a month on");
 });
 
 test("each tileset has its own deep HD colour, Northrend's for one not measured", () => {

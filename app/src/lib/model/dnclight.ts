@@ -333,6 +333,9 @@ export interface SceneLight {
   dir: [number, number, number];
   diffuse: [number, number, number];
   ambient: [number, number, number];
+  /** The light's ambient intensity and its own intensity without their colours (classic water is lit by these alone:
+   *  terrain-viewer renderer.ts waterLight); absent for a light that isn't a lighting model's. */
+  levels?: [number, number];
   /** The light's shadow intensity (HD shading uses it, see tone.ts hdLight); absent: 0. */
   shadow?: number;
   /** The share of the lit light the HD view keeps in its real shadows besides what the light itself gives there
@@ -385,10 +388,12 @@ export function lightAt(m: LightModel, hour: number): SceneLight | null {
   const [x, y, z, w] = q.length === 4 ? q : [0, 0, 0, 1];
   // +Z rotated by q: the third column of the rotation matrix.
   const dir: [number, number, number] = [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)];
+  const intensity = propAt(l.intensity, time)[0] ?? 1, ambIntensity = propAt(l.ambIntensity, time)[0] ?? 0;
   return {
     dir,
-    diffuse: rgb(propAt(l.color, time), propAt(l.intensity, time)[0] ?? 1),
-    ambient: rgb(propAt(l.ambColor, time), propAt(l.ambIntensity, time)[0] ?? 0),
+    diffuse: rgb(propAt(l.color, time), intensity),
+    ambient: rgb(propAt(l.ambColor, time), ambIntensity),
+    levels: [ambIntensity, intensity],
     shadow: l.shadowIntensity,
   };
 }

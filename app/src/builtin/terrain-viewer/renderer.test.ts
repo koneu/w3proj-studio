@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
 import { borderShade } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
-import { castsSunShadow, edgeMode, meanBrightness, playRect, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
+import type { SceneLight } from "../../lib/model/dnclight";
+import { castsSunShadow, edgeMode, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -175,6 +176,34 @@ test("the map's water tint multiplies the ramp's colour, stored blue first, as t
   near([half.shallowMin[3], half.deepMax[3]], [(10 / 255) * 0.2, (250 / 255) * 0.2]);
 });
 
+test("classic water is lit by the unit light's intensities alone, as the World Editor's under each tileset's lights", () => {
+  // The game's unit lights at 06:00 (ambient colour × intensity, the sun's, its direction) and the editor's deep
+  // Lordaeron water under them (we-drive, SD, the w3i's light environment; 39, 46, 136 with View > Lighting off).
+  const sun: [number, number, number] = [-0.675, -0.406, 0.616], white: [number, number, number] = [1.295, 1.295, 1.295];
+  const lights: [string, SceneLight, number[]][] = [
+    ["Lordaeron", { dir: sun, diffuse: white, ambient: [0.252, 0.252, 0.294], levels: [0.3, 1.3] }, [43, 50, 149]],
+    ["Ashenvale", { dir: sun, diffuse: white, ambient: [0.395, 0.446, 0.471], levels: [0.5, 1.3] }, [51, 59, 175]],
+    ["Felwood", { dir: sun, diffuse: white, ambient: [0.316, 0.357, 0.376], levels: [0.4, 1.3] }, [48, 55, 163]],
+    ["Dalaran", { dir: sun, diffuse: white, ambient: [0.609, 0.546, 0.592], levels: [0.7, 1.3] }, [60, 69, 181]],
+    // Its light shines upwards: the ambient alone.
+    ["Dungeon", { dir: [0.559, -0.298, -0.774], diffuse: [0.307, 0.414, 1.6], ambient: [0.4, 0.4, 0.4], levels: [0.4, 1.6] }, [17, 20, 55]],
+  ];
+  // Lordaeron's deep ramp (96, 96, 192 at alpha 250) times the light, no brighter than white, times the texture's mean
+  // (105, 117.5, 184), over the bed 35, 114, 22: what WATER_FS draws.
+  const texture = [105, 117.5, 183.8], bed = [35, 114, 22], alpha = 250 / 255;
+  for (const [name, light, editor] of lights) {
+    const level = waterLight(light);
+    const drawn = LORDAERON.deepMax.slice(0, 3).map((c, k) => Math.min(1, c * level) * texture[k] * alpha + bed[k] * (1 - alpha));
+    drawn.forEach((v, k) => assert.ok(Math.abs(v - editor[k]) <= 2.5, `${name}: ${drawn.map(Math.round)} against the editor's ${editor}`));
+  }
+  // The same grey whatever the ambient's colour, and not the terrain light's level (Lordaeron's 0.2 + 1.3 × 0.616).
+  assert.ok(Math.abs(waterLight(lights[0][1]) - 1.1008) < 1e-3);
+  assert.ok(Math.abs(waterLight(lights[4][1]) - 0.4) < 1e-9, "a light from below adds nothing");
+  // View > Lighting off: as it is. A light that isn't a lighting model's goes by its brightest channels.
+  assert.equal(waterLight(null), 1);
+  assert.ok(Math.abs(waterLight({ dir: [0, 0, 2], diffuse: [0.2, 0.6, 0.4], ambient: [0.1, 0.3, 0.2] }) - 0.9) < 1e-9);
+});
+
 test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and as [red, green, blue]", () => {
   for (const waterTint of ["#dc5028", [220, 80, 40]]) {
     const doc: Record<string, any> = { version: 31, flags: 0 };
@@ -183,17 +212,17 @@ test("set_sky's waterTint is the colour white shallows take, as \"#rrggbb\" and 
   }
 });
 
-test("a texture's mean brightness comes from a small mip level", () => {
+test("a texture's mean red and green come from a small mip level", () => {
   const level = (w: number, h: number, rgba: number[]) => ({ width: w, height: h, rgba: new Uint8ClampedArray(rgba) });
   const asked: number[] = [];
   const img = {
     format: "t", width: 64, height: 64, hasAlpha: false, mipCount: 4,
     // Levels 64, 32, 16, 8: the 16-high one is read.
-    mip(l: number) { asked.push(l); return l === 2 ? level(1, 2, [255, 255, 255, 255, 0, 0, 0, 255]) : level(1, 1, [9, 9, 9, 255]); },
+    mip(l: number) { asked.push(l); return l === 2 ? level(1, 2, [255, 51, 255, 255, 0, 0, 0, 255]) : level(1, 1, [9, 9, 9, 255]); },
   };
-  assert.equal(meanBrightness(img), 0.5);
+  assert.deepEqual(meanRedGreen(img), [0.5, 0.1]);
   assert.deepEqual(asked, [2]);
-  assert.equal(meanBrightness({ ...img, mip() { throw new Error("truncated"); } }), null, "an image that can't be decoded");
+  assert.equal(meanRedGreen({ ...img, mip() { throw new Error("truncated"); } }), null, "an image that can't be decoded");
 });
 
 test("a shore corner's water depth is its own stored level's; its surface stays the lake's", () => {
