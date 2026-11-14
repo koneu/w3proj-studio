@@ -582,6 +582,9 @@ prologue screens, map options, environment (weather, fog, water, camera zoom), p
 forces. Texts that live in the string table (`TRIGSTR_…`) are edited in `war3map.wts` directly,
 changing only that string. Formats v25 (TFT) through v39 (3.0) are supported; v32–v39 follow
 War3Net / wc3libs and are verified byte-exact against the game's own 3.0 campaign maps.
+Its **Preferences** section holds what the World Editor keeps in `war3mapExtra.txt`: the Trigger Editor's
+JassHelper switches (enable, vJass, debug mode, optimizer) and Map Properties › Prefs (sky display, time of day,
+enforce terrain limits), written as the editor writes them. Studio's own vJASS compile keeps its `vjass.*` settings.
 
 ## Workflow with the World Editor
 
