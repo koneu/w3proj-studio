@@ -161,6 +161,88 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
 
 }
 
+/** What a click of the Ramp tool did: built (or added to) a ramp, took one off, or nothing (`problem` says why, if
+ *  there's something to say). */
+export interface RampClick { done: "built" | "removed" | "none"; problem?: string }
+
+/** The Ramp tool's click at world (wx, wy), as the World Editor's (we-drive 2026-11-14, specs ramp-*.json): the
+ *  corner nearest the click decides, and the brush size doesn't matter. On the high corner of a one-level cliff it
+ *  flags a line of three corners down the cliff, that corner and the two below it; on the corner just below a high
+ *  one (the middle of such a line) the same line. On a plateau's corner, where the cliff falls away on two sides,
+ *  both lines and the corners between them (a 3×3 block). A line beside a bend in the cliff (the next line's middle
+ *  corner isn't on the low layer) isn't built: a ramp's side piece can't end there. A wider ramp is more clicks,
+ *  or a drag, along the edge. A click on a line that is a ramp already does nothing in the World Editor; here it
+ *  takes off the ramp it belongs to (all flagged corners joined to it), unless `keep` (a drag going over it). */
+export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog, keep = false): RampClick {
+  const cx = Math.round((wx - t.offsetX) / 128), cy = Math.round((wy - t.offsetY) / 128);
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
+  const c = at(cx, cy);
+  if (!c) return { done: "none", problem: "Outside the map." };
+  const dirs: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  /** The line from high corner (hx, hy) down the cliff in direction d, or null if it doesn't fit there. */
+  const line = (hx: number, hy: number, [dx, dy]: [number, number]): [number, number][] | null => {
+    const hi = at(hx, hy)?.layer;
+    if (hi === undefined) return null;
+    const cells: [number, number][] = [[hx, hy], [hx + dx, hy + dy], [hx + 2 * dx, hy + 2 * dy]];
+    if (cells.slice(1).some(([x, y]) => at(x, y)?.layer !== hi - 1)) return null;
+    // The lines on either side: their middle corner on the low layer too, or the cliff bends there.
+    for (const s of [1, -1]) {
+      const m = at(hx + dx + s * dy, hy + dy + s * dx);
+      if (m && m.layer !== hi - 1) return null;
+    }
+    return cells;
+  };
+  const found: [number, number][][] = [];
+  const down: [number, number][] = [];
+  for (const d of dirs) {
+    const l = line(cx, cy, d);
+    if (l) { found.push(l); down.push(d); }
+  }
+  // A plateau's corner: the lines down both sides, and the corners between them.
+  const ax = down.find((d) => d[0] !== 0), ay = down.find((d) => d[1] !== 0);
+  if (ax && ay) {
+    for (let i = 1; i <= 2; i++) for (let j = 1; j <= 2; j++) {
+      const x = cx + i * ax[0], y = cy + j * ay[1];
+      if (at(x, y)?.layer === c.layer - 1) found.push([[x, y]]);
+    }
+  }
+  // The corner below a high one: the line through it.
+  for (const [dx, dy] of dirs) {
+    if (at(cx - dx, cy - dy)?.layer !== c.layer + 1) continue;
+    const l = line(cx - dx, cy - dy, [dx, dy]);
+    if (l) found.push(l);
+  }
+  if (!found.length) {
+    const near = dirs.map(([dx, dy]) => at(cx + dx, cy + dy)).filter((n): n is Corner => !!n);
+    if (near.some((n) => Math.abs(n.layer - c.layer) > 1)) return { done: "none", problem: "Ramps only work on cliffs one level high; this one is higher." };
+    if (near.some((n) => n.layer !== c.layer)) return { done: "none", problem: "The cliff isn't straight here: click its edge where it runs straight for a ramp." };
+    return { done: "none", problem: "Click a cliff one level high to build a ramp." };
+  }
+  const cells = found.flat();
+  if (cells.every(([x, y]) => at(x, y)!.ramp)) {
+    if (keep) return { done: "none" };
+    // Take off the ramp: every flagged corner joined to these.
+    const todo = [...cells], seen = new Set<number>();
+    while (todo.length) {
+      const [x, y] = todo.pop()!;
+      const k = at(x, y);
+      if (!k?.ramp || seen.has(y * t.width + x)) continue;
+      seen.add(y * t.width + x);
+      stroke.touch(t, y * t.width + x);
+      k.ramp = false;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (i || j) todo.push([x + i, y + j]);
+    }
+    return { done: "removed" };
+  }
+  for (const [x, y] of cells) {
+    const k = at(x, y)!;
+    if (k.ramp) continue;
+    stroke.touch(t, y * t.width + x);
+    k.ramp = true;
+  }
+  return { done: "built" };
+}
+
 /** A ramp on a cliff that bends, as the World Editor flags one: every corner of the cliff tiles, and the low
  *  ground one step further. Measured on a ramp it built right round a plateau and one along a diagonal: 135 of
  *  138 corners. It covers the cliff within `reach` corners of corner (cx, cy) and no further: a drag paints the

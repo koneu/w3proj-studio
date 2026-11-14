@@ -5,7 +5,7 @@ import { matchCliffTypes } from "../../lib/terrain/cliffs";
 import { waterBasin } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
-export { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
+export { matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth" | "noise";
 /** Cliff layer up/down by one or two, level (the start's layer); water: shallow (one layer
