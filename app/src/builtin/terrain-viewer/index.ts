@@ -696,6 +696,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!changed) throw new Error("Nothing placed matches that.");
         // Swapped doodads go on their new grid, facing and scale range, as in the editor's Replace.
         if (fileKey(args.kind ?? "doodads") === "doodads") await handle.objects.settleDoodads(f.list.filter((p) => was.get(p) !== p.id), { place: true, scale: true });
+        // A swapped unit goes on its new type's building grid (a gold mine, a building), as the editor's Replace does.
+        if (fileKey(args.kind ?? "doodads") === "units") {
+          for (const p of f.list.filter((q) => was.get(q) !== q.id)) {
+            const [gx, gy] = await handle.objects.buildingSpot(p.id, p.position[0], p.position[1]);
+            if (gx !== p.position[0] || gy !== p.position[1]) p.position = [gx, gy, heightAt(handle.terrain, gx, gy)];
+          }
+        }
       });
       return { changed };
     }),
