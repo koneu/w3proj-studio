@@ -5723,6 +5723,7 @@ async function editDuringSave(page, found) {
   } finally {
     await page.evaluate(`(() => { const S = window.__slowSave, io = w3Workbench.editors.io; if (S) for (const m of ["writeText", "writeBytes"]) if (S["orig_" + m]) io[m] = S["orig_" + m]; delete window.__slowSave; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
+    await restoreWindow(page);
   }
   } catch (e) { fail(e.message); }
 }
