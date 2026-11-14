@@ -184,3 +184,14 @@ test("texture paths are renamed in place; the rest of the file stays", () => {
   assert.equal(parseMdx(src).textures[0].path, "Doodads/X/Rock_Diffuse.tif");
   assert.throws(() => renameTextures(src, () => "x".repeat(300)));
 });
+
+test("a geoset that claims more vertices than the file holds is refused before anything that large is made", () => {
+  const parts: number[] = [];
+  const u32 = (v: number) => parts.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255);
+  const tag = (s: string) => parts.push(...[...s].map((c) => c.charCodeAt(0)));
+  tag("MDLX");
+  tag("VERS"); u32(4); u32(800);
+  tag("GEOS"); u32(16);
+  u32(16); tag("VRTX"); u32(0x15555555); u32(0);
+  assert.throws(() => parseMdx(new Uint8Array(parts)), /GEOS: geoset VRTX: \d+ bytes needed/);
+});

@@ -4,7 +4,7 @@ import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
-import { mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
+import { importOr, mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
@@ -148,14 +148,15 @@ const MAX_GROUND_TILES = 16;
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
 async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): Promise<{ buf: Uint8Array; name: string }> {
-  if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return { buf: await readImport(w3, path), name: path }; } catch { /* use the game's */ }
-  }
-  if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
-    const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
-    try { return { buf: await w3.game.read(hd), name: hd }; } catch { /* classic texture */ }
-  }
-  return { buf: await w3.game.read(path), name: path };
+  const game = async () => {
+    if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
+      const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
+      try { return { buf: await w3.game.read(hd), name: hd }; } catch { /* classic texture */ }
+    }
+    return { buf: await w3.game.read(path), name: path };
+  };
+  if (doc.path.startsWith("game:") || !w3.workspace.project()) return game();
+  return importOr(readImport(w3, path).then((buf) => ({ buf, name: path })), game);
 }
 
 /** Flips a switch where its value is kept: a project's own setting (.w3proj/settings.json) wins over the user's, so writing the user's would do nothing. */
@@ -508,10 +509,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       corners = touched.length;
       if (!touched.length) return [];
       // Enforce Water Height Limits refuses the whole edit, as in the terrain editor: nothing is written.
-      const refused = toolWaterRefusal(w3, await applyTilesetWater(w3, parseW3e(bytes)), terrain, touched);
+      // The terrain as it was, read once more (the first reading is the one changed): for the limits and the derived files.
+      const was = await applyTilesetWater(w3, parseW3e(bytes));
+      const refused = toolWaterRefusal(w3, was, terrain, touched);
       if (refused) throw new Error(refused);
       const files = [{ path, text: w3eToText(writeW3e(terrain)) }];
-      states.before = { terrain: await applyTilesetWater(w3, parseW3e(bytes)), doodads: [] };
+      states.before = { terrain: was, doodads: [] };
       states.after = { terrain, doodads: [] };
       for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
         const json = `map/${name}.json`, doc = await read(json);
@@ -2048,8 +2051,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const problems = h("div.model-list");
         const texInfo = h("div.muted");
+        /** The loader's missing textures as last listed (ObjectLoader.missingVersion). */
+        let missingListed = 0;
         const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p, terrain.tileset), () => {
           loadRedraw();
+          // Called for every texture that lands, hundreds of times as a map opens: the list is only made again when
+          // what is missing changed.
+          if (loader.missingVersion === missingListed) return;
+          missingListed = loader.missingVersion;
           const list = [...loader.missing];
           // Click: the placed objects whose model uses the texture.
           const users = (tex: string) => {
@@ -2293,7 +2302,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const unitHalves = new Map<string, [number, number]>();
         const loadCells = async (id: string) => {
           if (buildingCells.has(id) || id === "sloc") return;
-          pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+          pathingData = pathing();
           const data = await pathingData, shape = data.unitShape(id);
           const image = shape?.path ? await data.texture(shape.path).catch(() => null) : null;
           const cells: [number, number] | null = image ? [image.width, image.height] : null;
@@ -2628,7 +2637,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const doodadCells = new Map<string, PathSize | null>();
         const loadDoodadCells = async (id: string) => {
           if (doodadCells.has(id)) return;
-          pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+          pathingData = pathing();
           const data = await pathingData;
           const info = data.placedTex(id);
           const image = info?.path ? (await data.placedImage(info)).image : null;
@@ -3608,9 +3617,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let destructablePromise: Promise<Uint8Array> | null = null;
         let standingPromise: Promise<Uint8Array> | null = null;
         let pathingData: Promise<PathingData> | null = null;
+        /** The footprints of the game's and the map's types, read once (until the object data changes). */
+        function pathing(): Promise<PathingData> { return (pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id))); }
         const occupancy = () => {
           occupancyPromise ??= (async () => {
-            pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+            pathingData = pathing();
             const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind;
             const placed = [
               ...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })),
@@ -3730,7 +3741,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!ringLoading.has(key)) {
             ringLoading.add(key);
             void (async () => {
-              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+              pathingData = pathing();
               const data = await pathingData;
               const texRadius = async (path?: string) => { const t = path ? await data.texture(path) : null; return t ? Math.max(t.width, t.height) * 16 : undefined; };
               let r: number | undefined;
@@ -4257,7 +4268,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }).catch(() => { renderer.ghost = null; redraw(); });
             },
             blockers: () => (walkPromise ??= (async () => {
-              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              pathingData = pathing();
               const data = await pathingData;
               // Units walk off and items are walked over: of those, only buildings stay in the way.
               const buildings = (unitsFile?.list ?? []).filter((e) => data.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" }));
@@ -4265,7 +4276,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return (await Occupancy.build(terrain, data, placed)).blocked;
             })()),
             standing: () => (standingPromise ??= (async () => {
-              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              pathingData = pathing();
               const data = await pathingData;
               const isDestructable = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind === "w3b";
               const placed = [
@@ -4285,7 +4296,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return { length: Math.max(x, y) * skin.modelScale, alongX: x >= y };
             },
             destructables: () => (destructablePromise ??= (async () => {
-              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              pathingData = pathing();
               const isDestructable = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind === "w3b";
               const placed = (dooFile?.list ?? []).filter((e) => isDestructable(e.id)).map((entry) => ({ entry, kind: "w3b" }));
               return Occupancy.mask(terrain, await pathingData, placed);

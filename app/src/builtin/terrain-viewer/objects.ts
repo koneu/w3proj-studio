@@ -134,6 +134,10 @@ export function addMoveTypes(skins: Map<string, Skin>, rows: readonly Record<str
   }
 }
 
+/** A type's skin with nothing set but its kind and model: what every other field is when no table gives it. */
+export const plainSkin = (kind: string, file: string): Skin =>
+  ({ kind, file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
+
 /** The kinds drawn, in the order their skin tables are read (a later one's entry wins), with each kind's data
  *  table and its id column: the type ids as placed objects name them, whose skin section may be spelled in another
  *  case (lib/objects/skinids.ts). */
@@ -252,12 +256,12 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
-    out.set("sloc", { kind: "w3u", file: "Objects\\StartLocation\\StartLocation.mdl", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
+    out.set("sloc", plainSkin("w3u", "Objects\\StartLocation\\StartLocation.mdl"));
   }
   // Random units, buildings and items (chosen when the game starts) have no type either: the World Editor draws
   // them with its question mark (WorldEditData.txt, RandomUnitModel).
   for (const [id, kind] of RANDOM_KINDS) {
-    if (!out.has(id)) out.set(id, { kind, file: RANDOM_MODEL, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
+    if (!out.has(id)) out.set(id, plainSkin(kind, RANDOM_MODEL));
   }
   return out;
 }
@@ -294,7 +298,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
       const art = mods.filter((m) => Object.values(fields).includes(m.field));
       if (!art.length && o.id === undefined) continue;
       const base = out.get(id) ?? out.get(o.base);
-      const skin: Skin = base ? { ...base } : { kind: f.kind, file: "", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" };
+      const skin: Skin = base ? { ...base } : plainSkin(f.kind, "");
       for (const [key, field] of Object.entries(fields) as [keyof Skin, string][]) {
         const m = art.find((x) => x.field === field);
         if (!m) continue;
@@ -381,6 +385,19 @@ export interface ModelRequest {
   /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders); `slot`: the texture's place in the
    *  model's HD layers (hdSlots), when it has one. */
   retexture?: (path: string, slot?: string) => string;
+  /** What tells this request's `retexture` from another's of the same model (a cliff type's id): loaded models are
+   *  shared by path, replaceable textures, look and this. */
+  retextureKey?: string;
+}
+
+/** A read that failed because the file isn't there (the game's words, see workbench/game.ts): for good. Any other
+ *  failure (the storage busy, a file of the map that couldn't be read just now) may pass. */
+const isMissing = (e: unknown) => /^not found: /.test(typeof e === "string" ? e : String((e as Error)?.message ?? e));
+
+/** The centre and radius of a model-space box: the sphere an instance is picked and culled by. */
+export function boxSphere(box: { min: readonly number[]; max: readonly number[] }): [number, number, number, number] {
+  return [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2,
+    Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2];
 }
 
 /** Textures a placed object takes instead of its type's: replaceable id → path, and the swap of an HD model's
@@ -409,6 +426,8 @@ export class ObjectLoader {
   private textures = new Map<string, Promise<WebGLTexture | null>>();
   /** Textures that couldn't be read or decoded, with the reason. */
   readonly missing = new Map<string, string>();
+  /** Counts the changes of `missing`: a list made from it is made again only when this moved on. */
+  missingVersion = 0;
   /** Texture path (lower case) → model paths (lower case) that use it. */
   private textureUsers = new Map<string, Set<string>>();
   /** Models, textures and effects still loading. */
@@ -428,6 +447,7 @@ export class ObjectLoader {
    *  changed, so they're read again on the next load. */
   reset() {
     this.textures.clear();
+    if (this.missing.size) this.missingVersion++;
     this.missing.clear();
     this.textureUsers.clear();
     this.models.clear();
@@ -465,16 +485,22 @@ export class ObjectLoader {
         ? path.split(/[\\/]+/).map((_, i, parts) => parts.slice(i).join("\\")).slice(1).filter((t) => t.includes("\\"))
         : [path];
       const variants = neverStoredLast(tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t])));
-      t = this.track((async () => {
-        let error = "";
+      let load!: Promise<WebGLTexture | null>;
+      load = t = this.track((async () => {
+        let error = "", again = false;
         for (const v of variants) {
           try {
-            const tex = createTexture(this.gl, decodeImage(await this.readFile(v), v), { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
+            const bytes = await this.readFile(v).catch((e: unknown) => { again ||= !isMissing(e); throw e; });
+            const tex = createTexture(this.gl, decodeImage(bytes, v), { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
+            if (this.missing.delete(path)) this.missingVersion++;
             this.onTexture();
             return tex;
           } catch (e) { error += `${error ? " | " : ""}${v}: ${(e as Error).message ?? e}`; }
         }
         this.missing.set(path, error);
+        this.missingVersion++;
+        // A read that failed for another reason than the file not being there is tried again by the next load.
+        if (again && this.textures.get(key) === load) this.textures.delete(key);
         this.onTexture();
         return null;
       })());
@@ -516,12 +542,16 @@ export class ObjectLoader {
   }
 
   private model(req: ModelRequest): Promise<ModelGpu> {
-    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}`;
+    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}|${req.retextureKey ?? ""}`;
     let m = this.models.get(key);
     if (!m) {
-      m = this.track((async () => {
-        const model = parseModel(await this.readFile(req.path).catch((e: unknown) => {
-          if (req.plain) return this.readFile(req.plain);
+      // A model that can't be read or parsed stays so (asked for again, it fails at once), except when a read failed
+      // for another reason than the file not being there: that one is read again by the next load.
+      let again = false;
+      const read = (p: string) => this.readFile(p).catch((e: unknown) => { again ||= !isMissing(e); throw e; });
+      const load = m = this.track((async () => {
+        const model = parseModel(await read(req.path).catch((e: unknown) => {
+          if (req.plain) return read(req.plain);
           throw e;
         }));
         const gpu = new ModelGpu(this.gl, model);
@@ -541,6 +571,7 @@ export class ObjectLoader {
         return gpu;
       })());
       this.models.set(key, m);
+      load.catch(() => { if (again && this.models.get(key) === load) this.models.delete(key); });
     }
     return m;
   }
@@ -560,9 +591,7 @@ export class ObjectLoader {
         const gpu = await this.model(req);
         const model = gpu.model;
         // Bounding sphere per instance, for picking and culling; the model's own is kept for when the object turns.
-        const b = bounds(model);
-        const local: [number, number, number, number] = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2,
-          Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2];
+        const local = boxSphere(bounds(model));
         for (const inst of req.instances) {
           inst.bounds = local;
           inst.sphere = worldSphere(inst.world, local);
@@ -612,7 +641,7 @@ export class ObjectLoader {
       const skin = (other !== undefined ? skinFor(other) : undefined) ?? skinFor(p.id);
       if (!skin) {
         unresolved.push(p);
-        if (p.id !== "sloc") unknown.set(p.id, [...(unknown.get(p.id) ?? []), p]);
+        if (p.id !== "sloc") { const same = unknown.get(p.id); if (same) same.push(p); else unknown.set(p.id, [p]); }
         continue;
       }
       const path = modelPath(skin, p.variation);
@@ -623,7 +652,7 @@ export class ObjectLoader {
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = own?.replaceable ?? skinTextures(skin);
-        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(own?.retexture ? { retexture: own.retexture } : {}) }, items: [] };
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(own?.retexture ? { retexture: own.retexture, retextureKey: own.key } : {}) }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);
@@ -662,9 +691,7 @@ export class ObjectLoader {
     if (!owners.length) return null;
     let gpu: ModelGpu;
     try { gpu = await this.model({ path: CLICK_HELPER.model, replaceable: {}, instances: [] }); } catch { return null; }
-    const b = bounds(gpu.model);
-    const local: [number, number, number, number] = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2,
-      Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2];
+    const local = boxSphere(bounds(gpu.model));
     const instances = owners.map((owner): ObjectInstance => {
       const follows = { owner, local: clickHelperLocal(owner) };
       const world = mat4.mul(owner.world, follows.local);
@@ -682,8 +709,7 @@ export function clickHelperLocal(_owner: ObjectInstance): Mat4 {
 
 /** The strays as instances of the placeholder cube: picked and culled by the cube's bounds (`box`, model space). */
 export function placeholderInstances(strays: readonly Stray[], box: { min: readonly number[]; max: readonly number[] }): ObjectInstance[] {
-  const local: [number, number, number, number] = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2,
-    Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2];
+  const local = boxSphere(box);
   return strays.map(({ inst }) => ({ ...inst, bounds: local, sphere: worldSphere(inst.world, local) }));
 }
 

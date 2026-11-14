@@ -74,27 +74,47 @@ function campaignListing(w3: W3Api, campaign: string): Promise<string[] | null> 
   return files;
 }
 
+/** The map (and its campaign) has no file for a path: the game's is the one to read. */
+export class NotImported extends Error {
+  constructor(path: string) {
+    super(`${path} isn't imported`);
+    this.name = "NotImported";
+  }
+}
+
 /** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
- *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
+ *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. Rejects with NotImported
+ *  when the map has no such file, and with the read's own error when it has one that couldn't be read. */
 export async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   const names = modeNames(path.replace(/\//g, "\\"), w3.settings.get<string>("game.graphicsMode") ?? "hd");
   const campaign = campaignRoot(w3);
   // The project's own files are known; only those are read (most paths are the game's), under the name they have on
   // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
   const own = names.flatMap((n) => importedPath(w3, n) ?? []);
-  const candidates = [...own, ...(campaign ? campaignCandidates(campaign, names, await campaignListing(w3, campaign)) : [])];
-  let last: unknown = new Error(`${path} isn't imported`);
-  for (const c of candidates) {
+  const listing = campaign ? await campaignListing(w3, campaign) : null;
+  const shared = campaign ? campaignCandidates(campaign, names, listing) : [];
+  // Known to be there: the project's listed files, and the campaign's when its folder could be listed. Without a
+  // listing the campaign's are guesses, and one that isn't there is no failure.
+  const known = own.length > 0 || (listing !== null && shared.length > 0);
+  let last: unknown = null;
+  for (const c of [...own, ...shared]) {
     try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
   }
-  throw last;
+  throw known && last !== null ? last : new NotImported(path);
+}
+
+/** `read`, or `fallback` when the map doesn't import the file. An import that is there but can't be read is an
+ *  error, not the game's file in its place: the map would be drawn with art it doesn't use, and nothing would say so. */
+export async function importOr<T>(read: Promise<T>, fallback: () => Promise<T>): Promise<T> {
+  try { return await read; } catch (e) {
+    if (!(e instanceof NotImported)) throw e;
+    return fallback();
+  }
 }
 
 /** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
  *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
 export async function readFile(w3: W3Api, doc: Pick<EditorDocument, "path">, path: string, tileset?: string): Promise<Uint8Array> {
-  if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return await readImport(w3, path); } catch { /* use the game's */ }
-  }
-  return w3.game.read(path, { tileset });
+  const game = () => w3.game.read(path, { tileset });
+  return !doc.path.startsWith("game:") && w3.workspace.project() ? importOr(readImport(w3, path), game) : game();
 }
