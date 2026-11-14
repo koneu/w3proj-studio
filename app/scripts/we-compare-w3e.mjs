@@ -71,6 +71,35 @@ export function heightSpread(buf, base = 0) {
   return { count: values.length, min: values[0], max: values.at(-1), values };
 }
 
+/**
+ * The ground and cliff variations without their randomness: per ground texture, how many corners wear it and which
+ * variation values occur (sorted, distinct) with how many corners each (`ground`/`cliff` as value to count; `variationView` leaves the counts
+ * out: two draws never agree on them). `ground` is the 5-bit ground variation.
+ */
+export function variationSpread(buf) {
+  const { header, corners } = readW3e(buf, true);
+  const out = {};
+  for (const c of Object.values(corners)) {
+    const t = header.ground[c.texture] ?? `#${c.texture}`;
+    const e = (out[t] ??= { corners: 0, ground: {}, cliff: {} });
+    e.corners++;
+    e.ground[c.variation] = (e.ground[c.variation] ?? 0) + 1;
+    e.cliff[c.cliffVariation] = (e.cliff[c.cliffVariation] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** The compared form of variationSpread: the corner counts and the ground variations that at least 5% of a texture's
+ *  corners wear (the editor draws a few rare values besides its main ones, a stroke of 149 corners shows the main ones
+ *  at 15 to 35 corners and each rare one at 1 to 3). */
+export function variationView(buf) {
+  const out = {};
+  for (const [t, e] of Object.entries(variationSpread(buf))) {
+    out[t] = { corners: e.corners, ground: Object.entries(e.ground).filter(([, n]) => n * 20 >= e.corners).map(([v]) => Number(v)).sort((x, y) => x - y) };
+  }
+  return out;
+}
+
 /** war3mapUnits.doo as the codecs' JSON, reduced to where each object stands: id, x, y and the height (z), in file order.
  *  What else differs between the two editors' files (the format version, item tables, hero attributes) isn't compared. */
 export function unitHeights(json) {
@@ -81,5 +110,6 @@ export function unitHeights(json) {
 export function w3eView(kind, buf) {
   if (kind === "w3e") return readW3e(buf);
   if (kind === "w3e-spread") return heightSpread(buf);
+  if (kind === "w3e-variation") return variationView(buf);
   throw new Error(`unknown w3e kind ${kind}`);
 }

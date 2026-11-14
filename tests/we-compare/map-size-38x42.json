@@ -1,0 +1,56 @@
+[
+  {
+    "name": "map-size-38x42",
+    "description": "a 38x42 map (not a multiple of 4: fixtures/we-specs/make-odd-size.mjs, flat.w3x's blank map cut by hand, Studio's own tools refuse the size) opened and saved by the World Editor, and opened in the terrain view and saved by Studio: the w3e, the pathing map (wpm) and the shadow map (shd) sizes and cells; the w3i's playable area and camera bounds",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/odd-size.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: true, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.shd",
+        "as": "bytes"
+      },
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "saves",
+          "name",
+          "author",
+          "description",
+          "suggestedPlayers",
+          "loadingScreen.crestRace",
+          "gameDataSet"
+        ]
+      }
+    ],
+    "limit": 30
+  }
+]

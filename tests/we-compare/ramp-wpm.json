@@ -1,0 +1,111 @@
+{
+  "name": "ramp-wpm",
+  "description": "a plateau (Apply Cliff Increase One, size 5, one click at 748,500) on the blank 64x64 map and a size-3 ramp on its lower left face (653,622); the pathing map and the ramp flags each editor saves (the WE's Ramp is the palette's 1505,311, Studio's Ramp tool); DIFFERS (2026-11-14): the ramp flags the editor saves are on corner column 30, rows 25-27 (3 corners), Studio's on column 31, same rows (WE 0, Studio 1 at 31,25..27); the pathing map differs in 32 cells: the editor's 0xca (blocked) on tile 30,26 (cells 120-123, 104-107) where Studio's is 0x40 and the other way on tile 29,25 (cells 116-119, 100-103); the plateau itself (size-5 Increase One) matches",
+  "input": {
+    "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+  },
+  "we": {
+    "saveAccept": [
+      "Warning"
+    ],
+    "steps": [
+      [
+        "--key",
+        "t"
+      ],
+      [
+        "--click",
+        "1488,569"
+      ],
+      [
+        "--click",
+        "1505,282"
+      ],
+      [
+        "--click",
+        "748,500"
+      ],
+      [
+        "--sleep",
+        "800"
+      ],
+      [
+        "--click",
+        "1456,569"
+      ],
+      [
+        "--click",
+        "1505,311"
+      ],
+      [
+        "--click",
+        "653,622"
+      ],
+      [
+        "--sleep",
+        "1500"
+      ]
+    ]
+  },
+  "studio": {
+    "steps": [
+      {
+        "terrain": true
+      },
+      {
+        "ui": [
+          [
+            "tab",
+            "Terrain"
+          ],
+          [
+            "view",
+            "we"
+          ],
+          [
+            "tool",
+            "+1:"
+          ],
+          [
+            "size",
+            5
+          ],
+          [
+            "click",
+            748,
+            500
+          ],
+          [
+            "tool",
+            "Ramp"
+          ],
+          [
+            "size",
+            3
+          ],
+          [
+            "click",
+            653,
+            622
+          ]
+        ]
+      },
+      {
+        "sleep": 1000
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3map.wpm",
+      "as": "wpm",
+      "expect": "differs"
+    },
+    {
+      "file": "war3map.w3e",
+      "as": "w3e",
+      "expect": "differs"
+    }
+  ],
+  "limit": 40
+}

@@ -1,0 +1,166 @@
+[
+  {
+    "name": "boundary-partial-wpm",
+    "description": "Boundary (palette tile 1552,143) painted at size 1 (one corner: every tile it touches is partly painted); the pathing map and the corner flags each editor saves; DIFFERS (2026-11-14): the editor sets the flag on corner 32,29 (Studio on 32,30, where the click lands: every other brush matches there) and its saved pathing map blocks the painted corner's own tile, cells 128-131 x 116-119 (16 cells, 0xce) where Studio's stay 0x40",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1552,143"
+        ],
+        [
+          "--click",
+          "1392,569"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Boundary"
+            ],
+            [
+              "size",
+              1
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "boundary-full-wpm",
+    "description": "Boundary painted at size 3 (13 corners: four tiles fully painted, more partly); the pathing map and the corner flags each editor saves; DIFFERS (2026-11-14): the flags are one row lower in the editor (5 corners of 13 differ each way, centre 32,29 against Studio's 32,30) and its pathing map blocks 13 tiles, one per painted corner, 208 cells at 0xce: a tile is blocked when its lower-left corner is painted, whether its other three are or not; Studio's cells all stay 0x40",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1552,143"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "748,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Boundary"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              748,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  }
+]
