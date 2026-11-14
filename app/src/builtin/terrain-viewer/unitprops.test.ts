@@ -1,3 +1,4 @@
+import { randomItemChoices } from "./dropsedit";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -443,4 +444,18 @@ test("skills and attributes are common only to one type; inventory to as many sl
   assert.ok(!mixed.includes("skills") && !mixed.includes("attributes") && mixed.includes("level") && mixed.includes("inventory"));
   const pack = { entry: unit("hpea"), facts: facts({ slots: 2 }) };
   assert.ok(!commonFields([h1, pack]).includes("inventory"));
+});
+
+test("the random item entries offered are the World Editor's: every class by any level and levels 0 to 8", () => {
+  const all = randomItemChoices();
+  assert.equal(all.length, 8 * 10);
+  assert.equal(new Set(all.map((c) => c.id)).size, all.length);
+  for (const c of all) assert.ok(randomItemLabel(c.id), c.id);
+  assert.deepEqual(all.slice(0, 2).map((c) => c.id), ["YYI/", "YYI0"]);
+  const power2 = all.find((c) => c.id === "YkI2");
+  assert.equal(power2?.label, "Power Up, level 2");
+  assert.equal(randomItemLabel("YkI2"), "Random item, power-up, level 2");
+  // Ids TurtleRock's drops use.
+  for (const id of ["YiI2", "YjI2"]) assert.ok(all.some((c) => c.id === id));
+  assert.equal(all.some((c) => c.id === "YzI2"), false);
 });
