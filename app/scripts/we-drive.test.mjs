@@ -107,6 +107,9 @@ test("parseArgs: --drag takes its two positions (and a duration) as one value; -
   for (const bad of ["1,2", "1,2:3", "1,2:3,4@5", "1,2:3,4@x", "-1,2:3,4", ""]) assert.throws(() => parseArgs(["--drag", bad]), /--drag/, bad);
   assert.throws(() => parseArgs(["--drag-mod", "meta", "--drag", "1,2:3,4"]), /--drag-mod wants/);
   assert.throws(() => parseArgs(["--drag-mod", "alt"]), /needs a --drag/);
+  assert.deepEqual(parseArgs(["--drag-button", "3", "--drag", "1,2:3,4", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, button: 3 }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  assert.throws(() => parseArgs(["--drag-button", "4", "--drag", "1,2:3,4"]), /--drag-button wants/);
+  assert.throws(() => parseArgs(["--drag-button", "2"]), /needs a --drag/);
 });
 
 test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
