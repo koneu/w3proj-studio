@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
-import { dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
+import { cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { waterBasin } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
@@ -13,6 +13,7 @@ export type HeightTool = "raise" | "lower" | "plateau" | "smooth" | "noise";
 export type LayerTool = "cliffUp" | "cliffUp2" | "cliffDown" | "cliffDown2" | "cliffLevel" | "shallow" | "deep" | "dry";
 
 const LAYER_TOOLS: ReadonlySet<string> = new Set<LayerTool>(["cliffUp", "cliffUp2", "cliffDown", "cliffDown2", "cliffLevel", "shallow", "deep", "dry"]);
+const CLIFF_TOOLS: ReadonlySet<string> = new Set<LayerTool>(["cliffUp", "cliffUp2", "cliffDown", "cliffDown2", "cliffLevel"]);
 
 /** What a layer stroke sets, decided where the stroke starts: the cliff
  *  layer, and for new water its stored level word (low 14 bits). */
@@ -97,8 +98,8 @@ export class Stroke {
   private after = new Map<number, Corner>();
   /** Corners the brush went over, changed or not. */
   private covered = new Set<number>();
-  /** Corners a cliff or water brush moved to another layer or turned into water: they take the cliff type though no
-   *  cliff touches them (retypeCliffs). */
+  /** Corners a cliff or water brush moved to another layer or turned into water, and those of the cliff brush's
+   *  stencil (cliffTypeStencil): they take the cliff type though no cliff touches them (retypeCliffs). */
   readonly own = new Set<number>();
 
   constructor(readonly label: string) {}
@@ -207,6 +208,16 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
   }
   // The ramps the cliff brush breaks lose their flags, as the editor's do (dropBrokenRamps; not measured for water).
   if (tool !== "shallow" && tool !== "deep" && moved.size) dropBrokenRamps(t, moved, stroke);
+  if (CLIFF_TOOLS.has(tool)) {
+    // The corners round the centre the editor's cliff brush types, cliff or not (cliffTypeStencil); retypeCliffs types them.
+    const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
+    for (const [dx, dy] of cliffTypeStencil(b.radius, !!b.square)) {
+      const x = cx + dx, y = cy + dy;
+      if (x < 0 || y < 0 || x >= t.width || y >= t.height) continue;
+      stroke.cover(y * t.width + x);
+      stroke.own.add(y * t.width + x);
+    }
+  }
   const level = target.waterLevel;
   if ((tool === "shallow" || tool === "deep") && level !== undefined) {
     // The dry corners round the new water get its level word too, without the water flag: the World Editor's
@@ -232,7 +243,8 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
 /** After a cliff or water stroke: cliffs next to what it changed take the cliff type `chosen` (the palette's) or that
  *  of their ground tile, and so do the corners the brush itself moved (matchCliffTypes). The World Editor's cliff
  *  brush (size 3, Decrease Two, Grass Cliff) typed the 13 corners it lowered, the middle one with only the pit round
- *  it too, and the 24 round them on cliff tiles (we-compare painted-cliff-type, 2026-11-13). A ground texture stroke
+ *  it too, and the 24 round them on cliff tiles (we-compare painted-cliff-type, 2026-11-13); its cliff brushes also type
+ *  the corners of their stencil round each stamp, cliff or not (cliffTypeStencil). A ground texture stroke
  *  re-types nothing: the editor's left all 37 of those cliff corners as they were under a Dirt stroke, with Apply
  *  Cliff on (Grass or Dirt Cliff chosen) or off (same spec). Whether a corner changed. */
 export function retypeCliffs(t: Terrain, stroke: Stroke, cliffGround: string[], chosen?: number): boolean {

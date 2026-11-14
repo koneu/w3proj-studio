@@ -253,6 +253,52 @@ test("a cliff pit gets its cliff type as the World Editor's, and a ground textur
   assert.equal(cliffTypes(t), PIT);
 });
 
+test("a size-3 Increase One below a plateau types the plateau's corners 2 and 3 rows above the centre, as the World Editor's", () => {
+  // we-compare ramp-cliff-brush-up3 and cliff-type-stencil (2026-11-14): the editor typed plateau.w3x's corners 31-33 x
+  // 28-29 above a size-3 Increase One centred on 32,26 (the plateau's low edge row), though no cliff touches them.
+  const t = flatMap();
+  for (let y = 17; y < t.height; y++) for (let x = 0; x < t.width; x++) t.corners[y * t.width + x].layer = 3;
+  for (const y of [16, 17]) for (let x = 0; x < t.width; x++) t.corners[y * t.width + x].cliffTexture = 1;
+  const up = new Stroke("cliffUp");
+  assert.equal(applyLayer(t, brushOf("cliffUp", t, centre(t).x + 20, centre(t).y - 30, 3), "cliffUp", { layer: 3 }, up), true);
+  retypeCliffs(t, up, CLIFF_GROUND, 1);
+  assert.equal(cliffTypes(t), [
+    ".........",
+    "...111...",
+    "...111...",
+    "111111111",
+    "111111111",
+    ".1111111.",
+    "..11111..",
+    "...111...",
+    ".........",
+  ].join("\n"));
+  assert.equal(up.finish(t), true);
+  up.undo(t);
+  assert.equal(t.corners[18 * t.width + 16].cliffTexture, 15, "undo takes the type back");
+});
+
+test("Level on flat ground moves nothing but types the World Editor's stencil round the centre", () => {
+  // we-compare cliff-type-stencil (2026-11-14): Level on flat.w3x typed 9, 15, 33, 74 and 196 corners at sizes 1, 2, 3,
+  // 5 and 8 (the shapes in cliffTypeStencil).
+  const plus = ["...111...", "...111...", ".1111111.", ".1111111.", ".1111111.", "...111...", "...111..."].join("\n");
+  for (const [size, count] of [[1, 9], [2, 15], [3, 33], [5, 74], [8, 196]]) {
+    const t = flatMap(), layers = t.corners.map((c) => c.layer);
+    const s = new Stroke("cliffLevel");
+    assert.equal(applyLayer(t, brushOf("cliffLevel", t, centre(t).x, centre(t).y, size), "cliffLevel", { layer: 2 }, s), false, "no corner moves");
+    assert.equal(retypeCliffs(t, s, CLIFF_GROUND, 1), true);
+    assert.deepEqual(t.corners.map((c) => c.layer), layers);
+    assert.equal(t.corners.filter((c) => c.cliffTexture === 1).length, count, `size ${size}`);
+    if (size === 3) assert.equal(cliffTypes(t).split("\n").slice(1, 8).join("\n"), plus);
+    if (size === 1) assert.equal(cliffTypes(t).split("\n").slice(2, 7).map((r) => r.slice(3, 6)).join(","), "...,111,111,111,...");
+    if (size === 2) assert.equal(cliffTypes(t).split("\n").slice(2, 7).join(","), ".........,..11111..,..11111..,..11111..,.........");
+    assert.equal(s.finish(t), true, "the typing alone is an undo step");
+  }
+  const water = new Stroke("shallow"), t = flatMap();
+  applyLayer(t, brushOf("shallow", t, centre(t).x, centre(t).y, 1), "shallow", { layer: 1, waterLevel: 0x2000 }, water);
+  assert.equal(water.own.size, 1, "the water brush has no stencil");
+});
+
 /** The same numbers every run (seed printed in the test's name). */
 const seeded = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 

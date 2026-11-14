@@ -1,0 +1,92 @@
+[
+  {
+    "name": "cliff-type-level-1",
+    "description": "Level size 1 on flat ground (nothing moves): the editor types the 3x3 corners round the centre (branch cliff-type-we, 2026-11-14; lib/terrain/cliffs.ts cliffTypeStencil)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1473,282"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-level-2",
+    "description": "Level size 2 on flat ground: 5 wide and 3 high (15 corners), not the brush's cross (branch cliff-type-we, 2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1424,569"], ["--click", "1473,282"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 2], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-level-3",
+    "description": "Level size 3 on flat ground: a plus of two bars 3 corners wide reaching 3 out (33 corners) (branch cliff-type-we, 2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 3], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-level-5",
+    "description": "Level size 5 on flat ground: an irregular shape of 74 corners, the same at 600,650 and on plateau.w3x at 750,850 with the pointer at five places round one corner (branch cliff-type-we, 2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1488,569"], ["--click", "1473,282"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 5], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-level-8",
+    "description": "Level size 8 on flat ground: an irregular shape of 196 corners, the same at 900,400 (branch cliff-type-we, 2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1520,569"], ["--click", "1473,282"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 8], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-up3-below",
+    "description": "Increase One size 3 centred on 32,26 below plateau.w3x's plateau (no ramps): the plateau corners 31-33 x 28-29 get the type though no cliff touches them; Studio left them 15 before branch cliff-type-we (2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "750,700"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 3], ["click", 750, 700]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-down3-edge",
+    "description": "Decrease One size 3 centred on 32,27, the plateau's edge: the low corners 31-33 x 24-25 get the type (branch cliff-type-we, 2026-11-14)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1441,282"], ["--click", "750,630"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["size", 3], ["click", 750, 630]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-up3-top",
+    "description": "Increase One size 3 on the plateau: every typed corner is on a cliff (matched before the stencil too)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "750,450"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 3], ["click", 750, 450]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-up5-below",
+    "description": "Increase One size 5 centred on 32,26 below the plateau: known difference of 3 rim corners, the editor types 36,29 and leaves 34,30 and 35,30, the flat-ground size-5 stencil the other way round (branch cliff-type-we, 2026-11-14; 24 corners differed before)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1488,569"], ["--click", "1505,282"], ["--click", "750,700"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 5], ["click", 750, 700]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "cliff-type-down5-edge",
+    "description": "Decrease One size 5 centred on 32,27: known difference of 3 rim corners, the editor also types 35,24, 36,24 and 36,25 (branch cliff-type-we, 2026-11-14; 23 corners differed before)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1488,569"], ["--click", "1441,282"], ["--click", "750,630"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["size", 5], ["click", 750, 630]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  }
+]

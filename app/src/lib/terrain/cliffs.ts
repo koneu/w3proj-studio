@@ -55,6 +55,44 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
   return changed;
 }
 
+/** The World Editor's cliff types per round brush radius (its size − 1): for each row of corners from the top (north,
+ *  `top` rows above the brush's centre) down, the first and last column, relative to the centre. */
+const CLIFF_TYPE_ROWS: Record<number, { top: number; rows: [number, number][] }> = {
+  0: { top: 1, rows: [[-1, 1], [-1, 1], [-1, 1]] },
+  1: { top: 1, rows: [[-2, 2], [-2, 2], [-2, 2]] },
+  2: { top: 3, rows: [[-1, 1], [-1, 1], [-3, 3], [-3, 3], [-3, 3], [-1, 1], [-1, 1]] },
+  4: { top: 5, rows: [[-1, 1], [-1, 3], [-4, 3], [-4, 4], [-5, 4], [-5, 4], [-5, 3], [-4, 3], [-4, 2], [-2, 2]] },
+  7: {
+    top: 8,
+    rows: [[-1, 1], [-1, 3], [-4, 5], [-6, 5], [-6, 5], [-7, 6], [-7, 6], [-8, 8], [-8, 8], [-8, 8], [-7, 7], [-7, 7], [-7, 6], [-5, 6], [-5, 3],
+      [-3, 3], [-1, 1]],
+  },
+};
+
+/** The corners round a cliff brush's centre (offsets in corners, y north) that the World Editor's cliff brush gives the
+ *  cliff type, whether or not a cliff touches them: its Level, Increase One and Decrease One alike, also where the
+ *  brush moved nothing (we-compare cliff-type-stencil and ramp-cliff-brush-up3, 2026-11-14, branch cliff-type-we:
+ *  Level on flat.w3x, Increase and Decrease beside plateau.w3x's plateau). Measured per size: 1, the 3×3 round the
+ *  centre; 2, 5 wide and 3 high (not the brush's cross); 3, a plus of two bars 3 corners wide reaching 3 out (the
+ *  plateau's corners 2 and 3 rows above a size-3 Increase One below it got the type); 5 and 8, the irregular shapes in
+ *  CLIFF_TYPE_ROWS, the same wherever they were stamped on flat ground (two places each, size 5 at five pointer
+ *  positions on one corner). Beside an edited cliff the editor's size-5 and size-8 shapes differ by a few rim corners
+ *  from these. Other sizes (the editor has none) and the square brush: the 3×3 round each corner of the brush. */
+export function cliffTypeStencil(radius: number, square = false): [number, number][] {
+  const table = square ? undefined : CLIFF_TYPE_ROWS[radius];
+  if (table) return table.rows.flatMap(([x0, x1], k) => Array.from({ length: x1 - x0 + 1 }, (_, j) => [x0 + j, table.top - k] as [number, number]));
+  const out = new Map<string, [number, number]>();
+  for (let y = -radius - 1; y <= radius + 1; y++) for (let x = -radius - 1; x <= radius + 1; x++) {
+    let near = false;
+    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1 && !near; dx++) {
+      const bx = x + dx, by = y + dy;
+      near = square ? Math.abs(bx) <= radius && Math.abs(by) <= radius : bx * bx + by * by <= radius * radius;
+    }
+    if (near) out.set(`${x},${y}`, [x, y]);
+  }
+  return [...out.values()];
+}
+
 /** Ramp tool, one click at world (wx, wy): on a one-layer cliff tile the
  *  corners along the slope get the ramp flag (the high end and two corners
  *  on the lower layer, `2 * halfWidth + 1` corners across, as World Editor
