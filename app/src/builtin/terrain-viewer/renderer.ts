@@ -608,6 +608,8 @@ export class TerrainRenderer {
   /** HD water's waves: the game's water normal map and its mean red and green (meanRedGreen); null until it's read
    *  (and where the game has none): flat water. */
   private waterWave: { tex: WebGLTexture; mean: [number, number] } | null = null;
+  /** When the water was last drawn (performance.now): HD's waves have drifted on since (animating). */
+  private waterWaveShown = 0;
   /** White texture for untextured water. */
   private waterWhite: WebGLTexture;
   /** The map's water tint as stored (b, g, r, a in 0–255; see waterRamp) when tinting is on; null: none. */
@@ -1553,6 +1555,8 @@ export class TerrainRenderer {
   /** Whether the view changes by itself (animation, particles, water): then it's redrawn. */
   get animating(): boolean {
     if (this.showWater && this.water.count && this.waterLook.frames.length > 1 && this.waterFrame() !== this.waterFrameShown) return true;
+    // HD's waves drift whether or not the tileset's classic water has frames (Outland's has one): 15 pictures a second.
+    if (this.showWater && this.water.count && this.tone === 2 && this.waterWave && performance.now() - this.waterWaveShown > 66) return true;
     if (this.animate && performance.now() - this.lastAnimFrame > 33
       && this.batches.some((b) => b.instances.length && b.gpu.model.sequences.length && this.groupShown(b.group))) return true;
     if (this.showWeather && this.weather.length) return true;
@@ -1885,6 +1889,7 @@ export class TerrainRenderer {
     if (this.showWater && this.water.count) {
       const look = this.waterLook, frame = this.waterFrame();
       this.waterFrameShown = frame;
+      this.waterWaveShown = performance.now();
       gl.useProgram(this.waterProg);
       setSunShadow(gl, (name) => gl.getUniformLocation(this.waterProg, name), sun, noSun);
       setFog(gl, (name) => gl.getUniformLocation(this.waterProg, name), fog);
