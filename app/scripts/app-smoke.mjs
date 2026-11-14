@@ -5804,6 +5804,38 @@ async function editDuringSave(page, found) {
     } finally {
       await page.evaluate(`(() => { if (window.__slowPick) w3.window.pickSaveFile = window.__slowPick; delete window.__slowPick; })()`);
     }
+
+    // The Lighting Editor: the map's own copy of a game lighting model (Customize… in the Lighting view).
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(() => { window.__slowQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+    try {
+      await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+      await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector("input.lighting-num")`), 30000);
+      const lightPath = await page.evaluate(`w3.editors.activePath()`);
+      await check("Lighting Editor", `document.querySelector("input.lighting-num")`, "0.31", "0.32", null, lightPath);
+    } finally {
+      await page.evaluate(`(() => { if (window.__slowQuick) w3.window.quickPick = window.__slowQuick; delete window.__slowQuick; })()`);
+    }
+
+    // The Campaign Editor (a campaign project of its own, so last).
+    await page.evaluate(`w3.editors.closeAll()`);
+    const camp = join(work, "slow-campaign");
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Slow Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const w3f = "map/war3campaign.w3f.json";
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Slow Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const fogStyle = `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Fog style")?.querySelector("input")`;
+    await check("Campaign Editor", fogStyle, "1", "2", () => String(JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")).fogStyle), w3f);
   } finally {
     await page.evaluate(`(() => { const S = window.__slowSave, io = w3Workbench.editors.io; if (S) for (const m of ["writeText", "writeBytes"]) if (S["orig_" + m]) io[m] = S["orig_" + m]; delete window.__slowSave; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
