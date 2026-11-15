@@ -4370,6 +4370,28 @@ async function mcpLimits(page, found) {
     await settled(page);
     const below = await refusal("set_water", { mode: "shallow", ...sink });
     if (!/Not done: the water at \d+ corners? would go past/.test(below ?? "")) fail(`water on ground below -2048 with Enforce Water Height Limits on: ${below ?? "drawn"}`);
+    // Refused values (TESTING.md): ground past the stored word, a tool setting out of range, a place off the map, a
+    // variation the type hasn't got. Each is refused with the files as they were; the controls in range go through.
+    await settled(page);
+    const files = () => [hash(w3e), JSON.stringify(k.doodads())].join();
+    const before = files();
+    const tree = k.doodads().findIndex((d) => d.id === "LTlt");
+    const refusedAll = [
+      ["flatten past the ground word", "sculpt_terrain", { mode: "flatten", amount: 7000, left: -512, bottom: -512, right: 512, top: 512, shape: "box" }, /Not done: the ground at \d+ corners? would go past the lowest or highest ground height/],
+      ["edge 1.5", "paint_terrain", { tile: "Ldrt", edge: 1.5, left: -512, bottom: -512, right: 512, top: 512 }, /edge must be a number from 0 to 1/],
+      ["density 2", "scatter_objects", { ids: ["LTlt"], density: 2, left: -512, bottom: -512, right: 512, top: 512 }, /density must be a number from 0\.05 to 1/],
+      ["variation 99", "place_objects", { objects: [{ id: "LTlt", x: 0, y: 0, variation: 99 }], ignoreRoom: true }, /objects\[0\]: variation goes from 0 to \d+/],
+      ["scale -1", "place_objects", { objects: [{ id: "LTlt", x: 0, y: 0, scale: -1 }], ignoreRoom: true }, /objects\[0\]: scale must be a number from 0 up/],
+      ["move off the map", "move_object", { kind: "doodads", index: tree, id: "LTlt", x: 1e6, y: 0 }, /Not moved: x 1000000 is off the map/],
+    ];
+    for (const [what, name, args, wanted] of refusedAll) {
+      const why = await refusal(name, args);
+      await settled(page);
+      if (!wanted.test(why ?? "") || files() !== before) fail(`${what} (${name}): ${why ?? "done"}${files() !== before ? ", and the files changed" : ""}`);
+    }
+    const offMap = JSON.parse(await k.tool("place_objects", { objects: [{ id: "LTlt", x: 1e6, y: 0 }, { id: "LTlt", x: 64, y: 64, variation: 0 }], ignoreRoom: true }));
+    await settled(page);
+    if (offMap.placed !== 1 || !/off the map/.test(offMap.skipped?.[0]?.reason ?? "")) fail(`place_objects off the map with ignoreRoom (control: one in range): ${JSON.stringify(offMap)}`);
   } finally {
     await k.reset();
   }
