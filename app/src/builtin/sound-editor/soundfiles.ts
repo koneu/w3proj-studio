@@ -1,13 +1,13 @@
 // Export Sound and Replace Internal Sound: a sound file out of the map (or the game), and a file from
 // disk into its place. A sound is named in the map by one path; the game takes it under its other
-// sound extensions too (Blizzard's maps list .flac where the archive holds .ogg), so a replacement in
-// another format keeps the sound's own path.
+// sound extensions too (Blizzard's maps list .flac where the archive holds .ogg), and a replacement in
+// another format keeps the file's name (as the World Editor does).
 
 import type { W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { soundVariants } from "../../lib/audio/variants";
-import { readImported } from "../../lib/imports";
+import { newEntryFlags, readImported } from "../../lib/imports";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { SOUND_EXTENSIONS } from "./sounds";
 
@@ -16,13 +16,10 @@ export { soundVariants };
 
 /** An import list entry (war3map.imp). */
 export interface ImportEntry { flags: number; path: string }
-/** Flags of an entry with a path of its own, as the Import Manager writes it. */
-const CUSTOM_PATH_FLAGS = 13;
 const STANDARD_FLAGS = [5, 8];
 const IMPORT_FOLDER = "war3mapImported";
 
 const extOf = (p: string) => (/\.(\w+)$/.exec(p)?.[1] ?? "").toLowerCase();
-const withExt = (p: string, ext: string) => p.replace(/\.\w+$/, `.${ext}`);
 const projectOf = (archive: string) => `map/${toProjectPath(archive)}`;
 
 export interface FoundSound { bytes: Uint8Array; path: string; source: "map" | "game" }
@@ -36,7 +33,7 @@ export async function findSoundFile(w3: W3Api, path: string, gameFiles: Map<stri
     if (bytes) return { bytes, path: variant, source: "map" };
   }
   for (const variant of soundVariants(path)) {
-    const bytes = await w3.game.read(gameFiles?.get(variant) ?? variant).catch(() => null);
+    const bytes = await w3.game.read(gameFiles?.get(variant.replace(/\//g, "\\")) ?? variant).catch(() => null);
     if (bytes) return { bytes, path: variant, source: "game" };
   }
   return null;
@@ -59,8 +56,6 @@ export async function exportSound(w3: W3Api, path: string, gameFiles: Map<string
 export interface ReplacePlan {
   /** Project path the new file is copied to. */
   write: string;
-  /** Project path of the file it replaces and that goes, when the format changes; else null. */
-  remove: string | null;
   /** The sound's path as the archive will hold it. */
   archive: string;
   /** The import list afterwards, and whether it differs. */
@@ -71,37 +66,30 @@ export interface ReplacePlan {
 }
 
 /** What replacing the sound at `soundFile` with a file called `sourceName` does. `projectFiles`: the
- *  project's files (any case); `imports`: the import list as it is. Throws for a source that is no sound. */
+ *  project's files (any case); `imports`: the import list as it is. Throws for a source that is no sound.
+ *  As the World Editor's Replace Internal Sound (spec sound-flags-we): the file keeps its name, whatever the new
+ *  file's format (Sound/Interface/AchievementEarned.flac holding the .wav's bytes; the game reads a sound by its bytes),
+ *  so nothing is renamed or removed: the map's own file under one of the sound's names is written over, else the
+ *  sound's own path. A file not listed yet gets an entry with the sound's path as it names it (`/` and all) and the
+ *  flags of a new import (21, which the editor writes at the save after the replace). */
 export function planReplace(opts: { soundFile: string; sourceName: string; projectFiles: Iterable<string>; imports: ImportEntry[] }): ReplacePlan {
-  const newExt = extOf(opts.sourceName);
   if (!SOUND_EXTENSIONS.test(opts.sourceName)) throw new Error(`${opts.sourceName} isn't a sound file (flac, wav, mp3 or ogg).`);
   if (!opts.soundFile.trim() || !/\.\w+$/.test(opts.soundFile)) throw new Error("This sound has no file name to replace.");
   const files = new Set([...opts.projectFiles].map((p) => p.replace(/\\/g, "/").toLowerCase()));
-  const existing = soundVariants(opts.soundFile).find((v) => files.has(projectOf(v).toLowerCase()));
-  // The sound keeps its own path; only the extension follows the new file.
-  const archive = withExt(opts.soundFile, newExt);
+  // The archive's names take either separator (the game's lookup doesn't tell them apart).
+  const own = opts.soundFile.replace(/\//g, "\\");
+  const existing = soundVariants(own).find((v) => files.has(projectOf(v).toLowerCase()));
+  const archive = existing ?? own;
   const write = projectOf(archive);
-  const remove = existing && projectOf(existing).toLowerCase() !== write.toLowerCase() ? projectOf(existing) : null;
-  // Another format means another file name; one already there belongs to something else.
-  if (remove && files.has(write.toLowerCase())) {
-    throw new Error(`${toArchiveName(write.slice(4))} is already in the map, so a replacement in ${newExt} format would overwrite it. Remove or rename that file first, or replace ${opts.soundFile} with a file in ${extOf(existing!)} format.`);
-  }
 
-  let changed = false;
   const imports = opts.imports.map((e) => ({ ...e }));
-  const listed = (e: ImportEntry, project: string) => {
+  const listed = (e: ImportEntry) => {
     const forms = STANDARD_FLAGS.includes(e.flags) ? [`${IMPORT_FOLDER}\\${e.path}`, e.path] : [e.path];
-    return forms.some((f) => soundVariants(f).some((v) => projectOf(v).toLowerCase() === project.toLowerCase()));
+    return forms.some((f) => soundVariants(f.replace(/\//g, "\\")).some((v) => projectOf(v).toLowerCase() === write.toLowerCase()));
   };
-  let found = false;
-  for (const e of imports) {
-    if (existing && listed(e, projectOf(existing))) {
-      found = true;
-      if (remove) { e.path = withExt(e.path, newExt); changed = true; }
-    } else if (listed(e, write)) found = true;
-  }
-  if (!found) { imports.push({ flags: CUSTOM_PATH_FLAGS, path: archive }); changed = true; }
-  return { write, remove, archive, imports, importsChanged: changed, inMap: !!existing };
+  const found = imports.some(listed);
+  if (!found) imports.push({ flags: newEntryFlags(opts.soundFile), path: opts.soundFile });
+  return { write, archive, imports, importsChanged: !found, inMap: !!existing };
 }
 
 /** Replace Internal Sound: asks for a sound file and puts it in the sound's place in the map. A sound the
@@ -128,11 +116,10 @@ export async function replaceSound(w3: W3Api, soundFile: string): Promise<string
   doc.files ??= [];
   const plan = planReplace({ soundFile, sourceName: name, projectFiles: w3.workspace.files().map((f) => f.path), imports: doc.files });
   const what = plan.inMap ? `The map's ${toArchiveName(plan.write.slice(4))} is replaced` : `The game's ${soundFile} is overridden by a file of the map at ${plan.archive}`;
-  if (!(await w3.window.confirm(`Replace the sound ${soundFile} with ${name}? ${what}${plan.remove ? `, and ${toArchiveName(plan.remove.slice(4))} removed` : ""}. A checkpoint is made first, to come back to, where they're enabled.`, "Replace", 60_000))) return null;
+  if (!(await w3.window.confirm(`Replace the sound ${soundFile} with ${name}? ${what} (the file keeps its name). A checkpoint is made first, to come back to, where they're enabled.`, "Replace", 60_000))) return null;
   changed();
   await checkpointIfOn(w3, "Replace Internal Sound");
   await w3.workspace.copy(source, plan.write);
-  if (plan.remove) await w3.workspace.delete(plan.remove);
   if (plan.importsChanged) {
     doc.files = plan.imports;
     if (raw) await w3.backend.invoke("codec_write", { root, path: "map/war3map.imp", text: JSON.stringify({ format: "w3proj.imports/1", ...doc }) });

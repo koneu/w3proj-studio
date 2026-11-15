@@ -14,48 +14,50 @@ const entry = (path: string, flags = 21): ImportEntry => ({ flags, path });
 test("replacing with the same format overwrites in place and leaves the list alone", () => {
   const plan = planReplace({ soundFile: "war3mapImported\\boom.wav", sourceName: "new.WAV", projectFiles: ["map/war3mapImported/boom.wav"], imports: [entry("war3mapImported\\boom.wav")] });
   assert.equal(plan.write, "map/war3mapImported/boom.wav");
-  assert.equal(plan.remove, null);
   assert.equal(plan.importsChanged, false);
   assert.equal(plan.inMap, true);
 });
 
-test("replacing with another format puts the new file at the sound's name, removes the old one and follows in the list", () => {
+test("replacing with another format keeps the file's name and the list as they are (the World Editor's Replace Internal Sound)", () => {
   const imports = [entry("war3mapImported\\boom.wav"), entry("war3mapImported\\other.wav")];
   const plan = planReplace({ soundFile: "war3mapImported\\boom.wav", sourceName: "x.mp3", projectFiles: ["map/war3mapImported/boom.wav", "map/Map/Other.txt"], imports });
-  assert.equal(plan.write, "map/war3mapImported/boom.mp3");
-  assert.equal(plan.remove, "map/war3mapImported/boom.wav");
-  assert.deepEqual(plan.imports.map((e) => e.path), ["war3mapImported\\boom.mp3", "war3mapImported\\other.wav"]);
-  assert.equal(plan.importsChanged, true);
-  assert.equal(imports[0].path, "war3mapImported\\boom.wav", "the list handed in is not changed");
+  assert.equal(plan.write, "map/war3mapImported/boom.wav");
+  assert.deepEqual(plan.imports, imports);
+  assert.equal(plan.importsChanged, false);
 });
 
-test("the file may be in the map under another extension than the sound names", () => {
+test("the file may be in the map under another extension than the sound names: that file is written over", () => {
   const plan = planReplace({ soundFile: "Sound\\a.wav", sourceName: "n.ogg", projectFiles: ["map/Sound/a.flac"], imports: [entry("Sound\\a.flac", 13)] });
-  assert.equal(plan.write, "map/Sound/a.ogg");
-  assert.equal(plan.remove, "map/Sound/a.flac");
-  assert.equal(plan.imports[0].path, "Sound\\a.ogg");
-  assert.equal(plan.imports[0].flags, 13);
+  assert.equal(plan.write, "map/Sound/a.flac");
+  assert.deepEqual(plan.imports, [{ flags: 13, path: "Sound\\a.flac" }]);
+  assert.equal(plan.importsChanged, false);
 });
 
-test("a standard-path entry keeps its relative name", () => {
+test("a standard-path entry is found by its relative name", () => {
   const plan = planReplace({ soundFile: "war3mapImported\\v.wav", sourceName: "v.mp3", projectFiles: ["map/war3mapImported/v.wav"], imports: [entry("v.wav", 5)] });
-  assert.deepEqual(plan.imports, [{ flags: 5, path: "v.mp3" }]);
+  assert.deepEqual(plan.imports, [{ flags: 5, path: "v.wav" }]);
+  assert.equal(plan.importsChanged, false);
 });
 
-test("a game sound gets the file as an override at its path, registered in the list", () => {
+test("a game sound gets the file as an override under its own name, listed as the sound names it with a new import's flags", () => {
   const plan = planReplace({ soundFile: "Sound\\Buildings\\Death\\x.wav", sourceName: "mine.wav", projectFiles: ["map/war3map.j"], imports: [] });
   assert.equal(plan.inMap, false);
   assert.equal(plan.write, "map/Sound/Buildings/Death/x.wav");
-  assert.equal(plan.remove, null);
-  assert.deepEqual(plan.imports, [{ flags: 13, path: "Sound\\Buildings\\Death\\x.wav" }]);
+  assert.deepEqual(plan.imports, [{ flags: 21, path: "Sound\\Buildings\\Death\\x.wav" }]);
   assert.equal(plan.importsChanged, true);
-  // Another format: the override carries the new extension.
-  assert.equal(planReplace({ soundFile: "Sound\\x.wav", sourceName: "m.flac", projectFiles: [], imports: [] }).write, "map/Sound/x.flac");
+  // Another format: the name stays (spec sound-flags-we: AchievementEarned.flac holding beep.wav's bytes), the list
+  // entry keeps the sound's `/` and gets 21, as the World Editor saves it right after the replace.
+  const we = planReplace({ soundFile: "Sound/Interface/AchievementEarned.flac", sourceName: "beep.wav", projectFiles: [], imports: [] });
+  assert.equal(we.write, "map/Sound/Interface/AchievementEarned.flac");
+  assert.deepEqual(we.imports, [{ flags: 21, path: "Sound/Interface/AchievementEarned.flac" }]);
 });
 
-test("a file in the map that the list lacks is registered", () => {
+test("a file in the map that the list lacks is registered; one listed with `/` is found", () => {
   const plan = planReplace({ soundFile: "Sound\\a.wav", sourceName: "n.wav", projectFiles: ["map/Sound/a.wav"], imports: [] });
-  assert.deepEqual(plan.imports, [{ flags: 13, path: "Sound\\a.wav" }]);
+  assert.deepEqual(plan.imports, [{ flags: 21, path: "Sound\\a.wav" }]);
+  const slash = planReplace({ soundFile: "Sound/a.wav", sourceName: "n.wav", projectFiles: ["map/Sound/a.wav"], imports: [entry("Sound/a.wav")] });
+  assert.equal(slash.write, "map/Sound/a.wav");
+  assert.equal(slash.importsChanged, false);
 });
 
 test("what is no sound, or has no name to replace, is refused", () => {
@@ -134,11 +136,11 @@ test("Export Sound writes the sound's bytes to the chosen file", async () => {
 
 const IMP = JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [{ flags: 21, path: "war3mapImported\\boom.wav" }] });
 
-test("Replace Internal Sound asks, makes a checkpoint, copies the file, removes the old one and updates the list", async () => {
+test("Replace Internal Sound asks, makes a checkpoint and copies the file over the sound's own (its name kept)", async () => {
   const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1) }, imp: IMP });
-  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.mp3");
-  assert.deepEqual(f.log, ["confirm", "command w3.checkpoints.create", "copy C:\\in\\new.mp3 map/war3mapImported/boom.mp3", "delete map/war3mapImported/boom.wav", "writeText map/war3map.imp.json", "refresh"]);
-  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.mp3" }]);
+  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.wav");
+  assert.deepEqual(f.log, ["confirm", "command w3.checkpoints.create", "copy C:\\in\\new.mp3 map/war3mapImported/boom.wav", "refresh"]);
+  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.wav" }]);
 });
 
 test("Replace Internal Sound right after an open, while the file list is still read: it waits, and the import list keeps its entries", async () => {
@@ -149,9 +151,9 @@ test("Replace Internal Sound right after an open, while the file list is still r
   assert.equal(f.w3.workspace.files().length, 0);
   const run = replaceSound(f.w3, "Sound\\x.wav");
   setTimeout(done, 20);
-  assert.equal(await run, "map/Sound/x.mp3");
-  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.wav" }, { flags: 13, path: "Sound\\x.mp3" }]);
-  assert.ok(f.log.includes("delete map/Sound/x.wav"), "the map's own file, now listed, is replaced");
+  assert.equal(await run, "map/Sound/x.wav");
+  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.wav" }, { flags: 21, path: "Sound\\x.wav" }]);
+  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/Sound/x.wav"), "the map's own file, now listed, is replaced");
 });
 
 test("Replace Internal Sound goes on with the Checkpoints extension off, and says no checkpoint was made", async () => {
@@ -160,8 +162,8 @@ test("Replace Internal Sound goes on with the Checkpoints extension off, and say
   const warned: string[] = [];
   Object.assign(f.w3.commands, { execute: async (id: string) => { f.log.push(`command ${id}`); throw new Error(commandNotFound(id)); } });
   Object.assign(f.w3.window, { showWarning: async (m: string) => { warned.push(m); } });
-  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.mp3");
-  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/war3mapImported/boom.mp3"));
+  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.wav");
+  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/war3mapImported/boom.wav"));
   assert.equal(warned.length, 1);
   assert.match(warned[0], /Replace Internal Sound went on without a checkpoint/);
   forgetCheckpointsOffWarning();
@@ -177,8 +179,8 @@ test("Replace Internal Sound stops before changing anything when the checkpoint 
 test("Replace Internal Sound on a game sound registers the override in a new list", async () => {
   const f = fake({});
   await replaceSound(f.w3, "Sound\\x.wav");
-  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/Sound/x.mp3"));
-  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 13, path: "Sound\\x.mp3" }]);
+  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/Sound/x.wav"));
+  assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "Sound\\x.wav" }]);
   assert.equal(JSON.parse(f.imp()!).format, "w3proj.imports/1");
 });
 
@@ -194,17 +196,9 @@ test("Replace Internal Sound changes nothing when declined, cancelled, with the 
   assert.deepEqual(bad.log, []);
 });
 
-test("a replacement in another format that would overwrite another file of the map is refused", () => {
-  const projectFiles = ["map/Sound/x.wav", "map/Sound/x.mp3"];
-  assert.throws(() => planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.mp3", projectFiles, imports: [] }), /Sound\\x\.mp3 is already in the map/);
-  // The same format replaces its own file; a free name is fine.
-  assert.equal(planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.wav", projectFiles, imports: [] }).remove, null);
-  assert.equal(planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.ogg", projectFiles, imports: [] }).remove, "map/Sound/x.wav");
-});
-
-test("Replace Internal Sound refused for a clash writes nothing", async () => {
+test("a replacement in another format never touches the map's file of that format: the sound's own file is written", async () => {
   const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1), "map/war3mapImported/boom.mp3": bytes(2) }, imp: IMP });
-  await assert.rejects(replaceSound(f.w3, "war3mapImported\\boom.wav"), /already in the map/);
-  assert.deepEqual(f.log, []);
+  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.wav");
   assert.deepEqual([...f.map.get("map/war3mapImported/boom.mp3")!], [2]);
+  assert.ok(!f.log.some((l) => l.startsWith("delete")));
 });

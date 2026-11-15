@@ -39,8 +39,13 @@ export function entryCandidates(e: ImportEntry, folder: string): string[] {
 }
 
 export function candidates(archivePath: string): string[] {
-  const own = projectPath(archivePath);
-  return SOUND.test(archivePath) ? [own, ...[".flac", ".ogg", ".mp3", ".wav"].map((e) => projectPath(archivePath.replace(SOUND, e)))] : [own];
+  // A path with `/` (the World Editor lists a replaced sound as Sound/Interface/x.flac) is that name in the archive,
+  // or the folders it names: the game's lookup takes either separator.
+  const forms = archivePath.includes("/") ? [archivePath, archivePath.replace(/\//g, "\\")] : [archivePath];
+  return forms.flatMap((p) => {
+    const own = projectPath(p);
+    return SOUND.test(p) ? [own, ...[".flac", ".ogg", ".mp3", ".wav"].map((e) => projectPath(p.replace(SOUND, e)))] : [own];
+  });
 }
 export const isMapFile = (archivePath: string) => {
   // Also in an art set or language folder (Blizzard's maps hold _Locales\deDE.w3mod\war3map.wts and the like).
@@ -92,7 +97,10 @@ export function listedPath(files: readonly FileInfo[], path: string): string | u
 /** The project file of an archive path the map uses (`Units\Human\Footman\Footman.mdx`, `war3mapImported\a.blp`), found
  *  as the game finds it, whatever its case: "map/…" as listed, or undefined when the map has no such file. */
 export function importedPath(w3: Pick<W3Api, "workspace">, archive: string): string | undefined {
-  return listedPath(w3.workspace.files(), projectPath(archive.replace(/\//g, "\\")));
+  const files = w3.workspace.files();
+  // A name with `/` may be a file of that very name (the World Editor's Replace Internal Sound stores one so, unpacked
+  // as Sound%2FInterface%2Fx.flac): the game's lookup takes either separator.
+  return listedPath(files, projectPath(archive.replace(/\//g, "\\"))) ?? (archive.includes("/") ? listedPath(files, projectPath(archive)) : undefined);
 }
 
 /** The bytes of the map's own file for an archive path (see importedPath): null when the map has none. A file that is

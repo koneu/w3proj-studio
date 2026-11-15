@@ -7194,13 +7194,13 @@ async function moduleFunctionsChecks(page, found) {
     const e2 = await run("w3.sounds.replace");
     if (e2) fail(`Replace Internal Sound: ${e2}`);
     else {
-      const now = join(s, "map", "war3mapImported", "boom.mp3");
-      if (!existsSync(now) || !readFileSync(now).equals(mp3Bytes)) fail("the replacement isn't in the map");
-      if (existsSync(join(s, "map", "war3mapImported", "boom.wav"))) fail("the replaced sound is still in the map");
+      // As the World Editor's: the file keeps its name (boom.wav holding the mp3's bytes), the list stays.
+      const now = join(s, "map", "war3mapImported", "boom.wav");
+      if (!existsSync(now) || !readFileSync(now).equals(mp3Bytes)) fail("the replacement isn't in the map under the sound's file name");
+      if (existsSync(join(s, "map", "war3mapImported", "boom.mp3"))) fail("the replacement was put under the new file's extension");
       const imp = json(join(s, "map", "war3map.imp.json")).files.map((f) => f.path);
-      if (imp.join() !== "war3mapImported\\boom.mp3,readme.txt") fail(`the import list: ${imp.join()}`);
+      if (imp.join() !== "war3mapImported\\boom.wav,readme.txt") fail(`the import list: ${imp.join()}`);
       if (!existsSync(join(s, "build", "checkpoints"))) fail("Replace Internal Sound made no checkpoint");
-      // The sound still names its file; the game takes it under the other extension.
       if (json(join(s, "map", "war3map.w3s.json")).sounds[0].file !== "war3mapImported\\boom.wav") fail("the sound entry changed");
     }
     await page.evaluate(`w3.editors.closeAll()`);

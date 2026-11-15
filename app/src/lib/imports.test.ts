@@ -17,6 +17,14 @@ test("files of the map folder the list doesn't name are unlisted; the map's own 
   assert.deepEqual(unlistedFiles(["map/war3campaign.w3f.json", "map/war3campImported/s.blp"], [{ flags: 5, path: "s.blp" }], "war3campImported"), []);
 });
 
+test("an entry listed with `/` names the folders' file, or a file of that very name (the World Editor's Replace Internal Sound)", () => {
+  const entries = [{ flags: 21, path: "Sound/Interface/AchievementEarned.flac" }];
+  assert.deepEqual(unlistedFiles(["map/Sound/Interface/AchievementEarned.flac"], entries, "war3mapImported"), []);
+  // The World Editor's own archive holds the name with `/` (unpacked escaped).
+  assert.deepEqual(unlistedFiles(["map/Sound%2FInterface%2FAchievementEarned.flac"], entries, "war3mapImported"), []);
+  assert.deepEqual(unlistedFiles(["map/Sound/Interface/AchievementEarned.flac"], [], "war3mapImported"), ["map/Sound/Interface/AchievementEarned.flac"]);
+});
+
 test("a map's file is found under its name on disk, whatever the case asked for; the exact name wins", async () => {
   const list = [{ path: "map/war3mapimported/hero.mdx" }, { path: "map/Units/A.mdx" }, { path: "map/units/a.mdx" }].map((f) => ({ ...f, size: 1, modified: 0 }));
   assert.equal(listedPath(list, "map/war3mapImported/Hero.mdx"), "map/war3mapimported/hero.mdx");
@@ -30,6 +38,11 @@ test("a map's file is found under its name on disk, whatever the case asked for;
   assert.deepEqual(await readImported(w3, "War3mapImported/Hero.MDX"), new Uint8Array([1]));
   assert.equal(await readImported(w3, "war3mapImported\\none.mdx"), null);
   assert.deepEqual(read, ["map/war3mapimported/hero.mdx"]);
+  // A file named with `/` itself (the World Editor's replaced sound, unpacked escaped); the folders' file wins.
+  const we = [{ path: "map/Sound%2FInterface%2FA.flac", size: 1, modified: 0 }];
+  assert.equal(importedPath({ workspace: { files: () => we } } as unknown as W3Api, "Sound/Interface/A.flac"), "map/Sound%2FInterface%2FA.flac");
+  const both = [...we, { path: "map/Sound/Interface/A.flac", size: 1, modified: 0 }];
+  assert.equal(importedPath({ workspace: { files: () => both } } as unknown as W3Api, "Sound/Interface/A.flac"), "map/Sound/Interface/A.flac");
 });
 
 test("a campaign's own files aren't imports, its imports are", () => {
