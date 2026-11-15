@@ -370,6 +370,116 @@ test("a Decrease that would go below level 0 is no stroke at all, as the World E
   assert.equal(strokeLayer("dry", 5), 5);
 });
 
+/** A flat 64×64 map of one cliff level, as tests/fixtures/we-specs/flat.w3x (level 2) and the made maps of branch
+ *  cliff-slope-we (levels 12 to 15). */
+function flat64(level: number): Terrain {
+  const t = flatMap();
+  const width = 65, height = 65;
+  return { ...t, width, height, offsetX: -4096, offsetY: -4096, corners: Array.from({ length: width * height }, () => ({ ...t.corners[0], layer: level })) };
+}
+/** Cliff levels of the corners x0..x1, y1 down to y0, one row per line (north first). */
+function levelRows(t: Terrain, x0: number, x1: number, y0: number, y1: number): string[] {
+  const rows: string[] = [];
+  for (let y = y1; y >= y0; y--) {
+    let r = "";
+    for (let x = x0; x <= x1; x++) r += t.corners[y * t.width + x].layer.toString(16);
+    rows.push(r);
+  }
+  return rows;
+}
+/** One Increase Two click on corner (x, y) with Grass Cliff chosen, as the painter makes it (layerTarget, the stamp,
+ *  then the cliff types). */
+function increaseTwo(t: Terrain, x: number, y: number, size: number, limits = false): boolean {
+  const target = painterTools.layerTarget(t, "cliffUp2", x, y, 1, limits);
+  if (!target) return false;
+  const s = new Stroke("cliffUp2");
+  const changed = applyLayer(t, painterTools.cornerBrush(t, t.offsetX + x * 128, t.offsetY + y * 128, size), "cliffUp2", target, s);
+  retypeCliffs(t, s, CLIFF_GROUND, 1);
+  return changed;
+}
+/** Cliff types of the corners x0..x1, y1 down to y0 (north first). */
+function typeRows(t: Terrain, x0: number, x1: number, y0: number, y1: number): string[] {
+  const rows: string[] = [];
+  for (let y = y1; y >= y0; y--) {
+    let r = "";
+    for (let x = x0; x <= x1; x++) r += t.corners[y * t.width + x].cliffTexture.toString(16);
+    rows.push(r);
+  }
+  return rows;
+}
+
+test("the cliff slope spreads ring after ring until no cliff is taller than two levels, as the World Editor's", () => {
+  // we-drive, 2026-11-15, branch cliff-slope-we: Increase Two clicked ten times at 748,500 of flat.w3x, saved after
+  // each click. The pointer's corner moves south down the growing slope (the corners are those whose stamp gives the
+  // editor's save; each was the only one that did). The editor's levels of x 26..38, y 32..18 after the tenth, size 1:
+  const t = flat64(2);
+  for (const y of [30, 29, 29, 28, 28, 27, 27, 26, 26, 25]) increaseTwo(t, 32, y, 1);
+  assert.deepEqual(levelRows(t, 26, 38, 18, 32), [
+    "2222222222222", "2222222222222", "2244444444422", "2246666666422", "2246888886422", "22468aaa86422", "22468aca86422",
+    "22468aca86422", "22468aaa86422", "2246888886422", "2246666666422", "2244444444422", "2222222222222", "2222222222222",
+    "2222222222222",
+  ]);
+  // Its cliff types: the slope's corners took Grass Cliff, the level-2 corners round its outermost ring didn't (the
+  // first click's stencil, rows 31 to 29, did: tools.ts typingArea). The editor's, x 27..37, y 31..20:
+  assert.deepEqual(typeRows(t, 27, 37, 20, 31), ["ffff111ffff", ...Array(10).fill("f111111111f"), "fffffffffff"]);
+  // Size 3: the seventh click hit the level-14 top and wrapped round to 0 (strokeLayer), the slope taking the plateau
+  // down round the pit; the eighth to tenth clicks climbed again. The editor's levels of x 22..42, y 34..14:
+  const u = flat64(2);
+  const clicks = [30, 29, 27, 26, 25, 24, 23];
+  for (const y of clicks) increaseTwo(u, 32, y, 3);
+  assert.deepEqual(levelRows(u, 22, 42, 14, 34), [
+    "222222222222222222222", "222222222222222222222", "222222222444222222222", "222224444464444422222", "222244666666666442222",
+    "222446688888886644222", "222466866666668664222", "222468664444466864222", "222466644222446664222", "222466442202244664222",
+    "222466422000224664222", "222466420000024664222", "222466422000224664222", "222466442202244664222", "222466644222446664222",
+    "222446664444466644222", "222244666666666442222", "222224444444444422222", "222222222222222222222", "222222222222222222222",
+    "222222222222222222222",
+  ]);
+  for (const y of [28, 26, 25]) increaseTwo(u, 32, y, 3);
+  assert.deepEqual(levelRows(u, 22, 42, 14, 34), [
+    "222222222222222222222", "222222222222222222222", "222222224444422222222", "222224444666444422222", "222244666686666442222",
+    "222446688888886644222", "222466888aaa888664222", "22246888aacaa88864222", "2224668aacccaa8664222", "2224668accccca8664222",
+    "2224668aacccaa8664222", "22246688aacaa88664222", "222466688aaa886664222", "222466668888866664222", "222466666666666664222",
+    "222446664444466644222", "222244666666666442222", "222224444444444422222", "222222222222222222222", "222222222222222222222",
+    "222222222222222222222",
+  ]);
+  // The editor's, but two corners of the top row (30,33 and 34,33), which Studio types round the second click's ring
+  // beside the brush and the editor didn't (Stroke.typingArea).
+  assert.deepEqual(typeRows(u, 24, 40, 16, 33), [
+    "ffffff11111ffffff", "fffff1111111fffff", "fff11111111111fff", "ff1111111111111ff", ...Array(11).fill("f111111111111111f"),
+    "ff1111111111111ff", "fff11111111111fff", "fffffffffffffffff",
+  ]);
+});
+
+test("Increase past the top wraps round without Enforce Terrain Limits and does nothing above 14 with it", () => {
+  // we-drive, 2026-11-15, branch cliff-slope-we, one size-1 click on maps of one level: switch off, Increase Two from 14
+  // and One from 15 set the corner to 0 and left a pit of square rings 2, 4, … 12 (the 14 field from x 25..39); switch
+  // on, Increase One from 14 and Two from 13 and 14 changed nothing, One from 13 and Two from 12 built 14.
+  const { strokeLayer, ENFORCED_TOP_LEVEL } = painterTools;
+  assert.equal(ENFORCED_TOP_LEVEL, 14);
+  assert.equal(strokeLayer("cliffUp2", 14), 0);
+  assert.equal(strokeLayer("cliffUp", 15), 0);
+  assert.equal(strokeLayer("cliffUp2", 15), 1);
+  assert.equal(strokeLayer("cliffUp2", 13), 15, "15 is a level when the switch is off (Increase Two from 13 built it)");
+  assert.equal(strokeLayer("cliffUp", 14, true), null);
+  assert.equal(strokeLayer("cliffUp2", 13, true), null);
+  assert.equal(strokeLayer("cliffUp2", 14, true), null);
+  assert.equal(strokeLayer("cliffUp", 13, true), 14);
+  assert.equal(strokeLayer("cliffUp2", 12, true), 14);
+  assert.equal(strokeLayer("cliffDown2", 15, true), 13, "only Increase is held");
+  assert.equal(strokeLayer("cliffLevel", 15, true), 15);
+  const t = flat64(14);
+  assert.equal(increaseTwo(t, 32, 30, 1), true);
+  assert.deepEqual(levelRows(t, 25, 39, 23, 37), [
+    "eeeeeeeeeeeeeee", "eccccccccccccce", "ecaaaaaaaaaaace", "eca888888888ace", "eca866666668ace", "eca864444468ace",
+    "eca864222468ace", "eca864202468ace", "eca864222468ace", "eca864444468ace", "eca866666668ace", "eca888888888ace",
+    "ecaaaaaaaaaaace", "eccccccccccccce", "eeeeeeeeeeeeeee",
+  ]);
+  const before = levelRows(flat64(14), 0, 64, 0, 64);
+  const on = flat64(14);
+  assert.equal(increaseTwo(on, 32, 30, 1, true), false, "no stroke with the switch on");
+  assert.deepEqual(levelRows(on, 0, 64, 0, 64), before);
+});
+
 test("the corners next to a cliff brush come along to within two levels of it, as the World Editor's", () => {
   // we-compare cliff-reach-up2-edge and cliff-reach-down2-below (2026-11-14): on plateau.w3x (level 3 on 2) Increase
   // Two of size 3 on the edge (3 to 5) took the low corners round the brush to 3, and Decrease Two below the edge (2

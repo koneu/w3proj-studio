@@ -2,7 +2,8 @@
 // (service "w3.terrain"): height, ground textures, cliffs, water, blight, ramps.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
+import { MAP_INFO_SERVICE, TERRAIN_SERVICE, type MapInfoService, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
+import { MAP_EXTRA_PATH, readMapExtra } from "../../lib/formats/mapextra";
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strokepath";
@@ -80,6 +81,31 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 
   /** The World Editor's Enforce Water Height Limits (the terrain editor's switch, on unless set off). */
   const enforceWater = () => w3.settings.get<boolean>("terrain.enforceWaterLimits", true) !== false;
+  /** The map's Enforce Terrain Limits as war3mapExtra.txt has it saved: off when the map has none, null while it is
+   *  being read or when it is there but can't be read. */
+  let savedLimits: boolean | null = null;
+  let limitsRead = 0;
+  const root = w3.workspace.project()?.root ?? null;
+  const readLimits = async () => {
+    const n = ++limitsRead;
+    let on: boolean | null;
+    try {
+      on = readMapExtra(await w3.workspace.readText(MAP_EXTRA_PATH)).enforceTerrainLimits === true;
+    } catch {
+      // Absent is off; a file that is listed but unreadable says nothing (not off: that would let Increase wrap).
+      await w3.workspace.filesReady().catch(() => {});
+      on = w3.workspace.files().some((f) => f.path.toLowerCase() === MAP_EXTRA_PATH.toLowerCase()) ? null : false;
+    }
+    // A later read (the file saved again) or another project wins.
+    if (n === limitsRead && (w3.workspace.project()?.root ?? null) === root) savedLimits = on;
+  };
+  void readLimits();
+  const stopLimitsWatch = w3.workspace.onDidSave((path) => { if (path.toLowerCase() === MAP_EXTRA_PATH.toLowerCase()) { savedLimits = null; void readLimits(); } });
+  let mapInfo: MapInfoService | null = null;
+  void w3.services.get<MapInfoService>(MAP_INFO_SERVICE).then((s) => { mapInfo = s; }, () => {});
+  /** Enforce Terrain Limits for a cliff stroke: the open Map Properties' (unsaved changes too), else the saved file's;
+   *  unknown counts as on, the side on which Increase refuses rather than wraps round (strokeLayer). */
+  const enforceLimits = () => (root !== null ? mapInfo?.liveEnforceTerrainLimits(root) : null) ?? savedLimits ?? true;
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number, amount = strength): boolean => {
     if (!stroke) return false;
@@ -371,6 +397,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   return {
     toolbar,
     deactivate() { endStroke(); ed.setBrush(null); },
+    dispose() { stopLimitsWatch.dispose(); },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       const g = p.ground;
@@ -394,7 +421,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const cx = Math.round((g[0] - terrain.offsetX) / 128), cy = Math.round((g[1] - terrain.offsetY) / 128);
         const c = terrain.corners[cy * terrain.width + cx];
         // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
-        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType()) : { layer: c.layer };
+        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), enforceLimits()) : { layer: c.layer };
         if (layer === null) return;
         stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);

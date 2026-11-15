@@ -26,8 +26,10 @@ export class CornerUndo implements CornerLog {
  *  maps), on flat ground they don't. `cliffGround`: the ground tile of each cliff type number;
  *  corners next to `around` are checked too (a cliff's type comes from its bottom-left corner). `own` are corners
  *  that take the type though no cliff touches them: those a water brush turned into water, as the World Editor's
- *  size 3 brush gave its middle corner, with only water round it, the chosen cliff type too (we-drive 2026-11-12). */
-export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: CornerLog, fixed?: number, own?: ReadonlySet<number>): boolean {
+ *  size 3 brush gave its middle corner, with only water round it, the chosen cliff type too (we-drive 2026-11-12).
+ *  `alone` are checked without the corners next to them (the cliff brush's slope: the World Editor typed its corners
+ *  but not the ones round it). */
+export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: CornerLog, fixed?: number, own?: ReadonlySet<number>, alone: Iterable<number> = []): boolean {
   if (!cliffGround.length) return false;
   const W = t.width, H = t.height;
   const layer = (x: number, y: number) => t.corners[y * W + x].layer;
@@ -41,6 +43,7 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
       if (x + dx >= 0 && y + dy >= 0 && x + dx < W && y + dy < H) near.add((y + dy) * W + x + dx);
     }
   }
+  for (const i of alone) near.add(i);
   let changed = false;
   for (const i of near) {
     const x = i % W, y = Math.floor(i / W);

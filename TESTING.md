@@ -519,6 +519,21 @@ rounded down per stamp, round with either shape. Plateau and Smooth take the dis
 sets it to the stroke's first corner, Smooth is a 48:2:1 kernel (terrain-painter/tools.ts `raiseLower`, `plateau`,
 `smooth`). A drag stamps at the editor's own ticks where the pointer moved (20 steps of 1, 5, 10, 15 px over 3-4 s added
 5, 15, 18, 16 stamps), so no drag spec: Studio stamps per 40 ms tick once the pointer is 16 units on (`steppedTick`).
+Cliff slopes (branch cliff-slope-we, 2026-11-15, spec `cliff-slope`; inputs `level14.w3x`, `pyramid.w3x` from
+`make-levels.mjs`): after a cliff brush sets its corners, each corner beside or diagonal to one that moved comes to within
+two levels of it, ring after ring until nothing moves (terrain-painter/tools.ts `cliffSlope`). Measured by saving after
+each of ten Increase Two clicks on one pixel of flat.w3x (sizes 1 and 3): every save was Studio's stamp on one corner
+(tools.test.ts). The "cap" of 12 such clicks seemed to have came from the pointer: its corner moves down the growing
+slope, and a click on the top past 15 wraps round as the 4-bit level does (14 + 2 and 15 + 1 make level 0, a pit whose
+slope takes the plateau down round it). With Enforce Terrain Limits on, an Increase whose level would pass 14 does
+nothing (from 13 and 14 alike). The slope's corners take the cliff type; the corners round them only round the ring
+beside a brush larger than size 1 (`Stroke.typingArea`: fits the 20 saves but 2 corners; the rule is a guess beyond
+them). Studio's pick over
+cliffs of two levels lands on other corners than the editor's (`cliff-slope-up2-1-pick`, expect differs), so a click
+sequence on one pixel (the `limits-*-cliff-cap` specs) still differs. Not built: with the limits on, an edit also put
+every level-15 corner of the map to 14, and lowered the ground of a corner whose level and ground passed level 14's height
+(an Increase One to 14 on ground +512 left 0 there, 98 and 183 round it); and the editor's open and save alone evened
+out a map's cliffs taller than two levels (a level-12 block on level 2 came back stepped).
 Dragged cliff strokes (branch drag-stroke-we, 2026-11-14, spec `drag-stroke`): the editor stamps its brush only where the
 pointer is at its own ticks, nothing in between (a 20 ms `--drag` of size 1 raised one corner, of size 3 one brush, not at
 the press point), so a quick drag has gaps and two runs of it differ; at 3 s for 20 steps it sees every step and matches

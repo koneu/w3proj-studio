@@ -163,7 +163,7 @@ let requestedAnchor: string | null = null;
 /** Section shown last (an editor opened again after another save keeps it). */
 let lastSection: SectionId = "description";
 /** An open Map Properties editor: its project, showing a section (scrolled to an anchor), adding an item table. */
-interface OpenEditor { root: string; show(s: SectionId, anchor?: string): void; createItemTable(): { number: number; name: string }; itemTables(): LiveItemTable[] }
+interface OpenEditor { root: string; show(s: SectionId, anchor?: string): void; createItemTable(): { number: number; name: string }; itemTables(): LiveItemTable[]; enforceTerrainLimits(): boolean | null }
 const openEditors = new Set<OpenEditor>();
 /** MapInfoService.onDidEdit's listeners. */
 const edits = new Listeners();
@@ -174,6 +174,7 @@ const STRINGS = "map/war3map.wts";
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const service: MapInfoService = {
     liveItemTables: (root) => [...openEditors].filter((e) => e.root === root).at(-1)?.itemTables() ?? null,
+    liveEnforceTerrainLimits: (root) => [...openEditors].filter((e) => e.root === root).at(-1)?.enforceTerrainLimits() ?? null,
     onDidEdit: (listener) => edits.add(listener),
   };
   ctx.subscriptions.push(w3.services.provide(MAP_INFO_SERVICE, service));
@@ -591,7 +592,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 row("Time of day", select<number>([[-1, "Use Editor Preference"], ...TIMES_OF_DAY], () => extra.timeOfDay ?? -1,
                   (n) => { extra.timeOfDay = n < 0 ? undefined : n; })),
                 h("div.form-checks", {}, check("Enforce terrain limits", () => extra.enforceTerrainLimits === true, (b) => { extra.enforceTerrainLimits = b || undefined; })),
-                h("small.muted", {}, "What the World Editor's terrain view uses for this map (Map Properties › Prefs). Studio's terrain view keeps its own sky and limits."),
+                h("small.muted", {}, "What the World Editor's terrain view uses for this map (Map Properties › Prefs). Studio's terrain view keeps its own sky; "
+                  + "with the limits on, the cliff brush's Increase builds no higher than level 14 (off, it wraps round to 0 past 15, as the editor's)."),
               ),
             ];
           },
@@ -736,6 +738,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const ref = StringTable.ref(value);
             return ref !== null && strings?.has(ref) ? strings.get(ref)! : value;
           }),
+          // An unreadable war3mapExtra.txt isn't edited here: what it says is unknown.
+          enforceTerrainLimits: () => (prefs.error ? null : extra.enforceTerrainLimits === true),
         };
         openEditors.add(controller);
         // The game's labels come in later. The techtree doesn't use them: drawn again, it would lose what was scrolled to.
