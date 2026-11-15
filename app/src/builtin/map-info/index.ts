@@ -1,5 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
+import { withColorTools } from "../../extensions/colortools";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
@@ -389,7 +390,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("label.form-row", {}, h("span.form-label", {}, label), h("div.form-control", {}, control, hint ? h("small.muted", {}, hint) : null));
 
         /** String field; TRIGSTR references edit the string table text. */
-        const text = (get: () => string, set: (s: string) => void, opts: { multiline?: boolean } = {}) => {
+        const text = (get: () => string, set: (s: string) => void, opts: { multiline?: boolean; plain?: boolean } = {}) => {
           const ref = StringTable.ref(get());
           const viaTable = ref !== null && strings?.has(ref);
           const value = viaTable ? strings!.get(ref!)! : get();
@@ -404,9 +405,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             update(visit);
           });
           input.addEventListener("blur", () => { visit = {}; });
+          // Texts the game shows get the colour tools; paths and ids (plain) don't.
+          const shown = opts.plain ? input : withColorTools(input);
           return viaTable
-            ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
-            : input;
+            ? h("div.form-stack", {}, shown, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
+            : shown;
         };
         const num = (get: () => number, set: (n: number) => void, opts: { int?: boolean } = {}) => {
           const input = h("input.form-input.form-num", { type: "number", value: String(get()), step: opts.int ? "1" : "any" });
@@ -491,7 +494,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Screen", lists
                 ? select<number>([[-1, "None / custom model"], ...lists.loadingScreens], () => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; })
                 : num(() => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; }, { int: true })),
-              v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => { info.loadingScreen.model = s; })) : null,
+              v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => { info.loadingScreen.model = s; }, { plain: true })) : null,
               row("Title", text(() => info.loadingScreen.title, (s) => { info.loadingScreen.title = s; })),
               row("Subtitle", text(() => info.loadingScreen.subtitle, (s) => { info.loadingScreen.subtitle = s; })),
               row("Text", text(() => info.loadingScreen.text, (s) => { info.loadingScreen.text = s; }, { multiline: true })),
@@ -502,7 +505,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ],
           prologue: () => [
             section_("Prologue screen",
-              v >= 25 ? row("Screen path", text(() => info.prologue.path, (s) => { info.prologue.path = s; })) : null,
+              v >= 25 ? row("Screen path", text(() => info.prologue.path, (s) => { info.prologue.path = s; }, { plain: true })) : null,
               row("Title", text(() => info.prologue.title, (s) => { info.prologue.title = s; })),
               row("Subtitle", text(() => info.prologue.subtitle, (s) => { info.prologue.subtitle = s; })),
               row("Text", text(() => info.prologue.text, (s) => { info.prologue.text = s; }, { multiline: true })),
@@ -541,11 +544,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             section_("Weather & sound",
               row("Global weather", lists
                 ? select<string>([["0x00000000", "None"], ...lists.weather], () => info.weather, (s) => { info.weather = s; })
-                : text(() => info.weather, (s) => { info.weather = s; })),
-              row("Sound environment", text(() => info.soundEnvironment, (s) => { info.soundEnvironment = s; })),
+                : text(() => info.weather, (s) => { info.weather = s; }, { plain: true })),
+              row("Sound environment", text(() => info.soundEnvironment, (s) => { info.soundEnvironment = s; }, { plain: true })),
               row("Light environment", lists
                 ? select<string>([["", "Default (map tileset)"], ...lists.tilesets], () => info.lightEnvironment, (s) => { info.lightEnvironment = s; })
-                : text(() => info.lightEnvironment, (s) => { info.lightEnvironment = s; })),
+                : text(() => info.lightEnvironment, (s) => { info.lightEnvironment = s; }, { plain: true })),
               row("Water tint", color(info.waterTint), "Used when “Enable water tinting” is set (Options)."),
             ),
             section_("Fog",
@@ -652,7 +655,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     }
                     return h("tr", {},
                       h("td.muted", {}, String(p.id + 1)),
-                      h("td", {}, text(() => p.name, (s) => { p.name = s; })),
+                      h("td", {}, text(() => p.name, (s) => { p.name = s; }, { plain: true })),
                       h("td", {}, controller(id)),
                       h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => {
                         p.race = n;
