@@ -405,6 +405,10 @@ export interface MapInfoService {
    *  included), names as shown there (string table references resolved); null when no editor of that project is open
    *  (the saved war3map.w3i is what there is then). A copy: changing it changes nothing. */
   liveItemTables(root: string): LiveItemTable[] | null;
+  /** The map's Enforce Terrain Limits (war3mapExtra.txt) as the open Map Properties editor of the project at `root`
+   *  holds it now, unsaved changes included; null when no editor of that project is open or its war3mapExtra.txt
+   *  couldn't be read (the saved file is what there is then). */
+  liveEnforceTerrainLimits(root: string): boolean | null;
   /** After every edit, undo and redo in an open Map Properties editor, and when one closes. */
   onDidEdit(listener: () => void): { dispose(): void };
 }

@@ -34,12 +34,56 @@ const LAYER_STEPS: Partial<Record<LayerTool, number>> = { cliffUp: 1, cliffUp2: 
  *  no corner moved and none was typed, at the pit's middle and on the floor's rim, with or without a tile picked
  *  beside it (we-compare cliff-floor and painted-cliff-type-grass, 2026-11-14, branch painted-cliff-type-we). Studio
  *  used to lower the whole brush to level 0 there. A water brush whose level would be below 0 lowers nothing: the
- *  corners turn wet on the level they are on (waterBelowFloor), so the level returned is the start's. */
-export function strokeLayer(tool: LayerTool, start: number): number | null {
+ *  corners turn wet on the level they are on (waterBelowFloor), so the level returned is the start's. Past the top,
+ *  Increase does nothing with the map's Enforce Terrain Limits on (`enforceLimits`) and wraps round without it
+ *  (ENFORCED_TOP_LEVEL). */
+export function strokeLayer(tool: LayerTool, start: number, enforceLimits = false): number | null {
   const to = start + (LAYER_STEPS[tool] ?? 0);
   if (to < 0 && (tool === "cliffDown" || tool === "cliffDown2")) return null;
   if (waterBelowFloor(tool, start)) return start;
+  if (tool === "cliffUp" || tool === "cliffUp2") {
+    if (enforceLimits && to > ENFORCED_TOP_LEVEL) return null;
+    if (to > 15) return to & 15;
+  }
   return Math.max(0, Math.min(15, to));
+}
+
+/** The highest cliff level Increase One and Two build with the map's Enforce Terrain Limits on. The World Editor's
+ *  Increase did nothing at all where it would have gone higher (we-drive, flat maps of one level, one size-1 click,
+ *  2026-11-15, branch cliff-slope-we): Increase One from 14 and Two from 13 and 14 changed no corner, One from 13 and
+ *  Two from 12 built level 14. With the switch off (the default) the level wraps round past 15 as its 4 bits do:
+ *  Increase Two from 14 and One from 15 set the brush to level 0 and the slope round it climbed back to the plateau
+ *  (cliffSlope), the "cap" of 12 a size-3 brush clicked ten times on one pixel seemed to have (we-compare
+ *  limits-off-cliff-cap): the pointer's corner moves down the growing slope, and a click on the top wraps it. */
+export const ENFORCED_TOP_LEVEL = 14;
+
+/** The World Editor's cliff slope: after a cliff brush set its corners (`brush`), each corner beside or diagonal to
+ *  one that moved comes to within two levels of it, and so on outwards until nothing moves (the brush's own corners
+ *  stay). we-drive, 2026-11-15, branch cliff-slope-we: Increase Two clicked ten times on one pixel of flat.w3x, saved
+ *  after each click, left square rings 2, 4, 6, … round a size-1 brush and the brush's disc grown by one corner each
+ *  way per ring at size 3, every save the stamp of one corner (tools.test.ts); a brush wrapped to level 0 on a level-14
+ *  field (Increase Two from 14) left a pit 0, 2, 4, … 12 in square rings (we-compare cliff-slope-wrap). `moved(i,
+ *  from, first)` is called before corner i changes (from: its level then; first: it is beside the brush). */
+export function cliffSlope(t: Terrain, brush: readonly number[], moved: (i: number, from: number, first: boolean) => void): void {
+  const inBrush = new Set(brush);
+  const queue = [...brush];
+  // Each change moves a corner towards a level its neighbour already has; the bound only guards a terrain that could
+  // keep two corners trading places (none is known): every corner may change a few times over.
+  const most = brush.length + 16 * t.width * t.height;
+  for (let k = 0; k < queue.length && k < most; k++) {
+    const i = queue[k], level = t.corners[i].layer;
+    const x = i % t.width, y = Math.floor(i / t.width);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy, n = ny * t.width + nx;
+      if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height || inBrush.has(n)) continue;
+      const c = t.corners[n];
+      const to = Math.max(level - 2, Math.min(level + 2, c.layer));
+      if (to === c.layer) continue;
+      moved(n, c.layer, k < brush.length);
+      setLayer(c, to);
+      queue.push(n);
+    }
+  }
 }
 
 /** What a cliff or water stroke started on corner (x, y) sets, or null when it does nothing there (strokeLayer). Cliff
@@ -47,9 +91,9 @@ export function strokeLayer(tool: LayerTool, start: number): number | null {
  *  (89.6) under its original ground, as the World Editor does: its shallow water is 38.4 deep, deep water 166.4 (12 game
  *  maps). On a ramp's middle corner the water goes by the ramp's height, half a level up (rampLift): the editor's word
  *  was 256 more there (we-compare water-ramp-below, 2026-11-14, branch water-brush-we2). `cliffType`: the palette's. */
-export function layerTarget(t: Terrain, tool: LayerTool, x: number, y: number, cliffType?: number): LayerTarget | null {
+export function layerTarget(t: Terrain, tool: LayerTool, x: number, y: number, cliffType?: number, enforceLimits = false): LayerTarget | null {
   const c = t.corners[y * t.width + x];
-  const layer = strokeLayer(tool, c.layer);
+  const layer = strokeLayer(tool, c.layer, enforceLimits);
   if (layer === null) return null;
   return { layer, waterLevel: waterLevelAt(c.height + rampLift(t, x, y) - WATER_OFFSET), start: c.layer, cliffType };
 }
@@ -141,8 +185,25 @@ export class Stroke {
   /** Corners a cliff or water brush moved to another layer or turned into water, and those of the cliff brush's
    *  stencil (cliffTypeStencil): they take the cliff type though no cliff touches them (retypeCliffs). */
   readonly own = new Set<number>();
+  /** Corners only the cliff slope moved (cliffSlope), not a brush: they take the cliff type, the corners round them
+   *  don't (typingArea), but for `ring`'s. */
+  readonly slope = new Set<number>();
+  /** The slope's corners right beside a brush larger than size 1: the corners round them take the cliff type too. */
+  readonly ring = new Set<number>();
+  /** Corners a cliff brush of this stroke went over (they never count as the slope's). */
+  readonly brushed = new Set<number>();
 
   constructor(readonly label: string) {}
+
+  /** The corners whose cliff tiles round them take the cliff type after a cliff or water stroke (retypeCliffs): the
+   *  area but the corners only the slope moved, past its first ring. we-drive, 2026-11-15, branch cliff-slope-we, the
+   *  saves after each of ten Increase Two clicks on one pixel of flat.w3x: size 1 typed the slope's corners and none
+   *  round them (all 10 saves as Studio's but one, 8 corners the next click typed anyway); size 3 typed the corners
+   *  round the ring beside the brush too, not round the rings further out (all 10 but 2 corners, (±2, 4) from the
+   *  second click's centre). The rule beyond these is not known. */
+  typingArea(): number[] {
+    return this.area().filter((i) => !this.slope.has(i) || this.ring.has(i));
+  }
 
   /** Indices of the corners the stroke changed (or touched). */
   corners(): number[] {
@@ -332,26 +393,18 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
   // The low ground comes up with the switch on or off: the editor's lift was the same with Enforce Water Height Limits
   // off (we-compare water-limit-off-deep, 2026-11-14, branch water-brush-we2).
   if (water && liftToFloor(t, inside.map(({ i }) => i), (i) => stroke.touch(t, i)).length) changed = true;
+  if (CLIFF_TOOLS.has(tool)) for (const { i } of inside) { stroke.brushed.add(i); stroke.slope.delete(i); stroke.ring.delete(i); }
   if (CLIFF_TOOLS.has(tool) && moved.size) {
-    // No cliff taller than two levels: the corners next to the brush come along to within two levels of it, as the
-    // editor's do (we-compare cliff-reach: Increase Two, size 3, on plateau.w3x's edge, level 3 to 5, took the low
-    // ground round the brush from 2 to 3; Decrease Two below the edge, 2 to 0, took the plateau round it from 3 to
-    // 2; 2026-11-14, branch painted-cliff-type-we). One ring was measured, not what a ring five levels off does.
-    const brush = new Set(inside.map(({ i }) => i));
-    for (const i of brush) {
-      const x = i % t.width, y = Math.floor(i / t.width);
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy, n = ny * t.width + nx;
-        if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height || brush.has(n)) continue;
-        const c = t.corners[n];
-        const to = Math.max(target.layer - 2, Math.min(target.layer + 2, c.layer));
-        if (to === c.layer) continue;
-        stroke.touch(t, n);
-        moved.set(n, c.layer);
-        setLayer(c, to);
-        stroke.own.add(n);
-      }
-    }
+    // No cliff taller than two levels: from the brush outwards, each corner beside (or diagonal to) one that moved
+    // comes to within two levels of it, ring after ring, as far as it takes (cliffSlope).
+    cliffSlope(t, inside.map(({ i }) => i), (n, from, first) => {
+      stroke.touch(t, n);
+      if (!moved.has(n)) moved.set(n, from);
+      stroke.own.add(n);
+      if (stroke.brushed.has(n)) return;
+      stroke.slope.add(n);
+      if (first && b.radius > 0) stroke.ring.add(n);
+    });
   }
   // The ramps the cliff and water brushes break lose their flags, as the editor's do (dropBrokenRamps; water: we-compare
   // water-ramp-on, -below and -deep took the three flags of a ramp line off, 2026-11-14, branch water-brush-we2).
@@ -402,7 +455,7 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
  *  stroke there (painted-with-cliff-*). Whether a corner changed. */
 export function retypeCliffs(t: Terrain, stroke: Stroke, cliffGround: string[], chosen?: number): boolean {
   if (!LAYER_TOOLS.has(stroke.label)) return false;
-  return matchCliffTypes(t, stroke.area(), cliffGround, stroke, chosen, stroke.own);
+  return matchCliffTypes(t, stroke.typingArea(), cliffGround, stroke, chosen, stroke.own, stroke.slope);
 }
 
 

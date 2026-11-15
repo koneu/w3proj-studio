@@ -332,7 +332,7 @@
   },
   {
     "name": "limits-off-cliff-cap",
-    "description": "What Enforce Terrain Limits limits, the one difference found (2026-11-15): Increase Two, size 3, clicked 10 times on one corner of edge-last-step.w3m (all corners level 2; click 400,500), switch off. The World Editor's cliff stops at level 12 (layer nibble c) and its slope reaches a fixed number of rings round the brush: nothing higher is built however often one clicks (20 and 25 clicks the same); with the switch on (limits-on-cliff-cap) it goes to 14, one ring wider. Studio has no cap: it goes to 15 and keeps the brush flat on top with one ring of slope (tools.ts applyLayer). Expected to differ until Studio has the editor's slope rule (not yet understood: from a base of level 6 the editor's centre stopped at 10 off and 14 on)",
+    "description": "What Enforce Terrain Limits limits, the one difference found (2026-11-15): Increase Two, size 3, clicked 10 times on one corner of edge-last-step.w3m (all corners level 2; click 400,500), switch off. The World Editor's cliff stops at level 12 (layer nibble c) and its slope reaches a fixed number of rings round the brush: nothing higher is built however often one clicks (20 and 25 clicks the same); with the switch on (limits-on-cliff-cap) it goes to 14, one ring wider. Explained since branch cliff-slope-we (2026-11-15; we-compare cliff-slope): there is no cap. The slope spreads ring after ring (tools.ts cliffSlope), the pointer's corner moves down it as it grows, and a click that lands on the top past level 15 wraps round to 0 with the switch off and does nothing above 14 with it on (strokeLayer); Studio stamps as the editor does (tools.test.ts holds the editor's saves after each click), but its pick over cliffs of two levels lands on other corners, so this sequence still differs (cliff-slope-up2-1-pick)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m"
     },
@@ -610,7 +610,7 @@
   },
   {
     "name": "limits-on-cliff-cap",
-    "description": "limits-off-cliff-cap with Enforce Terrain Limits ticked first: the editor's cliff goes to level 14 (nibble e), one ring wider than with the switch off; Studio's has no cap (expected to differ, see limits-off-cliff-cap)",
+    "description": "limits-off-cliff-cap with Enforce Terrain Limits ticked first: the editor's cliff goes to level 14 (nibble e), one ring wider than with the switch off: an Increase past 14 does nothing then (tools.ts ENFORCED_TOP_LEVEL); expected to differ for the pick, see limits-off-cliff-cap",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m"
     },
