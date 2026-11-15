@@ -1,7 +1,7 @@
 [
   {
     "name": "limits-off-raise-margin",
-    "description": "What Enforce Terrain Limits limits (test.md), first look: the Raise brush (size 3, one click each) on the playable edge (695,500), the margin beside it (800,400) and its far end (940,300; the map's edge is at 1080) of edge-last-step.w3m (camera 3456, 0, 3000), switch off (the default). The World Editor raises the ground in the margin and up to the map's last corner, as it does with the switch on (limits-on-raise-margin): nothing is refused. Expected to differ: the editor's click raises the middle corner by 128 where Studio's Raise adds 149 to 176, and the far-off click lands a corner away (Studio's view is only exact near the middle); both raise the margin, so the refusal asked about does not exist",
+    "description": "What Enforce Terrain Limits limits (test.md), first look: the Raise brush (size 3, one click each) on the playable edge (695,500), the margin beside it (800,400) and its far end (940,300; the map's edge is at 1080) of edge-last-step.w3m (camera 3456, 0, 3000), switch off (the default). The World Editor raises the ground in the margin and up to the map's last corner, as it does with the switch on (limits-on-raise-margin): nothing is refused. Matches since branch raise-brush-we (2026-11-15: Studio's Raise stamps the editor's dome, 76 stored units in the middle at size 3; tools.ts raiseLower); before, Studio's Raise went by time and added 149 to 176",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m"
     },
@@ -141,14 +141,13 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       }
     ]
   },
   {
     "name": "limits-on-raise-margin",
-    "description": "limits-off-raise-margin with Enforce Terrain Limits ticked first (Scenario > Map Preferences in the editor, Map Properties > Preferences in Studio): the same ground, the margin and the last corner raised as with the switch off. Expected to differ: the editor's click raises the middle corner by 128 where Studio's Raise adds 149 to 176, and the far-off click lands a corner away (Studio's view is only exact near the middle); both raise the margin, so the refusal asked about does not exist",
+    "description": "limits-off-raise-margin with Enforce Terrain Limits ticked first (Scenario > Map Preferences in the editor, Map Properties > Preferences in Studio): the same ground, the margin and the last corner raised as with the switch off; matches since branch raise-brush-we (see limits-off-raise-margin)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m"
     },
@@ -323,8 +322,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "w3e",
-        "expect": "differs"
+        "as": "w3e"
       },
       {
         "file": "war3mapExtra.txt",

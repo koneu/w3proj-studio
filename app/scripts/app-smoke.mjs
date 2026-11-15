@@ -5738,6 +5738,17 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
       await save();
       const n = changed(section);
       if (n !== want) fail(`a ${title.slice(0, -1)} click of size ${size} (${dx},${dy} px off the middle) changed ${n} corners' ${section}, the World Editor's ${want}`);
+      if (title === "Raise:") {
+        // One stamp of the World Editor's, held still or not: 76 stored units at the middle for size 3 (we-compare
+        // height-raise-3; terrain-painter/tools.ts raiseLower). The old brush went by time and the hold added more.
+        const values = readFileSync(ground, "utf8").split("\n[height]\n")[1].split("\n[")[0].trim().split(/\s+/)
+          .flatMap((v) => { const [x, k] = v.split("*"); return Array(Number(k ?? 1)).fill(Number(x)); });
+        const counts = new Map();
+        for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+        const flat = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+        const top = Math.max(...values) - flat;
+        if (top !== 76) fail(`a Raise click of size 3 held still 150 ms raised the middle corner by ${top} stored units, the World Editor's one stamp 76`);
+      }
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
       await save();
       if (hash(ground) !== untouched) { fail(`undo didn't take the ${title.slice(0, -1)} click back`); return; }

@@ -86,15 +86,16 @@ export function cornerBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, 
   return { x: snap(x, t.offsetX), y: snap(y, t.offsetY), radius: Math.max(0, Math.round(size) - 1), square };
 }
 
-const HEIGHT_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower", "plateau", "smooth", "noise"]);
+/** The height brushes that leave the rim out (Plateau and Smooth take it: discCorners). */
+const OPEN_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower", "noise"]);
 const BOUNDARY_TOOLS: ReadonlySet<string> = new Set(["boundary", "unboundary"]);
 
 /** The brush a painter tool puts down for a pointer at (x, y) and the toolbar's Size (not Ramp's, which goes by the
- *  cliff): the World Editor's corner brush (cornerBrush). The height brushes leave its rim out: the World Editor's
- *  Raise (we-drive, one click each on flat ground, 2026-11-13, verify3-we-diffs) changed 1, 1, 9, 45, 145 corners at
- *  sizes 1, 2, 3, 5, 8, the corners strictly inside radius size − 1 round the nearest corner (size 1: that corner),
- *  fading to nothing at the rim. Cliffs, water and the ground textures (Blight and Boundary are tiles of its texture
- *  palette) take the rim too. Boundary and Remove Boundary alone are centred on the lower-left corner of the tile
+ *  cliff): the World Editor's corner brush (cornerBrush). Raise and Lower (and Noise) leave its rim out: the World
+ *  Editor's Raise (we-drive, one click each on flat ground, 2026-11-13, verify3-we-diffs) changed 1, 1, 9, 45, 145
+ *  corners at sizes 1, 2, 3, 5, 8, the corners strictly inside radius size − 1 round the nearest corner (size 1: that
+ *  corner), fading to nothing at the rim. Plateau and Smooth, cliffs, water and the ground textures (Blight and
+ *  Boundary are tiles of its texture palette) take the rim too. Boundary and Remove Boundary alone are centred on the lower-left corner of the tile
  *  under the pointer instead of the nearest corner (the World Editor flags the tile there): we-drive, 2026-11-14,
  *  branch boundary-we, 16 size-1 clicks at 0.2 to 0.8 of a tile in x and y each flagged that corner, and sizes 2, 3
  *  and 5 took 5, 13 and 49 corners round it (spec tests/we-compare/boundary-wpm.json). */
@@ -106,7 +107,7 @@ export function brushOf(tool: string, t: Pick<Terrain, "offsetX" | "offsetY">, x
     const down = (v: number, o: number) => o + Math.floor((v - o) / 128 + 1e-6) * 128;
     return { ...b, x: down(x, t.offsetX), y: down(y, t.offsetY) };
   }
-  return HEIGHT_TOOLS.has(tool) ? { ...b, open: true } : b;
+  return OPEN_TOOLS.has(tool) ? { ...b, open: true } : b;
 }
 
 /** How far out the brush's outline is drawn, in world units: half a tile past the outermost corners it takes. */
@@ -178,36 +179,110 @@ export class Stroke {
   }
 }
 
-/** One application of a height brush. `amount` is world units at the centre
- *  (raise/lower), the most a corner moves up or down (noise: each corner by its own
- *  random share, from `random`), the target height (plateau) or ignored (smooth).
- *  Returns whether anything changed. */
+/** What one Raise or Lower stamp adds at the brush's centre per step of the brush size, in stored height units (a
+ *  quarter of a world unit): 6.4 world units a size. */
+export const RAISE_PER_SIZE = 25.6;
+
+/** One Raise or Lower stamp, as the World Editor's: the corners strictly inside radius R = size − 1 round the brush's
+ *  corner (size 1 and 2: that corner) move by 25.6 × size stored units × cos(π/2 · d / R), d their distance in tiles,
+ *  and the stored word is rounded down after each stamp (a Lower of 76.8 makes −77, two Raises of 76.8 make 152).
+ *  The brush shape doesn't count: the editor's Square raised the same disc. we-drive, flat.w3x, one click each
+ *  (2026-11-15, branch raise-brush-we): centres 25, 51, 76, 128, 204 at sizes 1, 2, 3, 5, 8; size 5 at d = 1, √2, 2, √5,
+ *  √8, 3, √10, √13: 118, 108, 90, 81, 56, 48, 41, 19; size 3 Lower −77, −55, −35; a second click adds as much again;
+ *  a pointer held still adds nothing more. */
+function raiseLower(t: Terrain, b: Brush, up: boolean, stroke: Stroke): boolean {
+  const R = b.radius, amount = RAISE_PER_SIZE * (R + 1);
+  const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
+  const reach = Math.max(0, Math.ceil(R) - 1);
+  let changed = false;
+  for (let y = Math.max(0, cy - reach); y <= Math.min(t.height - 1, cy + reach); y++) {
+    for (let x = Math.max(0, cx - reach); x <= Math.min(t.width - 1, cx + reach); x++) {
+      const d = Math.hypot(x - cx, y - cy);
+      if (d > 0 && d >= R) continue;
+      const delta = amount * (R > 0 ? Math.cos((Math.PI / 2) * (d / R)) : 1);
+      const i = y * t.width + x;
+      changed = setRaw(t, i, Math.floor(t.corners[i].rawHeight + (up ? delta : -delta)), stroke) || changed;
+    }
+  }
+  return changed;
+}
+
+/** The corners of the World Editor's Plateau and Smooth brushes: within radius size − 1 of the brush's corner, the rim
+ *  included, as its cliff brush (sizes 1, 2, 3, 5: 1, 5, 13, 49 corners), and unlike Raise and Lower they take the
+ *  Square shape (size 3: the 5 × 5 square). we-drive, 2026-11-15. */
+function discCorners(t: Terrain, b: Brush): number[] {
+  const R = b.radius, reach = Math.floor(R);
+  const cx = Math.round((b.x - t.offsetX) / 128), cy = Math.round((b.y - t.offsetY) / 128);
+  const out: number[] = [];
+  for (let y = Math.max(0, cy - reach); y <= Math.min(t.height - 1, cy + reach); y++) {
+    for (let x = Math.max(0, cx - reach); x <= Math.min(t.width - 1, cx + reach); x++) {
+      if (b.square || Math.hypot(x - cx, y - cy) <= R) out.push(y * t.width + x);
+    }
+  }
+  return out;
+}
+
+/** Whether a tool's brush takes the Square shape: the World Editor's Raise and Lower raised a disc with it (raiseLower). */
+export const takesShape = (tool: string) => tool !== "raise" && tool !== "lower" && tool !== "ramp";
+
+/** Sets a corner's stored ground word, recording it for undo; whether it changed. */
+function setRaw(t: Terrain, i: number, raw: number, stroke: Stroke): boolean {
+  const c = t.corners[i];
+  raw = Math.max(-0x8000, Math.min(0x7fff, raw));
+  if (raw === c.rawHeight) return false;
+  stroke.touch(t, i);
+  c.rawHeight = raw;
+  c.height = (raw - 0x2000) / 4 + (c.layer - 2) * 128;
+  return true;
+}
+
+/** One Plateau stamp, as the World Editor's: every corner of the disc (discCorners) takes the stored ground word
+ *  `target` (the corner the stroke started on). we-drive, 2026-11-15: size 3 one tile beside a size-5 Raise set the 13
+ *  corners within two tiles to the clicked corner's 118, nothing between. */
+function plateau(t: Terrain, b: Brush, target: number, stroke: Stroke): boolean {
+  let changed = false;
+  for (const i of discCorners(t, b)) changed = setRaw(t, i, target, stroke) || changed;
+  return changed;
+}
+
+/** One Smooth stamp, as the World Editor's: each corner of the disc (discCorners) becomes 48/60 of itself, 2/60 of each
+ *  corner beside it and 1/60 of each diagonal one, read before the stamp, rounded down (where the map ends, the
+ *  weights there are left out). we-drive, 2026-11-15: a 255 spike smoothed by size 3 went to 204, its four
+ *  neighbours to 8, its diagonals to 4, and a second click to 164, 13, 7; a size-5 Raise smoothed by size 3: 125, 115,
+ *  105, 87 for 128, 118, 108, 90, the rim's 90 included, the corners past it untouched. */
+function smooth(t: Terrain, b: Brush, stroke: Stroke): boolean {
+  const ids = discCorners(t, b);
+  const next = ids.map((i) => {
+    const x = i % t.width, y = Math.floor(i / t.width);
+    let sum = 0, weight = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height) continue;
+      const w = dx === 0 && dy === 0 ? 48 : dx === 0 || dy === 0 ? 2 : 1;
+      sum += w * t.corners[ny * t.width + nx].rawHeight;
+      weight += w;
+    }
+    return Math.floor(sum / weight);
+  });
+  let changed = false;
+  ids.forEach((i, k) => { changed = setRaw(t, i, next[k], stroke) || changed; });
+  return changed;
+}
+
+/** One application of a height brush. `amount` is the most a corner moves up or down (noise: each corner by its own
+ *  random share, from `random`), the stored ground word to level to (plateau), or ignored (raise and lower:
+ *  raiseLower; smooth). Returns whether anything changed. */
 export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke, random: () => number = Math.random): boolean {
+  if (tool === "raise" || tool === "lower") return raiseLower(t, b, tool === "raise", stroke);
+  if (tool === "plateau") return plateau(t, b, amount, stroke);
+  if (tool === "smooth") return smooth(t, b, stroke);
   const cs = cornersIn(t, b);
   if (!cs.length) return false;
-  const before = cs.map(({ i }) => groundHeight(t.corners[i]));
-  cs.forEach(({ i, w }, k) => {
+  for (const { i, w } of cs) {
     const c = t.corners[i];
-    let h = before[k];
-    if (tool === "raise") h += amount * w;
-    else if (tool === "lower") h -= amount * w;
-    else if (tool === "plateau") h += (amount - h) * Math.min(1, w * 1.5);
-    else if (tool === "noise") h += (random() * 2 - 1) * amount * w;
-    else {
-      // Average of the 3×3 neighbourhood, blended by the brush weight.
-      const x = i % t.width, y = Math.floor(i / t.width);
-      let sum = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height) continue;
-        sum += groundHeight(t.corners[ny * t.width + nx]);
-        n++;
-      }
-      h += (sum / n - h) * w * 0.5;
-    }
     stroke.touch(t, i);
-    setGroundHeight(c, h);
-  });
+    setGroundHeight(c, groundHeight(c) + (random() * 2 - 1) * amount * w);
+  }
   return true;
 }
 

@@ -116,7 +116,8 @@ test("height brushes take the World Editor's corners: inside radius size − 1 r
       const t = flatMap(), { x, y } = centre(t);
       for (const tool of ["raise", "lower", "plateau", "smooth", "noise"] as const) {
         const b = brushOf(tool, t, x + dx, y + dy, size);
-        assert.deepEqual([b.x, b.y, b.radius, b.open], [x, y, size - 1, true], `${tool} size ${size} at +${dx},${dy}`);
+        const open = tool !== "plateau" && tool !== "smooth";
+        assert.deepEqual([b.x, b.y, b.radius, !!b.open], [x, y, size - 1, open], `${tool} size ${size} at +${dx},${dy}`);
       }
       applyHeight(t, brushOf("raise", t, x + dx, y + dy, size), "raise", 64, new Stroke("raise"));
       const raised = t.corners.flatMap((c, i) => (groundHeight(c) > 0 ? [i] : []));
@@ -158,13 +159,111 @@ test("a cliff raised on grass becomes a grass cliff, on the cliff corners only",
   assert.equal(at(11, 16), 15);
 });
 
-/** A drag across the map at a speed, with the clock ticking `ms` apart while the mouse reports
- *  many times in between, as the painter runs it. `busy` makes every third tick late. */
+/** The stored ground word's change of the corners x 16 + dx, y 16 + dy for dy 2..-2 (north first), dx -2..2. */
+function heightGrid(t: Terrain, reach = 2): number[][] {
+  const rows: number[][] = [];
+  for (let dy = reach; dy >= -reach; dy--) {
+    const r: number[] = [];
+    for (let dx = -reach; dx <= reach; dx++) r.push(t.corners[(16 + dy) * t.width + 16 + dx].rawHeight - 0x2000);
+    rows.push(r);
+  }
+  return rows;
+}
+
+test("Raise and Lower stamp the World Editor's cosine dome: 25.6 stored units a size at the centre, rounded down", () => {
+  // we-drive on flat.w3x, one click each (2026-11-15, branch raise-brush-we): the middle corner rose by 25, 51, 76, 128
+  // and 204 at sizes 1, 2, 3, 5, 8.
+  for (const [size, middle, corners] of [[1, 25, 1], [2, 51, 1], [3, 76, 9], [5, 128, 45], [8, 204, 145]]) {
+    const t = flatMap(), { x, y } = centre(t), s = new Stroke("raise");
+    assert.equal(applyHeight(t, brushOf("raise", t, x + 30, y - 20, size), "raise", 16, s), true);
+    assert.equal(heightGrid(t)[2][2], middle, `size ${size}`);
+    assert.equal(t.corners.filter((c) => c.rawHeight !== 0x2000).length, corners, `size ${size}`);
+  }
+  const zero = [0, 0, 0, 0, 0];
+  let t = flatMap();
+  applyHeight(t, brushOf("raise", t, 0, 0, 3), "raise", 0, new Stroke("raise"));
+  assert.deepEqual(heightGrid(t), [zero, [0, 34, 54, 34, 0], [0, 54, 76, 54, 0], [0, 34, 54, 34, 0], zero]);
+  applyHeight(t, brushOf("raise", t, 0, 0, 3), "raise", 0, new Stroke("raise"));
+  assert.deepEqual(heightGrid(t), [zero, [0, 68, 108, 68, 0], [0, 108, 152, 108, 0], [0, 68, 108, 68, 0], zero], "a second click adds the same, each rounded down");
+  t = flatMap();
+  applyHeight(t, brushOf("lower", t, 0, 0, 3), "lower", 0, new Stroke("lower"));
+  assert.deepEqual(heightGrid(t), [zero, [0, -35, -55, -35, 0], [0, -55, -77, -55, 0], [0, -35, -55, -35, 0], zero], "Lower rounds down too");
+  t = flatMap();
+  applyHeight(t, brushOf("raise", t, 0, 0, 5, true), "raise", 0, new Stroke("raise"));
+  assert.deepEqual(heightGrid(t, 4).slice(0, 5), [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 19, 41, 48, 41, 19, 0, 0],
+    [0, 19, 56, 81, 90, 81, 56, 19, 0],
+    [0, 41, 81, 108, 118, 108, 81, 41, 0],
+    [0, 48, 90, 118, 128, 118, 90, 48, 0],
+  ], "size 5, the Square shape too: the editor's Square raised the same disc");
+  t = flatMap();
+  applyHeight(t, brushOf("lower", t, 0, 0, 5), "lower", 0, new Stroke("lower"));
+  assert.deepEqual(heightGrid(t, 4)[4], [0, -49, -91, -119, -128, -119, -91, -49, 0]);
+});
+
+test("Plateau levels the whole disc to the stroke's start, rim included; Smooth is the World Editor's 48:2:1 kernel", () => {
+  // we-drive, 2026-11-15: a size-5 Raise, then Plateau size 3 one corner east (its 118) and, on another copy, Smooth size 3
+  // on the middle.
+  const dome = () => { const t = flatMap(); applyHeight(t, brushOf("raise", t, 0, 0, 5), "raise", 0, new Stroke("raise")); return t; };
+  let t = dome();
+  const target = t.corners[16 * t.width + 17].rawHeight;
+  applyHeight(t, brushOf("plateau", t, 128, 0, 3), "plateau", target, new Stroke("plateau"));
+  assert.deepEqual(heightGrid(t, 4).slice(1, 5), [
+    [0, 0, 19, 41, 48, 41, 19, 0, 0],
+    [0, 19, 56, 81, 90, 118, 56, 19, 0],
+    [0, 41, 81, 108, 118, 118, 118, 41, 0],
+    [0, 48, 90, 118, 118, 118, 118, 118, 0],
+  ]);
+  t = dome();
+  applyHeight(t, brushOf("smooth", t, 0, 0, 3), "smooth", 0, new Stroke("smooth"));
+  assert.deepEqual(heightGrid(t, 4).slice(1, 5), [
+    [0, 0, 19, 41, 48, 41, 19, 0, 0],
+    [0, 19, 56, 81, 87, 81, 56, 19, 0],
+    [0, 41, 81, 105, 115, 105, 81, 41, 0],
+    [0, 48, 87, 115, 125, 115, 87, 48, 0],
+  ]);
+  // A spike of 255 (five size-2 Raises), smoothed by size 3 twice.
+  t = flatMap();
+  for (let k = 0; k < 5; k++) applyHeight(t, brushOf("raise", t, 0, 0, 2), "raise", 0, new Stroke("raise"));
+  assert.equal(heightGrid(t)[2][2], 255);
+  applyHeight(t, brushOf("smooth", t, 0, 0, 3), "smooth", 0, new Stroke("smooth"));
+  assert.deepEqual(heightGrid(t).slice(1, 4), [[0, 4, 8, 4, 0], [0, 8, 204, 8, 0], [0, 4, 8, 4, 0]]);
+  applyHeight(t, brushOf("smooth", t, 0, 0, 3), "smooth", 0, new Stroke("smooth"));
+  assert.deepEqual(heightGrid(t).slice(1, 4), [[0, 7, 13, 7, 0], [0, 13, 164, 13, 0], [0, 7, 13, 7, 0]]);
+  // Sizes 1 and 2 on the spike: the corner alone, then the cross.
+  for (const [size, want] of [[1, [[0, 0, 0], [0, 204, 0], [0, 0, 0]]], [2, [[0, 8, 0], [8, 204, 8], [0, 8, 0]]]] as const) {
+    t = flatMap();
+    for (let k = 0; k < 5; k++) applyHeight(t, brushOf("raise", t, 0, 0, 2), "raise", 0, new Stroke("raise"));
+    applyHeight(t, brushOf("smooth", t, 0, 0, size), "smooth", 0, new Stroke("smooth"));
+    assert.deepEqual(heightGrid(t, 1), want, `Smooth size ${size}`);
+  }
+  // The Square shape counts for both (the editor's size 3: the 5 × 5 square), and the corners the disc takes per size.
+  t = dome();
+  applyHeight(t, brushOf("plateau", t, 128, 0, 3, true), "plateau", target, new Stroke("plateau"));
+  assert.deepEqual(heightGrid(t, 4).slice(1, 5), [
+    [0, 0, 19, 41, 48, 41, 19, 0, 0],
+    [0, 19, 56, 118, 118, 118, 118, 118, 0],
+    [0, 41, 81, 118, 118, 118, 118, 118, 0],
+    [0, 48, 90, 118, 118, 118, 118, 118, 0],
+  ]);
+  t = dome();
+  applyHeight(t, brushOf("smooth", t, 0, 0, 3, true), "smooth", 0, new Stroke("smooth"));
+  assert.deepEqual(heightGrid(t, 4).slice(2, 5), [[0, 19, 54, 79, 87, 79, 54, 19, 0], [0, 41, 79, 105, 115, 105, 79, 41, 0], [0, 48, 87, 115, 125, 115, 87, 48, 0]]);
+  for (const [size, n] of [[1, 1], [2, 5], [3, 13], [5, 49]]) {
+    t = flatMap();
+    applyHeight(t, brushOf("plateau", t, 0, 0, size), "plateau", 0x2000 + 100, new Stroke("plateau"));
+    assert.equal(t.corners.filter((c) => c.rawHeight === 0x2000 + 100).length, n, `Plateau size ${size}`);
+  }
+});
+
+/** A Noise drag (every corner pushed up: random 1) across the map at a speed, with the clock ticking `ms` apart while
+ *  the mouse reports many times in between, as the painter runs it. `busy` makes every third tick late. */
 function drag(speedPerMs: number, ms: number, busy = false) {
-  const t = flatMap(), s = new Stroke("raise"), radius = 2, y = 0, from = -800, to = 800;
+  const t = flatMap(), s = new Stroke("noise"), radius = 2, y = 0, from = -800, to = 800;
   const brush = new HeightStroke([from, y], -HEIGHT_TICK, radius * 64);
   let now = 0, at = from, n = 0;
-  const stamp = () => { for (const d of brush.tick(now, 16)) applyHeight(t, { x: d.x, y: d.y, radius }, "raise", d.amount, s); };
+  const stamp = () => { for (const d of brush.tick(now, 16)) applyHeight(t, { x: d.x, y: d.y, radius }, "noise", d.amount, s, () => 1); };
   stamp();
   while (at < to) {
     const step = busy && ++n % 3 === 0 ? ms * 3 : ms;

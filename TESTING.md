@@ -510,6 +510,15 @@ longer depends on what the last one left in the shared prefix (with the limit of
 the 35-unit lift next to the water and the dry rim's water word). `--keep-prefs` (we-drive, we-compare) leaves them as
 they are. The other View toggles aren't in the preferences file. Within one running editor (several specs of a
 we-compare process share it) a toggle a spec switched stays until the editor restarts.
+Height brushes (branch raise-brush-we, 2026-11-15, spec `height-brush`, flat.w3x, clicks at 748,500): the palette's
+Apply Height box 1372,470, tools at y=507: Raise 1409, Lower 1441, Plateau 1473, a spiky one 1505 (not measured), Smooth 1537; Shape at
+y=624: Circle 1392, Square 1424 (the shape stays for the editor's session: a spec sets it back). The editor has no
+strength: one stamp per click, and a pointer held still adds nothing (1 s and 3 s holds gave the click's result).
+Raise/Lower: a cosine dome of 25.6 stored units a size at the middle, the corners strictly inside radius size - 1,
+rounded down per stamp, round with either shape. Plateau and Smooth take the disc with its rim (or the square): Plateau
+sets it to the stroke's first corner, Smooth is a 48:2:1 kernel (terrain-painter/tools.ts `raiseLower`, `plateau`,
+`smooth`). A drag stamps at the editor's own ticks where the pointer moved (20 steps of 1, 5, 10, 15 px over 3-4 s added
+5, 15, 18, 16 stamps), so no drag spec: Studio stamps per 40 ms tick once the pointer is 16 units on (`steppedTick`).
 Dragged cliff strokes (branch drag-stroke-we, 2026-11-14, spec `drag-stroke`): the editor stamps its brush only where the
 pointer is at its own ticks, nothing in between (a 20 ms `--drag` of size 1 raised one corner, of size 3 one brush, not at
 the press point), so a quick drag has gaps and two runs of it differ; at 3 s for 20 steps it sees every step and matches
