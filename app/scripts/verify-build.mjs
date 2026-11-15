@@ -10,6 +10,10 @@
 //   --tester NAME   print the command lines with NAME's folders (target/verify-runs/<sha>/NAME/…)
 //   --json          print one JSON object (commit, exe, cli, env) instead of text
 //   --force         build again even when the folder says it is built
+//   --keep N        before building, delete the older builds (target/verify/<sha> and target/verify-runs/<sha>) and
+//                   keep the newest N (default 2; 0 = keep all). Never deleted: a build with a lock folder, one whose
+//                   runs folder changed in the last 2 hours, the commit being built.
+//   --dry-run       only print what --keep would delete (and free); delete and build nothing
 //
 // A folder that is already built (verify.json inside, the binary there) is not built again; two runs at once for
 // one commit take turns (the second finds it built). Progress goes to stderr, the answer to stdout.
@@ -17,8 +21,8 @@
 // folders) is used when it is set up.
 
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./appctl.mjs";
 import { mainCheckout } from "../../tests/gamepath.mjs";
@@ -100,16 +104,78 @@ async function lock(dir, timeoutMs = 60 * 60 * 1000) {
   }
 }
 
+const RECENT_MS = 2 * 60 * 60 * 1000;
+
+/** Newest modification time in a folder tree (depth-limited; a missing folder gives 0). */
+function newestMtime(dir, depth = 4) {
+  let st;
+  try { st = lstatSync(dir); } catch { return 0; }
+  let m = st.mtimeMs;
+  if (!st.isDirectory() || depth <= 0) return m;
+  let names = [];
+  try { names = readdirSync(dir); } catch { /* unreadable: its own time */ }
+  for (const n of names) m = Math.max(m, newestMtime(join(dir, n), depth - 1));
+  return m;
+}
+
+function sizeOf(path) {
+  let st;
+  try { st = lstatSync(path); } catch { return 0; }
+  if (!st.isDirectory()) return st.size;
+  let n = 0;
+  try { for (const f of readdirSync(path)) n += sizeOf(join(path, f)); } catch { /* unreadable */ }
+  return n;
+}
+
+/** True when `path` is strictly inside `parent`. */
+const inside = (parent, path) => { const r = relative(parent, path); return r !== "" && !r.startsWith("..") && !isAbsolute(r); };
+
+/**
+ * Deletes the older builds: keeps the newest `keep` (keep 0 = everything), plus any build with a lock folder, with a
+ * runs folder touched within `recentMs`, or named `current`. Only folders directly in <root>/target/verify and
+ * <root>/target/verify-runs are ever removed. Returns { removed: [{sha, bytes}], kept: [sha], freed, dryRun }.
+ */
+export function pruneBuilds(root, { keep = 2, dryRun = false, now = Date.now(), recentMs = RECENT_MS, current = null, remove = (p) => rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 }) } = {}) {
+  const verify = resolve(root, "target", "verify"), runsRoot = resolve(root, "target", "verify-runs");
+  const out = { removed: [], kept: [], freed: 0, dryRun };
+  if (!(keep > 0) || !existsSync(verify)) return out;
+  const builds = readdirSync(verify, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.endsWith(".lock") && !/\.(lock|stale)-/.test(d.name))
+    .map((d) => ({ sha: d.name, dir: join(verify, d.name), runs: join(runsRoot, d.name) }))
+    .map((b) => ({ ...b, time: Math.max(statSync(b.dir).mtimeMs, newestMtime(join(b.dir, "verify.json"), 0)) }))
+    .sort((a, b) => b.time - a.time);
+  builds.forEach((b, i) => {
+    const busy = existsSync(`${b.dir}.lock`) || now - newestMtime(b.runs) < recentMs || b.sha === current;
+    if (i < keep || busy) { out.kept.push(b.sha); return; }
+    for (const p of [b.dir, b.runs]) {
+      if (!existsSync(p)) continue;
+      if (!inside(verify, p) && !inside(runsRoot, p)) throw new Error(`refusing to delete ${p}: not under ${verify} or ${runsRoot}`);
+      const bytes = sizeOf(p);
+      if (!dryRun) remove(p);
+      out.freed += bytes;
+      out.removed.push({ sha: b.sha, path: p, bytes });
+    }
+  });
+  return out;
+}
+
+function reportPrune(r) {
+  const mb = (n) => (n / 1048576).toFixed(0);
+  for (const x of r.removed) log(`${r.dryRun ? "would remove" : "removed"} ${x.path} (${mb(x.bytes)} MB)`);
+  if (r.removed.length) log(`${r.dryRun ? "would free" : "freed"} ${mb(r.freed)} MB`);
+}
+
 const readRecord = (file) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
 const isBuilt = (rec, want) => rec && existsSync(rec.exe) && (!want.cli || (rec.cli && existsSync(rec.cli)));
 
-export async function verifyBuild({ commit = "HEAD", cli = true, force = false } = {}) {
+export async function verifyBuild({ commit = "HEAD", cli = true, force = false, keep = 2 } = {}) {
   const root = mainCheckout(here);
   const full = git(["rev-parse", "--verify", `${commit}^{commit}`], here);
   const sha = full.slice(0, 10);
   const l = layout(root, sha);
   let rec = readRecord(l.record);
   if (!force && isBuilt(rec, { cli })) return { ...rec, reused: true, runs: l.runs };
+  reportPrune(pruneBuilds(root, { keep, current: sha }));
   const release = await lock(l.dir);
   try {
     rec = readRecord(l.record);
@@ -155,13 +221,15 @@ export async function verifyBuild({ commit = "HEAD", cli = true, force = false }
 }
 
 function parse(argv) {
-  const o = { commit: "HEAD", cli: true, force: false, json: false, tester: "tester" };
+  const o = { commit: "HEAD", cli: true, force: false, json: false, keep: 2, dryRun: false, tester: "tester" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     if (a === "--commit") o.commit = value();
     else if (a === "--no-cli") o.cli = false;
     else if (a === "--force") o.force = true;
+    else if (a === "--keep") { o.keep = Number(value()); if (!Number.isInteger(o.keep) || o.keep < 0) throw new Error("--keep needs a whole number >= 0"); }
+    else if (a === "--dry-run") o.dryRun = true;
     else if (a === "--json") o.json = true;
     else if (a === "--tester") o.tester = value();
     else if (a === "-h" || a === "--help") o.help = true;
@@ -172,7 +240,8 @@ function parse(argv) {
 
 async function main() {
   const o = parse(process.argv.slice(2));
-  if (o.help) { console.log("usage: node scripts/verify-build.mjs [--commit REV] [--no-cli] [--tester NAME] [--json] [--force]; see the top of the file"); return 0; }
+  if (o.help) { console.log("usage: node scripts/verify-build.mjs [--commit REV] [--no-cli] [--tester NAME] [--json] [--force] [--keep N] [--dry-run]; see the top of the file"); return 0; }
+  if (o.dryRun) { reportPrune(pruneBuilds(mainCheckout(here), { keep: o.keep, dryRun: true })); return 0; }
   const built = await verifyBuild(o);
   const cmds = testerCommands(built, built.runs, o.tester);
   if (o.json) { console.log(JSON.stringify({ ...built, commands: cmds })); return 0; }

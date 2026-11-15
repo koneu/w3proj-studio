@@ -425,6 +425,12 @@ turns (a lock folder next to it). It prints the binary, the CLI and the command 
 - app-smoke: `W3_APP_BIN=<binary> W3PROJ_BIN=<cli> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>`
 - we-compare: `node scripts/we-compare.mjs --app <binary> --work <own folder> <spec.json>`
 
+**Pruning**: each build is about 3.8 GB, so before building a new commit `verify-build` deletes the older ones and
+keeps the newest N (`--keep N`, default 2, `0` = keep all): `target/verify/<sha>` and `target/verify-runs/<sha>`, nothing
+else (it refuses any path not directly under those two folders of the main checkout). A build with a `.lock` folder, one
+whose runs folder changed in the last 2 hours (a tester may be using it) and the commit being built stay. It prints what
+it removed and the space freed. `--dry-run` prints that without deleting or building.
+
 `W3_APP_BIN` (or `--app`) makes `appctl.mjs`, app-drive, app-smoke and we-compare run that binary and build nothing.
 Settings (`W3PROJ_CONFIG_DIR`, default `<work>/config`) and the webview's storage (`XDG_DATA_HOME`/`XDG_CACHE_HOME`
 under the work folder, Linux) are per run, so testers sharing a binary share nothing. The identifier of the build is
