@@ -2,7 +2,7 @@
   "id": "w3.importManager",
   "name": "Import Manager",
   "version": "0.1.0",
-  "description": "The map's imported files (war3map.imp) like the World Editor's Import Manager: import files from disk, change their path in the archive, export, open, remove, and list files in the map that aren't registered.",
+  "description": "The map's imported files (war3map.imp) like the World Editor's Import Manager: import files from disk, change their path in the archive, export, open, remove, list files in the map that aren't registered, and clean up the list (entries without a file out, unlisted files in).",
   "contributes": {
     "editors": [{ "id": "w3.importManager", "title": "Import Manager", "patterns": ["war3map.imp.json", "war3map.imp", "war3campaign.imp.json", "war3campaign.imp"] }],
     "commands": [
@@ -10,6 +10,7 @@
       { "id": "w3.imports.replace", "when": "project", "title": "Import Manager: Replace File…", "category": "Module" },
       { "id": "w3.imports.addVersion", "when": "project", "title": "Import Manager: Add Reforged or Classic Version…", "category": "Module" },
       { "id": "w3.imports.addDeVersion", "when": "project", "title": "Import Manager: Add 3.0 Version…", "category": "Module" },
+      { "id": "w3.imports.cleanUp", "when": "project", "title": "Import Manager: Clean Up Import List…", "category": "Module" },
       { "id": "w3.imports.add", "when": "project", "title": "Import Manager: Add to Import List", "category": "Module", "hidden": true }
     ]
   }
