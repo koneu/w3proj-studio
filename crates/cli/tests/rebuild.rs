@@ -122,9 +122,19 @@ fn without_the_game_nothing_is_made() {
     let project = dir.join("project");
     copy_dir(&fixture(), &project);
     let o = w3proj(&["rebuild", s(&project)], s(&dir.join("no-such-game")));
-    assert!(!o.status.success());
-    assert!(text(&o).contains("nothing was made"), "{}", text(&o));
+    // Pathing, shadows and the minimap are kept, per part, with the reason (not an abort of the whole run); the
+    // script needs the game's tables too and fails, so the run as a whole exits 1.
+    assert!(!o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("failed") && text(&o).contains("map script"), "{}", text(&o));
+    assert!(text(&o).contains("kept"), "{}", text(&o));
+    assert!(text(&o).contains("war3map.shd"), "{}", text(&o));
     assert!(text(&o).contains("--game"), "{}", text(&o));
+    assert_eq!(derived(&project), derived(&fixture()));
+    // Only the shadows asked for: nothing can be made, and it says so.
+    let o = w3proj(&["rebuild", s(&project), "--only=shd"], s(&dir.join("no-such-game")));
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("kept") && text(&o).contains("nothing was made"), "{}", text(&o));
+    assert!(!text(&o).contains("error:"), "{}", text(&o));
     assert_eq!(derived(&project), derived(&fixture()));
     let _ = fs::remove_dir_all(&dir);
 }
