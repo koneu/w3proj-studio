@@ -34,6 +34,8 @@ KillUnit=0,unit
 
 const has = (text: string, line: string) => assert.ok(text.split(EOL).includes(line), `no line "${line}" in:\n${text}`);
 const hasNot = (text: string, part: string) => assert.ok(!text.includes(part), `"${part}" in:\n${text}`);
+/** The lines one after the other, whole lines. */
+const hasLines = (text: string, lines: string[]) => assert.ok(`${EOL}${text}${EOL}`.includes(`${EOL}${lines.join(EOL)}${EOL}`), `no lines\n${lines.join("\n")}\nin:\n${text}`);
 
 // ---- numbers and names ------------------------------------------------------------------
 
@@ -739,6 +741,58 @@ test("without Modify ally priorities the script has the World Editor's, worked o
   has(t, "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_LOW )");
   // One player: none.
   hasNot(playersSection(setup({ flags: 0x9c14 })), "InitAllyPriorities");
+});
+
+/** The InitAllyPriorities function of a players section, endfunction included. */
+const allyPriorities = (s: string) => s.slice(s.indexOf("function InitAllyPriorities"), s.indexOf("endfunction", s.indexOf("function InitAllyPriorities")) + "endfunction".length);
+
+test("Modify ally priorities: the masks are by player id, the entries by slot index, as the World Editor's scripts of the game's maps", () => {
+  // Maps\FrozenThrone\(4)TurtleRock.w3x: war3map.w3i flags 0x2dc16, ally and enemy priorities; its war3map.j.
+  const turtle = setup({ flags: 0x2dc16, players: [
+    player(0, { start: [-2112, 4608], allyHigh: 8, enemyLow: 0, enemyHigh: 6 }),
+    player(1, { start: [5376, -2112], allyHigh: 4, enemyLow: 0, enemyHigh: 9 }),
+    player(2, { start: [2624, -5248], allyHigh: 2, enemyLow: 0, enemyHigh: 9 }),
+    player(3, { start: [-5248, 1600], allyHigh: 1, enemyLow: 0, enemyHigh: 6 }),
+  ] });
+  assert.equal(allyPriorities(playersSection(turtle)), [
+    "function InitAllyPriorities takes nothing returns nothing", "",
+    "    call SetStartLocPrioCount( 0, 1 )", "    call SetStartLocPrio( 0, 0, 3, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetEnemyStartLocPrioCount( 0, 2 )", "    call SetEnemyStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )", "    call SetEnemyStartLocPrio( 0, 1, 2, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetStartLocPrioCount( 1, 1 )", "    call SetStartLocPrio( 1, 0, 2, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetEnemyStartLocPrioCount( 1, 2 )", "    call SetEnemyStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )", "    call SetEnemyStartLocPrio( 1, 1, 3, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetStartLocPrioCount( 2, 1 )", "    call SetStartLocPrio( 2, 0, 1, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetEnemyStartLocPrioCount( 2, 2 )", "    call SetEnemyStartLocPrio( 2, 0, 0, MAP_LOC_PRIO_HIGH )", "    call SetEnemyStartLocPrio( 2, 1, 3, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetStartLocPrioCount( 3, 1 )", "    call SetStartLocPrio( 3, 0, 0, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetEnemyStartLocPrioCount( 3, 2 )", "    call SetEnemyStartLocPrio( 3, 0, 1, MAP_LOC_PRIO_HIGH )", "    call SetEnemyStartLocPrio( 3, 1, 2, MAP_LOC_PRIO_HIGH )",
+    "endfunction",
+  ].join(EOL));
+  // Maps\FrozenThrone\Scenario\(6)BlizzardTD.w3x (flags 0xcffa): player 9 is in slot 7, so its entry says 7; player 8
+  // (slot 6) has both masks 0xeeeeeeee: LOW wins, bits of absent players don't count, nor its own.
+  const td = setup({ flags: 0xcffa, players: [
+    player(0, { allyHigh: 2 }), player(1, { allyHigh: 1 }), player(2, { allyHigh: 16 }), player(3, { allyHigh: 32 }), player(4, { allyHigh: 4 }), player(5, { allyHigh: 8 }),
+    player(8, { controller: 2, allyLow: 4008636142, allyHigh: 4008636142 }), player(9, { controller: 2 }),
+  ] });
+  const t = allyPriorities(playersSection(td));
+  has(t, "    call SetStartLocPrio( 2, 0, 4, MAP_LOC_PRIO_HIGH )");
+  has(t, "    call SetStartLocPrio( 5, 0, 3, MAP_LOC_PRIO_HIGH )");
+  hasLines(t, ["    call SetStartLocPrioCount( 6, 5 )", "    call SetStartLocPrio( 6, 0, 1, MAP_LOC_PRIO_LOW )", "    call SetStartLocPrio( 6, 1, 2, MAP_LOC_PRIO_LOW )",
+    "    call SetStartLocPrio( 6, 2, 3, MAP_LOC_PRIO_LOW )", "    call SetStartLocPrio( 6, 3, 5, MAP_LOC_PRIO_LOW )", "    call SetStartLocPrio( 6, 4, 7, MAP_LOC_PRIO_LOW )", "endfunction"]);
+});
+
+test("stored priority masks count only with Modify ally priorities: without it the starts decide (example map 23b)", () => {
+  // 23b_Start_AllyPriorities: four users on a square, flags 0x9c50 (no Modify), P1/P2 and P3/P4 ally-high, P1/P2
+  // enemy-low on P3/P4. The World Editor works them out again from the starts: the two sides High, the diagonal Low.
+  const players = [
+    player(0, { start: [-1500, -1500], allyHigh: 2, enemyLow: 12, enemyHigh: 0 }), player(1, { start: [1500, -1500], allyHigh: 1, enemyLow: 12, enemyHigh: 0 }),
+    player(2, { start: [-1500, 1500], allyHigh: 8, enemyLow: 0, enemyHigh: 0 }), player(3, { start: [1500, 1500], allyHigh: 4, enemyLow: 0, enemyHigh: 0 }),
+  ];
+  const auto = allyPriorities(playersSection(setup({ flags: 0x9c50, players })));
+  hasLines(auto, ["    call SetStartLocPrioCount( 0, 3 )", "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )", "    call SetStartLocPrio( 0, 1, 2, MAP_LOC_PRIO_HIGH )", "    call SetStartLocPrio( 0, 2, 3, MAP_LOC_PRIO_LOW )"]);
+  hasNot(auto, "EnemyStartLocPrio");
+  // With Modify on, the stored masks are the script's.
+  const kept = allyPriorities(playersSection(setup({ flags: 0x9c52, players })));
+  hasLines(kept, ["    call SetStartLocPrioCount( 0, 1 )", "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )", "",
+    "    call SetEnemyStartLocPrioCount( 0, 2 )", "    call SetEnemyStartLocPrio( 0, 0, 2, MAP_LOC_PRIO_LOW )", "    call SetEnemyStartLocPrio( 0, 1, 3, MAP_LOC_PRIO_LOW )"]);
 });
 
 test("main: camera bounds, tileset sound and the calls in their order", () => {
