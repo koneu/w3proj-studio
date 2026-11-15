@@ -525,7 +525,9 @@ disable = ["imports", "melee/camps"]   # a Problems check id (the groups in the 
 
 A disabled Problems check isn't run; the view says what the project switched off. A `[checks]` that can't be read
 switches nothing off and is reported. This is for whole checks; `.w3proj/problems-ignore.json` (the Ignore buttons)
-puts single reports of a check that stays on aside, and both apply together.
+puts single reports of a check that stays on aside, and both apply together. The Problems view's "Disable this
+check for the project" button writes this; in a project without a `w3proj.toml` it creates a minimal one (`format = 1`
+and the `[checks]` section).
 
 ### Tests
 
