@@ -5,7 +5,7 @@ import { toClassicMdx } from "../../lib/model/classic";
 import type { Model } from "../../lib/model/mdx";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { loadSkins, withObjectArt, type Placed } from "./objects";
-import { predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
+import { doodadTypes, predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { terrainShadows } from "./shadows";
 import { writeDerived } from "./derive";
 
@@ -110,7 +110,7 @@ test("shadows are not written over the stored file when the game data can't be r
   const run = async (read: (p: string) => Promise<Uint8Array>, n: number, mode: string) => {
     const stats: ShadowStats = { wanted: 0, unreadable: 0 };
     await predictShadows(terrain, Array.from({ length: n }, at), skins, () => undefined, read, undefined, undefined, () => mode, stats);
-    return shadowVerdict(stats, n, skins.size);
+    return shadowVerdict(stats, n, doodadTypes(skins));
   };
   const tower = towerModel();
   const none = await run(async () => { throw new Error("no game"); }, 3, "sd-unreadable-a");
@@ -118,18 +118,23 @@ test("shadows are not written over the stored file when the game data can't be r
   assert.match(none.problem ?? "", /game folder/);
   const ok = await run(async () => tower, 3, "sd-unreadable-b");
   assert.deepEqual([ok.write, ok.leftOut], [true, 0], "the control: readable models write");
-  const half = shadowVerdict({ wanted: 4, unreadable: 1 }, 4, skins.size);
+  const half = shadowVerdict({ wanted: 4, unreadable: 1 }, 4, doodadTypes(skins));
   assert.deepEqual([half.write, half.leftOut], [true, 1], "some unreadable: written, counted");
   assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 2, 0).write, false, "doodads but no object tables: refused");
   assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 0, 0).write, true, "no doodads at all: cliffs-only is right");
-  // The game's tables unread: the skins are only the built-in few (start location, random objects), never 0.
-  const bare = await loadSkins({ settings: { get: () => "sd-unreadable-shadow-test-empty" }, game: { readText: async () => { throw new Error("no game"); } } } as unknown as W3Api);
-  assert.ok(bare.size > 0, "built-in skins are there without the game");
+  // The game's tables unread: the skins are the built-in few (start location, random objects) and the map's own custom
+  // types, whose base no table gave (no model): never 0 entries, but no doodad type.
+  const empty = await loadSkins({ settings: { get: () => "sd-unreadable-shadow-test-empty" }, game: { readText: async () => { throw new Error("no game"); } } } as unknown as W3Api);
+  const bare = withObjectArt(empty, [{ kind: "w3d", custom: [{ base: "LOrk", id: "D000", mods: [] }] }, { kind: "w3u", custom: [{ base: "hfoo", id: "h000", mods: [] }] }]);
+  assert.ok(bare.size > 0, "skins are there without the game");
   const stats: ShadowStats = { wanted: 0, unreadable: 0 };
-  await predictShadows(terrain, Array.from({ length: 3 }, at), bare, () => undefined, async () => tower, undefined, undefined, () => "sd-unreadable-d", stats);
-  const tablesUnread = shadowVerdict(stats, 3, bare.size);
-  assert.equal(tablesUnread.write, false, "no placed doodad known to any table: refused");
+  await predictShadows(terrain, [at(), { ...at(), id: "D000" }], bare, () => "LOrk", async () => tower, undefined, undefined, () => "sd-unreadable-d", stats);
+  assert.equal(doodadTypes(bare), 0);
+  const tablesUnread = shadowVerdict(stats, 2, doodadTypes(bare));
+  assert.equal(tablesUnread.write, false, "no doodad type from the tables: refused");
   assert.match(tablesUnread.problem ?? "", /object tables/);
+  assert.ok(doodadTypes(skins) > 0, "the control: the game's table gives the rock");
+  assert.equal(shadowVerdict(stats, 2, doodadTypes(skins)).write, true);
 });
 
 test("a model read with no casting faces isn't unreadable: only a failed read is counted, and a save isn't refused for it", async () => {
@@ -153,7 +158,7 @@ test("a model read with no casting faces isn't unreadable: only a failed read is
   const run = async (ids: string[], mode: string) => {
     const stats: ShadowStats = { wanted: 0, unreadable: 0 };
     const shd = await predictShadows(terrain, ids.map(at), skins, () => undefined, read, undefined, undefined, () => mode, stats);
-    return { stats, verdict: shadowVerdict(stats, ids.length, skins.size), cast: shd.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0) };
+    return { stats, verdict: shadowVerdict(stats, ids.length, doodadTypes(skins)), cast: shd.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0) };
   };
   const glows = await run(["LOgl", "LOgl"], "sd-no-faces-a");
   assert.deepEqual(glows.stats, { wanted: 2, unreadable: 0 }, "read with nothing to cast: not unreadable");

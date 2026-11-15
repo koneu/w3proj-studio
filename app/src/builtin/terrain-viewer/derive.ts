@@ -10,7 +10,7 @@ import { readTerrainBytes } from "../../lib/terrain/w3etext";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { buildMinimap, buildMinimapIcons, graphicsMode, minimapSettings } from "./minimapgen";
 import { buildPathingMap, readMapJson, specialsOf, type SpecialDoodad } from "./pathmap";
-import { predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
+import { doodadTypes, predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile } from "./placement";
 import type { Placed, loadSkins } from "./objects";
@@ -107,7 +107,7 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
     const statsAfter: ShadowStats = { wanted: 0, unreadable: 0, failed: failedModels };
     const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsBefore);
     const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsAfter);
-    const verdicts = [shadowVerdict(statsBefore, s.baseDoodads.length, s.skins.size), shadowVerdict(statsAfter, s.doodads.length, s.skins.size)];
+    const verdicts = [shadowVerdict(statsBefore, s.baseDoodads.length, doodadTypes(s.skins)), shadowVerdict(statsAfter, s.doodads.length, doodadTypes(s.skins))];
     const refused = verdicts.find((v) => !v.write);
     if (refused) {
       // The stored file stays as it is: an update from unreadable models would take the baked doodad shadows out.
@@ -164,7 +164,7 @@ export async function fullShadows(w3: W3Api, opts: {
   const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
   const stats: ShadowStats = { wanted: 0, unreadable: 0 };
   const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3), stats);
-  const verdict = shadowVerdict(stats, dooFile?.list.length ?? 0, objects.skins.size);
+  const verdict = shadowVerdict(stats, dooFile?.list.length ?? 0, doodadTypes(objects.skins));
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
   const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
   return { shd, stored, ...verdict };

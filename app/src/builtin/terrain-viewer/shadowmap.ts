@@ -46,19 +46,26 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
 }
 
 /** What a prediction could not use: `wanted` doodads whose model should cast a shadow, `unreadable` of those whose model
- *  (or its texture data) couldn't be read. `unknown`: placed objects no skin table entry names (neither the game's nor the
- *  map's object data). `failed`: the models that couldn't be read, by mode and path; predictions sharing it read each
- *  failed model once and agree on it (the save's before/after diff, where a model read in one and not the other would
- *  wipe or add its baked shadow). */
-export type ShadowStats = { wanted: number; unreadable: number; unknown?: number; failed?: Set<string> };
+ *  (or its texture data) couldn't be read. `failed`: the models that couldn't be read, by mode and path; predictions
+ *  sharing it read each failed model once and agree on it (the save's before/after diff, where a model read in one and
+ *  not the other would wipe or add its baked shadow). */
+export type ShadowStats = { wanted: number; unreadable: number; failed?: Set<string> };
+
+/** How many doodad and destructable types with a model the skins have: what tells whether the game's tables were read.
+ *  Not `skins.size`: the built-in few (start location, random objects) are always there, and the map's own custom types
+ *  of a base no table gave have no model. */
+export function doodadTypes(skins: Skins): number {
+  let n = 0;
+  for (const s of skins.values()) if ((s.kind === "w3d" || s.kind === "w3b") && s.file) n++;
+  return n;
+}
 
 /** Whether a calculated shadow map may replace the stored one. Nothing wanted from models, or all of them readable:
  *  write. Every wanted model unreadable (the game's files can't be opened): refuse, the result would be cliffs only.
- *  Some unreadable: write, and say how many objects were left out. `skins`: how many object entries there are; with
- *  doodads placed, none of them known (the game's tables unread: the map's own entries and the built-in few don't
- *  name the game's doodads) refuses as no tables at all does. */
-export function shadowVerdict(stats: ShadowStats, doodads: number, skins: number): { write: boolean; leftOut: number; problem?: string } {
-  if (doodads > 0 && (skins === 0 || stats.unknown === doodads)) return { write: false, leftOut: doodads, problem: "the game's object tables couldn't be read (is the game folder set?)" };
+ *  Some unreadable: write, and say how many objects were left out. `types`: doodadTypes of the skins (0 with doodads
+ *  placed: the game's object tables weren't read, refuse). */
+export function shadowVerdict(stats: ShadowStats, doodads: number, types: number): { write: boolean; leftOut: number; problem?: string } {
+  if (doodads > 0 && types === 0) return { write: false, leftOut: doodads, problem: "the game's object tables couldn't be read (is the game folder set?)" };
   if (stats.wanted > 0 && stats.unreadable === stats.wanted) return { write: false, leftOut: stats.unreadable, problem: `none of the ${stats.wanted} doodad models could be read (is the game folder set?)` };
   return { write: true, leftOut: stats.unreadable };
 }
@@ -78,7 +85,6 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
       since = performance.now();
     }
     const skin = skins.get(d.id) ?? skins.get(baseOf(d.id) ?? "");
-    if (!skin && stats) stats.unknown = (stats.unknown ?? 0) + 1;
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
