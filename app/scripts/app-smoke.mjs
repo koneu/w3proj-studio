@@ -3311,6 +3311,86 @@ async function importPathTab(page, found) {
   }
 }
 
+/** The Import Manager's "Clean up import list" on smoketest_maps' TurtleRock v2.0, whose war3map.imp holds 66 entries
+ *  without a name while the archive holds 48 imported files: previewed (Show the changes, then Clean up), the list then
+ *  names the 48 files and the manager shows them, one undo takes it back to the 66 blank entries, redo cleans up again;
+ *  the packed map holds every file of the original and lists the 48. Skipped without the map. */
+async function importListCleanup(page, found) {
+  const fail = (what) => found.push(`import list cleanup: ${what}`);
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "12_w3c_251104_0950_TurtleRock_v2.0.w3x");
+  if (!existsSync(map)) { console.log(`import list cleanup: skipped, ${map} isn't there`); return; }
+  const dir = join(work, "import-cleanup", "project");
+  rmSync(join(work, "import-cleanup"), { recursive: true, force: true });
+  mkdirSync(dirname(dir), { recursive: true });
+  const IMP = "map/war3map.imp.json";
+  const list = () => JSON.parse(readFileSync(join(dir, "map", "war3map.imp.json"), "utf8")).files;
+  const blank = (files) => files.length === 66 && files.every((e) => e.path === "" && e.flags === 0);
+  const names = (w3x) => spawnSync(cli, ["ls", w3x], { encoding: "utf8" }).stdout.split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c.length === 4).map((c) => c[3]);
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+    if (!blank(list())) return fail(`the unpacked list isn't TurtleRock's 66 blank entries (control): ${JSON.stringify(list().slice(0, 3))}`);
+    await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+    await settled(page);
+    // The preview: shown in full first (Output), then accepted.
+    await page.evaluate(`(() => {
+      window.__cleanAsked = [];
+      w3.window.showWarning = async (m, ...actions) => { window.__cleanAsked.push({ m, actions }); return window.__cleanAsked.length === 1 ? "Show the changes" : "Clean up"; };
+    })()`);
+    const r = await page.evaluate(`w3.commands.execute("w3.imports.cleanUp").then((v) => v, (e) => "error: " + String(e))`);
+    if (r !== true) return fail(`the command answered ${JSON.stringify(r)}`);
+    const asked = await page.evaluate(`window.__cleanAsked`);
+    if (asked.length !== 2 || asked[0].actions.join() !== "Clean up,Show the changes,Cancel" || !/^Clean up the import list: remove 66 entries without a name; add 48 files of the map that aren't listed \(/.test(asked[0].m)) {
+      fail(`the preview: ${JSON.stringify(asked).slice(0, 400)}`);
+    }
+    const output = await page.evaluate(`(w3Workbench.output.channels.get("Import Manager") ?? []).join("\\n")`);
+    if (!output.includes("+ _teen.w3mod\\ReplaceableTextures\\CommandButtons\\BTNClaw+15.dds") || (output.match(/ {2}- \(entry \d+, no name\)$/gm) ?? []).length !== 66) {
+      fail(`Show the changes wrote: ${output.slice(0, 300)}`);
+    }
+    const cleaned = list();
+    const paths = cleaned.map((e) => e.path);
+    if (cleaned.length !== 48 || cleaned.some((e) => !e.path || e.flags !== 21)) fail(`after the clean-up the list holds ${cleaned.length} entries: ${JSON.stringify(cleaned.slice(0, 4))}`);
+    for (const want of ["_teen.w3mod\\ReplaceableTextures\\CommandButtons\\BTNClaw+15.dds", "ReplaceableTextures\\CommandButtons\\BTNClaw+4.dds", "loot-indicator\\ui\\ui.toc", "UI\\MiniMap\\MiniMap-Shop.mdx"]) {
+      if (!paths.includes(want)) fail(`${want} isn't in the cleaned list`);
+    }
+    if (paths.some((p) => /^war3map/i.test(p))) fail(`the map's own files were listed: ${paths.filter((p) => /^war3map/i.test(p))}`);
+    if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(IMP)})`)) fail("the list is dirty after the clean-up wrote it");
+    // The manager shows the files as rows now, none as unlisted.
+    const shown = () => page.evaluate(`[...document.querySelectorAll(".imp-editor:not([hidden]) tr.imp-row")].length`);
+    if (!(await soon(async () => (await shown()) === 48, 10000))) fail(`the Import Manager shows ${await shown()} rows, not 48`);
+    if (await page.evaluate(`[...document.querySelectorAll(".imp-editor h3")].some((h) => /aren't listed/.test(h.textContent))`)) fail("the Import Manager still lists files as not in the list");
+    // One undo step: one undo gives TurtleRock's list back, redo the clean-up.
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    await settled(page);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    if (!(await soon(async () => blank(list()), 10000))) fail(`after one undo the list holds ${JSON.stringify(list().slice(0, 3))}… (${list().length})`);
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    if (!(await soon(async () => JSON.stringify(list()) === JSON.stringify(cleaned), 10000))) fail(`redo didn't clean up again: ${list().length} entries`);
+    // Nothing left to do: the second run says so and changes nothing.
+    await page.evaluate(`window.__cleanAsked = []`);
+    if ((await page.evaluate(`w3.commands.execute("w3.imports.cleanUp")`)) !== false || (await page.evaluate(`window.__cleanAsked.length`))) fail("a second clean-up asked or changed something");
+    // The packed map: every file of the original, and the list of 48.
+    await page.evaluate(`w3.editors.closeAll()`);
+    const packed = join(work, "import-cleanup", "TurtleRockCleaned.w3x");
+    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(dir)}, output: ${JSON.stringify(packed)} })`);
+    await until("the pack", () => existsSync(packed), 30000);
+    const before = names(map), after = new Set(names(packed).map((n) => n.toLowerCase()));
+    if (before.length < 69) fail(`the original map lists ${before.length} files (control)`);
+    const lost = before.filter((n) => !after.has(n.toLowerCase()));
+    if (lost.length) fail(`the packed map lost ${lost.length} files: ${lost.slice(0, 5).join(", ")}`);
+    const back = join(work, "import-cleanup", "back");
+    const un = spawnSync(cli, ["unpack", packed, back], { encoding: "utf8" });
+    if (un.status !== 0) fail(`unpacking the packed map: ${(un.stdout + un.stderr).slice(-300)}`);
+    else {
+      const again = JSON.parse(readFileSync(join(back, "map", "war3map.imp.json"), "utf8")).files;
+      if (JSON.stringify(again) !== JSON.stringify(cleaned)) fail(`the packed map's list: ${again.length} entries, ${JSON.stringify(again.slice(0, 2))}`);
+    }
+  } finally {
+    await restoreWindow(page);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** A ground texture the map imports (map/<the tile's own path>) is drawn from the import, and another program overwriting
  *  it shows in the open view at the next focus, as the placed models do. */
 async function groundTextureReload(page, found) {
@@ -12925,6 +13005,7 @@ async function run() {
         heightsPreserve,
         heightsUniform,
         importArtReload,
+        importListCleanup,
         importPathTab,
         importWarnings,
         itemDrops,
@@ -13231,6 +13312,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
   await leftOpen(page, "importPathTab", found);
+  await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));
+  await leftOpen(page, "importListCleanup", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
   await leftOpen(page, "groundTextureReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));

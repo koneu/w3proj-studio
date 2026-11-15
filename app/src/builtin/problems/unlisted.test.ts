@@ -89,7 +89,7 @@ test("files the import list doesn't name are reported, with the game file they r
   for (const p of found) {
     assert.equal(p.severity, "warning");
     assert.match(p.message, /isn't in the import list, but is packed into the map anyway/);
-    assert.deepEqual(p.fixes?.map((f) => f.label), ["Add to import list", "Delete file"]);
+    assert.deepEqual(p.fixes?.map((f) => f.label), ["Add to import list", "Delete file", "Clean up import list"]);
     assert.deepEqual(p.reveal, { command: "w3.imports.open" });
   }
   assert.match(byFile(found, "Buildings\\Human\\TownHall\\TownHall.mdx")!.message, /and replaces the game's Buildings\\Human\\TownHall\\TownHall\.mdx$/);
@@ -170,4 +170,22 @@ test("the imports check names blank entries once, not once per entry", async () 
   const found = await builtinChecks(f.w3).find((c) => c.id === "imports")!.run();
   assert.equal(found.length, 1);
   assert.equal(found[0].message, "66 import entries have no name (stored blank by the map's tool); the imported files can't be matched to the list");
+});
+
+test("the import messages offer the Import Manager's clean-up: blank entries, entries whose file is missing, unlisted files", async () => {
+  const f = fake({ imp: JSON.stringify({ files: [...Array.from({ length: 2 }, () => ({ flags: 0, path: "" })), { flags: 21, path: "war3mapImported\\Gone.blp" }] }) });
+  const found = await builtinChecks(f.w3).find((c) => c.id === "imports")!.run();
+  assert.deepEqual(found.map((p) => p.message.split(" ").slice(0, 2).join(" ")), ["2 import", "war3mapImported\\Gone.blp is"]);
+  for (const p of found) {
+    assert.deepEqual(p.fixes?.map((x) => x.label), ["Clean up import list"]);
+    await p.fixes![0].run();
+  }
+  const unlisted = await f.run();
+  assert.ok(unlisted.length > 0);
+  await unlisted[0].fixes!.find((x) => x.label === "Clean up import list")!.run();
+  assert.deepEqual(f.log, ["w3.imports.cleanUp []", "w3.imports.cleanUp []", "w3.imports.cleanUp []"]);
+  // Another project open by now: nothing is run.
+  (f.w3.workspace as { project: () => unknown }).project = () => ({ root: "/q" });
+  await assert.rejects(found[0].fixes![0].run(), /Another project is open/);
+  assert.equal(f.log.length, 3);
 });
