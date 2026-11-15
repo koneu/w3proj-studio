@@ -2,10 +2,15 @@
 // can lie, and where objects may stand (the camera bounds). The viewer passes what it has; the tests
 // pass made-up values.
 
-import { WATER_LEVEL_MAX, WATER_LEVEL_MIN } from "../../lib/terrain/w3e";
+import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, WATER_OFFSET, waterLevelWanted } from "../../lib/terrain/w3e";
 
 /** The water word of a corner: the flag and the stored level (low 14 bits). */
-export interface WaterWord { hasWater: boolean; rawWater: number }
+export interface WaterWord {
+  hasWater: boolean; rawWater: number;
+  /** The corner's height: where its water was meant to lie (the level is the height as quarter units). Without it,
+   *  a stored level at either end counts as at the limit; with it, only a level that went past the end does. */
+  height?: number;
+}
 
 const levelOf = (c: WaterWord) => c.rawWater & 0x3fff;
 
@@ -16,9 +21,18 @@ const levelOf = (c: WaterWord) => c.rawWater & 0x3fff;
  * a corner counts if it has water at the limit now, and didn't before. Returns their positions.
  */
 export function waterLimitHits(before: readonly WaterWord[], after: readonly WaterWord[]): number[] {
-  const atLimit = (c: WaterWord) => c.hasWater && (levelOf(c) <= WATER_LEVEL_MIN || levelOf(c) >= WATER_LEVEL_MAX);
+  // Ground exactly at -2048 is stored as level 0 and fits: only water that would pass the end is cut off there.
+  // The height is the one before the edit when known: a water brush lowers the corner's cliff level, which the water
+  // level was not taken from.
+  const atLimit = (c: WaterWord, was?: WaterWord) => {
+    if (!c.hasWater) return false;
+    const lv = levelOf(c), height = was?.height ?? c.height;
+    if (height === undefined) return lv <= WATER_LEVEL_MIN || lv >= WATER_LEVEL_MAX;
+    const wanted = waterLevelWanted(height - WATER_OFFSET);
+    return (lv <= WATER_LEVEL_MIN && wanted < WATER_LEVEL_MIN) || (lv >= WATER_LEVEL_MAX && wanted > WATER_LEVEL_MAX);
+  };
   const hits: number[] = [];
-  for (let i = 0; i < after.length; i++) if (atLimit(after[i]) && !(before[i] && atLimit(before[i]) && levelOf(before[i]) === levelOf(after[i]))) hits.push(i);
+  for (let i = 0; i < after.length; i++) if (atLimit(after[i], before[i]) && !(before[i] && atLimit(before[i]) && levelOf(before[i]) === levelOf(after[i]))) hits.push(i);
   return hits;
 }
 

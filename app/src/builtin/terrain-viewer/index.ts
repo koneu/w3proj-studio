@@ -1834,7 +1834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
             // there and loses its shape, so the whole edit is refused instead.
-            const word = () => st.corners.map((i) => ({ hasWater: terrain.corners[i].hasWater, rawWater: terrain.corners[i].rawWater }));
+            const word = () => st.corners.map((i) => ({ hasWater: terrain.corners[i].hasWater, rawWater: terrain.corners[i].rawWater, height: terrain.corners[i].height }));
             const after = word();
             st.undo();
             const hits = waterLimitHits(word(), after);

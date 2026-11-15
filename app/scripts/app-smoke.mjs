@@ -4237,6 +4237,27 @@ async function mcpLimits(page, found) {
     const drawn = await refusal("set_water", mound);
     await settled(page);
     if (drawn || hash(w3e) === lowHash) fail(`the same water with Enforce Water Height Limits off: ${drawn ?? "nothing changed"}`);
+    // Ground exactly at -2048 is stored as water level 0, which fits: the editor writes it with the switch on. One
+    // quarter unit lower would pass the limit and is refused (the control).
+    await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", true)`);
+    const pit = { left: 640, bottom: -1536, right: 1152, top: -1024, shape: "box" };
+    for (const amount of [1000, 1000, 48]) {
+      const dug = await refusal("sculpt_terrain", { mode: "lower", amount, ...pit });
+      if (dug) return fail(`lowering the ground to -2048: ${dug}`);
+    }
+    await settled(page);
+    const pitHash = hash(w3e);
+    const exact = await refusal("set_water", { mode: "deep", ...pit });
+    await settled(page);
+    if (exact || hash(w3e) === pitHash) fail(`deep water on ground at -2048 with Enforce Water Height Limits on: ${exact ?? "nothing changed"}`);
+    const sink = { left: 1536, bottom: -1536, right: 2048, top: -1024, shape: "box" };
+    for (const amount of [1000, 1000, 49]) {
+      const dug = await refusal("sculpt_terrain", { mode: "lower", amount, ...sink });
+      if (dug) return fail(`lowering the ground below -2048: ${dug}`);
+    }
+    await settled(page);
+    const below = await refusal("set_water", { mode: "shallow", ...sink });
+    if (!/Not done: the water at \d+ corners? would go past/.test(below ?? "")) fail(`water on ground below -2048 with Enforce Water Height Limits on: ${below ?? "drawn"}`);
   } finally {
     await k.reset();
   }
