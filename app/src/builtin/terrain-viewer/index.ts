@@ -3295,7 +3295,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const copySelection = () => {
           const entries = copyable();
           if (!entries.length) return false;
-          const items = entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry }));
+          // In the order of the map's files, as the World Editor pastes them (not the order a box picked them in).
+          const doodadAt = new Map(dooFile?.list.map((p, i) => [p, i]) ?? []), unitAt = new Map(unitsFile?.list.map((p, i) => [p, i]) ?? []);
+          const fileOrder = (p: Placed) => doodadAt.get(p) ?? doodadAt.size + (unitAt.get(p) ?? 0);
+          const items = [...entries].sort((a, b) => fileOrder(a) - fileOrder(b)).map((entry) => ({ list: doodadAt.has(entry) ? "doodads" as const : "units" as const, entry }));
           // The centre as the World Editor's (copyCentre): from where each would stand on its own grid, and only on the
           // 64 grid when something of the group has a grid.
           const own = items.map(({ list, entry: p }): [number, number] => {
