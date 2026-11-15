@@ -36,6 +36,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
+import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
 // An older Node (a system one on Linux, when nvm's isn't loaded in this shell) fails steps in ways that look like
@@ -393,5 +394,7 @@ const failed = results.filter((r) => !r.ok).length;
 console.log(failed ? `${failed} of ${results.length} FAILED` : `all ${results.length} passed`);
 console.log(`total ${Math.round((Date.now() - started) / 1000)}s`);
 const code = failed ? 1 : 0;
+// Wine servers a run of ours left behind: reported, never killed (the prefix may be the user's).
+for (const line of wineserverReport([repo, mainCheckout()])) console.log(line);
 console.log(`GATE_EXIT=${code}`);
 process.exitCode = code;

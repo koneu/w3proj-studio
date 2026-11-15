@@ -59,7 +59,7 @@ function alive() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     const waiting = [...pending.values()].map((p) => p.cmd);
-    void finish({ error: `nothing happened for ${Math.round(idleMs / 1000)} s${waiting.length ? `, waiting for the CLI's answer to ${waiting.join(", ")}` : " (the job waits for something that never comes)"}` });
+    void finish({ error: `nothing happened for ${Math.round(idleMs / 1000)} s${waiting.length ? `, waiting for the CLI's answer to ${waiting.join(", ")}` : " (the job waits for something that never comes)"}` }, { wait: false });
   }, idleMs);
   // The timer alone doesn't keep the process alive: a job that ended without finishing exits, and the CLI says so.
   idleTimer.unref?.();
@@ -85,16 +85,59 @@ export function call(cmd: string, args: unknown, options?: { headers?: Record<st
   });
 }
 
+/** Called when no command waits for its answer any more. */
+const quiet: (() => void)[] = [];
+function settle(id: number) {
+  pending.delete(id);
+  if (!pending.size) for (const f of quiet.splice(0)) f();
+}
+
+/** An answer from the CLI to the command `msg.id`; one nothing waits for is dropped. */
+export function receive(msg: Record<string, unknown>, body: Uint8Array | null) {
+  alive();
+  const p = pending.get(Number(msg.id));
+  if (!p) return;
+  settle(Number(msg.id));
+  if (typeof msg.err === "string") p.reject(msg.err);
+  else if (body) p.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
+  else p.resolve(msg.ok);
+}
+
+/** How long a finished job waits for commands still running (`settled`). */
+const SETTLE_MS = 10_000;
+
+/** Resolves true once no command waits for its answer, also after a turn of the event loop (what an answer's
+ *  continuation sends next has been sent by then); false after `limitMs` with commands still waiting. A job's code can
+ *  start backend work it doesn't wait for (the Map Script extension compares the script when the project is opened
+ *  again, map-script/index.ts `opened`): the process ending meanwhile leaves the CLI answering a closed pipe. */
+export async function settled(limitMs = SETTLE_MS): Promise<boolean> {
+  const until = Date.now() + limitMs;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 0));
+    if (!pending.size) return true;
+    const left = until - Date.now();
+    if (left <= 0) return false;
+    await new Promise<void>((r) => {
+      const t = setTimeout(r, left);
+      quiet.push(() => { clearTimeout(t); r(); });
+    });
+  }
+}
+
 let finished = false;
-/** The job's report to the CLI; the process ends once it is written (with 1, said on stderr, when it couldn't be). */
-export function finish(report: unknown): Promise<never> {
+/** The job's report to the CLI, once the commands still running are answered (`settled`; not when `wait` is false:
+ *  the watchdog's report, whose commands won't be answered); the process ends once it is written (with 1, said on
+ *  stderr, when it couldn't be). */
+export function finish(report: unknown, { wait = true }: { wait?: boolean } = {}): Promise<never> {
   return new Promise(() => {
     if (finished) return;
     finished = true;
-    clearTimeout(idleTimer);
-    process.stdout.write(frame({ done: report }), (e) => {
-      if (e) process.stderr.write(`w3proj rebuild: the report couldn't be sent to the CLI: ${e.message}\n`);
-      process.exit(e ? 1 : 0);
+    void (wait ? settled() : Promise.resolve(true)).then(() => {
+      clearTimeout(idleTimer);
+      process.stdout.write(frame({ done: report }), (e) => {
+        if (e) process.stderr.write(`w3proj rebuild: the report couldn't be sent to the CLI: ${e.message}\n`);
+        process.exit(e ? 1 : 0);
+      });
     });
   });
 }
@@ -109,20 +152,14 @@ export function install() {
     process.stderr.write(`w3proj rebuild: the pipe to the CLI broke: ${e.message}\n`);
     process.exit(1);
   });
-  const reader = new FrameReader((msg, body) => {
-    alive();
-    const p = pending.get(Number(msg.id));
-    if (!p) return;
-    pending.delete(Number(msg.id));
-    if (typeof msg.err === "string") p.reject(msg.err);
-    else if (body) p.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
-    else p.resolve(msg.ok);
-  });
+  const reader = new FrameReader(receive);
   process.stdin.on("data", (c: Buffer) => reader.push(c));
   // The CLI went away: nothing can be answered any more.
   process.stdin.on("end", () => {
-    for (const p of pending.values()) p.reject("the w3proj CLI closed the pipe");
-    pending.clear();
+    for (const [id, p] of [...pending]) {
+      settle(id);
+      p.reject("the w3proj CLI closed the pipe");
+    }
   });
   const toStderr = (...a: unknown[]) => { process.stderr.write(`${a.map((x) => (typeof x === "string" ? x : String(x))).join(" ")}\n`); };
   console.log = console.info = console.warn = console.error = console.debug = toStderr;

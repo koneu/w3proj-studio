@@ -880,7 +880,14 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String, guard: Option<too
         // A Windows program through Proton runs once at a time on this machine (toolrun::one_at_a_time).
         #[cfg(not(windows))]
         let _one = proton::is_windows_program(own.unwrap_or(Path::new(""))).then(|| toolrun::one_at_a_time(Path::new(&exe), &std::env::temp_dir().join("w3proj-studio"))).flatten();
-        toolrun::run(cmd, &exe, Path::new(&cwd), own, guard.as_ref())
+        let result = toolrun::run(cmd, &exe, Path::new(&cwd), own, guard.as_ref());
+        // Whether it ended by itself, by its guard, or with an error: a Wine server with nothing but its own services
+        // left in the prefix is stopped (proton::end_idle_server; a prefix with the user's programs is left alone).
+        #[cfg(unix)]
+        if let Some(p) = own.filter(|o| proton::is_windows_program(o)).and_then(|o| proton::proton_for(o).ok()) {
+            proton::end_idle_server(&p);
+        }
+        result
     })
     .await
     .map_err(err)?

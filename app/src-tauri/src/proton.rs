@@ -96,6 +96,90 @@ pub fn command(proton: &Proton, exe: &Path, args: &[String]) -> Command {
     cmd
 }
 
+/// What is left of a prefix's Wine processes after a program of ours has ended, and whether that is only Wine's own
+/// services. Wine's services (`wineserver`, `services.exe`, `winedevice.exe`, `plugplay.exe`, `svchost.exe`,
+/// `rpcss.exe`, `explorer.exe`) stay as long as something holds them; when nothing but them is left the
+/// server is a leak (seen 2026-11-15: a wineserver and two winedevice.exe 13 hours after the run that started
+/// them was killed by `timeout`). Anything else in the prefix (the user's Battle.net, a game, a World Editor) is
+/// a program that may be using the server. `cmdlines` are the NUL-separated command lines of the processes whose
+/// WINEPREFIX is the prefix.
+#[cfg(any(unix, test))]
+fn only_wine_services_left(cmdlines: &[Vec<u8>]) -> bool {
+    const SERVICES: [&str; 8] = ["wineserver", "services.exe", "winedevice.exe", "plugplay.exe", "svchost.exe", "rpcss.exe", "explorer.exe", "conhost.exe"];
+    !cmdlines.is_empty()
+        && cmdlines.iter().all(|c| {
+            let args: Vec<String> = c.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).to_lowercase()).collect();
+            let name = |a: &String| a.rsplit(['\\', '/']).next().unwrap_or_default().to_string();
+            // `explorer.exe /desktop` is the prefix's desktop; an explorer window of the user's is another command line.
+            let first = args.first().map(name).unwrap_or_default();
+            SERVICES.contains(&first.as_str()) && (first != "explorer.exe" || args.get(1).is_some_and(|a| a.starts_with("/desktop")))
+        })
+}
+
+/// After a Windows program of ours has ended (also ended by a guard or a timeout): if nothing but Wine's own services
+/// is left in its prefix, stops that prefix's server with the build's `wineserver -k`, so it doesn't stay for good.
+/// If any other program runs in the prefix (the user's Battle.net, the game), nothing is touched: the prefix is the
+/// user's and shared (README), and `-k` would end those. Returns whether it stopped the server.
+#[cfg(unix)]
+pub fn end_idle_server(proton: &Proton) -> bool {
+    let prefix = proton.compat_data.join("pfx");
+    let server = proton.tool.join("files/bin/wineserver");
+    if !server.is_file() {
+        return false;
+    }
+    // Wine's services take a moment to go after the last program; a program of ours that ended just now may still
+    // be seen. Look twice, a short while apart, and act only when both looks agree it is just services.
+    for look in 0..2 {
+        if look > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        let left = prefix_cmdlines(&prefix);
+        if left.is_empty() {
+            return false;
+        }
+        if !only_wine_services_left(&left) {
+            return false;
+        }
+    }
+    let mut cmd = Command::new(&server);
+    cmd.arg("-k").env("WINEPREFIX", &prefix).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let Ok(mut child) = cmd.spawn() else { return false };
+    // Bounded: `-k` normally returns at once.
+    let t = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => return s.success(),
+            Ok(None) if t.elapsed() < std::time::Duration::from_secs(10) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// The command lines of the processes (of this user) whose WINEPREFIX is `prefix`.
+#[cfg(unix)]
+fn prefix_cmdlines(prefix: &Path) -> Vec<Vec<u8>> {
+    let Ok(procs) = std::fs::read_dir("/proc") else { return Vec::new() };
+    let mut found = Vec::new();
+    for p in procs.flatten() {
+        if !p.file_name().to_str().is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit())) {
+            continue;
+        }
+        let (Ok(environ), Ok(cmdline)) = (std::fs::read(p.path().join("environ")), std::fs::read(p.path().join("cmdline"))) else { continue };
+        let ours = environ
+            .split(|b| *b == 0)
+            .find_map(|e| e.strip_prefix(b"WINEPREFIX="))
+            .is_some_and(|v| Path::new(String::from_utf8_lossy(v).trim_end_matches('/')) == prefix);
+        if ours && !cmdline.is_empty() {
+            found.push(cmdline);
+        }
+    }
+    found
+}
+
 /// Ends Wine's desktop process (`explorer.exe /desktop`) of `proton`'s prefix when the X display it was started on is
 /// gone. The first Windows program in a prefix starts it on that program's display, and every later program in the
 /// prefix waits on it; when that display has ended (a hidden Xvfb of a smoke run or tester app that stopped, while
@@ -174,6 +258,59 @@ mod tests {
         assert!(!is_stale_desktop(desktop, b"WINEPREFIX=/steam/steamapps/compatdata/1/pfx\0", prefix, &x11));
         assert!(!is_stale_desktop(desktop, &env(":", "/steam/steamapps/compatdata/1/pfx/"), prefix, &x11));
         let _ = std::fs::remove_dir_all(&x11);
+    }
+
+    #[test]
+    fn a_prefix_with_only_wines_services_left_is_idle_and_one_with_any_program_is_not() {
+        let c = |s: &str| s.replace('|', "\0").into_bytes();
+        let services = vec![c("/p/files/bin/wineserver|-f"), c("C:\\windows\\system32\\winedevice.exe|"), c("C:\\windows\\system32\\services.exe|"), c("C:\\windows\\system32\\explorer.exe|/desktop")];
+        assert!(only_wine_services_left(&services));
+        // The controls: a program of the user's, an explorer window, nothing seen at all.
+        let mut with_game = services.clone();
+        with_game.push(c("Z:\\g\\Battle.net.exe|"));
+        assert!(!only_wine_services_left(&with_game));
+        let mut with_window = services.clone();
+        with_window.push(c("C:\\windows\\system32\\explorer.exe|C:\\users"));
+        assert!(!only_wine_services_left(&with_window));
+        assert!(!only_wine_services_left(&[]));
+    }
+
+    /// A fake wineserver: `-k` records that it was asked, with which WINEPREFIX; a fake service in the prefix
+    /// (a process with WINEPREFIX set, named wineserver) stands for the leftover. Nothing of the machine's is touched.
+    #[cfg(unix)]
+    #[test]
+    fn an_idle_server_is_stopped_with_the_builds_wineserver_and_a_busy_one_is_left() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, exe) = steam();
+        let p = proton_for(&exe).unwrap();
+        let bin = p.tool.join("files/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = root.join("k.log");
+        let server = bin.join("wineserver");
+        std::fs::write(&server, format!("#!/bin/sh\necho \"$1 $WINEPREFIX\" >> '{}'\n", log.display())).unwrap();
+        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prefix = p.compat_data.join("pfx");
+        // No Wine process in the prefix: nothing to stop, and `-k` is not run.
+        assert!(!end_idle_server(&p));
+        assert!(!log.exists());
+        // A leftover service: a copy of sleep named wineserver, started with the prefix.
+        let sleep = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|f| Path::new(f).is_file()).unwrap();
+        let fake = root.join("wineserver");
+        std::fs::copy(sleep, &fake).unwrap();
+        let mut service = Command::new(&fake).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        assert!(end_idle_server(&p), "an idle server was left");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("-k {}", prefix.display()));
+        // The control: with a program of the user's in the prefix, `-k` isn't run again.
+        let game = root.join("Battle.net.exe");
+        std::fs::copy(sleep, &game).unwrap();
+        let mut busy = Command::new(&game).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        assert!(!end_idle_server(&p));
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1, "a busy prefix's server was ended");
+        let _ = service.kill();
+        let _ = busy.kill();
+        let _ = service.wait();
+        let _ = busy.wait();
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);

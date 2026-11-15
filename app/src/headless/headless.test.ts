@@ -23,7 +23,7 @@ g.__TAURI_INTERNALS__ = {
   transformCallback: () => 1, unregisterCallback() {},
 };
 
-const { FrameReader, frame } = await import("./ipc");
+const { FrameReader, frame, call, receive, settled } = await import("./ipc");
 const { HeadlessSettings } = await import("./host");
 
 test("frames split anywhere come out whole: a JSON line, and the raw bytes its len counts", () => {
@@ -39,6 +39,42 @@ test("frames split anywhere come out whole: a JSON line, and the raw bytes its l
     assert.deepEqual(got[1][0], { id: 2, len: 5 });
     assert.deepEqual([...got[1][1]!], [...body]);
     assert.deepEqual(got[2], [{ id: 3, err: "no" }, null]);
+  }
+});
+
+test("a finished job waits for the commands still running, also the ones their answers start, before it reports", async () => {
+  // The frames go to a list here; the test runner's own output (it reports over stdout too) goes on.
+  const sent: Record<string, unknown>[] = [];
+  const write = process.stdout.write;
+  process.stdout.write = ((chunk: Uint8Array | string, ...rest: unknown[]) => {
+    if (typeof chunk !== "string" && Buffer.from(chunk).subarray(0, 6).toString() === '{"id":') {
+      new FrameReader((m) => sent.push(m)).push(chunk);
+      return true;
+    }
+    return (write as (...a: unknown[]) => boolean).call(process.stdout, chunk, ...rest);
+  }) as typeof process.stdout.write;
+  try {
+    // Work a job started without awaiting it (map-script's compare on the project opened again): a read, then one
+    // more after its answer.
+    const background = call("fs_read_text", { path: "a" }).then(() => call("fs_read_text", { path: "b" }));
+    let done = false;
+    const quiet = settled(5_000).then((v) => { done = true; return v; });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(done, false, "a command waits for its answer");
+    receive({ id: sent[0].id, ok: "x" }, null);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(sent.length, 2);
+    assert.equal(done, false, "the command its answer started waits too");
+    receive({ id: sent[1].id, ok: "y" }, null);
+    assert.equal(await quiet, true);
+    assert.equal(await background, "y");
+    // Control: a command nobody answers holds it only up to the limit.
+    void call("fs_read_text", { path: "c" }).catch(() => {});
+    assert.equal(await settled(50), false);
+    receive({ id: sent[2].id, ok: "z" }, null);
+    assert.equal(await settled(50), true);
+  } finally {
+    process.stdout.write = write;
   }
 });
 

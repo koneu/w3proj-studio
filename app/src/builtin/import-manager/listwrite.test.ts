@@ -68,3 +68,21 @@ test("a failed write rejects its caller, keeps the tab dirty and doesn't stop th
   assert.equal(dirty, false);
   assert.deepEqual(landed, [JSON.stringify(["A"])]);
 });
+
+test("after a failed write save() writes the list again; a clean tab's save writes nothing", async () => {
+  const list = { files: ["A"] };
+  let dirty = false, fail = true, writes = 0;
+  const write = listWriter({
+    snapshot: () => JSON.stringify(list.files),
+    persist: async () => { writes++; if (fail) throw new Error("disk full"); },
+    setDirty: (d) => { dirty = d; },
+  });
+  await assert.rejects(write(), /disk full/);
+  assert.equal(dirty, true);
+  fail = false;
+  await write.save();
+  assert.equal(writes, 2);
+  assert.equal(dirty, false);
+  await write.save();
+  assert.equal(writes, 2, "clean: no write");
+});
