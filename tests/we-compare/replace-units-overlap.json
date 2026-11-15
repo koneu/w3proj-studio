@@ -1,7 +1,7 @@
 [
   {
     "name": "replace-units-overlap-farm",
-    "description": "x",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): farm: the footman stays beside a tree 96 west (c2) or 96 south (c14), a peasant 96 west (c5), an item 96 west (c10), a second footman 96 west (c11: both stay, each is the other's neighbour), and beside a barracks 224 west (c15: its no-build ring); it becomes a farm beside a tree 160 or 224 west, a peasant 160 west, crates, a farm, a pathless doodad, LOsh, and a tree 96 east (the farm lands 20 west of the footman). MATCH.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
     },
@@ -115,7 +115,7 @@
   },
   {
     "name": "replace-units-overlap-barracks",
-    "description": "x",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): barracks: only the footmen with nothing near (c1) or a pathless doodad (c9) become barracks (12x12 pixels: 8x8 no-walk in 12x12 no-build, which counts for the new building too: a tree 224 west stops it). MATCH.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
     },
@@ -229,7 +229,7 @@
   },
   {
     "name": "replace-units-overlap-mine",
-    "description": "x",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): gold mine (16x16 Goldmine: 8x8 no-walk in 16x16 no-build): as the barracks, only c1 and c9. MATCH.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
     },
