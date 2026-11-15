@@ -2321,6 +2321,16 @@ async function techtreeRandomLevels(page, found) {
     const label = await text(`${cell(0)} .techtree-name`);
     if (label !== "Random Level 3 Neutral Hostile Unit") fail(`the unit position is named ${JSON.stringify(label)}`);
     if ((await value(`${cell(0)} select.techtree-random`)) !== "") fail("the Random… choice didn't go back to its title");
+    // At 900 px (#app narrowed) the row's name label wraps or is cut with an ellipsis and a tooltip: never silently clipped by the pane.
+    await page.evaluate(`document.getElementById("app").style.width = "900px"`);
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const m = await page.evaluate(`(() => { const row = document.querySelector(${JSON.stringify(`${cell(0)} .techtree-object`)}), l = row.querySelector(".techtree-name");
+        let p = row.parentElement; while (p && !/(auto|scroll|hidden)/.test(getComputedStyle(p).overflowX)) p = p.parentElement;
+        const lr = l.getBoundingClientRect(), pr = (p ?? document.documentElement).getBoundingClientRect();
+        return { right: lr.right, paneRight: pr.right, cut: l.scrollWidth > l.clientWidth, title: l.title, text: l.textContent, w: lr.width }; })()`);
+      if (m.w < 1 || (m.right > m.paneRight + 0.5 && !(m.cut && m.title === m.text))) fail(`at 900 px the random row's name label ends at ${m.right}, past its pane's ${m.paneRight}, and is not cut with a tooltip: ${JSON.stringify(m)}`);
+    } finally { await page.evaluate(`document.getElementById("app").style.width = ""`); }
     if (!(await dirty())) fail("choosing a random object didn't mark Map Properties changed");
 
     // The per-player grid: the knight, unavailable to player 1, ticked available again.
@@ -2400,6 +2410,16 @@ async function mapInfoColorTools(page, found) {
   if (colored !== "Hello |cffFF0303world|r") return fail(`wrapping gave ${JSON.stringify(colored)}`);
   const shown = await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-preview"); return { hidden: p.hidden, color: p.querySelector("span:last-child")?.style.color, text: p.textContent }; })()`);
   if (shown.hidden || shown.text !== "Hello world" || shown.color !== "rgb(255, 3, 3)") return fail(`preview ${JSON.stringify(shown)}`);
+  // The toolbar and the preview are not wider than the text field, also in a narrow window (#app at 900 px).
+  for (const width of ["", "900px"]) try {
+    await page.evaluate(`document.getElementById("app").style.width = ${JSON.stringify(width)}`);
+    await page.evaluate(`${field}.focus()`);
+    await new Promise((r) => setTimeout(r, 300));
+    const w = await page.evaluate(`(() => { const f = ${field}, r = f.closest(".color-tools"), b = (e) => e.getBoundingClientRect().width, bar = r.querySelector(".color-tools-bar"), pv = r.querySelector(".color-tools-preview");
+      return { field: b(f), bar: b(bar), barShown: getComputedStyle(bar).display !== "none", preview: pv.hidden ? 0 : b(pv), scroll: r.scrollWidth - r.clientWidth }; })()`);
+    if (!w.barShown) fail("the colour toolbar isn't shown while the name box has focus");
+    else if (w.bar > w.field + 0.5 || w.preview > w.field + 0.5 || w.scroll > 0) fail(`the colour tools are wider than the name box (window ${width || "full"}): ${JSON.stringify(w)}`);
+  } finally { await page.evaluate(`document.getElementById("app").style.width = ""`); }
   await page.evaluate(`(() => { const e = ${field}; e.setSelectionRange(18, 19); e.dispatchEvent(new Event("select")); })()`);
   await page.evaluate(`[...${root}.querySelectorAll("button")].find((b) => b.textContent === "Remove color").click()`);
   const removed = await nameNow();
@@ -7902,14 +7922,14 @@ async function moduleFunctionsChecks(page, found) {
       sounds: [{
         name: "gg_snd_Jaina01", file: "Sound\\Dialogue\\Jaina01.flac", eaxEffect: "HeroAcksEAX", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
         channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
-        variableName: "gg_snd_Jaina01", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+        variableName: "gg_snd_Jaina01", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "Old legacy text", speakerNameKey: -1, speakerName: "", unknown1: 0,
         speakerUnitType: "Hjai", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 0,
       }],
     });
     await openProject(dl);
     await openDialogue("gg_snd_Jaina01");
     const empty = await dialogueFields();
-    if (empty.join("|") !== "|") fail(`a dialogue sound without keys shows ${JSON.stringify(empty)}`);
+    if (empty.join("|") !== "|Old legacy text") fail(`a dialogue sound without keys shows ${JSON.stringify(empty)}, not the w3s file's own text`);
     await setField("input.snd-speaker-name", "Jaina Proudmoore");
     await setField("textarea.snd-dialogue-text", "We must hurry.\nThe dead are coming.");
     await until("the dialogue text unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a dialogue text left the Sound Editor without unsaved changes"));

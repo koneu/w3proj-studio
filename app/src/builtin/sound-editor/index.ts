@@ -763,9 +763,11 @@ class SoundEditor {
         this.otherRefs.then(apply, (e) => void this.w3.window.showError(
           `No dialogue strings were made: the TRIGSTR references in the map's files couldn't be read (${errorText(e)}). Reopen the Sound Editor once they can be.`));
       };
+      // A sound without a key shows the w3s file's own text until the first edit makes the keys.
+      const shown = () => (key() ?? -1) < 0 ? (which === "text" ? s.dialogueText : s.speakerName) ?? "" : strings.text(key());
       const control: HTMLInputElement | HTMLTextAreaElement = which === "text"
-        ? h("textarea.snd-dialogue-text", { value: strings.text(key()), readOnly: ro, rows: 3, onchange })
-        : h("input.snd-speaker-name", { type: "text", value: strings.text(key()), readOnly: ro, onchange });
+        ? h("textarea.snd-dialogue-text", { value: shown(), readOnly: ro, rows: 3, onchange })
+        : h("input.snd-speaker-name", { type: "text", value: shown(), readOnly: ro, onchange });
       // The dialogue text and the speaker name are shown to the player (subtitles): colour tools, committed on each use.
       return h("div.form-stack", {}, ro ? control : withColorTools(control, { commit: true }), keyNote(key()));
     };
