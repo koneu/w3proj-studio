@@ -1163,7 +1163,11 @@ async function verify3Steps(page, found) {
   if ((await k.setting("terrain.resetFixedHeights")) === false) fail("Reset Fixed Object Heights isn't on by default");
   const x0 = tree().position[0];
   await dragTree();
-  if (tree().position[0] === x0) fail("the drag didn't move the tree (control)");
+  if (tree().position[0] === x0) {
+    // The view's size goes with it: a small one (a panel left open below it) draws the tree too small for the grab.
+    const c = await hands.where(".model-stage canvas");
+    fail(`the drag didn't move the tree (control; the view is ${Math.round(c.width)}×${Math.round(c.height)})`);
+  }
   else if (tree().position[2] !== ground || (tree().flags & k.FIXED)) fail(`a drag with Reset Fixed Object Heights on left the tree at ${JSON.stringify([tree().position[2], tree().flags])}; it should be on the ground without a height of its own`);
   await fixUp();
   await page.evaluate(`w3.settings.set("terrain.resetFixedHeights", false)`);
@@ -3326,6 +3330,9 @@ async function importListCleanup(page, found) {
   const list = () => JSON.parse(readFileSync(join(dir, "map", "war3map.imp.json"), "utf8")).files;
   const blank = (files) => files.length === 66 && files.every((e) => e.path === "" && e.flags === 0);
   const names = (w3x) => spawnSync(cli, ["ls", w3x], { encoding: "utf8" }).stdout.split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c.length === 4).map((c) => c[3]);
+  // "Show the changes" opens the Output panel: closed again at the end if it was closed (left open, it took two thirds
+  // of the terrain view's height from verify3Steps, whose drag then missed the tree).
+  const panelWasHidden = await page.evaluate(`w3Workbench.output.root.hidden`).catch(() => true);
   try {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
     if (!blank(list())) return fail(`the unpacked list isn't TurtleRock's 66 blank entries (control): ${JSON.stringify(list().slice(0, 3))}`);
@@ -3388,6 +3395,7 @@ async function importListCleanup(page, found) {
   } finally {
     await restoreWindow(page);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    if (panelWasHidden) await page.evaluate(`w3Workbench.output.toggle(false)`).catch(() => {});
   }
 }
 
@@ -4199,6 +4207,11 @@ async function leftOpen(page, check, found) {
   if (replaced.length) {
     console.log(`  w3.window left replaced after ${check}: ${replaced.join(", ")}`);
     found.push(`${check} left w3.window.${replaced.join(", w3.window.")} replaced`);
+  }
+  // The Output panel shown takes the editors' height (the terrain view's two thirds of it): each check starts with it
+  // closed, as it does alone with --only (an open one made verify3Steps' drag miss its tree, 2026-11-15).
+  if (await page.evaluate(`(() => { const o = window.w3Workbench?.output; if (!o || o.root.hidden) return false; o.toggle(false); return true; })()`).catch(() => false)) {
+    console.log(`  Output panel left open after ${check}: closed`);
   }
 }
 
