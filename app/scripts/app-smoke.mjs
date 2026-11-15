@@ -3315,6 +3315,70 @@ async function importPathTab(page, found) {
   }
 }
 
+/** The Import Manager's list writes, one at a time: two "Add to list" clicks whose writes would overlap (the list's
+ *  canonicalize held back, the later one let through first) end with the file holding both entries in click order, and
+ *  the tab stays dirty after the first write lands while the second entry isn't written yet. */
+async function importWriteOrder(page, found) {
+  try {
+  const fail = (what) => found.push(`import write order: ${what}`);
+  const k = await heightKit(page, "ImportWriteOrder");
+  const IMP = "map/war3map.imp.json", A = "war3mapImported\\OrderA.txt", B = "war3mapImported\\OrderB.txt";
+  const listed = () => { try { return k.read("war3map.imp.json").files.map((f) => f.path); } catch { return null; } };
+  const held = () => page.evaluate(`window.__ordHeld.length`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(IMP)})`);
+  /** Lets the newest held write through: a first write slower than the one after it. */
+  const releaseNewest = () => page.evaluate(`window.__ordHeld.pop()?.()`);
+  await page.evaluate(`(async () => {
+    await w3.workspace.writeText("map/war3mapImported/OrderA.txt", "a");
+    await w3.workspace.writeText("map/war3mapImported/OrderB.txt", "b");
+    await w3.workspace.writeText(${JSON.stringify(IMP)}, ${JSON.stringify(JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [] }))});
+    await w3.workspace.refresh();
+  })()`);
+  try {
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    const buttons = `[...document.querySelectorAll(".imp-editor:not([hidden]) .imp-unlisted-row")].filter((r) => /Order[AB]\\.txt/.test(r.textContent))`;
+    if (!(await soon(() => page.evaluate(`${buttons}.length === 2`), 20000))) return fail("the Import Manager doesn't show the two files as unlisted");
+    await settled(page);
+    // The list's canonicalize (the step before its write) waits until let through.
+    await page.evaluate(`(() => {
+      window.__ordKept = w3.backend.invoke;
+      window.__ordHeld = [];
+      w3.backend.invoke = (cmd, args) => cmd === "codec_canonicalize" && /war3map\\.imp\\.json$/i.test(args?.path ?? "")
+        ? new Promise((res, rej) => window.__ordHeld.push(() => window.__ordKept(cmd, args).then(res, rej)))
+        : window.__ordKept(cmd, args);
+    })()`);
+    const add = (name) => page.evaluate(`(() => { const b = ${buttons}.find((r) => r.textContent.includes(${JSON.stringify(name)}))?.querySelector("button"); if (!b) return false; b.click(); return true; })()`);
+    if (!(await add("OrderA.txt"))) return fail("no Add to list button for OrderA.txt");
+    // The first write has taken its list (only A) and is on its way when B is added.
+    if (!(await soon(async () => (await held()) >= 1, 10000))) return fail("no list write started");
+    if (!(await add("OrderB.txt"))) return fail("no Add to list button for OrderB.txt");
+    // A second write that would overlap has time to start.
+    await new Promise((r) => setTimeout(r, 500));
+    if (!(await dirty())) fail("the tab isn't dirty while the list is being written");
+    await releaseNewest();
+    if (!(await soon(async () => (listed()?.length ?? 0) >= 1, 10000))) return fail(`no write landed: the list holds ${JSON.stringify(listed())}`);
+    await settled(page);
+    if (JSON.stringify(listed()) === JSON.stringify([A]) && !(await dirty())) fail("the tab is clean while the second entry isn't written yet");
+    else if (JSON.stringify(listed()) !== JSON.stringify([A])) fail(`the first write to land holds ${JSON.stringify(listed())}, not only ${A} (the writes overlapped)`);
+    // The rest, newest first.
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline && (JSON.stringify(listed()) !== JSON.stringify([A, B]) || (await held()) || (await dirty()))) {
+      await releaseNewest();
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    await settled(page);
+    if (JSON.stringify(listed()) !== JSON.stringify([A, B])) fail(`the list holds ${JSON.stringify(listed())}, not ${JSON.stringify([A, B])}`);
+    if (await dirty()) fail("the tab is still dirty after the last write landed");
+  } finally {
+    await page.evaluate(`(() => { if (window.__ordKept) w3.backend.invoke = window.__ordKept; for (const f of window.__ordHeld ?? []) f(); window.__ordHeld = []; window.__ordKept = null; })()`).catch(() => {});
+    await settled(page);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Import Manager's "Clean up import list" on smoketest_maps' TurtleRock v2.0, whose war3map.imp holds 66 entries
  *  without a name while the archive holds 48 imported files: previewed (Show the changes, then Clean up), the list then
  *  names the 48 files and the manager shows them, one undo takes it back to the 66 blank entries, redo cleans up again;
@@ -13029,6 +13093,7 @@ async function run() {
         importListCleanup,
         importPathTab,
         importWarnings,
+        importWriteOrder,
         itemDrops,
         itemTablesAccess,
         keybindings,
@@ -13333,6 +13398,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importArtReload", found);
   await importPathTab(page, found).catch((e) => found.push(`import path tab: ${e.message}`));
   await leftOpen(page, "importPathTab", found);
+  await importWriteOrder(page, found).catch((e) => found.push(`import write order: ${e.message}`));
+  await leftOpen(page, "importWriteOrder", found);
   await importListCleanup(page, found).catch((e) => found.push(`import list cleanup: ${e.message}`));
   await leftOpen(page, "importListCleanup", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
