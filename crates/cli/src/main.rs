@@ -420,7 +420,9 @@ enum Cmd {
     /// Prints one line per report (severity, check, location, message) and how many the project's
     /// .w3proj/problems-ignore.json left out. Exits with 1 when there are errors (with
     /// --warnings-fail also on warnings). Without --only: the Problems checks, check_melee when the
-    /// map's war3map.w3i has the Melee flag, and check_path when --path gives its points. Runs the
+    /// map's war3map.w3i has the Melee flag or it looks like a ladder map (2+ starts and a gold mine),
+    /// and check_path when --path gives its points. w3proj.toml's [checks] disable = ["id", ...]
+    /// switches checks off (a Problems check id, "melee/<rule>" or "melee"). Runs the
     /// app's own code in Node.js (22 or newer; W3PROJ_NODE names another node); writes nothing.
     Check {
         project: PathBuf,

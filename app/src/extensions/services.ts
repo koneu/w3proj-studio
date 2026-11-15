@@ -599,7 +599,9 @@ export interface ProblemsService {
    *  the result, and why it was not applied if that file is there but can't be read (then nothing is left out).
    *  `checks`: the same by check, with the reason of a check that failed (it found nothing, which isn't "no
    *  problems"); `w3proj check` prints them. Empty when the run's results weren't the open project's. */
-  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[] }>;
+  runChecked(): Promise<{ problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[];
+    /** The checks the project's w3proj.toml [checks] switched off (they weren't run), and why that section can't be used. */
+    disabled: string[]; configError: string | null }>;
   /** The result of the last run. */
   problems(): Problem[];
 }

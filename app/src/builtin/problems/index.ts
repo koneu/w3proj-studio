@@ -9,6 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
+import { MANIFEST_FILE, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -25,7 +26,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let ran = false;
   /** The run going on: `root` is the project it checks, `adopted` whether its results became the
    *  shown ones (not when the project was closed or changed meanwhile). */
-  let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[] }> | null = null;
+  let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[]; ignored: number; ignoreError: string | null; checks: CheckedGroup[]; disabled?: string[]; configError?: string | null }> | null = null;
   /** What the checks of the running run share; outside a run, nothing is shared. */
   let scope = new RunScope(w3, false);
   const folded = new Set<string>();
@@ -34,6 +35,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let ignore: IgnoreFile = emptyIgnore();
   let ignoreBad: string | null = null;
   let showIgnored = false;
+  /** The project's [checks] (w3proj.toml) as the last run read it: checks it switched off, and why it can't be used. */
+  let config: ChecksConfig = noChecksConfig();
+  let configBad: string | null = null;
   /** Writes of the ignore file, one after the other. */
   let ignoreWrites: Promise<unknown> = Promise.resolve();
   const status = w3.statusBar.add({ id: "w3.problems.status", text: "", command: "w3.problems.show", align: "right", priority: 60 });
@@ -67,7 +71,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return runCurrent().then((r) => r.problems);
     },
     runChecked() {
-      return runCurrent().then((r) => ({ problems: r.problems, ignored: r.ignored, ignoreError: r.ignoreError, checks: r.checks }));
+      return runCurrent().then((r) => ({ problems: r.problems, ignored: r.ignored, ignoreError: r.ignoreError, checks: r.checks, disabled: r.disabled ?? [], configError: r.configError ?? null }));
     },
     problems: all,
   };
@@ -84,8 +88,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
       const loaded = await readIgnore();
+      const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
       // One failing check doesn't stop the others.
       for (const check of [...checks]) {
+        if (isDisabled(cfg.config, check.id)) continue;
         // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
         const started = performance.now();
         try { result.push({ check, problems: await check.run() }); } catch (e) {
@@ -98,6 +104,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       groups = result;
       ignore = loaded.file;
       ignoreBad = loaded.bad;
+      config = cfg.config;
+      configBad = cfg.error;
       ranFor = root;
       ran = true;
       updateStatus();
@@ -105,7 +113,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const shown = visible(g);
         return { id: g.check.id, title: g.check.title, problems: shown, ignored: g.problems.length - shown.length, ...(g.error ? { error: g.error } : {}) };
       });
-      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck };
+      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck, disabled: [...config.disable], configError: configBad };
     })().finally(() => {
       // The run's documents aren't kept: the next run reads the files as they are then.
       scope = new RunScope(w3, false);
@@ -201,6 +209,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ? h("button.problems-ignore-library", { title: "The Orc bonus chapters carry a quest library whose triggers nothing runs. Ignores these reports (here and in later runs); other triggers are still reported. Undo it from Show ignored.", onclick: run(() => changeIgnore((f) => ({ ...f, rules: [...f.rules, BONUS_QUEST_LIBRARY] }))) }, "Ignore the bonus campaign quest library") : null,
           ran && ignoredCount() ? h("button.problems-show-ignored", { title: "Lists the ignored reports too, each with an Un-ignore button", onclick: run(async () => { await w3.commands.execute("w3.problems.toggleIgnored"); }) }, `${showIgnored ? "Hide" : "Show"} ignored (${ignoredCount()})`) : null,
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${errors} error${errors === 1 ? "" : "s"}, ${total.length - errors} warning${total.length - errors === 1 ? "" : "s"}` : " No problems found.") : "")));
+        if (ran && configBad) el.append(h("div.view-empty.problems-failed", {}, `${configBad}. No check is switched off until it is fixed.`));
+        else if (ran && config.disable.length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${config.disable.join(", ")}`));
         if (ran && ignoreBad) el.append(h("div.view-empty.problems-failed", {}, `${ignoreBad}. Nothing is hidden, and ignoring is off until it is fixed.`));
         if (!ran) {
           el.append(h("div.view-empty", {}, "Checks the map script, files used by object data, imported models' textures, placed objects and imports. Build runs them too."));

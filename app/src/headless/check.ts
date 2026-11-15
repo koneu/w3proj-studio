@@ -4,8 +4,9 @@
 //
 //   problems  the Problems view's checks (builtin/problems: the service's runChecked, so the project's
 //             .w3proj/problems-ignore.json is honoured and the ignored are counted as in the view and Build)
-//   melee     check_melee (terrain-viewer/meleefacts.ts meleeReport), on the saved files: by default only on maps
-//             whose war3map.w3i has the Melee flag
+//   melee     check_melee (terrain-viewer/meleefacts.ts meleeReport), on the saved files: by default on maps whose
+//             war3map.w3i has the Melee flag, or that look like ladder maps (2+ start locations and a gold mine; the
+//             section's note says why it ran). w3proj.toml's [checks] disable = [...] switches checks off (builtin/problems/checkconfig.ts)
 //   path      check_path between two points (meleefacts.ts pathReport); only when the job gives them
 //
 // Nothing is written: the checks only read, and the CLI's backend refuses writes for this job.
@@ -16,7 +17,8 @@ import { PROBLEMS_SERVICE, TERRAIN_SERVICE, type CheckedGroup, type ProblemsServ
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
-import { meleeReport, pathReport, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
+import { MANIFEST_FILE, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
+import { meleeReport, pathReport, projectLadderLook, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
 import * as problemsExtension from "../builtin/problems/index";
 import * as pathingExtension from "../builtin/terrain-pathing/index";
@@ -49,8 +51,10 @@ export interface CheckReport {
   ignored: number;
   /** Why the ignore file wasn't applied, when it is there but can't be used (then nothing is left out). */
   ignoreError: string | null;
-  /** What each section did: ran, or was skipped (and why). */
+  /** What each section did: ran, or was skipped (and why; a note on a section that ran says why it ran). */
   sections: { section: Section; ran: boolean; note?: string }[];
+  /** The checks w3proj.toml's [checks] switched off. */
+  disabled: string[];
   /** The Problems checks by id, as the view groups them. */
   problems?: CheckedGroup[];
   /** check_melee's answer as the MCP tool gives it. */
@@ -71,8 +75,11 @@ export async function check(job: CheckJob): Promise<CheckReport> {
   const h = headless([problemsManifest, terrainManifest, pathingManifest] as ExtensionManifest[], job.settings);
   const { w3, workspace, messages } = h;
   await workspace.open(job.root);
-  const report: CheckReport = { rows: [], ignored: 0, ignoreError: null, sections: [], messages };
+  const report: CheckReport = { rows: [], ignored: 0, ignoreError: null, sections: [], disabled: [], messages };
   const rows = report.rows;
+  const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
+  report.disabled = [...cfg.config.disable];
+  if (cfg.error) rows.push({ severity: "warning", check: "problems", location: MANIFEST_FILE, message: `${cfg.error}; no check is switched off until it is fixed` });
 
   if (!asked || asked.has("problems")) {
     await h.activate(problemsManifest.id, problemsExtension);
@@ -106,24 +113,30 @@ export async function check(job: CheckJob): Promise<CheckReport> {
 
   if (wantMelee) {
     let skip: string | null = null;
+    let why: string | undefined;
     if (!asked) {
-      // By default only a melee map is held to what ladder maps do.
+      // By default a melee map is held to what ladder maps do, and so is one that looks like a ladder map.
       try {
         const info = await readMapDocStrict<{ flags?: number }>(w3, "map/war3map.w3i.json");
-        if (!info) skip = "the project has no war3map.w3i, so it isn't a melee map";
-        else if (!((info.flags ?? 0) & MELEE_MAP)) skip = "not a melee map (war3map.w3i's Melee flag is off; --only=melee checks it anyway)";
+        const melee = !!info && !!((info.flags ?? 0) & MELEE_MAP);
+        if (!melee) {
+          const look = await projectLadderLook(w3);
+          if (look?.ladder) why = `Melee flag off; ran because the map has ${look.starts} starts and ${look.mines} gold mine${look.mines === 1 ? "" : "s"}`;
+          else skip = !info ? "the project has no war3map.w3i, so it isn't a melee map" : "not a melee map (war3map.w3i's Melee flag is off and it has no ladder layout of 2+ starts and a gold mine; --only=melee checks it anyway)";
+        }
       } catch (e) {
         skip = `whether it is a melee map can't be told: ${text(e)}`;
         rows.push({ severity: "warning", check: "melee", location: "map/war3map.w3i", message: skip });
       }
     }
+    if (!skip && isDisabled(cfg.config, "melee")) { skip = "switched off by w3proj.toml ([checks] disable)"; why = undefined; }
     if (skip) report.sections.push({ section: "melee", ran: false, note: skip });
     else {
       try {
         const m = await meleeReport(w3, await ground(), unitSize);
         report.melee = m;
-        for (const f of m.findings) rows.push({ severity: f.severity, check: `melee/${f.rule}`, ...(f.at ? { location: at(f.at) } : {}), message: f.fix ? `${f.message} Fix: ${f.fix}` : f.message });
-        report.sections.push({ section: "melee", ran: true });
+        for (const f of m.findings.filter((f) => !isDisabled(cfg.config, `melee/${f.rule}`))) rows.push({ severity: f.severity, check: `melee/${f.rule}`, ...(f.at ? { location: at(f.at) } : {}), message: f.fix ? `${f.message} Fix: ${f.fix}` : f.message });
+        report.sections.push({ section: "melee", ran: true, ...(why ? { note: why } : {}) });
       } catch (e) {
         rows.push({ severity: "error", check: "melee", message: `the check failed: ${text(e)}` });
         report.sections.push({ section: "melee", ran: false, note: text(e) });

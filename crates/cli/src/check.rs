@@ -110,10 +110,10 @@ pub fn lines(report: &Value) -> Vec<String> {
         out.push(format!("{sev:<7}  {check}{at}: {message}"));
     }
     for s in report["sections"].as_array().into_iter().flatten() {
-        if s["ran"] == json!(false) {
-            if let (Some(name), Some(note)) = (s["section"].as_str(), s["note"].as_str()) {
-                out.push(format!("skipped  {name}: {note}"));
-            }
+        if let (Some(name), Some(note)) = (s["section"].as_str(), s["note"].as_str()) {
+            // A skipped section says why; one that ran on its own accord (a ladder map without the Melee flag) says why too.
+            let what = if s["ran"] == json!(false) { "skipped" } else { "note   " };
+            out.push(format!("{what}  {name}: {note}"));
         }
     }
     let (errors, warnings, infos) = counts(report);
@@ -193,6 +193,8 @@ mod tests {
         assert_eq!(l[2], "skipped  path: needs two points");
         assert_eq!(l[3], "1 error, 1 warning; 3 reports ignored by the project (.w3proj/problems-ignore.json)");
         assert_eq!(l.len(), 4);
+        let ran = json!({ "rows": [], "ignored": 0, "sections": [{ "section": "melee", "ran": true, "note": "Melee flag off; ran because the map has 4 starts and 8 gold mines" }] });
+        assert_eq!(lines(&ran)[0], "note     melee: Melee flag off; ran because the map has 4 starts and 8 gold mines");
     }
 
     /// The check's backend writes nothing, not even inside the project; the rebuild's still does (control).

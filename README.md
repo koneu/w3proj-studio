@@ -480,7 +480,7 @@ w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --force, --mode sd|hd|de
 w3proj check MyMap/                 # the Problems view's checks (honouring .w3proj/problems-ignore.json) and
-                                    # check_melee on melee maps; --only=problems,melee,path,
+                                    # check_melee on melee and ladder-looking maps; --only=problems,melee,path,
                                     # --path x1,y1:x2,y2 (check_path), --json, --warnings-fail; exit 1 on errors
 w3proj verify *.w3x                 # unpack→pack in memory, compare every file; a file that can't be read
                                     # as a map (no war3map.w3i / war3campaign.w3f) fails; TRIGSTR references
@@ -509,8 +509,23 @@ shadows and the minimap all follow the terrain and doodads.
 `w3proj check` runs the same way (`app/src/headless/check.ts`), for an AI after its edits or for CI: the Problems
 view's checks as the view and Build run them, and check_melee / check_path on the saved files as the MCP tools answer
 them in the app. Ignored reports aren't listed, only counted; a check that can't run (no game folder) is an error.
-check_melee runs by default only on maps with war3map.w3i's Melee flag (`--only=melee` on any map; ladder maps from
-other tools often have it off). It writes nothing: its backend refuses every write.
+check_melee runs by default on maps with war3map.w3i's Melee flag, and on maps that look like ladder maps without it
+(2 or more start locations and a gold mine among the placed units; the report says "Melee flag off; ran because the map
+has 4 starts and 8 gold mines", so a non-melee map that happens to look like one is told why). `--only=problems` leaves
+it out, `--only=melee` forces it. It writes nothing: its backend refuses every write.
+
+Checks can be switched off per project in a `[checks]` section of `w3proj.toml` (the Problems view and `w3proj check`
+both read it; Rust leaves it alone when it rewrites the manifest):
+
+```toml
+[checks]
+disable = ["imports", "melee/camps"]   # a Problems check id (the groups in the view, `w3proj check --json`), a melee
+                                       # rule as melee/<rule>, or "melee" for check_melee as a whole
+```
+
+A disabled Problems check isn't run; the view says what the project switched off. A `[checks]` that can't be read
+switches nothing off and is reported. This is for whole checks; `.w3proj/problems-ignore.json` (the Ignore buttons)
+puts single reports of a check that stays on aside, and both apply together.
 
 ### Tests
 

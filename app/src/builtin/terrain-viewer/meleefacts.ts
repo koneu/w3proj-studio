@@ -87,6 +87,19 @@ export async function pathReport(src: WalkSource, from: [number, number], to: [n
   return withNeighbour(src, checkPath(await walkGrid(src), from, to, unitSize));
 }
 
+/** Whether placed units look like a ladder map's: two or more start locations and a gold mine. Counted from the units
+ *  alone (no terrain read), so a check can ask before it decides to walk the ground. */
+export function ladderLook(units: readonly { id: string }[]): { starts: number; mines: number; ladder: boolean } {
+  const starts = units.filter((u) => u.id === "sloc").length, mines = units.filter((u) => u.id === "ngol").length;
+  return { starts, mines, ladder: starts >= 2 && mines >= 1 };
+}
+
+/** The saved map's placed units, counted by ladderLook; none when the project has no units file. */
+export async function projectLadderLook(w3: W3Api) {
+  const file = await loadPlacedFile(w3, "war3mapUnits.doo", "units");
+  return file ? ladderLook(file.list) : null;
+}
+
 /** What the melee tools go by: units, trees, routes, and how wide things are. */
 export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
   const [balance, weapons, destructables, game, data, grid, unitMods] = await Promise.all([
