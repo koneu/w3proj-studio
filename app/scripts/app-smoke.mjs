@@ -2412,6 +2412,36 @@ async function mapInfoColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
+ *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
+async function triggerParamColorTools(page, found) {
+  const fail = (what) => found.push(`trigger parameter colour tools: ${what}`);
+  try {
+    await page.evaluate(`(async () => {
+      const gui = await w3.services.get("w3.triggers.gui");
+      const data = { functions: [new Map(), new Map(), new Map(), new Map()], find: () => undefined, categories: new Map(), presets: new Map(),
+        types: new Map([["StringExt", { name: "Message", base: "StringExt", global: false }], ["string", { name: "String", base: "string", global: false }]]) };
+      window.__colorDialog = (type) => { window.__colorResult = undefined; gui.editParam({ data, display: { data }, type, current: { type: 3, value: "Hello world" } }).then((p) => { window.__colorResult = p ?? null; }); };
+    })()`);
+    const root = `document.querySelector(".trig-dialog-body .color-tools")`;
+    await page.evaluate(`window.__colorDialog("string")`);
+    await until("the string dialog", () => page.evaluate(`!!document.querySelector(".trig-dialog-body input")`), 20000);
+    if (await page.evaluate(`!!${root}`)) fail("a plain string parameter has colour tools");
+    await page.evaluate(`document.querySelector(".trig-dialog-body .primary").click()`);
+    await until("the dialog closed", () => page.evaluate(`window.__colorResult !== undefined`), 20000);
+    await page.evaluate(`window.__colorDialog("StringExt")`);
+    await until("the message dialog", () => page.evaluate(`!!${root}`), 20000);
+    await page.evaluate(`(() => { const e = ${root}.querySelector("input.picker-search"); e.focus(); e.setSelectionRange(6, 11); e.dispatchEvent(new Event("select")); })()`);
+    await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
+    const shown = await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-preview"); return { hidden: p.hidden, text: p.textContent }; })()`);
+    if (shown.hidden || shown.text !== "Hello world") fail(`preview ${JSON.stringify(shown)}`);
+    await page.evaluate(`document.querySelector(".trig-dialog-body .primary").click()`);
+    await until("the dialog closed", () => page.evaluate(`window.__colorResult !== undefined`), 20000);
+    const got = await page.evaluate(`window.__colorResult?.value ?? null`);
+    if (got !== "Hello |cffFF0303world|r") fail(`the dialog returned ${JSON.stringify(got)}`);
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -13259,6 +13289,7 @@ async function run() {
         keybindings,
         keyChords,
         mapInfoColorTools,
+        triggerParamColorTools,
         mapInfoUndoKept,
         mcpGuides,
         mcpLimits,
@@ -13512,6 +13543,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "itemTablesAccess", found);
   await mapInfoColorTools(page, found).catch((e) => found.push(`Map Properties colour tools: ${e.message}`));
   await leftOpen(page, "mapInfoColorTools", found);
+  await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
+  await leftOpen(page, "triggerParamColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
   await leftOpen(page, "mapInfoUndoKept", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));

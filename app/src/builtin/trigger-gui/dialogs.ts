@@ -3,12 +3,13 @@
 // value, or an editor another extension registered for the type).
 
 import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/services";
+import { withColorTools } from "../../extensions/colortools";
 import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { focusAfterClick, h } from "../../workbench/dom";
-import { callParam, FUNCTION, functionsFor, PRESET, presetsFor, takesValue, VALUE, VARIABLE, variablesFor } from "./params";
+import { callParam, FUNCTION, functionsFor, isMessageType, PRESET, presetsFor, takesValue, VALUE, VARIABLE, variablesFor } from "./params";
 
 /** A modal over the whole window; resolves with what `body` passes to `done`. */
 function modal<T>(title: string, body: (done: (v: T | undefined) => void, hide: (hidden: boolean) => void) => HTMLElement[], cls = ""): Promise<T | undefined> {
@@ -146,7 +147,8 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
         onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") take(); },
         oninput: () => { note.classList.remove("error"); } });
-      return [input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
+      // A message the game shows gets the colour tools (the preview starts white, as the game's message text).
+      return [isMessageType(data, type) ? withColorTools(input, { defaultColor: "FFFFFF" }) : input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
     } });
     const body = h("div.trig-dialog-body");
     const bar = h("div.picker-tabs");

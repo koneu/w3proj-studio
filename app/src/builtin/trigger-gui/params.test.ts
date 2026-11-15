@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isUnsetParam } from "./params";
+import { isMessageType, isUnsetParam } from "./params";
 
 // What the GUI shows as an unset parameter (its argument's name in red) is what Validate Map Triggers reports as
 // "isn't set": round 4 found a variable parameter of no name drawn as an empty sliver.
@@ -16,4 +16,12 @@ test("isUnsetParam: no parameter, type -1, a nameless preset or variable, a call
   assert.equal(isUnsetParam({ type: 1, value: "udg_Hero" }), false);
   assert.equal(isUnsetParam({ type: 2, value: "GetTriggerUnit", call: { kind: 3, name: "GetTriggerUnit", hasParams: false, params: [] } }), false);
   assert.equal(isUnsetParam({ type: 3, value: "" }), false);
+});
+
+test("isMessageType: the game's StringExt (display text, quest texts, subtitles) and types based on it, not plain strings", () => {
+  const data = { types: new Map([["string", { base: "string" }], ["subtitle", { base: "StringExt" }]]) } as never;
+  assert.equal(isMessageType(data, "StringExt"), true);
+  assert.equal(isMessageType(data, "subtitle"), true);
+  assert.equal(isMessageType(data, "string"), false);
+  assert.equal(isMessageType(data, "imagefile"), false);
 });
