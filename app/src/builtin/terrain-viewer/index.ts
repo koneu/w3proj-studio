@@ -45,9 +45,9 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
-import { doodadSnaps, hasPathSize, snapSize, type PathSize } from "./doodadgrid";
-import { doodadFixes, savedFlags } from "./doodadrules";
-import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
+import { hasPathSize, snapSize, type PathSize } from "./doodadgrid";
+import { savedFlags } from "./doodadrules";
+import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
@@ -471,8 +471,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const list = (doc[key] ??= []) as Placed[];
       splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
+      // The open editor holds the doodads as opening the map put them (Snap and Fix Doodads on Load), which the file
+      // gets at the next save: the edit starts from there, so it goes by the places shown and writes them along.
+      const editor = key === "doodads" ? ownEditor() : null;
+      if (editor) await editor.handle.objects.openRules(list);
       const startsBefore = key === "units" ? structuredClone(startLocations(list)) : null;
       await change({ name, key, doc, list, json: true, dirty: false });
+      // And what it writes is what the editor holds after reading it again (a replaced barrel's life as a doodad's): a
+      // save then writes the same, which leaves the edit's undo possible.
+      if (editor) await editor.handle.objects.openRules(list);
       const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
       // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
       const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
@@ -2726,30 +2733,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
          *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
         async function snapOnOpen(f: PlacedFile) {
-          try {
-            await Promise.all([...new Set(f.list.map((p) => p.id))].map(loadDoodadCells));
-          } catch (e) {
-            console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
-            return;
-          }
           // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
-          if (disposed || dooFile !== f) return;
-          // A fixed rotation the map's own data may change isn't known while that data can't be read: angles only
-          // come into 0..360 then.
-          const snaps = doodadSnaps(f.list, (id) => doodadCells.get(id) ?? null, scalesKnown ? destructableFixedRot : () => null);
-          for (const { entry, x, y, angle } of snaps) {
-            const moved = x !== entry.position[0] || y !== entry.position[1];
-            if (moved) {
-              entry.position = [x, y, (flagsOf(entry) ?? 0) & 4 ? entry.position[2] : heightAt(terrain, x, y)];
-              repositioned.add(entry);
-            }
-            entry.angle = angle;
-          }
-          if (!snaps.length) return;
+          const n = await snapList(f.list, () => !disposed && dooFile === f, (entry) => repositioned.add(entry));
+          if (!n) return;
           objectsTouched = true;
-          const n = snaps.length;
           void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid and facing, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
         }
+        /** Snap Doodads on Load's places and facings for the doodads of `list`, in place; `moved` hears of each one that
+         *  moved. The number changed; 0 when the pathing data can't be read or `still` is false after the wait. */
+        async function snapList(list: Placed[], still: () => boolean, moved?: (entry: Placed) => void): Promise<number> {
+          try {
+            await Promise.all([...new Set(list.map((p) => p.id))].map(loadDoodadCells));
+          } catch (e) {
+            console.warn("doodads not put on their grids: the pathing data couldn't be read", e);
+            return 0;
+          }
+          if (!still()) return 0;
+          return snapAsOpened(list, openRuleSource(null), moved);
+        }
+        /** What Snap and Fix Doodads on Load go by now (doodadedit.ts). A fixed rotation the map's own data may change
+         *  isn't known while that data can't be read: angles only come into 0..360 then. */
+        const openRuleSource = (edge: Area | null, scales = scalesKnown): OpenRuleSource => {
+          const skins = objCtx?.skins;
+          return {
+            sizeOf: (id) => doodadCells.get(id) ?? null,
+            fixedRot: (id) => (scalesKnown ? destructableFixedRot(id) : null),
+            scaleRule: (id) => {
+              const skin = scales ? skins?.get(id) : undefined, range = skin ? savedScaleRange(skin) : undefined;
+              return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
+            },
+            outside: edge ? (x, y) => !inArea(x, y, edge) : null,
+            kindOf: (id) => skins?.get(id)?.kind,
+            ground: (x, y) => heightAt(terrain, x, y),
+          };
+        };
         /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
          *  (doodadrules.ts; setting terrain.doodads.fixOnLoad): the scale in its type's range, the outside flag from
          *  the playable area, the solid flag set. Not an edit, as the snap: no undo step, the map isn't marked as
@@ -2757,28 +2774,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  known); a type without a range keeps its scale, and so do all with `scales` false (the map's own ranges
          *  couldn't be read). */
         async function fixOnOpen(f: PlacedFile, scales: boolean) {
-          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
           // Taken after the wait: a file reloaded meanwhile is another's, and is taken as it is.
-          if (disposed || dooFile !== f || !objCtx) return;
-          const skins = objCtx.skins;
-          const edge = info ? playableArea(info, terrain) : null;
-          if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
-          if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
-          const fixes = doodadFixes(f.list as (Placed & { flags?: number })[], (id) => {
-            if (!scales) return null;
-            const skin = skins.get(id), range = skin ? savedScaleRange(skin) : undefined;
-            return skin && range ? { kind: skin.kind, min: range[0], max: range[1] } : null;
-          }, edge ? (x, y) => !inArea(x, y, edge) : null, undefined, (id) => skins.get(id)?.kind);
-          for (const { entry, scale, flags, life } of fixes) {
-            entry.scale = scale;
-            if (life !== undefined) (entry as Placed & { life?: number }).life = life;
-            if (flags !== undefined) entry.flags = flags;
-          }
-          if (!fixes.length) return;
+          const n = await fixList(f.list, scales, () => !disposed && dooFile === f);
+          if (!n) return;
           objectsTouched = true;
-          const n = fixes.length;
           void w3.window.showInfo(`Set the scale, flags or life of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
+        /** Fix Doodads on Load's scales, flags and life for the doodads of `list`, in place. The number changed; 0 when
+         *  `still` is false after the wait or the types aren't loaded. */
+        async function fixList(list: Placed[], scales: boolean, still: () => boolean): Promise<number> {
+          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          if (!still() || !objCtx) return 0;
+          if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
+          if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
+          return fixAsOpened(list, openRuleSource(info ? playableArea(info, terrain) : null, scales));
+        }
+        /** What opening the map does to the doodads of a list (Snap and Fix Doodads on Load, as the settings have them
+         *  now), in place: an AI tool's edit of war3map.doo starts from the doodads as the open editor holds them. */
+        const openRules = async (list: Placed[]) => {
+          await firstLoad.catch(() => {});
+          if (snapsDoodads()) await snapList(list, () => !disposed);
+          if (!disposed && fixesDoodads()) await fixList(list, scalesKnown, () => !disposed);
+        };
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
         /** Placed objects standing on the given corners' tiles that follow the
          *  ground: units, items and doodads without a fixed height (flag 4). */
@@ -4307,6 +4324,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const rules = doodadRules();
               for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what);
             },
+            openRules: (entries) => openRules(entries as Placed[]),
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             update: () => {
               objectsTouched = true;
@@ -5707,8 +5725,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!f) return reopenInstead();
             // The selection is of the entries as they were: it goes to the same objects in the file's (a resize writes them too).
             const kept = selectionRefs();
-            if (key === "doodads") { dooFile = f; savedDoodads = structuredClone(f.list); void viewShadows.reloadBaked(); } else { unitsFile = f; savedStarts = startLocations(f.list); }
-            objectsTouched = false;
+            if (key === "doodads") {
+              dooFile = f;
+              savedDoodads = structuredClone(f.list);
+              void viewShadows.reloadBaked();
+              // The file as it is now, under the rules opening it would apply (an AI tool's undo writes back the stored
+              // places): not an edit, and the next save writes them, as after the open. Only the doodads' changes from
+              // the open are what a clean editor holds besides the files, so units read again leave them to be saved.
+              objectsTouched = false;
+              if (snapsDoodads()) await snapOnOpen(f);
+              if (!disposed && fixesDoodads()) await fixOnOpen(f, scalesKnown);
+              if (disposed) return true;
+            } else { unitsFile = f; savedStarts = startLocations(f.list); }
             if (selected || group.length) clearSelection();
             await rebuildObjects();
             reselect(kept);

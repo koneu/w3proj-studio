@@ -4,8 +4,9 @@
 // Fix Doodads on Load (terrain.doodads.fixOnLoad) the scale. What the editor does while editing (we-drive, 2026-11-13) is written in
 // TESTING.md "Doodad rules while editing".
 
-import { doodadOnGrid, type PathSize } from "./doodadgrid";
-import { savedScale, type ScaleRule } from "./doodadrules";
+import { doodadOnGrid, doodadSnaps, type PathSize } from "./doodadgrid";
+import { doodadFixes, savedScale, type ScaleRule } from "./doodadrules";
+import type { Placed } from "./objects";
 
 /** What the rules know of the map: each switch, a type's pathing size (null: none; undefined: not read yet, so it
  *  stays where it is) and its scale rule (null: none, the scale stays). */
@@ -55,6 +56,47 @@ export function settleDoodad(entry: RuledEntry, rules: DoodadRuleSource, ground:
     if (scale.some((v, i) => v !== entry.scale[i])) { entry.scale = scale; changed = true; }
   }
   return changed;
+}
+
+/** What opening a map goes by for its doodads: a type's pathing size (null: none) and fixed rotation (null: none), its
+ *  scale rule (null: none, or the ranges can't be read), whether a place is outside the playable area (null: not
+ *  known, flags stay), a type's object kind (w3d, w3b), and the ground's height. */
+export interface OpenRuleSource {
+  sizeOf(id: string): PathSize | null;
+  fixedRot(id: string): number | null;
+  scaleRule(id: string): ScaleRule | null;
+  outside: ((x: number, y: number) => boolean) | null;
+  kindOf(id: string): string | undefined;
+  ground(x: number, y: number): number;
+}
+
+/** Snap Doodads on Load on a list as stored, in place (doodadgrid.ts doodadSnaps): each doodad on its grid and facing;
+ *  one that moves and follows the ground (no flag 4) lands on it. `moved` hears of each one that moved. The number
+ *  changed. Applied to its own result it changes nothing, so an AI tool's file and the save after it agree. */
+export function snapAsOpened(list: Placed[], src: OpenRuleSource, moved?: (entry: Placed) => void): number {
+  const snaps = doodadSnaps(list, (id) => src.sizeOf(id), (id) => src.fixedRot(id));
+  for (const { entry, x, y, angle } of snaps) {
+    if (x !== entry.position[0] || y !== entry.position[1]) {
+      const flags = (entry as Placed & { flags?: number }).flags ?? 0;
+      entry.position = [x, y, flags & 4 ? entry.position[2] : src.ground(x, y)];
+      moved?.(entry);
+    }
+    entry.angle = angle;
+  }
+  return snaps.length;
+}
+
+/** Fix Doodads on Load on a list as stored, in place (doodadrules.ts doodadFixes): the scale within the type's range,
+ *  the outside and solid flags, the life the World Editor writes for the type's kind. The number changed. */
+export function fixAsOpened(list: Placed[], src: OpenRuleSource, random: () => number = Math.random): number {
+  type Ruled = Placed & { flags?: number; life?: number };
+  const fixes = doodadFixes(list as Ruled[], (id) => src.scaleRule(id), src.outside, random, (id) => src.kindOf(id));
+  for (const { entry, scale, flags, life } of fixes) {
+    entry.scale = scale;
+    if (life !== undefined) entry.life = life;
+    if (flags !== undefined) entry.flags = flags;
+  }
+  return fixes.length;
 }
 
 /** The facing a turn key gives a doodad of type `id` facing `angle`, turned by `by` (radians): one whose texture isn't

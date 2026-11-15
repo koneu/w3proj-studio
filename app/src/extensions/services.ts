@@ -329,6 +329,10 @@ export interface TerrainObjects {
    *  (`place`) and the scale (`scale`) the World Editor gives them, in place: on their grid (Snap Doodads on Load),
    *  the scale within their type's range (Fix Doodads on Load). Part of the caller's edit; units are left alone. */
   settleDoodads(entries: PlacedEntry[], what: { place?: boolean; scale?: boolean }): Promise<void>;
+  /** Gives the doodads among `entries` (war3map.doo as stored) what opening the map gives them, in place: their grid
+   *  and facing (Snap Doodads on Load), scale, flags and life (Fix Doodads on Load), as the settings are now. A tool's
+   *  edit of the file starts from the doodads as the open editor holds them, not from the stored places. */
+  openRules(entries: PlacedEntry[]): Promise<void>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a

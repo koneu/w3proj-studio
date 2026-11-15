@@ -6906,6 +6906,100 @@ async function doodadSnapOnLoad(page, found) {
   }
 }
 
+/** An AI tool's edit of the doodads right after a map opens works on the doodads as Snap and Fix Doodads on Load put
+ *  them (bugs: replace_objects edited the file on disk, so it went by the stored places, and the save after it wrote
+ *  the stored places back). On a copy of the mini map with a barrel stored at 40, 40 (snapped to 32, 32) and the mini
+ *  map's LOtr at -64, 32 (snapped to -32, 64, scale 0.8, 0.8, 1.2, flag 3): replace_objects in an area round 32, 32
+ *  only (not 40, 40) turns the barrel into a hay cart; the file it writes, the save after an edit, and the same after
+ *  undo_last_edit keep LOtr snapped and fixed. */
+async function mcpReplaceSnap(page, found) {
+  const fail = (what) => found.push(`mcp replace after snap: ${what}`);
+  const TXT = "map/war3map.w3e.txt";
+  const dir = join(work, "mcp-replace-snap");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const root = join(dir, "map");
+  cpSync(FIXTURE, root, { recursive: true });
+  const file = join(root, "map", "war3map.doo.json");
+  const doo = JSON.parse(readFileSync(file, "utf8"));
+  doo.doodads.push({ ...doo.doodads[0], id: "LTbr", skinId: "LTbr", variation: 0, position: [40, 40, 0], angle: 4.712389, flags: 2, life: 255, editorId: 50, scale: [1, 1, 1] });
+  writeFileSync(file, JSON.stringify(doo, null, 2));
+  const f = Math.fround;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const onDisk = () => JSON.parse(readFileSync(file, "utf8")).doodads;
+  const pose = (d) => d && [d.position[0], d.position[1], ...d.scale.map(f), d.flags];
+  const SNAPPED_LOTR = [-32, 64, f(0.8), f(0.8), f(1.2), 3];
+  const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
+  const tool = mcpTool(page);
+  const saveAfterEdit = async () => {
+    await page.evaluate(`(async () => {
+      const s = await w3.services.get("w3.terrain");
+      window.__mrsGroup?.dispose();
+      window.__mrsGroup = s.registerToolGroup({ id: "smoke-mrs", title: "smoke-mrs", order: 998, create: (ed) => { window.__mrsEd = ed; return { toolbar: document.createElement("div") }; } });
+    })()`);
+    await until("the editor's handle", () => page.evaluate(`!!window.__mrsEd`), 20000);
+    await page.evaluate(`window.__mrsEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false })`);
+    await settled(page);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    await page.evaluate(`window.__mrsGroup?.dispose(); window.__mrsGroup = null; window.__mrsEd = null;`);
+  };
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the doodads loaded", async () => (await live()) !== null, 30000);
+    await settled(page);
+    const shown = await live();
+    // Controls: the open snapped both, and the file still has the stored places.
+    if (!same(pose(shown.find((d) => d.id === "LTbr"))?.slice(0, 2), [32, 32])) return fail(`the barrel stored at 40, 40 isn't shown at 32, 32 (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LTbr")))}`);
+    if (!same(pose(shown.find((d) => d.id === "LOtr")), SNAPPED_LOTR)) return fail(`LOtr isn't shown snapped and fixed (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LOtr")))}`);
+    if (!same(pose(onDisk().find((d) => d.id === "LOtr"))?.slice(0, 2), [-64, 32])) return fail("the open wrote the doodad file (control)");
+
+    const check = (when) => {
+      const list = onDisk();
+      if (!list.some((d) => d.id === "LOch") || list.some((d) => d.id === "LTbr")) fail(`${when}: the barrel isn't a hay cart in the file (${list.map((d) => d.id)})`);
+      const lotr = pose(list.find((d) => d.id === "LOtr"));
+      if (!same(lotr, SNAPPED_LOTR)) fail(`${when}: LOtr is written as ${JSON.stringify(lotr)}, not snapped and fixed ${JSON.stringify(SNAPPED_LOTR)}`);
+    };
+    await tool("replace_objects", { swaps: { LTbr: "LOch" } });
+    await settled(page);
+    check("the file replace_objects wrote");
+    const written = readFileSync(file, "utf8");
+    await saveAfterEdit();
+    // The editor holds what the tool wrote: the save writes the same, so the tool's undo stays possible.
+    if (readFileSync(file, "utf8") !== written) fail("the save after replace_objects wrote war3map.doo.json otherwise than the tool did");
+    check("the save after replace_objects");
+
+    await tool("undo_last_edit");
+    await settled(page);
+    await saveAfterEdit();
+    const back = onDisk();
+    if (!back.some((d) => d.id === "LTbr")) fail(`undo_last_edit didn't bring the barrel back (${back.map((d) => d.id)})`);
+    const lotr = pose(back.find((d) => d.id === "LOtr"));
+    if (!same(lotr, SNAPPED_LOTR)) fail(`the save after undo_last_edit wrote LOtr as ${JSON.stringify(lotr)}, not snapped and fixed`);
+    const barrel = pose(back.find((d) => d.id === "LTbr"));
+    if (!same(barrel?.slice(0, 2), [32, 32])) fail(`the save after undo_last_edit wrote the barrel at ${JSON.stringify(barrel)}, not on its grid at 32, 32`);
+
+    // Opened again from the stored places: only the snapped barrel (32, 32) is in this area, not the stored one (40, 40).
+    await page.evaluate(`w3.editors.closeAll()`);
+    writeFileSync(file, JSON.stringify(doo, null, 2));
+    await settled(page);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the doodads loaded", async () => (await live()) !== null, 30000);
+    await settled(page);
+    const reply = await tool("replace_objects", { swaps: { LTbr: "LOch" }, left: 20, bottom: 20, right: 36, top: 36 }).catch((e) => e.message);
+    if (!/changed/.test(reply)) fail(`replace_objects in an area round the snapped barrel (32, 32) gave ${reply}`);
+    await settled(page);
+    check("the file replace_objects in an area wrote");
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`window.__mrsGroup?.dispose(); window.__mrsGroup = null; window.__mrsEd = null;`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** The World Editor's doodad rules while editing (doodadedit.ts), under the same settings as on load (Snap Doodads on
  *  Load, Fix Doodads on Load), on a new map, both on and then both off: a barrel (2×2 texture, 1.1 to 1.5) placed by
  *  place_objects at 40, 40 with scale 3 lands at 32, 32 with 1.5 (off: as asked), a hay cart (4×2) at 500, 300 facing
@@ -13328,6 +13422,7 @@ async function run() {
         mapInfoUndoKept,
         mcpGuides,
         mcpLimits,
+        mcpReplaceSnap,
         mcpStartMove,
         meleeByHand,
         mineStartGrid,
@@ -13665,6 +13760,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "cliCheck", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
+  await mcpReplaceSnap(page, found).catch((e) => found.push(`mcp replace after snap: ${e.message}`));
+  await leftOpen(page, "mcpReplaceSnap", found);
   await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
   await leftOpen(page, "doodadRulesEdit", found);
   await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));

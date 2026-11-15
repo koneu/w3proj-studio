@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, type DoodadRuleSource, type RuledEntry } from "./doodadedit";
+import { doodadNudgeSteps, fixAsOpened, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, snapAsOpened, type DoodadRuleSource, type OpenRuleSource, type RuledEntry } from "./doodadedit";
 import type { PathSize } from "./doodadgrid";
+import type { Placed } from "./objects";
 import type { ScaleRule } from "./doodadrules";
 
 // The barrel (2×2 texture, 1.1 to 1.5), a crate (4×4), a log (12×6, not square), a type without a texture, and one
@@ -83,6 +84,37 @@ test("doodadNudgeSteps: a doodad on a grid nudges a grid step (eight nudges of 8
   // A nudge of 8 on the barrel's grid would round back to where it was; 64 doesn't.
   assert.equal(doodadPose(rules(), "LTbr", 32 + 8 * doodadNudgeSteps(rules(), "LTbr"), 32, deg(270)).x, 96);
   assert.equal(doodadPose(rules(), "LTbr", 96 - 8, 32, deg(270)).x, 96);
+});
+
+test("snapAsOpened and fixAsOpened: a list as stored gets the open's places, scales, flags and life, and a second pass changes nothing", () => {
+  // The kinds: the barrel and the crate are destructables, the log and the hay cart doodads.
+  const KINDS: Record<string, string> = { LTbr: "w3b", LTcr: "w3b", AOlg: "w3d", LOch: "w3d" };
+  const src: OpenRuleSource = {
+    sizeOf: (id) => SIZES[id] ?? null, fixedRot: () => null, scaleRule: (id) => RULES[id] ?? null,
+    outside: (x) => x < 0, kindOf: (id) => KINDS[id], ground,
+  };
+  type Entry = Placed & { flags: number; life: number };
+  const entry = (id: string, x: number, y: number, flags = 2, life = 255): Entry => ({ id, variation: 0, position: [x, y, 5], angle: deg(270), scale: [1, 1, 1], flags, life });
+  // A barrel stored at 40, 40; a crate at -500 (outside); one with a height of its own (flag 4); a hay cart that was
+  // a barrel before a replace (a destructable's life of 100).
+  const list = [entry("LTbr", 40, 40), entry("LTcr", -500, 100), entry("LTbr", 40, 40, 6), entry("LOch", 32, 0, 2, 100)];
+  const moved: Placed[] = [];
+  assert.equal(snapAsOpened(list, src, (e) => moved.push(e)), 3);
+  assert.deepEqual(list[0].position, [32, 32, ground(32, 32)]);
+  assert.deepEqual(list[1].position, [-512, 128, ground(-512, 128)]);
+  // Flag 4 keeps its height.
+  assert.deepEqual(list[2].position, [32, 32, 5]);
+  assert.deepEqual(moved, list.slice(0, 3));
+  assert.equal(fixAsOpened(list, src), 4);
+  assert.deepEqual(list[0].scale.map(Math.fround), [1.1, 1.1, 1.1].map(Math.fround));
+  assert.deepEqual([list[0].flags, list[0].life], [2, 100]);
+  assert.deepEqual([list[1].flags, list[1].life], [3, 100]);
+  assert.deepEqual([list[3].flags, list[3].life], [2, 255]);
+  // What an AI tool writes is what the editor holds after reading it again: the same rules change nothing then.
+  const once = structuredClone(list);
+  assert.equal(snapAsOpened(list, src), 0);
+  assert.equal(fixAsOpened(list, src), 0);
+  assert.deepEqual(list, once);
 });
 
 test("placedNudgeSteps: buildings and start locations nudge 64, units 8, doodads by their grid", () => {
