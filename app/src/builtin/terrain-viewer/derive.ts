@@ -101,12 +101,28 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
   // Shadows: only cells whose prediction changed since the last save.
   if (cfg<boolean>("shadows.update")) try {
     const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3));
-    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3));
-    const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
-    const shd = updateShadows(stored, before, after);
-    if (gone()) return;
-    if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
+    // One set of failed models for both: a model read for one and not the other would wipe (or stamp) its shadow.
+    const failedModels = new Set<string>();
+    const statsBefore: ShadowStats = { wanted: 0, unreadable: 0, failed: failedModels };
+    const statsAfter: ShadowStats = { wanted: 0, unreadable: 0, failed: failedModels };
+    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsBefore);
+    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsAfter);
+    const verdicts = [shadowVerdict(statsBefore, s.baseDoodads.length, s.skins.size), shadowVerdict(statsAfter, s.doodads.length, s.skins.size)];
+    const refused = verdicts.find((v) => !v.write);
+    if (refused) {
+      // The stored file stays as it is: an update from unreadable models would take the baked doodad shadows out.
+      failed = true;
+      w3.window.showWarning(`The shadow map (war3map.shd) was left as it is: ${refused.problem}.`);
+    } else {
+      // Absent is made anew; there but unreadable is an error, not written over.
+      const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
+      const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
+      const shd = updateShadows(stored, before, after);
+      if (gone()) return;
+      if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
+      const leftOut = statsAfter.unreadable;
+      if (leftOut) w3.window.showWarning(`Shadow map: ${leftOut} doodad${leftOut === 1 ? "" : "s"} left out, their models couldn't be read; their shadows weren't updated.`);
+    }
   } catch (e) {
     failed = true;
     w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
