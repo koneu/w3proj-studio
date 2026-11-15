@@ -5,6 +5,7 @@
 // game sound label keep their settings unset (the label's values apply), as
 // the World Editor stores them.
 
+import { withColorTools } from "../../extensions/colortools";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName } from "../../lib/formats/archivepath";
 import { readImported } from "../../lib/imports";
@@ -768,7 +769,8 @@ class SoundEditor {
       const control: HTMLInputElement | HTMLTextAreaElement = which === "text"
         ? h("textarea.snd-dialogue-text", { value: strings.text(key()), readOnly: ro, rows: 3, onchange })
         : h("input.snd-speaker-name", { type: "text", value: strings.text(key()), readOnly: ro, onchange });
-      return h("div.form-stack", {}, control, keyNote(key()));
+      // The dialogue text and the speaker name are shown to the player (subtitles): colour tools, committed on each use.
+      return h("div.form-stack", {}, ro ? control : withColorTools(control, { commit: true }), keyNote(key()));
     };
     return [row("Speaker name", field("speaker")), row("Text", field("text"))];
   }

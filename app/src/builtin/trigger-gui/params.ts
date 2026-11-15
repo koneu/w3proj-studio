@@ -50,6 +50,12 @@ export function takesValue(data: TriggerData, type: string): boolean {
   return ["integer", "real", "string", "StringExt", "boolean"].includes(base) || /code$/.test(type) || /file$/.test(type);
 }
 
+/** Whether a parameter of `type` is a text the game shows the player (Display Text, quest and requirement texts,
+ *  subtitles: the game's StringExt), which can carry colour tags. Plain strings (names, labels, keys) are not. */
+export function isMessageType(data: TriggerData, type: string): boolean {
+  return type === "StringExt" || data.types.get(type)?.base === "StringExt";
+}
+
 /** A call parameter with the function's default arguments. */
 export function callParam(data: TriggerData, f: TriggerFunction, vars: TriggerFile): Param {
   const value = f.kind === CALL ? f.name : f.kind === ACTION ? "DoNothing" : "";
