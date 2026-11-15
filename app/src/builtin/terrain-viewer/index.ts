@@ -5292,7 +5292,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 gridSelect,
                 layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights", "w3.terrain.toggleHeightMap"),
                 layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
-                layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
+                layerToggle("Naval pathing", "Where ships can't sail: light red over land, brown past the playable map; water clear, shallow or deep", "naval", "w3.terrain.toggleNavalPathing"),
                 layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
                 layerToggle("Camera objects", "The map's cameras: a camera with an arrow to its target", "cameras", "w3.terrain.toggleCameraObjects"),
                 layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
