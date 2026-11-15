@@ -21,6 +21,7 @@ import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
 import { stepPath, type PathFs, type PathStep } from "./path";
+import { listWriter } from "./listwrite";
 import { findCampaign } from "../../lib/objects/campaign";
 import { cleanedList, cleanupIsEmpty, cleanupSummary, entriesWithoutFile, entryGameNames, importCleanup, type ImportCleanup } from "../../lib/importcleanup";
 
@@ -105,13 +106,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const list: ImportsDoc = isNew ? { format: "w3proj.imports/1", version: 1, files: [] }
           : JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
         list.files ??= [];
-        // Written after every change (the files on disk have changed already).
-        const write = async () => {
-          if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.imports/1", ...list }) });
-          else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(list) }));
-          if (isNew) { isNew = false; await w3.workspace.refresh(); }
-          doc.setDirty(false);
-        };
+        // Written after every change (the files on disk have changed already), one write at a time (listwrite.ts).
+        const write = listWriter({
+          snapshot: () => JSON.stringify(list),
+          persist: async (text) => {
+            if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.imports/1", ...JSON.parse(text) }) });
+            else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text }));
+            if (isNew) { isNew = false; await w3.workspace.refresh(); }
+          },
+          setDirty: (d) => doc.setDirty(d),
+        });
         const campaign = /war3campaign\.imp(\.json)?$/i.test(doc.path);
         const view = new ImportView(w3, el, list, write, !doc.readOnly, campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER);
         const stop = w3.workspace.onDidChange(() => view.render());
