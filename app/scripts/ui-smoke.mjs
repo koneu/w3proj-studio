@@ -143,7 +143,7 @@ async function run() {
     await page.evaluate(`document.querySelectorAll(".browse-folder")[0].click()`);
     await sleep(100);
     const browserAll = await page.evaluate(`document.querySelectorAll(".picker-row").length`);
-    await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+    await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);
     // A question after Delete: a key held down doesn't answer it, a new press does.
     const heldKey = await page.evaluate(`(async () => {
