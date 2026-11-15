@@ -167,8 +167,22 @@ export function randomVariation(random: () => number = Math.random): number {
   return VARIATION_WEIGHTS.length - 1;
 }
 
-/** Sets a corner's ground height (world units, without the cliff layer). */
+/** The stored ground word is a signed 16-bit number: the lowest and highest ground heights it holds (world units,
+ *  without the cliff layer), -10240 and 6143.75. */
+export const GROUND_HEIGHT_MIN = (-0x8000 - 0x2000) / 4;
+export const GROUND_HEIGHT_MAX = (0x7fff - 0x2000) / 4;
+
+/** Whether a ground height (without the cliff layer) fits the stored word as it is, with no cut-off. */
+export const groundFits = (ground: number): boolean => {
+  const raw = Math.round(ground * 4 + 0x2000);
+  return Number.isFinite(raw) && raw >= -0x8000 && raw <= 0x7fff;
+};
+
+/** Sets a corner's ground height (world units, without the cliff layer). A height past the stored word stops at its
+ *  end, as the World Editor's brushes do (Raise, Random heights: we-compare height-random-stops); the AI tools refuse such
+ *  an edit first (groundFits). A height that isn't a number is refused: it would leave the corner without one. */
 export function setGroundHeight(c: Corner, ground: number) {
+  if (Number.isNaN(ground)) throw new Error("A ground height must be a number.");
   c.rawHeight = Math.max(-0x8000, Math.min(0x7fff, Math.round(ground * 4 + 0x2000)));
   c.height = (c.rawHeight - 0x2000) / 4 + (c.layer - 2) * 128;
 }
@@ -190,7 +204,6 @@ export function waterLevelWanted(z: number, offset = WATER_OFFSET): number {
   return Math.round((z + offset) * 4) + 0x2000;
 }
 
-/** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
 /** Whether a point is on a tile painted as Boundary (any of its corners). Nothing walks there, though doodads can
  *  stand there. The World Editor's pathing map blocks only the tiles whose lower-left corner is painted
  *  (generatePathing). */
@@ -251,7 +264,10 @@ export function markMapEdge(t: Terrain, complements: readonly number[], keepOute
   }
 }
 
+/** Marks a corner as water with a stored level, 0 to 0x3fff (keeping the word's high bits). A level past the 14 bits is
+ *  refused, not wrapped round to the other end (the World Editor wraps; a decision of 2026-11-15). */
 export function setWaterLevel(c: Corner, level: number, offset = WATER_OFFSET) {
+  if (!Number.isInteger(level) || level < WATER_LEVEL_MIN || level > WATER_LEVEL_MAX) throw new Error(`A water level is stored in 14 bits, ${WATER_LEVEL_MIN} to ${WATER_LEVEL_MAX}, and this would be ${level}.`);
   c.hasWater = true;
   c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);
   c.water = (level - 0x2000) / 4 - offset;
@@ -376,8 +392,33 @@ export function waterSurfaceAt(t: Terrain, wx: number, wy: number): number | nul
   return surface > heightAt(t, wx, wy) ? surface : null;
 }
 
-/** Serializes a terrain; an unedited one comes out byte for byte as it was read. */
+/** Why a terrain can't be written as it is, or null: a corner field past the bits the file gives it, or not a whole
+ *  number, would be cut to those bits by the writer and come back as another value. */
+export function w3eWriteProblem(t: Terrain): string | null {
+  if (t.width * t.height !== t.corners.length) return `${t.width} × ${t.height} corners, but ${t.corners.length} are there`;
+  for (const [what, list] of [["ground tile", t.groundTiles], ["cliff tile", t.cliffTiles]] as const) {
+    const bad = list.find((s) => s.length !== 4);
+    if (bad !== undefined) return `the ${what} "${bad}" isn't four characters`;
+  }
+  const fields: [keyof Corner, number, number][] = [
+    ["rawHeight", -0x8000, 0x7fff], ["rawWater", 0, 0xffff], ["texture", 0, t.version === 12 ? 0x3f : 0xf],
+    ["variation", 0, 0x1f], ["cliffVariation", 0, 7], ["cliffTexture", 0, 15], ["layer", 0, 15], ["texExtra", 0, t.version === 12 ? 0x3f : 0],
+  ];
+  for (let i = 0; i < t.corners.length; i++) {
+    const c = t.corners[i];
+    for (const [k, lo, hi] of fields) {
+      const v = c[k] as number;
+      if (!Number.isInteger(v) || v < lo || v > hi) return `corner ${i % t.width}, ${Math.floor(i / t.width)} has ${k} ${v} (${lo} to ${hi})`;
+    }
+  }
+  return null;
+}
+
+/** Serializes a terrain; an unedited one comes out byte for byte as it was read. A terrain with a field past its bits is
+ *  refused (w3eWriteProblem), not cut to them. */
 export function writeW3e(t: Terrain): Uint8Array {
+  const problem = w3eWriteProblem(t);
+  if (problem) throw new Error(`war3map.w3e can't be written: ${problem}.`);
   const per = t.version === 12 ? 8 : 7;
   const head = 13 + 4 + t.groundTiles.length * 4 + 4 + t.cliffTiles.length * 4 + 16;
   const out = new Uint8Array(head + t.corners.length * per + t.trailer.length);
