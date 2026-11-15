@@ -55,3 +55,17 @@ test("an import list that can't be read fails the check", async () => {
   const f = fake({ "map/war3map.imp.json": "{nope", "map/_Locales/deDE.w3mod/war3map.wts": "" });
   await assert.rejects(f.run());
 });
+
+test("a table stored as one escaped file name is found, unlisted: warning and fix name the backslash path", async () => {
+  const f = fake({ "map/war3map.imp.json": imp("war3mapImported\\a.blp"), "map/_Locales%2FdeDE.w3mod%2Fwar3map.wts": "" });
+  const found = await f.run();
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /^_Locales\\deDE\.w3mod\\war3map\.wts isn't in the import list/);
+  await found[0].fixes![0].run();
+  assert.deepEqual(f.log, ['w3.imports.add [["_Locales\\\\deDE.w3mod\\\\war3map.wts"]]']);
+});
+
+test("a table stored as one escaped file name and listed gives no warning", async () => {
+  const f = fake({ "map/war3map.imp.json": imp("_Locales\\deDE.w3mod\\war3map.wts"), "map/_Locales%2FdeDE.w3mod%2Fwar3map.wts": "" });
+  assert.deepEqual(await f.run(), []);
+});

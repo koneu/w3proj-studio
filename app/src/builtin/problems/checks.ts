@@ -484,7 +484,10 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
 async function unlistedLocaleTexts(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const root = w3.workspace.project()?.root;
   const files = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"));
-  const tables = files.filter((p) => /^map\/_locales\/[^/]+\.w3mod\/war3map\.wts$/i.test(p));
+  // A table is a folder (map/_Locales/deDE.w3mod/…) or, where unpack escaped the archive name's `/`, one file
+  // (map/_Locales%2FdeDE.w3mod%2Fwar3map.wts): both are the archive path _Locales\deDE.w3mod\war3map.wts.
+  const tableName = (p: string) => archivePath(p).replace(/\//g, "\\");
+  const tables = files.filter((p) => p.toLowerCase().startsWith("map/") && /^_locales\\[^\\]+\.w3mod\\war3map\.wts$/i.test(tableName(p)));
   if (!tables.length) return [];
   const names = new Set(files.map((p) => p.toLowerCase()));
   const campaign = names.has("map/war3campaign.w3f.json") || names.has("map/war3campaign.w3f");
@@ -496,10 +499,11 @@ async function unlistedLocaleTexts(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const byLower = new Map<string, string>();
   for (const p of files) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);
   const claimed = new Set(entries.map((e) => entryFile(e, folder, (l) => byLower.get(l))?.toLowerCase()).filter((x): x is string => !!x));
+  for (const e of entries) claimed.add(e.path.replace(/\//g, "\\").toLowerCase());
   const listName = listPath.slice(4).replace(/\.json$/, "");
   const out: Problem[] = [];
-  for (const file of tables.filter((p) => !claimed.has(p.toLowerCase()))) {
-    const archive = archivePath(file);
+  for (const file of tables.filter((p) => !claimed.has(p.toLowerCase()) && !claimed.has(tableName(p).toLowerCase()))) {
+    const archive = tableName(file);
     out.push({
       severity: "warning",
       message: `${archive} isn't in the import list: the World Editor drops it when it saves the map`,
