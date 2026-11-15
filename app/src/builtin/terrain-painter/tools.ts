@@ -124,7 +124,8 @@ export interface Brush {
  *  we-drive, one click each on a flat empty Lordaeron map: Shallow Water sizes 1, 2, 3 took 1, 5, 13 corners
  *  (2026-11-12, verify round 2, C3; tests/fixtures/water-brush); Raise One sizes 1, 2, 3, 5, 8 1, 5, 13, 49, 149
  *  (verify round 3 item 7), and a grass texture the same 1, 5, 13, 49, 149 (2026-11-13, verify3-we-diffs): the corners
- *  within a circle of radius size − 1. The square shape wasn't seen: a square of that half side. */
+ *  within a circle of radius size − 1. The square shape is the square of that half side (we-compare brush-square,
+ *  2026-11-15: Grass sizes 3 and 5 took 5 × 5 and 9 × 9 corners, Level, Increase One and Decrease One the same). */
 export function cornerBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
   const snap = (v: number, o: number) => o + Math.round((v - o) / 128) * 128;
   return { x: snap(x, t.offsetX), y: snap(y, t.offsetY), radius: Math.max(0, Math.round(size) - 1), square };

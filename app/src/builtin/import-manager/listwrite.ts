@@ -12,16 +12,21 @@ export interface ListWriterOptions {
 
 /** A `write()` for the list: resolves when its own write has landed, rejects with its own failure (a failed write
  *  doesn't stop the ones after it; the tab stays dirty until one lands). */
-export function listWriter(o: ListWriterOptions): () => Promise<void> {
+export function listWriter(o: ListWriterOptions): (() => Promise<void>) & { save: () => Promise<void> } {
   let tail: Promise<unknown> = Promise.resolve();
-  return () => {
+  let dirty = false;
+  const write = () => {
+    dirty = true;
     o.setDirty(true);
     const run = tail.then(async () => {
       const text = o.snapshot();
       await o.persist(text);
-      if (o.snapshot() === text) o.setDirty(false);
+      if (o.snapshot() === text) { dirty = false; o.setDirty(false); }
     });
     tail = run.catch(() => {});
     return run;
   };
+  /** The document's save: writes the list again when a write left it dirty (a failed one), else nothing. */
+  const save = () => dirty ? write() : tail.then(() => dirty ? write() : undefined);
+  return Object.assign(write, { save });
 }

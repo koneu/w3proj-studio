@@ -123,7 +123,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopMode = w3.settings.onDidChange((key) => { if (key === "game.graphicsMode") view.modeChanged(); });
         if (!doc.readOnly) openView = view;
         // Replace File is the one change here with a way back (the others act on the files at once, as there).
-        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; view.dropModelPreview(); stop.dispose(); stopMode.dispose(); if (openView === view) openView = null; } };
+        return { save: () => write.save(), undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; view.dropModelPreview(); stop.dispose(); stopMode.dispose(); if (openView === view) openView = null; } };
       },
     }),
   );

@@ -1,0 +1,98 @@
+[
+  {
+    "name": "square-grass-3",
+    "description": "the palette's square brush shape (Shape, 1424,624; the circle is 1392,624) on the ground texture brush: Grass, size 3, one click at the middle of flat.w3x (748,500). The shape stays for the editor's session: the spec sets it back. MATCH (2026-11-15, branch we-specs-d2): the 5 x 5 corners; size 5 the 9 x 9; Level size 3 and Increase One size 3 type the 7 x 7 square, Level size 5 the 11 x 11 (cliffs.ts cliffTypeStencil square)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1409,144"], ["--click", "1456,569"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1000"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "square-grass-5",
+    "description": "square-grass-3 at size 5",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1409,144"], ["--click", "1488,569"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1000"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 5], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "square-level-3",
+    "description": "the square shape on the cliff brush: Level, size 3, one click on flat.w3x (nothing moves, so the cliff-type stencil alone shows the shape; the round one is cliff-type-stencil's cliff-type-level-3)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 3], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "square-level-5",
+    "description": "square-level-3 at size 5",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1488,569"], ["--click", "1473,282"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["size", 5], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "square-up1-3",
+    "description": "the square shape on Increase One, size 3, one click on flat.w3x: the raised square, its slope and the cliff types",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 3], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "square-down1-5",
+    "description": "the square shape on Decrease One, size 5, one click on flat.w3x (level 2 ground, so a pit of level 1)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1488,569"], ["--click", "1441,282"], ["--click", "1424,624"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1500"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["size", 5], ["shape", "square"], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  }
+]
