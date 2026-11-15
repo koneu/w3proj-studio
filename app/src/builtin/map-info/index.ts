@@ -423,7 +423,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           input.addEventListener("blur", () => { visit = {}; });
           // Texts the game shows get the colour tools; paths and ids (plain) don't.
-          const shown = opts.plain ? input : withColorTools(input);
+          const shown = opts.plain ? input : withColorTools(input, { lineBreak: viaTable ? "|n" : "\n" });
           return viaTable
             ? h("div.form-stack", {}, shown, cut, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
             : shown;

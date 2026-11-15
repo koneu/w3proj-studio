@@ -2,7 +2,7 @@
 // a toolbar under the field (colour, the player colours, remove colour, line break) and a preview of the text as the
 // game shows it. The field itself stays plain text; the tags stay visible in it.
 
-import { insertBreak, PLAYER_COLORS, plainText, removeColor, renderColorTags, wrapColor, type Edit } from "../lib/text/colortags";
+import { insertBreak, type BreakForm, PLAYER_COLORS, plainText, removeColor, renderColorTags, wrapColor, type Edit } from "../lib/text/colortags";
 import { h } from "../workbench/dom";
 
 export interface ColorToolsOptions {
@@ -10,6 +10,9 @@ export interface ColorToolsOptions {
   defaultColor?: string;
   /** Also fire `change` after each edit made with the toolbar (for fields that commit on it). */
   commit?: boolean;
+  /** The line break this field stores: `|n` (string table, object data; the default) or a real line break (texts the
+   *  info file holds directly). A real break can't go in a one-line box, so the button is off there. */
+  lineBreak?: BreakForm;
 }
 
 /** Replaces the text of `field` with `next` as one editing step the field's own undo knows (the changed middle part
@@ -60,6 +63,12 @@ export function withColorTools(field: HTMLInputElement | HTMLTextAreaElement, op
     b.addEventListener("click", click);
     return b;
   };
+  const form = opts.lineBreak ?? "|n";
+  const lineBreakButton = () => {
+    const b = button("Line break", form === "|n" ? "Insert |n (this text is stored with |n for a line break)" : "Insert a real line break (this text is stored with real line breaks)", () => run((t, a, c) => insertBreak(t, a, c, form)));
+    if (form !== "|n" && field instanceof HTMLInputElement) { b.disabled = true; b.title = "This one-line field can't hold a line break"; }
+    return b;
+  };
   const swatches = PLAYER_COLORS.map((c, i) => {
     const s = button("", `${i < 24 ? `Player ${i + 1}: ` : ""}${c.name} (${c.rgb})`, () => run((t, a, b) => wrapColor(t, a, b, c.rgb)), ".color-tools-swatch");
     s.style.backgroundColor = `#${c.rgb}`;
@@ -70,7 +79,7 @@ export function withColorTools(field: HTMLInputElement | HTMLTextAreaElement, op
     picker,
     h("span.color-tools-swatches", {}, ...swatches),
     button("Remove color", "Take the colour off the selection (the colour around the caret without one)", () => run((t, a, b) => removeColor(t, a, b))),
-    button("Line break |n", "Insert |n", () => run((t, a, b) => insertBreak(t, a, b))));
+    lineBreakButton());
 
   const preview = h("div.color-tools-preview", { title: "Preview as the game shows it" });
   const paint = () => {

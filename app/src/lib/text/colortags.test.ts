@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { insertBreak, parseColorTags, PLAYER_COLORS, plainText, removeColor, renderColorTags, serializeRuns, wrapColor } from "./colortags";
 
+const bare = (text: string) => parseColorTags(text).map(({ raw, ...r }) => (void raw, r));
+
 describe("parseColorTags", () => {
   it("splits colours, resets and breaks", () => {
-    assert.deepEqual(parseColorTags("a|cffFF0303red|rb|nc"), [
+    assert.deepEqual(bare("a|cffFF0303red|rb|nc"), [
       { text: "a" }, { text: "red", color: "FF0303", alpha: "ff" }, { text: "b" }, { newline: true, text: "" }, { text: "c" },
     ]);
   });
   it("keeps any alpha and case, and an unterminated colour lasts to the end", () => {
-    assert.deepEqual(parseColorTags("|C00aBcDeFx"), [{ text: "x", color: "aBcDeF", alpha: "00" }]);
+    assert.deepEqual(bare("|C00aBcDeFx"), [{ text: "x", color: "aBcDeF", alpha: "00" }]);
   });
   it("leaves malformed tags as text", () => {
     assert.equal(plainText("|cff12 |cZZ112233 |x ||"), "|cff12 |cZZ112233 |x ||");
@@ -21,9 +23,38 @@ describe("parseColorTags", () => {
   it("a new colour replaces the old one", () => {
     assert.deepEqual(parseColorTags("|cff111111a|cff222222b").map((r) => r.color), ["111111", "222222"]);
   });
+  it("round-trips the game's forms byte-identical", () => {
+    for (const t of [
+      "|C00aBcDeFx|R|N|n", "|cFf1aBc9eword|r", "|cffFF0000a|cff00FF00b|rc|r", "|cff112233unterminated", "a\r\nb|nc|Nd\ne\rf",
+      "|cff112233|r", "tail|R|cffAAAAAA", "|r|r|n|n", "a|b |x| |c12 |cZZ112233", "",
+    ]) assert.equal(serializeRuns(parseColorTags(t)), t, JSON.stringify(t));
+  });
+  it("code-made runs are written in lower case", () => {
+    assert.equal(serializeRuns([{ text: "a", color: "FF0303" }, { text: "", newline: true }]), "|cffFF0303a|n|r");
+  });
   it("round-trips through serializeRuns", () => {
     const t = "x|cffFF0303a|nb|rc";
     assert.equal(serializeRuns(parseColorTags(t)), t);
+  });
+  it("reads the capital forms the game's data has: |C, |R, |N", () => {
+    assert.deepEqual(bare("a|CffFF0303red|Rb|Nc"), [
+      { text: "a" }, { text: "red", color: "FF0303", alpha: "ff" }, { text: "b" }, { newline: true, text: "" }, { text: "c" },
+    ]);
+    assert.equal(plainText("|C00aBcDeFx|R|N|n"), "x\n\n");
+  });
+  it("takes mixed-case digits", () => {
+    assert.equal(bare("|cFf1aBc9eword|r")[0].color, "1aBc9e");
+  });
+  it("a colour inside a colour: the text stays whole", () => {
+    const t = "|cffFF0000a|cff00FF00b|rc|r";
+    assert.equal(plainText(t), "abc");
+    assert.deepEqual(bare(t).filter((r) => r.text).map((r) => [r.text, r.color]), [["a", "FF0000"], ["b", "00FF00"], ["c", undefined]]);
+  });
+  it("a pipe before another character is plain text", () => {
+    assert.equal(plainText("a|b |x|"), "a|b |x|");
+  });
+  it("a real line break and |n mix", () => {
+    assert.equal(plainText("a\r\nb|nc|Nd\ne"), "a\nb\nc\nd\ne");
   });
   it("never hangs on hostile input", () => {
     const hostile = "|c".repeat(50000) + "|cff".repeat(50000) + "\u0000|".repeat(50000);
@@ -83,6 +114,9 @@ describe("removeColor", () => {
 });
 
 describe("insertBreak", () => {
+  it("puts a real line break where the field stores them", () => {
+    assert.deepEqual(insertBreak("abcd", 1, 3, "\n"), { text: "a\nd", selStart: 2, selEnd: 2 });
+  });
   it("replaces the selection", () => {
     assert.deepEqual(insertBreak("abcd", 1, 3), { text: "a|nd", selStart: 3, selEnd: 3 });
   });

@@ -2408,6 +2408,13 @@ async function mapInfoColorTools(page, found) {
   if (!(await soon(async () => (await nameNow()) === colored))) fail(`undo after removing: ${await nameNow()}`);
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   if (!(await soon(async () => (await nameNow()) !== colored))) fail("undo of the colour did nothing");
+  // The line break button writes the form the field stores: |n in a string table text, a real break in a direct one.
+  const desc = `(() => { const l = [...document.querySelectorAll(".map-info label.form-row")].find((x) => x.querySelector(".form-label")?.textContent === "Description"); return l?.querySelector("textarea"); })()`;
+  const brk = await page.evaluate(`(() => { const e = ${desc}; if (!e) return null; const b = e.closest(".color-tools").querySelector('button[title^="Insert"]');
+    const viaTable = !!e.closest(".form-stack"); const was = e.value; e.focus(); e.setSelectionRange(0, 0); e.dispatchEvent(new Event("select")); b.click();
+    return { viaTable, label: b.textContent, was, now: e.value }; })()`);
+  if (!brk) fail("the description box is missing");
+  else if (brk.label !== "Line break" || brk.now !== (brk.viaTable ? "|n" : "\n") + brk.was) fail(`line break gave ${JSON.stringify(brk)}`);
   void before;
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
