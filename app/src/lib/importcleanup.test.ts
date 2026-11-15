@@ -79,6 +79,38 @@ test("a Reforged version gets the flags Blizzard's maps list it with; two files 
   assert.deepEqual(c.add, [{ flags: 13, path: "_HD.w3mod\\war3mapImported\\a.mdx" }, { flags: 21, path: "x\\A.blp" }]);
 });
 
+/** The game's lookup as the backend does it (crates/casc/src/game.rs resolve, Classic layers): a plain path, `\` or
+ *  `/`, any case, behind each layer prefix, against the storage's full root paths. */
+function gameResolver(root: readonly string[]) {
+  const stored = new Map(root.map((p) => [p.toLowerCase(), p]));
+  const layers = ["war3.w3mod:_locales/enus.w3mod:", "war3.w3mod:", "war3.w3mod:_deprecated.w3mod:"];
+  return (path: string) => {
+    const p = path.replace(/\\/g, "/").toLowerCase();
+    for (const l of layers) { const hit = stored.get(`${l}${p}`); if (hit) return hit; }
+    return null;
+  };
+}
+
+test("an art set's or language's entry is looked up in the game's layer form, as the game names it", () => {
+  const f = { flags: 13, path: "Units\\Human\\Footman\\Footman.mdx" };
+  assert.deepEqual(entryGameNames(f, IMPORT_FOLDER), ["Units\\Human\\Footman\\Footman.mdx"]);
+  assert.deepEqual(entryGameNames({ flags: 13, path: "_HD.w3mod\\Units\\Human\\Footman\\Footman.mdx" }, IMPORT_FOLDER), ["_HD.w3mod:Units\\Human\\Footman\\Footman.mdx"]);
+  assert.deepEqual(entryGameNames({ flags: 13, path: "_HD.w3mod\\_Locales\\deDE.w3mod\\Sound\\X.wav" }, IMPORT_FOLDER).slice(0, 1), ["_HD.w3mod:_Locales\\deDE.w3mod:Sound\\X.wav"]);
+});
+
+test("Clean up keeps an _HD entry the game provides (its layer _hd.w3mod), drops one it hasn't", () => {
+  const resolve = gameResolver(["War3.w3mod:Units/Human/Footman/Footman.mdx", "War3.w3mod:_HD.w3mod:Units/Human/Footman/Footman.mdx"]);
+  const plain = { flags: 13, path: "Units\\Human\\Footman\\Footman.mdx" };
+  const hd = { flags: 13, path: "_HD.w3mod\\Units\\Human\\Footman\\Footman.mdx" };
+  const none = { flags: 13, path: "_HD.w3mod\\Units\\Human\\Footman\\NoSuch.mdx" };
+  const files = ["map/war3map.w3i.json"];
+  const c = importCleanup(files, [plain, hd, none], IMPORT_FOLDER, (e) => entryGameNames(e, IMPORT_FOLDER).some((n) => resolve(n) !== null));
+  assert.deepEqual(c.keptProvided, [plain, hd]);
+  assert.deepEqual(c.drop.map((d) => d.entry), [none]);
+  // Control: the archive path as such (`_HD.w3mod\…`) isn't what the game knows; looked up that way the entry went.
+  assert.equal(resolve(hd.path), null);
+});
+
 test("a list that is already clean gives nothing to do", () => {
   const files = ["map/war3map.w3i.json", "map/war3mapImported/a.blp"];
   const c = importCleanup(files, [{ flags: 21, path: "war3mapImported\\a.blp" }], IMPORT_FOLDER);

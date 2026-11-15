@@ -23,7 +23,7 @@ import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, entryFile, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, entryFile, gameLookupName, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import { checkpointOrStop } from "../../lib/checkpoint";
 
 export { FileLookup };
@@ -262,7 +262,7 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         for (const [list, folder] of lists) {
           for (const e of named((await s.doc<{ files?: { flags: number; path: string }[] }>(list))?.files)) {
             const variants = variantsOf(e, folder);
-            if (!variants.some((v) => files.inMap(v))) gamePaths.push(...variants);
+            if (!variants.some((v) => files.inMap(v))) gamePaths.push(...variants.map(gameLookupName));
           }
         }
         await files.prefetchGame(gamePaths);
@@ -279,7 +279,8 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
             const variants = variantsOf(e, folder);
             if (variants.some((v) => files.inMap(v))) continue;
             let inGame = false;
-            for (const v of variants) if (await files.inGame(v)) { inGame = true; break; }
+            // The game knows an art set or language folder as a layer (`_HD.w3mod:Units\…`, lib/imports.ts gameLookupName).
+            for (const v of variants) if (await files.inGame(gameLookupName(v))) { inGame = true; break; }
             if (!inGame) out.push({ severity: "warning", message: `${e.path} is listed but its file is missing${files.hasCampaign() ? " (also not in the campaign's files)" : ""}`, location: list.slice(4), reveal: { command: "w3.imports.open" }, ...(fixes ? { fixes } : {}) });
           }
         }
