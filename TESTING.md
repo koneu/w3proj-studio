@@ -240,6 +240,12 @@ It never starts the game itself.
 - **Nothing on the screen, no sound.** A display of its own (Xvfb, 1600x1000), Vulkan through lavapipe. Wine's audio
   drivers are off, PulseAudio and PipeWire are pointed at nothing and their sockets and `/dev/snd` are hidden, and
   the editor's interface sounds are off in its preferences: nothing of it shows in `pactl list sink-inputs`.
+- **Never the user's desktop.** `we-x11.py` (clicks, keys, drags) refuses with exit 2 unless `--display :N` is an
+  Xvfb process (found in `/proc`, by its argument or its `-displayfd` socket); no `--display` is refused too, so
+  Xlib never falls back to `$DISPLAY`. `W3_ALLOW_REAL_DISPLAY=1` overrides it, for your own manual use only.
+  `webdriver.mjs` (app-smoke, app-drive) and we-drive strip `DISPLAY`, `WAYLAND_DISPLAY` and `XAUTHORITY` from what
+  they inherit and start their own Xvfb, or fail. Tested in `input-guard.test.mjs` with a fake `/proc`
+  (`we-x11.py guard-check --display :N --procroot DIR`).
 - **Preferences** (`Documents/Warcraft III/WorldEditPreferences.txt` in the farm's prefix, written before each start,
   the rest kept): `Has Been Run=true`, no interface or splash sounds, `Fixed Day Night Cycle` from `--day-night`, and
   the graphics: `--mode sd|hd|de` sets `assetMode` to 0, 1 or 2 (File > Preferences > General > Asset Mode offers

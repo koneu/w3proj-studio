@@ -19,10 +19,15 @@ its own), through python-xlib and its XTest extension. Every command prints one 
   we-x11.py --display :N frames MS [--rect X,Y,W,H]    how often a part of the screen changes during MS
   we-x11.py stats FILE [--rect X,Y,W,H]                the same counts of a picture
 
+Every command that touches a display is refused (exit 2) unless it is an Xvfb started for tests (guard_decision;
+`guard-check --display :N [--procroot DIR]` prints the decision), or W3_ALLOW_REAL_DISPLAY=1 is set.
+
 Run with `python3 -I` (we-drive does) so nothing in the working folder is imported.
 """
 
 import json
+import os
+import re
 import sys
 
 from PIL import Image
@@ -31,6 +36,44 @@ from PIL import Image
 def out(obj):
     print(json.dumps(obj))
     sys.stdout.flush()
+
+
+def guard_decision(display, procroot="/proc", environ=None):
+    """(allowed, reason): input goes only to an Xvfb that someone started for a test, never to a desktop session.
+    Allowed: a local display ":N" with an Xvfb process (argv[0] named Xvfb) that either has ":N" in its arguments or
+    listens on the socket X<N> (-displayfd picks the number itself). W3_ALLOW_REAL_DISPLAY=1 overrides, for the
+    user's own manual use. A missing --display is refused (Xlib would take $DISPLAY, the desktop)."""
+    environ = os.environ if environ is None else environ
+    if environ.get("W3_ALLOW_REAL_DISPLAY") == "1":
+        return True, "W3_ALLOW_REAL_DISPLAY=1"
+    if not display:
+        return False, "no --display given (the desktop's $DISPLAY must never be used by default)"
+    m = re.fullmatch(r":(\d+)(\.\d+)?", display)
+    if not m:
+        return False, "display %r is not a local display of the form :N" % display
+    num = m.group(1)
+    try:
+        pids = [e for e in os.listdir(procroot) if e.isdigit()]
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            with open(os.path.join(procroot, pid, "cmdline"), "rb") as f:
+                argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            continue
+        if not argv or os.path.basename(argv[0]) != "Xvfb":
+            continue
+        if any(a == ":" + num for a in argv):
+            return True, "Xvfb pid " + pid
+        if "-displayfd" in argv:
+            try:
+                with open(os.path.join(procroot, pid, "net", "unix"), "r", errors="replace") as f:
+                    if re.search(r"\.X11-unix/X%s$" % num, f.read(), re.M):
+                        return True, "Xvfb pid %s (-displayfd)" % pid
+            except OSError:
+                pass
+    return False, "display %s is not an Xvfb started for tests (set W3_ALLOW_REAL_DISPLAY=1 to use a real one on purpose)" % display
 
 
 def parse_rect(s):
@@ -334,6 +377,16 @@ def main(argv):
         b = tuple(int(v) for v in rest[1].split(","))
         out({"path": drag_path(a, b, int(opt("--steps", "20")))})
         return 0
+
+    if cmd == "guard-check":
+        ok, why = guard_decision(opt("--display", disp), opt("--procroot", "/proc"))
+        out({"allowed": ok, "reason": why})
+        return 0 if ok else 2
+
+    ok, why = guard_decision(disp)
+    if not ok:
+        sys.stderr.write("we-x11: refused, %s\n" % why)
+        return 2
 
     d = connect(disp)
     if cmd == "windows":
