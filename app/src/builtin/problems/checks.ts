@@ -266,16 +266,21 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
           }
         }
         await files.prefetchGame(gamePaths);
+        // The Import Manager's clean-up works on the list it opens: the campaign's in a campaign project, else the map's.
+        const root = w3.workspace.project()?.root;
+        const names = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+        const managed = names.has("map/war3campaign.w3f.json") || names.has("map/war3campaign.w3f") ? lists[1][0] : lists[0][0];
         for (const [list, folder] of lists) {
           const data = await s.doc<{ files?: { flags: number; path: string }[] }>(list);
           const blank = (data?.files?.length ?? 0) - named(data?.files).length;
-          if (blank) out.push({ severity: "warning", message: blankMessage(blank), location: list.slice(4), reveal: { command: "w3.imports.open" } });
+          const fixes = list === managed ? [cleanUpFix(w3, root)] : undefined;
+          if (blank) out.push({ severity: "warning", message: blankMessage(blank), location: list.slice(4), reveal: { command: "w3.imports.open" }, ...(fixes ? { fixes } : {}) });
           for (const e of named(data?.files)) {
             const variants = variantsOf(e, folder);
             if (variants.some((v) => files.inMap(v))) continue;
             let inGame = false;
             for (const v of variants) if (await files.inGame(v)) { inGame = true; break; }
-            if (!inGame) out.push({ severity: "warning", message: `${e.path} is listed but its file is missing${files.hasCampaign() ? " (also not in the campaign's files)" : ""}`, location: list.slice(4), reveal: { command: "w3.imports.open" } });
+            if (!inGame) out.push({ severity: "warning", message: `${e.path} is listed but its file is missing${files.hasCampaign() ? " (also not in the campaign's files)" : ""}`, location: list.slice(4), reveal: { command: "w3.imports.open" }, ...(fixes ? { fixes } : {}) });
           }
         }
         return capped(out, "missing imports");
@@ -462,6 +467,7 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
           title: `Deletes ${file} from the project (after a question; a checkpoint is made first where they're enabled): the map no longer packs it`,
           run: () => deleteUnlisted(w3, root, file, archive, listPath, folder),
         },
+        cleanUpFix(w3, root),
       ],
     });
   }
@@ -737,6 +743,16 @@ const removePlaced = async (w3: W3Api, file: string, key: string, id: string) =>
 
 /** Fixes run one at a time: each reads and writes war3map.imp and the object data. */
 const serial = serialQueue();
+
+/** The Import Manager's "Clean up import list" (previewed there, one undo step) as a fix of the import messages. Not
+ *  in the fixes' queue: it waits for an answer to its preview. */
+function cleanUpFix(w3: W3Api, root: string | undefined) {
+  return {
+    label: "Clean up import list",
+    title: "Removes the list's entries without a name or without a file, and lists the map's files that aren't listed, in the Import Manager: previewed first, undoable there",
+    run: async () => { sameProject(w3, root); await w3.commands.execute("w3.imports.cleanUp"); },
+  };
+}
 
 /** The fix was found in a project; it must not write into another one opened since. */
 function sameProject(w3: W3Api, root: string | undefined) {

@@ -20,6 +20,9 @@ export const RAW = "\u0001";
 export const CONCAT = "\u0002";
 /** Integer division (`//`). */
 export const INT_DIV = "\u0003";
+/** In a RAW line: an LF line break of the map's own text, written as LF (the custom script header keeps its breaks). */
+export const LF_BREAK = "\u0004";
+const LF_BREAK_RE = new RegExp(LF_BREAK, "g");
 
 /** Default element of a global array by base type. */
 const ARRAY_DEFAULT: Record<string, string> = { integer: "__jarray(0)", real: "__jarray(0.0)", boolean: "__jarray(false)", string: "__jarray(\"\")" };
@@ -69,7 +72,7 @@ export function jassToLua(jass: string): string {
   const out: string[] = [];
   let inGlobals = false, depth = 0, locals = false;
   for (const raw of jass.split(/\r?\n/)) {
-    if (raw.startsWith(RAW)) { out.push(raw.slice(1)); continue; }
+    if (raw.startsWith(RAW)) { out.push(raw.slice(1).replace(LF_BREAK_RE, "\n")); continue; }
     const line = raw.trim();
     if (!line || line.startsWith("//")) continue;
     if (line === "globals") { inGlobals = true; continue; }

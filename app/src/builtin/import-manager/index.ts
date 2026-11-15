@@ -21,6 +21,8 @@ import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 import { keepFiles, removeStep, stepRemove, type RemoveStep } from "./remove";
 import { stepPath, type PathFs, type PathStep } from "./path";
+import { findCampaign } from "../../lib/objects/campaign";
+import { cleanedList, cleanupIsEmpty, cleanupSummary, entriesWithoutFile, entryGameNames, importCleanup, type ImportCleanup } from "../../lib/importcleanup";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -87,6 +89,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.imports.removePath", async (path: string) => {
       if (typeof path !== "string" || !path) throw new Error("Name the import to remove.");
       await withRow(w3, path, (view, row) => view.removeRows([row]));
+    }),
+    // Clean up import list (lib/importcleanup.ts), previewed, as one undo step; the Problems view's import messages
+    // offer it. True when the list was changed.
+    w3.commands.register("w3.imports.cleanUp", async () => {
+      await w3.commands.execute("w3.imports.open");
+      if (!openView?.isListOf(w3.workspace.project()?.root)) throw new Error("The Import Manager can't change this project's list.");
+      return openView.cleanUp();
     }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
@@ -169,6 +178,12 @@ async function addToList(w3: W3Api, paths: string[]): Promise<void> {
   await w3.workspace.refresh();
 }
 
+/** Whether two clean-ups of the same list do the same: the same entries go, the same paths come. */
+const samePlan = (a: ImportCleanup, b: ImportCleanup) => a.drop.length === b.drop.length && a.add.length === b.add.length
+  && a.drop.every((d, i) => d.entry === b.drop[i].entry) && a.add.every((e, i) => e.path === b.add[i].path && e.flags === b.add[i].flags);
+/** Whether `list` holds exactly `entries` (the same objects, in order). */
+const sameEntries = (list: readonly ImportEntry[], entries: readonly ImportEntry[]) => list.length === entries.length && list.every((e, i) => e === entries[i]);
+
 class ImportView {
   /** Selected rows (ImportRow.key: a file and its Reforged version are one row); render() drops what the filter hides,
    *  so that actions only ever touch rows that can be seen. */
@@ -183,8 +198,10 @@ class ImportView {
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
   /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
   private modelPreview: { key: string; view: ModelPreview; failed: boolean } | null = null;
-  /** Replace File, Remove and Change path steps, for undo and redo; `at` of them are done. */
-  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> } | { path: PathStep<ImportEntry> })[] = [];
+  /** Replace File, Remove, Change path and Clean up steps, for undo and redo; `at` of them are done. A clean-up keeps
+   *  the list before and after it (the same entry objects, which the other steps find their entries by). */
+  private history: ({ replace: ReplaceStep } | { remove: RemoveStep<ImportEntry> } | { path: PathStep<ImportEntry> }
+    | { list: { before: ImportEntry[]; after: ImportEntry[] } })[] = [];
   private at = 0;
   /** A replace, undo or redo is writing: another replace is refused meanwhile, undo and redo wait for it (in order;
    *  dropped when the editor closes or another project opens). */
@@ -524,6 +541,81 @@ class ImportView {
       if (error) throw new Error(`${count} of ${total} removed, then: ${error}`);
     });
   }
+  /** Clean up import list: entries without a name and entries whose file is neither in the map nor provided by the game
+   *  go, files of the map folder the list doesn't name come in (lib/importcleanup.ts). Previewed first (the whole change
+   *  can be written to the Output panel), then done as one undo step; only the list changes, no file. True when the
+   *  list was changed. */
+  cleanUp(): Promise<boolean> {
+    let changed = false;
+    return this.run("Clean up", async () => {
+      const projectFiles = () => [...this.files().values()].map((f) => f.path);
+      // Which of the entries the map lacks the game or a chapter map's campaign provides (asked once: the plan is made
+      // again after the question). Unknown isn't "not provided": the entries would go.
+      const lacking = entriesWithoutFile(projectFiles(), this.list.files, this.folder);
+      const names = [...new Set(lacking.flatMap((e) => entryGameNames(e, this.folder)))];
+      let found: Set<string>;
+      const inCampaign = new Set<string>();
+      try {
+        const where = names.length ? await this.w3.game.resolveMany(names) : [];
+        found = new Set(names.filter((_, i) => where[i]).map((n) => n.toLowerCase()));
+      } catch (e) {
+        throw new Error(`the game's files can't be read to tell which listed files it provides (${(e as Error).message ?? e}); nothing was changed.`);
+      }
+      const campaign = lacking.length ? await findCampaign(this.w3, this.root) : undefined;
+      if (campaign !== undefined) {
+        const list = await this.w3.backend.invoke<{ files: FileInfo[]; unreadable: { path: string; error: string }[] }>("project_files_partial", { root: campaign });
+        const bad = list.unreadable.find((u) => /^map(\/|$)/i.test(u.path.replace(/\\/g, "/")));
+        if (bad) throw new Error(`the campaign's files (${campaign}) can't be listed (${bad.path}: ${bad.error}); nothing was changed.`);
+        for (const f of list.files) inCampaign.add(f.path.replace(/\\/g, "/").toLowerCase());
+      }
+      if (this.disposed || this.w3.workspace.project()?.root !== this.root) return;
+      const provided = (e: ImportEntry) => entryGameNames(e, this.folder).some((n) => found.has(n.toLowerCase()))
+        || entryCandidates(e, this.folder).some((c) => inCampaign.has(c.toLowerCase()));
+      const plan = () => importCleanup(projectFiles(), this.list.files, this.folder, provided);
+      const shown = plan();
+      if (cleanupIsEmpty(shown)) { void this.w3.window.showInfo(cleanupSummary(shown)); return; }
+      for (;;) {
+        const answer = await this.w3.window.showWarning(cleanupSummary(shown), "Clean up", "Show the changes", "Cancel");
+        if (answer === "Show the changes") { this.writeCleanup(shown); continue; }
+        if (answer !== "Clean up") return;
+        break;
+      }
+      // The editor closed or another project opened during the question: nothing is done.
+      if (this.disposed || this.w3.workspace.project()?.root !== this.root) return;
+      if (this.busy) throw new Error("Another change is still being written.");
+      await this.queue.hold(async () => {
+        // As things are now: a list or files changed during the question aren't cleaned up unseen.
+        const now = plan();
+        if (!samePlan(now, shown)) throw new Error("The import list or the map's files changed meanwhile; nothing was changed. Run it again to see the new changes.");
+        const before = [...this.list.files];
+        const after = cleanedList(before, now);
+        const history = this.history.slice(), at = this.at;
+        this.list.files = after;
+        this.history.splice(this.at, this.history.length, { list: { before, after: [...after] } });
+        this.at = this.history.length;
+        try { await this.write(); } catch (e) {
+          // Not written: the list and its history as they were.
+          this.list.files = before;
+          this.history = history;
+          this.at = at;
+          throw e;
+        }
+        changed = true;
+      });
+      this.select(shown.add.map((e) => e.path));
+      const removed = shown.drop.length;
+      void this.w3.window.showInfo(`Cleaned up the import list: ${removed.toLocaleString()} ${removed === 1 ? "entry" : "entries"} removed, ${plural(shown.add.length, "file")} added. Undo takes it back.`);
+    }).then((ok) => ok && changed);
+  }
+  /** The whole of a clean-up in the Output panel ("Import Manager"). */
+  private writeCleanup(c: ImportCleanup) {
+    const out = this.w3.output.channel("Import Manager");
+    out.append(cleanupSummary(c, 0));
+    for (const d of c.drop) out.append(`  - ${d.reason === "blank" ? `(entry ${d.index + 1}, no name)` : d.entry.path}`);
+    for (const e of c.keptProvided) out.append(`  = ${e.path} (the game or the campaign provides it)`);
+    for (const e of c.add) out.append(`  + ${e.path}`);
+    out.show();
+  }
   /** Moves a project file; an editor tab open on it follows to the new path (closed and opened again), so it shows the file as it is there. Unsaved changes in it refuse the move. */
   private async moveFile(from: string, to: string): Promise<void> {
     const key = (p: string) => p.replace(/\\/g, "/").toLowerCase();
@@ -624,8 +716,15 @@ class ImportView {
     this.queue.step(() => {
       const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
       if (!step) return;
-      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "path" in step ? "Change path" : "Replace File"}`, async () => {
-        if ("path" in step) {
+      return this.run(`${dir < 0 ? "Undo" : "Redo"} ${"remove" in step ? "Remove" : "path" in step ? "Change path" : "list" in step ? "Clean up" : "Replace File"}`, async () => {
+        if ("list" in step) {
+          const [from, to] = dir < 0 ? [step.list.after, step.list.before] : [step.list.before, step.list.after];
+          if (!sameEntries(this.list.files, from)) throw new Error("The import list changed since; it isn't put back.");
+          const was = this.list.files;
+          this.list.files = [...to];
+          try { await this.write(); } catch (e) { this.list.files = was; throw e; }
+          this.select([]);
+        } else if ("path" in step) {
           await stepPath(this.pathFs(), this.list, step.path, dir);
           await this.write();
           this.select(step.path.moves.length ? [classicPathOf((dir < 0 ? step.path.moves[0].before : step.path.moves[0].after).path)] : []);
@@ -715,6 +814,7 @@ class ImportView {
     ...USE_IN.map(([value, label, title]) => h("option", { value, title, selected: value === this.useIn }, label))) as HTMLSelectElement;
     const toolbar = h("div.imp-toolbar", {},
       ...(this.editable ? [h("button.primary", { onclick: () => this.importFiles() }, "Import files…"), h("button", { onclick: () => this.importFolder() }, "Import folder…"),
+        h("button.imp-cleanup", { title: "Removes entries without a name or without a file, and lists the map's files that aren't listed: previewed first, Ctrl+Z takes it back", onclick: () => void this.cleanUp() }, "Clean up list…"),
         h("label.imp-use-label", {}, "Use in", useIn)] : []),
       search, h("span.muted", {}, `${this.list.files.length} imported · ${formatBytes(total)}`));
 
