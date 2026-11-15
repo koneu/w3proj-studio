@@ -54,7 +54,7 @@ import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
-import { checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
+import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { campsOf } from "./meleecheck";
 import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
@@ -799,14 +799,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
-      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
+      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE;
       const { handle } = await liveEditor("read");
       return pathReport(walkSource(handle), start, goal, size);
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
       const { handle } = await liveEditor("read");
-      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
+      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
       return withNeighbour(handle, checkRoute(await walkGrid(handle), points as [number, number][], size, wide));
     }),
     w3.mcp.registerTool("find_pockets", async (args) => {
@@ -816,7 +816,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (bounds) for (let y = 0; y < grid.height; y++) for (let x = 0; x < grid.width; x++) {
         if (!inArea(grid.offsetX + (x + 0.5) * 32, grid.offsetY + (y + 0.5) * 32, bounds)) grid.blocked[y * grid.width + x] = 1;
       }
-      const size = typeof args.unitSize === "number" && args.unitSize >= 0 ? args.unitSize : 32;
+      const size = typeof args.unitSize === "number" && args.unitSize >= 0 ? args.unitSize : DEFAULT_UNIT_SIZE;
       const found = findPockets(grid, size, await readArea(w3, args), typeof args.smallest === "number" ? args.smallest : 16);
       const t = handle.terrain;
       const levelAt = ([x, y]: readonly number[]) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer;

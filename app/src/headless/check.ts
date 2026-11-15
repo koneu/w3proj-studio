@@ -18,6 +18,7 @@ import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
 import { MANIFEST_FILE, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
+import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
 import { meleeReport, pathReport, projectLadderLook, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
 import * as problemsExtension from "../builtin/problems/index";
@@ -36,7 +37,7 @@ export interface CheckJob {
   only?: Section[];
   /** check_path's two points, world coordinates. */
   path?: { from: [number, number]; to: [number, number] };
-  /** The collision size (a radius) of the unit the path and melee checks walk with; 32 as the MCP tools. */
+  /** The collision size (a radius) of the unit the path and melee checks walk with; a Footman's (31) as the MCP tools. */
   unitSize?: number;
   /** Settings that win over the project's and the defaults (the game folder, the graphics mode). */
   settings: Record<string, unknown>;
@@ -71,7 +72,7 @@ export async function check(job: CheckJob): Promise<CheckReport> {
   const asked = job.only ? new Set(job.only) : null;
   for (const s of asked ?? []) if (!SECTIONS.includes(s)) throw new Error(`no section ${JSON.stringify(s)} (problems, melee, path)`);
   if (asked?.has("path") && !job.path) throw new Error("the path check needs its two points (--path x1,y1:x2,y2)");
-  const unitSize = typeof job.unitSize === "number" && job.unitSize >= 0 ? job.unitSize : 32;
+  const unitSize = typeof job.unitSize === "number" && job.unitSize >= 0 ? job.unitSize : DEFAULT_UNIT_SIZE;
   const h = headless([problemsManifest, terrainManifest, pathingManifest] as ExtensionManifest[], job.settings);
   const { w3, workspace, messages } = h;
   await workspace.open(job.root);

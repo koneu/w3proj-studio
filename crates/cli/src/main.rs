@@ -432,7 +432,7 @@ enum Cmd {
         /// check_path from one point to another, in world coordinates: x1,y1:x2,y2.
         #[arg(long, allow_hyphen_values = true)]
         path: Option<String>,
-        /// Collision size of the unit check_path and check_melee walk with (default 32, as the MCP tools).
+        /// Collision size of the unit check_path and check_melee walk with (default 31, a Footman's, as the MCP tools).
         #[arg(long)]
         unit_size: Option<f64>,
         /// Fail (exit 1) on warnings too.
