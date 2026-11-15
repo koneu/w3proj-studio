@@ -200,7 +200,7 @@
   },
   {
     "name": "camera-bounds-create",
-    "description": "Enforce Camera Bounds on: what the switch does. Create Camera from the views of the input's cameras 2 to 7 (View Selected Camera first): the World Editor answers 'The current camera position is outside of the world camera bounds.' for the views whose target is past the camera bounds (3000, 0 inside the playable part; 0, 2900 with the eye inside; 2820, 0) and makes a camera for the others (2700, 0; 0, -3000 with the eye south of the map; 2700, 300 from 500): Camera 008 to 010. Studio's Cameras tab: Go to camera, View, Create from view, for the same six. Studio gives a new camera a far clipping of its distance + 3000 (the editor: 5000), left out here. Expected MATCH",
+    "description": "Enforce Camera Bounds on: what the switch does. Create Camera from the views of the input's cameras 2 to 7 (View Selected Camera first): the World Editor answers 'The current camera position is outside of the world camera bounds.' for the views whose target is past the camera bounds (3000, 0 inside the playable part; 0, 2900 with the eye inside; 2820, 0) and makes a camera for the others (2700, 0; 0, -3000 with the eye south of the map; 2700, 300 from 500): Camera 008 to 010. Studio's Cameras tab: Go to camera, View, Create from view, for the same six. The new cameras' far and near clipping are the viewed camera's (spec camera-farz). Expected MATCH",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
     },
@@ -444,16 +444,13 @@
       {
         "file": "war3map.w3c",
         "as": "parsed",
-        "tolerance": 0.01,
-        "ignore": [
-          "cameras[].farZ"
-        ]
+        "tolerance": 0.01
       }
     ]
   },
   {
     "name": "camera-bounds-create-off",
-    "description": "Enforce Camera Bounds off (Advanced > Enforce Camera Bounds, switched back before the save): Create Camera from the same six views makes all six, Camera 008 to 013, also the three past the camera bounds. Studio: the setting terrain.enforceCameraBounds off, the same six. The far clipping is left out as in camera-bounds-create. Expected MATCH",
+    "description": "Enforce Camera Bounds off (Advanced > Enforce Camera Bounds, switched back before the save): Create Camera from the same six views makes all six, Camera 008 to 013, also the three past the camera bounds. Studio: the setting terrain.enforceCameraBounds off, the same six. Expected MATCH",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/camera-bounds.w3m"
     },
@@ -732,10 +729,7 @@
       {
         "file": "war3map.w3c",
         "as": "parsed",
-        "tolerance": 0.01,
-        "ignore": [
-          "cameras[].farZ"
-        ]
+        "tolerance": 0.01
       }
     ]
   },

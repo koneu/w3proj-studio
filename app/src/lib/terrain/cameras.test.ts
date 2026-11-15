@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraMarkers, DEPTH_OF_FIELD, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds } from "./cameras";
+import { cameraMarkers, DEPTH_OF_FIELD, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -134,4 +134,23 @@ test("targetInCameraBounds: a typed target past the camera bounds lands on the b
   assert.deepEqual(targetInCameraBounds(null, 3100, -600), [3100, -600]);
   assert.deepEqual(targetInCameraBounds([1, 2, 3], 3100, -600), [3100, -600]);
   assert.deepEqual(targetInCameraBounds(bounds, NaN, 5), [NaN, 5]);
+});
+
+test("ViewClipping: a camera from the view takes the view's clipping, the World Editor's own until a camera is looked through", () => {
+  // we-compare camera-farz (2026-11-15): the opening view gives far 50000, near 16, at any distance; looking through
+  // cameras of distance 500 to 5000 with far 5000 / near 100 or far 9000 / near 50 gave exactly those, not distance + 3000.
+  const clip = new ViewClipping();
+  assert.deepEqual(clip.current(), { farZ: 50000, nearZ: 16 });
+  assert.deepEqual(EDITOR_VIEW_CLIP, { farZ: 50000, nearZ: 16 });
+  for (const [distance, farZ, nearZ] of [[500, 5000, 100], [1000, 9000, 50], [1650, 5000, 100], [2000, 9000, 50], [2500, 5000, 100], [3000, 9000, 50], [4000, 5000, 100], [5000, 9000, 50]]) {
+    clip.lookThrough({ distance, farZ, nearZ } as { farZ: number; nearZ: number });
+    assert.deepEqual(clip.current(), { farZ, nearZ }, `a camera of distance ${distance}`);
+  }
+  // A camera without numbers there leaves the view's clipping; what current() gives is a copy.
+  clip.lookThrough({ farZ: NaN });
+  assert.deepEqual(clip.current(), { farZ: 9000, nearZ: 50 });
+  clip.current().farZ = 1;
+  assert.equal(clip.current().farZ, 9000);
+  // Each view starts with the editor's own clipping.
+  assert.deepEqual(new ViewClipping().current(), { farZ: 50000, nearZ: 16 });
 });

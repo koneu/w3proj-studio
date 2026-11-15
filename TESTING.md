@@ -273,6 +273,12 @@ It never starts the game itself.
   angle 304 and field of view 70 the numbers scale with its distance d (target `y - 0.0993 d`, distance `0.9127 d`).
   The editor puts the target above the middle of the view (an off-centre projection, at 0.385 of the height), which
   a centred camera matches only at this aspect.
+- **A new camera's clipping** (branch camera-farz-we, 2026-11-15, SD; specs `tests/we-compare/camera-farz.json`, input
+  `camera-farz.w3m`: eight cameras at 0, 0 from 500 to 5000, every second with far 9000 / near 50): Create Camera, Create
+  Free Camera and Set Camera To Current View give the camera the view's far and near clipping, never one from the
+  distance. The view has far 50000, near 16 when a map opens (the empty map and 4v4_MountHyjal); View Selected Camera
+  gives it that camera's, which stay through wheel zoom (x1.1 a notch) and arrow-key panning. Studio:
+  lib/terrain/cameras.ts `ViewClipping`, set by the Cameras tab's View button.
 - **Applying a camera object**: `--key m` (camera layer), `--click 1396,177` (the first camera in the palette's list,
   13 px per row), `--click 1476,119` (View Selected Camera). Three runs gave the same picture. `--look` does this:
   its cameras go into we-drive's copy of the map before the start (unpacked with the release CLI, war3map.w3c.json,

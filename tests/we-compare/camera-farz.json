@@ -1,0 +1,87 @@
+[
+  {
+    "name": "camera-farz-create",
+    "description": "A new camera's far and near clipping (branch camera-farz-we, 2026-11-15, SD): Create Camera takes the view's clipping, and View Selected Camera gives the view the camera's; the distance plays no part. The input's eight cameras look at 0, 0 from 500, 1000, 1650, 2000, 2500, 3000, 4000 and 5000, every second one with far 9000 / near 50 instead of 5000 / 100 (tests/fixtures/we-compare/make-camera-bounds-input.mjs with those looks, the clipping set in war3map.w3c.json and packed again). Viewed and made a camera each: Camera 009 to 016 have the viewed camera's far and near (Studio gave max(5000, distance + 3000) and near 100 before). Studio: Cameras tab, Go to camera, View, Create from view. Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-farz.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,190"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,203"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,216"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,229"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,242"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,255"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,268"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "ui": [["view", "we:0,0,3000"], ["tab", "Cameras"]] },
+        {
+          "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const jump = document.querySelector('select[title=\"Go to a camera\"]'); if (!jump) throw new Error('no Cameras tab'); for (let i = 0; i < 40 && jump.options.length < 9; i++) await wait(250); for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) { const o = [...jump.options].find((o) => o.textContent === '00 we-drive look 0' + n); if (!o) throw new Error('no camera ' + n); jump.value = o.value; jump.dispatchEvent(new Event('change')); await wait(300); const view = [...document.querySelectorAll('.terrain-region-panel button')].find((b) => b.textContent === 'View'); if (!view) throw new Error('no View button'); view.click(); await wait(500); [...document.querySelectorAll('.terrain-group-tools button')].find((b) => b.textContent === 'Create from view').click(); await wait(800); } await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3c",
+        "as": "parsed",
+        "tolerance": 0.01
+      }
+    ]
+  },
+  {
+    "name": "camera-farz-free-view",
+    "description": "The view's clipping when no camera was looked through, and how long a viewed camera's stays (2026-11-15, SD, the input of camera-farz-create). The editor: Create Camera from the opening view (0, 0 from 3000) gives far 50000, near 16 (also on 4v4_MountHyjal, 2026-11-15); six wheel notches out (x1.1 each: 5314.68) the same; after View Selected Camera of the second camera (far 9000, near 50) five notches out (1610.51) 9000 / 50; after viewing the second then the first 5000 / 100; after viewing the fourth (9000 / 50) and the Right key held 600 ms (target 85.3, 0) 9000 / 50; and Set Camera To Current View of the third camera after viewing the second gives it the second's distance and 9000 / 50. Studio: the same views set on the terrain view (the panning step by lookAt; its target X, which the held key's time sets, is left out), Create from view and Set from view. Expected MATCH",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/camera-farz.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--move", "748,404"], ["--wheel", "-6@748,404"], ["--sleep", "800"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,190"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"],
+        ["--move", "748,404"], ["--wheel", "-5@748,404"], ["--sleep", "800"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,190"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"],
+        ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,216"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"],
+        ["--move", "748,404"], ["--key", "Right@600"], ["--sleep", "800"],
+        ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,80"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"],
+        ["--click", "1396,190"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2000"],
+        ["--click", "1396,203"], ["--sleep", "300"], ["--click", "1476,139"], ["--sleep", "1200"], ["--key", "Escape"], ["--sleep", "400"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "ui": [["view", "we:0,0,3000"], ["tab", "Cameras"]] },
+        {
+          "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const ed = window.__driveEd; const RAD = Math.PI / 180; const jump = document.querySelector('select[title=\"Go to a camera\"]'); if (!jump) throw new Error('no Cameras tab'); for (let i = 0; i < 40 && jump.options.length < 9; i++) await wait(250); const btn = (sel, t) => { const b = [...document.querySelectorAll(sel)].find((b) => b.textContent === t); if (!b) throw new Error('no ' + t + ' button'); return b; }; const create = async () => { btn('.terrain-group-tools button', 'Create from view').click(); await wait(800); }; const pick = async (n) => { const o = [...jump.options].find((o) => o.textContent === '00 we-drive look 0' + n); if (!o) throw new Error('no camera ' + n); jump.value = o.value; jump.dispatchEvent(new Event('change')); await wait(300); }; const look = async (n) => { await pick(n); btn('.terrain-region-panel button', 'View').click(); await wait(500); }; const zoom = async (d) => { ed.setView({ ...ed.view(), distance: d }); await wait(300); }; ed.lookAt(0, 0); await wait(300); ed.setView({ target: ed.view().target, yaw: 270 * RAD, pitch: 56 * RAD, distance: 3000, fov: 2 * Math.atan(Math.tan(35 * RAD) / ed.aspect()) }); await wait(300); await create(); await zoom(5314.6836); await create(); await look(2); await zoom(1610.51); await create(); await look(2); await look(1); await create(); await look(4); ed.lookAt(85.333336, 0); await wait(300); await create(); await look(2); await pick(3); btn('.terrain-region-panel button', 'Set from view').click(); await wait(800); await w3.editors.saveAll();"
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3c",
+        "as": "parsed",
+        "tolerance": 0.01,
+        "ignore": ["cameras[12].targetX"]
+      }
+    ]
+  }
+]

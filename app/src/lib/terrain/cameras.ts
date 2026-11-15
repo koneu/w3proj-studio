@@ -47,6 +47,33 @@ export function targetInCameraBounds(cameraBounds: readonly number[] | null | un
   return [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))];
 }
 
+/** A view's far and near clipping, which a camera made or set from the view takes. */
+export interface ViewClip { farZ: number; nearZ: number }
+
+/** The World Editor's own view's clipping: what a camera made from a view that never looked through a camera gets,
+ *  whatever its distance (we-drive 2026-11-15, branch camera-farz-we: Create Camera from the opening view of the empty
+ *  64x64 map and of 4v4_MountHyjal, and after six wheel notches out to 5314.7, gave far 50000, near 16). */
+export const EDITOR_VIEW_CLIP: Readonly<ViewClip> = Object.freeze({ farZ: 50000, nearZ: 16 });
+
+/**
+ * The view's clipping as the World Editor keeps it for Create Camera and Set Camera To Current View (spec
+ * tests/we-compare/camera-farz.json): EDITOR_VIEW_CLIP when the map opens; View Selected Camera gives the view that
+ * camera's far and near clipping, which then stay through zooming and scrolling until another camera is looked
+ * through. Distance plays no part (cameras of distance 500 to 5000 with far 5000 or 9000 gave new cameras the same).
+ */
+export class ViewClipping {
+  private clip: ViewClip = { ...EDITOR_VIEW_CLIP };
+  /** Looking through camera `c` (View): its clipping becomes the view's; a value that is no number keeps the view's. */
+  lookThrough(c: Partial<ViewClip>): void {
+    this.clip = {
+      farZ: Number.isFinite(c.farZ) ? c.farZ! : this.clip.farZ,
+      nearZ: Number.isFinite(c.nearZ) ? c.nearZ! : this.clip.nearZ,
+    };
+  }
+  /** The clipping a camera made or set from the view takes. */
+  current(): ViewClip { return { ...this.clip }; }
+}
+
 /** Version 3's floats after the local angles: the World Editor's DoF Distance, DoF Scale and Pos Absolute Z, in the
  *  file's order (the codec's cameras definition). JSON written before they had names keeps them in `unknown`. */
 export const DEPTH_OF_FIELD = ["dofDistance", "dofScale", "posAbsoluteZ"] as const;

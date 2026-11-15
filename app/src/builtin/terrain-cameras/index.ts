@@ -13,7 +13,7 @@ import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type Terra
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
-import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds } from "../../lib/terrain/cameras";
+import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, ViewClipping } from "../../lib/terrain/cameras";
 import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
@@ -90,6 +90,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   const select = (cams: Camera[]) => { selection = cams; selected = cams.at(-1) ?? null; };
   /** Looking through a camera: the markers are hidden until the next click on the map. */
   let previewing = false;
+  /** The view's far and near clipping, which Create from view and Set from view give a camera (the World Editor's rule:
+   *  its own view's until View looks through a camera, then that camera's). */
+  const clipping = new ViewClipping();
 
   /** The names as saved, for the gg_cam_ references in the triggers of cameras renamed since. */
   const names = new SavedNames<Camera>();
@@ -223,18 +226,18 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     else renderPanel();
   };
   const create = async () => {
-    const v = fromView();
+    const v = fromView(), clip = clipping.current();
     if (await viewRefused(v) || gone || !ed.editable) return;
     const c: Camera = {
-      targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, nearZ: 100,
-      ...v, farZ: Math.max(5000, Math.round((v.distance ?? 0) + 3000)), name: uniqueName(),
+      targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70,
+      ...v, ...clip, name: uniqueName(),
     };
     commit(doc.cameras, [...doc.cameras, c], [c]);
   };
   /** Set from view: the camera takes the view's values, unless Enforce Camera Bounds refuses the view. The camera may
    *  have gone while the bounds were read (deleted, or put back by an undo): then nothing changes. */
   const setFromView = async (c: Camera) => {
-    const v = fromView();
+    const v = { ...fromView(), ...clipping.current() };
     if (await viewRefused(v) || gone || !ed.editable || !doc.cameras.includes(c)) return;
     update(c, v);
   };
@@ -353,9 +356,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return h("label.terrain-camera-field", { title }, label, input);
     });
     panel.replaceChildren(name,
-      h("button", { title: "Look through this camera", onclick: () => preview(c) }, "View"),
+      h("button", { title: "Look through this camera", onclick: () => { clipping.lookThrough(c); preview(c); } }, "View"),
       // Several cameras made one by the view would be nothing but copies: this is for one.
-      ...(many ? [] : [h("button", { title: "Take target, angles, distance and field of view from the current view", onclick: () => void setFromView(c) }, "Set from view")]),
+      ...(many ? [] : [h("button", { title: "Take target, angles, distance, field of view and clipping from the current view", onclick: () => void setFromView(c) }, "Set from view")]),
       h("button", { title: many ? "A copy of each selected camera, with a new name" : "A copy of this camera, with a new name", onclick: () => { if (ed.editable) duplicate(); } }, "Duplicate"),
       h("button", { title: many ? "Delete the selected cameras (Del)" : "Delete this camera (Del)", onclick: () => deleteSelected() }, "Delete"),
       ...fields);
