@@ -239,8 +239,8 @@ test("checkpoints recovered from an older version's stray files (build/checkpoin
   assert.ok(app.disk.has(`${FOLDER}\\${RECOVERED}`), `the recovered checkpoint was deleted: ${app.log.join("\n")}`);
   // Control: the checkpoints beyond the one kept go.
   assert.ok(!app.disk.has(`${FOLDER}\\${OLDEST}`) && !app.disk.has(`${FOLDER}\\${NEWER}`), app.log.join("\n"));
-  // Nor are they among the checkpoints the MCP tools list (only the Restore command offers them).
-  assert.deepEqual(((await app.tools.get("list_checkpoints")!({})) as { name: string }[]).map((c) => c.name).filter((n) => n.includes("2019")), []);
+  // They're listed (after the regular ones), and still never counted: see the MCP test below.
+  assert.ok(((await app.tools.get("list_checkpoints")!({})) as { name: string }[]).some((c) => c.name.includes("2019")));
   app.dispose();
 });
 
@@ -262,6 +262,24 @@ test("the Restore list offers recovered checkpoints after the others, timed by n
   // Not counted: keep = 2 holds OLDEST and the new one, so nothing goes; never pruned.
   assert.deepEqual(app.log.filter((l) => l.startsWith("fs_delete")), [], app.log.join("\n"));
   for (const n of [OLDEST, NAMED, STRAY, UNREAD]) assert.ok(app.disk.has(joinPath(FOLDER, n)), `${n} still there`);
+  app.dispose();
+});
+
+test("MCP list_checkpoints appends recovered ones (recovered: true, at null without a time); restore_checkpoint takes their names; counting and pruning unchanged", async () => {
+  const NAMED = "recovered/Map 2019-01-01 10-00-00.w3x", STRAY = "recovered/x.w3x", UNREAD = "recovered/y.w3x";
+  const strayTime = new Date(2018, 5, 1, 12, 0, 0).getTime();
+  const app = fakeApp({ existing: [OLDEST, NEWER, NAMED, STRAY, UNREAD], keep: 2, modified: { [`recovered\\x.w3x`]: strayTime } });
+  const listed = (await app.tools.get("list_checkpoints")!({})) as { name: string; at: string | null; recovered?: boolean }[];
+  assert.deepEqual(listed.map((c) => c.name), [NEWER, OLDEST, NAMED, STRAY, UNREAD]);
+  assert.deepEqual(listed.map((c) => c.recovered), [undefined, undefined, true, true, true]);
+  assert.equal(listed[3].at, new Date(strayTime).toLocaleString());
+  assert.equal(listed[4].at, null);
+  // A regular one still restores (control), a recovered one restores through the same flow, and nothing is pruned.
+  await app.tools.get("restore_checkpoint")!({ name: OLDEST });
+  await app.tools.get("restore_checkpoint")!({ name: STRAY });
+  assert.deepEqual(syncs(app.log), [`sync from ${FOLDER}\\${OLDEST}`, `sync from ${FOLDER}\\recovered\\x.w3x`]);
+  for (const n of [NAMED, STRAY, UNREAD]) assert.ok(app.disk.has(joinPath(FOLDER, n)), `${n} still there`);
+  await assert.rejects(app.tools.get("restore_checkpoint")!({ name: "recovered/nope.w3x" }), /no checkpoint/);
   app.dispose();
 });
 
