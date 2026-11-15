@@ -617,6 +617,12 @@ export function replacePlaced(list: { id: string; position: readonly number[]; v
   return changed;
 }
 
+/** replace_objects' swap: `look` is the object-type lookup the tool has (variation count and kind), so a swap between
+ *  a doodad and a destructable gets the life of its new kind, as the editor's own Replace does. */
+export function replaceByType(list: Parameters<typeof replacePlaced>[0], swaps: Readonly<Record<string, string>>, area: Area | null, look: (id: string) => { numVar?: number; kind?: string } | null | undefined) {
+  return replacePlaced(list, swaps, area, (id) => look(id)?.numVar ?? 1, (id) => look(id)?.kind);
+}
+
 /** A whole placed entry as it is now, for an undo that restores it exactly (life, scale, flags and all). */
 export const entryLook = <T extends object>(e: T): T => structuredClone(e);
 

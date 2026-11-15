@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -459,4 +459,14 @@ test("a replace's snapshot restores the whole entry: life, scale and flags come 
   replacePlaced(old, { LTbr: "LOch" }, null, () => 1, kindOf);
   old[0].id = "LTbr"; old[0].skinId = "LTbr";
   assert.notEqual(old[0].life, start[0].life);
+});
+
+test("replace_objects sets the life of the new kind: 100 as destructable, 255 as doodad", () => {
+  const types: Record<string, { numVar: number; kind: string }> = { LTbr: { numVar: 1, kind: "w3b" }, LOch: { numVar: 1, kind: "w3d" } };
+  const look = (id: string) => types[id];
+  const list = [{ id: "LTbr", skinId: "LTbr", position: [0, 0, 0], life: 100 }];
+  assert.equal(replaceByType(list, { LTbr: "LOch" }, null, look), 1);
+  assert.equal(list[0].life, 255);
+  assert.equal(replaceByType(list, { LOch: "LTbr" }, null, look), 1);
+  assert.equal(list[0].life, 100);
 });

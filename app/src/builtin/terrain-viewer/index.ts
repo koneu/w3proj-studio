@@ -66,7 +66,7 @@ import { CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -708,7 +708,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await editPlaced(`Replace ${Object.keys(swaps).join(", ")}`, fileKey(args.kind ?? "doodads"), async (f) => {
         const was = new Map(f.list.map((p) => [p, p.id]));
         const copies = new Map(f.list.map((p) => [p, structuredClone(p)]));
-        changed = replacePlaced(f.list as Parameters<typeof replacePlaced>[0], swaps, area, (id) => look(id)?.numVar ?? 1);
+        changed = replaceByType(f.list as Parameters<typeof replaceByType>[0], swaps, area, look);
         if (!changed) throw new Error("Nothing placed matches that.");
         // Swapped doodads go on their new grid, facing and scale range, as in the editor's Replace, and one whose new
         // footprint would cover another object's stays as it was, as there.
