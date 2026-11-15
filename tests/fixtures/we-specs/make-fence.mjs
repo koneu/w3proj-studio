@@ -15,11 +15,17 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
-if (!game) { console.error("usage: make-fence.mjs <w3proj cli> <game folder> [angles]"); process.exit(2); }
+if (!game) { console.error("usage: make-fence.mjs <w3proj cli> <game folder> [angles|ints|neg|dest]"); process.exit(2); }
 // "angles": fence-angles.w3x, many facings of two rectangles (below), for the quarter the editor turns them to
 const angles = process.argv[4] === "angles";
 // "ints": fence-ints.w3x, angles that are whole numbers of radians (2.0, 3.0, 180.0 …) on three kinds of doodad
 const ints = process.argv[4] === "ints";
+// "neg": fence-neg.w3x, negative and other whole and odd angles (-1 three times each: random?) on the same three kinds,
+// and NOfl and LOcb off their grid with flags 0 and 1
+const neg = process.argv[4] === "neg";
+// "dest": fence-dest.w3x, whole-number angles on destructables without a fixed rotation: the barrel LTbr (2x2Default,
+// one colour), the thin path blocker YTpl (2x1Default, turns), the crate LTcr (4x4Default) and OTsp (no texture)
+const dest = process.argv[4] === "dest";
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -36,10 +42,21 @@ try {
   run("unpack", join(here, "flat.w3x"), dir, "--game", game);
   const file = join(dir, "map", "war3map.doo.json");
   const doc = JSON.parse(readFileSync(file, "utf8"));
-  const put = (id, x, y, angle, scale = 1) => doc.doodads.push({
+  const put = (id, x, y, angle, scale = 1, flags = 2) => doc.doodads.push({
     id, variation: 0, position: [x, y, 0], angle: f32(angle), scale: [scale, scale, scale], skinId: id,
-    preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [doc.doodads.length, 0, 0], extras: [] });
-  if (angles) {
+    preFlags: 4294967295, flags, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [doc.doodads.length, 0, 0], extras: [] });
+  if (neg) {
+    const list = [];
+    const NEG = [-0.5, -1, -1, -1, -2, -3, -45, -90, -180, -3.14159, -360, 360, 361, 720];
+    for (const id of ["NOfl", "LOcb", "APms"]) for (const a of NEG) list.push([id, a, 2]);
+    list.forEach(([id, a], i) => put(id, -2688 + (i % 8) * 640, -2688 + Math.floor(i / 8) * 640, a));
+    // Off their grid (13.5, 20.25) at 0.4 radians with flags 0 and 1.
+    [["NOfl", 0], ["NOfl", 1], ["LOcb", 0], ["LOcb", 1]].forEach(([id, flags], k) => put(id, -2688 + 13.5 + k * 640, 2432 + 20.25, 0.4, 1, flags));
+  } else if (dest) {
+    const list = [];
+    for (const id of ["LTbr", "YTpl", "LTcr", "OTsp"]) for (const a of [1, 2, 3, 90, 180, 270, -1, -2, 2.0000002, 0.5]) list.push([id, a]);
+    list.forEach(([id, a], i) => put(id, -2688 + (i % 8) * 640 + 13.5, -2688 + Math.floor(i / 8) * 640 + 20.25, a));
+  } else if (angles) {
     // Which quarter the editor turns each angle to: the straight fence (8x2) and the hay cart (4x2) every 5 degrees,
     // and the fence at radian values round 2.0.
     const list = [];
@@ -64,7 +81,7 @@ try {
     for (let k = 0; k < 10; k++) put("NOal", 128 + 64 * k, -1536 + 64 * k, 0, 1.2);
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, angles ? "fence-angles.w3x" : ints ? "fence-ints.w3x" : "fence-wpm.w3x"), "--force-stale");
+  run("pack", dir, "-o", join(here, angles ? "fence-angles.w3x" : ints ? "fence-ints.w3x" : neg ? "fence-neg.w3x" : dest ? "fence-dest.w3x" : "fence-wpm.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

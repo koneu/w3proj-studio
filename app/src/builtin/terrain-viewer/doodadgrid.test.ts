@@ -175,7 +175,7 @@ test("a square texture of more than one colour turns to the quarter, a plain one
 
 // we-compare specs fence-ints and fence-angles (tests/we-compare/fence-wpm.json, 2026-11-15): the editor reads a stored
 // angle that is a whole number as degrees, on a rectangle (NOfl 8x2), a plain square (LOcb) and without a texture (APms)
-// alike; 2.0000002 and 1.9999999 stay radians; -1 came back as 180 (not explained: left as a radian angle here).
+// alike; 2.0000002 and 1.9999999 stay radians; -1 came back as 180 (it is read as 135°: the test below).
 test("Snap Doodads on Load reads a whole-number angle as degrees (measured)", () => {
   const at = (id: string, angle: number): Placed => ({ id, variation: 0, position: [0, 0, 0], angle, scale: [1, 1, 1] });
   const sizes: Record<string, PathSize | null> = { NOfl: { width: 8, height: 2 }, LOcb: { width: 4, height: 4 }, APms: null };
@@ -292,13 +292,36 @@ test("a texture's grid is 64n plus the whole cells below its middle (measured, 1
   assert.equal(onDoodadGrid(-32, 1), 0);
 });
 
-test("a whole-number angle stays radians where the caller says the type isn't a doodad (destructables: not measured)", () => {
-  const entry = { id: "LTbr", variation: 0, position: [0, 0, 0] as [number, number, number], angle: 2, scale: [1, 1, 1] as [number, number, number] };
-  const sizeOf = () => ({ width: 4, height: 4 });
-  const asDoodad = doodadSnaps([entry], sizeOf, () => null, () => true);
-  assert.notEqual(asDoodad.length ? asDoodad[0].angle : entry.angle, 2, "a doodad reads 2 as 2 degrees");
-  // The destructable's 2 is kept as the angle the grid rule gets (radians), not turned to 0.0349 first.
-  const viaRadians = doodadSnaps([{ ...entry }], sizeOf, () => null, () => false);
-  const viaDegrees = doodadSnaps([{ ...entry }], sizeOf, () => null, () => true);
-  assert.notDeepEqual(viaRadians.map((s) => s.angle), viaDegrees.map((s) => s.angle));
+// we-compare fence-neg and fence-dest (tests/we-compare/fence-wpm.json, 2026-11-15, branch snap-angle-we): negative and
+// large whole numbers on the doodads, whole numbers on four destructables without a fixed rotation (the barrel LTbr
+// 2x2, the thin path blocker YTpl 2x1, the crate LTcr 4x4, OTsp without a texture). -1 is 135° on every type.
+test("a stored -1 is 135°, other negative whole numbers degrees, destructables as doodads (measured)", () => {
+  const at = (id: string, angle: number): Placed => ({ id, variation: 0, position: [0, 0, 0], angle, scale: [1, 1, 1] });
+  const sizes: Record<string, PathSize | null> = {
+    NOfl: { width: 8, height: 2 }, LOcb: { width: 4, height: 4 }, APms: null,
+    LTbr: { width: 2, height: 2 }, YTpl: { width: 2, height: 2, mixed: true }, LTcr: { width: 4, height: 4 }, OTsp: null,
+  };
+  const saved = (id: string, angle: number) => {
+    const s = doodadSnaps([at(id, Math.fround(angle))], (i) => sizes[i]);
+    return Math.fround(s.length ? s[0].angle : angle);
+  };
+  // [type, stored, saved by the editor]
+  const cases: [string, number, number][] = [
+    ["NOfl", -1, 3.1415927], ["LOcb", -1, 2.3561945], ["APms", -1, 2.3561945],
+    ["NOfl", -0.5, 0], ["LOcb", -0.5, 5.7831855], ["NOfl", -3, 0], ["LOcb", -3, 6.2308254], ["LOcb", -45, 5.4977875],
+    ["APms", -90, 4.712389], ["NOfl", -90, 4.712389], ["NOfl", -180, 3.1415927], ["LOcb", -180, 3.1415927],
+    ["APms", -3.14159, 3.1415954], ["NOfl", -3.14159, 3.1415927], ["LOcb", -360, 0], ["LOcb", 360, 6.2831855],
+    ["APms", 361, 0.017453194], ["LOcb", 720, 6.2831855], ["NOfl", 720, 0],
+    ["LTbr", 1, 0.017453292], ["LTbr", 2, 0.034906585], ["LTbr", 3, 0.05235988], ["LTbr", 90, 1.5707964], ["LTbr", 180, 3.1415927],
+    ["LTbr", 270, 4.712389], ["LTbr", -1, 2.3561945], ["LTbr", -2, 6.248279], ["LTbr", 2.0000002, 2.0000002], ["LTbr", 0.5, 0.5],
+    ["YTpl", 1, 0], ["YTpl", 2, 0], ["YTpl", 3, 0], ["YTpl", 90, 1.5707964], ["YTpl", 180, 3.1415927], ["YTpl", 270, 4.712389],
+    ["YTpl", -1, 3.1415927], ["YTpl", -2, 0], ["YTpl", 2.0000002, 1.5707964], ["YTpl", 0.5, 0],
+    ["LTcr", 90, 1.5707964], ["LTcr", -1, 2.3561945], ["OTsp", 3, 0.05235988], ["OTsp", -1, 2.3561945], ["OTsp", -2, 6.248279],
+  ];
+  const wrong = cases.filter(([id, a, want]) => saved(id, a) !== Math.fround(want)).map(([id, a, want]) => [id, a, want, saved(id, a)]);
+  assert.deepEqual(wrong, []);
+  // Control: read as a radian angle, -1 would come out at 5.28 (the square) or 270 (the rectangle).
+  assert.notEqual(saved("LOcb", -1), Math.fround(2 * Math.PI - 1));
+  // Through snapAsOpened's kinds: a destructable reads its whole number as degrees too.
+  assert.equal(doodadSnaps([at("LTbr", 3)], (i) => sizes[i])[0].angle, Math.fround((3 * Math.PI) / 180));
 });

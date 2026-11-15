@@ -4,7 +4,7 @@
 // Fix Doodads on Load (terrain.doodads.fixOnLoad) the scale. What the editor does while editing (we-drive, 2026-11-13) is written in
 // TESTING.md "Doodad rules while editing".
 
-import { doodadOnGrid, doodadSnaps, type PathSize } from "./doodadgrid";
+import { doodadOnGrid, doodadSnaps, openedUnitAngle, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedScale, type ScaleRule } from "./doodadrules";
 import type { Placed } from "./objects";
 
@@ -74,8 +74,8 @@ export interface OpenRuleSource {
  *  one that moves and follows the ground (no flag 4) lands on it. `moved` hears of each one that moved. The number
  *  changed. Applied to its own result it changes nothing, so an AI tool's file and the save after it agree. */
 export function snapAsOpened(list: Placed[], src: OpenRuleSource, moved?: (entry: Placed) => void): number {
-  // A whole-number angle is degrees for doodads (measured in the editor), not (measured) for destructables (w3b).
-  const snaps = doodadSnaps(list, (id) => src.sizeOf(id), (id) => src.fixedRot(id), (id) => src.kindOf(id) !== "w3b");
+  // A whole-number angle is degrees, -1 is 135°, for doodads and destructables alike (doodadgrid.ts openedAngle).
+  const snaps = doodadSnaps(list, (id) => src.sizeOf(id), (id) => src.fixedRot(id));
   for (const { entry, x, y, angle } of snaps) {
     if (x !== entry.position[0] || y !== entry.position[1]) {
       const flags = (entry as Placed & { flags?: number }).flags ?? 0;
@@ -85,6 +85,20 @@ export function snapAsOpened(list: Placed[], src: OpenRuleSource, moved?: (entry
     entry.angle = angle;
   }
   return snaps.length;
+}
+
+/** The facings the World Editor gives the entries of war3mapUnits.doo when it opens a map, in place (doodadgrid.ts
+ *  openedUnitAngle: a whole number as degrees, -1 as 135°, then into 0..360). The number changed. Applied to its own
+ *  result it changes nothing. */
+export function unitAnglesAsOpened(list: Placed[]): number {
+  let n = 0;
+  for (const entry of list) {
+    const angle = openedUnitAngle(entry.angle);
+    if (angle === entry.angle || (Number.isNaN(angle) && Number.isNaN(entry.angle))) continue;
+    entry.angle = angle;
+    n++;
+  }
+  return n;
 }
 
 /** Fix Doodads on Load on a list as stored, in place (doodadrules.ts doodadFixes): the scale within the type's range,

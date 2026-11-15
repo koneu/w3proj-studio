@@ -26,6 +26,8 @@
 //   doodad's and a destructable's alike, with or without a texture: -90 to 270, 450 to 90, 720 and 1080 to 360 (not
 //   0: only above 360 is taken down), -720 to 0. A quarter turn comes from the stored angle (LOch -45 goes to 0, not
 //   the 270 of its 315).
+// - before any of this the stored angle is read as the editor reads it: a whole number as degrees, -1 as 135°
+//   (openedAngle), doodads, destructables and units alike (units: openedUnitAngle).
 // The editor doesn't count this as a change (closing it asks nothing), but its next save writes the new places.
 
 import type { Placed } from "./objects";
@@ -119,26 +121,42 @@ export function doodadOnGrid(x: number, y: number, angle: number, size: PathSize
   return { x: keep(x, onDoodadGrid(x, cellsX)), y: keep(y, onDoodadGrid(y, cellsY)), angle: turned };
 }
 
-/** The angle (radians) the World Editor takes a stored angle for when it opens a map: a whole number is read as degrees
- *  (we-compare specs fence-ints / fence-angles, 2026-11-15: 1, 2, 3 … 7, 45, 90, 180, 270 and -2 on a rectangle NOfl, a
- *  plain square LOcb and a doodad without a texture APms; 2.0000002 and 1.9999999 stay radians). -1 is left as it is: the
- *  editor turned an NOfl stored at -1 to 180, which neither reading gives. Measured on doodads, not on destructables. */
+/** What the World Editor reads a stored -1 as: 135° (fence-neg, fence-dest, 2026-11-15). */
+const MINUS_ONE_ANGLE = Math.fround((3 * Math.PI) / 4);
+
+/** The angle (radians) the World Editor takes a stored angle for when it opens a map: a whole number is read as degrees,
+ *  and -1 as 135° (we-compare specs fence-ints, fence-neg and fence-dest, 2026-11-15: 1 to 7, 45, 90, 180, 270, 360,
+ *  361, 720 and -2, -3, -45, -90, -180, -360 on a rectangle NOfl, a plain square LOcb and a doodad without a texture
+ *  APms, and 1, 2, 3, 90, 180, 270, -2 on the destructables LTbr, YTpl, LTcr and OTsp, all as degrees; -1 on all seven
+ *  types, three copies each, as 135, so the NOfl and YTpl turn to 180; 2.0000002, 1.9999999, -0.5 and -3.14159 stay
+ *  radians). Doodads and destructables alike. */
 export function openedAngle(angle: number): number {
   const a = Math.fround(angle);
-  return Number.isInteger(a) && a !== 0 && a !== -1 ? fixedAngle(a) : angle;
+  if (a === -1) return MINUS_ONE_ANGLE;
+  return Number.isInteger(a) && a !== 0 ? fixedAngle(a) : angle;
 }
 
-/** The doodads of a list the World Editor would move or turn when it opens the map, with where to. `sizeOf`: an
- *  id's pathing texture size, null for none; `fixedRotOf`: a destructable type's fixed rotation (doodadOnGrid). A
- *  whole-number angle is degrees (openedAngle) where `degreesFor(id)` says so: measured on doodads only, so not for
- *  destructables. */
+/** The facing the World Editor gives a unit (or anything else of war3mapUnits.doo) stored at `angle` when it opens a map:
+ *  read as a doodad's (openedAngle: a whole number as degrees, -1 as 135°), then brought into 0..360 by whole turns
+ *  (wholeTurns: 360 stays 360). Measured on gold mines, taverns, goblin merchants, barracks and footmen (we-compare
+ *  neutral-facing and neutral-facing-neg, 2026-11-15: 2 and 3 to 2° and 3°, 0.5, 90° and 5.5 kept, -1 to 135°, -0.5 to
+ *  5.78, -2.0725 to 4.21, 400 to 40°, 6.5 to 0.217, 360 to 6.2831855). As stored when that is the same in single
+ *  precision, so an angle in range isn't rewritten. */
+export function openedUnitAngle(angle: number): number {
+  if (!Number.isFinite(angle)) return angle;
+  const now = wholeTurns(openedAngle(angle));
+  return Math.fround(angle) === now ? angle : now;
+}
+
+/** The doodads and destructables of a list the World Editor would move or turn when it opens the map, with where to.
+ *  `sizeOf`: an id's pathing texture size, null for none; `fixedRotOf`: a destructable type's fixed rotation
+ *  (doodadOnGrid). The stored angle is read as the editor reads it (openedAngle). */
 export function doodadSnaps(list: readonly Placed[], sizeOf: (id: string) => PathSize | null,
-  fixedRotOf: (id: string) => number | null = () => null,
-  degreesFor: (id: string) => boolean = () => true): { entry: Placed; x: number; y: number; angle: number }[] {
+  fixedRotOf: (id: string) => number | null = () => null): { entry: Placed; x: number; y: number; angle: number }[] {
   const out: { entry: Placed; x: number; y: number; angle: number }[] = [];
   for (const entry of list) {
     const [x, y] = entry.position;
-    const at = doodadOnGrid(x, y, degreesFor(entry.id) ? openedAngle(entry.angle) : entry.angle, sizeOf(entry.id), fixedRotOf(entry.id));
+    const at = doodadOnGrid(x, y, openedAngle(entry.angle), sizeOf(entry.id), fixedRotOf(entry.id));
     if (at.x !== x || at.y !== y || at.angle !== entry.angle) out.push({ entry, ...at });
   }
   return out;

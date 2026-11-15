@@ -76,7 +76,7 @@
   },
   {
     "name": "fence-ints",
-    "description": "Angles that are whole numbers of radians (make-fence.mjs ints): NOfl 8x2 at 1 to 7, 45, 90, 180, 270, -1, -2 and 2.0000002, 1.9999999, 0.5; a plain square LOcb and mushrooms APms (no texture) at 1, 2, 3, 90, 180, 2.0000002, 0.5. The editor reads a whole number as degrees (2026-11-15: LOcb and APms at 1 saved as 0.017453292, at 180 as 3.1415927; NOfl at 270 turned to 270 and lies along x), the others as radians (doodadgrid.ts openedAngle). Ignored: the NOfl at -1 (doodads[11]), which the editor turned to 180, neither reading of -1",
+    "description": "Angles that are whole numbers of radians (make-fence.mjs ints): NOfl 8x2 at 1 to 7, 45, 90, 180, 270, -1, -2 and 2.0000002, 1.9999999, 0.5; a plain square LOcb and mushrooms APms (no texture) at 1, 2, 3, 90, 180, 2.0000002, 0.5. The editor reads a whole number as degrees (2026-11-15: LOcb and APms at 1 saved as 0.017453292, at 180 as 3.1415927; NOfl at 270 turned to 270 and lies along x), the others as radians (doodadgrid.ts openedAngle). The NOfl at -1 (doodads[11]) turned to 180: the editor reads -1 as 135 (fence-neg); MATCH since branch snap-angle-we (2026-11-15)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/fence-ints.w3x"
     },
@@ -107,12 +107,85 @@
     "compare": [
       {
         "file": "war3map.doo",
-        "as": "parsed",
-        "ignore": [
-          "doodads[11]"
-        ]
+        "as": "parsed"
       }
     ],
     "limit": 60
+  },
+  {
+    "name": "fence-neg",
+    "description": "Negative and other angles (make-fence.mjs neg): NOfl 8x2, the plain square LOcb and APms (no texture) at -0.5, -1 (three times each), -2, -3, -45, -90, -180, -3.14159, -360, 360, 361, 720; NOfl and LOcb off their grid at 0.4 with flags 0 and 1. Measured 2026-11-15 (branch snap-angle-we): every whole number is degrees (-2 to 358, 361 to 1, 360 and 720 to 6.2831855 on the squares), -1 is 135 on all three types and all copies (the NOfl's quarter turn of it is 180), -0.5 and -3.14159 are radians brought into 0..360; flags 0 and 1 snap as flags 2 and are saved with the solid flag (doodadgrid.ts openedAngle). MATCH since then",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-neg.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 80
+  },
+  {
+    "name": "fence-dest",
+    "description": "Whole-number angles on destructables without a fixed rotation (make-fence.mjs dest): the barrel LTbr (2x2Default, one colour), the thin path blocker YTpl (2x1Default, turns to a quarter), the crate LTcr (4x4Default) and OTsp (no texture) at 1, 2, 3, 90, 180, 270, -1, -2, 2.0000002, 0.5, off their grid. Measured 2026-11-15 (branch snap-angle-we): as on doodads, a whole number is degrees and -1 is 135 (YTpl: 180); before, Studio read them as radians for destructables. MATCH since then",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-dest.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 80
   }
 ]
