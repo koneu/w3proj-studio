@@ -4617,6 +4617,59 @@ async function dataSafety(page, found) {
   }
 }
 
+/** A campaign whose chapter can't be read (not on Windows, where the permissions differ; not as root):
+ *  1. Opening the campaign works: the other chapter is listed, the open rejects nothing.
+ *  2. The workspace names the unreadable chapter folders (a whole chapter, and the map folder of another), and a warning
+ *     says so once.
+ *  3. The Problems view has an entry naming the chapter, its path and the system's reason.
+ *  4. The files of the readable chapter open as before (control), and a chapter whose w3proj.toml can't be read still
+ *     lets the campaign open. */
+async function unreadableChapter(page, found) {
+  if (process.platform === "win32") return;
+  const fail = (what) => found.push(`unreadable chapter: ${what}`);
+  const dir = join(work, "unreadable-chapter");
+  rmSync(dir, { recursive: true, force: true });
+  const camp = join(dir, "camp");
+  const put = (p, text) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text); };
+  const locks = [];
+  try {
+    for (const name of ["Chapter 1.w3x", "Chapter 2.w3x", "Chapter 3.w3x", "Chapter 4.w3x"]) cpSync(FIXTURE, join(camp, "maps", name), { recursive: true });
+    put(join(camp, "w3proj.toml"), readFileSync(join(FIXTURE, "w3proj.toml"), "utf8"));
+    put(join(camp, "map", "war3campaign.w3f.json"), "{}");
+    const lock = (p) => { chmodSync(p, 0o000); locks.push(p); };
+    lock(join(camp, "maps", "Chapter 2.w3x"));
+    lock(join(camp, "maps", "Chapter 3.w3x", "map"));
+    lock(join(camp, "maps", "Chapter 4.w3x", "w3proj.toml"));
+    let seesThrough = false;
+    try { readdirSync(join(camp, "maps", "Chapter 2.w3x")); seesThrough = true; } catch { /* locked, as wanted */ }
+    if (seesThrough) { console.log("  unreadable chapter: skipped (the permissions don't lock anything, as root)"); return; }
+    await page.evaluate(`(() => { window.__chWarned = []; window.__chWarn = w3Workbench.notifications.show; w3Workbench.notifications.show = async (sev, m) => { window.__chWarned.push(m); }; })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    const opened = await page.evaluate(`w3.workspace.open(${JSON.stringify(camp)}).then(() => null, (e) => String(e?.message ?? e))`);
+    if (opened) return fail(`opening the campaign failed: ${opened}`);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, (e) => String(e))`);
+    const files = await page.evaluate(`w3.workspace.files().map((f) => f.path)`);
+    if (!files.includes("maps/Chapter 1.w3x/map/war3map.w3i.json")) fail(`the readable chapter's files aren't listed: ${files.length} files`);
+    const bad = await page.evaluate(`w3.workspace.unreadable()`);
+    const paths = bad.map((u) => u.path).sort();
+    if (JSON.stringify(paths) !== JSON.stringify(["maps/Chapter 2.w3x", "maps/Chapter 3.w3x/map"])) fail(`unreadable folders: ${JSON.stringify(bad)}`);
+    if (bad.some((u) => !u.error)) fail(`an unreadable folder without a reason: ${JSON.stringify(bad)}`);
+    await soon(async () => (await page.evaluate(`window.__chWarned.length`)) > 0, 5000).catch(() => {});
+    const warned = await page.evaluate(`window.__chWarned`);
+    if (warned.length !== 1 || !warned[0].includes("Chapter 2.w3x")) fail(`the warning: ${JSON.stringify(warned)}`);
+    const list = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.run()).then((p) => p.map((x) => x.message), (e) => ["failed: " + e])`).catch(() => null);
+    if (list === null) fail("the Problems check couldn't be run");
+    else if (!list.some((m) => m.includes('chapter "Chapter 2.w3x"') && /can't be read/.test(m))) fail(`no Problems entry names the chapter: ${JSON.stringify(list).slice(0, 400)}`);
+    // The campaign's files stay usable: the folder list holds the readable chapter too.
+    const folders = await page.evaluate(`w3.workspace.folders()`);
+    if (!folders.includes("maps/Chapter 1.w3x/map")) fail(`folders: ${JSON.stringify(folders)}`);
+  } finally {
+    for (const p of locks) { try { chmodSync(p, 0o755); } catch { /* gone */ } }
+    await page.evaluate(`(() => { if (window.__chWarn) w3Workbench.notifications.show = window.__chWarn; window.__chWarn = null; })()`).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** The workbench's own state (branch workbench-polish):
  *  1. A project's tabs come back with their editors where they were: the text editor's selection and first line in
  *     sight go into the webview's storage when the tabs close, and come back from there.
@@ -12925,6 +12978,7 @@ async function run() {
         triggersAndAi,
         typedFieldSave,
         unitProperties,
+        unreadableChapter,
         verify3Steps,
         viewModes,
         vjassCheck,
@@ -13138,6 +13192,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeUndo", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety", found);
+  await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
+  await leftOpen(page, "unreadableChapter", found);
   await pathingImport(page, found).catch((e) => found.push(`pathing import: ${e.message}`));
   await leftOpen(page, "pathingImport", found);
   await pathingSquare(page, found).catch((e) => found.push(`pathing square: ${e.message}`));

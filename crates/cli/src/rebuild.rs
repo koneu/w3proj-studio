@@ -341,6 +341,10 @@ impl Server {
         match cmd {
             "project_open" => to_json(backend::open_project(path()?)?),
             "project_files" => to_json(backend::walk_project(Path::new(root()?), false)?.0),
+            "project_files_partial" => {
+                let (files, unreadable) = backend::walk_project(Path::new(root()?), true)?;
+                to_json(serde_json::json!({ "files": files, "unreadable": unreadable }))
+            }
             "project_folders" => to_json(backend::project_folders(Path::new(root()?))?),
             "path_normalize" => to_json(backend::normal_path(path()?)),
             "fs_stat" => to_json(backend::stamp_of(Path::new(path()?)).ok()),

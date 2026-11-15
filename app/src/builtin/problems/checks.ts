@@ -52,10 +52,31 @@ const BATCH_VARIATIONS = 64;
 /** Imported models read at the same time by "Textures of imported models". */
 const MODEL_READS = 6;
 
+/** A folder the listing couldn't read: a campaign's chapter (`maps/<chapter>`) is named as such, with its path and why. */
+export function unreadableProblems(list: { path: string; error: string }[]): Problem[] {
+  return list.map((u): Problem => {
+    const parts = u.path.replace(/\\/g, "/").split("/");
+    const chapter = parts.length >= 2 && parts[0].toLowerCase() === "maps" ? parts[1] : null;
+    return {
+      severity: "error",
+      message: `${chapter ? `The campaign's chapter "${chapter}"` : `The folder ${u.path}`} can't be read (${u.error}), so it isn't listed or checked. The rest of the project works.`,
+      location: u.path,
+      about: u.path,
+    };
+  });
+}
+
 /** `scope`: what the checks of the current run share (the Problems service makes one per run);
  *  without it, every check reads everything itself. */
 export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(w3, false)): ProblemCheck[] {
   return [
+    {
+      id: "unreadable",
+      title: "Unreadable folders",
+      async run() {
+        return unreadableProblems(w3.workspace.unreadable());
+      },
+    },
     {
       id: "jass",
       title: "Map script",

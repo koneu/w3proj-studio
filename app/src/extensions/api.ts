@@ -364,6 +364,9 @@ export interface W3Api {
     filesReady(): Promise<void>;
     /** The project's folders (forward slashes), empty ones too. */
     folders(): string[];
+    /** Folders below the project root the last listing couldn't read (e.g. a campaign chapter without permission),
+     *  with the system's reason: skipped, the rest of the project works. */
+    unreadable(): { path: string; error: string }[];
     /** Creates a project folder, with those above it. */
     createFolder(projectPath: string): Promise<void>;
     /** Removes an empty project folder. */

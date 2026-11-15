@@ -177,10 +177,16 @@ pub fn project_folders(root: &Path) -> CmdResult<Vec<String>> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).map_err(err)? {
-            let entry = entry.map_err(err)?;
+        // A subfolder that can't be read is listed itself but not entered (`walk_project` names it); the root must be readable.
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) if dir != root => continue,
+            Err(e) => return Err(err(e)),
+        };
+        for entry in entries {
+            let Ok(entry) = entry else { break };
             // A name with a `\` is a stray of an older version (see walk_project): not a folder path.
-            if !entry.file_type().map_err(err)?.is_dir() || entry.file_name().to_string_lossy().contains('\\') {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) || entry.file_name().to_string_lossy().contains('\\') {
                 continue;
             }
             let path = entry.path();

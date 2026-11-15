@@ -10,6 +10,8 @@ let gate: Promise<void> | null = null;
 let filesGate: Promise<void> | null = null;
 /** The directory reads fail. */
 let failFiles = false;
+/** Folders the listing can't read (project paths): their files are left out of what the disk answers. */
+const locked = new Map<string, string>();
 let normalizeGate: Promise<void> | null = null;
 /** Answers for a file written at once: what the listing then has. */
 const holds = new Map<string, Promise<void>>();
@@ -41,13 +43,16 @@ g.__TAURI_INTERNALS__ = {
   async invoke(command: string, args: Record<string, unknown>, options?: { headers?: Record<string, string> }) {
     switch (command) {
       case "project_open": return { root: args.path, name: "p" };
+      case "project_files_partial":
       case "project_files": {
         calls.projectFiles++;
         // What the disk holds when the read starts; a held read answers with that, later.
         const seen = (backend.get(String(args.root)) ?? []).map((f) => ({ ...f, ...listingLag.get(f.path) }));
         if (filesGate) await filesGate;
         if (failFiles) throw "the folder can't be read";
-        return seen;
+        if (command === "project_files") return seen;
+        const hidden = (p: string) => [...locked.keys()].some((l) => p === l || p.startsWith(l + "/"));
+        return { files: seen.filter((f) => !hidden(f.path)), unreadable: [...locked].map(([path, error]) => ({ path, error })) };
       }
       case "project_folders": return [];
       case "fs_stat": {
@@ -323,6 +328,41 @@ test("an open whose list can't be read still opens the project (told, recent lis
   await ws.refresh();
   await ws.filesReady();
   assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j"]);
+});
+
+test("a chapter folder that can't be read doesn't fail the open: the rest lists, the folder is named, its known files stay", async () => {
+  reset();
+  backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }, { path: "maps/Chapter 1/map/a.txt", size: 1, modified: 1 }, { path: "maps/Chapter 2/map/b.txt", size: 1, modified: 1 }]);
+  const { ws } = make();
+  locked.set("maps/Chapter 2", "Keine Berechtigung (os error 13)");
+  try {
+    await ws.open(A);
+    await ws.filesReady();
+    assert.deepEqual(ws.files().map((f) => f.path), ["war3map.j", "maps/Chapter 1/map/a.txt"]);
+    assert.deepEqual(ws.unreadable(), [{ path: "maps/Chapter 2", error: "Keine Berechtigung (os error 13)" }]);
+    // Once readable its files are new to the list; locked again later they aren't reported as deleted.
+    locked.delete("maps/Chapter 2");
+    assert.deepEqual([...(await ws.externalChanges())], ["maps/chapter 2/map/b.txt"].map((k) => ws.key(k)));
+    assert.deepEqual(ws.unreadable(), []);
+    assert.equal(ws.files().length, 3);
+    locked.set("maps/Chapter 2", "denied");
+    assert.deepEqual([...(await ws.externalChanges())], [], "a folder locked later isn't a deletion");
+    assert.equal(ws.files().length, 3, "its files stay listed");
+    assert.equal(ws.unreadable().length, 1);
+  } finally {
+    locked.clear();
+  }
+});
+
+test("an unreadable project root still fails the open", async () => {
+  reset();
+  const { ws } = make();
+  failFiles = true;
+  try {
+    await assert.rejects(ws.open(A), /can't be read/);
+  } finally {
+    failFiles = false;
+  }
 });
 
 const OFFLINE = "//offline/share/p";

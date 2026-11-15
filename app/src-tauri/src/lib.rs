@@ -1341,6 +1341,7 @@ mod fs_tests {
         let readable = std::fs::read_dir(&locked).is_ok();
         let partial = project_files_partial(root.clone());
         let strict = project_files(root.clone());
+        let folders = project_folders(root.clone());
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         if readable {
@@ -1352,7 +1353,10 @@ mod fs_tests {
         assert_eq!(partial.unreadable.len(), 1, "{:?}", partial.unreadable);
         assert_eq!(partial.unreadable[0].path, "maps/Chapter 2");
         assert!(!partial.unreadable[0].error.is_empty());
-        assert!(strict.is_err(), "the workspace's list must not pass a folder it couldn't read for an empty one");
+        assert!(strict.is_err(), "the strict list must not pass a folder it couldn't read for an empty one");
+        let mut folders = folders.expect("the folder list failed on one unreadable chapter folder");
+        folders.sort();
+        assert_eq!(folders, ["map", "map/sub", "maps", "maps/Chapter 1", "maps/Chapter 1/map", "maps/Chapter 2"]);
         // An unreadable root fails the partial list too: there is nothing it could list.
         assert!(project_files_partial(dir.join("nope").to_string_lossy().into_owned()).is_err());
     }

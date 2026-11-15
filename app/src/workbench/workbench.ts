@@ -124,6 +124,7 @@ export class Workbench {
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
     this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking(), () => this.editors.remember());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
+    this.workspace.onDidChange.on(() => this.warnUnreadable());
     root.append(this.titleBar.root, main, this.statusBar.root);
     this.notifications = new Notifications(root);
     // A settings file that is there but can't be read is never written over: said where the user sees it.
@@ -295,6 +296,20 @@ export class Workbench {
     });
   }
 
+  /** What the user was told is unreadable, by project: one notice per change, not one per file refresh. */
+  private toldUnreadable: { root: string | null; paths: string } = { root: null, paths: "" };
+  /** A folder of the open project the listing couldn't read (a campaign's chapter): said where the user sees it, the
+   *  rest of the project works (the Problems view has an entry too). */
+  private warnUnreadable() {
+    const root = this.workspace.project()?.root ?? null, list = this.workspace.unreadable();
+    const paths = list.map((u) => u.path).join("\n");
+    if (this.toldUnreadable.root === root && this.toldUnreadable.paths === paths) return;
+    this.toldUnreadable = { root, paths };
+    if (!root || !list.length) return;
+    const what = list.length === 1 ? "A folder of the project can't be read and is" : `${list.length} folders of the project can't be read and are`;
+    void this.notifications.show("warning", `${what} left out: ${list.map((u) => `${u.path} (${u.error})`).join("; ")}. The rest of the project opens; the Problems view lists it.`, []);
+  }
+
   private applyContributions(rec: ExtensionRecord) {
     const c = rec.manifest.contributes ?? {};
     for (const cmd of c.commands ?? []) this.commands.contribute(rec.manifest.id, cmd);
@@ -362,6 +377,7 @@ export class Workbench {
         files: () => wb.workspace.files(),
         filesReady: () => wb.workspace.filesReady(),
         folders: () => wb.workspace.folders(),
+        unreadable: () => wb.workspace.unreadable(),
         createFolder: (p) => wb.workspace.createFolder(p),
         removeFolder: (p) => wb.workspace.removeFolder(p),
         refresh: () => wb.workspace.refresh(),

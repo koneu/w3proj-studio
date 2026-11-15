@@ -28,6 +28,9 @@ export class WorkspaceService {
     return root ? fileKey(path, root) : fileKey(path, onWindows() ? "C:\\" : "/");
   }
   private folderList: string[] = [];
+  /** Folders of the project that couldn't be read at the last listing (a chapter of a campaign the user may not
+   *  open): skipped, not failing the list; their files stay listed as they were known. */
+  private unreadableList: { path: string; error: string }[] = [];
   readonly onDidChange = new Emitter<void>();
   /** A project file was written (its path as given, with forward slashes). */
   readonly onDidSave = new Emitter<string>();
@@ -44,6 +47,26 @@ export class WorkspaceService {
   }
   folders() {
     return this.folderList;
+  }
+  /** The folders below the root the last listing couldn't read, and why (project paths, forward slashes). */
+  unreadable() {
+    return this.unreadableList;
+  }
+
+  /** The project's files: a subfolder that can't be read is skipped and named, and the files last known inside it stay
+   *  (taken for deleted otherwise: an external change that removes them from every editor). An unreadable root fails. */
+  private async listFiles(root: string): Promise<{ files: FileInfo[]; unreadable: { path: string; error: string }[] }> {
+    const known = this.info?.root === root ? this.fileList : [];
+    const got = await invoke<{ files: FileInfo[]; unreadable: { path: string; error: string }[] }>("project_files_partial", { root });
+    if (!got.unreadable.length) return got;
+    const under = (path: string) => got.unreadable.some((u) => {
+      const a = this.key(path, root), b = this.key(u.path, root);
+      return a === b || a.startsWith(b + "/");
+    });
+    const have = new Set(got.files.map((f) => this.key(f.path, root)));
+    const kept = known.filter((f) => under(f.path) && !have.has(this.key(f.path, root)));
+    const files = kept.length ? [...got.files, ...kept].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())) : got.files;
+    return { files, unreadable: got.unreadable };
   }
 
   /** The root whose files `fileList` holds all of (read from its disk once at least), or null: right after an open the
@@ -81,6 +104,7 @@ export class WorkspaceService {
     this.listedRoot = null;
     this.setList([]);
     this.folderList = [];
+    this.unreadableList = [];
     // A list that can't be read doesn't stop the open: the project is open all the same (settings, recent list, tabs
     // and extensions told), the next refresh or focus check reads it again, and the open rejects at the end with why.
     let listFailed: unknown = null;
@@ -125,6 +149,7 @@ export class WorkspaceService {
     this.listedRoot = null;
     this.setList([]);
     this.folderList = [];
+    this.unreadableList = [];
     void this.settings.loadProject(null);
     this.onDidChange.fire();
   }
@@ -142,12 +167,13 @@ export class WorkspaceService {
     const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     const info = await invoke<ProjectInfo>("project_open", { path: root });
     if (this.testListingHold) await this.testListingHold;
-    const list = await invoke<FileInfo[]>("project_files", { root });
+    const { files: list, unreadable } = await this.listFiles(root);
     const folders = await invoke<string[]>("project_folders", { root });
     // Another project was opened meanwhile (or none): this list isn't its.
     if (this.info?.root !== root) return;
     this.info = info;
     this.folderList = folders;
+    this.unreadableList = unreadable;
     this.setList(this.keepNoticed(list, listedBefore, ownBefore));
     this.listedRoot = info.root;
     for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
@@ -184,7 +210,7 @@ export class WorkspaceService {
     const baseline = this.listedRoot === root;
     const before = new Map(this.fileList.map((f) => [this.key(f.path, root), f]));
     const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
-    const after = await invoke<FileInfo[]>("project_files", { root });
+    const { files: after, unreadable } = await this.listFiles(root);
     if (this.info?.root !== root) return new Set();
     // Whether a difference is our own write: one that finished during the read always is (the read may
     // have missed it); an earlier one only while the file still has the size and time it was left with.
@@ -214,9 +240,11 @@ export class WorkspaceService {
     for (const k of before.keys()) if (!isOwn(k)) changed.add(k);
     if (!baseline) changed.clear();
     this.setList(this.keepNoticed(after, listedBefore, ownBefore));
+    const unreadableChanged = unreadable.map((u) => u.path).join("\n") !== this.unreadableList.map((u) => u.path).join("\n");
+    this.unreadableList = unreadable;
     this.listedRoot = root;
     for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
-    if (changed.size || !baseline) {
+    if (changed.size || !baseline || unreadableChanged) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });
       this.onDidChange.fire();
     }
