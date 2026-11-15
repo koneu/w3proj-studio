@@ -105,6 +105,22 @@ test("a tile whose lower-left corner is painted Boundary is blocked as the borde
   assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_BUILD));
 });
 
+test("ships sail shallow and deep water alike; footmen wade it to 52 deep, as the World Editor saves it", () => {
+  // we-compare ford-wpm (2026-11-15, tests/fixtures/we-specs/ford.w3x): the editor's own pathing map over bands of
+  // water 2.4 to 160.4 deep. Every band is ship water (0x40 clear, 0x08 set); up to 51.9 walkable too (0x08), from
+  // 52.4 not (0x0a). In the game ships sail map 03's 38-deep ford (bugs.md, protocol 03 steps 8 and 9).
+  const t = ground();
+  const measured: [number, number][] = [[2.4, 0x08], [20.4, 0x08], [38.4, 0x08], [51.4, 0x08], [51.9, 0x08], [52.4, 0x0a], [53.4, 0x0a], [102.4, 0x0a], [160.4, 0x0a]];
+  for (const [depth, flags] of measured) {
+    for (const k of t.corners) { k.hasWater = true; k.water = depth; }
+    assert.deepEqual(tile(t, 1, 1), Array(16).fill(flags), `${depth} deep`);
+    assert.equal(flags & NO_WATER, 0, `${depth} deep: a ship sails it`);
+  }
+  // Control: the same ground dry has no water for ships.
+  for (const k of t.corners) k.hasWater = false;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_WATER));
+});
+
 test("the water's depth is measured from the tileset's own surface", () => {
   // Ashenvale's water lies 76.8 below the stored level, not 89.6: 12.8 deeper than the corners' `water` says.
   const t = ground();
