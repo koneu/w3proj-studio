@@ -12,7 +12,7 @@ type Host = { settings: Pick<Settings, "get"> };
  *  before and after the edit, `touched` the corners it changed. */
 export function toolWaterRefusal(w3: Host, before: { corners: readonly WaterWord[] }, after: { corners: readonly WaterWord[] }, touched: readonly number[]): string | null {
   if (!switchedOn(w3, "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"])) return null;
-  const words = (t: { corners: readonly WaterWord[] }) => touched.map((i) => ({ hasWater: t.corners[i]?.hasWater ?? false, rawWater: t.corners[i]?.rawWater ?? 0 }));
+  const words = (t: { corners: readonly WaterWord[] }) => touched.map((i) => ({ hasWater: t.corners[i]?.hasWater ?? false, rawWater: t.corners[i]?.rawWater ?? 0, height: t.corners[i]?.height }));
   const hits = waterLimitHits(words(before), words(after));
   return hits.length ? waterLimitText(hits.length) : null;
 }

@@ -182,7 +182,12 @@ export function setLayer(c: Corner, layer: number) {
 
 /** The stored water level word that puts the surface at world height `z`. */
 export function waterLevelAt(z: number, offset = WATER_OFFSET): number {
-  return Math.max(WATER_LEVEL_MIN, Math.min(WATER_LEVEL_MAX, Math.round((z + offset) * 4) + 0x2000));
+  return Math.max(WATER_LEVEL_MIN, Math.min(WATER_LEVEL_MAX, waterLevelWanted(z, offset)));
+}
+
+/** The level `waterLevelAt` would store without the cut-off at the 14 bits: below 0 or above 0x3fff is out of range. */
+export function waterLevelWanted(z: number, offset = WATER_OFFSET): number {
+  return Math.round((z + offset) * 4) + 0x2000;
 }
 
 /** Marks a corner as water with a stored level (keeping the word's unknown high bits). */

@@ -4,7 +4,7 @@ import { clampPoint, insetBy, pasteSkipText, scaledNudge, strictlyInside, waterL
 import { unitHalf } from "../../lib/terrain/resize";
 import { clampShift, refuseShift } from "./moveedit";
 import type { Bounds } from "./moveedit";
-import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, waterLevelAt } from "../../lib/terrain/w3e";
+import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, WATER_OFFSET, waterLevelAt } from "../../lib/terrain/w3e";
 
 const wet = (level: number) => ({ hasWater: true, rawWater: level });
 const dry = { hasWater: false, rawWater: 0 };
@@ -67,12 +67,25 @@ test("a group keeps its shape and stops at the map's edge, whatever the camera b
 
 test("water at the lowest stored level is a hit, one step above it is not", () => {
   // Level 0 is the surface at -2137.6; the ground can go lower than that.
-  const at = (z: number) => ({ hasWater: true, rawWater: waterLevelAt(z) });
-  assert.equal(waterLevelAt(-2137.6), WATER_LEVEL_MIN);
-  assert.deepEqual(waterLimitHits([at(-100)], [at(-2137.6)]), [0]);
-  assert.deepEqual(waterLimitHits([at(-100)], [at(-5000)]), [0], "ground far below the limit is cut off at it");
-  assert.deepEqual(waterLimitHits([at(-100)], [at(-2137)]), [], "a quarter unit above is stored as it is");
+  // `g` is the corner's ground: its water lies WATER_OFFSET under it, so ground at -2048 is stored as level 0.
+  const at = (g: number) => ({ hasWater: true, rawWater: waterLevelAt(g - WATER_OFFSET), height: g });
+  // A water click that lowers the cliff level: the water comes from the height before the edit, not the one after.
+  const click = (g: number) => [[{ hasWater: false, rawWater: 0x2000, height: g }], [{ hasWater: true, rawWater: waterLevelAt(g - WATER_OFFSET), height: g - 256 }]] as const;
+  assert.deepEqual(waterLimitHits(...click(-2048)), [], "a deep click on ground at -2048 is written, though the corner drops a level");
+  assert.deepEqual(waterLimitHits(...click(-2048.25)), [0]);
+  assert.equal(waterLevelAt(-2048 - WATER_OFFSET), WATER_LEVEL_MIN);
+  assert.deepEqual(waterLimitHits([at(-100)], [at(-2048)]), [], "ground exactly at -2048 is stored as level 0 and fits (the editor writes it)");
+  assert.deepEqual(waterLimitHits(...click(-5000)), [0], "ground far below the limit is cut off at it");
+  assert.deepEqual(waterLimitHits(...click(-2047.75)), [], "a quarter unit above is stored as it is");
   assert.deepEqual(waterLimitHits([at(-5000)], [at(-5000)]), [], "water that was at the limit already isn't a new hit");
+});
+
+test("pasted water at the stored limit is a hit when no height is given (the paste's word has no height of its own)", () => {
+  // The target's ground is in range, the pasted word is cut off at the end: with heights it would pass, without it is refused.
+  const was = { hasWater: false, rawWater: 0x2000, height: 0 }, pasted = { hasWater: true, rawWater: WATER_LEVEL_MAX, height: 0 };
+  assert.deepEqual(waterLimitHits([was], [pasted]), [], "control: with the target's height the level looks wanted");
+  assert.deepEqual(waterLimitHits([{ ...was, height: undefined }], [{ ...pasted, height: undefined }]), [0]);
+  assert.deepEqual(waterLimitHits([{ ...was, height: undefined }], [{ ...pasted, rawWater: WATER_LEVEL_MIN, height: undefined }]), [0]);
 });
 
 test("a nudge is held to the bounds with its steps: a step past the limit is refused, the object stays", () => {

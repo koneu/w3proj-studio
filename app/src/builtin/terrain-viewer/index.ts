@@ -1830,11 +1830,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A finished terrain stroke as one undo step; objects on the edited
          *  ground follow it (doodads with a fixed height, flag 4, keep theirs). */
-        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean => {
+        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }, pasted = false): boolean => {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
             // there and loses its shape, so the whole edit is refused instead.
-            const word = () => st.corners.map((i) => ({ hasWater: terrain.corners[i].hasWater, rawWater: terrain.corners[i].rawWater }));
+            const word = () => st.corners.map((i) => ({ hasWater: terrain.corners[i].hasWater, rawWater: terrain.corners[i].rawWater, height: pasted ? undefined : terrain.corners[i].height }));
+            // A paste brings its own water word (the stored level, cut off at the end) with its ground: no height of
+            // the target's says where that water was meant to lie, so a level at either end counts.
             const after = word();
             st.undo();
             const hits = waterLimitHits(word(), after);
@@ -3514,7 +3516,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // own step: without clearing keyStep this click would join the one before.
           keyStep = null;
           keyPress = "first";
-          const applied = stamped?.corners.length ? commitTerrain({ ...stamped, cliffs: true }) : true;
+          const applied = stamped?.corners.length ? commitTerrain({ ...stamped, cliffs: true }, true) : true;
           if (!applied) {
             // Neither the ground nor the objects that stand on it.
             keyPress = null;
