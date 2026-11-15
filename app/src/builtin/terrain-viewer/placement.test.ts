@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, unitGridCells, type PlacedFile } from "./placement";
 import { fragmentOf } from "../../lib/terrain/fragment";
+import { doodadOnGrid } from "./doodadgrid";
 import type { Placed } from "./objects";
 
 const file = (key: "doodads" | "units", version: number, subversion: number, more: Record<string, unknown> = {}, list: Placed[] = []): PlacedFile =>
@@ -249,6 +250,50 @@ test("a pasted group lands where the World Editor puts it: its mean and the poin
     const f = fragmentOf(copied.map(([x, y]) => ({ list: "doodads" as const, entry: { position: [x, y, 0], angle: 0 } })), () => 0, copyCentre(copied));
     const [cx, cy] = pasteCentreAt(...pointer);
     assert.deepEqual(f.objects.map((o) => [cx + o.at[0], cy + o.at[1]]), pasted, `${JSON.stringify(copied)} at ${pointer}`);
+  }
+});
+
+// we-drive 2026-11-15 (branch paste-centre-we, tests/we-compare/paste-centre.json's input, SD): one object or a box of
+// them copied and pasted at an off-grid pointer, the pointer read from a lone pathless LPcr pasted at the same pixel
+// first (it lands where the pointer is), the rest from the saved files. The copied positions are as the editor saved
+// them (doodads on their grids, the farms where the map put them). Grids: LTbs and LOsh 2x2 (64n + 32), LTlt and the
+// farm hhou 4x4 (64n); LPcr, the footman and the item ratf have none.
+type Kind = "free" | "2x2" | "4x4" | "farm";
+const WE_MIXED: { name: string; copied: [Kind, number, number][]; pointer: [number, number]; pasted: [number, number][] }[] = [
+  { name: "LPcr", copied: [["free", -901.3, 1013.7]], pointer: [-976.718, 291.992], pasted: [[-976.718, 291.992]] },
+  { name: "LTbs", copied: [["2x2", -480, 992]], pointer: [-716.028, 291.992], pasted: [[-736, 288]] },
+  { name: "LTlt", copied: [["4x4", -128, 1024]], pointer: [-455.339, 291.992], pasted: [[-448, 320]] },
+  { name: "LOsh", copied: [["2x2", 288, 992]], pointer: [-194.649, 291.992], pasted: [[-224, 288]] },
+  { name: "LTbs + LPcr", copied: [["2x2", -928, 672], ["free", -783.6, 701.2]], pointer: [66.042, 291.992], pasted: [[-32, 288], [112.4, 317.2]] },
+  { name: "LPcr + LPcr", copied: [["free", -405.1, 640.3], ["free", -291.7, 688.9]], pointer: [326.731, 291.992], pasted: [[270.031, 267.692], [383.432, 316.292]] },
+  { name: "LOsh + LTlt", copied: [["2x2", 96, 672], ["4x4", 256, 640]], pointer: [587.421, 291.992], pasted: [[480, 352], [640, 320]] },
+  { name: "LTbs + LTlt", copied: [["2x2", 608, 672], ["4x4", 704, 640]], pointer: [848.111, 291.992], pasted: [[800, 352], [896, 320]] },
+  { name: "hfoo", copied: [["free", -900.4, -650.6]], pointer: [-929.307, -203.811], pasted: [[-929.307, -203.811]] },
+  { name: "ratf", copied: [["free", -550.2, -640.9]], pointer: [-508.367, -203.811], pasted: [[-508.367, -203.811]] },
+  { name: "hhou", copied: [["farm", -200, -650]], pointer: [-87.426, -203.811], pasted: [[-64, -192]] },
+  // The farm counts at 320, -640 (its grid): from 290 the group's mean would round to 192 and the footman land at 278.7.
+  { name: "hfoo + hhou", copied: [["free", 150.7, -650.3], ["farm", 290, -650]], pointer: [333.515, -203.811], pasted: [[214.7, -202.3], [384, -192]] },
+  { name: "hfoo + ratf", copied: [["free", 600.9, -650.2], ["free", 700.3, -610.7]], pointer: [754.455, -203.811], pasted: [[704.755, -223.561], [804.155, -184.061]] },
+];
+
+test("pastes of pathless, gridded and mixed groups land where the World Editor puts them", () => {
+  const SIZES = { "2x2": { width: 2, height: 2 }, "4x4": { width: 4, height: 4 } } as const;
+  // Each object's own grid, as the terrain viewer's ruledPose (doodads) and onGrid (units) give it.
+  const own = (kind: Kind, x: number, y: number): [number, number] => {
+    if (kind === "free") return [x, y];
+    if (kind === "farm") return [onBuildingGrid(x, 4), onBuildingGrid(y, 4)];
+    const at = doodadOnGrid(x, y, (270 * Math.PI) / 180, SIZES[kind]);
+    return [at.x, at.y];
+  };
+  // The editor's numbers are single precision, written here to three places.
+  const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  for (const { name, copied, pointer, pasted } of WE_MIXED) {
+    const free = copied.every(([kind]) => kind === "free");
+    const f = fragmentOf(copied.map(([, x, y]) => ({ list: "doodads" as const, entry: { position: [x, y, 0], angle: 0 } })), () => 0,
+      copyCentre(copied.map(([kind, x, y]) => own(kind, x, y)), free));
+    const [cx, cy] = pasteCentreAt(...pointer, free);
+    const got = f.objects.map((o, i) => own(copied[i][0], cx + o.at[0], cy + o.at[1]));
+    assert.ok(got.every(([x, y], i) => close(x, pasted[i][0]) && close(y, pasted[i][1])), `${name}: ${JSON.stringify(got)}, the editor ${JSON.stringify(pasted)}`);
   }
 });
 

@@ -97,6 +97,9 @@ export function onDoodadGrid(v: number, cells: number): number {
   return Math.round((v - half) / 64) * 64 + half;
 }
 
+/** Whether a pathing size puts a doodad on a grid (doodadOnGrid): a texture at least a pixel each way. */
+export const hasPathSize = (size: PathSize | null | undefined): size is PathSize => !!size && size.width >= 1 && size.height >= 1;
+
 /** Where the World Editor puts a doodad of pathing size `size` (null: no pathing texture) that is stored at (x, y)
  *  with `angle` (radians), and the angle it turns it to. `fixedRot`: a destructable type's fixed rotation in degrees
  *  (null: none, and always for doodads, whose fixed rotation the editor doesn't enforce); it only holds with a texture. */
@@ -104,7 +107,7 @@ export function doodadOnGrid(x: number, y: number, angle: number, size: PathSize
   // Compared as the file stores them (single precision): the JSON's 3.1415927 is the file's π, and stays as written.
   const keep = (was: number, now: number) => (Math.fround(was) === now ? was : now);
   if (!Number.isFinite(angle)) return { x, y, angle };
-  const hasSize = !!size && size.width >= 1 && size.height >= 1;
+  const hasSize = hasPathSize(size);
   const facing = hasSize && fixedRot !== null && Number.isFinite(fixedRot) && fixedRot >= 0 ? fixedAngle(fixedRot) : angle;
   if (!size || !(size.width >= 1) || !(size.height >= 1) || !Number.isFinite(x) || !Number.isFinite(y)) return { x, y, angle: keep(angle, wholeTurns(facing)) };
   const q = quarterTurn(facing);

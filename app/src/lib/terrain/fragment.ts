@@ -57,6 +57,9 @@ export interface Fragment {
   /** The same while it is being gathered, and kept through turns: a paste waits for it. Not part of a saved fragment. */
   typesReady?: Promise<Copied[]>;
   objects: FragmentObject[];
+  /** No object stands on a grid (pathless doodads, units and items without a building texture): the centre is
+   *  their mean, and a paste puts it at the pointer, not on the 64 grid (terrain-viewer placement.ts copyCentre). */
+  free?: boolean;
   ground?: FragmentGround;
 }
 
