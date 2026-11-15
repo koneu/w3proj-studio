@@ -6966,7 +6966,7 @@ async function mcpReplaceSnap(page, found) {
   cpSync(FIXTURE, root, { recursive: true });
   const file = join(root, "map", "war3map.doo.json");
   const doo = JSON.parse(readFileSync(file, "utf8"));
-  doo.doodads.push({ ...doo.doodads[0], id: "LTbr", skinId: "LTbr", variation: 0, position: [40, 40, 0], angle: 4.712389, flags: 2, life: 255, editorId: 50, scale: [1, 1, 1] });
+  doo.doodads.push({ ...doo.doodads[0], id: "LTbr", skinId: "LTbr", variation: 0, position: [1000, 1000, 0], angle: 4.712389, flags: 2, life: 255, editorId: 50, scale: [1, 1, 1] });
   writeFileSync(file, JSON.stringify(doo, null, 2));
   const f = Math.fround;
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -6997,7 +6997,7 @@ async function mcpReplaceSnap(page, found) {
     await settled(page);
     const shown = await live();
     // Controls: the open snapped both, and the file still has the stored places.
-    if (!same(pose(shown.find((d) => d.id === "LTbr"))?.slice(0, 2), [32, 32])) return fail(`the barrel stored at 40, 40 isn't shown at 32, 32 (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LTbr")))}`);
+    if (!same(pose(shown.find((d) => d.id === "LTbr"))?.slice(0, 2), [992, 992])) return fail(`the barrel stored at 1000, 1000 isn't shown at 992, 992 (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LTbr")))}`);
     if (!same(pose(shown.find((d) => d.id === "LOtr")), SNAPPED_LOTR)) return fail(`LOtr isn't shown snapped and fixed (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LOtr")))}`);
     if (!same(pose(onDisk().find((d) => d.id === "LOtr"))?.slice(0, 2), [-64, 32])) return fail("the open wrote the doodad file (control)");
 
@@ -7024,17 +7024,17 @@ async function mcpReplaceSnap(page, found) {
     const lotr = pose(back.find((d) => d.id === "LOtr"));
     if (!same(lotr, SNAPPED_LOTR)) fail(`the save after undo_last_edit wrote LOtr as ${JSON.stringify(lotr)}, not snapped and fixed`);
     const barrel = pose(back.find((d) => d.id === "LTbr"));
-    if (!same(barrel?.slice(0, 2), [32, 32])) fail(`the save after undo_last_edit wrote the barrel at ${JSON.stringify(barrel)}, not on its grid at 32, 32`);
+    if (!same(barrel?.slice(0, 2), [992, 992])) fail(`the save after undo_last_edit wrote the barrel at ${JSON.stringify(barrel)}, not on its grid at 992, 992`);
 
-    // Opened again from the stored places: only the snapped barrel (32, 32) is in this area, not the stored one (40, 40).
+    // Opened again from the stored places: only the snapped barrel (992, 992) is in this area, not the stored one (1000, 1000).
     await page.evaluate(`w3.editors.closeAll()`);
     writeFileSync(file, JSON.stringify(doo, null, 2));
     await settled(page);
     await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
     await until("the doodads loaded", async () => (await live()) !== null, 30000);
     await settled(page);
-    const reply = await tool("replace_objects", { swaps: { LTbr: "LOch" }, left: 20, bottom: 20, right: 36, top: 36 }).catch((e) => e.message);
-    if (!/changed/.test(reply)) fail(`replace_objects in an area round the snapped barrel (32, 32) gave ${reply}`);
+    const reply = await tool("replace_objects", { swaps: { LTbr: "LOch" }, left: 980, bottom: 980, right: 1004, top: 1004 }).catch((e) => e.message);
+    if (!/changed/.test(reply)) fail(`replace_objects in an area round the snapped barrel (992, 992) gave ${reply}`);
     await settled(page);
     check("the file replace_objects in an area wrote");
   } finally {
