@@ -267,7 +267,12 @@ fn read_frames(mut from: impl BufRead + Send + 'static) -> Receiver<Result<Optio
 
 /// Answers the frames until the report comes (Some) or the pipe ends (None); an error when the host sends nothing
 /// for `idle`.
+///
+/// An answer that can't be written because the host closed its end (it exited) doesn't end the job: the host may
+/// have sent a command it didn't wait for (an extension's work started without an await) and its report after it,
+/// both still in the pipe. The frames are read on, and the report counts; without one the pipe's end says so.
 fn serve(frames: &Receiver<Result<Option<Frame>>>, to: &mut impl Write, server: &Server, idle: Duration) -> Result<Option<Value>> {
+    let mut closed = false;
     loop {
         let (msg, body) = match frames.recv_timeout(idle) {
             Ok(frame) => match frame? {
@@ -292,8 +297,14 @@ fn serve(frames: &Receiver<Result<Option<Frame>>>, to: &mut impl Write, server: 
             }
             Err(e) => format!("{}\n", json!({ "id": id, "err": e })).into_bytes(),
         };
-        to.write_all(&answer)?;
-        to.flush()?;
+        if closed {
+            continue;
+        }
+        match to.write_all(&answer).and_then(|()| to.flush()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => closed = true,
+            Err(e) => return Err(e.into()),
+        }
     }
 }
 
@@ -469,6 +480,36 @@ mod tests {
         let dir = scratch("eof");
         let mut out = Vec::new();
         assert_eq!(serve(&read_frames(std::io::Cursor::new(Vec::new())), &mut out, &server(&dir), Duration::from_secs(10)).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The host's end of the pipe, closed: every write is a broken pipe (the host exited).
+    struct Closed;
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    /// A host that sent a command it didn't wait for (an extension's read started without an await) and then its
+    /// report, and exited: the answer can't be written, the report is still the job's (21_Drops_Waygates_Random and
+    /// 26_Sounds failed with "Broken pipe" here).
+    #[test]
+    fn a_report_after_a_command_the_exited_host_didnt_wait_for_counts() {
+        let dir = scratch("closed");
+        let p = dir.join("map").join("war3map.j");
+        std::fs::write(&p, "x").unwrap();
+        let mut input = Vec::new();
+        input.extend(format!("{}\n", json!({ "id": 1, "cmd": "fs_read_text", "args": { "path": p.to_string_lossy() } })).as_bytes());
+        input.extend(format!("{}\n", json!({ "done": { "parts": [] } })).as_bytes());
+        let report = serve(&read_frames(std::io::Cursor::new(input)), &mut Closed, &server(&dir), Duration::from_secs(10)).unwrap();
+        assert_eq!(report, Some(json!({ "parts": [] })));
+        // Control: without a report, the closed pipe ends in None (the host died), not in a report.
+        let input = format!("{}\n", json!({ "id": 1, "cmd": "fs_read_text", "args": { "path": p.to_string_lossy() } }));
+        assert_eq!(serve(&read_frames(std::io::Cursor::new(input.into_bytes())), &mut Closed, &server(&dir), Duration::from_secs(10)).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
