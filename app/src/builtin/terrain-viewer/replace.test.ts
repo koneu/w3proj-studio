@@ -4,7 +4,8 @@ import { CornerUndo } from "../../lib/terrain/cliffs";
 import type { Corner, Terrain } from "../../lib/terrain/w3e";
 import { replacePlaced } from "./aitools";
 import { replaceCorners, roomCells, roomForReplaced, swapsOf } from "./replace";
-import type { RoomShape } from "./occupancy";
+import { roomShape, type RoomShape } from "./occupancy";
+import type { PathingData } from "./pathmap";
 
 /** 4 corners: tiles 0, 1, 2, 1; cliff types 0, 1, 15 (flat ground's), 0. */
 function ground(): Terrain {
@@ -138,4 +139,20 @@ test("Replace Units: footmen to farms, as the World Editor did (tests/we-compare
   assert.deepEqual(roomForReplaced([], [
     { before: footman(20, 20), after: farm(0, 0) }, { before: footman(-76, 20), after: farm(-64, 0) },
   ]), [false, false]);
+});
+
+test("roomShape: a building takes in its texture's no-build ring (blue), a doodad only the red part", async () => {
+  // 4x4 pixels: red in the middle 2x2, blue over all of it (a barracks' 12x12 over 8x8, small).
+  const rgba = new Uint8Array(4 * 4 * 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const i = (y * 4 + x) * 4; rgba[i] = x > 0 && x < 3 && y > 0 && y < 3 ? 255 : 0; rgba[i + 2] = 255; rgba[i + 3] = 255; }
+  const image = { width: 4, height: 4, rgba };
+  const data = {
+    unitShape: (id: string) => (id === "hbar" ? { path: "b.tga", collision: 0 } : null),
+    texture: async () => image,
+    placedTex: () => ({ path: "d.tga", dest: false, walkable: false }),
+    placedImage: async () => ({ image }),
+  } as unknown as PathingData;
+  const count = (s: RoomShape) => (s && "mask" in s ? s.mask.reduce((a, b) => a + b, 0) : -1);
+  assert.equal(count(await roomShape(data, "hbar", "w3u")), 16);
+  assert.equal(count(await roomShape(data, "LTlt", "w3d")), 4);
 });
