@@ -45,7 +45,7 @@ def out(obj):
 def guard_decision(display, procroot="/proc", environ=None):
     """(allowed, reason): input goes only to an Xvfb that someone started for a test, never to a desktop session.
     Allowed: a local display ":N" with an Xvfb process (argv[0] named Xvfb) that either has ":N" in its arguments or
-    listens on the socket X<N> (-displayfd picks the number itself). W3_ALLOW_REAL_DISPLAY=1 overrides, for the
+    holds the listening socket X<N> itself (-displayfd picks the number itself; matched by the socket's inode in its own fd links). W3_ALLOW_REAL_DISPLAY=1 overrides, for the
     user's own manual use. A missing --display is refused (Xlib would take $DISPLAY, the desktop)."""
     environ = os.environ if environ is None else environ
     if environ.get("W3_ALLOW_REAL_DISPLAY") == "1":
@@ -71,10 +71,22 @@ def guard_decision(display, procroot="/proc", environ=None):
         if any(a == ":" + num for a in argv):
             return True, "Xvfb pid " + pid
         if "-displayfd" in argv:
+            # /proc/<pid>/net/unix lists every unix socket of the machine (the desktop's X0 too), so only a socket
+            # this very process holds open (its fd links, matched by inode) counts as its display.
+            own = set()
+            try:
+                for fd in os.listdir(os.path.join(procroot, pid, "fd")):
+                    m2 = re.fullmatch(r"socket:\[(\d+)\]", os.readlink(os.path.join(procroot, pid, "fd", fd)))
+                    if m2:
+                        own.add(m2.group(1))
+            except OSError:
+                continue
             try:
                 with open(os.path.join(procroot, pid, "net", "unix"), "r", errors="replace") as f:
-                    if re.search(r"\.X11-unix/X%s$" % num, f.read(), re.M):
-                        return True, "Xvfb pid %s (-displayfd)" % pid
+                    for line in f:
+                        cols = line.split()
+                        if len(cols) >= 8 and cols[6] in own and re.search(r"\.X11-unix/X%s$" % num, cols[7]):
+                            return True, "Xvfb pid %s (-displayfd)" % pid
             except OSError:
                 pass
     return False, "display %s is not an Xvfb started for tests (set W3_ALLOW_REAL_DISPLAY=1 to use a real one on purpose)" % display
