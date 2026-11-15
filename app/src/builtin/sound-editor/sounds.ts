@@ -43,7 +43,11 @@ export function soundName(file: string, taken: Set<string>): string {
 }
 
 /** A game sound label (UI\SoundInfo\*.slk row) as the World Editor fills a sound from it. */
-export interface SoundLabel { name: string; files: string[]; eax: string; channel: number; volume: number; flags: string }
+export interface SoundLabel {
+  name: string; files: string[]; eax: string; channel: number; volume: number; flags: string;
+  /** The row's numbers (NaN where the table has none). */
+  pitch?: number; pitchVariance?: number; priority?: number; minDistance?: number; maxDistance?: number; distanceCutoff?: number;
+}
 
 /** Labels by the files they play: full paths (without extension, lower case, backslashes) and,
  *  for rows that list bare names (unit acknowledgements), "name:<file name>". */
@@ -53,7 +57,11 @@ export function labelIndex(tables: Record<string, string>[][]): Map<string, Soun
   for (const rows of tables) {
     for (const r of rows) {
       if (!r.SoundName || !r.FileNames) continue;
-      const label: SoundLabel = { name: r.SoundName, files: [], eax: r.EAXFlags || "DefaultEAXON", channel: Number(r.Channel) || 0, volume: Number(r.Volume) || 127, flags: r.Flags ?? "" };
+      // An effect of "0" (AchievementEarned) or none is the default one, as the World Editor writes it (spec sound-flags-we).
+      const eax = !r.EAXFlags || r.EAXFlags === "0" || r.EAXFlags === "_" ? "DefaultEAXON" : r.EAXFlags;
+      const label: SoundLabel = { name: r.SoundName, files: [], eax, channel: Number(r.Channel) || 0, volume: Number(r.Volume) || 127, flags: r.Flags ?? "",
+        pitch: Number(r.Pitch), pitchVariance: Number(r.PitchVariance), priority: Number(r.Priority), minDistance: Number(r.MinDistance),
+        maxDistance: Number(r.MaxDistance), distanceCutoff: Number(r.DistanceCutoff) };
       for (const f of r.FileNames.split(",")) {
         const path = f.trim().replace(/\//g, "\\");
         label.files.push(path);
@@ -71,11 +79,21 @@ export function findLabel(index: Map<string, SoundLabel>, file: string): SoundLa
   return index.get(key) ?? index.get(`name:${key.split("\\").pop()}`);
 }
 
-/** A new entry for `file`: labelled game sounds take the label (settings unset, as the World
- *  Editor writes them), other files the editor's usual defaults. The word after the facial animation file (`unknown2`)
- *  is 1, as on every sound without a dialogue in the game's maps (plain, labelled, imported and music alike; 0 only on
- *  dialogue): the generated script's dialogue keys go by it (lib/script/jass.ts). */
-export function newSound(name: string, file: string, opts: { music?: boolean; imported?: boolean; label?: SoundLabel }): Sound {
+/** The game's value of a labelled sound's setting when nothing sets it (what SetSoundParamsFromLabel's absence means:
+ *  lib/script/jass.ts labelledSoundParams); a label value equal to it is stored unset, as the World Editor does. */
+const LABEL_DEFAULTS = { pitch: 1, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000 };
+
+/** A label's number as a new sound stores it: unset when the table has none or it is the game's default. */
+const fromLabel = (v: number | undefined, def?: number) => (v === undefined || !Number.isFinite(v) || v === def ? UNSET : v);
+
+/** A new entry for `file` (stored with `/`, as the World Editor writes a sound's path: spec sound-flags-we): labelled
+ *  game sounds take the label's values, those equal to the game's defaults unset (LABEL_DEFAULTS; the label's channel
+ *  0 is -1), other files the editor's defaults (fade 0, priority 100, outside cone volume 127, the file as asset file).
+ *  The word after the facial animation file (`unknown2`) is 1, as on every sound without a dialogue in the game's maps
+ *  (plain, labelled, imported and music alike; 0 only on dialogue): the generated script's dialogue keys go by it
+ *  (lib/script/jass.ts). Music isn't measured against the editor (its old defaults stay). */
+export function newSound(name: string, path: string, opts: { music?: boolean; imported?: boolean; label?: SoundLabel }): Sound {
+  const file = path.replace(/\\/g, "/");
   const common = {
     name, file, variableName: name, dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
     speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
@@ -88,13 +106,15 @@ export function newSound(name: string, file: string, opts: { music?: boolean; im
   if (opts.label) {
     const l = opts.label;
     const flags = (/LOOPING/.test(l.flags) ? LOOPING : 0) | (/WANT3D/.test(l.flags) ? THREE_D | STOP_OUT_OF_RANGE : 0);
-    return { ...common, eaxEffect: l.eax, flags, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: UNSET, pitchVariance: UNSET, priority: 8,
-      channel: -1, minDistance: UNSET, maxDistance: UNSET, distanceCutoff: UNSET, coneInside: UNSET, coneOutside: UNSET, coneOutsideVolume: 0,
+    return { ...common, eaxEffect: l.eax, flags, fadeInRate: 0, fadeOutRate: 0, volume: l.volume, pitch: fromLabel(l.pitch, LABEL_DEFAULTS.pitch),
+      pitchVariance: fromLabel(l.pitchVariance), priority: Number.isFinite(l.priority) ? l.priority! : 100, channel: l.channel === 0 ? -1 : l.channel,
+      minDistance: fromLabel(l.minDistance, LABEL_DEFAULTS.minDistance), maxDistance: fromLabel(l.maxDistance, LABEL_DEFAULTS.maxDistance),
+      distanceCutoff: fromLabel(l.distanceCutoff, LABEL_DEFAULTS.distanceCutoff), coneInside: UNSET, coneOutside: UNSET, coneOutsideVolume: -1,
       coneOrientation: [UNSET, UNSET, UNSET], assetLabel: l.name, assetFile: file };
   }
-  return { ...common, eaxEffect: "DefaultEAXON", flags: opts.imported ? IMPORTED : 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1,
-    pitchVariance: 0, priority: 8, channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0,
-    coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "" };
+  return { ...common, eaxEffect: "DefaultEAXON", flags: opts.imported ? IMPORTED : 0, fadeInRate: 0, fadeOutRate: 0, volume: 127, pitch: 1,
+    pitchVariance: 0, priority: 100, channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0,
+    coneOutsideVolume: 127, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: file };
 }
 
 // ---- order and preview volume ----------------------------------------------------------
