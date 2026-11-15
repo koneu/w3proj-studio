@@ -6,6 +6,7 @@ import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits
 import { OBJECTS_SERVICE, type LiveObjectData } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
 import { h } from "../../workbench/dom";
+import { withColorTools } from "../../extensions/colortools";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
 import { campaignObjects, iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
@@ -787,7 +788,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               value: text, title: `Text of TRIGSTR_${ref} in ${wtsName} (every use of this string changes)`,
               onchange: () => { wts.set(ref, input.value); markDirty(); renderDetail(); },
             });
-            return h("div.obj-value-cell", {}, input, h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
+            return h("div.obj-value-cell", {}, withColorTools(input, { commit: true, defaultColor: "FFFFFF" }), h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
           }
           // Object codes and lists of them: the object browser; the value types of UnitEditorData:
           // a choice, a list or flags.
@@ -819,7 +820,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onCommit(v);
             },
           });
-          return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
+          return h("div.obj-value-cell", {}, type === "string" && metaType === "string" && !mixed ? withColorTools(input, { commit: true }) : input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
             browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit),
             mixed ? null : playButton(metaType, String(current)),
             mixed ? null : artPreview(metaType, String(current)));

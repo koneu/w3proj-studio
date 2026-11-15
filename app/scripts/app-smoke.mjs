@@ -2381,6 +2381,37 @@ async function techtreeRandomLevels(page, found) {
   }
 }
 
+/** The colour tools under Map Properties' name: a colour button wraps the selection in the tags, "Remove color" takes
+ *  them off, the preview shows the colour, and the workbench undo takes the edit back. */
+async function mapInfoColorTools(page, found) {
+  try {
+  const fail = (what) => found.push(`Map Properties colour tools: ${what}`);
+  await heightKit(page, "MapInfoColors");
+  const field = `(() => { const l = [...document.querySelectorAll(".map-info label.form-row")].find((x) => x.querySelector(".form-label")?.textContent === "Name"); return l?.querySelector("input, textarea"); })()`;
+  const root = `${field}.closest(".color-tools")`;
+  const nameNow = () => page.evaluate(`${field}?.value ?? null`);
+  await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "description")`);
+  await until("Map Properties' name box", async () => (await nameNow()) !== null, 20000);
+  if (!(await page.evaluate(`!!${root}`))) return fail("the name box has no colour tools");
+  const before = await nameNow();
+  await page.evaluate(`(() => { const e = ${field}; e.focus(); e.value = "Hello world"; e.dispatchEvent(new Event("input", { bubbles: true })); e.setSelectionRange(6, 11); e.dispatchEvent(new Event("select")); })()`);
+  await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
+  const colored = await nameNow();
+  if (colored !== "Hello |cffFF0303world|r") return fail(`wrapping gave ${JSON.stringify(colored)}`);
+  const shown = await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-preview"); return { hidden: p.hidden, color: p.querySelector("span:last-child")?.style.color, text: p.textContent }; })()`);
+  if (shown.hidden || shown.text !== "Hello world" || shown.color !== "rgb(255, 3, 3)") return fail(`preview ${JSON.stringify(shown)}`);
+  await page.evaluate(`(() => { const e = ${field}; e.setSelectionRange(18, 19); e.dispatchEvent(new Event("select")); })()`);
+  await page.evaluate(`[...${root}.querySelectorAll("button")].find((b) => b.textContent === "Remove color").click()`);
+  const removed = await nameNow();
+  if (removed !== "Hello |cffFF0303wo|rr|cffFF0303ld|r") return fail(`removing gave ${JSON.stringify(removed)}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  if (!(await soon(async () => (await nameNow()) === colored))) fail(`undo after removing: ${await nameNow()}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  if (!(await soon(async () => (await nameNow()) !== colored))) fail("undo of the colour did nothing");
+  void before;
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** Map Properties keeps its undo history when the terrain editor saves (the terrain file is one it watches, for its tileset
  *  hint): an edit made and saved, then a sculpt saved in the terrain editor, still undoes. */
 async function mapInfoUndoKept(page, found) {
@@ -13227,6 +13258,7 @@ async function run() {
         itemTablesAccess,
         keybindings,
         keyChords,
+        mapInfoColorTools,
         mapInfoUndoKept,
         mcpGuides,
         mcpLimits,
@@ -13478,6 +13510,8 @@ async function firstHalf(page, found) {
 async function secondHalf(page, found, project) {
   await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
   await leftOpen(page, "itemTablesAccess", found);
+  await mapInfoColorTools(page, found).catch((e) => found.push(`Map Properties colour tools: ${e.message}`));
+  await leftOpen(page, "mapInfoColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
   await leftOpen(page, "mapInfoUndoKept", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));

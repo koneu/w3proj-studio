@@ -1106,3 +1106,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .model-pick-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .copy-error { margin-left: 6px; padding: 0 6px; font-size: 11px; }
 .model-pick-mode { width: 100%; margin-bottom: 6px; }
+
+/* Colour tools under the text fields of game texts (extensions/colortools.ts) */
+.color-tools { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.color-tools:not(:focus-within) > .color-tools-bar { display: none; }
+.color-tools-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.color-tools-picker { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.color-tools-swatches { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+.color-tools-swatch { width: 14px; height: 14px; min-width: 14px; padding: 0; border: 1px solid var(--border, #555); }
+.color-tools-preview { background: #000; color: #fff; padding: 4px 6px; max-width: 640px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--border, #555); }
