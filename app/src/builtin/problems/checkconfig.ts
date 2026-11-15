@@ -10,6 +10,10 @@
 
 export const MANIFEST_FILE = "w3proj.toml";
 
+/** What a project without a manifest gets before its first setting is added: Rust's `Manifest` needs only `format`
+ *  (tests/fixtures/manifest-minimal-checks/w3proj.toml is this plus a disable, loaded by crates/w3proj tests). */
+export const MINIMAL_MANIFEST = "format = 1\n";
+
 export interface ChecksConfig { disable: string[] }
 export const noChecksConfig = (): ChecksConfig => ({ disable: [] });
 
