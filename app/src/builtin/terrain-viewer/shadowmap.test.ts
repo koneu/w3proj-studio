@@ -9,8 +9,8 @@ import { predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { terrainShadows } from "./shadows";
 import { writeDerived } from "./derive";
 
-/** A model of one opaque box, 100 wide and 1000 high, standing on its origin. */
-function towerModel(): Uint8Array {
+/** A model of one opaque box, 100 wide and 1000 high, standing on its origin. `filterMode` 2 (blended): it casts nothing. */
+function towerModel(filterMode = 0): Uint8Array {
   const [w, h] = [50, 1000];
   const positions: number[] = [];
   for (const z of [0, h]) for (const [x, y] of [[-w, -w], [w, -w], [w, w], [-w, w]]) positions.push(x, y, z);
@@ -20,7 +20,7 @@ function towerModel(): Uint8Array {
   const extent = { radius: h, min: [-w, -w, 0] as [number, number, number], max: [w, w, h] as [number, number, number] };
   const model = {
     version: 800, name: "tower", extent, sequences: [], globalSequences: [], textures: [], textureAnims: [], geosetAnims: [],
-    materials: [{ priorityPlane: 0, flags: 0, layers: [{ filterMode: 0, shadingFlags: 0, textureIds: [0], textureAnimId: -1, coordId: 0, alpha: 1 }] }],
+    materials: [{ priorityPlane: 0, flags: 0, layers: [{ filterMode, shadingFlags: 0, textureIds: [0], textureAnimId: -1, coordId: 0, alpha: 1 }] }],
     geosets: [{
       positions: new Float32Array(positions), normals: new Float32Array(positions.length), uvs: new Float32Array((positions.length / 3) * 2),
       faces: new Uint16Array(faces), vertexGroups: new Uint8Array(positions.length / 3), groups: [[0]], materialId: 0, lod: 0, lodName: "", extent,
@@ -122,6 +122,52 @@ test("shadows are not written over the stored file when the game data can't be r
   assert.deepEqual([half.write, half.leftOut], [true, 1], "some unreadable: written, counted");
   assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 2, 0).write, false, "doodads but no object tables: refused");
   assert.equal(shadowVerdict({ wanted: 0, unreadable: 0 }, 0, 0).write, true, "no doodads at all: cliffs-only is right");
+  // The game's tables unread: the skins are only the built-in few (start location, random objects), never 0.
+  const bare = await loadSkins({ settings: { get: () => "sd-unreadable-shadow-test-empty" }, game: { readText: async () => { throw new Error("no game"); } } } as unknown as W3Api);
+  assert.ok(bare.size > 0, "built-in skins are there without the game");
+  const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+  await predictShadows(terrain, Array.from({ length: 3 }, at), bare, () => undefined, async () => tower, undefined, undefined, () => "sd-unreadable-d", stats);
+  const tablesUnread = shadowVerdict(stats, 3, bare.size);
+  assert.equal(tablesUnread.write, false, "no placed doodad known to any table: refused");
+  assert.match(tablesUnread.problem ?? "", /object tables/);
+});
+
+test("a model read with no casting faces isn't unreadable: only a failed read is counted, and a save isn't refused for it", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOgl]\nfile=Doodads\\Glow\nshadow=1\n[LOrk]\nfile=Doodads\\Rock\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const w3 = { settings: { get: () => "sd-no-faces-test" }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const terrain = flatTerrain();
+  const at = (id: string): Placed => ({ id, variation: 0, position: [terrain.offsetX + 16 * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [1, 1, 1] });
+  // The glow is blended only (filter mode 2): read, nothing casts. The rock's model can't be read.
+  const glow = towerModel(2), tower = towerModel();
+  let rockReadable = false;
+  const read = async (p: string) => {
+    if (/Glow\.mdx$/i.test(p)) return glow;
+    if (/Rock\.mdx$/i.test(p) && rockReadable) return tower;
+    throw new Error(`no ${p}`);
+  };
+  const ground = terrainShadows(terrain);
+  const run = async (ids: string[], mode: string) => {
+    const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+    const shd = await predictShadows(terrain, ids.map(at), skins, () => undefined, read, undefined, undefined, () => mode, stats);
+    return { stats, verdict: shadowVerdict(stats, ids.length, skins.size), cast: shd.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0) };
+  };
+  const glows = await run(["LOgl", "LOgl"], "sd-no-faces-a");
+  assert.deepEqual(glows.stats, { wanted: 2, unreadable: 0 }, "read with nothing to cast: not unreadable");
+  assert.equal(glows.cast, 0, "and it casts nothing");
+  assert.deepEqual([glows.verdict.write, glows.verdict.leftOut], [true, 0], "a map of such doodads isn't refused");
+  const again = await run(["LOgl"], "sd-no-faces-a");
+  assert.deepEqual(again.stats, { wanted: 1, unreadable: 0 }, "from the kept result too");
+  const mixed = await run(["LOgl", "LOrk"], "sd-no-faces-b");
+  assert.deepEqual(mixed.stats, { wanted: 2, unreadable: 1 }, "the failed read is counted, the faceless model isn't");
+  assert.deepEqual([mixed.verdict.write, mixed.verdict.leftOut], [true, 1]);
+  const rocks = await run(["LOrk"], "sd-no-faces-c");
+  assert.equal(rocks.verdict.write, false, "the control: a model that can't be read still refuses");
+  rockReadable = true;
+  assert.ok((await run(["LOrk"], "sd-no-faces-d")).cast > 10, "the control: the opaque tower casts");
 });
 
 /** A rock skin table (one shadow-casting doodad type), read in its own graphics mode so no other test's meshes are used. */
