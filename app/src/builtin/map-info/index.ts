@@ -393,8 +393,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ref = StringTable.ref(get());
           const viaTable = ref !== null && strings?.has(ref);
           const value = viaTable ? strings!.get(ref!)! : get();
-          const input = opts.multiline
-            ? h("textarea.form-input", { rows: 6, value })
+          // A one-line box drops line breaks from its value: a text that has some (a subtitle of two lines) gets a box
+          // that keeps them, or the first key typed in it would join its lines.
+          const input = opts.multiline || /[\r\n]/.test(value)
+            ? h("textarea.form-input", { rows: opts.multiline ? 6 : 2, value })
             : h("input.form-input", { value });
           if (opts.cls) input.classList.add(opts.cls);
           if (opts.disabled) { input.disabled = true; input.title = opts.disabled; }

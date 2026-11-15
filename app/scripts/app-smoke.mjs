@@ -10042,9 +10042,11 @@ async function shouldHaves(page, found) {
   const wtsPath = join(k.root, "map", "war3map.wts");
   const info = k.read("war3map.w3i.json");
   info.description = "TRIGSTR_900";
+  // A loading title of two lines: shown in a box that keeps its line break.
+  info.loadingScreen.title = "TRIGSTR_901";
   await page.evaluate(`(async () => {
     await w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))});
-    await w3.workspace.writeText("map/war3map.wts", (await w3.workspace.readText("map/war3map.wts")) + "STRING 900\\r\\n{\\r\\nOld words\\r\\n}\\r\\n");
+    await w3.workspace.writeText("map/war3map.wts", (await w3.workspace.readText("map/war3map.wts")) + "STRING 900\\r\\n{\\r\\nOld words\\r\\n}\\r\\n\\r\\nSTRING 901\\r\\n{\\r\\nTwo\\r\\nlines\\r\\n}\\r\\n");
   })()`);
   const typeDescription = (text) => page.evaluate(`(async () => {
     await w3.commands.execute("w3.mapInfo.open", "description");
@@ -10083,6 +10085,8 @@ async function shouldHaves(page, found) {
       note: !document.querySelector(".map-info .map-info-loading-unused")?.hidden }))()`);
     await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "loading")`);
     await sleep(400);
+    const title = await page.evaluate(`(() => { const t = document.querySelector(".map-info .map-info-loading-text"); return t ? [t.tagName, t.value] : null; })()`);
+    if (JSON.stringify(title) !== JSON.stringify(["TEXTAREA", "Two\nlines"])) fail(`a loading title of two lines is shown as ${JSON.stringify(title)}, not in a box that keeps its line break`);
     const off = await loading();
     if (off.off.join() !== "true,true,true" || !off.note) fail(`the loading texts on the default screen are ${JSON.stringify(off)}, not greyed with a note`);
     const typedModel = await page.evaluate(`(() => { const m = [...document.querySelectorAll(".map-info label.form-row")].find((r) => r.querySelector(".form-label")?.textContent === "Custom model")?.querySelector("input");
