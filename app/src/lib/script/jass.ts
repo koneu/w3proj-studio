@@ -6,7 +6,7 @@
 // Work in progress: not every section is generated yet.
 
 import { parseSlk } from "../formats/text";
-import { jassToLua, RAW } from "./lua";
+import { jassToLua, LF_BREAK, RAW } from "./lua";
 import { ident } from "./names";
 import { nameDepthOfField } from "../terrain/cameras";
 import type { TriggerData } from "../triggers/triggerdata";
@@ -263,12 +263,17 @@ export const HEADER_SECTION = "Custom Script Code (header)";
  *  (war3map.lua, World Editor 2026-11-12: "   " stays a line), and so is one of line breaks only: the World Editor
  *  wrote the banner, the two line breaks of a header "\n\n" and its own line break after them, in war3map.j and
  *  war3map.lua alike (we-compare header-newlines and header-newlines-lua, 2026-11-14, branch water-low-header-we;
- *  it keeps the header's own LF breaks, which Studio writes as CRLF). */
+ *  it keeps the header's own LF breaks: headerLines). */
 export function mapHeader(i: ScriptInput): string {
   const text = i.custom?.header ?? "";
   if (!text) return "";
-  return banner("Custom Script Code").slice(0, -EOL.length) + codeLines(i, text);
+  return banner("Custom Script Code").slice(0, -EOL.length) + headerLines(i, text);
 }
+
+/** The header's own line breaks stay as they are, LF or CRLF (the World Editor's, we-compare header-newlines:
+ *  lines equal, bytes not, while Studio wrote CRLF); only the line break after it is the script's CRLF. In Lua
+ *  maps the CRLF breaks end RAW lines and the LF ones go through jassToLua as LF_BREAK. */
+const headerLines = (i: ScriptInput, t: string) => (i.lua ? t.split(EOL).map((l) => RAW + l.replace(/\n/g, LF_BREAK) + EOL).join("") : t + EOL);
 
 export function sounds(i: ScriptInput): string {
   // Sections for objects the map doesn't have are left out.

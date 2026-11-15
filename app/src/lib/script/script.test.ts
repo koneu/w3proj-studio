@@ -1154,13 +1154,34 @@ test("a header of only line breaks gets its banner and its empty lines, as the W
   const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });
   const stars = "//" + "*".repeat(75);
   const j = jassScript(wtg([]), { custom: custom("\n\n") });
-  assert.ok(j.includes(["//*  Custom Script Code", "//*", stars, "", "", "", stars].join(EOL)), j);
+  // The header's two LF breaks stay LF, the editor's own break after them is CRLF (header-newlines: lines equal).
+  assert.ok(j.includes(["//*  Custom Script Code", "//*", stars, "\n\n", stars].join(EOL)), j);
   assert.equal(j.split("//*  Custom Script Code").length, 3);
   assert.equal(jassScript(wtg([]), { custom: custom("") }).split("//*  Custom Script Code").length, 2, "an empty header: no banner");
-  const none = luaScript(wtg([trigger("T", [])]), { custom: custom("") }).split(EOL);
-  const lua = luaScript(wtg([trigger("T", [])]), { custom: custom("\n\n") }).split(EOL);
+  const none = luaScript(wtg([trigger("T", [])]), { custom: custom("") }).split(/\r?\n/);
+  const lua = luaScript(wtg([trigger("T", [])]), { custom: custom("\n\n") }).split(/\r?\n/);
   const k = lua.findIndex((l, n) => l !== none[n]);
   assert.ok(k > 0, "the Lua script has the header's lines");
   assert.deepEqual(lua.slice(k, k + 3), ["", "", ""]);
   assert.deepEqual(lua.slice(k + 3), none.slice(k));
+});
+
+test("a header keeps its own line breaks, LF, CRLF or mixed, in war3map.j and war3map.lua; only the break after it is CRLF", () => {
+  // The World Editor keeps the header's LF breaks (we-compare header-newlines, 2026-11-14: lines equal, bytes not).
+  const custom = (header: string) => ({ reforged: true, version: 1, comment: "", header, texts: [] });
+  const stars = "//" + "*".repeat(75);
+  const banner2 = ["//*  Custom Script Code", "//*", stars, ""].join(EOL);
+  for (const [name, h] of [["LF", "// a\nfunction H takes nothing returns nothing\nendfunction"], ["CRLF", "// a\r\nfunction H takes nothing returns nothing\r\nendfunction\r\n"],
+    ["mixed", "\n// a\r\n// b\n\n// c\r\n"], ["LF only breaks", "\n\n"]]) {
+    const j = jassScript(wtg([]), { custom: custom(h) });
+    assert.ok(j.includes(banner2 + h + EOL + stars), `${name}: war3map.j has the header byte for byte`);
+    const from = j.lastIndexOf(banner2) + banner2.length;
+    if (!h.includes("\r")) assert.ok(!j.slice(from, from + h.length).includes("\r"), `${name}: no CR added`);
+    const none = luaScript(wtg([trigger("T", [])]), { custom: custom("") });
+    const lua = luaScript(wtg([trigger("T", [])]), { custom: custom(h) });
+    const at = lua.indexOf("function Trig_T_Actions()") - none.indexOf("function Trig_T_Actions()");
+    const start = lua.indexOf(h + EOL);
+    assert.ok(start > 0 && at === h.length + EOL.length, `${name}: war3map.lua has the header byte for byte`);
+    assert.equal(lua.slice(0, start) + lua.slice(start + h.length + EOL.length), none, `${name}: nothing else changes`);
+  }
 });
