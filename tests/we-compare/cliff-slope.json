@@ -1,0 +1,115 @@
+[
+  {
+    "name": "cliff-slope-pyramid-up2-8",
+    "description": "bugs.md 'Cliff brush slopes (Increase/Decrease)' (branch cliff-slope-we, 2026-11-15): Increase Two, size 8, one click at 748,478 on the top of pyramid.w3x (at 748,500 the editor's pick landed one row north of Studio's, corner 32,24 for 32,23) (level 12 within 3 corners of 32,23, rings of 10, 8, 6, 4 round it; make-levels.mjs). The brush sets its disc to 14, down the pyramid's slope too, and each corner beside or diagonal to one that moved comes to within two levels of it, ring after ring outwards until nothing moves (terrain-painter/tools.ts cliffSlope); before, Studio moved one ring only",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/pyramid.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1372,245"], ["--click", "1537,282"], ["--click", "1520,569"], ["--click", "1392,624"], ["--click", "1409,367"],
+        ["--move", "748,478"], ["--click", "748,478"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+2:"], ["shape", "round"], ["size", 8], ["cliff", "Grass"], ["click", 748, 478]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "cliff-slope-pyramid-up1-5-square",
+    "description": "cliff-slope-pyramid-up2-8 with Increase One, size 5, Square: the square of half side 4 goes to 13 and the slope spreads from its edge in square rings (tools.ts cliffSlope); the shape is set back to Circle afterwards (it stays for the editor's session)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/pyramid.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1372,245"], ["--click", "1505,282"], ["--click", "1488,569"], ["--click", "1424,624"], ["--click", "1409,367"],
+        ["--move", "748,478"], ["--click", "748,478"], ["--sleep", "1000"], ["--click", "1392,624"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["shape", "square"], ["size", 5], ["cliff", "Grass"], ["click", 748, 478]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "cliff-slope-wrap",
+    "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field (tools.ts strokeLayer, cliffSlope)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1372,245"], ["--click", "1537,282"], ["--click", "1392,569"], ["--click", "1392,624"], ["--click", "1409,367"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+2:"], ["shape", "round"], ["size", 1], ["cliff", "Grass"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "cliff-slope-wrap-limits",
+    "description": "cliff-slope-wrap with Enforce Terrain Limits ticked first (Scenario > Map Preferences in the editor, Map Properties > Preferences in Studio, unsaved there when the click comes): Increase Two from 14 does nothing at all (tools.ts ENFORCED_TOP_LEVEL: nothing above 14 with the switch on)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--click", "166,41"], ["--sleep", "500"], ["--click", "203,146"], ["--sleep", "1500"], ["--click", "604,239"], ["--sleep", "300"], ["--click", "818,831"], ["--sleep", "1000"],
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1372,245"], ["--click", "1537,282"], ["--click", "1392,569"], ["--click", "1392,624"], ["--click", "1409,367"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); let box = null; for (let i = 0; i < 100 && !box; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); const l = b && [...b.querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === 'Enforce terrain limits'); box = l?.querySelector('input') ?? null; if (!box) await wait(100); } if (!box) throw new Error('no Enforce terrain limits box'); if (!box.checked) box.click(); await wait(500);" },
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+2:"], ["shape", "round"], ["size", 1], ["cliff", "Grass"], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3mapExtra.txt", "as": "text" }]
+  },
+  {
+    "name": "cliff-slope-up2-1-pick",
+    "description": "Increase Two, size 1, clicked ten times at 748,500 of flat.w3x. Each click's stamp is the editor's (its saves after each click were Studio's stamps on rows 30, 29, 29, 28, 28, 27, 27, 26, 26, 25 of column 32: tools.test.ts), but the pointer lands on other corners of the growing slope: Studio's pick hit row 26 at the seventh click where the editor's hit 27 (rows 30, 29, 29, 28, 28, 27, 26, 26, 25, 25), so the tops differ. Expected to differ until Studio's pick over cliffs of two levels is the editor's",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1372,245"], ["--click", "1537,282"], ["--click", "1392,569"], ["--click", "1392,624"], ["--click", "1409,367"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"], ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"], ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"], ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"], ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"],
+        ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "300"], ["--move", "748,500"], ["--click", "748,500"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+2:"], ["shape", "round"], ["size", 1], ["cliff", "Grass"],
+          ["click", 748, 500], ["click", 748, 500], ["click", 748, 500], ["click", 748, 500], ["click", 748, 500],
+          ["click", 748, 500], ["click", 748, 500], ["click", 748, 500], ["click", 748, 500], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }]
+  }
+]
