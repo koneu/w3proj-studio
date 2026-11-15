@@ -101,7 +101,7 @@
   },
   {
     "name": "limits-off-paste-margin",
-    "description": "the footman (3200, 512) box-selected, copied and pasted in the margin (800,400), then the pathless doodad LPcr (3584, -512) at its far end (940,300) of edge-last-step.w3m, switch off. Units MATCH (2026-11-15): the footman's paste past the playable part is refused in both, with the switch on too. war3map.doo DIFFERS, expected, not about the margin: the editor puts the pasted LPcr where the pointer is (3983.3, 359.9; inside the playable part 2425.1, -568.2, and camera-bounds-paste's 3072.2, -510.5), Studio on the 64 grid (3968, 384: placement.ts pasteCentreAt, measured on barrels, which have a grid). Same with the switch on (limits-on-paste-margin)",
+    "description": "the footman (3200, 512) box-selected, copied and pasted in the margin (800,400), then the pathless doodad LPcr (3584, -512) at its far end (940,300) of edge-last-step.w3m, switch off. Units MATCH (2026-11-15): the footman's paste past the playable part is refused in both, with the switch on too. war3map.doo MATCH (2026-11-15, branch paste-centre-we; tolerance 4: the two views' pointers): the pasted LPcr lands where the pointer is (3983.3, 359.9 in the editor; inside the playable part 2425.1, -568.2, and camera-bounds-paste's 3072.2, -510.5) in both, as a group with nothing on a grid does (placement.ts pasteCentreAt, spec paste-centre). Same with the switch on (limits-on-paste-margin)",
     "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
     "we": {
       "mode": "sd",
@@ -126,12 +126,12 @@
         { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
       ]
     },
-    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": 4 }],
     "limit": 40
   },
   {
     "name": "limits-on-paste-margin",
-    "description": "limits-off-paste-margin with Enforce Terrain Limits ticked first: the same (footman refused in both; LPcr at the pointer in the editor, on the 64 grid in Studio)",
+    "description": "limits-off-paste-margin with Enforce Terrain Limits ticked first: the same (footman refused in both; LPcr at the pointer in both)",
     "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
     "we": {
       "mode": "sd",
@@ -158,7 +158,7 @@
         { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
       ]
     },
-    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "expect": "differs" }, { "file": "war3mapExtra.txt", "as": "bytes" }],
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": 4 }, { "file": "war3mapExtra.txt", "as": "bytes" }],
     "limit": 40
   }
 ]
