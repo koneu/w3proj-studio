@@ -13,7 +13,7 @@ import { findCampaign } from "../../lib/objects/campaign";
 import { importedPathFor } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
-import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
+import { PATH_KIND, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
@@ -76,8 +76,6 @@ const isCampaignProject = (w3: W3Api) => isCampaignFiles(w3.workspace.files());
 const objectDocPath = (w3: W3Api, ext: string) => `map/${isCampaignProject(w3) ? "war3campaign" : "war3map"}.${ext}.json`;
 /** The string table of an object data file: a campaign's own texts are in war3campaign.wts. */
 const wtsOf = (docPath: string) => (/(^|\/)war3campaign\.w3[utabdhq]\.json$/i.test(docPath.replace(/\\/g, "/")) ? "map/war3campaign.wts" : "map/war3map.wts");
-/** Path field types (UnitMetaData & co.) that get a file browser. */
-const PATH_KIND: Record<string, FileKind> = { model: "model", modelList: "model", icon: "image", texture: "image" };
 const KINDS: { ext: string; label: string; singular: string }[] = [
   { ext: "w3u", label: "Units", singular: "unit" },
   { ext: "w3t", label: "Items", singular: "item" },

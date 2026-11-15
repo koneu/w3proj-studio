@@ -9324,6 +9324,14 @@ async function objectLayout(page, found, root) {
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   try {
+    // The image path fields of the Barracks get a Browse… button: pathing map (upat), shadow texture (ushb).
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hbar")`);
+    await until("the barracks' fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
+    for (const [id, label] of [["upat", "Pathing Map"], ["ushb", "Shadow Texture (Building)"]]) {
+      const browse = await page.evaluate(`(() => { const row = [...document.querySelectorAll(".obj-table tr")].find((r) => r.textContent.includes(${JSON.stringify(label)}) && r.querySelector(".obj-value-cell")); return row ? [...row.querySelectorAll("button")].some((b) => b.textContent === "Browse…") : null; })()`);
+      if (browse === null) fail(`the ${id} field isn't in the barracks' table (control)`);
+      else if (!browse) fail(`the ${id} field has no Browse… button`);
+    }
     await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
     await until("the footman's fields and its preview", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20 && !!document.querySelector(".obj-detail .obj-preview")`), 30000);
     const m = await page.evaluate(`(() => {

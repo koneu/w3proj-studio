@@ -13,6 +13,11 @@ import { findListed, folderTree, foldersOf, inFolder, labelFiles, storedSound, t
 
 const MAX_ROWS = 300;
 export type FileKind = "model" | "image";
+/** Path field types (UnitMetaData & co.) that get a file browser, and the kind of file each takes. */
+export const PATH_KIND: Record<string, FileKind> = {
+  model: "model", modelList: "model", icon: "image", texture: "image",
+  pathingTexture: "image", shadowTexture: "image",
+};
 const EXTENSIONS: Record<FileKind, RegExp> = { model: /\.(mdx|mdl)$/i, image: /\.(blp|dds|tga)$/i };
 
 interface FileEntry { path: string; imported: boolean }
