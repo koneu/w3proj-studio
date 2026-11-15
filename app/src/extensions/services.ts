@@ -318,6 +318,10 @@ export interface TerrainObjects {
   occupancy(): Promise<TerrainOccupancy>;
   /** Where a unit type lands near a point: buildings go on the building grid, others stay. */
   buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
+  /** Replace Doodads' rule for room, for doodads of `list` (war3map.doo) that took a new type and went on its grid:
+   *  `was` has each as it was before (a copy). One whose new footprint would cover another placed object's (taken in
+   *  the list's order; the ground doesn't count) gets its old fields back. How many went back. */
+  sendBackCrowded(list: PlacedEntry[], was: ReadonlyMap<PlacedEntry, PlacedEntry>): Promise<number>;
   /** Reads what `type(id)` needs of a doodad or destructable type's pathing texture (a destructable without one has no
    *  fixed rotation to place at); resolves when it's read or can't be. Others: at once. */
   ready(id: string): Promise<void>;

@@ -6,6 +6,8 @@ import type { Terrain } from "../../lib/terrain/w3e";
 import type { CornerLog } from "../../lib/terrain/cliffs";
 import { h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
+import { forEachStampCell } from "../../lib/terrain/pathing";
+import type { RoomShape } from "./occupancy";
 
 export type ReplaceKind = "cliffs" | "tiles" | "doodads" | "units";
 
@@ -62,6 +64,51 @@ export function replaceCorners(t: Terrain, field: "texture" | "cliffTexture", fr
 /** For placed objects: old id → new id, both ways with `swap`. */
 export function swapsOf(req: ReplaceRequest): Record<string, string> {
   return req.swap && req.from !== req.to ? { [req.from]: req.to, [req.to]: req.from } : { [req.from]: req.to };
+}
+
+/** The cells of the 32-unit pathing grid (index y * width + x, rows from the south) that `shape` at (x, y) facing
+ *  `angle` (radians) covers. A circle covers each cell it reaches into: in the World Editor a footman (collision 31)
+ *  whose middle is 24 from a crate's edge keeps a barrel from becoming that crate, one 40 from it doesn't. */
+export function roomCells(t: Terrain, shape: RoomShape, x: number, y: number, angle: number): number[] {
+  const w = (t.width - 1) * 4, h = (t.height - 1) * 4, out: number[] = [];
+  if (!shape) return out;
+  if ("radius" in shape) {
+    const gx = (x - t.offsetX) / 32, gy = (y - t.offsetY) / 32, r = shape.radius / 32;
+    for (let cy = Math.max(0, Math.floor(gy - r)); cy <= Math.min(h - 1, Math.floor(gy + r)); cy++) {
+      for (let cx = Math.max(0, Math.floor(gx - r)); cx <= Math.min(w - 1, Math.floor(gx + r)); cx++) {
+        // From the middle to the cell's nearest point.
+        const dx = Math.max(cx - gx, 0, gx - cx - 1), dy = Math.max(cy - gy, 0, gy - cy - 1);
+        if (dx * dx + dy * dy < r * r) out.push(cy * w + cx);
+      }
+    }
+    return out;
+  }
+  forEachStampCell(t, w, h, { x, y, angle, width: shape.width, height: shape.height }, (cx, cy, pixel) => {
+    if (shape.mask[pixel]) out.push(cy * w + cx);
+  });
+  return out;
+}
+
+/** Replace Doodads' rule for room, as the World Editor has it: a doodad keeps its new type only where that type's
+ *  footprint, on its new grid, covers no cell another placed object covers then. `others`: the cells of every object
+ *  that isn't being replaced (doodads and destructables with a pathing texture, units, items, buildings; not the
+ *  ground: a cliff or water under the new footprint doesn't stop it). `swapped`, in the file's order, each one's cells
+ *  before and after. They go one by one: one replaced earlier counts with its new cells, one still to come with its
+ *  old ones, its own old cells never. Measured (tests/we-compare/replace-doodad-overlap.json): barrels to crates
+ *  beside a tree, crates, a doodad, a footman, an item or a farm stay barrels, beside a pathless doodad or across a
+ *  cliff they become crates; of two barrels whose crates would overlap, the one first in the file becomes one.
+ *  Whether each may change, in `swapped`'s order. */
+export function roomForReplaced(others: Iterable<readonly number[]>, swapped: readonly { before: readonly number[]; after: readonly number[] }[]): boolean[] {
+  const taken = new Map<number, number>();
+  const add = (cells: readonly number[], by: number) => { for (const c of cells) taken.set(c, (taken.get(c) ?? 0) + by); };
+  for (const cells of others) add(cells, 1);
+  for (const s of swapped) add(s.before, 1);
+  return swapped.map((s) => {
+    add(s.before, -1);
+    const free = s.after.every((c) => !taken.get(c));
+    add(free ? s.after : s.before, 1);
+    return free;
+  });
 }
 
 /** The dialog: Old and New type, Swap Both, and for objects Selected Only (and Reset Variations for doodads).
