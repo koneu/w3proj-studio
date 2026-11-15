@@ -201,7 +201,10 @@ export async function launch(exe, env = {}, attempt = 1) {
   const port = await freePort(), nativePort = await freePort();
   // xvfb-run sets DISPLAY; a Wayland session's WAYLAND_DISPLAY would still lead the app (and what it starts, like
   // JassHelper through Proton) to the user's screen, so it isn't passed on.
-  const { WAYLAND_DISPLAY: _wayland, ...inherited } = process.env;
+  // DISPLAY and XAUTHORITY of the desktop go too: xvfb-run sets its own, and if it can't, the app must fail, not
+  // open on the user's screen. Nobody can hand a DISPLAY in through `env` either.
+  const { WAYLAND_DISPLAY: _wayland, DISPLAY: _display, XAUTHORITY: _xauth, ...inherited } = process.env;
+  if (env.DISPLAY || env.WAYLAND_DISPLAY) throw new Error("webdriver: refusing an explicit DISPLAY/WAYLAND_DISPLAY: the app runs on its own Xvfb only");
   const driver = spawn("xvfb-run", ["-a", "-s", "-screen 0 1600x1000x24", "tauri-driver", "--port", String(port), "--native-port", String(nativePort)], {
     stdio: ["ignore", "ignore", "pipe"], detached: true, env: { ...inherited, ...env },
   });

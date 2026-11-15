@@ -546,6 +546,10 @@ class Session {
     bw.push("--args", "3", join(this.proton.tool, "proton"), "run", program, ...args);
     const env = { ...process.env };
     delete env.PIPEWIRE_REMOTE;
+    // Never the desktop: the editor opens on its own Xvfb or not at all.
+    delete env.WAYLAND_DISPLAY;
+    delete env.XAUTHORITY;
+    if (!this.display || !/^:\d+$/.test(this.display)) throw new Error("we-drive: no Xvfb display of its own, refusing to start the editor");
     Object.assign(env, {
       DISPLAY: this.display,
       STEAM_COMPAT_DATA_PATH: prefixDir(),
