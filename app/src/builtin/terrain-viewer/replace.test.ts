@@ -120,3 +120,22 @@ test("roomForReplaced: an object's own old cells don't count; one refused keeps 
   // B moved off cell 7 first, so A may take it.
   assert.deepEqual(roomForReplaced([], [{ before: [7], after: [6] }, { before: [1], after: [1, 7] }]), [true, true]);
 });
+
+test("Replace Units: footmen to farms, as the World Editor did (tests/we-compare/replace-units-overlap-farm.json)", () => {
+  // A footman (circle 31) becomes a farm (4x4 cells) on the grid point nearest it: (20, 20) goes to (0, 0), covering -64..64.
+  const farm = (x: number, y: number) => roomCells(MAP, square(4), x, y, SOUTH);
+  const footman = (x: number, y: number) => roomCells(MAP, { radius: 31 }, x, y, SOUTH);
+  const tree = (x: number, y: number) => roomCells(MAP, square(4), x, y, SOUTH);
+  const item = (x: number, y: number) => roomCells(MAP, { radius: 16 }, x, y, SOUTH);
+  const pair = (others: number[][], atX: number) => roomForReplaced(others, [{ before: footman(atX, 20), after: farm(Math.round((atX - 20) / 64) * 64, 0) }]);
+  assert.deepEqual(pair([], 20), [true], "alone");
+  assert.deepEqual(pair([tree(-76, 20)], 20), [false], "a tree 96 west covers its edge");
+  assert.deepEqual(pair([tree(-140, 20)], 20), [true], "a tree a farm's width further west");
+  assert.deepEqual(pair([footman(-76, 20)], 20), [false], "a peasant 96 west");
+  assert.deepEqual(pair([item(-76, 20)], 20), [false], "an item 96 west");
+  assert.deepEqual(pair([roomCells(MAP, null, -76, 20, SOUTH)], 20), [true], "a pathless doodad");
+  // Two footmen 96 apart, both replaced: the first's farm would cover the second's footman, and the second's the first's.
+  assert.deepEqual(roomForReplaced([], [
+    { before: footman(20, 20), after: farm(0, 0) }, { before: footman(-76, 20), after: farm(-64, 0) },
+  ]), [false, false]);
+});

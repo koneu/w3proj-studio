@@ -721,7 +721,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         // One whose new footprint would cover another object's stays as it was, as in the editor's Replace Doodads and
         // Replace Units.
-        changed -= await handle.objects.sendBackCrowded(f.list, copies);
+        changed -= await handle.objects.sendBackCrowded(f.list, copies, fileKey(args.kind ?? "doodads"));
         if (!changed) throw new Error("Nothing was replaced: each new footprint would cover another object's, which the World Editor's Replace refuses too.");
       });
       return { changed };
@@ -2726,16 +2726,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  or units) that took a new type (`was` has them as they were: type, place, facing), the ones whose new footprint
          *  would cover another placed object's, taken in the list's order. The others are every placed doodad, unit and
          *  item not in `was`. Shapes not read yet (loadRoomShapes) take no room. */
-        const crowdedReplacements = (list: readonly Placed[], was: ReadonlyMap<Placed, { id: string; position: readonly number[]; angle: number }>): Set<Placed> => {
+        const crowdedReplacements = (list: readonly Placed[], was: ReadonlyMap<Placed, { id: string; position: readonly number[]; angle: number }>, units: boolean): Set<Placed> => {
           const cellsOf = (kind: string, p: { id: string; position: readonly number[]; angle: number }) =>
             roomCells(terrain, roomShapes.get(`${kind}:${p.id}`) ?? null, p.position[0], p.position[1], p.angle);
           const changed = list.filter((p) => was.has(p));
-          const kindOf = (p: Placed) => (unitsFile?.list.includes(p) ? unitRoomKind(p) : "w3d");
-          const kind = changed.length ? kindOf(changed[0]) : "w3d";
-          const others = [...(dooFile?.list ?? []).filter((p) => !was.has(p)).map((p) => cellsOf("w3d", p)),
-            ...(unitsFile?.list ?? []).filter((p) => !was.has(p)).map((p) => cellsOf(unitRoomKind(p), p))];
-          const beforeKind = (p: Placed) => (kind === "w3d" ? "w3d" : unitsEntryKind(was.get(p) as Placed, skinById(was.get(p)!.id)?.kind));
-          const ok = roomForReplaced(others, changed.map((p) => ({ before: cellsOf(beforeKind(p), was.get(p)!), after: cellsOf(kind === "w3d" ? "w3d" : unitRoomKind(p), p) })));
+          // `list` is the file the entries are in as the caller holds it (the editor's own, or an MCP edit's copy); the other file is the editor's.
+          const others = [...(units ? (dooFile?.list ?? []) : list).filter((p) => !was.has(p)).map((p) => cellsOf("w3d", p)),
+            ...(units ? list : (unitsFile?.list ?? [])).filter((p) => !was.has(p)).map((p) => cellsOf(unitRoomKind(p), p))];
+          const beforeKind = (p: Placed) => (units ? unitsEntryKind(was.get(p) as Placed, skinById(was.get(p)!.id)?.kind) : "w3d");
+          const ok = roomForReplaced(others, changed.map((p) => ({ before: cellsOf(beforeKind(p), was.get(p)!), after: cellsOf(units ? unitRoomKind(p) : "w3d", p) })));
           return new Set(changed.filter((_, i) => !ok[i]));
         };
         const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
@@ -3277,7 +3276,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           settleDoodads(swapped, { place: true, scale: true });
           if (room) {
             const was = new Map(swapped.map((p, i) => [p, before[i]]));
-            const crowded = crowdedReplacements(swapped, was);
+            const units = !!unitsFile?.list.includes(swapped[0]);
+            const crowded = crowdedReplacements(units ? unitsFile!.list : dooFile?.list ?? [], was, units);
             for (const p of crowded) Object.assign(p, structuredClone(was.get(p)!));
             before = before.filter((_, i) => !crowded.has(swapped[i]));
             swapped = swapped.filter((p) => !crowded.has(p));
@@ -4373,15 +4373,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
             buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
-            sendBackCrowded: async (list, was) => {
-              const entries = list as Placed[];
+            sendBackCrowded: async (list, was, kind) => {
+              const entries = list as Placed[], units = kind === "units";
               const both = [...entries, ...([...was.values()] as Placed[])];
               // Units' shapes are read by "kind:id" for the old types too, which a list already changed no longer holds.
-              if (entries.length && unitsFile?.list.includes(entries[0])) await loadRoomShapes([], both.map((p) => `${unitRoomKind(p)}:${p.id}`));
+              if (units) await loadRoomShapes([], both.map((p) => `${unitRoomKind(p)}:${p.id}`));
               else await loadRoomShapes(both);
               // Taken after the wait: only those still in the list and of another type than they were.
               const changed = new Map(entries.filter((p) => was.has(p) && was.get(p)!.id !== p.id).map((p) => [p, was.get(p) as Placed]));
-              const crowded = crowdedReplacements(entries, changed);
+              const crowded = crowdedReplacements(entries, changed, units);
               for (const p of crowded) Object.assign(p, structuredClone(changed.get(p)!));
               return crowded.size;
             },
