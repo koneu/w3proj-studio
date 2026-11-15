@@ -5,7 +5,8 @@
 //   wpm      war3map.wpm, as a rebuild after an edit writes it (terrain-viewer/derive.ts deriveFromProject, with the
 //            Pathing tool's saved overrides: terrain-pathing's filterSavedPathing)
 //   shd      war3map.shd made again in whole, as Calculate Shadows does (derive.ts fullShadows): the record of what
-//            the stored one was made from isn't kept, so it can't be updated only where something changed
+//            the stored one was made from isn't kept, so it can't be updated only where something changed; the stored
+//            one is kept when the result would leave the doodads out (shadowVerdict: the game's data unreadable)
 //   minimap  war3mapMap.blp and its icons war3map.mmp, as the rebuild writes them
 //   script   war3map.j / war3map.lua from the triggers, as the Map Script extension's Generate Map Script: a script
 //            that isn't the one Studio wrote last is kept (lib/script/guard.ts), vJASS isn't compiled
@@ -100,9 +101,15 @@ export async function rebuild(job: Job): Promise<Report> {
     const objects = () => savedObjects(w3);
     if (parts.has("shd")) {
       try {
-        const { shd, stored } = await fullShadows(w3, { terrainPath: terrain, objects, read });
-        if (!same(shd, stored)) await w3.workspace.writeBytes("map/war3map.shd", shd);
-        results.push(await result("shd", true));
+        const { shd, stored, write, leftOut, problem } = await fullShadows(w3, { terrainPath: terrain, objects, read });
+        // As Calculate Shadows: a result without the doodads' models (the game's data unreadable) would be cliffs only,
+        // written over baked shadows. The stored file stays.
+        if (!write) {
+          results.push({ part: "shd", files: [PART_FILES.shd[0]], status: "kept", note: `${problem}: the stored war3map.shd is kept` });
+        } else {
+          if (!same(shd, stored)) await w3.workspace.writeBytes("map/war3map.shd", shd);
+          results.push(await result("shd", true, leftOut ? `warning: ${leftOut} doodad${leftOut === 1 ? "" : "s"} left out of the shadows, their models couldn't be read` : undefined));
+        }
       } catch (e) {
         results.push(await result("shd", false, text(e)));
       }
