@@ -1,11 +1,14 @@
 // The display guard of we-x11.py (no test tool may click on the user's real desktop), through its `guard-check`
 // mode with a fake /proc, plus the real command refusing without touching any display.
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+
+// The guard reads Linux /proc: nothing to test on Windows.
+const test = (name, fn) => nodeTest(name, { skip: process.platform === "win32" }, fn);
 
 // Tests run from app/ (the runner copies the compiled tests elsewhere, so not next to this file).
 const HELPER = join(process.cwd(), "scripts", "we-x11.py");
