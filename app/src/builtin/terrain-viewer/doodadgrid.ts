@@ -119,14 +119,24 @@ export function doodadOnGrid(x: number, y: number, angle: number, size: PathSize
   return { x: keep(x, onDoodadGrid(x, cellsX)), y: keep(y, onDoodadGrid(y, cellsY)), angle: turned };
 }
 
+/** The angle (radians) the World Editor takes a stored angle for when it opens a map: a whole number is read as degrees
+ *  (we-compare specs fence-ints / fence-angles, 2026-11-15: 1, 2, 3 … 7, 45, 90, 180, 270 and -2 on a rectangle NOfl, a
+ *  plain square LOcb and a doodad without a texture APms; 2.0000002 and 1.9999999 stay radians). -1 is left as it is: the
+ *  editor turned an NOfl stored at -1 to 180, which neither reading gives. Measured on doodads, not on destructables. */
+export function openedAngle(angle: number): number {
+  const a = Math.fround(angle);
+  return Number.isInteger(a) && a !== 0 && a !== -1 ? fixedAngle(a) : angle;
+}
+
 /** The doodads of a list the World Editor would move or turn when it opens the map, with where to. `sizeOf`: an
- *  id's pathing texture size, null for none; `fixedRotOf`: a destructable type's fixed rotation (doodadOnGrid). */
+ *  id's pathing texture size, null for none; `fixedRotOf`: a destructable type's fixed rotation (doodadOnGrid). A
+ *  whole-number angle is degrees (openedAngle). */
 export function doodadSnaps(list: readonly Placed[], sizeOf: (id: string) => PathSize | null,
   fixedRotOf: (id: string) => number | null = () => null): { entry: Placed; x: number; y: number; angle: number }[] {
   const out: { entry: Placed; x: number; y: number; angle: number }[] = [];
   for (const entry of list) {
     const [x, y] = entry.position;
-    const at = doodadOnGrid(x, y, entry.angle, sizeOf(entry.id), fixedRotOf(entry.id));
+    const at = doodadOnGrid(x, y, openedAngle(entry.angle), sizeOf(entry.id), fixedRotOf(entry.id));
     if (at.x !== x || at.y !== y || at.angle !== entry.angle) out.push({ entry, ...at });
   }
   return out;
