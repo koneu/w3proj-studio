@@ -127,6 +127,18 @@ export function pickLabel(w3: W3Api, host: HTMLElement, opts: { title: string; c
     load: async () => (await opts.labels()).map((path) => ({ path, imported: false })) });
 }
 
+export type PickerAction = { kind: "move"; active: number } | { kind: "choose" } | { kind: "cancel" };
+
+/** What a key does in the open picker, or null when it's left alone (typing, or Enter on a button,
+ *  which presses it). `count` is the rows shown. */
+export function pickerKey(key: string, active: number, count: number, onButton = false): PickerAction | null {
+  if (key === "ArrowDown") return { kind: "move", active: Math.max(0, Math.min(active + 1, count - 1)) };
+  if (key === "ArrowUp") return { kind: "move", active: Math.max(active - 1, 0) };
+  if (key === "Enter") return onButton ? null : { kind: "choose" };
+  if (key === "Escape") return { kind: "cancel" };
+  return null;
+}
+
 function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
   return new Promise((resolve) => {
     let all: FileEntry[] = [];
@@ -187,13 +199,6 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
       placeholder: opts.placeholder,
       value: start === "_" ? "" : start,
       oninput: () => { active = 0; filter(); },
-      onkeydown: (e: KeyboardEvent) => {
-        const key = keyOf(e);
-        if (key === "ArrowDown") { active = Math.min(active + 1, Math.min(shown.length, MAX_ROWS) - 1); mark(); e.preventDefault(); }
-        else if (key === "ArrowUp") { active = Math.max(active - 1, 0); mark(); e.preventDefault(); }
-        else if (key === "Enter") { if (shown[active]) finish(shown[active].path); e.preventDefault(); }
-        else if (key === "Escape") { finish(null); e.preventDefault(); }
-      },
     });
     // Thumbnails load when their row scrolls into view.
     const seen = new IntersectionObserver((entries) => {
@@ -248,8 +253,19 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
       if (tree) treeEl.replaceChildren(...row(tree, 0));
     };
     const body = h("div.browse-body", {}, opts.folders ? treeEl : null, rowsEl, previewEl);
+    // Keys go to the whole dialog: a click on a row or folder moves focus off the search box, but the
+    // dialog (tabindex -1) keeps it inside the picker.
+    const onKey = (e: KeyboardEvent) => {
+      const act = pickerKey(keyOf(e), active, Math.min(shown.length, MAX_ROWS), (e.target as HTMLElement | null)?.tagName === "BUTTON");
+      if (!act) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (act.kind === "move") { active = act.active; mark(); }
+      else if (act.kind === "choose") { if (shown[active]) finish(shown[active].path); }
+      else finish(null);
+    };
     const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) finish(null); } },
-      h("div.picker.picker-browse", {},
+      h("div.picker.picker-browse", { tabindex: -1, onkeydown: onKey },
         h("div.picker-header", {}, h("strong", {}, opts.title), countEl, h("button.icon-button", { title: "Cancel (Esc)", onclick: () => finish(null) }, "×")),
         search,
         body,

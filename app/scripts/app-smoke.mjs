@@ -9735,6 +9735,45 @@ async function objectPreview(page, found, root) {
   }
 }
 
+/** The Object Editor's file picker keeps its keys after a row click: a real click on a row, then Enter chooses it (the
+ *  field takes the path); reopened, a click and Escape closes it and the field stays. The focus used to land on the
+ *  editor pane, where the dialog heard nothing. */
+async function objectFilePicker(page, found, root) {
+  const fail = (what) => found.push(`object file picker: ${what}`);
+  const hands = new Hands(page);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hbar")`);
+  await until("the barracks' fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
+  const cell = `(() => { const row = [...document.querySelectorAll(".obj-table tr")].find((r) => r.textContent.includes("Shadow Texture (Building)") && r.querySelector(".obj-value-cell")); return row; })()`;
+  const value = () => page.evaluate(`(() => { const c = ${cell}.querySelector(".obj-value-cell"); return (c.querySelector("input,textarea")?.value ?? c.textContent).trim(); })()`);
+  const open = async () => {
+    await page.evaluate(`(() => { ${cell}.scrollIntoView({ block: "center" }); })()`);
+    await page.evaluate(`[...${cell}.querySelectorAll("button")].find((b) => b.textContent === "Browse…").click()`);
+    await until("the picker's rows", () => page.evaluate(`document.querySelectorAll(".picker-browse .picker-row").length > 0`), 30000);
+  };
+  const before = await value();
+  await open();
+  const second = await page.evaluate(`document.querySelectorAll(".picker-browse .picker-row")[2].querySelector(".picker-name").textContent`);
+  await hands.click(".picker-browse .picker-row:nth-child(3) .picker-name");
+  const focus = await page.evaluate(`!!document.activeElement?.closest(".picker-browse")`);
+  if (!focus) fail("after a row click the focus left the picker");
+  await hands.key("ArrowDown", "ArrowDown", 40);
+  const moved = await page.evaluate(`[...document.querySelectorAll(".picker-browse .picker-row")].findIndex((r) => r.classList.contains("active"))`);
+  if (moved !== 3) fail(`ArrowDown after a row click moved the highlight to row ${moved}, not 3`);
+  await hands.key("ArrowUp", "ArrowUp", 38);
+  await hands.key("Enter", "Enter", 13);
+  if (await page.evaluate(`!!document.querySelector(".picker-browse")`)) fail("Enter after a row click left the picker open");
+  const after = await value();
+  if (after !== second && !after.toLowerCase().includes(second.toLowerCase().replace(/\.\w+$/, ""))) fail(`Enter chose "${after}", not "${second}"`);
+  if (after === before) fail("the field didn't change (control)");
+  await open();
+  await hands.click(".picker-browse .picker-row:nth-child(1) .picker-name");
+  await hands.key("Escape", "Escape", 27);
+  if (await page.evaluate(`!!document.querySelector(".picker-browse")`)) fail("Escape after a row click left the picker open");
+  if ((await value()) !== after) fail("Escape changed the field");
+}
+
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
  *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
 async function objectLayout(page, found, root) {
@@ -13496,6 +13535,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectEditorColorTools,
+        objectFilePicker: (p, f) => objectFilePicker(p, f, project),
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
@@ -13851,6 +13891,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "editorTabRaces", found);
   await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
   await leftOpen(page, "playerStarts", found);
+  await objectFilePicker(page, found, project).catch((e) => found.push(`object file picker: ${e.message}`));
+  await leftOpen(page, "objectFilePicker", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
   await leftOpen(page, "objectLayout", found);
   await objectListKept(page, found, project).catch((e) => found.push(`object list kept: ${e.message}`));
