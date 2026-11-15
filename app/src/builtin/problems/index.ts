@@ -90,8 +90,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
       const loaded = await readIgnore();
-      const there = await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }).catch(() => false);
-      const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
+      let there = false;
+      const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), async () => (there = await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) })));
       // One failing check doesn't stop the others.
       for (const check of [...checks]) {
         if (isDisabled(cfg.config, check.id)) continue;
