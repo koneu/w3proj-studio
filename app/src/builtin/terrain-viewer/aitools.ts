@@ -8,6 +8,7 @@ import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundLimitText } from "./limits";
 import { variationText } from "./values";
+import { savedLife } from "./doodadrules";
 import { groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
@@ -600,8 +601,8 @@ export function swapTiles(current: readonly string[], oldOwn: readonly string[],
 }
 
 /** Swaps placed objects for other types, keeping where they stand. A variation the new type
- *  hasn't got becomes one it has. How many changed. */
-export function replacePlaced(list: { id: string; position: readonly number[]; variation?: number; skinId?: string }[], swaps: Readonly<Record<string, string>>, area: Area | null, variations: (id: string) => number) {
+ *  hasn't got becomes one it has; with `kindOf` the life follows the new kind (doodadrules.ts savedLife). How many changed. */
+export function replacePlaced(list: { id: string; position: readonly number[]; variation?: number; skinId?: string; life?: number }[], swaps: Readonly<Record<string, string>>, area: Area | null, variations: (id: string) => number, kindOf?: (id: string) => string | undefined) {
   let changed = 0;
   for (const e of list) {
     const to = swaps[e.id];
@@ -609,6 +610,8 @@ export function replacePlaced(list: { id: string; position: readonly number[]; v
     e.id = to;
     if ("skinId" in e) e.skinId = to;
     if (e.variation !== undefined) e.variation = Math.min(e.variation, Math.max(0, variations(to) - 1));
+    // A doodad that becomes a destructable or the reverse gets the life the World Editor saves for its new kind.
+    if (e.life !== undefined && kindOf) e.life = savedLife(e.life, kindOf(to));
     changed++;
   }
   return changed;

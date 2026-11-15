@@ -292,6 +292,22 @@ test("objects swap types where they stand, in an area if given", () => {
   assert.equal(list[2].id, "ARrk");
 });
 
+test("a replace follows the new kind's life: barrel to destructable and back, units untouched", () => {
+  const kinds: Record<string, string> = { LTbr: "w3d", LTcr: "w3b", hfoo: "w3u", hpea: "w3u" };
+  const kindOf = (id: string) => kinds[id];
+  const list: { id: string; position: number[]; life?: number }[] = [{ id: "LTbr", position: [0, 0, 0], life: 255 }, { id: "LTcr", position: [1, 0, 0], life: 50 }, { id: "hfoo", position: [2, 0, 0] }];
+  assert.equal(replacePlaced(list, { LTbr: "LTcr" }, null, () => 1, kindOf), 1);
+  assert.equal(list[0].life, 100);
+  assert.equal(replacePlaced(list, { LTcr: "LTbr" }, null, () => 1, kindOf), 2);
+  assert.deepEqual(list.map((e) => e.life), [255, 255, undefined]);
+  assert.equal(replacePlaced(list, { hfoo: "hpea" }, null, () => 1, kindOf), 1);
+  assert.equal(list[2].life, undefined);
+  // Without the kind (control: the old behaviour) the life stays.
+  const old = [{ id: "LTbr", position: [0, 0, 0], life: 255 }];
+  replacePlaced(old, { LTbr: "LTcr" }, null, () => 1);
+  assert.equal(old[0].life, 255);
+});
+
 test("a picture can leave things out, water with its shoreline", () => {
   assert.deepEqual(hiddenInPicture(undefined), { groups: [], water: false });
   assert.deepEqual(hiddenInPicture(["doodads", "units"]), { groups: ["doodads", "units"], water: false });

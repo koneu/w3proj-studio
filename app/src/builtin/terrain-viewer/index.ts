@@ -2788,11 +2788,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  into 0..360), as the World Editor does when it opens a map (doodadgrid.ts; setting terrain.doodads.snapOnLoad). Not an edit, as in the World Editor: the map isn't
          *  marked as changed and there's no undo step, but the next save writes the new places. A doodad that
          *  follows the ground (no flag 4) lands on it. Pathing textures that can't be read leave their doodads be. */
-        async function snapOnOpen(f: PlacedFile) {
+        async function snapOnOpen(f: PlacedFile, quiet = false) {
           // Taken after the waits: a file reloaded meanwhile is another's, and is taken as it is.
           const n = await snapList(f.list, () => !disposed && dooFile === f, (entry) => repositioned.add(entry));
           if (!n) return;
           objectsTouched = true;
+          if (quiet) return;
           void w3.window.showInfo(`Put ${n} doodad${n === 1 ? "" : "s"} on ${n === 1 ? "its" : "their"} grid and facing, as the World Editor does when it opens a map; the next save writes ${n === 1 ? "it" : "them"} so (setting Snap Doodads on Load).`);
         }
         /** Snap Doodads on Load's places and facings for the doodads of `list`, in place; `moved` hears of each one that
@@ -2829,11 +2830,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  changed, the next save writes them. A map whose w3i can't be read keeps its flags (the playable area isn't
          *  known); a type without a range keeps its scale, and so do all with `scales` false (the map's own ranges
          *  couldn't be read). */
-        async function fixOnOpen(f: PlacedFile, scales: boolean) {
+        async function fixOnOpen(f: PlacedFile, scales: boolean, quiet = false) {
           // Taken after the wait: a file reloaded meanwhile is another's, and is taken as it is.
           const n = await fixList(f.list, scales, () => !disposed && dooFile === f);
           if (!n) return;
           objectsTouched = true;
+          if (quiet) return;
           void w3.window.showInfo(`Set the scale, flags or life of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
         /** Fix Doodads on Load's scales, flags and life for the doodads of `list`, in place. The number changed; 0 when
@@ -3299,7 +3301,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
           let before = swapped.map(look);
           const numVar = (id: string) => handle.objects.type(id)?.numVar ?? 1;
-          replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar);
+          replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar, (id) => objCtx?.skins?.get(id)?.kind);
           for (const p of swapped) {
             if (newVariations && p.variation !== undefined) p.variation = Math.floor(Math.random() * numVar(p.id));
             // A building of another size has another spot on the grid.
@@ -5842,8 +5844,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // places): not an edit, and the next save writes them, as after the open. Only the doodads' changes from
               // the open are what a clean editor holds besides the files, so units read again leave them to be saved.
               objectsTouched = false;
-              if (snapsDoodads()) await snapOnOpen(f);
-              if (!disposed && fixesDoodads()) await fixOnOpen(f, scalesKnown);
+              if (snapsDoodads()) await snapOnOpen(f, true);
+              if (!disposed && fixesDoodads()) await fixOnOpen(f, scalesKnown, true);
               if (disposed) return true;
             } else { unitsFile = f; savedStarts = startLocations(f.list); }
             if (selected || group.length) clearSelection();

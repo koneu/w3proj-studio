@@ -7031,6 +7031,7 @@ async function mcpReplaceSnap(page, found) {
     await page.evaluate(`window.__mrsGroup?.dispose(); window.__mrsGroup = null; window.__mrsEd = null;`);
   };
   await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  await page.evaluate(`(() => { window.__mrsInfos = []; window.__mrsKept = w3.window.showInfo; w3.window.showInfo = (m, ...a) => { window.__mrsInfos.push(String(m)); return window.__mrsKept.call(w3.window, m, ...a); }; })()`);
   try {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
     await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
@@ -7043,6 +7044,10 @@ async function mcpReplaceSnap(page, found) {
     if (!same(pose(shown.find((d) => d.id === "LOtr")), SNAPPED_LOTR)) return fail(`LOtr isn't shown snapped and fixed (control): ${JSON.stringify(pose(shown.find((d) => d.id === "LOtr")))}`);
     if (!same(pose(onDisk().find((d) => d.id === "LOtr"))?.slice(0, 2), [-64, 32])) return fail("the open wrote the doodad file (control)");
 
+    const gridMsgs = () => page.evaluate(`window.__mrsInfos.filter((m) => /on (its|their) grid/.test(m)).length`);
+    // Control: opening the map said it.
+    if ((await gridMsgs()) < 1) return fail("opening the map didn't say the doodads were put on their grid (control)");
+    await page.evaluate(`window.__mrsInfos.length = 0`);
     const check = (when) => {
       const list = onDisk();
       if (!list.some((d) => d.id === "LOch") || list.some((d) => d.id === "LTbr")) fail(`${when}: the barrel isn't a hay cart in the file (${list.map((d) => d.id)})`);
@@ -7060,6 +7065,8 @@ async function mcpReplaceSnap(page, found) {
 
     await tool("undo_last_edit");
     await settled(page);
+    // The message says it's when a map opens: the read-back of the undo applies the rules silently.
+    if ((await gridMsgs()) > 0) fail("undo_last_edit brought back the 'on their grid' message");
     await saveAfterEdit();
     const back = onDisk();
     if (!back.some((d) => d.id === "LTbr")) fail(`undo_last_edit didn't bring the barrel back (${back.map((d) => d.id)})`);
@@ -7081,6 +7088,7 @@ async function mcpReplaceSnap(page, found) {
     check("the file replace_objects in an area wrote");
   } finally {
     await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`if (window.__mrsKept) { w3.window.showInfo = window.__mrsKept; window.__mrsKept = null; }`).catch(() => {});
     await page.evaluate(`window.__mrsGroup?.dispose(); window.__mrsGroup = null; window.__mrsEd = null;`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
