@@ -45,7 +45,7 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
-import { doodadSnaps, snapSize, type PathSize } from "./doodadgrid";
+import { doodadSnaps, hasPathSize, snapSize, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, settleDoodad, type DoodadRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
@@ -3295,8 +3295,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const copySelection = () => {
           const entries = copyable();
           if (!entries.length) return false;
-          clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y),
-            copyCentre(entries.map((p) => p.position)));
+          // In the order of the map's files, as the World Editor pastes them (not the order a box picked them in).
+          const doodadAt = new Map(dooFile?.list.map((p, i) => [p, i]) ?? []), unitAt = new Map(unitsFile?.list.map((p, i) => [p, i]) ?? []);
+          const fileOrder = (p: Placed) => doodadAt.get(p) ?? doodadAt.size + (unitAt.get(p) ?? 0);
+          const items = [...entries].sort((a, b) => fileOrder(a) - fileOrder(b)).map((entry) => ({ list: doodadAt.has(entry) ? "doodads" as const : "units" as const, entry }));
+          // The centre as the World Editor's (copyCentre): from where each would stand on its own grid, and only on the
+          // 64 grid when something of the group has a grid.
+          const own = items.map(({ list, entry: p }): [number, number] => {
+            if (list === "units") return onGrid(p.id, p.position[0], p.position[1]);
+            const at = ruledPose(p.id, p.position[0], p.position[1], p.angle);
+            return [at.x, at.y];
+          });
+          const rules = doodadRules();
+          const free = !items.some(({ list, entry: p }) => (list === "doodads" ? rules.snap && hasPathSize(rules.size(p.id)) : unitGridCells(p.id, buildingCells.get(p.id)) !== null));
+          clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), copyCentre(own, free)), ...(free ? { free } : {}) };
           takeTypes(clipboard);
           return true;
         };
@@ -3402,10 +3414,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre) };
           takeTypes(clipboard);
         };
-        /** Where the fragment's centre lands for a pointer on the ground: objects alone on the World Editor's 64 grid,
-         *  ground on whole tiles. */
+        /** Where the fragment's centre lands for a pointer on the ground: objects alone on the World Editor's 64 grid
+         *  (at the pointer when none of them has a grid), ground on whole tiles. */
         const pasteCentre = (f: Fragment, g: Vec3): [number, number] => {
-          if (!f.ground) return pasteCentreAt(g[0], g[1]);
+          if (!f.ground) return pasteCentreAt(g[0], g[1], f.free === true);
           const [x, y] = groundOrigin(terrain, f.ground, g[0], g[1]);
           return [terrain.offsetX + x * 128 - f.ground.at[0], terrain.offsetY + y * 128 - f.ground.at[1]];
         };

@@ -172,15 +172,20 @@ const PASTE_GRID = 64;
 const onPasteGrid = (v: number) => Math.round(v / PASTE_GRID) * PASTE_GRID + 0;
 
 /** The centre of a copied group of objects, as the World Editor's: the mean of their positions (not the middle of
- *  their extent) on the 64 grid. we-drive 2026-11-12, nine pastes (placement.test.ts). */
-export function copyCentre(positions: readonly (readonly number[])[]): [number, number] {
+ *  their extent), each on its own grid as a paste would put it (a farm saved at 290 counts at 320), on the 64 grid.
+ *  A group with nothing on a grid (`free`: pathless doodads, units and items without a building texture) keeps the
+ *  mean itself. we-drive 2026-11-12, nine pastes of barrels, and 2026-11-15, tests/we-compare/paste-centre.json
+ *  (placement.test.ts). */
+export function copyCentre(positions: readonly (readonly number[])[], free = false): [number, number] {
   const mean = (i: number) => positions.reduce((sum, p) => sum + p[i], 0) / positions.length;
-  return [onPasteGrid(mean(0)), onPasteGrid(mean(1))];
+  return free ? [mean(0), mean(1)] : [onPasteGrid(mean(0)), onPasteGrid(mean(1))];
 }
 
-/** Where the World Editor puts a copied group's centre for the pointer at (x, y): on the 64 grid. */
-export function pasteCentreAt(x: number, y: number): [number, number] {
-  return [onPasteGrid(x), onPasteGrid(y)];
+/** Where the World Editor puts a copied group's centre for the pointer at (x, y): on the 64 grid, or at the pointer
+ *  itself for a group with nothing on a grid (`free`, see copyCentre: a pasted LPcr, footman or item lands where the
+ *  pointer is). */
+export function pasteCentreAt(x: number, y: number, free = false): [number, number] {
+  return free ? [x, y] : [onPasteGrid(x), onPasteGrid(y)];
 }
 
 /** The building grid: a building's edges lie on the 64 grid, so a 6×6 one stands at 32 past it and an
