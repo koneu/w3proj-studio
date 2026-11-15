@@ -363,23 +363,23 @@ async function terrainWiring(page, found) {
   await until("the object's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
   await hands.click("input.obj-field-search");
   await hands.type("unam");
-  await until("the name field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  await until("the name field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
   const strings = join(root, "map", "war3map.wts");
   const wts = gateWrites(page, "map/war3map.wts"), objects = "map/war3map.w3u.json";
   const gated = await wts;
   const dirtyObjects = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(objects)})`);
-  await retype(hands, ".obj-table .obj-value-cell input", "First Name");
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "First Name");
   if (!(await dirtyObjects())) fail("changing a map string didn't mark the object file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
   if (!readFileSync(strings, "utf8").includes("First Name")) fail("a changed map string wasn't saved into war3map.wts");
   if (await dirtyObjects()) fail("the object file is still marked as changed after saving");
   try {
-    await retype(hands, ".obj-table .obj-value-cell input", "Second Name");
+    await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "Second Name");
     await gated.hold();
     await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
     await until("the write of the strings", async () => (await gated.state()).inflight === 1, 5000);
-    await retype(hands, ".obj-table .obj-value-cell input", "Third Name");
+    await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "Third Name");
     await gated.release();
     await page.evaluate(`window.__save`);
     await settled(page);
@@ -6162,8 +6162,8 @@ async function objectByHand(page, hands, root, fail) {
 
   await hands.click("input.obj-field-search");
   await hands.type("uhpm");
-  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
-  await retype(hands, ".obj-table .obj-value-cell input", "777");
+  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "777");
   await limits(page, hands, file, fail);
   if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("changing a field didn't mark the file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
@@ -6176,10 +6176,10 @@ async function objectByHand(page, hands, root, fail) {
 /** Hit points stop at 500000 in the World Editor: past that the field warns and still saves. */
 async function limits(page, hands, file, fail) {
   const flagged = () => page.evaluate(`document.querySelectorAll("tr.obj-over").length`);
-  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input").title`);
+  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)").title`);
   if (await flagged()) fail("777 hit points were marked as outside the limits");
   if (!/range: 1 to 500000/.test(await tooltip())) fail(`the field's tooltip is "${await tooltip()}"`);
-  await retype(hands, ".obj-table .obj-value-cell input", "999999");
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "999999");
   if ((await flagged()) !== 1) fail("999999 hit points weren't marked as outside the limits");
   if (!/Outside/.test(await tooltip())) fail(`the warning's tooltip is "${await tooltip()}"`);
   await page.evaluate(`w3.editors.saveAll()`);
@@ -6190,12 +6190,12 @@ async function limits(page, hands, file, fail) {
   await page.evaluate(`(() => { const e = document.querySelector("input.obj-field-search"); e.value = ""; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
   await until("all the fields", () => page.evaluate(`document.querySelectorAll(".obj-table tr").length > 20`), 5000);
   await hands.click(".obj-detail-toolbar label", "Outside limits (1)");
-  await until("the filter", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  await until("the filter", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
   await hands.click(".obj-detail-toolbar label", "Outside limits (1)");
   await hands.click("input.obj-field-search");
   await hands.type("uhpm");
-  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
-  await retype(hands, ".obj-table .obj-value-cell input", "777");
+  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "777");
   if (await flagged()) fail("the mark stayed after going back inside the limits");
   await speedLimits(page, hands, fail);
 }
@@ -6205,17 +6205,17 @@ async function limits(page, hands, file, fail) {
  *  450 is fine. */
 async function speedLimits(page, hands, fail) {
   const flagged = () => page.evaluate(`document.querySelectorAll("tr.obj-over").length`);
-  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input").title`);
+  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)").title`);
   const search = async (text) => {
     await page.evaluate(`(() => { const e = document.querySelector("input.obj-field-search"); e.value = ""; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     await hands.click("input.obj-field-search");
     await hands.type(text);
-    await until(`the field ${text}`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+    await until(`the field ${text}`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
   };
   await search("umvs");
-  await retype(hands, ".obj-table .obj-value-cell input", "350");
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "350");
   if (await flagged()) fail(`a Movement Speed of 350 was marked: "${await tooltip()}"`);
-  await retype(hands, ".obj-table .obj-value-cell input", "450");
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "450");
   if ((await flagged()) !== 1) fail("a Movement Speed of 450 wasn't marked, though the game moves units at 400 at most");
   if (!/400 at most.*Unit Speed - Maximum, the game's default/.test(await tooltip())) fail(`the speed warning's tooltip is "${await tooltip()}"`);
   // The map raises the limit: the mark goes once the file is saved, with the editor left open. The map's own file
@@ -6228,7 +6228,7 @@ async function speedLimits(page, hands, fail) {
   await until("the lower constant", async () => (await flagged()) === 1, 5000).catch(() => fail("with MaxUnitSpeed 420 in the map, 450 isn't marked"));
   if (!/420 at most.*set by this map/.test(await tooltip())) fail(`the map constant's tooltip is "${await tooltip()}"`);
   await page.evaluate(had === null ? `w3.workspace.delete("map/war3mapMisc.txt")` : `w3.workspace.writeText("map/war3mapMisc.txt", ${JSON.stringify(had)})`);
-  await retype(hands, ".obj-table .obj-value-cell input", "270");
+  await retype(hands, ".obj-table .obj-value-cell input:not(.color-tools-picker)", "270");
   await search("uhpm");
 }
 
@@ -6424,8 +6424,8 @@ async function typedFieldSave(page, found) {
     await until("its fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 15000);
     await hands.click("input.obj-field-search");
     await hands.type("uhpm");
-    await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
-    await typeAndSave("the Footman's hit points", `document.querySelector(".obj-table .obj-value-cell input")`, "555");
+    await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000);
+    await typeAndSave("the Footman's hit points", `document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")`, "555");
     const hp = () => JSON.parse(readFileSync(join(root, w3u), "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm")?.value;
     await until("the typed hit points saved", () => hp() === 555, 5000).catch(() => fail(`Ctrl+S right after typing 555 hit points saved ${JSON.stringify(hp())}`));
     await settled(page);
@@ -12181,8 +12181,8 @@ async function editorExtras(page, found) {
     await run("w3.objectEditor.open", "w3u", unit);
     await until("the unit's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000).catch(() => fail("the Object Editor shows no fields"));
     await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpr"; s.dispatchEvent(new Event("input")); })()`);
-    await until("the field uhpr", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000).catch(() => fail("the field filter doesn't find uhpr alone"));
-    const typeRegen = (v) => page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input"); i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input")?.classList.contains("invalid") ?? null; })()`);
+    await until("the field uhpr", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000).catch(() => fail("the field filter doesn't find uhpr alone"));
+    const typeRegen = (v) => page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")?.classList.contains("invalid") ?? null; })()`);
     if ((await typeRegen("-2")) !== true) fail("typing -2 into an unreal field wasn't refused without the setting");
     await k.save();
     if (modOf("uhpr") !== undefined) fail(`a refused -2 reached the file: ${modOf("uhpr")}`);
@@ -12965,7 +12965,7 @@ async function niceToHaves(page, found) {
       const unam = () => ["war3map.w3u.json", "war3mapSkin.w3u.json"].map((f) => { try { return k.read(f).custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === "unam")?.value; } catch { return undefined; } }).find((v) => v !== undefined);
       if (unam() !== "TRIGSTR_007" || strings().get(7) !== "Nice Unit") fail(`the unit's name isn't string 7 (control): ${unam()}, ${JSON.stringify(strings().get(7))}`);
       const objects = "map/war3map.w3u.json", objectsDirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(objects)})`);
-      const nameInput = ".obj-table .obj-value-cell input";
+      const nameInput = ".obj-table .obj-value-cell input:not(.color-tools-picker)";
       /** The Object Editor on the unit, its fields filtered to the name; the name's text. */
       const showName = async () => {
         await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
