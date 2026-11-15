@@ -30,7 +30,11 @@ import os
 import re
 import sys
 
-from PIL import Image
+
+def pil_image():
+    """Pillow, imported where pictures are made: the guard and the key/click commands work without it."""
+    from PIL import Image
+    return Image
 
 
 def out(obj):
@@ -275,7 +279,7 @@ def grab(d, rect=None):
     x, y = max(0, x), max(0, y)
     w, h = min(w, g.width - x), min(h, g.height - y)
     raw = root.get_image(x, y, w, h, X.ZPixmap, 0xFFFFFFFF)
-    return Image.frombytes("RGB", (w, h), raw.data, "raw", "BGRX")
+    return pil_image().frombytes("RGB", (w, h), raw.data, "raw", "BGRX")
 
 
 def stats(img):
@@ -359,7 +363,7 @@ def main(argv):
 
     if cmd == "stats" and disp is None:
         rect = opt("--rect")
-        img = Image.open(rest[0])
+        img = pil_image().open(rest[0])
         if rect:
             x, y, w, h = parse_rect(rect)
             img = img.crop((x, y, x + w, y + h))
