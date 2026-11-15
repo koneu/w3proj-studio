@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { conversionSources, layerOrder, missingTextures, readLayered, sourcesText, uniqueName } from "./reforged";
+import { conversionSources, layerOrder, missingTextures, readLayered, refuseUnlikeClassic, sourcesText, uniqueName } from "./reforged";
 import { textureCandidates } from "../../lib/model/texpath";
+import { toClassicMdx } from "../../lib/model/classic";
+import type { Model } from "../../lib/model/mdx";
+import { blpPath, reforgedModel } from "../../lib/model/testbox";
 
 /** A game with these full paths stored. */
 const game = (stored: string[]) => async (full: string) => {
@@ -53,4 +56,26 @@ test("missingTextures names the colour textures the map lacks", () => {
   const have = new Set(["d\\a.blp"]);
   const t = [{ path: "d\\A.blp", replaceableId: 0 }, { path: "C:/x/b.blp", replaceableId: 0 }, { path: "", replaceableId: 0 }, { path: "ReplaceableTextures\\TeamColor\\TeamColor00.blp", replaceableId: 1 }];
   assert.deepEqual(missingTextures(t, (n) => have.has(n)), ["C:/x/b.blp"]);
+});
+
+test("Convert to Classic refuses a converted model with nothing to draw, saying why", () => {
+  /** What refuseUnlikeClassic says of `m` converted, with its textures written beside it ("" when it passes). */
+  const refusal = (m: Model) => {
+    const files = new Map([["war3mapImported\\Classic\\Box\\box.mdx", toClassicMdx(m, blpPath(m))], ...m.textures.map((_, i) => [blpPath(m)(i), new Uint8Array(4)] as const)]);
+    try { refuseUnlikeClassic(files); } catch (e) { return (e as Error).message; }
+    return "";
+  };
+  // The control: the box passes.
+  assert.equal(refusal(reforgedModel([0, 0])), "");
+  // Its geosets all removed.
+  assert.equal(refusal({ ...reforgedModel(), geosets: [], geosetAnims: [] } as Model),
+    "war3mapImported\\Classic\\Box\\box.mdx came out unusable for Classic graphics (GEOS holds no geoset: the model has nothing to draw), nothing changed");
+  // Its geosets all without faces.
+  const faceless = reforgedModel([0, 0]);
+  faceless.geosets.forEach((g) => { g.faces = new Uint16Array(0); });
+  assert.match(refusal(faceless), /unusable for Classic graphics \(none of its 2 geosets has a face: the model has nothing to draw\), nothing changed$/);
+  // One without faces beside one with: refused as unlike the game's models (a warning).
+  const half = reforgedModel([0, 0]);
+  half.geosets[1].faces = new Uint16Array(0);
+  assert.match(refusal(half), /came out unlike the game's Classic models \(geoset 1 has no faces\)/);
 });
