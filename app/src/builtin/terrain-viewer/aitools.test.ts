@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -438,4 +438,25 @@ test("a selection is offered what it can become", () => {
   assert.equal(replaceableBy("w3d", "w3b"), true, "a tree can become a destructable");
   assert.equal(replaceableBy("w3u", "w3d"), false, "a unit can't become a doodad: they're in different files");
   assert.equal(replaceableBy("w3t", "w3u"), false);
+});
+
+test("a replace's snapshot restores the whole entry: life, scale and flags come back exactly", () => {
+  const kinds: Record<string, string> = { LTbr: "w3b", LOch: "w3d" };
+  const kindOf = (id: string) => kinds[id];
+  const list: { id: string; skinId?: string; position: number[]; life?: number; scale?: number[]; flags?: number; extra?: number }[] = [
+    { id: "LTbr", skinId: "LTbr", position: [1, 2, 3], life: 100, scale: [1, 1, 1], flags: 2 },
+    { id: "LOch", skinId: "LOch", position: [4, 5, 6], life: 255, scale: [2, 2, 2] },
+  ];
+  const start = structuredClone(list);
+  const before = list.map(entryLook);
+  replacePlaced(list, { LTbr: "LOch", LOch: "LTbr" }, null, () => 1, kindOf);
+  list[0].scale = [3, 3, 3]; list[0].flags = 7; list[1].extra = 1;
+  assert.notDeepEqual(list, start);
+  list.forEach((e, i) => restoreEntry(e, before[i]));
+  assert.deepEqual(list, start);
+  // Control: restoring only id, skinId and variation (the old undo) leaves the life changed.
+  const old = structuredClone(start);
+  replacePlaced(old, { LTbr: "LOch" }, null, () => 1, kindOf);
+  old[0].id = "LTbr"; old[0].skinId = "LTbr";
+  assert.notEqual(old[0].life, start[0].life);
 });

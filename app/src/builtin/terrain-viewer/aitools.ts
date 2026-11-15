@@ -617,6 +617,16 @@ export function replacePlaced(list: { id: string; position: readonly number[]; v
   return changed;
 }
 
+/** A whole placed entry as it is now, for an undo that restores it exactly (life, scale, flags and all). */
+export const entryLook = <T extends object>(e: T): T => structuredClone(e);
+
+/** Puts `look` (from entryLook) back into `e`: every field as it was, one it hadn't got removed again. */
+export function restoreEntry<T extends object>(e: T, look: T): void {
+  const keep = structuredClone(look) as Record<string, unknown>;
+  for (const k of Object.keys(e)) if (!(k in keep)) delete (e as Record<string, unknown>)[k];
+  Object.assign(e, keep);
+}
+
 /** What a selection can become, its own kind first (the picker opens there): doodads and destructables share a
  *  file, units and items each stay what they are. */
 export function replaceableKinds(kinds: Iterable<string>): string[] {

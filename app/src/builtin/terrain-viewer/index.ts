@@ -66,7 +66,7 @@ import { CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -3297,8 +3297,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Taken after the waits: an edit meanwhile may have removed some or changed their type.
           swapped = swapped.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id && !!fileOf(p));
           if (!swapped.length) return 0;
-          type Look = Props & { id: string; skinId?: string };
-          const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
+          // The whole entry, so an undo is exact whatever a replace changed (id, skin, variation, life, scale, flags).
+          type Look = Placed;
+          const look = (p: Placed): Look => entryLook(p);
           let before = swapped.map(look);
           const numVar = (id: string) => handle.objects.type(id)?.numVar ?? 1;
           replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar, (id) => objCtx?.skins?.get(id)?.kind);
@@ -3314,13 +3315,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const was = new Map(swapped.map((p, i) => [p, before[i]]));
             const units = !!unitsFile?.list.includes(swapped[0]);
             const crowded = crowdedReplacements(units ? unitsFile!.list : dooFile?.list ?? [], was, units);
-            for (const p of crowded) Object.assign(p, structuredClone(was.get(p)!));
+            for (const p of crowded) restoreEntry(p, was.get(p)!);
             before = before.filter((_, i) => !crowded.has(swapped[i]));
             swapped = swapped.filter((p) => !crowded.has(p));
             if (!swapped.length) return 0;
           }
           const after = swapped.map(look);
-          const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
+          const put = (v: Look[]) => { swapped.forEach((p, i) => restoreEntry(p, v[i])); };
           pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });
           objectsTouched = true;
           await rebuildObjects();
@@ -4421,7 +4422,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // Taken after the wait: only those still in the list and of another type than they were.
               const changed = new Map(entries.filter((p) => was.has(p) && was.get(p)!.id !== p.id).map((p) => [p, was.get(p) as Placed]));
               const crowded = crowdedReplacements(entries, changed, units);
-              for (const p of crowded) Object.assign(p, structuredClone(changed.get(p)!));
+              for (const p of crowded) restoreEntry(p, changed.get(p)!);
               return crowded.size;
             },
             placedSpot: async (kind, id, x, y, angle) => {

@@ -7228,6 +7228,23 @@ async function doodadRulesEdit(page, found) {
         const back = k.doodads()[at];
         if (back?.id !== "LTbr" || !same(pose(back), standing)) say(`${how}: undo after the replace left ${back?.id} at ${JSON.stringify(pose(back))}, not LTbr at ${JSON.stringify(standing)}`);
       }
+      // Replace twice (barrel to hay cart, then back; the life follows each kind) and undo twice: the saved entry is
+      // the one it started as, life included.
+      {
+        const start = JSON.stringify(k.doodads()[at]);
+        if (!k.doodads()[at]?.life) say(`the barrel has no life to compare (control): ${start}`);
+        for (const [from, to] of [["LTbr", "LOch"], ["LOch", "LTbr"]]) { const e = await k.run("w3.terrain.replaceDoodads", { from, to }); if (e) say(`Replace Doodads ${from} to ${to}: ${e}`); }
+        await k.save();
+        if (k.doodads()[at]?.id !== "LTbr") say(`two replaces didn't end on a barrel (control): ${k.doodads()[at]?.id}`);
+        await k.focusMap();
+        await k.run("workbench.undo");
+        await k.save();
+        if (k.doodads()[at]?.id !== "LOch") say(`one undo of two replaces left ${k.doodads()[at]?.id}, not LOch`);
+        await k.run("workbench.undo");
+        await k.save();
+        const now = JSON.stringify(k.doodads()[at]);
+        if (now !== start) say(`two replaces and two undos changed the saved entry: ${start} became ${now}`);
+      }
       await k.verify(say);
       await page.evaluate(`w3.editors.closeAll()`);
     }
