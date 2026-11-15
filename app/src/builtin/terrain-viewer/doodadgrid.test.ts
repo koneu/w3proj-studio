@@ -291,3 +291,14 @@ test("a texture's grid is 64n plus the whole cells below its middle (measured, 1
   assert.equal(onDoodadGrid(32, 1), 64);
   assert.equal(onDoodadGrid(-32, 1), 0);
 });
+
+test("a whole-number angle stays radians where the caller says the type isn't a doodad (destructables: not measured)", () => {
+  const entry = { id: "LTbr", variation: 0, position: [0, 0, 0] as [number, number, number], angle: 2, scale: [1, 1, 1] as [number, number, number] };
+  const sizeOf = () => ({ width: 4, height: 4 });
+  const asDoodad = doodadSnaps([entry], sizeOf, () => null, () => true);
+  assert.notEqual(asDoodad.length ? asDoodad[0].angle : entry.angle, 2, "a doodad reads 2 as 2 degrees");
+  // The destructable's 2 is kept as the angle the grid rule gets (radians), not turned to 0.0349 first.
+  const viaRadians = doodadSnaps([{ ...entry }], sizeOf, () => null, () => false);
+  const viaDegrees = doodadSnaps([{ ...entry }], sizeOf, () => null, () => true);
+  assert.notDeepEqual(viaRadians.map((s) => s.angle), viaDegrees.map((s) => s.angle));
+});

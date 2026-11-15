@@ -74,7 +74,8 @@ export interface OpenRuleSource {
  *  one that moves and follows the ground (no flag 4) lands on it. `moved` hears of each one that moved. The number
  *  changed. Applied to its own result it changes nothing, so an AI tool's file and the save after it agree. */
 export function snapAsOpened(list: Placed[], src: OpenRuleSource, moved?: (entry: Placed) => void): number {
-  const snaps = doodadSnaps(list, (id) => src.sizeOf(id), (id) => src.fixedRot(id));
+  // A whole-number angle is degrees for doodads (measured in the editor), not (measured) for destructables (w3b).
+  const snaps = doodadSnaps(list, (id) => src.sizeOf(id), (id) => src.fixedRot(id), (id) => src.kindOf(id) !== "w3b");
   for (const { entry, x, y, angle } of snaps) {
     if (x !== entry.position[0] || y !== entry.position[1]) {
       const flags = (entry as Placed & { flags?: number }).flags ?? 0;

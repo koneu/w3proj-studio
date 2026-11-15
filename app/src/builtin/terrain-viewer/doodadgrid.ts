@@ -130,13 +130,15 @@ export function openedAngle(angle: number): number {
 
 /** The doodads of a list the World Editor would move or turn when it opens the map, with where to. `sizeOf`: an
  *  id's pathing texture size, null for none; `fixedRotOf`: a destructable type's fixed rotation (doodadOnGrid). A
- *  whole-number angle is degrees (openedAngle). */
+ *  whole-number angle is degrees (openedAngle) where `degreesFor(id)` says so: measured on doodads only, so not for
+ *  destructables. */
 export function doodadSnaps(list: readonly Placed[], sizeOf: (id: string) => PathSize | null,
-  fixedRotOf: (id: string) => number | null = () => null): { entry: Placed; x: number; y: number; angle: number }[] {
+  fixedRotOf: (id: string) => number | null = () => null,
+  degreesFor: (id: string) => boolean = () => true): { entry: Placed; x: number; y: number; angle: number }[] {
   const out: { entry: Placed; x: number; y: number; angle: number }[] = [];
   for (const entry of list) {
     const [x, y] = entry.position;
-    const at = doodadOnGrid(x, y, openedAngle(entry.angle), sizeOf(entry.id), fixedRotOf(entry.id));
+    const at = doodadOnGrid(x, y, degreesFor(entry.id) ? openedAngle(entry.angle) : entry.angle, sizeOf(entry.id), fixedRotOf(entry.id));
     if (at.x !== x || at.y !== y || at.angle !== entry.angle) out.push({ entry, ...at });
   }
   return out;
