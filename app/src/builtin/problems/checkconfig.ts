@@ -77,3 +77,64 @@ export async function readChecksConfig(read: () => Promise<string>, exists: () =
     return { config: parseChecksConfig(await read()), error: null };
   } catch (e) { return { config: noChecksConfig(), error: `${MANIFEST_FILE} can't be used for its [checks]: ${e instanceof Error ? e.message : String(e)}` }; }
 }
+
+/** The manifest's text with `id` added to `[checks] disable = [...]`: everything else stays as it is, byte for byte
+ *  (comments, blank lines, other keys, line endings). The section or the key is created when missing, an id already
+ *  listed is not added again. Throws (and so writes nothing) on text the parser refuses. */
+export function addDisabled(text: string, id: string): string {
+  if (parseChecksConfig(text).disable.includes(id)) return text;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const quoted = `"${id.replace(/([\\"])/g, "\\$1")}"`;
+  const lines = text.split(/(?<=\n)/); // each with its line ending
+  let offset = 0;
+  let inChecks = false, found = false;
+  let lastContent = -1; // offset just after the last non-blank line of the section
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i], start = offset;
+    offset += raw.length;
+    const line = stripComment(raw).trim();
+    if (!line) continue;
+    const header = /^\[\[?\s*([^\]]*?)\s*\]\]?$/.exec(line);
+    if (header) { inChecks = header[1] === "checks" && !line.startsWith("[["); if (inChecks) { found = true; lastContent = offset; } continue; }
+    if (!inChecks) continue;
+    lastContent = offset;
+    const kv = /^([A-Za-z0-9_-]+|"[^"]*")\s*=/.exec(line);
+    if (!kv || kv[1] !== "disable") continue;
+    // The list starts at the first [ after the = (outside the key, which has no [).
+    const eq = raw.indexOf("=");
+    const open = raw.indexOf("[", eq);
+    return insertInList(text, start + open + 1, quoted, eol);
+  }
+  const key = `disable = [${quoted}]`;
+  if (found) {
+    const head = text.slice(0, lastContent), tail = text.slice(lastContent);
+    return `${head}${head.endsWith("\n") ? "" : eol}${key}${eol}${tail}`;
+  }
+  const sep = text === "" ? "" : text.endsWith("\n") ? (text.endsWith("\n\n") || text.endsWith("\n\r\n") ? "" : eol) : eol + eol;
+  return `${text}${sep}[checks]${eol}${key}${eol}`;
+}
+
+/** Adds `quoted` to the array whose `[` is just before `from`, touching as little as possible. */
+function insertInList(text: string, from: number, quoted: string, eol: string): string {
+  let quote = "", lastEnd = -1, comma = false, close = -1;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (quote) { if (c === "\\" && quote === '"') i++; else if (c === quote) { quote = ""; lastEnd = i + 1; comma = false; } continue; }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "#") { while (i < text.length && text[i] !== "\n") i++; }
+    else if (c === ",") comma = true;
+    else if (c === "]") { close = i; break; }
+  }
+  if (close < 0) throw new Error("`disable` isn't closed with ]");
+  if (lastEnd < 0) return `${text.slice(0, close)}${quoted}${text.slice(close)}`;
+  const lineStart = text.lastIndexOf("\n", close - 1) + 1;
+  const ownLine = /^[ \t]*$/.test(text.slice(lineStart, close)) && lineStart > lastEnd;
+  if (ownLine) {
+    const lastLineStart = text.lastIndexOf("\n", lastEnd - 1) + 1;
+    const indent = /^[ \t]*/.exec(text.slice(lastLineStart))![0];
+    const withComma = comma ? text.slice(0, lineStart) : `${text.slice(0, lastEnd)},${text.slice(lastEnd, lineStart)}`;
+    return `${withComma}${indent}${quoted},${eol}${text.slice(lineStart)}`;
+  }
+  if (comma) return `${text.slice(0, close)}${quoted}, ${text.slice(close)}`;
+  return `${text.slice(0, lastEnd)}, ${quoted}${text.slice(lastEnd)}`;
+}

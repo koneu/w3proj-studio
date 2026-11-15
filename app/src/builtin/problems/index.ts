@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
-import { MANIFEST_FILE, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
+import { MANIFEST_FILE, addDisabled, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -38,6 +38,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The project's [checks] (w3proj.toml) as the last run read it: checks it switched off, and why it can't be used. */
   let config: ChecksConfig = noChecksConfig();
   let configBad: string | null = null;
+  /** Whether the project has a w3proj.toml (the quick action to disable a check writes into it, never creates one). */
+  let manifestThere = false;
   /** Writes of the ignore file, one after the other. */
   let ignoreWrites: Promise<unknown> = Promise.resolve();
   const status = w3.statusBar.add({ id: "w3.problems.status", text: "", command: "w3.problems.show", align: "right", priority: 60 });
@@ -88,6 +90,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
       const loaded = await readIgnore();
+      const there = await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }).catch(() => false);
       const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
       // One failing check doesn't stop the others.
       for (const check of [...checks]) {
@@ -106,6 +109,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       ignoreBad = loaded.bad;
       config = cfg.config;
       configBad = cfg.error;
+      manifestThere = there;
       ranFor = root;
       ran = true;
       updateStatus();
@@ -180,6 +184,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     ignoreWrites = job;
     return job;
   };
+  /** Switches a whole check off for the project: adds it to [checks] disable in w3proj.toml (comments kept), then
+   *  checks again. Only where the project has a w3proj.toml (others have no manifest to write); a [checks] it can't
+   *  read is refused and nothing is written. */
+  const disableCheck = async (id: string) => {
+    const root = w3.workspace.project()?.root ?? null;
+    if (!root) throw new Error("Open a project first.");
+    if (!(await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }))) throw new Error(`This project has no ${MANIFEST_FILE} to switch the check off in.`);
+    let next: string;
+    try { next = addDisabled(await w3.workspace.readText(MANIFEST_FILE), id); } catch (e) { throw new Error(`${MANIFEST_FILE} can't be used for its [checks], so nothing was written: ${e instanceof Error ? e.message : String(e)}`); }
+    if (resultsStale(root, w3.workspace.project()?.root ?? null)) return;
+    await w3.workspace.writeText(MANIFEST_FILE, next);
+    await service.run();
+  };
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
   ctx.subscriptions.push(
     w3.commands.register("w3.problems.run", async () => { await w3.views.show("problems"); await service.run(); }),
@@ -187,6 +204,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.problems.deleteInvalid", async () => {
       if (await deleteInvalid(w3)) await service.run();
     }),
+    w3.commands.register("w3.problems.disableCheck", (id: string) => disableCheck(id)),
     w3.commands.register("w3.problems.toggleIgnored", () => { showIgnored = !showIgnored; w3.views.refresh("w3.problems.list"); }),
     w3.commands.register("w3.problems.open", async (path: string) => { await w3.editors.open(path); }),
     w3.workspace.onDidChange(() => {
@@ -221,7 +239,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const n = visible(g).length;
           const fold = folded.has(g.check.id);
           el.append(h("div.camp-side-head.problems-head", { onclick: () => { if (fold) folded.delete(g.check.id); else folded.add(g.check.id); w3.views.refresh("w3.problems.list"); } },
-            `${fold ? "▸" : "▾"} ${g.check.title}`, h("small", {}, g.error ? " (failed)" : ` ${n}`)));
+            `${fold ? "▸" : "▾"} ${g.check.title}`, h("small", {}, g.error ? " (failed)" : ` ${n}`),
+            manifestThere && !configBad ? h("button.problem-fix.problem-disable-check", {
+              title: `Adds "${g.check.id}" to [checks] disable in w3proj.toml: the check is no longer run for this project`,
+              onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => disableCheck(g.check.id))(); },
+            }, "Disable this check for the project") : null));
           if (fold) continue;
           if (g.error) { el.append(h("div.view-empty.problems-failed", {}, `The check failed: ${g.error} `, copyButton(`${g.check.title}: the check failed: ${g.error}`))); continue; }
           if (!shown.length) { el.append(h("div.view-empty", {}, "OK")); continue; }
