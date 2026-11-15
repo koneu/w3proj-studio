@@ -1,0 +1,164 @@
+[
+  {
+    "name": "limits-off-paint-margin",
+    "description": "test.md 'Texture, doodad and paste at the margin against Enforce Terrain Limits': Grass, size 3, one click each on the playable edge (695,500), the margin beside it (800,400) and its far end (940,300) of edge-last-step.w3m (camera 3456, 0, 3000; playable part to 3328, map to 4096), switch off (the default). MATCH (2026-11-15, branch we-specs-d2): the editor paints the margin as the playable part, with the switch on too (limits-on-paint-margin)",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1409,144"], ["--click", "1456,569"],
+        ["--move", "695,500"], ["--click", "695,500"], ["--sleep", "300"], ["--move", "800,400"], ["--click", "800,400"], ["--sleep", "300"],
+        ["--move", "940,300"], ["--click", "940,300"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we:3456,0,3000"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 695, 500], ["click", 800, 400], ["click", 940, 300]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "limits-on-paint-margin",
+    "description": "limits-off-paint-margin with Enforce Terrain Limits ticked first (Scenario > Map Preferences in the editor, Map Properties > Preferences in Studio): the same ground. MATCH (2026-11-15)",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--click", "166,41"], ["--sleep", "500"], ["--click", "203,146"], ["--sleep", "1500"], ["--click", "604,239"], ["--sleep", "300"], ["--click", "818,831"], ["--sleep", "1000"],
+        ["--key", "t"], ["--sleep", "800"], ["--click", "1409,144"], ["--click", "1456,569"],
+        ["--move", "695,500"], ["--click", "695,500"], ["--sleep", "300"], ["--move", "800,400"], ["--click", "800,400"], ["--sleep", "300"],
+        ["--move", "940,300"], ["--click", "940,300"], ["--sleep", "1000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); let box = null; for (let i = 0; i < 100 && !box; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); const l = b && [...b.querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === 'Enforce terrain limits'); box = l?.querySelector('input') ?? null; if (!box) await wait(100); } if (!box) throw new Error('no Enforce terrain limits box'); if (!box.checked) box.click(); await wait(500);" },
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we:3456,0,3000"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 695, 500], ["click", 800, 400], ["click", 940, 300]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3mapExtra.txt", "as": "bytes" }],
+    "limit": 40
+  },
+  {
+    "name": "limits-off-doodad-margin",
+    "description": "a Summer Tree Wall (LTlt, the Doodad palette's first row, 1410,184) placed in the margin (800,400) and at its far end (940,300) of edge-last-step.w3m, switch off. Studio: the map's tree selected, Select In Tool Palette, the Objects tab, the same clicks. Ignored: the new trees' variation and scale (both editors draw them at random). MATCH (2026-11-15): both placed, on the tree's grid (3584, 0 and 3968, 384), with the switch on too",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--key", "d"], ["--sleep", "500"], ["--click", "1410,184"], ["--sleep", "500"],
+        ["--move", "800,400"], ["--click", "800,400"], ["--sleep", "500"], ["--move", "940,300"], ["--click", "940,300"], ["--sleep", "500"],
+        ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "ui": [["view", "we:3456,0,3000"]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); await s.look.get('map/war3map.w3e.txt')(3584, 1024, { id: 'LTlt', x: 3584, y: 1024 }); await new Promise((r) => setTimeout(r, 800)); document.querySelector('.model-stage canvas').focus(); const why = await w3.commands.execute('w3.terrain.selectInPalette'); if (why) throw new Error('Select In Tool Palette: ' + why); await new Promise((r) => setTimeout(r, 500));" },
+        { "ui": [["view", "we:3456,0,3000"], ["tab", "Objects"], ["click", 800, 400], ["click", 940, 300]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["doodads[2].variation", "doodads[3].variation", "doodads[2].scale", "doodads[3].scale"] }],
+    "limit": 40
+  },
+  {
+    "name": "limits-on-doodad-margin",
+    "description": "limits-off-doodad-margin with Enforce Terrain Limits ticked first: the same trees. MATCH (2026-11-15)",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--click", "166,41"], ["--sleep", "500"], ["--click", "203,146"], ["--sleep", "1500"], ["--click", "604,239"], ["--sleep", "300"], ["--click", "818,831"], ["--sleep", "1000"],
+        ["--key", "d"], ["--sleep", "500"], ["--click", "1410,184"], ["--sleep", "500"],
+        ["--move", "800,400"], ["--click", "800,400"], ["--sleep", "500"], ["--move", "940,300"], ["--click", "940,300"], ["--sleep", "500"],
+        ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); let box = null; for (let i = 0; i < 100 && !box; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); const l = b && [...b.querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === 'Enforce terrain limits'); box = l?.querySelector('input') ?? null; if (!box) await wait(100); } if (!box) throw new Error('no Enforce terrain limits box'); if (!box.checked) box.click(); await wait(500);" },
+        { "terrain": true },
+        { "ui": [["view", "we:3456,0,3000"]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); await s.look.get('map/war3map.w3e.txt')(3584, 1024, { id: 'LTlt', x: 3584, y: 1024 }); await new Promise((r) => setTimeout(r, 800)); document.querySelector('.model-stage canvas').focus(); const why = await w3.commands.execute('w3.terrain.selectInPalette'); if (why) throw new Error('Select In Tool Palette: ' + why); await new Promise((r) => setTimeout(r, 500));" },
+        { "ui": [["view", "we:3456,0,3000"], ["tab", "Objects"], ["click", 800, 400], ["click", 940, 300]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["doodads[2].variation", "doodads[3].variation", "doodads[2].scale", "doodads[3].scale"] }, { "file": "war3mapExtra.txt", "as": "bytes" }],
+    "limit": 40
+  },
+  {
+    "name": "limits-off-paste-margin",
+    "description": "the footman (3200, 512) box-selected, copied and pasted in the margin (800,400), then the pathless doodad LPcr (3584, -512) at its far end (940,300) of edge-last-step.w3m, switch off. Units MATCH (2026-11-15): the footman's paste past the playable part is refused in both, with the switch on too. war3map.doo DIFFERS, expected, not about the margin: the editor puts the pasted LPcr where the pointer is (3983.3, 359.9; inside the playable part 2425.1, -568.2, and camera-bounds-paste's 3072.2, -510.5), Studio on the 64 grid (3968, 384: placement.ts pasteCentreAt, measured on barrels, which have a grid). Same with the switch on (limits-on-paste-margin)",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--key", "u"], ["--sleep", "300"], ["--drag", "620,280:690,220"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"],
+        ["--move", "800,400"], ["--sleep", "300"], ["--click", "800,400"], ["--sleep", "300"], ["--key", "Escape"],
+        ["--key", "d"], ["--sleep", "300"], ["--drag", "760,610:850,520"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"],
+        ["--move", "940,300"], ["--sleep", "300"], ["--click", "940,300"], ["--sleep", "300"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "ui": [["view", "we:3456,0,3000"]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); await s.look.get('map/war3map.w3e.txt')(3200, 512, { id: 'hfoo', x: 3200, y: 512 }); await new Promise((r) => setTimeout(r, 800)); document.querySelector('.model-stage canvas').focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["view", "we:3456,0,3000"], ["click", 800, 400]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await s.look.get('map/war3map.w3e.txt')(3584, -512, { id: 'LPcr', x: 3584, y: -512 }); await new Promise((r) => setTimeout(r, 800)); c.focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["view", "we:3456,0,3000"], ["click", 940, 300]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "limits-on-paste-margin",
+    "description": "limits-off-paste-margin with Enforce Terrain Limits ticked first: the same (footman refused in both; LPcr at the pointer in the editor, on the 64 grid in Studio)",
+    "input": { "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m" },
+    "we": {
+      "mode": "sd",
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "m"], ["--sleep", "500"], ["--click", "1396,177"], ["--sleep", "300"], ["--click", "1476,119"], ["--sleep", "2500"],
+        ["--click", "166,41"], ["--sleep", "500"], ["--click", "203,146"], ["--sleep", "1500"], ["--click", "604,239"], ["--sleep", "300"], ["--click", "818,831"], ["--sleep", "1000"],
+        ["--key", "u"], ["--sleep", "300"], ["--drag", "620,280:690,220"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"],
+        ["--move", "800,400"], ["--sleep", "300"], ["--click", "800,400"], ["--sleep", "300"], ["--key", "Escape"],
+        ["--key", "d"], ["--sleep", "300"], ["--drag", "760,610:850,520"], ["--sleep", "500"], ["--key", "ctrl+c"], ["--key", "ctrl+v"],
+        ["--move", "940,300"], ["--sleep", "300"], ["--click", "940,300"], ["--sleep", "300"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); await w3.commands.execute('w3.mapInfo.open', 'preferences'); let box = null; for (let i = 0; i < 100 && !box; i++) { const b = [...document.querySelectorAll('.map-info .form-body')].find((x) => x.querySelector('h2')?.textContent === 'Preferences'); const l = b && [...b.querySelectorAll('label.form-check')].find((x) => x.textContent.trim() === 'Enforce terrain limits'); box = l?.querySelector('input') ?? null; if (!box) await wait(100); } if (!box) throw new Error('no Enforce terrain limits box'); if (!box.checked) box.click(); await wait(500);" },
+        { "terrain": true },
+        { "ui": [["view", "we:3456,0,3000"]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500)); await s.look.get('map/war3map.w3e.txt')(3200, 512, { id: 'hfoo', x: 3200, y: 512 }); await new Promise((r) => setTimeout(r, 800)); document.querySelector('.model-stage canvas').focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["view", "we:3456,0,3000"], ["click", 800, 400]] },
+        { "eval": "const s = await w3.services.get('w3.terrain'); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await s.look.get('map/war3map.w3e.txt')(3584, -512, { id: 'LPcr', x: 3584, y: -512 }); await new Promise((r) => setTimeout(r, 800)); c.focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["view", "we:3456,0,3000"], ["click", 940, 300]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "expect": "differs" }, { "file": "war3mapExtra.txt", "as": "bytes" }],
+    "limit": 40
+  }
+]
