@@ -198,6 +198,10 @@ export const GROUND_EDGE: readonly number[] = [137, 138, 137, 255];
 /** Its regions are not dimmed there: the fill the playable part has, without the darker edge line (red 196, 27, 21 and
  *  yellow 194, 194, 6 for pure red and yellow, same measurement). */
 const REGION_EDGE_ALPHA = 194;
+/** Linear-light blend over the border (we-drive, regedge, 2026-11-15): pathing over the border is pure white at the
+ *  pathing's alpha (137, 138, 137 over black ground) and a region has the playable part's fill without its rim (pure yellow
+ *  194, 195, 0 alone, 210, 212, 137 under the pathing: the two blends one after the other, regions first). */
+const GROUND_EDGE_LINEAR: readonly number[] = [255, 255, 255, 66];
 
 /** How the World Editor blends Regions and Pathing - Ground over the playable map: in linear light, over the picture with
  *  its water, the colour's alpha as below (the renderer's LINEAR_OVERLAY_FS; we-drive, 2026-11-14, pure colours over
@@ -235,7 +239,7 @@ export function splitEdge(rgba: Uint8Array, edge: EdgeTiles): { inside: Uint8Arr
 export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {
-    if (edgeCell(edge, i)) { rgba.set(GROUND_EDGE, i * 4); continue; }
+    if (edgeCell(edge, i)) { rgba.set(linear ? GROUND_EDGE_LINEAR : GROUND_EDGE, i * 4); continue; }
     const c = cells[i];
     if (c & NO_WALK) rgba.set(linear ? [255, 0, 255, GROUND_PATHING_ALPHA] : [230, 40, 230, 150], i * 4);
     else if (c & NO_BUILD) rgba.set(linear ? [0, 0, 255, GROUND_PATHING_ALPHA] : [40, 90, 255, 140], i * 4);
@@ -259,7 +263,7 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const i = y * width + x;
-        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, REGION_EDGE_ALPHA], i * 4); continue; }
+        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : REGION_EDGE_ALPHA], i * 4); continue; }
         const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
         rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : 170], i * 4);
       }
