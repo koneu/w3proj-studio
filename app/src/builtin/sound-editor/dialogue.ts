@@ -152,11 +152,14 @@ export class DialogueStrings {
 export function setDialogueString(s: Sound, which: "text" | "speaker", value: string, strings: DialogueStrings, sounds: readonly Sound[],
   otherRefs: Iterable<number>): boolean {
   const key = which === "text" ? s.dialogueTextKey : s.speakerNameKey;
-  if (norm(strings.text(key)) === norm(value)) return false;
-  if (key === undefined || key < 0) {
+  const keyless = key === undefined || key < 0;
+  // A sound without a key shows the w3s file's own text; the keys made seed the strings with it.
+  const legacy = (w: "text" | "speaker") => (w === "text" ? s.dialogueText : s.speakerName) ?? "";
+  if (norm(keyless ? legacy(which) : strings.text(key)) === norm(value)) return false;
+  if (keyless) {
     let next = strings.nextKey(sounds, otherRefs);
-    if ((s.speakerNameKey ?? -1) < 0) { s.speakerNameKey = next++; strings.set(s.speakerNameKey, ""); }
-    if ((s.dialogueTextKey ?? -1) < 0) { s.dialogueTextKey = next++; strings.set(s.dialogueTextKey, ""); }
+    if ((s.speakerNameKey ?? -1) < 0) { s.speakerNameKey = next++; strings.set(s.speakerNameKey, legacy("speaker")); }
+    if ((s.dialogueTextKey ?? -1) < 0) { s.dialogueTextKey = next++; strings.set(s.dialogueTextKey, legacy("text")); }
   }
   strings.set(which === "text" ? s.dialogueTextKey! : s.speakerNameKey!, value);
   return true;

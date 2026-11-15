@@ -395,7 +395,8 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .form-table th { text-align: left; font-size: 11px; color: var(--fg-muted); font-weight: 600; padding: 4px 6px; }
 .form-table td { padding: 2px 6px; }
 .form-table .form-num { width: 100px; }
-.techtree-object { display: inline-flex; align-items: center; gap: 4px; }
+.techtree-object { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; }
+.techtree-name { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .form-input.techtree-id { width: 90px; font-family: var(--mono, monospace); }
 .form-table .form-num.techtree-num, .techtree-num { width: 64px; }
 .techtree-players { display: inline-flex; flex-wrap: wrap; gap: 2px 6px; }
@@ -1109,10 +1110,10 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .model-pick-mode { width: 100%; margin-bottom: 6px; }
 
 /* Colour tools under the text fields of game texts (extensions/colortools.ts) */
-.color-tools { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.color-tools { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 640px; } /* as wide as the text fields (.form-input) */
 .color-tools:not(:focus-within) > .color-tools-bar { display: none; }
-.color-tools-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.color-tools-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 0; min-width: 100%; box-sizing: border-box; } /* the bar wraps inside the field's width and adds nothing to it */
 .color-tools-picker { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
 .color-tools-swatches { display: inline-flex; flex-wrap: wrap; gap: 2px; }
 .color-tools-swatch { width: 14px; height: 14px; min-width: 14px; padding: 0; border: 1px solid var(--border, #555); }
-.color-tools-preview { background: #000; color: #fff; padding: 4px 6px; max-width: 640px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--border, #555); }
+.color-tools-preview { background: #000; color: #fff; padding: 4px 6px; max-width: 640px; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; border: 1px solid var(--border, #555); }

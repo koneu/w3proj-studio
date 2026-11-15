@@ -210,3 +210,15 @@ test("a plain sound gets a dialogue (speaker n, text n + 1), saves, and undo giv
   assert.equal(take(), before, "the sound is as before");
   assert.equal(strings.merge(out), null, "nothing is written for the undone dialogue");
 });
+
+test("a keyless sound with the w3s file's own dialogueText: the text stays when only the speaker is typed, and the same text is no edit", () => {
+  const strings = new DialogueStrings(WTS);
+  const s = spoken({ dialogueText: "Legacy line.", speakerName: "Old" });
+  assert.equal(setDialogueString(s, "text", "Legacy line.", strings, [s], []), false, "the shown text, unchanged");
+  assert.equal(s.dialogueTextKey, -1, "no keys for no edit");
+  assert.equal(setDialogueString(s, "speaker", "Arthas", strings, [s], []), true);
+  assert.equal(strings.text(s.speakerNameKey), "Arthas");
+  assert.equal(strings.text(s.dialogueTextKey), "Legacy line.", "the old text kept until edited");
+  const control = spoken({ dialogueText: "Legacy line." });
+  assert.equal(setDialogueString(control, "text", "New line.", new DialogueStrings(WTS), [control], []), true);
+});

@@ -66,8 +66,8 @@ function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (
   const label = h("span.muted.techtree-name");
   const show = () => {
     const id = get();
-    label.textContent = randomIdLabel(id) ?? "";
-    if (id && id !== NONE && !randomIdLabel(id)) void ctx.name(id).then((n) => { if (n && get() === id) label.textContent = n; });
+    label.textContent = label.title = randomIdLabel(id) ?? "";
+    if (id && id !== NONE && !randomIdLabel(id)) void ctx.name(id).then((n) => { if (n && get() === id) label.textContent = label.title = n; });
   };
   const input = h("input.form-input.techtree-id", {
     value: get() === NONE ? "" : get(), placeholder: "none", maxLength: 10,
