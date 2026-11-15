@@ -2419,6 +2419,50 @@ async function mapInfoColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The colour tools under the Object Editor's text fields: on a name kept in war3map.wts (the TRIGSTR id stays, the table
+ *  holds the tags) and on a plain tooltip (the object file holds them); the workbench undo takes each colour back. */
+async function objectEditorColorTools(page, found) {
+  const fail = (what) => found.push(`Object Editor colour tools: ${what}`);
+  try {
+    const k = await heightKit(page, "ObjEdColors");
+    const mapDir = join(k.root, "map"), wtsFile = join(mapDir, "war3map.wts");
+    const wts = readFileSync(wtsFile, "utf8"), eol = wts.includes("\r\n") ? "\r\n" : "\n";
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(`${wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 7${eol}{${eol}Hello world${eol}}${eol}`)})`);
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: "TRIGSTR_007" }, { field: "utip", value: "Hello world" }] });
+    const strings = () => new Map([...readFileSync(wtsFile, "utf8").matchAll(/STRING (\d+)\r?\n\{\r?\n([^}]*?)\r?\n\}/g)].map((m) => [Number(m[1]), m[2]]));
+    const mod = (f) => ["war3map.w3u.json", "war3mapSkin.w3u.json"].map((n) => { try { return k.read(n).custom.find((o) => o.id === unit)?.mods?.find((m) => m.field === f)?.value; } catch { return undefined; } }).find((v) => v !== undefined);
+    const cell = ".obj-table .obj-value-cell";
+    const input = `${cell} input:not(.color-tools-picker)`;
+    const show = async (code) => {
+      await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+      // The tab keeps its field filter: the search box is what shows it has opened.
+      await until("the unit's fields", () => page.evaluate(`!!document.querySelector("input.obj-field-search") && document.querySelectorAll(${JSON.stringify(cell)}).length >= 1`), 30000);
+      await retype(k.hands, "input.obj-field-search", code);
+      await until(`the ${code} field`, () => page.evaluate(`document.querySelectorAll(${JSON.stringify(input)}).length === 1`), 5000);
+    };
+    const value = () => page.evaluate(`document.querySelector(${JSON.stringify(input)})?.value ?? null`);
+    for (const [code, label] of [["unam", "name"], ["utip", "tooltip"]]) {
+      await show(code);
+      const root = `document.querySelector(${JSON.stringify(input)}).closest(".color-tools")`;
+      if (!(await page.evaluate(`!!${root}`))) { fail(`the ${label} field has no colour tools`); continue; }
+      if ((await value()) !== "Hello world") { fail(`the ${label} field shows ${JSON.stringify(await value())} (control)`); continue; }
+      await page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(input)}); e.focus(); e.setSelectionRange(6, 11); e.dispatchEvent(new Event("select")); })()`);
+      await page.evaluate(`${root}.querySelector('.color-tools-swatch[title^="Player 1:"]').click()`);
+      const colored = "Hello |cffFF0303world|r";
+      if ((await value()) !== colored) { fail(`the ${label} after the colour: ${JSON.stringify(await value())}`); continue; }
+      await k.save();
+      if (code === "unam") {
+        if (strings().get(7) !== colored || mod("unam") !== "TRIGSTR_007") fail(`name: string 7 ${JSON.stringify(strings().get(7))}, the unit's name ${JSON.stringify(mod("unam"))}`);
+      } else if (mod("utip") !== colored) fail(`tooltip stored as ${JSON.stringify(mod("utip"))}`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      if (!(await soon(async () => (await value()) === "Hello world"))) fail(`undo of the ${label} colour left ${JSON.stringify(await value())}`);
+      await k.save();
+      if (code === "unam" ? strings().get(7) !== "Hello world" : mod("utip") !== "Hello world") fail(`the ${label} after undo and save isn't the plain text again`);
+    }
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The parameter dialog of the trigger editor: a StringExt (message) parameter's Value tab has the colour tools and a
  *  preview, a plain string's doesn't; the toolbar's colour lands in the value the dialog returns. */
 async function triggerParamColorTools(page, found) {
@@ -13336,6 +13380,7 @@ async function run() {
         newMaps,
         niceToHaves,
         objectCopy,
+        objectEditorColorTools,
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
         objectManagerLive,
@@ -13579,6 +13624,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "itemTablesAccess", found);
   await mapInfoColorTools(page, found).catch((e) => found.push(`Map Properties colour tools: ${e.message}`));
   await leftOpen(page, "mapInfoColorTools", found);
+  await objectEditorColorTools(page, found).catch((e) => found.push(`Object Editor colour tools: ${e.message}`));
+  await leftOpen(page, "objectEditorColorTools", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
