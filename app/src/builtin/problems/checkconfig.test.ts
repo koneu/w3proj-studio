@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
-import { addDisabled, isDisabled, parseChecksConfig, readChecksConfig } from "./checkconfig";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { MINIMAL_MANIFEST, addDisabled, isDisabled, parseChecksConfig, readChecksConfig } from "./checkconfig";
 import { activate } from "./index";
 
 test("disable lists are read from [checks] only, with comments, single quotes and several lines", () => {
@@ -92,14 +94,22 @@ test("the quick action writes the id into w3proj.toml and checks again, so the c
   assert.deepEqual(h.service.problems().map((p) => p.location), ["mine-c"], "re-run: the check's findings are gone");
 });
 
-test("the quick action refuses an unreadable manifest and a project without one, and writes nothing", async () => {
+test("the quick action refuses an unreadable manifest and writes nothing", async () => {
   const bad = '[checks]\ndisable = "mine-a"\n';
   const h = harness({ "w3proj.toml": bad }, ["mine-a"]);
   await assert.rejects(async () => h.cmds.get("w3.problems.disableCheck")!("mine-a"), /\[checks\]/);
   assert.equal(h.files["w3proj.toml"], bad);
-  const none = harness({}, ["mine-a"]);
-  await assert.rejects(async () => none.cmds.get("w3.problems.disableCheck")!("mine-a"), /no w3proj\.toml/);
-  assert.deepEqual(none.files, {}, "no file was created");
+});
+
+test("a project without a w3proj.toml gets a minimal one: the same text the Rust side loads (fixture)", async () => {
+  const none = harness({}, ["mine-a", "mine-b"]);
+  await none.service.runChecked();
+  await none.cmds.get("w3.problems.disableCheck")!("mine-a");
+  assert.equal(none.files["w3proj.toml"], 'format = 1\n\n[checks]\ndisable = ["mine-a"]\n');
+  assert.deepEqual(parseChecksConfig(none.files["w3proj.toml"]).disable, ["mine-a"]);
+  assert.deepEqual(none.service.problems().map((p) => p.location), ["mine-b"], "re-run: the check is gone");
+  const fixture = readFileSync(join(process.cwd(), "..", "tests", "fixtures", "manifest-minimal-checks", "w3proj.toml"), "utf8");
+  assert.equal(addDisabled(MINIMAL_MANIFEST, "imports"), fixture, "the fixture crates/w3proj loads is what the app writes");
 });
 
 test("the service doesn't run a check the project disabled, and says which; the others run", async () => {

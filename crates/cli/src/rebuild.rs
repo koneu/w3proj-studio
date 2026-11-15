@@ -24,6 +24,14 @@ pub const PARTS: [&str; 4] = ["wpm", "shd", "minimap", "script"];
 /// The parts made from the terrain and doodads (w3proj::derived records them as one).
 const DERIVED_PARTS: [&str; 3] = ["wpm", "shd", "minimap"];
 
+fn derived_file(part: &str) -> &'static str {
+    match part {
+        "wpm" => "war3map.wpm",
+        "shd" => "war3map.shd",
+        _ => "war3mapMap.blp",
+    }
+}
+
 fn what(part: &str) -> &'static str {
     match part {
         "wpm" => "pathing",
@@ -50,11 +58,31 @@ pub struct Options {
 pub fn run(o: Options) -> Result<ExitCode> {
     let info = backend::open_project(&o.project.to_string_lossy()).map_err(anyhow::Error::msg).with_context(|| format!("opening {}", o.project.display()))?;
     let root = PathBuf::from(&info.root);
-    let parts = due(&o, &root)?;
+    let mut parts = due(&o, &root)?;
     // Taken before anything is made: a terrain or doodad file written meanwhile shows as changed since.
     let sources = derived::sources(&root)?;
     let mut failed = false;
     let mut done: Vec<&str> = Vec::new();
+    let server = Server { root: root.clone(), formats: o.formats.clone(), game: backend::GameCache::default(), read_only: false };
+    // Pathing, shadows and the minimap read the game's tables, models and textures. Without it some would still come
+    // out, wrong: shadows without the doodads' models (the app's Calculate Shadows does the same), written over the
+    // good ones. So those stay as they are, said part by part as kept; the script is made from the triggers alone.
+    let mut no_game = None;
+    if parts.run.iter().any(|p| DERIVED_PARTS.contains(&p.as_str())) {
+        if let Err(e) = server.game.get(&o.game) {
+            no_game = Some(e.to_string());
+        }
+    }
+    if let Some(e) = &no_game {
+        let reason = format!("the game's data can't be read ({e}); give its folder with --game or W3PROJ_GAME");
+        for p in parts.run.iter().filter(|p| DERIVED_PARTS.contains(&p.as_str())) {
+            println!("kept       {} ({}): {reason}", derived_file(p), what(p));
+        }
+        parts.run.retain(|p| !DERIVED_PARTS.contains(&p.as_str()));
+        if parts.run.is_empty() {
+            println!("nothing was made: the stored files are kept");
+        }
+    }
     if !parts.run.is_empty() {
         let mut settings = json!({ "game.installDir": o.game });
         if let Some(mode) = &o.mode {
@@ -62,12 +90,6 @@ pub fn run(o: Options) -> Result<ExitCode> {
             settings["game.graphicsMode"] = json!(mode);
         }
         let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "settings": settings });
-        let server = Server { root: root.clone(), formats: o.formats.clone(), game: backend::GameCache::default(), read_only: false };
-        // Every part reads the game. Without it some still come out, wrong: shadows without the doodads' models
-        // (the app's Calculate Shadows does the same), written over the good ones. So nothing is made at all.
-        if let Err(e) = server.game.get(&o.game) {
-            bail!("{e}: nothing was made. The files come from the game's tables, models and textures: give its folder with --game or W3PROJ_GAME");
-        }
         let report = run_host(&job, &server)?;
         if let Some(e) = report.get("error").and_then(Value::as_str) {
             bail!("the rebuild stopped: {e}");
