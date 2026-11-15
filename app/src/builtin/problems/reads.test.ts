@@ -176,3 +176,16 @@ test("a doodad's pathing texture that isn't found says what the pathing map does
   // Other paths say only that they aren't found.
   assert.ok((await check.run()).some((p) => p.message === "Units\\Made\\Missing not found (neither in the map nor in the game)"));
 });
+
+test("an _HD.w3mod import entry the game provides (its layer War3.w3mod:_HD.w3mod:) isn't reported missing; one it hasn't is", async () => {
+  const hd = "_HD.w3mod\\Units\\Human\\Footman\\Footman.mdx", none = "_HD.w3mod\\Units\\Human\\Footman\\NoSuch.mdx";
+  // The backend finds a plain path behind its layer prefixes (crates/casc/src/game.rs resolve): the game's
+  // War3.w3mod:_HD.w3mod:Units/… answers to "_HD.w3mod:Units\…", not to the archive path "_HD.w3mod\Units\…".
+  const app = fakeApp({
+    overlay: { "map/war3map.imp.json": JSON.stringify({ files: [{ flags: 13, path: hd }, { flags: 13, path: none }] }) },
+    stored: ["_HD.w3mod:Units\\Human\\Footman\\Footman.mdx"],
+  });
+  const check = builtinChecks(app.w3).find((c) => c.id === "imports")!;
+  const found = (await check.run()).map((p) => p.message);
+  assert.deepEqual(found, [`${none} is listed but its file is missing`]);
+});

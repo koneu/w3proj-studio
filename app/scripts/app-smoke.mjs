@@ -3456,6 +3456,18 @@ async function importListCleanup(page, found) {
       const again = JSON.parse(readFileSync(join(back, "map", "war3map.imp.json"), "utf8")).files;
       if (JSON.stringify(again) !== JSON.stringify(cleaned)) fail(`the packed map's list: ${again.length} entries, ${JSON.stringify(again.slice(0, 2))}`);
     }
+    // An entry of an art set the map lacks but the real game has (stored as War3.w3mod:_HD.w3mod:Units/…) stays; one
+    // the game hasn't either goes.
+    const hd = "_HD.w3mod\\Units\\Human\\Footman\\Footman.mdx", none = "_HD.w3mod\\Units\\Human\\Footman\\NoSuchFootman.mdx";
+    await page.evaluate(`(async () => { const t = await w3.workspace.readText(${JSON.stringify(IMP)}); const d = JSON.parse(t);
+      d.files.push({ flags: 13, path: ${JSON.stringify(hd)} }, { flags: 13, path: ${JSON.stringify(none)} });
+      await w3.workspace.writeText(${JSON.stringify(IMP)}, JSON.stringify(d, null, 2)); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`window.__cleanAsked = [{}]`);
+    const hdRun = await page.evaluate(`w3.commands.execute("w3.imports.cleanUp").then((v) => v, (e) => "error: " + String(e))`);
+    const hdList = list().map((e) => e.path);
+    if (hdRun !== true || !hdList.includes(hd) || hdList.includes(none) || hdList.length !== 49) {
+      fail(`the _HD entry the game provides: the clean-up answered ${JSON.stringify(hdRun)}, the list holds ${hdList.length} entries, ${JSON.stringify(hdList.filter((p) => /footman/i.test(p)))}`);
+    }
   } finally {
     await restoreWindow(page);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});

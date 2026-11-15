@@ -4,7 +4,7 @@
 // game go; files of the map folder the list doesn't name (lib/imports.ts unlistedFiles, the rule the Problems view and
 // the Import Manager use) come in, with the flags new imports get. Pure: the caller previews and applies it.
 
-import { archivePath, entryCandidates, entryFile, newEntryFlags, unlistedFiles, type ImportEntry } from "./imports";
+import { archivePath, entryCandidates, gameLookupName, entryFile, newEntryFlags, unlistedFiles, type ImportEntry } from "./imports";
 
 /** Why an entry leaves the list. */
 export type DropReason = "blank" | "missing";
@@ -24,9 +24,9 @@ export interface ImportCleanup {
 export const isBlankEntry = (e: ImportEntry) => e.path === "";
 
 /** The archive names the game may provide an entry's file under (its candidates: the import folder for standard-path
- *  entries, a sound's other extensions). */
+ *  entries, a sound's other extensions), in the game's layer form (gameLookupName: `_HD.w3mod:Units\…`). */
 export function entryGameNames(e: ImportEntry, folder: string): string[] {
-  return [...new Set(entryCandidates(e, folder).map(archivePath))];
+  return [...new Set(entryCandidates(e, folder).map((c) => gameLookupName(archivePath(c))))];
 }
 
 const lowerIndex = (projectFiles: readonly string[]) => {
