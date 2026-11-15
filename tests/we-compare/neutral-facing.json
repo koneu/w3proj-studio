@@ -1,0 +1,94 @@
+[
+  {
+    "name": "neutral-facing",
+    "description": "bugs.md 'Gold mine / neutral building orientation': gold mines, taverns and goblin merchants of Neutral Passive, Player 1's barracks and footmen at 0, 0.5, 90 degrees, 3.0 and 5.5 radians and the whole number 2.0 (make-neutral-facing.mjs); the editor opens the map and saves it. Measured 2026-11-15 (branch snap-angle-we): every facing is kept, the mines' and the other buildings' alike, and the editor draws each building at its own facing (a picture of its opening view); only a whole number is read as degrees (3.0 and 2.0 saved as 3 and 2 degrees), as on doodads: a map whose units were stored at whole numbers shows them all facing about east. Studio reads them so since then (doodadedit.ts unitAnglesAsOpened). The editor writes the newer units format (subversion 11, itemTable and hero attributes), ignored here",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/neutral-facing.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "subversion",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ]
+      }
+    ],
+    "limit": 80
+  },
+  {
+    "name": "neutral-facing-neg",
+    "description": "The units' facings the editor reads (make-neutral-facing.mjs neg): a gold mine, barracks and a footman at -1, -2, -0.5, -2.0725 (Studio's own test maps have it), -90, 400, 7, 1, 6.5 and 360. Measured 2026-11-15 (branch snap-angle-we): read as doodads' angles (a whole number as degrees, -1 as 135), then brought into 0..360 by whole turns: -0.5 to 5.78, -2.0725 to 4.21, 6.5 to 0.217, 400 to 40 degrees, 360 stays 360 (doodadgrid.ts openedUnitAngle). MATCH since then",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/neutral-facing-neg.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "subversion",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ]
+      }
+    ],
+    "limit": 80
+  }
+]

@@ -48,7 +48,7 @@ import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { hasPathSize, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
-import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
+import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
@@ -2218,6 +2218,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         readStartGold();
         /** Set once an object was edited: the placement files are saved too. */
         let objectsTouched = false;
+        /** The units' file holds facings the open gave (unitAnglesAsOpened) that no save has written yet: a doodad file
+         *  read again keeps the placement files to be saved then. */
+        let unitAnglesUnsaved = false;
         /** An object to select once the placed objects have models (Object Manager double-click). */
         let pendingSel: PlacedRef | null = null;
         /** Cycle Random Groups: 0 shows objects placed from a random group as the question mark, n as what the group's
@@ -2672,6 +2675,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (df && snapsDoodads()) await snapOnOpen(df);
             if (df && !disposed && fixesDoodads()) await fixOnOpen(df, scalesKnown);
             if (disposed) return;
+            // The facings the World Editor reads war3mapUnits.doo with (doodadedit.ts unitAnglesAsOpened), with the
+            // doodads' (setting Snap Doodads on Load): not an edit either; the next save writes them.
+            if (uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(uf.list)) objectsTouched = unitAnglesUnsaved = true;
             // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
             if (autoCycleOn()) {
               const g = await readRandomGroups();
@@ -5844,11 +5850,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // The file as it is now, under the rules opening it would apply (an AI tool's undo writes back the stored
               // places): not an edit, and the next save writes them, as after the open. Only the doodads' changes from
               // the open are what a clean editor holds besides the files, so units read again leave them to be saved.
-              objectsTouched = false;
+              objectsTouched = unitAnglesUnsaved;
               if (snapsDoodads()) await snapOnOpen(f, true);
               if (!disposed && fixesDoodads()) await fixOnOpen(f, scalesKnown, true);
               if (disposed) return true;
-            } else { unitsFile = f; savedStarts = startLocations(f.list); }
+            } else {
+              unitsFile = f;
+              savedStarts = startLocations(f.list);
+              // As after the open (unitAnglesAsOpened): the facings the World Editor would read the file with.
+              unitAnglesUnsaved = snapsDoodads() && unitAnglesAsOpened(f.list) > 0;
+              if (unitAnglesUnsaved) objectsTouched = true;
+            }
             if (selected || group.length) clearSelection();
             await rebuildObjects();
             reselect(kept);
@@ -5928,7 +5940,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }),
               write: async (t) => {
                 await writeTerrainBytes(doc.path, t.w3e, doc);
-                for (const { f, text } of t.placed) await savePlacedFile(w3, f, text);
+                for (const { f, text } of t.placed) {
+                  await savePlacedFile(w3, f, text);
+                  if (f === unitsFile) unitAnglesUnsaved = false;
+                }
                 // Placed, moved or deleted start locations add, move or remove the map's players.
                 if (t.starts) {
                   const starts = t.starts;

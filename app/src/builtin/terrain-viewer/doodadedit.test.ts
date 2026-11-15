@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadNudgeSteps, fixAsOpened, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, snapAsOpened, type DoodadRuleSource, type OpenRuleSource, type RuledEntry } from "./doodadedit";
+import { doodadNudgeSteps, fixAsOpened, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource, type RuledEntry } from "./doodadedit";
 import type { PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 import type { ScaleRule } from "./doodadrules";
@@ -115,6 +115,30 @@ test("snapAsOpened and fixAsOpened: a list as stored gets the open's places, sca
   assert.equal(snapAsOpened(list, src), 0);
   assert.equal(fixAsOpened(list, src), 0);
   assert.deepEqual(list, once);
+});
+
+// we-compare neutral-facing and neutral-facing-neg (tests/we-compare/neutral-facing.json, 2026-11-15): gold mines,
+// taverns, goblin merchants, barracks and footmen saved by the World Editor after it opened the map; the same for all.
+test("unitAnglesAsOpened: the World Editor's facings of war3mapUnits.doo after an open (measured)", () => {
+  // [stored, saved by the editor]
+  const cases: [number, number][] = [
+    [0, 0], [0.5, 0.5], [1.5707964, 1.5707964], [4.712389, 4.712389], [5.5, 5.5], [2, 0.034906585], [3, 0.05235988],
+    [-90, 4.712389], [-2.072515, 4.2106705], [-2, 6.248279], [-1, 2.3561945], [-0.5, 5.7831855], [1, 0.017453292],
+    [6.5, 0.21681452], [7, 0.12217305], [360, 6.2831855], [400, 0.69813156],
+  ];
+  const list = cases.map(([a]): Placed => ({ id: "ngol", variation: 0, position: [0, 0, 0], angle: Math.fround(a), scale: [1, 1, 1] }));
+  const changed = unitAnglesAsOpened(list);
+  const wrong = cases.map(([a, want], i) => [a, want, list[i].angle]).filter(([, want, got]) => Math.fround(got) !== Math.fround(want));
+  assert.deepEqual(wrong, []);
+  assert.equal(changed, cases.filter(([a, want]) => Math.fround(a) !== Math.fround(want)).length);
+  // A facing already in range keeps the file's own number (the JSON's double), and a second pass changes nothing.
+  const kept: Placed[] = [{ id: "hfoo", variation: 0, position: [0, 0, 0], angle: (3 * Math.PI) / 2, scale: [1, 1, 1] }];
+  assert.equal(unitAnglesAsOpened(kept), 0);
+  assert.equal(kept[0].angle, (3 * Math.PI) / 2);
+  assert.equal(unitAnglesAsOpened(list), 0);
+  // A broken angle stays as it is.
+  const broken: Placed[] = [{ id: "hfoo", variation: 0, position: [0, 0, 0], angle: NaN, scale: [1, 1, 1] }];
+  assert.equal(unitAnglesAsOpened(broken), 0);
 });
 
 test("placedNudgeSteps: buildings and start locations nudge 64, units 8, doodads by their grid", () => {

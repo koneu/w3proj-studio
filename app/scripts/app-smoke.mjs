@@ -6877,6 +6877,13 @@ async function doodadSnapOnLoad(page, found) {
     add("LTex", [-96, -96, 0], 4.712389, 56);
     doo.doodads.at(-1).scale = [2, 2, 2];
     writeFileSync(file, JSON.stringify(doo, null, 2));
+    // Units the World Editor reads the facing of (doodadgrid.ts openedUnitAngle): a footman at the whole number 2 (2°),
+    // a knight at -0.5 (into 0..360); the mini map's own footman at 4.5 stays.
+    const unitsFile = join(root, "map", "war3mapUnits.doo.json");
+    const units = JSON.parse(readFileSync(unitsFile, "utf8"));
+    units.units.push({ ...units.units[0], id: "hkni", skinId: "hkni", angle: -0.5, position: [64, 0, 0], editorId: 90 });
+    units.units.push({ ...units.units[0], id: "hrif", skinId: "hrif", angle: 2, position: [-64, 0, 0], editorId: 91 });
+    writeFileSync(unitsFile, JSON.stringify(units, null, 2));
     writeFileSync(join(root, "map", "war3map.w3b.json"), JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [
       { base: "LTex", end: "LTex", mods: [{ field: "bmis", type: "unreal", value: 1.5 }, { field: "bmas", type: "unreal", value: 1.1 }] }], custom: [] }, null, 2));
     return root;
@@ -6892,6 +6899,13 @@ async function doodadSnapOnLoad(page, found) {
     LTlt: [1, 1, 1, 3], LOrb: [1, 1, 1, 3], LTex: [f(1.5), f(1.5), f(1.5), 3] };
   const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
+  /** The units' facings by id, single precision: as the editor holds them, and as the file has them. */
+  // The test's three: the save adds a start location to the mini map (it has none).
+  const facings = (list) => Object.fromEntries((list ?? []).filter((u) => ["hfoo", "hkni", "hrif"].includes(u.id)).map((u) => [u.id, Math.fround(u.angle)]));
+  const liveFacings = async () => facings(await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units ?? null)()`));
+  const facingsOnDisk = (root) => facings(JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8")).units);
+  /** What the World Editor reads the units' facings as (a whole number as degrees, into 0..360). */
+  const OPENED = { hfoo: f(4.5), hkni: f(5.7831855), hrif: f(0.034906585) };
   const onDisk = (root) => xyAngle(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
   const open = async (root) => {
@@ -6934,6 +6948,9 @@ async function doodadSnapOnLoad(page, found) {
     if (!same(snapped.LTlt, [-128, -128, TURNED])) fail(`the tree LTlt (fixedRot 270) stored at 30° is at ${JSON.stringify(snapped.LTlt)}, not turned to 270°`);
     if (!same(snapped.LOrb, [-200, -200, TURNED])) fail(`the wheel ruts stored at -90° are at ${JSON.stringify(snapped.LOrb)}, not at 270°`);
     if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the snap marked the map as changed");
+    const storedFacings = facingsOnDisk(on);
+    if (storedFacings.hrif !== 2 || storedFacings.hkni !== -0.5) fail(`the stored unit facings aren't the test's (control): ${JSON.stringify(storedFacings)}`);
+    if (!same(await liveFacings(), OPENED)) fail(`the units face ${JSON.stringify(await liveFacings())} after the open, not the World Editor's ${JSON.stringify(OPENED)}`);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("opening wrote the doodad file");
     if (!/Put 6 doodads on their grid/.test(await toasts())) fail(`no note of the 6 doodads put on their grid: ${(await toasts()).slice(0, 300)}`);
     const storedFixes = scaleFlagsOnDisk(on);
@@ -6952,6 +6969,7 @@ async function doodadSnapOnLoad(page, found) {
     for (const id of ["APms"]) if (!same(written[id], stored[id])) fail(`the save moved ${id} to ${JSON.stringify(written[id])}`);
     const writtenFixes = scaleFlagsOnDisk(on);
     for (const [id, want] of Object.entries(FIXED)) if (!same(writtenFixes[id], want)) fail(`the save after an edit wrote ${id} with scale and flags ${JSON.stringify(writtenFixes[id])}, not ${JSON.stringify(want)}`);
+    if (!same(facingsOnDisk(on), OPENED)) fail(`the save after an edit wrote the units facing ${JSON.stringify(facingsOnDisk(on))}, not ${JSON.stringify(OPENED)}`);
 
     // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
     const broken = make("broken");
@@ -6978,6 +6996,7 @@ async function doodadSnapOnLoad(page, found) {
     if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail("with the setting off the map is marked as changed");
     if (/on their grid/.test(await toasts())) fail(`with the setting off it still says it put doodads on their grid: ${(await toasts()).slice(0, 300)}`);
     if (/scale or flags/.test(await toasts())) fail(`with Fix Doodads on Load off it still says it set scales or flags: ${(await toasts()).slice(0, 300)}`);
+    if (!same(await liveFacings(), facingsOnDisk(off))) fail(`with the setting off the units face ${JSON.stringify(await liveFacings())}, not as stored ${JSON.stringify(facingsOnDisk(off))}`);
     const shownFixes = scaleFlags(await live());
     for (const id of Object.keys(FIXED)) if (!same(shownFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off ${id} has scale and flags ${JSON.stringify(shownFixes[id])}, not the map's ${JSON.stringify(keptFixes[id])}`);
     await saveAfterEdit();
@@ -6985,6 +7004,7 @@ async function doodadSnapOnLoad(page, found) {
     for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(after[id]?.slice(0, 2), kept[id].slice(0, 2)) || Math.fround(after[id][2]) !== Math.fround(kept[id][2])) fail(`with the setting off the save wrote ${id} at ${JSON.stringify(after[id])}, not ${JSON.stringify(kept[id])}`);
     const afterFixes = scaleFlagsOnDisk(off);
     for (const id of Object.keys(FIXED)) if (!same(afterFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off the save wrote ${id} with scale and flags ${JSON.stringify(afterFixes[id])}, not the map's ${JSON.stringify(keptFixes[id])}`);
+    if (!same(facingsOnDisk(off), facingsOnDisk(make("off-control")))) fail(`with the setting off the save wrote the units facing ${JSON.stringify(facingsOnDisk(off))}, not as stored`);
   } finally {
     await page.evaluate(`w3.settings.set(${JSON.stringify(KEY)}, undefined); w3.settings.set(${JSON.stringify(FIX)}, undefined); w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
     await page.evaluate(`window.__snapGroup?.dispose(); window.__snapGroup = null; window.__snapEd = null;`).catch(() => {});
