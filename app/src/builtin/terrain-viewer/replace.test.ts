@@ -4,7 +4,8 @@ import { CornerUndo } from "../../lib/terrain/cliffs";
 import type { Corner, Terrain } from "../../lib/terrain/w3e";
 import { replacePlaced } from "./aitools";
 import { replaceCorners, roomCells, roomForReplaced, swapsOf } from "./replace";
-import type { RoomShape } from "./occupancy";
+import { roomShape, type RoomShape } from "./occupancy";
+import type { PathingData } from "./pathmap";
 
 /** 4 corners: tiles 0, 1, 2, 1; cliff types 0, 1, 15 (flat ground's), 0. */
 function ground(): Terrain {
@@ -119,4 +120,39 @@ test("roomForReplaced: an object's own old cells don't count; one refused keeps 
   assert.deepEqual(roomForReplaced([[9]], [{ before: [2], after: [8, 9] }, { before: [5], after: [2, 6] }]), [false, false]);
   // B moved off cell 7 first, so A may take it.
   assert.deepEqual(roomForReplaced([], [{ before: [7], after: [6] }, { before: [1], after: [1, 7] }]), [true, true]);
+});
+
+test("Replace Units: footmen to farms, as the World Editor did (tests/we-compare/replace-units-overlap-farm.json)", () => {
+  // A footman (circle 31) becomes a farm (4x4 cells) on the grid point nearest it: (20, 20) goes to (0, 0), covering -64..64.
+  const farm = (x: number, y: number) => roomCells(MAP, square(4), x, y, SOUTH);
+  const footman = (x: number, y: number) => roomCells(MAP, { radius: 31 }, x, y, SOUTH);
+  const tree = (x: number, y: number) => roomCells(MAP, square(4), x, y, SOUTH);
+  const item = (x: number, y: number) => roomCells(MAP, { radius: 16 }, x, y, SOUTH);
+  const pair = (others: number[][], atX: number) => roomForReplaced(others, [{ before: footman(atX, 20), after: farm(Math.round((atX - 20) / 64) * 64, 0) }]);
+  assert.deepEqual(pair([], 20), [true], "alone");
+  assert.deepEqual(pair([tree(-76, 20)], 20), [false], "a tree 96 west covers its edge");
+  assert.deepEqual(pair([tree(-140, 20)], 20), [true], "a tree a farm's width further west");
+  assert.deepEqual(pair([footman(-76, 20)], 20), [false], "a peasant 96 west");
+  assert.deepEqual(pair([item(-76, 20)], 20), [false], "an item 96 west");
+  assert.deepEqual(pair([roomCells(MAP, null, -76, 20, SOUTH)], 20), [true], "a pathless doodad");
+  // Two footmen 96 apart, both replaced: the first's farm would cover the second's footman, and the second's the first's.
+  assert.deepEqual(roomForReplaced([], [
+    { before: footman(20, 20), after: farm(0, 0) }, { before: footman(-76, 20), after: farm(-64, 0) },
+  ]), [false, false]);
+});
+
+test("roomShape: a building takes in its texture's no-build ring (blue), a doodad only the red part", async () => {
+  // 4x4 pixels: red in the middle 2x2, blue over all of it (a barracks' 12x12 over 8x8, small).
+  const rgba = new Uint8Array(4 * 4 * 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const i = (y * 4 + x) * 4; rgba[i] = x > 0 && x < 3 && y > 0 && y < 3 ? 255 : 0; rgba[i + 2] = 255; rgba[i + 3] = 255; }
+  const image = { width: 4, height: 4, rgba };
+  const data = {
+    unitShape: (id: string) => (id === "hbar" ? { path: "b.tga", collision: 0 } : null),
+    texture: async () => image,
+    placedTex: () => ({ path: "d.tga", dest: false, walkable: false }),
+    placedImage: async () => ({ image }),
+  } as unknown as PathingData;
+  const count = (s: RoomShape) => (s && "mask" in s ? s.mask.reduce((a, b) => a + b, 0) : -1);
+  assert.equal(count(await roomShape(data, "hbar", "w3u")), 16);
+  assert.equal(count(await roomShape(data, "LTlt", "w3d")), 4);
 });

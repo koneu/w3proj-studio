@@ -7086,6 +7086,52 @@ async function mcpReplaceSnap(page, found) {
   }
 }
 
+/** replace_objects on units keeps the World Editor's Replace Units rule (tests/we-compare/replace-units-overlap.json): a
+ *  footman becomes a farm only where the farm's footprint covers no other object. On a copy of the mini map with no
+ *  doodads, a footman at 0, 0 with a peasant 70 west of it and another footman at 320, 128 alone: {hfoo: hhou} changes
+ *  one (the lone footman, on its grid), the file keeps the first as a footman and the peasant, and the same swap
+ *  again (only the refused footman is left) says nothing was replaced and leaves the file alone. */
+async function mcpReplaceUnitsRoom(page, found) {
+  const fail = (what) => found.push(`mcp replace units room: ${what}`);
+  const dir = join(work, "mcp-replace-units-room");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const root = join(dir, "map");
+  cpSync(FIXTURE, root, { recursive: true });
+  const base = join(root, "map");
+  writeFileSync(join(base, "war3map.doo.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(base, "war3map.doo.json"), "utf8")), doodads: [] }, null, 2));
+  const unitsFile = join(base, "war3mapUnits.doo.json");
+  const units = JSON.parse(readFileSync(unitsFile, "utf8"));
+  const [footman] = units.units;
+  const at = (id, x, y, n) => ({ ...footman, id, skinId: id, position: [x, y, 0], editorId: n });
+  units.units = [footman, at("hpea", -70, 0, 2), at("hfoo", 320, 128, 3)];
+  writeFileSync(unitsFile, JSON.stringify(units, null, 2));
+  const onDisk = () => JSON.parse(readFileSync(unitsFile, "utf8")).units.map((u) => [u.id, u.position[0], u.position[1]]);
+  const tool = mcpTool(page);
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the units loaded", () => page.evaluate(`(async () => ((await w3.services.get("w3.terrain")).placedObjects()?.units?.length ?? 0) > 0)()`), 30000);
+    await settled(page);
+    const reply = await tool("replace_objects", { kind: "units", swaps: { hfoo: "hhou" } });
+    if (!/"changed": 1\b/.test(reply)) fail(`replace_objects hfoo to hhou gave ${reply}, not one changed`);
+    await settled(page);
+    const after = onDisk();
+    if (after.filter((u) => u[0] === "hhou").length !== 1 || !after.some((u) => u[0] === "hfoo" && u[1] === 0 && u[2] === 0)) fail(`the footman beside a peasant should stay and the lone one become a farm: ${JSON.stringify(after)}`);
+    const farm = after.find((u) => u[0] === "hhou");
+    if (farm && (farm[1] % 64 !== 0 || farm[2] % 64 !== 0)) fail(`the farm isn't on the building grid: ${JSON.stringify(farm)}`);
+    // Only the refused footman is left: an error, no change on disk.
+    const again = await tool("replace_objects", { kind: "units", swaps: { hfoo: "hhou" } }).catch((e) => String(e.message ?? e));
+    if (!/Nothing was replaced/.test(again)) fail(`a replace where every footman is refused gave ${again}`);
+    if (JSON.stringify(onDisk()) !== JSON.stringify(after)) fail("the refused replace changed the file");
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** The World Editor's doodad rules while editing (doodadedit.ts), under the same settings as on load (Snap Doodads on
  *  Load, Fix Doodads on Load), on a new map, both on and then both off: a barrel (2×2 texture, 1.1 to 1.5) placed by
  *  place_objects at 40, 40 with scale 3 lands at 32, 32 with 1.5 (off: as asked), a hay cart (4×2) at 500, 300 facing
@@ -13548,6 +13594,7 @@ async function run() {
         mcpGuides,
         mcpLimits,
         mcpReplaceSnap,
+        mcpReplaceUnitsRoom,
         mcpStartMove,
         meleeByHand,
         mineStartGrid,
@@ -13891,6 +13938,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "doodadSnapOnLoad", found);
   await mcpReplaceSnap(page, found).catch((e) => found.push(`mcp replace after snap: ${e.message}`));
   await leftOpen(page, "mcpReplaceSnap", found);
+  await mcpReplaceUnitsRoom(page, found).catch((e) => found.push(`mcp replace units room: ${e.message}`));
+  await leftOpen(page, "mcpReplaceUnitsRoom", found);
   await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
   await leftOpen(page, "doodadRulesEdit", found);
   await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));

@@ -16,9 +16,9 @@ export interface Footprint {
   mask: Uint8Array;
 }
 
-function fromImage(img: PathImage): Footprint {
+function fromImage(img: PathImage, noBuild = false): Footprint {
   const mask = new Uint8Array(img.width * img.height);
-  for (let i = 0; i < mask.length; i++) mask[i] = img.rgba[i * 4] > 127 ? 1 : 0;
+  for (let i = 0; i < mask.length; i++) mask[i] = img.rgba[i * 4] > 127 || (noBuild && img.rgba[i * 4 + 2] > 127) ? 1 : 0;
   return { width: img.width, height: img.height, mask };
 }
 
@@ -44,7 +44,9 @@ export async function roomShape(data: PathingData, id: string, kind: string): Pr
     const shape = data.unitShape(id);
     if (!shape) return { radius: 16 };
     const img = shape.path ? await data.texture(shape.path).catch(() => null) : null;
-    return img ? fromImage(img) : { radius: shape.collision };
+    // A building's footprint for Replace Units takes in the ground round it that nothing may be built on (the texture's
+    // blue part: a barracks' 12x12 over its 8x8 of red; tests/we-compare/replace-units-overlap.json).
+    return img ? fromImage(img, true) : { radius: shape.collision };
   }
   const info = data.placedTex(id);
   if (!info?.path || info.walkable) return null;

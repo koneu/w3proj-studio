@@ -1,0 +1,356 @@
+[
+  {
+    "name": "replace-units-overlap-farm",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): farm: the footman stays beside a tree 96 west (c2) or 96 south (c14), a peasant 96 west (c5), an item 96 west (c10), a second footman 96 west (c11: both stay, each is the other's neighbour), and beside a barracks 224 west (c15: its no-build ring); it becomes a farm beside a tree 160 or 224 west, a peasant 160 west, crates, a farm, a pathless doodad, LOsh, and a tree 96 east (the farm lands 20 west of the footman). MATCH.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "u"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "288,274"
+        ],
+        [
+          "--sleep",
+          "3500"
+        ],
+        [
+          "--click",
+          "503,365"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "733,290"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "705,309"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ],
+        [
+          "--click",
+          "797,525"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "791,725"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500));"
+        },
+        {
+          "mcp": "replace_objects",
+          "args": {
+            "kind": "units",
+            "swaps": {
+              "hfoo": "hhou"
+            }
+          }
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "replace-units-overlap-barracks",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): barracks: only the footmen with nothing near (c1) or a pathless doodad (c9) become barracks (12x12 pixels: 8x8 no-walk in 12x12 no-build, which counts for the new building too: a tree 224 west stops it). MATCH.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "u"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "288,274"
+        ],
+        [
+          "--sleep",
+          "3500"
+        ],
+        [
+          "--click",
+          "503,365"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "733,290"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "705,309"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ],
+        [
+          "--click",
+          "861,525"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "791,725"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500));"
+        },
+        {
+          "mcp": "replace_objects",
+          "args": {
+            "kind": "units",
+            "swaps": {
+              "hfoo": "hbar"
+            }
+          }
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "replace-units-overlap-mine",
+    "description": "bugs.md: Replace Units leaves a footman whose new building would cover another object. Input tests/fixtures/we-compare/make-replace-units-overlap-input.mjs (its head lists the fifteen cases); the editor's steps are replace-units.json's with the new type's race set to Human first (the dialog keeps its last race) and the new type clicked in the Buildings list (Human: Farm 797,525, Barracks 861,525; Neutral: filter 795,339 'Goldmine' left the one mine). The WE has no Replace for a selection (Edit menu: Cut, Copy, Paste, mirror/rotate paste, Clear, Select All, Nudge, View Selection, Edit Properties; Unit Properties has no type), so Studio's selection Replace follows this dialog's rule. Studio: replace_objects {hfoo: X} on units (replaceEntries and sendBackCrowded, roomForReplaced). MEASURED (2026-11-15, branch replace-units-overlap): gold mine (16x16 Goldmine: 8x8 no-walk in 16x16 no-build): as the barracks, only c1 and c9. MATCH.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/replace-units-overlap.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "u"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "288,274"
+        ],
+        [
+          "--sleep",
+          "3500"
+        ],
+        [
+          "--click",
+          "503,365"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "733,290"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "705,361"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "795,339"
+        ],
+        [
+          "--type",
+          "Goldmine"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ],
+        [
+          "--click",
+          "701,422"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "791,725"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500));"
+        },
+        {
+          "mcp": "replace_objects",
+          "args": {
+            "kind": "units",
+            "swaps": {
+              "hfoo": "ngol"
+            }
+          }
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 40
+  }
+]
