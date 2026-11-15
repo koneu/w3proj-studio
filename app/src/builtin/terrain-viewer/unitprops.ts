@@ -305,6 +305,9 @@ export function heroPools(facts: TypeFacts, entry: Placed): [number, number] | n
 // ---- checking and applying ----------------------------------------------------------------------
 
 const whole = (v: number) => Number.isInteger(v);
+/** A number the files store in a signed 32-bit field, from 0: a table's, region's or random group's number. Checked when
+ *  the map's own list can't be read too, so nothing past the field is cut to its bits. */
+const storedIndex = (v: number) => whole(v) && v >= 0 && v <= 0x7fffffff;
 /** Four characters, or an id the files write as a number ("0x00000000": an empty slot, which drops nothing). */
 const ITEM_ID = /^(?:[\x21-\x7e]{4}|0x[0-9a-fA-F]{8})$/;
 
@@ -359,6 +362,7 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
       const d = c.value;
       if (d.mode === "table") {
         if (!has(e, "itemTable")) return "This map's file has no item tables for placed objects (an older layout); give it its own sets.";
+        if (!storedIndex(d.table)) return "An item table's number is a whole number from 0.";
         return ctx.tables && !ctx.tables.includes(d.table) ? `The map has no item table #${d.table}.` : null;
       }
       if (d.mode === "custom") {
@@ -373,6 +377,7 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
     }
     case "waygate":
       if (!facts.waygate) return "Only waygates have a destination.";
+      if (c.value !== DEFAULT && !storedIndex(c.value)) return need("waygate") ?? "A region's number is a whole number from 0.";
       return need("waygate") ?? (c.value === DEFAULT || !ctx.regions || ctx.regions.includes(c.value) ? null : "That region isn't on the map.");
     case "color":
       if (!facts.customColor) return "Only a type that allows a custom team colour (a waygate) takes one: the World Editor's Custom Color, object data Allow Custom Team Color.";
@@ -400,7 +405,7 @@ function checkRandom(e: Entry, v: RandomChoice, ctx: PropContext): string | null
     return null;
   }
   if (v.by === "group") {
-    if (!whole(v.group) || v.group < 0 || !whole(v.position) || v.position < 0) return "A random group and its position are whole numbers.";
+    if (!storedIndex(v.group) || !storedIndex(v.position)) return "A random group and its position are whole numbers.";
     if (!ctx.groups) return null;
     const g = ctx.groups.find((x) => x.number === v.group);
     if (!g) return `The map has no random group #${v.group} (Map Properties › Random Groups).`;

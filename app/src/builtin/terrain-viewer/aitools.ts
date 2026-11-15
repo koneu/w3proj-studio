@@ -6,7 +6,9 @@ import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
-import { groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { groundLimitText } from "./limits";
+import { variationText } from "./values";
+import { groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -40,12 +42,14 @@ interface Dressed { variation: number; angle: number; scale: [number, number, nu
 /** What makes placed objects differ. What's asked for wins; with `vary` the rest is random within
  *  what the object's type allows, as the Scatter brush does. */
 export function dress(e: Dressed, look: Look | null, asked: Dressing, vary: boolean, random: () => number) {
+  const variations = look?.numVar ?? 1;
+  // A variation the type hasn't got is refused (placedValueProblem checks it first), not moved to its last one.
+  if (asked.variation !== undefined && !(Number.isInteger(asked.variation) && asked.variation >= 0 && asked.variation < variations)) throw new Error(variationText(variations));
   if (asked.scaleRange) {
     const k = asked.scaleRange[0] + random() * (asked.scaleRange[1] - asked.scaleRange[0]);
     e.scale = [k, k, k];
   }
-  const variations = look?.numVar ?? 1;
-  if (asked.variation !== undefined) e.variation = Math.max(0, Math.min(variations - 1, Math.round(asked.variation)));
+  if (asked.variation !== undefined) e.variation = asked.variation;
   else if (vary && variations > 1) e.variation = Math.floor(random() * variations);
   const degrees = look?.fixedRot ?? asked.facing;
   if (degrees !== undefined && degrees !== null) e.angle = (degrees * Math.PI) / 180;
@@ -229,13 +233,17 @@ function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], de
   const from = t.corners[middleOf(inside).i];
   const surface = showing.length ? t.corners[middleOf(showing).i].water : from.height - 8;
   const level = waterLevelAt(surface, waterOffsetOf(t)), changed: number[] = [];
-  for (const { i, r } of inside) {
+  const grounds = inside.filter(({ i }) => t.corners[i].layer === from.layer).map(({ i, r }) => {
     const c = t.corners[i];
-    if (c.layer !== from.layer) continue;
     const k = Math.min(1, (1 - r) / BANK), s = k * k * (3 - 2 * k);
     const bottom = surface - depth, target = c.height + (bottom - c.height) * s;
+    return { i, ground: target < c.height ? target - (c.layer - 2) * TILE : null };
+  });
+  refuseGroundPast(grounds.flatMap((g) => (g.ground === null ? [] : [g.ground])));
+  for (const { i, ground } of grounds) {
+    const c = t.corners[i];
     const before = c.rawHeight, wet = c.hasWater;
-    if (target < c.height) setGroundHeight(c, target - (c.layer - 2) * TILE);
+    if (ground !== null) setGroundHeight(c, ground);
     dropRamp(t, i, changed);
     setWaterLevel(c, level, waterOffsetOf(t));
     if (c.rawHeight !== before || !wet) changed.push(i);
@@ -387,17 +395,32 @@ export function paintPath(t: Terrain, points: readonly [number, number][], width
   };
   // Heights are read before any changes, and along the way, or the path would dig into itself.
   const before = flatten ? { ...t, corners: t.corners.map((c) => ({ ...c })) } : t;
+  // The levelled heights, worked out (and refused past the stored word) before anything changes.
+  const levelled = new Map<number, number>();
+  if (flatten) {
+    for (let y = 0; y < t.height; y++) {
+      for (let x = 0; x < t.width; x++) {
+        const i = y * t.width + x, c = t.corners[i], wx = t.offsetX + x * TILE, wy = t.offsetY + y * TILE;
+        const r = distanceToLine(wx, wy, points) / half;
+        if (c.boundary || r > 1) continue;
+        const [mx, my] = middle(wx, wy);
+        const w = 0.5 + 0.5 * Math.cos(Math.PI * r), layerLift = (c.layer - 2) * TILE;
+        const g = groundHeight(c), target = heightAt(before, mx, my) - layerLift;
+        levelled.set(i, g + (target - g) * w);
+      }
+    }
+    refuseGroundPast(levelled.values());
+  }
   for (let y = 0; y < t.height; y++) {
     for (let x = 0; x < t.width; x++) {
       const i = y * t.width + x, c = t.corners[i], wx = t.offsetX + x * TILE, wy = t.offsetY + y * TILE;
       if (c.boundary) continue;
       const r = distanceToLine(wx, wy, points) / half;
       if (r > 1) continue;
-      if (flatten) {
-        const [mx, my] = middle(wx, wy), raw = c.rawHeight;
-        const w = 0.5 + 0.5 * Math.cos(Math.PI * r), layerLift = (c.layer - 2) * TILE;
-        const g = groundHeight(c), target = heightAt(before, mx, my) - layerLift;
-        setGroundHeight(c, g + (target - g) * w);
+      const g = levelled.get(i);
+      if (g !== undefined) {
+        const raw = c.rawHeight;
+        setGroundHeight(c, g);
         if (c.rawHeight !== raw) changed.add(i);
       }
       if ((edge > 0 && r > 1 - edge && random() > (1 - r) / edge) || c.texture === slot) continue;
@@ -449,11 +472,12 @@ function bumps(random: () => number) {
  *  Ramps and water stay: bumps there would break a way up or a ford's depth. The changed corners. */
 export function roughenCorners(t: Terrain, area: Area, shape: Shape, amount: number, random: () => number) {
   const noise = bumps(random), changed: number[] = [];
-  for (const { i, r } of cornersIn(t, area, shape)) {
-    const c = t.corners[i];
-    if (c.ramp || c.hasWater) continue;
-    const before = c.rawHeight, fade = Math.min(1, (1 - r) / 0.25);
-    setGroundHeight(c, groundHeight(c) + noise(i % t.width, Math.floor(i / t.width)) * amount * fade);
+  const next = cornersIn(t, area, shape).filter(({ i }) => !t.corners[i].ramp && !t.corners[i].hasWater)
+    .map(({ i, r }) => ({ i, g: groundHeight(t.corners[i]) + noise(i % t.width, Math.floor(i / t.width)) * amount * Math.min(1, (1 - r) / 0.25) }));
+  refuseGroundPast(next.map((n) => n.g));
+  for (const { i, g } of next) {
+    const c = t.corners[i], before = c.rawHeight;
+    setGroundHeight(c, g);
     if (c.rawHeight !== before) changed.push(i);
   }
   return changed;
@@ -479,16 +503,27 @@ export function sculptCorners(t: Terrain, area: Area, shape: Shape, mode: Sculpt
     }
     return sum / n;
   };
-  const changed: number[] = [];
-  for (const { i, r } of inside) {
+  const next = inside.map(({ i, r }) => {
     const g = heights[i], w = fade(r);
-    const next = mode === "raise" ? g + (amount ?? 64) * w : mode === "lower" ? g - (amount ?? 64) * w
+    return mode === "raise" ? g + (amount ?? 64) * w : mode === "lower" ? g - (amount ?? 64) * w
       : mode === "flatten" ? g + (level - g) * w : g + (around(i) - g) * w;
+  });
+  refuseGroundPast(next);
+  const changed: number[] = [];
+  for (const [k, { i }] of inside.entries()) {
     const before = t.corners[i].rawHeight;
-    setGroundHeight(t.corners[i], next);
+    setGroundHeight(t.corners[i], next[k]);
     if (t.corners[i].rawHeight !== before) changed.push(i);
   }
   return changed;
+}
+
+/** Refuses ground heights the stored word can't hold (setGroundHeight would cut them off there), before anything is
+ *  changed: the tool's shape would come out other than asked. */
+function refuseGroundPast(heights: Iterable<number>) {
+  let past = 0;
+  for (const g of heights) if (!groundFits(g)) past++;
+  if (past) throw new Error(groundLimitText(past));
 }
 
 interface Follower { position: number[]; flags?: number }
