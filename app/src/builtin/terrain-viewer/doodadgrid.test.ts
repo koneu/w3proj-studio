@@ -173,6 +173,33 @@ test("a square texture of more than one colour turns to the quarter, a plain one
   assert.deepEqual(doodadOnGrid(13.5, 21.25, 0.4, { width: 2, height: 2, mixed: true }), { x: 32, y: 32, angle: 0 });
 });
 
+// we-compare specs fence-ints and fence-angles (tests/we-compare/fence-wpm.json, 2026-11-15): the editor reads a stored
+// angle that is a whole number as degrees, on a rectangle (NOfl 8x2), a plain square (LOcb) and without a texture (APms)
+// alike; 2.0000002 and 1.9999999 stay radians; -1 came back as 180 (not explained: left as a radian angle here).
+test("Snap Doodads on Load reads a whole-number angle as degrees (measured)", () => {
+  const at = (id: string, angle: number): Placed => ({ id, variation: 0, position: [0, 0, 0], angle, scale: [1, 1, 1] });
+  const sizes: Record<string, PathSize | null> = { NOfl: { width: 8, height: 2 }, LOcb: { width: 4, height: 4 }, APms: null };
+  const saved = (id: string, angle: number) => {
+    const s = doodadSnaps([at(id, angle)], (i) => sizes[i]);
+    return s.length ? s[0].angle : angle;
+  };
+  // [type, stored, saved by the editor]
+  const cases: [string, number, number][] = [
+    ["NOfl", 1, 0], ["NOfl", 2, 0], ["NOfl", 3, 0], ["NOfl", 4, 0], ["NOfl", 5, 0], ["NOfl", 6, 0], ["NOfl", 7, 0],
+    ["NOfl", 45, 1.5707964], ["NOfl", 90, 1.5707964], ["NOfl", 180, 3.1415927], ["NOfl", 270, 4.712389], ["NOfl", -2, 0],
+    ["NOfl", 2.0000002, 1.5707964], ["NOfl", 1.9999999, 1.5707964], ["NOfl", 0.5, 0],
+    ["LOcb", 1, 0.017453292], ["APms", 1, 0.017453292], ["LOcb", 2, 0.034906585], ["APms", 2, 0.034906585],
+    ["LOcb", 3, 0.05235988], ["APms", 3, 0.05235988], ["LOcb", 90, 1.5707964], ["APms", 90, 1.5707964],
+    ["LOcb", 180, 3.1415927], ["APms", 180, 3.1415927], ["LOcb", 2.0000002, 2.0000002], ["APms", 0.5, 0.5],
+  ];
+  const wrong = cases.filter(([id, a, want]) => Math.fround(saved(id, Math.fround(a))) !== Math.fround(want));
+  assert.deepEqual(wrong, []);
+  // The NOfl stored at 270 lies along x, where the editor put it (from -1408, -2048 to -1408, -2016).
+  assert.deepEqual(doodadSnaps([{ ...at("NOfl", 270), position: [-1408, -2048, 0] }], (i) => sizes[i]).map(({ x, y }) => [x, y]), [[-1408, -2016]]);
+  // Placing isn't loading: doodadOnGrid takes 2 as radians (a quarter turn of 1).
+  assert.equal(doodadOnGrid(0, 0, 2, sizes.NOfl).angle, Math.fround(Math.PI / 2));
+});
+
 test("mixedPicture: any pixel of another colour or another alpha", () => {
   const px = (...c: number[][]) => c.flatMap(([r, g, b, a = 255]) => [r, g, b, a]);
   assert.equal(mixedPicture(px([255, 0, 255], [255, 0, 255], [255, 0, 255])), false);
@@ -263,4 +290,15 @@ test("a texture's grid is 64n plus the whole cells below its middle (measured, 1
   // Control: halves go upwards.
   assert.equal(onDoodadGrid(32, 1), 64);
   assert.equal(onDoodadGrid(-32, 1), 0);
+});
+
+test("a whole-number angle stays radians where the caller says the type isn't a doodad (destructables: not measured)", () => {
+  const entry = { id: "LTbr", variation: 0, position: [0, 0, 0] as [number, number, number], angle: 2, scale: [1, 1, 1] as [number, number, number] };
+  const sizeOf = () => ({ width: 4, height: 4 });
+  const asDoodad = doodadSnaps([entry], sizeOf, () => null, () => true);
+  assert.notEqual(asDoodad.length ? asDoodad[0].angle : entry.angle, 2, "a doodad reads 2 as 2 degrees");
+  // The destructable's 2 is kept as the angle the grid rule gets (radians), not turned to 0.0349 first.
+  const viaRadians = doodadSnaps([{ ...entry }], sizeOf, () => null, () => false);
+  const viaDegrees = doodadSnaps([{ ...entry }], sizeOf, () => null, () => true);
+  assert.notDeepEqual(viaRadians.map((s) => s.angle), viaDegrees.map((s) => s.angle));
 });

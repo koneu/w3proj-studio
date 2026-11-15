@@ -1,0 +1,118 @@
+[
+  {
+    "name": "fence-wpm",
+    "description": "Diagonal fences in the pathing map (make-fence.mjs: Angled Fence NOal Fence45, VOal Fence135, VOas ShortFence135 and the straight NOfl 8x2Default at facings 0, 45, 90, 135, 180, 270 and 0.4, 2.0, 3.5, 5.5 radians, on the grid and NOal off it; map 22's Fence 1 as played, pairs 64 apart and 128 between them at facing 90, scale 1.2; a solid line of NOal every 64 at facing 0). The editor opens the map (Snap Doodads on Load) and saves it; Studio opens it in the terrain view and saves. Measured 2026-11-15 (branch rotated-footprint-we, two runs): a diagonal texture turns by quarters as any other, cell for cell as Studio's pathing.ts stamps it (Fence45 at 0 is a rising line of 2x2 blocks, at 90 a falling one), the scale doesn't count, and map 22's played Fence 1 gets the editor's pathing map exactly. The only difference was the 2.0 radians: the editor reads a whole number as degrees (fence-ints), so they turn to 0 (MATCH since then)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-wpm.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 60
+  },
+  {
+    "name": "fence-angles",
+    "description": "Which quarter the editor turns a rectangle's pathing texture to (make-fence.mjs angles: the straight fence NOfl 8x2 and the hay cart LOch 4x2 every 5 degrees, NOfl at 1.7 to 4.0 radians); the doodads each saves. The nearest quarter, 45 to 90, 135 to 180, 315 to 270, 320 to 0 (doodadgrid.ts quarterTurn), except 2.0, 3.0 and 4.0 radians, which went to 0: read as degrees (fence-ints; MATCH since then). The start location in the middle makes the save ask about the melee flag",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-angles.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 200
+  },
+  {
+    "name": "fence-ints",
+    "description": "Angles that are whole numbers of radians (make-fence.mjs ints): NOfl 8x2 at 1 to 7, 45, 90, 180, 270, -1, -2 and 2.0000002, 1.9999999, 0.5; a plain square LOcb and mushrooms APms (no texture) at 1, 2, 3, 90, 180, 2.0000002, 0.5. The editor reads a whole number as degrees (2026-11-15: LOcb and APms at 1 saved as 0.017453292, at 180 as 3.1415927; NOfl at 270 turned to 270 and lies along x), the others as radians (doodadgrid.ts openedAngle). Ignored: the NOfl at -1 (doodads[11]), which the editor turned to 180, neither reading of -1",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-ints.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "doodads[11]"
+        ]
+      }
+    ],
+    "limit": 60
+  }
+]
