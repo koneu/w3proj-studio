@@ -19,19 +19,30 @@ const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
 };
-for (const [name, stored] of [["a", -7400], ["b", -8000], ["c", -8160]]) {
+// - low-ground-d.w3x: the ground at -8400 (world -2100, below the stored word's 0) but the corner the specs click (32, 30
+//   from the south) at -8192, world -2048. The World Editor doesn't take such ground: it opened the whole map at 7984.
+// - low-ground-e.w3x: every corner at -8192 on level 1 (world -2176) but the clicked corner on level 2 (world -2048): a
+//   size 3 water brush there has its click corner at the floor and its neighbours below it.
+// [name, stored height, the clicked corner's, the level, the clicked corner's]
+for (const [name, stored, centre, level, centreLevel] of [["a", -7400], ["b", -8000], ["c", -8160], ["d", -8400, -8192], ["e", -8192, -8192, 1, 2]]) {
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
   try {
     const dir = join(scratch, "low");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
     const file = join(dir, "map", "war3map.w3e.txt");
     const lines = readFileSync(file, "utf8").split("\n");
-    const at = lines.findIndex((l) => l.startsWith("[height]"));
-    if (at < 0) throw new Error("no [height] section in the w3e text");
-    let end = at + 1;
-    while (end < lines.length && lines[end] !== "" && !lines[end].startsWith("[")) end++;
-    const row = Array.from({ length: 65 }, () => stored).join(" ");
-    lines.splice(at, end - at, "[height]", ...Array.from({ length: 65 }, () => row));
+    // One line per row of corners, from the north: the row 30 from the south is line 34.
+    const grid = (section, rest, mid, sep) => {
+      const at = lines.findIndex((l) => l.startsWith(`[${section}]`));
+      if (at < 0) throw new Error(`no [${section}] section in the w3e text`);
+      let end = at + 1;
+      while (end < lines.length && lines[end] !== "" && !lines[end].startsWith("[")) end++;
+      const rows = Array.from({ length: 65 }, (_, line) =>
+        Array.from({ length: 65 }, (_, x) => (mid !== undefined && line === 64 - 30 && x === 32 ? mid : rest)).join(sep));
+      lines.splice(at, end - at, `[${section}]`, ...rows);
+    };
+    grid("height", stored, centre, " ");
+    if (level !== undefined) grid("layer", level.toString(16), centreLevel.toString(16), "");
     writeFileSync(file, lines.join("\n"));
     run("pack", dir, "-o", join(here, `low-ground-${name}.w3x`), "--force-stale");
   } finally {

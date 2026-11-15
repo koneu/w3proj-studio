@@ -460,5 +460,79 @@
       }
     ],
     "limit": 30
+  },
+  {
+    "name": "water-floor-e-deep-3",
+    "description": "bugs.md 'Under Enforce Water Height Limits, a brush whose click corner is at -2048 with neighbours below it': low-ground-e.w3x (make-low-ground.mjs: every corner at stored -8192 on level 1, world -2176, the clicked corner 32,30 on level 2, world -2048), Deep, size 3, one click. DIFFERS (2026-11-15, branch snap-angle-we): the editor draws the water (the brush's corners to level 0, the clicked one lifted to -7168, a ring round them) and raises EVERY corner of the map below -2048 to it (stored -7680 on level 1, corner 0,0 too), which the open alone doesn't (low-ground-e-open); Studio refuses the stroke (its limit check takes each corner's own height, limits.ts waterLimitHits) and changes nothing",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-e.w3x"
+    },
+    "we": {
+      "saveAccept": ["Warning", "Error"],
+      "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1441,310"], ["--click", "748,500"], ["--sleep", "1500"]]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Deep:"], ["size", 3], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 30
+  },
+  {
+    "name": "water-floor-e-shallow-3",
+    "description": "water-floor-e-deep-3 with the Shallow brush: the same, the brush's corners to level 1 (DIFFERS, 2026-11-15)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-e.w3x"
+    },
+    "we": {
+      "saveAccept": ["Warning", "Error"],
+      "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,310"], ["--click", "748,500"], ["--sleep", "1500"]]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 748, 500]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 30
+  },
+  {
+    "name": "low-ground-e-open",
+    "description": "the control of water-floor-e: low-ground-e.w3x opened and saved without a stroke: the editor keeps the level-1 ground at -2176 (MATCH, 2026-11-15), so the map-wide lift comes from the water brush",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-e.w3x"
+    },
+    "we": { "saveAccept": ["Warning", "Error"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: true, objects: false });" },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 20
+  },
+  {
+    "name": "low-ground-d-open",
+    "description": "low-ground-d.w3x (make-low-ground.mjs: stored ground -8400, below the word's 0, the clicked corner at -8192) opened and saved. DIFFERS (2026-11-15, branch snap-angle-we): the editor reads the ground word in its low 14 bits: every -8400 corner (word -208) comes back as 7984 (0x3f30), the -8192 one stays; Studio keeps -8400",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/low-ground-d.w3x"
+    },
+    "we": { "saveAccept": ["Warning", "Error"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: true, objects: false });" },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 20
   }
 ]
