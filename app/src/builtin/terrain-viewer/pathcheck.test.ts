@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkPath, checkRoute, clearance, findPockets, nearestObject, type Grid } from "./pathcheck";
+import { DEFAULT_UNIT_SIZE, checkPath, checkRoute, clearance, findPockets, nearestObject, type Grid } from "./pathcheck";
 
 /** A grid from rows, north last in the text order given: "#" is blocked. Row 0 is the south. */
 function grid(rows: string[]): Grid {
@@ -160,4 +160,24 @@ test("offsets are the map's", () => {
   const g = { ...grid(open(10, 10)), offsetX: -160, offsetY: -160 };
   assert.equal(checkPath(g, [-140, -140], [130, 130], 16).walkable, true);
   assert.match(checkPath(g, [200, 0], [0, 0], 16).problem ?? "", /outside/);
+});
+
+/** A wall across column 10 with a gap `cells` wide in the middle. */
+const wallWithGap = (cells: number) => {
+  const mid = 10;
+  return open(21, 21).map((row, y) => (y >= mid - Math.floor(cells / 2) && y < mid - Math.floor(cells / 2) + cells ? row : `${row.slice(0, 10)}#${row.slice(11)}`));
+};
+
+test("the default unit is a Footman (collision 31): a gap 96 wide passes, a solid line blocks, a narrower gap blocks", () => {
+  assert.equal(DEFAULT_UNIT_SIZE, 31, "UnitBalance.slk: hfoo collision 31");
+  const way = (rows: string[], size = DEFAULT_UNIT_SIZE) => checkPath(grid(rows), at(2, 10), at(18, 10), size);
+  const three = way(wallWithGap(3));
+  assert.equal(three.walkable, true, "3 cells = 96");
+  assert.equal(three.narrowest?.width, 96);
+  assert.equal(way(open(21, 21).map((row) => `${row.slice(0, 10)}#${row.slice(11)}`)).walkable, false, "a solid line");
+  const two = way(wallWithGap(2));
+  assert.equal(two.walkable, false, "64 is narrower than the Footman needs");
+  assert.equal(two.largestUnitThatFits, 16, "what would fit instead: a Peasant");
+  assert.equal(way(wallWithGap(1)).walkable, false);
+  assert.equal(way(wallWithGap(1), 16).walkable, true, "control: a Peasant (16) takes one cell");
 });
