@@ -77,8 +77,10 @@ async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null, m
   // Under its name on disk, whatever the case the sound names (as the game finds it).
   let bytes: Uint8Array | null = await readImported(w3, path).catch(() => null);
   if (!bytes && game) {
-    const full = game.files.get(path)
-      ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => game.files.get(path.replace(SOUND_EXTENSIONS, e))).find(Boolean);
+    // The list is by paths with `\`; a sound names its file with either separator.
+    const key = path.replace(/\//g, "\\");
+    const full = game.files.get(key)
+      ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => game.files.get(key.replace(SOUND_EXTENSIONS, e))).find(Boolean);
     bytes = await w3.game.read(full ?? path).catch(() => null);
   }
   if (!bytes) { void w3.window.showWarning(`Can't find ${path}.`); return null; }
@@ -385,11 +387,24 @@ class SoundEditor {
     private otherRefs: Promise<Set<number>> | null) {
     el.classList.add("snd-editor");
     el.append(h("div.snd-left", {}, this.browser), h("div.snd-right", {}, this.list, this.detail));
-    this.imported = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"))
-      .filter((p) => p.startsWith("map/") && SOUND_EXTENSIONS.test(p)).map((p) => toArchiveName(p.slice(4)));
+    this.imported = this.importedFiles();
+    // A file imported (or removed) while the editor is open shows in the Imported tab at once.
+    this.filesSub = w3.workspace.onDidChange(() => {
+      if (this.disposed) return;
+      const now = this.importedFiles();
+      if (now.length === this.imported.length && now.every((p, i) => p === this.imported[i])) return;
+      this.imported = now;
+      this.renderBrowser();
+    });
     this.renderBrowser();
     this.renderList();
     this.renderDetail();
+  }
+  private filesSub: { dispose(): void };
+  /** The map's sound files, as archive paths. */
+  private importedFiles(): string[] {
+    return this.w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"))
+      .filter((p) => p.startsWith("map/") && SOUND_EXTENSIONS.test(p)).map((p) => toArchiveName(p.slice(4)));
   }
 
   /** Export Sound: the selected sound's file, else the file selected on the left. */
@@ -409,7 +424,7 @@ class SoundEditor {
   setGame(g: GameSounds) { this.game = g; this.renderBrowser(); this.renderDetail(); }
   setGameError(msg: string) { this.browser.replaceChildren(h("p.muted", {}, `Game sounds unavailable: ${msg}`)); }
   private disposed = false;
-  dispose() { this.disposed = true; this.stop(); }
+  dispose() { this.disposed = true; this.stop(); this.filesSub.dispose(); }
   /** After undo/redo: the list and the selected sound (if it's still there). */
   refresh() {
     if (this.selected && !this.doc.sounds.includes(this.selected)) this.selected = null;
@@ -674,7 +689,7 @@ class SoundEditor {
         ...(this.editable ? [h("button", { title: "Put a sound file from disk in this sound's place in the map", onclick: () => void this.replaceCurrent().catch(this.failed) }, "Replace Internal Sound…"), h("button", { onclick: () => this.remove(s) }, "Delete")] : [])),
       row("Name", "gg_snd_", name),
       row("File", text(s.file, (v) => set(() => { s.file = v.trim(); if (s.assetFile) s.assetFile = s.file; })),
-        ...(this.editable && this.selectedFile ? [h("button", { title: "Use the file selected on the left", onclick: () => set(() => { s.file = this.selectedFile!.path; this.renderDetail(); }) }, "Use selected file")] : [])),
+        ...(this.editable && this.selectedFile ? [h("button", { title: "Use the file selected on the left", onclick: () => set(() => { s.file = this.selectedFile!.path.replace(/\\/g, "/"); if (s.assetFile) s.assetFile = s.file; this.renderDetail(); }) }, "Use selected file")] : [])),
     ];
     if (labelled) parts.push(h("p.muted.snd-note", {}, `Plays the game's sound label "${s.assetLabel}": empty fields use the label's values.`));
     if (!music) {
