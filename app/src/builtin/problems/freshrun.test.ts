@@ -15,7 +15,7 @@ function setup(listing?: Promise<void>) {
   const none = { dispose() {} };
   // The built-in checks find nothing to work with in this stub and fail alone (one failing check stops no other).
   const w3 = {
-    workspace: { project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }), files: () => [], filesReady: async () => { await listing; }, onDidChange: () => none },
+    workspace: { project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }), files: () => [], unreadable: () => [], filesReady: async () => { await listing; }, onDidChange: () => none },
     settings: { get: () => undefined },
     statusBar: { add: () => ({ text: "", tooltip: "", dispose() {} }) },
     services: { provide: (id: string, impl: unknown) => { services.set(id, impl); return none; } },
