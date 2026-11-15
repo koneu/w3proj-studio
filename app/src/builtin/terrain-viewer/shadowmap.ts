@@ -28,18 +28,24 @@ async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8A
   return null;
 }
 
-function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string): Promise<ShadowMesh | null> {
-  return meshes.get(artMode, path.toLowerCase(), () => (async () => {
+/** A model's casting triangles; null when it can't be read. A failed read isn't kept for the session (the next
+ *  prediction tries again); within one prediction, or a set of them sharing `failed`, it's tried once. */
+function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string, failed: Set<string>): Promise<ShadowMesh | null> {
+  const key = `${artMode()}|${path.toLowerCase()}`;
+  if (failed.has(key)) return Promise.resolve(null);
+  return meshes.get(artMode, path.toLowerCase(), async () => {
     const model = parseMdx(await readFile(path));
     const maps = new Map<string, AlphaMap | null>();
     for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
     return shadowMesh(model, (p) => maps.get(p) ?? null);
-  })().catch(() => null));
+  }).catch(() => { failed.add(key); return null; });
 }
 
 /** What a prediction could not use: `wanted` doodads whose model should cast a shadow, `unreadable` of those whose model
- *  (or its texture data) couldn't be read. `skins` is how many object entries the game's tables gave. */
-export type ShadowStats = { wanted: number; unreadable: number };
+ *  (or its texture data) couldn't be read. `skins` is how many object entries the game's tables gave. `failed`: the
+ *  models that couldn't be read, by mode and path; predictions sharing it read each failed model once and agree on it
+ *  (the save's before/after diff, where a model read in one and not the other would wipe or add its baked shadow). */
+export type ShadowStats = { wanted: number; unreadable: number; failed?: Set<string> };
 
 /** Whether a calculated shadow map may replace the stored one. Nothing wanted from models, or all of them readable:
  *  write. Every wanted model unreadable (the game's files can't be opened): refuse, the result would be cliffs only.
@@ -58,6 +64,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
   stats?: ShadowStats): Promise<Uint8Array> {
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause) : terrainShadows(terrain, sun);
   let since = performance.now();
+  const failed = stats?.failed ?? new Set<string>();
   for (const d of doodads) {
     if (pause && performance.now() - since > 8) {
       if (!(await pause())) throw new Error("superseded");
@@ -67,7 +74,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
-    const mesh = await modelMesh(path, readFile, artMode);
+    const mesh = await modelMesh(path, readFile, artMode, failed);
     if (stats) { stats.wanted++; if (!mesh) stats.unreadable++; }
     if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
   }

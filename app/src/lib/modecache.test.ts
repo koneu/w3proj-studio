@@ -29,8 +29,15 @@ test("a value whose mode changed while it was made isn't kept", async () => {
   assert.equal(cache.size, 1);
 });
 
-test("a failed make is kept like a value (callers catch inside), and doesn't throw unhandled", async () => {
+test("a failed make isn't kept: the next ask makes it again; a make that catches inside keeps its fallback", async () => {
   const cache = new ModeCache<string | null>();
   const v = await cache.get(() => "hd", "k", async () => { throw new Error("no file"); }).catch(() => null);
-  assert.equal(v, null);
+  assert.equal(v, null, "the caller sees the failure");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(await cache.get(() => "hd", "k", async () => "read"), "read", "made again after the failure (the control: a kept rejection throws here)");
+  let made = 0;
+  const fallback = () => cache.get(() => "hd", "f", async () => { made++; return null; });
+  await fallback();
+  await fallback();
+  assert.equal(made, 1, "a resolved fallback is kept like any value");
 });
