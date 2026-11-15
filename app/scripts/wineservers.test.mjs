@@ -1,9 +1,12 @@
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findOurWineservers, wineserverReport } from "../../tests/wineservers.mjs";
+
+// The check reads Linux /proc and POSIX paths: nothing to test on Windows.
+const test = (name, fn) => nodeTest(name, { skip: process.platform === "win32" }, fn);
 
 /** A fake /proc with the given processes: [pid, argv0, env]. */
 function fakeProc(procs) {
