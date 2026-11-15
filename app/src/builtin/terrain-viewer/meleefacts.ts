@@ -11,7 +11,7 @@ import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { checkMelee, unitLevels } from "./meleecheck";
 import type { Placed } from "./objects";
 import { Occupancy } from "./occupancy";
-import { checkPath, nearestObject, narrowStrips, widestFrom, widthOf, type Grid, type PathReport } from "./pathcheck";
+import { DEFAULT_UNIT_SIZE, checkPath, nearestObject, narrowStrips, widestFrom, widthOf, type Grid, type PathReport } from "./pathcheck";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { loadPlacedFile } from "./placement";
 import { applyTilesetWater } from "./wateroffset";
@@ -83,7 +83,7 @@ export function withNeighbour<T extends { narrowest?: { at: [number, number] }; 
 }
 
 /** check_path: whether a unit of `unitSize` gets from `from` to `to`, and what stands by where it gets stuck. */
-export async function pathReport(src: WalkSource, from: [number, number], to: [number, number], unitSize = 32): Promise<PathReport & { standingNearby?: { id: string; position: number[] } }> {
+export async function pathReport(src: WalkSource, from: [number, number], to: [number, number], unitSize = DEFAULT_UNIT_SIZE): Promise<PathReport & { standingNearby?: { id: string; position: number[] } }> {
   return withNeighbour(src, checkPath(await walkGrid(src), from, to, unitSize));
 }
 
@@ -143,7 +143,7 @@ export async function meleeFacts(w3: W3Api, src: WalkSource, size: number) {
 }
 
 /** check_melee: the map against what ladder maps do. */
-export async function meleeReport(w3: W3Api, src: WalkSource, unitSize = 32): Promise<ReturnType<typeof checkMelee>> {
+export async function meleeReport(w3: W3Api, src: WalkSource, unitSize = DEFAULT_UNIT_SIZE): Promise<ReturnType<typeof checkMelee>> {
   const f = await meleeFacts(w3, src, unitSize);
   return checkMelee({
     units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,

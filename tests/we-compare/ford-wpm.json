@@ -1,0 +1,11 @@
+[
+  {
+    "name": "ford-wpm",
+    "description": "The ship rule (bugs.md: ships sail into map 03's shallow ford in the game). ford.w3x (make-ford.mjs): one water surface over corner rows 20 to 44, the ground under it in bands of three corner columns from column 8, depths 2.4 to 160.4 (shallow and deep, round the 52 walk limit). Neither side edits; the World Editor's save makes the pathing map itself (the input's is stale, all dry), Studio's rebuild_map makes its own. Water a ship sails has the 0x40 (no water) bit clear; water a footman wades also has 0x02 clear",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/ford.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3map.wpm", "as": "wpm" }],
+    "limit": 40
+  }
+]

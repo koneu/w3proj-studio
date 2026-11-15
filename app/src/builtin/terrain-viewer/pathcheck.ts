@@ -6,6 +6,11 @@ import { distanceToLine, type Area } from "../../lib/terrain/area";
 /** Pathing cells are this wide. */
 const CELL = 32;
 
+/** The collision size (a radius) the path tools assume when none is given: the Footman's, 31 in the game's
+ *  UnitBalance.slk (`w3proj game slk Units/UnitBalance.slk hfoo --col unitbalanceid,collision`). The same room as
+ *  32 (roomFor), but named after the unit instead of a magic number; a Peasant is 16, a Rifleman 32. */
+export const DEFAULT_UNIT_SIZE = 31;
+
 /** Clearance c leaves a way 2c - 1 cells wide, and a unit needs twice its collision size. Counted
  *  in whole cells that errs towards "too narrow": better to say so than to promise a way. */
 const roomFor = (unitSize: number) => Math.max(1, Math.ceil(unitSize / CELL + 0.5));
