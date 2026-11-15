@@ -12,13 +12,11 @@ function isSpace(c: number): boolean {
     || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff;
 }
 
-/** The parser's searches over one text, read by hand rather than by regex: they match exactly what these did
- *  (each is deterministic, nothing to backtrack into)
+/** The parser's searches over one text, read by hand rather than by regex:
  *    header:   /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r*\n/
- *    close:    /\r?\n\}/
- *    unclosed: /\}(?=\r?\n(?:[ \t]*\r?\n)*<header>)/  (a `}` ending a text line, the next header right after it)
+ *    close:    /(?:\r?\n)?(?<!\\)\}/  (the first `}` without a `\` right before it, anywhere: see findClose)
  *  but a run of `//` lines is read once however many header searches meet it (every `STRING` inside the run starts
- *  one; the regex read the rest of the run for each, quadratic time). The Rust port (crates/w3proj/src/wts.rs) is
+ *  one; a regex read the rest of the run for each, quadratic time). The Rust port (crates/w3proj/src/wts.rs) is
  *  the same reader. */
 export class WtsReader {
   /** Start of a `//` line (as the header's comment group meets it) → where the run of them ends. */
@@ -77,84 +75,62 @@ export class WtsReader {
     return null;
   }
 
-  /** The first `\r?\n}` from `from`: where it starts and ends. */
-  findClose(from: number): { index: number; end: number } | null {
-    const i = this.text.indexOf("\n}", from);
-    if (i < 0) return null;
-    return i > from && this.text.charCodeAt(i - 1) === 0x0d ? { index: i - 1, end: i + 2 } : { index: i, end: i + 2 };
-  }
-
-  /** The first `}` from `from` with `\r?\n`, blank lines and a header right after it. */
-  findUnclosed(from: number): number | null {
+  /** Where the text that starts at `from` ends, as the World Editor reads it (we-drive, 2026-11-15, map 24's texts and
+   *  variants saved again by the editor): at the first `}` that has no `\` right before it, wherever it is in a line
+   *  ("Name ends }" is "Name ends ", " }" on a line of its own ends the text too, a header in between doesn't stop it).
+   *  The line end right before that `}` isn't part of the text. `index`: where the text ends; `brace`: the `}`; `end`:
+   *  after it. A `\}` stays in the text, backslash and all. `{` means nothing. */
+  findClose(from: number): { index: number; brace: number; end: number } | null {
     const t = this.text;
-    for (let i = t.indexOf("}", from); i >= 0; i = t.indexOf("}", i + 1)) {
-      let p = i + 1;
-      if (t.charCodeAt(p) === 0x0d) p++;
-      if (t.charCodeAt(p) !== 0x0a) continue;
-      p++;
-      // (?:[ \t]*\r?\n)*
-      for (;;) {
-        let q = p;
-        while (t.charCodeAt(q) === 0x20 || t.charCodeAt(q) === 0x09) q++;
-        if (t.charCodeAt(q) === 0x0d) q++;
-        if (t.charCodeAt(q) !== 0x0a) break;
-        p = q + 1;
-      }
-      if (this.headerAt(p)) return i;
+    let i = t.indexOf("}", from);
+    while (i > 0 && t.charCodeAt(i - 1) === 0x5c) i = t.indexOf("}", i + 1); // `\}`
+    if (i < 0) return null;
+    let index = i;
+    if (index > from && t.charCodeAt(index - 1) === 0x0a) {
+      index--;
+      if (index > from && t.charCodeAt(index - 1) === 0x0d) index--;
     }
-    return null;
+    return { index, brace: i, end: i + 1 };
   }
 }
 
-/** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it; `head`
- *  its header. */
-interface Block { head: Header; num: number; from: number; to: number; end: number; closed: boolean }
+/** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it (a line end
+ *  and the `}`, or the `}` alone when it doesn't start a line); `head` its header. */
+interface Block { head: Header; num: number; from: number; to: number; end: number; lineEnd: boolean }
 
-/** The blocks of a file. A block ends at the first line that starts with `}`. Some real files have
- *  a block whose `}` sits at the end of its last text line, with the next STRING block right after;
- *  there the first such `}` ends the block (before the next header, never anywhere else), so the next
- *  string isn't swallowed. That also holds when no `}` line follows at all. A last block without a
- *  header after it stays unread, as it is without a `}` line.
- *
- *  The next `}` line and the next unclosed `}` are each searched for once and kept while they still
- *  lie ahead, so a file of many unclosed blocks is read in one pass. */
+/** The blocks of a file, as the World Editor reads them: a block's text ends at its first `}` that has no `\` right
+ *  before it (WtsReader.findClose), and what follows up to the next header is read by nothing. A last block without
+ *  such a `}` stays unread. */
 function scan(text: string, r = new WtsReader(text)): Block[] {
   const blocks: Block[] = [];
   let pos = 0;
-  let c: { index: number; end: number } | null | undefined, u: number | null | undefined; // undefined: not searched yet
   for (;;) {
     const h = r.findHeader(pos);
     if (!h) return blocks;
-    const from = h.end;
-    if (c === undefined || (c && c.index < from)) c = r.findClose(from);
-    if (u === undefined || (u !== null && u < from)) u = r.findUnclosed(from);
-    if (u !== null && (!c || u < c.index)) {
-      blocks.push({ head: h, num: h.num, from, to: u, end: u + 1, closed: false });
-      pos = u + 1;
-    } else if (!c) {
-      return blocks;
-    } else {
-      blocks.push({ head: h, num: h.num, from, to: c.index, end: c.end, closed: true });
-      pos = c.end;
-    }
+    const c = r.findClose(h.end);
+    if (!c) return blocks;
+    blocks.push({ head: h, num: h.num, from: h.end, to: c.index, end: c.end, lineEnd: c.index < c.brace });
+    pos = c.end;
   }
 }
 
-/** A string whose text the game (and this parser) would cut: its number and the lines (1-based) where it would end. */
+/** A string whose text the game would cut: its number and the lines (1-based) where it would end. */
 export interface WtsCut { num: number; lines: number[] }
 
-/** The lines (1-based) of a string's text at which the string would end when the file is read again: a
- *  line that starts with `}` (the game cut "Test 2" of map 17 at a line that was just `}` and dropped the
- *  rest; this parser ends a block at any line starting with `}`), and a line ending in `}` with a
- *  `STRING n {` header right after it (where this parser recovers an unclosed block). Empty: safe. */
+/** The lines (1-based) of a string's text that hold a `}` the string would end at when the file is read again: any
+ *  `}` without a `\` right before it, wherever it is in its line. The World Editor reads a string up to there and drops
+ *  the rest ("Name ends }" comes back "Name ends ", a " }" line ends the string too: we-drive, 2026-11-15), the game
+ *  showed map 24's name and description without their " }" (user, 2026-11-15), and the World Editor itself writes such
+ *  a text unchanged when it is typed: there is no way to keep a `}` in war3map.wts. Empty: safe. */
 export function wtsCutLines(value: string): number[] {
   const lines = value.split(/\r?\n/);
   const out: number[] = [];
-  lines.forEach((l, i) => { if (l.startsWith("}")) out.push(i + 1); });
+  lines.forEach((l, i) => { if (/(^|[^\\])\}/.test(l)) out.push(i + 1); });
   if (out.length) return out;
   const norm = value.replace(/\r\n/g, "\n");
-  // Read back as a file with either line end writes it. A text ending in a lone `\r` loses that `\r` to the `\r\n}` of
-  // a file with `\n` line ends (the close takes it): nothing is cut, so that isn't refused.
+  // Read back as a file with either line end writes it (the control for anything the line check misses). A text
+  // ending in a lone `\r` loses that `\r` to the `\r\n}` of a file with `\n` line ends (the close takes it): nothing
+  // is cut, so that isn't refused.
   for (const eol of ["\n", "\r\n"]) {
     const want = norm.replace(/\n/g, eol);
     const back = new StringTable(`STRING 1${eol}{${eol}${want}${eol}}${eol}`).get(1);
@@ -162,21 +138,6 @@ export function wtsCutLines(value: string): number[] {
     return [Math.min(lines.length, (back ?? "").split("\n").length)];
   }
   return [];
-}
-
-/** The text changed so it is read back whole: a space before every line that starts with `}`, and after a
- *  `}` that ends a line before a header. What the warning offers; the text otherwise stays as it is. */
-export function wtsSafeText(value: string): string {
-  let out = value.replace(/(^|\n)(?=\})/g, "$1 ");
-  for (let i = 0; i < 100 && wtsCutLines(out).length; i++) {
-    const at = wtsCutLines(out)[0];
-    const lines = out.split("\n");
-    lines[at - 1] = lines[at - 1].replace(/\}(\r?)$/, "} $1");
-    const next = lines.join("\n");
-    if (next === out) break;
-    out = next;
-  }
-  return out;
 }
 
 /** The strings among `values` whose text would be cut (see wtsCutLines). */
@@ -189,11 +150,12 @@ export function wtsCuts(values: Iterable<[number, string]>): WtsCut[] {
   return out.sort((a, b) => a.num - b.num);
 }
 
-/** What's wrong with the strings, for a warning or a refusal. */
+/** What's wrong with the strings, for a refusal. */
 export function wtsCutMessage(cuts: WtsCut[]): string {
   const which = cuts.map((c) => `string ${c.num} (line ${c.lines.join(", ")})`).join(", ");
-  return `${cuts.length === 1 ? "A text has" : `${cuts.length} texts have`} a line that starts with "}": ${which}. `
-    + "The game ends a string at such a line and drops the rest of it. Start the line with a space (\" }\") or remove it.";
+  return `${cuts.length === 1 ? "A text has" : `${cuts.length} texts have`} a "}": ${which}. `
+    + "The game ends a text of the string table at its first \"}\" and drops the \"}\" and everything after it, and there is no "
+    + "way to keep one there. Remove the \"}\" or use another character.";
 }
 
 /** Thrown instead of writing a string the game would cut. */
@@ -204,15 +166,8 @@ export class WtsCutError extends Error {
   }
 }
 
-/** Before a save: asks whether to change the texts that would be cut (` }`). True: the caller changes
- *  them (wtsSafeText) and saves; false: the save stops (the caller throws WtsCutError). Nothing to ask: true. */
-export async function askWtsCuts(confirm: (message: string, yes: string, expires: number) => Promise<boolean>, cuts: WtsCut[]): Promise<boolean> {
-  if (!cuts.length) return true;
-  return confirm(`${wtsCutMessage(cuts)} Change ${cuts.length === 1 ? "it" : "them"} to " }" and save?`, "Change and Save", 120_000);
-}
-
 /** Text outside every string of a war3map.wts as written by hand: what follows a block's end before the next
- *  header, other than blank and `//` lines. A `}` line typed inside a text ends the string there, and the
+ *  header, other than blank and `//` lines. A `}` typed inside a text ends the string there, and the
  *  rest of the text lands out here, where nothing reads it. Lines are 1-based. */
 export function wtsStrayLines(text: string): { line: number; text: string }[] {
   const out: { line: number; text: string }[] = [];
@@ -280,13 +235,6 @@ export class StringTable {
     return wtsCuts([...this.changed].filter((n) => this.values.has(n)).map((n) => [n, this.values.get(n)!] as [number, string]));
   }
 
-  /** Changes the texts of `cuts()` so they are read back whole (wtsSafeText); returns their numbers. */
-  fixCuts(): number[] {
-    const fixed = this.cuts().map((c) => c.num);
-    for (const n of fixed) this.set(n, wtsSafeText(this.values.get(n)!));
-    return fixed;
-  }
-
   /** The file with changed blocks rewritten. Every write of the string table goes through here, so a
    *  changed text the game would cut is refused (WtsCutError) rather than written and silently cut. */
   serialize(): string {
@@ -296,10 +244,11 @@ export class StringTable {
     let out = "", at = 0;
     for (const b of scan(this.text)) {
       if (!this.changed.has(b.num)) continue;
-      // an unchanged block stays as it is; a changed one that had no `}` line gets the usual one
+      // an unchanged block stays as it is; a changed one whose `}` didn't start a line gets a line end before it (what
+      // followed the `}` stays: nothing reads it)
       out += this.text.slice(at, b.from) + this.values.get(b.num)!.replace(/\r?\n/g, eol);
-      at = b.closed ? b.to : b.end;
-      if (!b.closed) out += eol + "}";
+      at = b.to;
+      if (!b.lineEnd) out += eol;
     }
     return out + this.text.slice(at);
   }

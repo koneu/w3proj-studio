@@ -258,13 +258,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const times = text.split(find).length - 1;
         if (times !== 1) throw new Error(`That text occurs ${times} times in ${file}. It must occur exactly once.`);
         const next = text.replace(find, () => replace);
-        // A string table: a line that starts with "}" ends its string there, and the rest would land outside every
-        // string, where the game drops it.
+        // A string table: a "}" ends its string there, and the rest would land outside every string, where the game
+        // drops it.
         if (/\.wts$/i.test(file)) {
           const stray = wtsStrayLines(next);
           if (stray.length > wtsStrayLines(text).length) {
             throw new Error(`Not changed: that leaves text outside every string of ${file} (line ${stray.map((s) => s.line).join(", ")}). `
-              + "A line that starts with \"}\" ends a string, and the game drops the rest of it: start such a line with a space (\" }\").");
+              + "The first \"}\" in a string's text ends the string, wherever it is in its line, and the game drops the rest of it: "
+              + "a text of the string table can't hold a \"}\".");
           }
         }
         if (isTerrainText(file)) {

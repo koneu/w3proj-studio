@@ -18,7 +18,7 @@ import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
-import { askWtsCuts, StringTable, WtsCutError } from "../../lib/formats/wts";
+import { StringTable, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
 import { projectWithFiles, stringNumbersTaken } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -255,12 +255,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => { history.undo(); },
           redo: () => { history.redo(); },
           async save() {
-            // A dialogue text the game would cut: changed (one undo step) after a question, or the save stops.
+            // A dialogue text the game would cut (a "}"): the save stops with the reason, nothing written.
             const cuts = strings?.cuts() ?? [];
-            if (cuts.length) {
-              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
-              if (strings!.fixCuts()) { changed(); editor.refresh(); }
-            }
+            if (cuts.length) throw new WtsCutError(cuts);
             // What is written, taken up front: an edit made while the save writes stays unsaved.
             const taken = take();
             const body = JSON.stringify(sounds);

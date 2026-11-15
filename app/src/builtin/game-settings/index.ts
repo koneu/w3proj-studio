@@ -11,7 +11,7 @@ import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { StackSave } from "../../lib/undo";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
+import { StringTable, WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { settingsFiles, settingsOf } from "./files";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
@@ -207,14 +207,11 @@ class SettingsView {
   /** What the next save writes is of this point; `saved` with it once written (edits meanwhile stay unsaved). */
   take() { return this.mark.take(this.undoStack.length); }
   saved(taken: ReturnType<StackSave["take"]>) { this.mark.saved(taken); this.setDirty(this.undoStack.length !== this.mark.at); }
-  /** Before a save: a text with a `}` line would be cut by the game, so it is changed (one undo step) or
-   *  the save stops with the reason. */
+  /** Before a save: a text with a `}` would be cut by the game, and there is no way to keep it: the save stops with
+   *  the reason, nothing changed. */
   async checkCuts() {
     const cuts = wtsCuts(this.texts);
-    if (!cuts.length) return;
-    if (!(await askWtsCuts((m, yes, ms) => this.w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
-    const now = wtsCuts(this.texts);
-    if (now.length) this.change(() => { this.texts = new Map(this.texts); for (const c of now) this.texts.set(c.num, wtsSafeText(this.texts.get(c.num)!)); });
+    if (cuts.length) throw new WtsCutError(cuts);
   }
   /** Merges the edited texts onto war3map.wts as it is now (other editors may have saved
    *  strings since it was read); `strings` holds the file as read or last saved here. */

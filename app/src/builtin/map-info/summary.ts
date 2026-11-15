@@ -26,12 +26,23 @@ const RACES = ["selectable", "human", "orc", "undead", "night elf"];
 interface Info {
   version: number; editorVersion: number; name: string; author: string; description: string; suggestedPlayers: string;
   playableWidth: number; playableHeight: number; tileset: string; scriptType?: number;
-  loadingScreen: { model?: string; text: string; title: string; subtitle: string };
+  loadingScreen: { number?: number; model?: string; text: string; title: string; subtitle: string };
   prologue: { text: string; title: string; subtitle: string };
   weather?: string; soundEnvironment?: string; lightEnvironment?: string;
   players: { id: number; controller: number; race: number; name: string; start: number[] }[];
   forces: { players: number; name: string }[];
   upgrades?: unknown[]; techs?: unknown[]; unitTables?: unknown[]; itemTables?: unknown[];
+}
+
+/** Why the loading screen's title, subtitle and text go unseen on the default screen. */
+export const LOADING_TEXTS_UNUSED = "Shown only on a campaign screen or an imported loading screen: the default screen shows the map's name and players instead.";
+
+/** Whether the loading screen is the default one (no campaign screen, no imported model), on which the World Editor
+ *  greys the title, subtitle and text (Map Properties > Loading Screen, Use Default Screen: we-drive, 2026-11-15) and
+ *  the game shows none of them (map 24, user, 2026-11-15). Of the game's own maps, every one with loading texts that
+ *  isn't a melee map has a campaign screen or a model. */
+export function loadingTextsUnused(screen: { number: number; model?: string }): boolean {
+  return screen.number < 0 && !screen.model?.trim();
 }
 
 export function mapSummary(info: Info, resolve: (value: string) => string) {
@@ -41,7 +52,11 @@ export function mapSummary(info: Info, resolve: (value: string) => string) {
     format: info.version, editorVersion: info.editorVersion,
     tileset: info.tileset, playableSize: [info.playableWidth, info.playableHeight],
     scriptLanguage: info.scriptType === 1 ? "lua" : "jass",
-    loadingScreen: { ...text(info.loadingScreen), ...(info.loadingScreen.model ? { model: info.loadingScreen.model } : {}) },
+    loadingScreen: {
+      ...text(info.loadingScreen), ...(info.loadingScreen.model ? { model: info.loadingScreen.model } : {}),
+      ...(info.loadingScreen.number !== undefined && loadingTextsUnused({ number: info.loadingScreen.number, model: info.loadingScreen.model })
+        ? { textsShown: false, note: LOADING_TEXTS_UNUSED } : {}),
+    },
     prologue: text(info.prologue),
     ...(info.weather !== undefined ? { environment: { weather: info.weather, sound: info.soundEnvironment, light: info.lightEnvironment } } : {}),
     players: info.players.map((p) => ({

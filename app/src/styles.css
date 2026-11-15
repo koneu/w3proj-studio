@@ -386,6 +386,7 @@ button.primary-inline { background: var(--accent-2); border-color: var(--accent-
 textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .form-num { max-width: 160px; }
 .form-stack { display: flex; flex-direction: column; gap: 2px; }
+.map-info-cut { color: var(--error); max-width: 640px; }
 .form-inline { display: flex; gap: 8px; align-items: center; }
 .form-inline .form-num { width: 80px; }
 .form-checks { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 4px 0; }

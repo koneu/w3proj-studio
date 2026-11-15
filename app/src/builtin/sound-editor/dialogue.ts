@@ -11,7 +11,7 @@
 // A save adds its new strings to those tables too, with the same text, as Move Texts does (lib/formats/localewts); a
 // text changed later changes war3map.wts only (the languages' copies are theirs to translate).
 
-import { appendStrings, StringTable, WtsCutError, wtsCuts, wtsSafeText, type NewString, type WtsCut } from "../../lib/formats/wts";
+import { appendStrings, StringTable, WtsCutError, wtsCuts, type NewString, type WtsCut } from "../../lib/formats/wts";
 import type { Sound } from "./sounds";
 
 const norm = (s: string | null | undefined) => s?.replace(/\r\n/g, "\n");
@@ -77,15 +77,9 @@ export class DialogueStrings {
     return [...this.pending()].filter(([n]) => !this.base?.has(n)).map(([num, v]) => ({ num, text: norm(v)! })).sort((a, b) => a.num - b.num);
   }
 
-  /** The strings to write that the game would cut (a line starting with "}"). */
+  /** The strings to write that the game would cut (a "}": wtsCutLines). */
   cuts(): WtsCut[] {
     return wtsCuts(this.pending());
-  }
-  /** Changes the texts of `cuts()` so they read back whole (wtsSafeText); false when there were none. */
-  fixCuts(): boolean {
-    const cuts = this.cuts();
-    for (const c of cuts) this.set(c.num, wtsSafeText(this.pending().get(c.num)!));
-    return cuts.length > 0;
   }
 
   /** The number for a new string: after the highest of the table, of the strings set here, of the sounds' keys and of
