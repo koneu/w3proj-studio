@@ -116,12 +116,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
   };
 
+  // Recovered ones (strays an older version left) come after the regular ones, newest first: when the name carries
+  // no time, the file's last write; one that can't be read about is still offered, at the end (known: false).
+  const recoveredList = async (root: string, names: string[]) =>
+    (await Promise.all(recoveredOf(names).map(async (c) => {
+      if (c.time !== null) return { name: c.name, time: c.time, known: true };
+      const stamp = await w3.backend.invoke<{ modified: number } | null>("fs_stat", { path: inFolder(root, c.name) }).catch(() => null);
+      return stamp ? { name: c.name, time: stamp.modified, known: true } : { name: c.name, time: 0, known: false };
+    }))).sort((a, b) => b.time - a.time);
+
   const timer = setInterval(() => void tick().catch(() => {}), POLL);
   ctx.subscriptions.push(
     w3.mcp.registerTool("list_checkpoints", async () => {
       const project = w3.workspace.project();
       if (!project) throw new Error("No project is open in W3Proj Studio.");
-      return newestFirst(await list(project.root)).map((c) => ({ name: c.name, at: new Date(c.time).toLocaleString() }));
+      const names = await list(project.root);
+      return [
+        ...newestFirst(names).map((c) => ({ name: c.name, at: new Date(c.time).toLocaleString() as string | null })),
+        ...(await recoveredList(project.root, names)).map((c) => ({ name: c.name, at: c.known ? new Date(c.time).toLocaleString() : null, recovered: true })),
+      ];
     }),
     w3.mcp.registerTool("create_checkpoint", async () => {
       const project = w3.workspace.project();
@@ -131,11 +144,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("restore_checkpoint", async ({ name }) => {
       const project = w3.workspace.project();
       if (!project) throw new Error("No project is open in W3Proj Studio.");
-      const found = newestFirst(await list(project.root)).find((c) => c.name === name);
+      const names = await list(project.root);
+      const regular = newestFirst(names).find((c) => c.name === name);
+      const stray = regular ? undefined : (await recoveredList(project.root, names)).find((c) => c.name === name);
+      const found = regular ?? (stray && { name: stray.name, time: stray.time, known: stray.known });
       if (!found) throw new Error(`There's no checkpoint "${String(name)}". list_checkpoints gives them.`);
       const unsaved = w3.editors.unsavedPaths();
       if (unsaved.length) throw new Error(`Not restored: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Ask the user to save or discard them first.`);
-      const when = new Date(found.time).toLocaleString();
+      const when = "known" in found && !found.known ? `${found.name} (recovered, time unknown)` : new Date(found.time).toLocaleString();
       if (!(await w3.window.confirm(`AI request: restore the map to the checkpoint of ${when}? Its files are replaced; a checkpoint of what's there now is made first.`, "Restore", 90_000))) {
         throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
       }
@@ -165,13 +181,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!project) throw new Error("Open or import a project first.");
       const names = await list(project.root);
       const all = newestFirst(names);
-      // Recovered ones (strays an older version left) come after, newest first too: when the name carries no time,
-      // the file's last write; one that can't be read about is still offered, at the end.
-      const recovered = (await Promise.all(recoveredOf(names).map(async (c) => {
-        if (c.time !== null) return { name: c.name, time: c.time, known: true };
-        const stamp = await w3.backend.invoke<{ modified: number } | null>("fs_stat", { path: inFolder(project.root, c.name) }).catch(() => null);
-        return stamp ? { name: c.name, time: stamp.modified, known: true } : { name: c.name, time: 0, known: false };
-      }))).sort((a, b) => b.time - a.time);
+      const recovered = await recoveredList(project.root, names);
       if (!all.length && !recovered.length) { void w3.window.showInfo("This project has no checkpoints yet."); return; }
       const pick = await w3.window.quickPick([
         ...all.map((c) => ({ label: new Date(c.time).toLocaleString(), description: c.name, value: c.name })),
