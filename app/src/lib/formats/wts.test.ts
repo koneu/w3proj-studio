@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { StringTable, askWtsCuts, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+import { StringTable, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsStrayLines } from "./wts";
 
 /** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
 const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
@@ -103,37 +103,66 @@ test("importing a translation reaches the strings after an unclosed block", () =
   assert.equal(new StringTable(r.text).get(9), "Ende");
 });
 
-test("a text ending in a brace, closed on its own line, is one string", () => {
-  assert.deepEqual(all("STRING 1\n{\nset {a}\n}\n\nSTRING 2\n{\nx\n}\n"), [[1, "set {a}"], [2, "x"]]);
+// How the World Editor reads a text (we-drive, 2026-11-15: map 24 of the play protocols and variants of it, opened and
+// saved again by the editor, which writes every string as it read it). These files are those variants, cut to the
+// strings; the expected texts are what the editor wrote back.
+const WE_READ: [string, string][] = [
+  ["P1 a{b", "P1 a{b"], // a `{` means nothing
+  ["F1 a}b", "F1 a"], // the first `}` ends the text, wherever it is
+  ["Name ends }", "Name ends "], // map 24's name: the game showed it without the " }"
+  ["Desc line1\r\nline2 } mid\r\nline3", "Desc line1\r\nline2 "],
+  ["} title start", ""],
+  ["sub { and } mid", "sub { and "],
+  ["text1\r\n}\r\ntext3", "text1"],
+  ["pro \\} backslash", "pro \\} backslash"], // a `}` right after `\` doesn't end it; the `\` stays
+  ["a \\\\} b", "a \\\\} b"], // `\\` is no escape of its own: the `}` still has a `\` before it
+  ["t \\} u }v", "t \\} u "],
+  ["eight\r\n }\r\nnine", "eight\r\n "], // a " }" line ends it too
+  ["seven }}", "seven "],
+  ["a\r\n", "a\r\n"], // only the one line end before the `}` is the close's
+  ["x\\", "x\\"],
+  ["a \\{ b", "a \\{ b"],
+];
+
+test("a text ends at its first } without a \\ before it, as the World Editor reads it", () => {
+  for (const [written, read] of WE_READ) {
+    const file = `${String.fromCharCode(0xfeff)}STRING 1\r\n{\r\n${written}\r\n}\r\n\r\nSTRING 2\r\n{\r\nnext\r\n}\r\n`;
+    assert.deepEqual(all(file), [[1, read], [2, "next"]], JSON.stringify(written));
+  }
 });
 
-test("a brace line inside the file is still what ends a block (the first line that starts with a brace)", () => {
-  assert.deepEqual(all("STRING 1\n{\nfoo}\nbar\n}\n"), [[1, "foo}\nbar"]]);
+test("a block without a } of its own runs on into the next one, as in the World Editor", () => {
+  // Its string 1 came back "no close here\r\n\r\nSTRING 2\r\n{\r\ntwo" and string 2 was gone.
+  assert.deepEqual(all("STRING 1\r\n{\r\nno close here\r\n\r\nSTRING 2\r\n{\r\ntwo\r\n}\r\n\r\nSTRING 3\r\n{\r\nthree\r\n}\r\n"),
+    [[1, "no close here\r\n\r\nSTRING 2\r\n{\r\ntwo"], [3, "three"]]);
 });
 
-test("a brace in the middle of a line, or a header that isn't one, does not split a block", () => {
-  assert.deepEqual(all("STRING 1\n{\na}b\nSTRING 2\n{\nx\n}\n"), [[1, "a}b\nSTRING 2\n{\nx"]]);
-  assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING 2\nnot a brace\n}\n"), [[1, "foo}\nSTRING 2\nnot a brace"]]);
-  assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING two\n{\nx\n}\n"), [[1, "foo}\nSTRING two\n{\nx"]]);
+test("what follows the } up to the next header is read by nothing", () => {
+  assert.deepEqual(all("STRING 1\n{\nfoo}\nbar\n}\n"), [[1, "foo"]]);
+  assert.deepEqual(all("STRING 4\r\n{\r\ntail} junk\r\nmore junk\r\n}\r\n\r\nSTRING 5\r\n{\r\nfive\r\n}\r\n"), [[4, "tail"], [5, "five"]]);
+  assert.deepEqual(all("STRING 1\n{\na}b\nSTRING 2\n{\nx\n}\n"), [[1, "a"], [2, "x"]]);
+  assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING 2\nnot a brace\n}\n"), [[1, "foo"]]);
+  assert.deepEqual(all("STRING 1\n{\nfoo} \nSTRING 2\n{\nx\n}\n"), [[1, "foo"], [2, "x"]]);
   assert.deepEqual(all("STRING 1\n{\nfoo\nSTRING 2\n{\nx\n}\n"), [[1, "foo\nSTRING 2\n{\nx"]]);
-});
-
-test("a brace followed by junk on the same line is not an end", () => {
-  assert.deepEqual(all("STRING 1\n{\nfoo} \nSTRING 2\n{\nx\n}\n"), [[1, "foo} \nSTRING 2\n{\nx"]]);
 });
 
 test("several unclosed blocks in a row", () => {
   assert.deepEqual(all("STRING 1\n{\na}\nSTRING 2\n{\nb}\n\n\nSTRING 3\n{\nc\n}\n"), [[1, "a"], [2, "b"], [3, "c"]]);
-});
-
-
-test("blocks followed by a header are recovered even with no brace line anywhere after them", () => {
   assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING 2\n{\nbar}\n\nSTRING 3\n{\nlast"), [[1, "foo"], [2, "bar"]]);
 });
 
-test("a last unclosed block with no header after it, and no brace line, stays unread", () => {
-  assert.deepEqual(all("STRING 1\n{\nfoo}\n"), []);
+test("a last block without a } stays unread", () => {
+  assert.deepEqual(all("STRING 1\n{\nfoo}\n"), [[1, "foo"]]);
   assert.deepEqual(all("STRING 1\n{\nfoo\nbar"), []);
+});
+
+test("an edited text whose } didn't start a line gets a line end before it; what followed stays", () => {
+  const t = new StringTable("STRING 4\r\n{\r\ntail} junk\r\n}\r\n\r\nSTRING 5\r\n{\r\nfive\r\n}\r\n");
+  t.set(4, "new");
+  assert.equal(t.serialize(), "STRING 4\r\n{\r\nnew\r\n} junk\r\n}\r\n\r\nSTRING 5\r\n{\r\nfive\r\n}\r\n");
+  const empty = new StringTable("STRING 1\n{\n}\n");
+  empty.set(1, "x");
+  assert.equal(empty.serialize(), "STRING 1\n{\nx\n}\n");
 });
 
 test("a header that doesn't qualify is skipped, a later one that does is used", () => {
@@ -156,13 +185,12 @@ test("many unclosed blocks are read in one pass, not one search to the end each"
   assert.ok(cpuMs() - t0 < 4000, `took ${cpuMs() - t0} ms of processor time`);
 });
 
-test("the reader finds what the header, close and unclosed patterns find, on random text", () => {
-  // The patterns the reader replaced, as the specification it must match exactly.
+test("the reader finds what the header and close patterns find, on random text", () => {
+  // The patterns as the specification the reader must match exactly.
   const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
-  const CLOSE = /\r?\n\}/g;
-  const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/g;
+  const CLOSE = /(?:\r?\n)?(?<!\\)\}/g;
   const parts = ["STRING", "STRING ", "STRING\t", " ", "\t", "\n", "\r\n", "\r", " ", "　", "﻿", "1", "07", "x",
-    "{", "}", "//", "// c", "/", "STRING 1\n{\n", "STRING 2 // c\n{\r\n", "\n}", "}\n\nSTRING 3\n{\n"];
+    "{", "}", "//", "// c", "/", "STRING 1\n{\n", "STRING 2 // c\n{\r\n", "\n}", "}\n\nSTRING 3\n{\n", "\\", "\\}", "\n\\}"];
   let seed = 12345;
   const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
   const exec = (re: RegExp, text: string, from: number) => { re.lastIndex = from; return re.exec(text); };
@@ -175,8 +203,7 @@ test("the reader finds what the header, close and unclosed patterns find, on ran
       assert.deepEqual(got && [got.at, got.num, text.slice(got.digits, got.digitsEnd), got.end],
         h && [h.index, Number(h[1]), h[1], h.index + h[0].length], JSON.stringify([text, from]));
       const c = exec(CLOSE, text, from), gotC = r.findClose(from);
-      assert.deepEqual(gotC, c && { index: c.index, end: c.index + c[0].length }, JSON.stringify([text, from]));
-      assert.equal(r.findUnclosed(from), exec(UNCLOSED, text, from)?.index ?? null, JSON.stringify([text, from]));
+      assert.deepEqual(gotC, c && { index: c.index, brace: c.index + c[0].length - 1, end: c.index + c[0].length }, JSON.stringify([text, from]));
     }
   }
 });
@@ -202,8 +229,9 @@ test("a long run of comment lines is read once, however many headers start in it
   }
 });
 
-// A line that is just `}` (or starts with it) inside a text: the game ends the string there and drops the
-// rest (map 17, "Test 2"), and so does this parser. Such a text is never written silently.
+// A `}` inside a text: the game ends the string there and drops the rest (map 17's "Test 2" at a `}` line, map 24's
+// name and description at a " }" ending them), and so does this parser. Such a text is never written: there is no
+// way to keep a `}` (the World Editor writes a typed one as it is, and cuts it when it reads the map again).
 
 // (The refusal itself: wtscut.test.ts.)
 
@@ -211,42 +239,29 @@ test("a cut text is listed with its lines", () => {
   const t = new StringTable(map);
   t.set(2, "Line one\n}\nLine three");
   assert.deepEqual(t.cuts(), [{ num: 2, lines: [2] }]);
+  t.set(2, "Name ends }\nok\nsub { and } mid");
+  assert.deepEqual(t.cuts(), [{ num: 2, lines: [1, 3] }]);
 });
 
-test("the offered change keeps the whole text when read back", () => {
-  const t = new StringTable(map);
-  t.set(2, "}\nLine one\n}\n} more\nLine five");
-  assert.deepEqual(t.fixCuts(), [2]);
-  assert.deepEqual(t.cuts(), []);
-  const back = new StringTable(t.serialize());
-  assert.equal(back.get(2), " }\r\nLine one\r\n }\r\n } more\r\nLine five");
-  assert.equal(back.get(3), "Kept");
-});
-
-test("a brace ending a line before something that reads as a header is caught and changed too", () => {
-  const v = "Cast at once}\nSTRING 9\n{\nnot a string";
-  assert.deepEqual(wtsCutLines(v), [1]);
-  const safe = wtsSafeText(v);
-  assert.equal(safe, "Cast at once} \nSTRING 9\n{\nnot a string");
-  const t = new StringTable(map);
-  t.set(2, safe);
-  assert.equal(new StringTable(t.serialize()).get(2), safe.replace(/\n/g, "\r\n"));
-});
-
-test("braces elsewhere in a line, an indented brace and untouched strings are fine", () => {
-  for (const v of ["set {a}", "a } b", " }", "\t}", "{\n  }\n", "end}", ""]) assert.deepEqual(wtsCutLines(v), [], v);
+test("every } the World Editor cuts at is a cut; a { and a } after \\ are not", () => {
+  for (const [written, read] of WE_READ) {
+    const value = written.replace(/\r\n/g, "\n");
+    assert.equal(wtsCutLines(value).length > 0, read !== written, JSON.stringify(written));
+  }
+  for (const v of ["a } b", " }", "\t}", "end}", "} start", "{\n  }\n"]) assert.notDeepEqual(wtsCutLines(v), [], v);
+  for (const v of ["set {a", "{", "a \\} b", ""]) assert.deepEqual(wtsCutLines(v), [], v);
   assert.deepEqual(wtsCuts([[4, "x\r\n}"], [1, "ok"], [2, "}"]]), [{ num: 2, lines: [1] }, { num: 4, lines: [2] }]);
   // a string that is not changed is never refused, whatever the file holds
   assert.doesNotThrow(() => new StringTable("STRING 1\n{\n}\nb\n}\n").serialize());
 });
 
-test("asking: agreed changes, declined stops, nothing to ask passes", async () => {
-  const cuts = [{ num: 3, lines: [2] }];
-  let asked = "";
-  assert.equal(await askWtsCuts(async (m) => { asked = m; return true; }, cuts), true);
-  assert.match(asked, /string 3/);
-  assert.equal(await askWtsCuts(async () => false, cuts), false);
-  assert.equal(await askWtsCuts(async () => { throw new Error("not asked"); }, []), true);
+test("a text without a cut reads back whole from the file it is written to", () => {
+  for (const v of ["P1 a{b", "pro \\} backslash", "a \\\\} b", "x\\", "a \\{ b", "{Sugg", "two\nlines {"]) {
+    assert.deepEqual(wtsCutLines(v), [], v);
+    const t = new StringTable(map);
+    t.set(2, v);
+    assert.equal(new StringTable(t.serialize()).get(2), v.replace(/\n/g, "\r\n"), v);
+  }
 });
 
 test("hand-written text outside every string is found by line", () => {
@@ -315,6 +330,33 @@ function crcrlfFixture(): string {
     if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-crcrlf not found");
   }
 }
+
+/** A file of tests/fixtures/wts-braces (see the test below). */
+function bracesFixture(name: string): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const p = join(dir, "tests", "fixtures", "wts-braces", name);
+    if (existsSync(p)) return readFileSync(p, "utf8");
+    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-braces not found");
+  }
+}
+
+test("the World Editor's own saves: Studio reads each file as the editor read it", () => {
+  // X-in.wts: map 24 of the play protocols with texts holding braces and backslashes in every place (A, B) and blocks
+  // without a } of their own or with text after it (D), packed with the release CLI; X-we.wts: what the World Editor
+  // wrote after opening it and saving (we-drive --save, SD, 2026-11-15). The editor writes every string anew, as it
+  // read it, so its file is its reading: Studio's reading of the input must be the same strings, and of its own save.
+  for (const x of ["A", "B", "D"]) {
+    const input = bracesFixture(`${x}-in.wts`), we = bracesFixture(`${x}-we.wts`);
+    assert.notEqual(input, we, `${x}: control, the editor changed the file`);
+    assert.deepEqual(all(input), all(we), x);
+  }
+  // Typed into Map Description: "N1 }" (the name) and " D1 } x" after the description's text are written as they are,
+  // so the editor itself cuts them when it reads the map again. Hence the refusal: no form keeps a }.
+  const typed = new StringTable(bracesFixture("C-typed-we.wts"));
+  assert.equal(typed.get(3), "N1 ");
+  assert.equal(typed.get(4), "a \\{ b D1 ");
+  assert.deepEqual(wtsCutLines("N1 }"), [1]);
+});
 
 test("stray carriage returns: read as part of the text, kept byte for byte outside an edited string", () => {
   // The four Chosen Ones campaigns' war3campaign.wts have `\r\r\n` inside a text, the Forsaken06/11Finale war3map.wts

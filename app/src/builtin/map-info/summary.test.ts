@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { mapSummary, setMapText, setW3iColorHex, w3iColorHex } from "./summary";
+import { loadingTextsUnused, mapSummary, setMapText, setW3iColorHex, w3iColorHex } from "./summary";
 
 const resolve = (v: string) => v.replace("TRIGSTR_", "text ");
 const info = {
@@ -66,5 +66,22 @@ test("set_map_text: a text in the string table with a line that is just } is ref
   const doc = { name: "TRIGSTR_001", author: "", description: "", suggestedPlayers: "", loadingScreen: { title: "", subtitle: "", text: "" } };
   const table = new StringTable(wts);
   setMapText(doc, "name", "First\n}\nSecond", table);
-  assert.throws(() => table.serialize(), /string 1 .*" }"/);
+  assert.throws(() => table.serialize(), /string 1 \(line 2\)/);
+  // map 24's name: a " }" at the end is refused too
+  const again = new StringTable(wts);
+  setMapText(doc, "name", "24 Texts with a brace }", again);
+  assert.throws(() => again.serialize(), /string 1 \(line 1\)/);
+});
+
+test("the loading texts go unseen on the default screen: no campaign screen, no imported model", () => {
+  assert.equal(loadingTextsUnused({ number: -1, model: "" }), true); // map 24
+  assert.equal(loadingTextsUnused({ number: -1 }), true);
+  assert.equal(loadingTextsUnused({ number: 45, model: "" }), false); // (1)TheDeathSheep: a campaign screen
+  assert.equal(loadingTextsUnused({ number: -1, model: "war3mapImported\\LoadingScreen.mdx" }), false); // (4)Monolith: an imported model
+  const info = { version: 31, editorVersion: 6105, name: "N", author: "", description: "", suggestedPlayers: "", playableWidth: 1, playableHeight: 1,
+    tileset: "L", players: [], forces: [], prologue: { text: "", title: "", subtitle: "" } };
+  const on = mapSummary({ ...info, loadingScreen: { number: -1, text: "t", title: "T", subtitle: "S" } }, (s) => s).loadingScreen as Record<string, unknown>;
+  assert.equal(on.textsShown, false);
+  const camp = mapSummary({ ...info, loadingScreen: { number: 3, text: "t", title: "T", subtitle: "S" } }, (s) => s).loadingScreen as Record<string, unknown>;
+  assert.equal(camp.textsShown, undefined);
 });

@@ -9943,8 +9943,8 @@ async function contextLossChecks(page, found) {
 }
 
 /** The Replace dialogs (doodads with Swap Both, units with Selected Only, tiles), each one undo step; regions: bounds as
- *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a line that is just } is
- *  changed to " }" when the save asks, and not saved when the answer is no. */
+ *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a } anywhere (a } line, a " }"
+ *  line, a } at a line's end) is marked as typed and refused by the save, the loading texts greyed on the default screen. */
 async function shouldHaves(page, found) {
   try {
   const fail = (what) => found.push(`should-haves: ${what}`);
@@ -10056,28 +10056,53 @@ async function shouldHaves(page, found) {
     return true;
   })()`);
   const W3I = "map/war3map.w3i.json";
-  // Asked, the answer no: nothing is saved, the editor stays unsaved.
-  await page.evaluate(`(() => { w3.window.confirm = async () => false; })()`);
-  if (!(await typeDescription("Line one\n}\nLine three"))) fail("the description isn't a text of war3map.wts in Map Properties");
-  const before = readFileSync(wtsPath, "utf8");
-  const refusedSave = await page.evaluate(`w3.editors.saveAll().then(() => null, (e) => String(e))`);
-  if (!/starts with "}"/.test(refusedSave ?? "")) fail(`saving with the answer no gave ${JSON.stringify(refusedSave)}`);
-  if (readFileSync(wtsPath, "utf8") !== before) fail("war3map.wts changed though the answer was no");
-  if (!(await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`))) fail("Map Properties isn't unsaved after a refused save");
-  // The answer yes: the line becomes " }" and the whole text comes back.
-  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  // The game ends the text at any "}" (map 24: " }" at the end of the name went), and nothing keeps one: the field
+  // says so as it is typed, the save refuses it with the reason and writes nothing, the editor stays unsaved.
+  await page.evaluate(`(() => { w3.window.confirm = async () => { throw new Error("asked"); }; })()`);
+  for (const typed of ["Line one\n}\nLine three", "Line one\n }\nLine three", "Line one }\nLine three"]) {
+    if (!(await typeDescription(typed))) { fail("the description isn't a text of war3map.wts in Map Properties"); break; }
+    const marked = await page.evaluate(`(() => { const c = [...document.querySelectorAll(".map-info .map-info-cut")].find((x) => !x.hidden); return c ? c.textContent : null; })()`);
+    if (!/first "\}"/.test(marked ?? "")) fail(`typing ${JSON.stringify(typed)} into the description shows ${JSON.stringify(marked)}, not why it can't be saved`);
+    const before = readFileSync(wtsPath, "utf8");
+    const refusedSave = await page.evaluate(`w3.editors.saveAll().then(() => null, (e) => String(e))`);
+    if (!/a "\}"/.test(refusedSave ?? "")) fail(`saving ${JSON.stringify(typed)} gave ${JSON.stringify(refusedSave)}`);
+    if (readFileSync(wtsPath, "utf8") !== before) fail(`war3map.wts changed though ${JSON.stringify(typed)} was refused`);
+    if (!(await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`))) fail("Map Properties isn't unsaved after a refused save");
+  }
+  // Without the "}" it saves, whole.
+  await typeDescription("Line one\n{\nLine three");
   await page.evaluate(`w3.editors.saveAll()`);
   await settled(page);
   const saved = readFileSync(wtsPath, "utf8");
-  if (!saved.includes("Line one\r\n }\r\nLine three\r\n}")) fail(`war3map.wts holds ${JSON.stringify(saved.slice(saved.indexOf("STRING 900"), saved.indexOf("STRING 900") + 60))}`);
+  if (!saved.includes("Line one\r\n{\r\nLine three\r\n}")) fail(`war3map.wts holds ${JSON.stringify(saved.slice(saved.indexOf("STRING 900"), saved.indexOf("STRING 900") + 60))}`);
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`)) fail("Map Properties is unsaved after its save");
+  // Loading Screen: on the default screen (no campaign screen, no model) the World Editor greys the three texts, and
+  // the game shows none of them: greyed here too, with why; a model typed brings them back at once.
+  if (k.read("war3map.w3i.json").loadingScreen.number < 0) {
+    const loading = () => page.evaluate(`(() => ({ off: [...document.querySelectorAll(".map-info .map-info-loading-text")].map((x) => x.disabled),
+      note: !document.querySelector(".map-info .map-info-loading-unused")?.hidden }))()`);
+    await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "loading")`);
+    await sleep(400);
+    const off = await loading();
+    if (off.off.join() !== "true,true,true" || !off.note) fail(`the loading texts on the default screen are ${JSON.stringify(off)}, not greyed with a note`);
+    const typedModel = await page.evaluate(`(() => { const m = [...document.querySelectorAll(".map-info label.form-row")].find((r) => r.querySelector(".form-label")?.textContent === "Custom model")?.querySelector("input");
+      if (!m) return false; m.value = "war3mapImported\\\\Screen.mdx"; m.dispatchEvent(new Event("input")); return true; })()`);
+    if (!typedModel) fail("Map Properties > Loading Screen has no Custom model box");
+    else {
+      const on = await loading();
+      if (on.off.join() !== "false,false,false" || on.note) fail(`with a model typed the loading texts are ${JSON.stringify(on)}`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    }
+  }
   await page.evaluate(`w3.editors.closeAll()`);
 
-  // edit_text_file (MCP) on war3map.wts: a "}" line inside a text is refused with the reason, a " }" line is fine.
-  const mcpCut = await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: "Line three\r\n}\r\nLine five" }).then(() => null, (e) => e.message);
-  if (!/outside every string/.test(mcpCut ?? "") || readFileSync(wtsPath, "utf8") !== saved) fail(`edit_text_file with a } line gave ${JSON.stringify(mcpCut)}`);
-  await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: "Line three\r\n }\r\nLine five" })
-    .catch((e) => fail(`edit_text_file with a " }" line was refused: ${e.message}`));
+  // edit_text_file (MCP) on war3map.wts: a "}" inside a text, a " }" line too, is refused with the reason; a "{" is fine.
+  for (const cut of ["Line three\r\n}\r\nLine five", "Line three\r\n }\r\nLine five"]) {
+    const mcpCut = await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: cut }).then(() => null, (e) => e.message);
+    if (!/outside every string/.test(mcpCut ?? "") || readFileSync(wtsPath, "utf8") !== saved) fail(`edit_text_file with ${JSON.stringify(cut)} gave ${JSON.stringify(mcpCut)}`);
+  }
+  await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: "Line three\r\n{\r\nLine five" })
+    .catch((e) => fail(`edit_text_file with a "{" line was refused: ${e.message}`));
 
   // war3map.wts by hand: text typed after a string's end (where a "}" line puts the rest of a text) is asked about.
   await page.evaluate(`w3.editors.open("map/war3map.wts", "w3.textEditor")`);

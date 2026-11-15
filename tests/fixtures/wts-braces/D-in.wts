@@ -1,0 +1,52 @@
+﻿STRING 1
+{
+no close here
+
+STRING 2
+{
+two
+}
+
+STRING 3
+{
+a
+
+}
+
+STRING 4
+{
+tail} junk
+more junk
+}
+
+STRING 5
+{
+five
+}
+
+STRING 6
+{
+x\
+}
+
+STRING 7
+{
+seven }}
+}
+
+STRING 8
+{
+eight
+ }
+nine
+}
+
+STRING 9
+{
+}
+}
+
+STRING 10
+{
+ten
+}

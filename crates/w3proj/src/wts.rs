@@ -169,46 +169,27 @@ impl<'a> Reader<'a> {
         None
     }
 
-    /// The first `\r?\n}` from `from`: (index, length).
+    /// Where the text from `from` ends, as the World Editor reads it (wts.ts `findClose`): at the first `}` without a
+    /// `\` right before it, anywhere; the `\r?\n` right before that `}` isn't text. Gives where the text ends and
+    /// where the `}` ends.
     fn find_close(&self, from: usize) -> Option<(usize, usize)> {
         let b = self.text.as_bytes();
-        let i = find(b, b"\n}", from)?;
-        Some(if i > from && b[i - 1] == b'\r' { (i - 1, 3) } else { (i, 2) })
-    }
-
-    /// The first `}` from `from` with `\r?\n`, blank lines and a header right after it (UNCLOSED).
-    fn find_unclosed(&mut self, from: usize) -> Option<usize> {
-        let b = self.text.as_bytes();
         let mut at = from;
-        while let Some(i) = b[at..].iter().position(|&c| c == b'}').map(|k| at + k) {
-            let mut p = i + 1;
-            if b.get(p) == Some(&b'\r') {
-                p += 1;
-            }
-            if b.get(p) == Some(&b'\n') {
-                p += 1;
-                // (?:[ \t]*\r?\n)*
-                loop {
-                    let mut q = p;
-                    while matches!(b.get(q), Some(b' ' | b'\t')) {
-                        q += 1;
-                    }
-                    if b.get(q) == Some(&b'\r') {
-                        q += 1;
-                    }
-                    if b.get(q) == Some(&b'\n') {
-                        p = q + 1;
-                    } else {
-                        break;
-                    }
-                }
-                if self.header_at(p).is_some() {
-                    return Some(i);
-                }
+        let i = loop {
+            let i = at + b.get(at..)?.iter().position(|&c| c == b'}')?;
+            if i == 0 || b[i - 1] != b'\\' {
+                break i;
             }
             at = i + 1;
+        };
+        let mut index = i;
+        if index > from && b[index - 1] == b'\n' {
+            index -= 1;
+            if index > from && b[index - 1] == b'\r' {
+                index -= 1;
+            }
         }
-        None
+        Some((index, i + 1))
     }
 }
 
@@ -229,39 +210,17 @@ struct Block {
     end: usize,
 }
 
-enum Search<T> {
-    NotYet,
-    None,
-    At(T),
-}
-
-/// The blocks of a file, as the app's parser reads them (wts.ts `scan`).
+/// The blocks of a file, as the app's parser reads them (wts.ts `scan`): a text ends at its first `}` without a `\`
+/// before it, and what follows up to the next header is read by nothing; a last block without one stays unread.
 fn scan(text: &str) -> Vec<Block> {
     let mut r = Reader::new(text);
     let mut blocks = Vec::new();
     let mut pos = 0;
-    let mut c: Search<(usize, usize)> = Search::NotYet;
-    let mut u: Search<usize> = Search::NotYet;
     loop {
         let Some(h) = r.find_header(pos) else { return blocks };
-        let from = h.end;
-        if matches!(c, Search::NotYet) || matches!(c, Search::At((i, _)) if i < from) {
-            c = r.find_close(from).map_or(Search::None, Search::At);
-        }
-        if matches!(u, Search::NotYet) || matches!(u, Search::At(i) if i < from) {
-            u = r.find_unclosed(from).map_or(Search::None, Search::At);
-        }
-        match (&u, &c) {
-            (Search::At(ui), close) if !matches!(close, Search::At((ci, _)) if *ci <= *ui) => {
-                blocks.push(Block { header: h.at, num: h.num, from, to: *ui, end: ui + 1 });
-                pos = ui + 1;
-            }
-            (_, Search::At((ci, len))) => {
-                blocks.push(Block { header: h.at, num: h.num, from, to: *ci, end: ci + len });
-                pos = ci + len;
-            }
-            _ => return blocks,
-        }
+        let Some((to, end)) = r.find_close(h.end) else { return blocks };
+        blocks.push(Block { header: h.at, num: h.num, from: h.end, to, end });
+        pos = end;
     }
 }
 
@@ -520,6 +479,31 @@ mod tests {
         // A last block with no end stays.
         let open = format!("{}STRING 2\r\n{{\r\nno end", block(1, "orphan"));
         assert_eq!(prune_strings(&open, &nums(&[])).unwrap().0, "STRING 2\r\n{\r\nno end");
+    }
+
+    #[test]
+    fn a_text_ends_at_its_first_brace_as_the_world_editor_reads_it() {
+        // What the World Editor wrote back for these texts (wts.test.ts WE_READ; we-drive, 2026-11-15).
+        for (written, read) in [
+            ("P1 a{b", "P1 a{b"),
+            ("Name ends }", "Name ends "),
+            ("Desc line1\r\nline2 } mid\r\nline3", "Desc line1\r\nline2 "),
+            ("} title start", ""),
+            ("text1\r\n}\r\ntext3", "text1"),
+            ("pro \\} backslash", "pro \\} backslash"),
+            ("t \\} u }v", "t \\} u "),
+            ("eight\r\n }\r\nnine", "eight\r\n "),
+            ("a\r\n", "a\r\n"),
+            ("x\\", "x\\"),
+        ] {
+            let wts = format!("{}{}", block(1, written), block(2, "next"));
+            let got: Vec<(f64, String)> = strings(&wts).into_iter().map(|(n, v)| (n.value(), v)).collect();
+            assert_eq!(got, [(1.0, read.to_string()), (2.0, "next".to_string())], "{written:?}");
+        }
+        // No `}` of its own: it runs on into the next block, which is gone.
+        let open = format!("STRING 1\r\n{{\r\nno close here\r\n\r\n{}{}", block(2, "two"), block(3, "three"));
+        let got: Vec<f64> = strings(&open).keys().map(|n| n.value()).collect();
+        assert_eq!(got, [1.0, 3.0]);
     }
 
     #[test]

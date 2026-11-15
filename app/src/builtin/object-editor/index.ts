@@ -14,7 +14,7 @@ import { importedPathFor } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { PATH_KIND, pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
-import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/formats/wts";
+import { StringTable, WtsCutError } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
@@ -1556,15 +1556,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 return;
               }
             }
-            // A text with a `}` line would be cut by the game: change it (one undo step) or save nothing,
-            // before the object file is written.
+            // A text with a `}` would be cut by the game: nothing is saved, before the object file is written.
             const cuts = hasWts ? wts.table.cuts() : [];
-            if (cuts.length) {
-              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
-              const now = wts.table.cuts();
-              for (const c of now) wts.set(c.num, wtsSafeText(wts.table.get(c.num)!));
-              if (now.length) { markDirty(); renderDetail(); }
-            }
+            if (cuts.length) throw new WtsCutError(cuts);
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.
             let result: { shown: boolean; recreated: boolean } | undefined;

@@ -1,7 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/formats/wts";
+import { importStrings, StringTable, WtsCutError, wtsCutLines } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -12,7 +12,7 @@ import { setMapText } from "./summary";
 import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
-import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
+import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
@@ -388,24 +388,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const row = (label: string, control: Node, hint?: string) =>
           h("label.form-row", {}, h("span.form-label", {}, label), h("div.form-control", {}, control, hint ? h("small.muted", {}, hint) : null));
 
-        /** String field; TRIGSTR references edit the string table text. */
-        const text = (get: () => string, set: (s: string) => void, opts: { multiline?: boolean } = {}) => {
+        /** String field; TRIGSTR references edit the string table text. `disabled`: shown greyed with why. */
+        const text = (get: () => string, set: (s: string) => void, opts: { multiline?: boolean; disabled?: string; cls?: string } = {}) => {
           const ref = StringTable.ref(get());
           const viaTable = ref !== null && strings?.has(ref);
           const value = viaTable ? strings!.get(ref!)! : get();
           const input = opts.multiline
             ? h("textarea.form-input", { rows: 6, value })
             : h("input.form-input", { value });
+          if (opts.cls) input.classList.add(opts.cls);
+          if (opts.disabled) { input.disabled = true; input.title = opts.disabled; }
+          // A "}" in a string table text: the game ends the text there (wtsCutLines), so the save refuses it; said here
+          // as it is typed.
+          const cut = h("small.form-error.map-info-cut");
+          const showCut = () => {
+            const lines = viaTable ? wtsCutLines(input.value) : [];
+            input.classList.toggle("invalid", lines.length > 0);
+            cut.textContent = lines.length
+              ? `The game ends this text at its first "}" (line ${lines.join(", ")}) and drops the rest; it can't be saved so. Remove the "}" or use another character.`
+              : "";
+            cut.hidden = !lines.length;
+          };
+          showCut();
           // One undo step per visit of the field.
           let visit = {};
           input.addEventListener("input", () => {
             if (viaTable) strings!.set(ref!, input.value);
             else set(input.value);
+            showCut();
             update(visit);
           });
           input.addEventListener("blur", () => { visit = {}; });
           return viaTable
-            ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
+            ? h("div.form-stack", {}, input, cut, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
             : input;
         };
         const num = (get: () => number, set: (n: number) => void, opts: { int?: boolean } = {}) => {
@@ -486,20 +501,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Saved", h("span", {}, `${info.saves} times · editor ${info.editorVersion}${info.gameVersion ? ` · game ${info.gameVersion.join(".")}` : ""} · format v${v}`)),
             ),
           ],
-          loading: () => [
+          loading: () => {
+            // Greyed on the default screen, as the World Editor's (summary.ts loadingTextsUnused); kept as they are.
+            const unused = loadingTextsUnused(info.loadingScreen) ? LOADING_TEXTS_UNUSED : undefined;
+            const screen = (n: number) => { info.loadingScreen.number = n; queueMicrotask(() => show(section)); };
+            return [
             section_("Loading screen",
               row("Screen", lists
-                ? select<number>([[-1, "None / custom model"], ...lists.loadingScreens], () => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; })
-                : num(() => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; }, { int: true })),
-              v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => { info.loadingScreen.model = s; })) : null,
-              row("Title", text(() => info.loadingScreen.title, (s) => { info.loadingScreen.title = s; })),
-              row("Subtitle", text(() => info.loadingScreen.subtitle, (s) => { info.loadingScreen.subtitle = s; })),
-              row("Text", text(() => info.loadingScreen.text, (s) => { info.loadingScreen.text = s; }, { multiline: true })),
+                ? select<number>([[-1, "None / custom model"], ...lists.loadingScreens], () => info.loadingScreen.number, screen)
+                : num(() => info.loadingScreen.number, screen, { int: true })),
+              // Typed: the three texts follow at once (drawn again, the model's box would lose the typing).
+              v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => {
+                info.loadingScreen.model = s;
+                const off = loadingTextsUnused(info.loadingScreen);
+                for (const t of body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(".map-info-loading-text")) {
+                  t.disabled = off;
+                  t.title = off ? LOADING_TEXTS_UNUSED : "";
+                }
+                const note = body.querySelector<HTMLElement>(".map-info-loading-unused");
+                if (note) note.hidden = !off;
+              })) : null,
+              row("Title", text(() => info.loadingScreen.title, (s) => { info.loadingScreen.title = s; }, { disabled: unused, cls: "map-info-loading-text" })),
+              row("Subtitle", text(() => info.loadingScreen.subtitle, (s) => { info.loadingScreen.subtitle = s; }, { disabled: unused, cls: "map-info-loading-text" })),
+              row("Text", text(() => info.loadingScreen.text, (s) => { info.loadingScreen.text = s; }, { multiline: true, disabled: unused, cls: "map-info-loading-text" })),
+              h("small.muted.map-info-loading-unused", { hidden: !unused }, LOADING_TEXTS_UNUSED),
               info.loadingScreen.crestRace !== undefined
                 ? row("Crest race", num(() => info.loadingScreen.crestRace!, (n) => { info.loadingScreen.crestRace = n; }, { int: true }))
                 : null,
             ),
-          ],
+            ];
+          },
           prologue: () => [
             section_("Prologue screen",
               v >= 25 ? row("Screen path", text(() => info.prologue.path, (s) => { info.prologue.path = s; })) : null,
@@ -749,12 +780,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => { history.undo(); },
           redo: () => { history.redo(); },
           async save() {
-            // A text with a `}` line would be cut by the game: change it (one undo step) or save nothing.
+            // A text with a `}` would be cut by the game (the field says so): nothing is saved.
             const cuts = strings?.cuts() ?? [];
-            if (cuts.length) {
-              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
-              if (strings!.fixCuts().length) { update(); show(section); }
-            }
+            if (cuts.length) throw new WtsCutError(cuts);
             // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
             // undo isn't mixed up with the save.
             const taken = history.mark();

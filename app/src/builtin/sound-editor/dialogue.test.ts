@@ -174,14 +174,17 @@ test("undo: back to before the first change writes the old text, also after a sa
   assert.equal(fresh.merge(WTS), null);
 });
 
-test("a text the game would cut stops the save until changed", () => {
+test("a text the game would cut stops the save until the } is gone", () => {
   const strings = new DialogueStrings(WTS);
   const s = spoken({ speakerNameKey: 7, dialogueTextKey: 8 });
   setDialogueString(s, "text", "One\n}two", strings, [s], []);
   assert.deepEqual(strings.cuts().map((c) => c.num), [8]);
   assert.throws(() => strings.merge(WTS), WtsCutError);
-  assert.equal(strings.fixCuts(), true);
-  assert.equal(new StringTable(strings.merge(WTS)!).get(8), "One\r\n }two");
+  // " }" doesn't help: the game ends the text there too
+  setDialogueString(s, "text", "One\n }two", strings, [s], []);
+  assert.throws(() => strings.merge(WTS), WtsCutError);
+  setDialogueString(s, "text", "One\n)two", strings, [s], []);
+  assert.equal(new StringTable(strings.merge(WTS)!).get(8), "One\r\n)two");
 });
 
 test("a plain sound gets a dialogue (speaker n, text n + 1), saves, and undo gives the sound and the file back byte-equal", () => {

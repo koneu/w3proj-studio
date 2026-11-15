@@ -214,7 +214,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
     if (typeof value !== "string" || (value === "" && !empty) || StringTable.ref(value) !== null) return null;
     const text = value.replace(/\r\n/g, "\n");
     if (wtsCutLines(text).length) {
-      kept.push({ where, why: "a line of it starts with \"}\", where the game would end the string" });
+      kept.push({ where, why: "it has a \"}\", where the game would end the string" });
       return null;
     }
     const num = next++;

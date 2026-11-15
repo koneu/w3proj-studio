@@ -261,14 +261,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           async save() {
             if (doc.readOnly) return;
             const t = view.state.sliceDoc();
-            // A string table edited by hand: a `}` line typed inside a text ends that string, and the rest
+            // A string table edited by hand: a `}` typed inside a text ends that string, and the rest
             // lands outside every string, where neither the game nor Studio reads it.
             if (/\.wts$/i.test(doc.path)) {
               const stray = wtsStrayLines(t);
               if (stray.length > wtsStrayLines(saved).length) {
                 const where = stray.slice(0, 5).map((s) => `line ${s.line} (${s.text.length > 30 ? `${s.text.slice(0, 30)}…` : s.text})`).join(", ");
-                const msg = `Text outside every string: ${where}${stray.length > 5 ? ` and ${stray.length - 5} more` : ""}. A line that starts with "}" ends a string, `
-                  + "and the game drops what follows it. Start such a line inside a text with a space (\" }\").";
+                const msg = `Text outside every string: ${where}${stray.length > 5 ? ` and ${stray.length - 5} more` : ""}. The first "}" in a text ends `
+                  + "its string, wherever it is in its line, and the game drops what follows it: a text can't hold a \"}\".";
                 if (!(await w3.window.confirm(`${msg} Save anyway?`, "Save Anyway", 120_000))) throw new Error(`Not saved: ${msg}`);
               }
             }

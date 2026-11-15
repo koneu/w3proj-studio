@@ -1,0 +1,62 @@
+﻿STRING 1
+{
+a \\} b
+}
+
+STRING 2
+{
+a \ b
+}
+
+STRING 3
+{
+N1 }
+}
+
+STRING 4
+{
+a \{ b D1 } x
+}
+
+STRING 5
+{
+a \n b
+}
+
+STRING 6
+{
+end\
+next
+}
+
+STRING 7
+{
+\}start
+}
+
+STRING 8
+{
+x \}
+y
+}
+
+STRING 9
+{
+q \\\} r
+}
+
+STRING 10
+{
+t \} u 
+}
+
+STRING 11
+{
+a \" b \t c A1 }
+}
+
+STRING 12
+{
+\
+}
+

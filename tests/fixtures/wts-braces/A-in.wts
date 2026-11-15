@@ -1,0 +1,66 @@
+﻿STRING 1
+{
+P1 a{b
+}
+
+STRING 2
+{
+F1 a}b
+}
+
+STRING 3
+{
+Name ends }
+}
+
+STRING 4
+{
+Desc line1
+line2 } mid
+line3
+}
+
+STRING 5
+{
+} title start
+}
+
+STRING 6
+{
+sub { and } mid
+}
+
+STRING 7
+{
+text1
+}
+text3
+}
+
+STRING 8
+{
+pro {
+}
+
+STRING 9
+{
+pro \} backslash
+}
+
+STRING 10
+{
+ptext1
+{
+ptext3
+}
+
+STRING 11
+{
+Auth }}
+}
+
+STRING 12
+{
+{Sugg}
+}
+
