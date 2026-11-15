@@ -4626,6 +4626,102 @@ async function resizeUndoChecks(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Map Size at its limits, through the real apply path (resize_map): a 64 × 64 map grown to 480 × 480 and cut to 32 × 32 has
+ *  that size in the terrain, shadows, pathing, camera bounds and playable area, saved and reopened it is the same, and it
+ *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) are refused with every file as it was. */
+async function resizeLimits(page, found) {
+  try {
+  const fail = (what) => found.push(`resize limits: ${what}`);
+  await page.evaluate(`(() => { window.__limitsKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; w3.window.showWarning = async () => "Apply"; })()`);
+  try {
+  const tool = mcpTool(page);
+  const folder = join(work, "resize-limits");
+  mkdirSync(folder, { recursive: true });
+  await tool("new_map", { name: "ResizeLimits", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const state = () => snapshot(join(root, "map"));
+  const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k));
+  const editorUp = async () => {
+    await until("the editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await settled(page);
+  };
+  const read = (f) => readFileSync(join(root, "map", f));
+  /** The files of the map say `size` tiles each way, with the border `border` (left, right, bottom, top). */
+  const sizes = (size, border, label) => {
+    const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(read("war3map.w3e.txt").toString("utf8")) ?? [];
+    if (Number(w) !== size + 1 || Number(h) !== size + 1) fail(`${label}: the terrain has ${Number(w) - 1} × ${Number(h) - 1} tiles, not ${size}`);
+    const wpm = read("war3map.wpm");
+    if (wpm.readUInt32LE(8) !== size * 4 || wpm.readUInt32LE(12) !== size * 4) fail(`${label}: the pathing map is ${wpm.readUInt32LE(8)} x ${wpm.readUInt32LE(12)}, not ${size * 4}`);
+    if (read("war3map.shd").length !== size * size * 16) fail(`${label}: the shadow map has ${read("war3map.shd").length} cells, not ${size * size * 16}`);
+    const i = JSON.parse(read("war3map.w3i.json").toString("utf8"));
+    const pw = size - border[0] - border[1], ph = size - border[2] - border[3];
+    if (i.playableWidth !== pw || i.playableHeight !== ph) fail(`${label}: the playable area is ${i.playableWidth} × ${i.playableHeight}, not ${pw} × ${ph}`);
+    const [l, b, r, t] = i.cameraBounds;
+    if (r - l !== (pw - 8) * 128 || t - b !== (ph - 4) * 128) fail(`${label}: the camera bounds span ${r - l} × ${t - b}, not ${(pw - 8) * 128} × ${(ph - 4) * 128}`);
+    if (JSON.stringify(i.cameraComplements) !== JSON.stringify(border)) fail(`${label}: the border is ${JSON.stringify(i.cameraComplements)}`);
+    if (!Array.isArray(JSON.parse(read("war3map.doo.json").toString("utf8")).doodads)) fail(`${label}: the doodad file has no list`);
+  };
+  const border = () => JSON.parse(read("war3map.w3i.json").toString("utf8")).cameraComplements;
+  const refused = async (change, label) => {
+    const before = state();
+    const err = await tool("resize_map", change).then(() => null, (e) => String(e.message ?? e));
+    if (!err) fail(`${label} wasn't refused`);
+    else if (!/must be|multiple|changes nothing/.test(err)) fail(`${label} was refused with "${err}"`);
+    await settled(page);
+    const moved = differ(before, state());
+    if (moved.length) fail(`${label} was refused but changed ${moved.join(", ")}`);
+  };
+  const reopened = async (label) => {
+    await tool("save_project");
+    await settled(page);
+    const saved = state();
+    await page.evaluate(`w3.editors.closeAll()`);
+    await settled(page);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await editorUp();
+    const moved = differ(saved, state());
+    if (moved.length) fail(`${label}: reopening the map changed ${moved.join(", ")}`);
+  };
+
+  // Both sides, so the World Editor's coordinate limit (limitResize) doesn't cut the growth down to a size that is allowed.
+  await refused({ left: 209, right: 208 }, "481 tiles");
+  await refused({ left: 210, right: 210 }, "484 tiles");
+  await refused({ top: -33 }, "31 tiles");
+  await refused({ top: -36 }, "28 tiles");
+  await refused({ left: 210, right: 210, bottom: -36 }, "a 484 × 28 map");
+
+  const grown = await tool("resize_map", { left: 208, right: 208, bottom: 208, top: 208 });
+  const g = typeof grown === "string" ? JSON.parse(grown) : grown;
+  await editorUp();
+  if (g.width !== 480 || g.height !== 480) fail(`resize_map answered ${g.width} × ${g.height} for 480`);
+  sizes(480, border(), "480 × 480");
+  await reopened("480 × 480");
+  sizes(480, border(), "480 × 480 reopened");
+  const map = join(folder, "ResizeLimits.w3x");
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(map)} })`);
+  await until("the pack", () => existsSync(map), 60000);
+  const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+  if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify of the 480 map: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
+  await refused({ left: 2, right: 2 }, "484 tiles from 480");
+  await refused({ left: 1 }, "481 tiles from 480");
+
+  await tool("resize_map", { left: -224, right: -224, bottom: -224, top: -224, border: [0, 0, 0, 0] });
+  await editorUp();
+  sizes(32, [0, 0, 0, 0], "32 × 32");
+  await reopened("32 × 32");
+  sizes(32, [0, 0, 0, 0], "32 × 32 reopened");
+  await refused({ right: -4 }, "28 tiles from 32");
+  await refused({ top: -1 }, "31 tiles from 32");
+  } finally {
+    await page.evaluate(`(() => { const k = window.__limitsKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__limitsKept; })()`).catch(() => {});
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
  *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
  *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
@@ -13157,6 +13253,7 @@ async function run() {
         problemsIgnore,
         realMapSave,
         rebuildCli,
+        resizeLimits,
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
@@ -13401,6 +13498,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
   await leftOpen(page, "resizeUndo", found);
+  await resizeLimits(page, found).catch((e) => found.push(`resize limits: ${e.message}`));
+  await leftOpen(page, "resizeLimits", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety", found);
   await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
