@@ -4810,8 +4810,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const show = () => {
               if (!latest()) return;
               // Regions and Pathing - Ground over the border lie over the water too (the editor's); the naval view keeps its own.
+              // In linear light the whole layer is drawn after the water, border included, so there is nothing to split.
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
-              const top = !on.naval ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
+              const top = !on.naval && !linear ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
               const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts, linear);
               const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
               if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over, linear); else renderer.setViewLayer(null);

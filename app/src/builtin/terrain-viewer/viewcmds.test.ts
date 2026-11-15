@@ -290,7 +290,20 @@ test("groundPathingColors, linear: pure magenta and blue at the editor's alpha; 
   near(blend([1, 125, 0], rgba.subarray(4, 8)), [1, 109, 137]);
   near(blend([59, 78, 88], rgba.subarray(0, 4)), [144, 67, 153]);
   const cells = new Array(32).fill(NO_WALK);
-  assert.deepEqual([...groundPathingColors(cells, EDGE, true).subarray(0, 4)], [137, 138, 137, 255], "over the border as without linear");
+  assert.deepEqual([...groundPathingColors(cells, EDGE, true).subarray(0, 4)], [255, 255, 255, 66], "over the border: white at the pathing's alpha");
+});
+
+test("over the border in linear light: yellow region 194, 195, 0 alone, 210, 212, 137 with Pathing - Ground (the editor's, regedge, 2026-11-15)", () => {
+  const region = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 255, blue: 0 } }], 8, 4, -128, -64, EDGE, true);
+  const path = groundPathingColors(new Array(32).fill(0), EDGE, true);
+  const ground = [0, 13, 0]; // the border's dark ground
+  const near = (got: number[], want: number[]) => assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= 3), `${got} against ${want}`);
+  near(blend(ground, region.subarray(0, 4)), [194, 195, 0]);
+  near(blend(ground, path.subarray(0, 4)), [137, 138, 137]);
+  near(blend(ground, composeLayers([region, path], true)!.subarray(0, 4)), [210, 212, 137]);
+  // Control: Studio's earlier border colours (opaque grey, region alpha 194) gave 227, 227, 33 for both.
+  const old = composeLayers([regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 255, blue: 0 } }], 8, 4, -128, -64, EDGE), groundPathingColors(new Array(32).fill(0), EDGE)], true)!;
+  assert.ok(blend(ground, old.subarray(0, 4)).some((v, i) => Math.abs(v - [210, 212, 137][i]) > 8));
 });
 
 test("composeLayers, linear: regions under the pathing's blue mix in linear light, as the editor's (red over grass, then blue: 170, 75, 137)", () => {
