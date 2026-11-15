@@ -1,6 +1,6 @@
 {
   "name": "replace-doodad-grid",
-  "description": "test.md 'Replacing a 2x2-texture doodad with a 4x4 one in the World Editor': Advanced (260,41) > Replace Doodads... (288,257) opens 'Replace Doodads' (460x377 at 450,310): Old Doodad's category (563,363) Trees/Destructibles (505,459), its list's second row Barrel LTbs (520,421; the list starts LTlt, LTbs, LTbr, LTbx, LTex, LTba, LOcg, LTcr at 408 in steps of 13, not the palette's order); New Doodad's category (793,363) Trees/Destructibles (735,459), Crates LTcr (750,499; 4x4 texture); OK (791,674). Selected Doodads Only unticked: every barrel. Input: paste-centre.w3m's three barrels, on the 2x2 grid once loaded (-480, 992; -928, 672; 608, 672). Studio: w3.terrain.replaceDoodads {from LTbs, to LTcr} once the doodads are on their grids. MEASURED (2026-11-15, branch paste-centre-we): the editor puts each crate on the 4x4 grid, halves going up (-448, 1024; -896, 704), facing kept, as Studio; it leaves the third barrel (608, 672) a barrel: its crate (640, 704) would overlap the tree LTlt at 704, 640. Studio replaces it (doodads[10], ignored here: a known difference, bugs.md)",
+  "description": "test.md 'Replacing a 2x2-texture doodad with a 4x4 one in the World Editor': Advanced (260,41) > Replace Doodads... (288,257) opens 'Replace Doodads' (460x377 at 450,310): Old Doodad's category (563,363) Trees/Destructibles (505,459), Barrel LTbs (a click in the list, Home, 16 Down keys: the list follows the editor's language, which was English when this was first measured and is deDE since 2026-11-15: LTlt, LTba, OTds, ... rows from 408 in steps of 13, [LTbs] Fass the 17th); New Doodad's category (793,363) Trees/Destructibles (735,459), a click in its list, Home and 20 Down keys: Crates LTcr (4x4 texture); OK (791,674). Selected Doodads Only unticked: every barrel. Input: paste-centre.w3m's three barrels, on the 2x2 grid once loaded (-480, 992; -928, 672; 608, 672). Studio: w3.terrain.replaceDoodads {from LTbs, to LTcr} once the doodads are on their grids. MEASURED (2026-11-15, branch paste-centre-we): the editor puts each crate on the 4x4 grid, halves going up (-448, 1024; -896, 704), facing kept, as Studio; it leaves the third barrel (608, 672) a barrel: its crate (640, 704) would overlap the tree LTlt at 704, 640. Studio replaced it until branch replace-doodads-overlap (replace.ts roomForReplaced; tests/we-compare/replace-doodad-overlap.json has the rule)",
   "input": { "map": "${REPO}/tests/fixtures/we-compare/paste-centre.w3m" },
   "we": {
     "mode": "sd",
@@ -10,7 +10,10 @@
       ["--click", "260,41"], ["--sleep", "800"], ["--click", "288,257"], ["--sleep", "3500"],
       ["--click", "563,363"], ["--sleep", "800"], ["--click", "505,459"], ["--sleep", "1000"],
       ["--click", "793,363"], ["--sleep", "800"], ["--click", "735,459"], ["--sleep", "1000"],
-      ["--click", "520,421"], ["--sleep", "300"], ["--click", "750,499"], ["--sleep", "500"],
+      ["--click", "520,500"], ["--sleep", "300"], ["--key", "Home"],
+      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "300"],
+      ["--click", "750,500"], ["--sleep", "300"], ["--key", "Home"],
+      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "500"],
       ["--click", "791,674"], ["--sleep", "2000"]
     ]
   },
@@ -22,7 +25,7 @@
     ]
   },
   "compare": [
-    { "file": "war3map.doo", "as": "parsed", "ignore": ["doodads[10]"] }
+    { "file": "war3map.doo", "as": "parsed" }
   ],
   "limit": 40
 }

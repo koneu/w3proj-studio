@@ -1,0 +1,31 @@
+{
+  "name": "replace-doodad-overlap",
+  "description": "bugs.md: Replace Doodads leaves a doodad whose new type's pathing would overlap another's. Input tests/fixtures/we-compare/make-replace-doodad-input.mjs (its head lists the seventeen cases). The editor's steps are replace-doodad-grid's: Replace Doodads barrel LTbs -> crates LTcr, every barrel (the deDE list; the lists keep their scroll between runs, so each is clicked, Home, then Down keys: 16 to [LTbs] Fass, 20 to [LTcr] Kisten). Studio: w3.terrain.replaceDoodads {from LTbs, to LTcr}. MEASURED (2026-11-15, branch replace-doodads-overlap): crates on c1, c2 (a tree touching the edge), c6 (pathless LPcr), c14 (footman 40 out), c17 (across a cliff: the ground doesn't count), of two barrels whose crates would overlap the one first in the file (c9, c10: one by one, a crate made counts for the next), of c11 the eastern one (the western's crate would cover it); barrels stay beside a tree, crates, LOsh, a footman (8 and 24 out, 8 in), a farm and an item. Studio: replace.ts roomForReplaced, roomCells.",
+  "input": { "map": "${REPO}/tests/fixtures/we-compare/replace-doodad.w3m" },
+  "we": {
+    "mode": "sd",
+    "saveAccept": ["Warning"],
+    "steps": [
+      ["--key", "d"], ["--sleep", "300"],
+      ["--click", "260,41"], ["--sleep", "800"], ["--click", "288,257"], ["--sleep", "3500"],
+      ["--click", "563,363"], ["--sleep", "800"], ["--click", "505,459"], ["--sleep", "1000"],
+      ["--click", "793,363"], ["--sleep", "800"], ["--click", "735,459"], ["--sleep", "1000"],
+      ["--click", "520,500"], ["--sleep", "300"], ["--key", "Home"],
+      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "300"],
+      ["--click", "750,500"], ["--sleep", "300"], ["--key", "Home"],
+      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "500"],
+      ["--click", "791,674"], ["--sleep", "2000"]
+    ]
+  },
+  "studio": {
+    "steps": [
+      { "setting": ["script.generateOnSave", false] },
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); const loaded = () => (s.placedObjects()?.doodads?.length ?? 0) > 0; for (let i = 0; i < 60 && !loaded(); i++) await new Promise((r) => setTimeout(r, 500)); if (!loaded()) throw new Error('the doodads were not loaded'); await new Promise((r) => setTimeout(r, 3000)); const n = await w3.commands.execute('w3.terrain.replaceDoodads', { from: 'LTbs', to: 'LTcr' }); if (!(n >= 1)) throw new Error('replaced ' + n); await new Promise((r) => setTimeout(r, 500)); await w3.editors.saveAll();" }
+    ]
+  },
+  "compare": [
+    { "file": "war3map.doo", "as": "parsed" }
+  ],
+  "limit": 40
+}

@@ -39,7 +39,7 @@ import { MinimapPanel, viewOutline } from "./minimappanel";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
-import { Occupancy } from "./occupancy";
+import { Occupancy, roomShape, type RoomShape } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
@@ -67,7 +67,7 @@ import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
-import { askReplace, replaceCorners, replaceTitle, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
+import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -706,10 +706,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       let changed = 0;
       await editPlaced(`Replace ${Object.keys(swaps).join(", ")}`, fileKey(args.kind ?? "doodads"), async (f) => {
         const was = new Map(f.list.map((p) => [p, p.id]));
+        const copies = fileKey(args.kind ?? "doodads") === "doodads" ? new Map(f.list.map((p) => [p, structuredClone(p)])) : null;
         changed = replacePlaced(f.list as Parameters<typeof replacePlaced>[0], swaps, area, (id) => look(id)?.numVar ?? 1);
         if (!changed) throw new Error("Nothing placed matches that.");
-        // Swapped doodads go on their new grid, facing and scale range, as in the editor's Replace.
-        if (fileKey(args.kind ?? "doodads") === "doodads") await handle.objects.settleDoodads(f.list.filter((p) => was.get(p) !== p.id), { place: true, scale: true });
+        // Swapped doodads go on their new grid, facing and scale range, as in the editor's Replace, and one whose new
+        // footprint would cover another object's stays as it was, as there.
+        if (copies) {
+          await handle.objects.settleDoodads(f.list.filter((p) => was.get(p) !== p.id), { place: true, scale: true });
+          changed -= await handle.objects.sendBackCrowded(f.list, copies);
+          if (!changed) throw new Error("Nothing was replaced: each new footprint would cover another object's, which the World Editor's Replace Doodads refuses too.");
+        }
         // A swapped unit goes on its new type's building grid (a gold mine, a building), as the editor's Replace does.
         if (fileKey(args.kind ?? "doodads") === "units") {
           for (const p of f.list.filter((q) => was.get(q) !== q.id)) {
@@ -2501,6 +2507,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               pathingData = null;
               buildingCells.clear();
               doodadCells.clear();
+              roomShapes.clear();
               unitHalves.clear();
               occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             }
@@ -2511,6 +2518,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
             const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
             for (const id of changed) { buildingCells.delete(id); doodadCells.delete(id); }
+            if (changed.size) roomShapes.clear();
             if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
             // A rebuild that starts meanwhile (a file taken in place) draws with the new data too.
             nextCtx = next;
@@ -2695,6 +2703,37 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const data = await pathingData;
           const info = data.placedTex(id);
           doodadCells.set(id, info?.path ? snapSize(await data.placedImage(info)) : null);
+        };
+        /** What each object type met so far takes up for Replace Doodads, by "kind:id" (occupancy.ts roomShape). */
+        const roomShapes = new Map<string, RoomShape>();
+        /** The kind a unit file's entry's room goes by: a unit or an item. */
+        const unitRoomKind = (p: Placed) => unitsEntryKind(p, skinById(p.id)?.kind);
+        /** Reads the RoomShapes of everything placed now and of the doodad types `extra`; one that can't be read takes no room. */
+        const loadRoomShapes = async (doodads: readonly Placed[], extra: Iterable<string> = []) => {
+          const keys = new Set([...doodads.map((p) => p.id), ...extra].map((id) => `w3d:${id}`));
+          for (const p of unitsFile?.list ?? []) keys.add(`${unitRoomKind(p)}:${p.id}`);
+          const missing = [...keys].filter((k) => !roomShapes.has(k));
+          if (!missing.length) return;
+          pathingData = pathing();
+          const data = await pathingData;
+          await Promise.all(missing.map(async (k) => {
+            const at = k.indexOf(":");
+            roomShapes.set(k, await roomShape(data, k.slice(at + 1), k.slice(0, at)).catch(() => null));
+          }));
+        };
+        /** Replace Doodads' rule for room (replace.ts roomForReplaced): of the doodads of `list` that took a new type
+         *  (`was` has them as they were: type, place, facing), the ones whose new footprint would cover another placed
+         *  object's, taken in the list's order. Shapes not read yet (loadRoomShapes) take no room. */
+        const crowdedReplacements = (list: readonly Placed[], was: ReadonlyMap<Placed, { id: string; position: readonly number[]; angle: number }>): Set<Placed> => {
+          const cellsOf = (kind: string, p: { id: string; position: readonly number[]; angle: number }) =>
+            roomCells(terrain, roomShapes.get(`${kind}:${p.id}`) ?? null, p.position[0], p.position[1], p.angle);
+          const changed = list.filter((p) => was.has(p));
+          const others = [
+            ...list.filter((p) => !was.has(p)).map((p) => cellsOf("w3d", p)),
+            ...(unitsFile?.list ?? []).map((p) => cellsOf(unitRoomKind(p), p)),
+          ];
+          const ok = roomForReplaced(others, changed.map((p) => ({ before: cellsOf("w3d", was.get(p)!), after: cellsOf("w3d", p) })));
+          return new Set(changed.filter((_, i) => !ok[i]));
         };
         const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
         const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
@@ -3207,16 +3246,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           refreshGroupRings();
         };
         /** Placed objects become other types where they stand (`swaps`: old id → new id), as one undo step; with
-         *  `newVariations` each takes a random variation of its new type. How many changed (0 when the view was lost). */
-        const replaceEntries = async (entries: Placed[], swaps: Record<string, string>, newVariations = false): Promise<number> => {
-          const swapped = entries.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id);
+         *  `newVariations` each takes a random variation of its new type; with `room` (Replace Doodads) a doodad whose new
+         *  footprint would cover another object's stays as it was (crowdedReplacements). How many changed (0 when the
+         *  view was lost). */
+        const replaceEntries = async (entries: Placed[], swaps: Record<string, string>, newVariations = false, room = false): Promise<number> => {
+          let swapped = entries.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id);
           if (!swapped.length) return 0;
           for (const id of new Set(swapped.map((p) => swaps[p.id]))) await loadCells(id).catch(() => { /* stays free */ });
           for (const id of new Set(swapped.map((p) => swaps[p.id]))) if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* stays where it is */ });
+          if (room && dooFile) await loadRoomShapes(dooFile.list, Object.values(swaps));
           if (refuseLost()) return 0;
+          // Taken after the waits: an edit meanwhile may have removed some or changed their type.
+          swapped = swapped.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id && !!fileOf(p));
+          if (!swapped.length) return 0;
           type Look = Props & { id: string; skinId?: string };
           const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
-          const before = swapped.map(look);
+          let before = swapped.map(look);
           const numVar = (id: string) => handle.objects.type(id)?.numVar ?? 1;
           replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar);
           for (const p of swapped) {
@@ -3227,6 +3272,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // A doodad of another texture size has another grid, facing and scale range (as place and move do).
           settleDoodads(swapped, { place: true, scale: true });
+          if (room && dooFile) {
+            const was = new Map(swapped.map((p, i) => [p, before[i]]));
+            const crowded = crowdedReplacements(dooFile.list, new Map([...was].filter(([p]) => dooFile!.list.includes(p))));
+            for (const p of crowded) Object.assign(p, structuredClone(was.get(p)!));
+            before = before.filter((_, i) => !crowded.has(swapped[i]));
+            swapped = swapped.filter((p) => !crowded.has(p));
+            if (!swapped.length) return 0;
+          }
           const after = swapped.map(look);
           const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
           pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });
@@ -4313,6 +4366,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
             buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
+            sendBackCrowded: async (list, was) => {
+              const entries = list as Placed[];
+              await loadRoomShapes([...entries, ...([...was.values()] as Placed[])]);
+              // Taken after the wait: only those still in the list and of another type than they were.
+              const changed = new Map(entries.filter((p) => was.has(p) && was.get(p)!.id !== p.id).map((p) => [p, was.get(p) as Placed]));
+              const crowded = crowdedReplacements(entries, changed);
+              for (const p of crowded) Object.assign(p, structuredClone(changed.get(p)!));
+              return crowded.size;
+            },
             placedSpot: async (kind, id, x, y, angle) => {
               if (kind === "w3u") { await loadCells(id).catch(() => { /* stays free */ }); const [gx, gy] = onGrid(id, x, y); return { x: gx, y: gy, angle }; }
               if (kind !== "w3d" && kind !== "w3b") return { x, y, angle };
@@ -4706,7 +4768,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!type) throw new Error(`"${req.to}" isn't an object type here.`);
             if (!fits({ id: req.to } as Placed) || (was && !replaceableBy(was.kind, type.kind))) throw new Error(`${req.from} can't become ${req.to}: ${kind === "units" ? "units stay units" : "doodads and destructables stay among them"}.`);
             const pool = req.selectedOnly ? selectedEntries().filter((p) => list.includes(p)) : list;
-            return replaceEntries(pool.filter(fits), swapsOf(req), kind === "doodads" && !!req.resetVariations);
+            return replaceEntries(pool.filter(fits), swapsOf(req), kind === "doodads" && !!req.resetVariations, kind === "doodads");
           },
         };
         /** The placed objects a Replace command works on, and which of them it may change (units: not start locations or items). */

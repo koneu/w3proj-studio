@@ -30,6 +30,28 @@ function circle(radius: number): Footprint {
   return { width: n, height: n, mask };
 }
 
+/** What a placed object takes up for Replace Doodads (replace.ts roomCells): the blocking part of its pathing texture
+ *  (doodads, destructables, buildings), a circle of its collision size (other units, items), or nothing (doodads
+ *  without a texture, walkable destructables, start locations). */
+export type RoomShape = Footprint | { radius: number } | null;
+
+/** The RoomShape of an object type ("w3u" units, "w3t" items, else doodads and destructables). Items take 16 (the
+ *  World Editor's isn't measured: one on a crate's quarter stops it). */
+export async function roomShape(data: PathingData, id: string, kind: string): Promise<RoomShape> {
+  if (kind === "w3t") return { radius: 16 };
+  if (kind === "w3u") {
+    if (id === "sloc") return null;
+    const shape = data.unitShape(id);
+    if (!shape) return { radius: 16 };
+    const img = shape.path ? await data.texture(shape.path).catch(() => null) : null;
+    return img ? fromImage(img) : { radius: shape.collision };
+  }
+  const info = data.placedTex(id);
+  if (!info?.path || info.walkable) return null;
+  const { image } = await data.placedImage(info);
+  return image ? fromImage(image) : null;
+}
+
 export class Occupancy {
   readonly w: number;
   readonly h: number;
