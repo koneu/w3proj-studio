@@ -23,7 +23,7 @@ import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, entryFile, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import { checkpointOrStop } from "../../lib/checkpoint";
 
 export { FileLookup };
@@ -291,6 +291,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
       title: "Files not in the import list",
       run: () => unlistedImports(w3, scope()),
     },
+    {
+      id: "unlistedLocaleTexts",
+      title: "Locale string tables not in the import list",
+      run: () => unlistedLocaleTexts(w3, scope()),
+    },
   ];
 }
 
@@ -472,6 +477,42 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
     });
   }
   return capped(out, "files not in the import list");
+}
+
+/** The `_Locales/x.w3mod/war3map.wts` string tables the import list doesn't name: the World Editor drops such a file
+ *  when it saves the map (Blizzard's melee maps don't list theirs). Fix: list it. A list that can't be read fails the check. */
+async function unlistedLocaleTexts(w3: W3Api, s: RunScope): Promise<Problem[]> {
+  const root = w3.workspace.project()?.root;
+  const files = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"));
+  const tables = files.filter((p) => /^map\/_locales\/[^/]+\.w3mod\/war3map\.wts$/i.test(p));
+  if (!tables.length) return [];
+  const names = new Set(files.map((p) => p.toLowerCase()));
+  const campaign = names.has("map/war3campaign.w3f.json") || names.has("map/war3campaign.w3f");
+  const listPath = campaign ? "map/war3campaign.imp.json" : "map/war3map.imp.json";
+  const folder = campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER;
+  const list = await s.docStrict<{ files?: ImportEntry[] }>(listPath);
+  if (list && !Array.isArray(list.files)) throw new Error(`${listPath} has no file list.`);
+  const entries = (list?.files ?? []).filter((e) => e.path !== "");
+  const byLower = new Map<string, string>();
+  for (const p of files) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);
+  const claimed = new Set(entries.map((e) => entryFile(e, folder, (l) => byLower.get(l))?.toLowerCase()).filter((x): x is string => !!x));
+  const listName = listPath.slice(4).replace(/\.json$/, "");
+  const out: Problem[] = [];
+  for (const file of tables.filter((p) => !claimed.has(p.toLowerCase()))) {
+    const archive = archivePath(file);
+    out.push({
+      severity: "warning",
+      message: `${archive} isn't in the import list: the World Editor drops it when it saves the map`,
+      location: listName,
+      reveal: { command: "w3.imports.open" },
+      fixes: [{
+        label: "Add to import list",
+        title: `Lists ${archive} in ${listName}, as the Import Manager's "Add to list" does: the World Editor then keeps it`,
+        run: () => serial(async () => { sameProject(w3, root); await w3.commands.execute("w3.imports.add", [archive]); }),
+      }],
+    });
+  }
+  return capped(out, "locale string tables not in the import list");
 }
 
 /** The "Delete file" fix of an unlisted file: asks, makes a checkpoint, and deletes it, unless meanwhile another
