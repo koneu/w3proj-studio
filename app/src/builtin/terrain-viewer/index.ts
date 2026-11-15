@@ -4377,7 +4377,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const entries = list as Placed[], units = kind === "units";
               const both = [...entries, ...([...was.values()] as Placed[])];
               // Units' shapes are read by "kind:id" for the old types too, which a list already changed no longer holds.
-              if (units) await loadRoomShapes([], both.map((p) => `${unitRoomKind(p)}:${p.id}`));
+              if (units) await loadRoomShapes(dooFile?.list ?? [], both.map((p) => `${unitRoomKind(p)}:${p.id}`));
               else await loadRoomShapes(both);
               // Taken after the wait: only those still in the list and of another type than they were.
               const changed = new Map(entries.filter((p) => was.has(p) && was.get(p)!.id !== p.id).map((p) => [p, was.get(p) as Placed]));
