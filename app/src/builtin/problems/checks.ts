@@ -11,6 +11,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
+import { checkClassicModel } from "../../lib/model/classiccheck";
 import { checkJass } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
 import { gameJassEnv } from "../../lib/jass/env";
@@ -1082,12 +1083,16 @@ async function convertToClassic(
   // A chapter map's file may be its campaign's: read from there, not from the chapter's own folder.
   const existing = (archive: string) => lookup.read(archive);
   const { dir, files } = await chooseFolder(name, build, existing);
-  // The converted models must find every texture they name, in the map.
+  // The converted models must find every texture they name, in the map, and have the shape of the game's Classic
+  // models (classiccheck.ts); one that hasn't would be written only to stay invisible.
   const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
   for (const [file, bytes] of files) {
     if (!/\.mdx$/i.test(file)) continue;
     const missing = missingTextures(parseMdx(bytes).textures, (n) => have.has(n));
     if (missing.length) throw new Error(`${file}: texture ${missing[0]} was not written, nothing changed`);
+    const { errors, warnings } = checkClassicModel(bytes, { hasTexture: (n) => have.has(n.toLowerCase()) });
+    const problem = errors[0] ?? warnings[0];
+    if (problem) throw new Error(`${file} came out unlike the game's Classic models (${problem}), nothing changed`);
   }
   // Everything that can fail comes before the first write.
   const applyImports = await prepareImports(w3, [...files.keys()]);

@@ -2,7 +2,7 @@
 // can draw it: the full-detail geometry, bones (Reforged skin weights become matrix groups),
 // sequences, geoset and texture animations, one layer per material with its colour texture.
 // Left out: normal/ORM/emissive/environment maps, team colour masks, PopcornFX (CORN), lights
-// and events (they become helpers so object ids and the hierarchy stay), collision shapes,
+// and events (they become helpers so the hierarchy stays; ids are renumbered in Classic's node order), collision shapes,
 // cameras, lower levels of detail. Units lose their team colour.
 
 import type { Geoset, Model, Track } from "./mdx";
@@ -93,7 +93,9 @@ function matrixGroups(g: Geoset): { groups: number[][]; vertexGroups: number[] }
  *  textures are asked for; null drops it, and layers using it get the first kept one). */
 export function toClassicMdx(m: Model, texturePath: (index: number) => string | null): Uint8Array {
   const w = new Writer();
-  const geosets = m.geosets.map((g, i) => [g, i] as const).filter(([g]) => g.lod === 0);
+  // The most detailed level the model has: 0 as a rule, but some have only lower ones (MoreCityBuilding3: level 2).
+  const level = Math.min(...m.geosets.map((g) => g.lod));
+  const geosets = m.geosets.map((g, i) => [g, i] as const).filter(([g]) => g.lod === level);
   // Textures: the colour textures of the layers, renumbered; replaceable ones (team colour) kept as they are.
   const colour = [...new Set(m.materials.flatMap((mat) => mat.layers.map((l) => l.textureIds[0])))].filter((i) => m.textures[i]);
   const kept: { replaceableId: number; path: string; flags: number }[] = [];
@@ -107,6 +109,15 @@ export function toClassicMdx(m: Model, texturePath: (index: number) => string | 
   }
   const tex = (i: number) => remap.get(i) ?? 0;
   const geosetIndex = new Map(geosets.map(([, old], i) => [old, i]));
+  // Nodes: bones, then helpers (what Classic can't show of the rest: lights, emitters, events, …), then attachments,
+  // numbered 0…n-1 in that order as Classic models are (a light or event of the Reforged model keeps its place in
+  // the hierarchy but not its id, which may be past the attachments'). Parents, matrices and pivots follow.
+  const nodes = m.nodes.filter(Boolean);
+  const bones = nodes.filter((n) => n.kind === "bone"), atts = nodes.filter((n) => n.kind === "atch");
+  const helpers = nodes.filter((n) => n.kind !== "bone" && n.kind !== "atch");
+  const ordered = [...bones, ...helpers, ...atts];
+  const newId = new Map(ordered.map((n, i) => [n.objectId, i]));
+  const idOf = (old: number) => newId.get(old) ?? old;
 
   w.tag("MDLX");
   w.chunk("VERS", () => w.u32(800));
@@ -150,7 +161,7 @@ export function toClassicMdx(m: Model, texturePath: (index: number) => string | 
         w.bytes(idx);
         w.tag("GNDX"); w.u32(nv); vertexGroups.forEach((v) => w.u8(v));
         w.tag("MTGC"); w.u32(groups.length); groups.forEach((gr) => w.u32(gr.length));
-        w.tag("MATS"); w.u32(groups.reduce((n, gr) => n + gr.length, 0)); groups.forEach((gr) => gr.forEach((b) => w.u32(b)));
+        w.tag("MATS"); w.u32(groups.reduce((n, gr) => n + gr.length, 0)); groups.forEach((gr) => gr.forEach((b) => w.u32(idOf(b))));
         w.u32(g.materialId); w.u32(0); w.u32(0);
         extent(w, g.extent);
         w.u32(m.sequences.length); m.sequences.forEach(() => extent(w, g.extent));
@@ -167,20 +178,16 @@ export function toClassicMdx(m: Model, texturePath: (index: number) => string | 
       track(w, "KGAO", a.alphaTrack); track(w, "KGAC", a.colorTrack);
     }, true);
   });
-  // Nodes by object id; ids, parents and pivots stay. Bones and attachments as such, the rest helpers.
-  const nodes = m.nodes.filter(Boolean);
+  // Bones and attachments as such, the rest helpers.
   const node = (n: (typeof nodes)[number], typeFlag: number) => w.sized(() => {
-    w.str(n.name, 80); w.u32(n.objectId); w.i32(n.parentId); w.u32((n.flags & ~TYPE_FLAGS) | typeFlag);
+    w.str(n.name, 80); w.u32(idOf(n.objectId)); w.i32(n.parentId < 0 ? -1 : idOf(n.parentId)); w.u32((n.flags & ~TYPE_FLAGS) | typeFlag);
     track(w, "KGTR", n.translation); track(w, "KGRT", n.rotation); track(w, "KGSC", n.scaling);
   }, true);
-  const bones = nodes.filter((n) => n.kind === "bone"), atts = nodes.filter((n) => n.kind === "atch");
-  const helpers = nodes.filter((n) => n.kind !== "bone" && n.kind !== "atch");
   if (bones.length) w.chunk("BONE", () => { for (const n of bones) { node(n, 0x100); w.i32(-1); w.i32(-1); } });
   if (helpers.length) w.chunk("HELP", () => { for (const n of helpers) node(n, 0); });
   if (atts.length) w.chunk("ATCH", () => {
     atts.forEach((n, i) => w.sized(() => { node(n, 0x800); w.str("", 260); w.u32(i); }, true));
   });
-  const maxId = Math.max(-1, ...nodes.map((n) => n.objectId));
-  w.chunk("PIVT", () => { for (let i = 0; i <= maxId; i++) for (let k = 0; k < 3; k++) w.f32(m.pivots[i * 3 + k] ?? 0); });
+  w.chunk("PIVT", () => { for (const n of ordered) for (let k = 0; k < 3; k++) w.f32(m.pivots[n.objectId * 3 + k] ?? 0); });
   return w.done();
 }
