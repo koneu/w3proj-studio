@@ -2,10 +2,12 @@
 // writes MDX 800 and nothing in Studio can show whether the game's Classic loader takes such a file, so this walks
 // the file on its own (not with the parser the converter is tested with) and reports:
 // - errors: what makes the file unreadable: a chunk, object, track or geoset block whose size doesn't add up, a
-//   geoset whose faces point past its vertices, a material or layer that isn't laid out as in version 800. The
+//   geoset whose faces point past its vertices, a material or layer that isn't laid out as in version 800; and what
+//   leaves it invisible: a GEOS chunk without a geoset that has faces (no GEOS chunk at all with `drawn`). The
 //   Classic models in real maps (2,300 MDX 800 files of smoketest_maps, all drawn by the game) have none of these:
 //   classiccheck.test.ts holds that as the control.
-// - warnings: what a model the game reads may still lack to be seen: no geoset, material or sequence, a layer or
+// - warnings: what a model the game reads may still lack to be seen: no GEOS, material or sequence, a geoset
+//   without faces beside others that have some, a layer or
 //   geoset naming a texture, material or matrix group that isn't there, a texture that isn't a BLP or isn't in the
 //   map, node ids that aren't 0…n-1 in the order of the node chunks, pivots short of the nodes, chunks of later
 //   versions. Real maps carry such models too (effects without geosets, a .dds texture), so these only say "not
@@ -29,6 +31,9 @@ const TRACK_VALUE: Record<string, number> = {
 export interface ClassicCheckOptions {
   /** Whether the map has a texture, by archive path (backslashes; compare without case). Not given: not checked. */
   hasTexture?: (path: string) => boolean;
+  /** The model must show something (a converted doodad or unit): no GEOS chunk is an error, not a warning. Real
+   *  maps' effects have none (28 of smoketest_maps' Classic models), so it isn't one for any model. */
+  drawn?: boolean;
 }
 
 export interface ClassicCheck {
@@ -117,7 +122,11 @@ export function checkClassicModel(bytes: Uint8Array, opts: ClassicCheckOptions =
   for (const c of chunks) if (!CLASSIC_CHUNKS.has(c.tag)) warnings.push(`chunk ${c.tag} isn't one of version 800`);
   const modl = one("MODL");
   if (!modl || modl.end - modl.start !== 372) errors.push(modl ? `MODL is ${modl.end - modl.start} bytes, not 372` : "no MODL chunk");
-  for (const t of ["SEQS", "MTLS", "GEOS"]) if (!one(t)) warnings.push(`no ${t} chunk`);
+  for (const t of ["SEQS", "MTLS", "GEOS"]) {
+    if (one(t)) continue;
+    if (t === "GEOS" && opts.drawn) errors.push("no GEOS chunk: the model has nothing to draw");
+    else warnings.push(`no ${t} chunk`);
+  }
 
   // Sequences: a doodad, unit or destructable plays one (Stand).
   const seqs = one("SEQS");
@@ -201,21 +210,25 @@ export function checkClassicModel(bytes: Uint8Array, opts: ClassicCheckOptions =
   if (pivots < nodes.length) warnings.push(`${pivots} pivots for ${nodes.length} nodes`);
 
   // Geosets.
-  let geosets = 0;
+  // A GEOS chunk without a geoset that has faces draws nothing: no real Classic model has one (the effects without
+  // geometry have no GEOS chunk), and a converted model that came out so would be written only to stay invisible.
+  let geosets = 0, withFaces = 0, unreadable = false;
   const geos = one("GEOS");
   if (geos) {
     for (let o = geos.start; o < geos.end; geosets++) {
       const where = `geoset ${geosets}`;
       const size = b.has(o, 4) ? b.u32(o) : 0;
-      if (size < 4 || o + size > geos.end) { errors.push(`${where}: size ${size}`); break; }
+      if (size < 4 || o + size > geos.end) { errors.push(`${where}: size ${size}`); unreadable = true; break; }
       const gEnd = o + size;
-      try { checkGeoset(b, o + 4, gEnd, where, { materials, ids, warnings }); } catch (e) {
+      try { if (checkGeoset(b, o + 4, gEnd, where, { materials, ids, warnings }) > 0) withFaces++; } catch (e) {
         if (!(e instanceof Unreadable)) throw e;
         errors.push(e.message);
+        unreadable = true;
       }
       o = gEnd;
     }
-    if (!geosets) warnings.push("no geoset");
+    if (!geosets) errors.push("GEOS holds no geoset: the model has nothing to draw");
+    else if (!withFaces && !unreadable) errors.push(`none of its ${geosets} geosets has a face: the model has nothing to draw`);
   }
 
   // Geoset animations.
@@ -238,8 +251,8 @@ export function checkClassicModel(bytes: Uint8Array, opts: ClassicCheckOptions =
   return out();
 }
 
-/** A version 800 geoset from `p` (after its size) to `end`. */
-function checkGeoset(b: Bytes, p: number, end: number, where: string, at: { materials: number; ids: Set<number>; warnings: string[] }) {
+/** A version 800 geoset from `p` (after its size) to `end`; how many face indices it has. */
+function checkGeoset(b: Bytes, p: number, end: number, where: string, at: { materials: number; ids: Set<number>; warnings: string[] }): number {
   const { warnings } = at;
   /** A tagged block of values of `each` bytes at `p`: where its values start and how many; `p` moves past it. */
   const block = (tag: string, each: number) => {
@@ -292,4 +305,5 @@ function checkGeoset(b: Bytes, p: number, end: number, where: string, at: { mate
     if (uv.n !== nv) warnings.push(`${where}: UV set ${s} has ${uv.n} pairs for ${nv} vertices`);
   }
   if (p !== end) throw new Unreadable(`${where}: ${end - p} bytes after its texture coordinates`);
+  return faces.n;
 }

@@ -9,39 +9,33 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { toClassicMdx } from "./classic";
 import { checkClassicModel } from "./classiccheck";
-import { parseMdx, type Model, type Node } from "./mdx";
+import { parseMdx, type Model } from "./mdx";
+import { blpPath, reforgedModel } from "./testbox";
 
-type V3 = [number, number, number];
-
-/** A Reforged-like model: a box on the bone "arm" (child of "root"), an attachment on "arm" and a sound event on
- *  "root" whose id comes after the attachment's, as in the game's units (events last). Its geosets are at `lods`. */
-function reforgedModel(lods = [0]): Model {
-  const [w, h] = [50, 200];
-  const positions: number[] = [];
-  for (const z of [0, h]) for (const [x, y] of [[-w, -w], [w, -w], [w, w], [-w, w]]) positions.push(x, y, z);
-  const quads = [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7]];
-  const faces = quads.flatMap(([a, b, c, d]) => [a, b, c, a, c, d]);
-  const extent = { radius: h, min: [-w, -w, 0] as V3, max: [w, w, h] as V3 };
-  const node = (name: string, objectId: number, parentId: number, kind: string): Node => ({ name, objectId, parentId, flags: 0, kind });
-  return {
-    version: 1000, name: "box", extent, globalSequences: [], textureAnims: [], geosetAnims: [],
-    sequences: [{ name: "Stand", start: 0, end: 1000, moveSpeed: 0, flags: 0, rarity: 0, extent }],
-    textures: [{ replaceableId: 0, path: "Textures/Box_Diffuse.tif", flags: 0 }, { replaceableId: 0, path: "Textures/Box_Normal.tif", flags: 0 }],
-    materials: [{ priorityPlane: 0, flags: 0, layers: [{ filterMode: 0, shadingFlags: 0, textureIds: [0, 1], textureAnimId: -1, coordId: 0, alpha: 1 }] }],
-    geosets: lods.map((lod) => ({
-      positions: new Float32Array(positions), normals: new Float32Array(positions.length), uvs: new Float32Array((positions.length / 3) * 2),
-      faces: new Uint16Array(faces), vertexGroups: new Uint8Array(positions.length / 3), groups: [[1]], materialId: 0, lod, lodName: `LOD${lod}`, extent,
-    })),
-    nodes: [node("root", 0, -1, "bone"), node("arm", 1, 0, "bone"), node("Origin Ref", 2, 1, "atch"), node("SNDXHFOO", 3, 0, "event")],
-    pivots: new Float32Array([0, 0, 0, 0, 0, 100, 0, 0, 150, 0, 0, 5]),
-    particleEmitters2: [], ribbons: [], skipped: [], warnings: [],
-  } as unknown as Model;
-}
-
-const blpPath = (m: Model) => (i: number) => `war3mapImported\\Classic\\Box\\${m.textures[i].path.split("/").pop()!.replace(/\.\w+$/, "")}.blp`;
 const clean = (bytes: Uint8Array, what: string) => {
-  const { errors, warnings } = checkClassicModel(bytes);
+  const { errors, warnings } = checkClassicModel(bytes, { drawn: true });
   assert.deepEqual([...errors, ...warnings], [], what);
+};
+
+/** Where the chunk `tag` starts (its tag) in an MDX file. */
+const find = (bytes: Uint8Array, tag: string) => {
+  for (let o = 4; o + 8 <= bytes.length; o += 8 + new DataView(bytes.buffer, bytes.byteOffset).getUint32(o + 4, true)) {
+    if (String.fromCharCode(...bytes.subarray(o, o + 4)) === tag) return o;
+  }
+  throw new Error(`no ${tag}`);
+};
+
+/** `bytes` with the contents of chunk `tag` replaced (null: the whole chunk left out). */
+const withChunk = (bytes: Uint8Array, tag: string, contents: Uint8Array | null) => {
+  const at = find(bytes, tag), end = at + 8 + new DataView(bytes.buffer, bytes.byteOffset).getUint32(at + 4, true);
+  const head = new Uint8Array(8);
+  head.set(bytes.subarray(at, at + 4));
+  new DataView(head.buffer).setUint32(4, contents?.length ?? 0, true);
+  const parts = [bytes.subarray(0, at), ...(contents ? [head, contents] : []), bytes.subarray(end)];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
 };
 
 test("a converted model numbers its nodes as Classic does: bones, helpers (an event), attachments; parents, matrices and pivots follow", () => {
@@ -70,12 +64,6 @@ test("a model with only lower levels of detail keeps its most detailed one inste
 test("the checker finds what would keep Classic from reading or drawing a model (controls)", () => {
   const src = reforgedModel();
   const good = toClassicMdx(src, blpPath(src));
-  const find = (bytes: Uint8Array, tag: string) => {
-    for (let o = 4; o + 8 <= bytes.length; o += 8 + new DataView(bytes.buffer, bytes.byteOffset).getUint32(o + 4, true)) {
-      if (String.fromCharCode(...bytes.subarray(o, o + 4)) === tag) return o;
-    }
-    throw new Error(`no ${tag}`);
-  };
   const edit = (fn: (b: Uint8Array, dv: DataView) => void) => { const b = good.slice(); fn(b, new DataView(b.buffer)); return checkClassicModel(b); };
   assert.match(edit((b, dv) => dv.setUint32(find(b, "VERS") + 8, 1000, true)).errors.join(), /version 1000/);
   assert.match(edit((b, dv) => dv.setUint32(find(b, "GEOS") + 4, 1 << 30, true)).errors.join(), /runs past the end/);
@@ -88,6 +76,40 @@ test("the checker finds what would keep Classic from reading or drawing a model 
   assert.deepEqual(checkClassicModel(good, { hasTexture: (p) => p === "war3mapImported\\Classic\\Box\\Box_Diffuse.blp" }), { errors: [], warnings: [] });
   // Hostile bytes: every cut of the file is answered, never thrown.
   for (let n = 0; n < good.length; n += 7) checkClassicModel(good.subarray(0, n));
+});
+
+test("a model with nothing to draw is an error (mutations)", () => {
+  const src = reforgedModel([0, 0]);
+  const good = toClassicMdx(src, blpPath(src));
+  // The control: the two-geoset box is clean.
+  clean(good, "the two-geoset box");
+
+  // The GEOS chunk emptied: with or without `drawn`.
+  assert.deepEqual(checkClassicModel(withChunk(good, "GEOS", new Uint8Array(0))).errors, ["GEOS holds no geoset: the model has nothing to draw"]);
+  // The converter given a model whose geosets were all removed writes such a file.
+  const none = { ...reforgedModel(), geosets: [], geosetAnims: [] } as Model;
+  assert.deepEqual(checkClassicModel(toClassicMdx(none, blpPath(none))).errors, ["GEOS holds no geoset: the model has nothing to draw"]);
+
+  // Every geoset without faces (and one without vertices too).
+  const faceless = reforgedModel([0, 0]);
+  faceless.geosets.forEach((g) => { g.faces = new Uint16Array(0); });
+  faceless.geosets[1].positions = new Float32Array(0); faceless.geosets[1].normals = new Float32Array(0);
+  faceless.geosets[1].uvs = new Float32Array(0); faceless.geosets[1].vertexGroups = new Uint8Array(0);
+  const facelessOut = toClassicMdx(faceless, blpPath(faceless));
+  assert.equal(parseMdx(facelessOut).geosets.length, 2, "the converter keeps the empty geosets");
+  assert.deepEqual(checkClassicModel(facelessOut).errors, ["none of its 2 geosets has a face: the model has nothing to draw"]);
+
+  // One geoset without faces beside one with: a warning, not an error.
+  const half = reforgedModel([0, 0]);
+  half.geosets[1].faces = new Uint16Array(0);
+  const halfCheck = checkClassicModel(toClassicMdx(half, blpPath(half)));
+  assert.deepEqual(halfCheck, { errors: [], warnings: ["geoset 1 has no faces"] });
+
+  // No GEOS chunk at all: a warning for any model (effects have none), an error for one that must be drawn.
+  const noChunk = withChunk(good, "GEOS", null);
+  assert.deepEqual(checkClassicModel(noChunk).errors, []);
+  assert.match(checkClassicModel(noChunk).warnings.join(), /no GEOS chunk/);
+  assert.match(checkClassicModel(noChunk, { drawn: true }).errors.join(), /no GEOS chunk: the model has nothing to draw/);
 });
 
 // --- the game's own art and real maps, when they are here --------------------------------------------------------
@@ -127,11 +149,14 @@ test("the Reforged art of the 14a/14c doodads, converted as Convert to Classic d
     ...[0, 9].map((v) => `War3.w3mod:_DE.w3mod:Doodads/Undercity/Props/Bones/Bones${v}.mdx`),
     // Units: lights, events and emitters among the nodes (they become helpers and are renumbered).
     "War3.w3mod:_HD.w3mod:Units/Human/Footman/Footman.mdx",
+    "War3.w3mod:_HD.w3mod:Units/Human/Peasant/Peasant.mdx",
+    "War3.w3mod:_HD.w3mod:Units/Human/Knight/Knight.mdx",
+    "War3.w3mod:_HD.w3mod:Units/Orc/Grunt/Grunt.mdx",
     "War3.w3mod:_HD.w3mod:Units/Creeps/Owl/Owl.mdx",
     "War3.w3mod:_HD.w3mod:Doodads/Cityscape/Structures/MoreCityBuilding3/MoreCityBuilding3.mdx",
   ]);
   if (!models.length) return ctx.skip("no game or release CLI (.game-path, target/release/w3proj)");
-  assert.ok(models.length >= 20, `only ${models.length} of the game's models read`);
+  assert.ok(models.length >= 23, `only ${models.length} of the game's models read`);
   for (const { name, bytes } of models) {
     const src = parseMdx(bytes);
     const out = toClassicMdx(src, (i) => (src.textures[i].path ? `war3mapImported\\Classic\\X\\${i}.blp` : null));

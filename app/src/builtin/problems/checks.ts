@@ -11,7 +11,6 @@ import { parseSlk } from "../../lib/formats/text";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
-import { checkClassicModel } from "../../lib/model/classiccheck";
 import { checkJass } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
 import { gameJassEnv } from "../../lib/jass/env";
@@ -19,7 +18,7 @@ import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { type ModeChoices, pickClassicModel } from "./modelpick";
 import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
-import { conversionPlans, conversionSources, missingTextures, type ModelArt, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName, variationFiles } from "./reforged";
+import { conversionPlans, conversionSources, type ModelArt, readLayered, refuseUnlikeClassic, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName, variationFiles } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
@@ -1083,17 +1082,7 @@ async function convertToClassic(
   // A chapter map's file may be its campaign's: read from there, not from the chapter's own folder.
   const existing = (archive: string) => lookup.read(archive);
   const { dir, files } = await chooseFolder(name, build, existing);
-  // The converted models must find every texture they name, in the map, and have the shape of the game's Classic
-  // models (classiccheck.ts); one that hasn't would be written only to stay invisible.
-  const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
-  for (const [file, bytes] of files) {
-    if (!/\.mdx$/i.test(file)) continue;
-    const missing = missingTextures(parseMdx(bytes).textures, (n) => have.has(n));
-    if (missing.length) throw new Error(`${file}: texture ${missing[0]} was not written, nothing changed`);
-    const { errors, warnings } = checkClassicModel(bytes, { hasTexture: (n) => have.has(n.toLowerCase()) });
-    const problem = errors[0] ?? warnings[0];
-    if (problem) throw new Error(`${file} came out unlike the game's Classic models (${problem}), nothing changed`);
-  }
+  refuseUnlikeClassic(files);
   // Everything that can fail comes before the first write.
   const applyImports = await prepareImports(w3, [...files.keys()]);
   const applyModel = await prepareModel(w3, kind, base, id, modelFieldValue(kind, `${dir}\\${name}`), count);

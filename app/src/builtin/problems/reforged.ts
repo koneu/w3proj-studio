@@ -2,6 +2,8 @@
 // paths around them. Pure, so a test can stand in for the game.
 
 import { textureCandidates } from "../../lib/model/texpath";
+import { checkClassicModel } from "../../lib/model/classiccheck";
+import { parseMdx } from "../../lib/model/mdx";
 
 /** The Reforged art sets a Classic model can be made from. */
 export type Source = "de" | "hd";
@@ -82,6 +84,21 @@ export function uniqueName(dir: string, file: string, used: Set<string>): string
  *  converted model names but the map doesn't hold. Replaceable textures and empty paths count as fine. */
 export function missingTextures(textures: { path: string; replaceableId: number }[], have: (archiveName: string) => boolean): string[] {
   return textures.filter((t) => !t.replaceableId && t.path && !have(t.path.replace(/\//g, "\\").toLowerCase())).map((t) => t.path);
+}
+
+/** Throws unless every converted model among `files` (archive name → bytes) finds every texture it names among
+ *  them and has the shape of the game's Classic models (classiccheck.ts, as a model that must be drawn): one that
+ *  hasn't would be written only to stay invisible. The message says the file and the first problem. */
+export function refuseUnlikeClassic(files: Map<string, Uint8Array>): void {
+  const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
+  for (const [file, bytes] of files) {
+    if (!/\.mdx$/i.test(file)) continue;
+    const missing = missingTextures(parseMdx(bytes).textures, (n) => have.has(n));
+    if (missing.length) throw new Error(`${file}: texture ${missing[0]} was not written, nothing changed`);
+    const { errors, warnings } = checkClassicModel(bytes, { hasTexture: (n) => have.has(n.toLowerCase()), drawn: true });
+    if (errors.length) throw new Error(`${file} came out unusable for Classic graphics (${errors[0]}), nothing changed`);
+    if (warnings.length) throw new Error(`${file} came out unlike the game's Classic models (${warnings[0]}), nothing changed`);
+  }
 }
 
 /** The models to say in the message: "the DE model X (or HD)". */
