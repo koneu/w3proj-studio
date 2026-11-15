@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -70,6 +70,46 @@ test("lowering, flattening and smoothing", () => {
   bumpy.corners[8 * 17 + 8].rawHeight += 400;
   sculptCorners(bumpy, hill, "ellipse", "smooth", undefined);
   assert.ok(at(bumpy, 8, 8) < 20, "a spike goes");
+});
+
+/** A field whose ground is `raw` (the stored word) everywhere. */
+function fieldAt(raw: number): Terrain {
+  const t = field();
+  for (const c of t.corners) { c.rawHeight = raw; c.height = (raw - 0x2000) / 4; }
+  return t;
+}
+const same = (t: Terrain) => JSON.stringify(t.corners);
+
+test("a tool's ground past the stored word is refused whole, with nothing changed, not cut off there", () => {
+  const top = fieldAt(0x7fff - 40), bottom = fieldAt(-0x8000 + 40);
+  const cases: [string, Terrain, (t: Terrain) => unknown][] = [
+    ["raise", top, (t) => sculptCorners(t, hill, "ellipse", "raise", 100)],
+    ["lower", bottom, (t) => sculptCorners(t, hill, "ellipse", "lower", 100)],
+    ["flatten above", field(), (t) => sculptCorners(t, hill, "ellipse", "flatten", 7000)],
+    ["flatten below", field(), (t) => sculptCorners(t, hill, "box", "flatten", -20000)],
+    ["roughen", top, (t) => roughenCorners(t, hill, "box", 1000, seeded())],
+    ["lake", bottom, (t) => setWater(t, hill, "ellipse", "lake", [])],
+  ];
+  for (const [what, t, edit] of cases) {
+    const was = same(t);
+    assert.throws(() => edit(t), /^Error: Not done: the ground at \d+ corners? would go past the lowest or highest ground height a map can store \(-10240 to 6143\.75/, what);
+    assert.equal(same(t), was, `${what}: nothing changed`);
+  }
+  // Up to the word's end is fine.
+  const t = field();
+  sculptCorners(t, hill, "box", "flatten", 6143.75);
+  assert.equal(at(t, 8, 8), 6143.75);
+});
+
+test("a levelled path whose ground would pass the stored word is refused whole", () => {
+  // Column 8 on cliff level 15, column 9 on level 0, both high: levelling column 9 towards the path between them
+  // would lift it past 6143.75.
+  const t = fieldAt(0x2000 + 6100 * 4);
+  for (let y = 0; y < 17; y++) { t.corners[y * 17 + 8].layer = 15; t.corners[y * 17 + 9].layer = 0; }
+  for (const c of t.corners) c.height = (c.rawHeight - 0x2000) / 4 + (c.layer - 2) * 128;
+  const was = same(t);
+  assert.throws(() => paintPath(t, [[8 * 128 + 64, 0], [8 * 128 + 64, 2048]], 256, 1, 0, true, seeded()), /Not done: the ground at \d+ corners/);
+  assert.equal(same(t), was);
 });
 
 test("smoothing doesn't pull heights across a cliff", () => {
@@ -297,8 +337,13 @@ test("scattered things differ, within what their type allows", () => {
 
 test("what's asked for wins, a type's fixed facing wins over that, and units don't vary by themselves", () => {
   const e = { variation: 0, angle: 0, scale: [1, 1, 1] as [number, number, number] };
-  dress(e, tree, { variation: 9, facing: 180, scale: 2 }, true, seeded());
-  assert.deepEqual(e, { variation: 4, angle: Math.PI, scale: [2, 2, 2] });
+  dress(e, tree, { variation: 3, facing: 180, scale: 2 }, true, seeded());
+  assert.deepEqual(e, { variation: 3, angle: Math.PI, scale: [2, 2, 2] });
+  // A variation the type hasn't got is refused, not moved to its last one (decision 2026-11-15), and nothing changes.
+  for (const variation of [9, 5, -1, 1.5, NaN, Infinity]) {
+    assert.throws(() => dress(e, tree, { variation, facing: 0 }, true, seeded()), /variation goes from 0 to 4/);
+    assert.deepEqual(e, { variation: 3, angle: Math.PI, scale: [2, 2, 2] });
+  }
   dress(e, { ...tree, fixedRot: 90 }, { facing: 180 }, true, seeded());
   assert.equal(e.angle, Math.PI / 2);
   const unit = { variation: 0, angle: 1, scale: [1, 1, 1] as [number, number, number] };

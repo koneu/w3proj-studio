@@ -2,7 +2,7 @@
 // can lie, and where objects may stand (the camera bounds). The viewer passes what it has; the tests
 // pass made-up values.
 
-import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, WATER_OFFSET, waterLevelWanted } from "../../lib/terrain/w3e";
+import { GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, WATER_LEVEL_MAX, WATER_LEVEL_MIN, WATER_OFFSET, waterLevelWanted } from "../../lib/terrain/w3e";
 
 /** The water word of a corner: the flag and the stored level (low 14 bits). */
 export interface WaterWord {
@@ -39,6 +39,11 @@ export function waterLimitHits(before: readonly WaterWord[], after: readonly Wat
 /** What Enforce Water Height Limits says when it refuses an edit, in the terrain editor and the AI tools alike. */
 export const waterLimitText = (corners: number) =>
   `Not done: the water at ${corners} corner${corners === 1 ? "" : "s"} would go past the game's lowest or highest water height. Turn off Enforce Water Height Limits to have it cut off there.`;
+
+/** What an AI tool says when it refuses a ground edit that would take corners past the stored ground word (w3e.ts
+ *  groundFits): the brushes stop there as the World Editor's do; a tool's asked shape would be cut off, so it isn't made. */
+export const groundLimitText = (corners: number) =>
+  `Not done: the ground at ${corners} corner${corners === 1 ? "" : "s"} would go past the lowest or highest ground height a map can store (${GROUND_HEIGHT_MIN} to ${GROUND_HEIGHT_MAX}, without the cliff level).`;
 
 /** Whether something fits where `snap` puts it: room is asked at the snapped spot, the one used. */
 export async function fitsSnapped(snap: (x: number, y: number) => Promise<readonly [number, number]>, fits: (x: number, y: number) => Promise<boolean>, x: number, y: number): Promise<boolean> {

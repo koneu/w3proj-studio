@@ -17,6 +17,7 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type Whole
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
+import { givenNumber, placedValueProblem } from "./values";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
@@ -552,7 +553,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** A place a tool names: [x, y], or a region's middle. */
   const readPlace = async (place: unknown, name: string): Promise<[number, number]> => {
-    if (Array.isArray(place) && place.length === 2 && place.every((n) => typeof n === "number")) return [place[0], place[1]];
+    if (Array.isArray(place) && place.length === 2 && place.every((n) => typeof n === "number" && Number.isFinite(n))) return [place[0], place[1]];
     if (typeof place === "string") {
       const a = (await readArea(w3, { region: place }))!;
       return [(a.left + a.right) / 2, (a.bottom + a.top) / 2];
@@ -849,8 +850,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const area = await readArea(w3, args);
       if (!area) throw new Error("fill_rows needs a region, or left, bottom, right and top.");
       const seed = seedOf(args.seed), keep = await readReserved();
-      const spots = rowSpots(area, spacingX, spacingY, typeof jitter === "number" ? jitter : 0, seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
-      const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(typeof facing === "number" ? { facing } : {}) }));
+      const spots = rowSpots(area, spacingX, spacingY, givenNumber("jitter", jitter, { min: 0, max: Infinity, fallback: 0 }), seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
+      const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(facing !== undefined ? { facing } : {}) }));
       return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror })) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
@@ -871,8 +872,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
       const known = (await (await liveEditor()).handle.tilesets()).flatMap((s) => s.tiles);
       if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
-      const across = typeof width === "number" && width > 0 ? width : 256;
-      const fray = typeof edge === "number" ? Math.min(1, Math.max(0, edge)) : 0.4;
+      const across = givenNumber("width", width, { min: 0, max: Infinity, above: true, fallback: 256 });
+      const fray = givenNumber("edge", edge, { min: 0, max: 1, fallback: 0.4 });
       const seed = seedOf(args.seed), random = seededRandom(seed);
       const kinds = await cliffKinds();
       return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => withCliffTypes(t, paintPath(t, points as [number, number][], across, groundSlot(t, tile, kinds), fray, flatten === true, random), kinds)) };
@@ -884,7 +885,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!area) throw new Error("paint_terrain needs a region, or left, bottom, right and top.");
       const known = (await (await liveEditor()).handle.tilesets()).flatMap((s) => s.tiles);
       if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
-      const edge = typeof args.edge === "number" ? Math.min(1, Math.max(0, args.edge)) : 0.3;
+      const edge = givenNumber("edge", args.edge, { min: 0, max: 1, fallback: 0.3 });
       const shape = args.shape === "box" ? "box" : "ellipse";
       const seed = seedOf(args.seed), random = seededRandom(seed);
       const kinds = await cliffKinds();
@@ -966,7 +967,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         camps: campsOf(f.units, { level: f.levels }).map((c) => c.centre),
         routes: f.routes.flatMap((r) => (r.points ? [r.points] : [])),
         noBuild: (x, y) => ((pathing.cells[Math.floor((y - t.offsetY) / 32) * pathing.width + Math.floor((x - t.offsetX) / 32)] ?? NO_BUILD) & NO_BUILD) !== 0,
-      }, typeof count === "number" ? Math.max(1, Math.min(30, count)) : 12, mirror === true);
+      }, givenNumber("count", count, { min: 1, max: 30, whole: true, fallback: 12 }), mirror === true);
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
       const editor = await liveEditor("read");
@@ -1019,6 +1020,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (key === "doodads" && (o.camp !== undefined || o.gold !== undefined || o.drops !== undefined)) throw new Error(`objects[${i}]: camp, gold and drops are for units.`);
         try { setUnitChoices(o); } catch (e) { throw new Error(`objects[${i}]: ${(e as Error).message}`); }
       }
+      // A place, facing or scale that isn't a number, a variation the type hasn't got: refused, with nothing placed
+      // (values.ts). A place off the map is skipped with its reason, as one without room (plan).
+      for (const [i, o] of wanted.entries()) {
+        if (o.variation !== undefined) await handle.objects.ready(o.id as string);
+        const why = placedValueProblem({ x: o.x as number, y: o.y as number, facing: o.facing, scale: o.scale === undefined ? undefined : [o.scale],
+          variation: o.variation, numVar: handle.objects.type(o.id as string)?.numVar ?? 1 }, null);
+        if (why) throw new Error(`objects[${i}]: ${why}`);
+      }
       // Properties as set_object_properties takes them (the Properties panel's), made on each new object in the same edit:
       // one an object doesn't have, or out of range, refuses the whole call.
       const asked = wanted.some((o) => o.properties !== undefined) ? await propLists() : null;
@@ -1057,6 +1066,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await handle.objects.ready(o.id as string);
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
           if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
+          // Even with ignoreRoom: nothing stands off the map.
+          if (!inArea(x, y, whole)) { skipped.push({ index: i, id, x, y, reason: `it's off the map (x ${whole.left} to ${whole.right}, y ${whole.bottom} to ${whole.top})` }); continue; }
           // Decided here: a footprint is checked at the facing the object ends up with.
           const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? random() * 360 : 270);
           const angle = (facing * Math.PI) / 180;
@@ -1121,8 +1132,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!Array.isArray(ids) || !ids.length || !ids.every((i) => typeof i === "string" && i.length === 4)) throw new Error("ids must list object types of four characters.");
       const area = await readArea(w3, args);
       if (!area) throw new Error("scatter_objects needs a region, or left, bottom, right and top.");
-      const density = typeof args.density === "number" ? Math.min(1, Math.max(0.05, args.density)) : 0.7;
-      const limit = typeof args.limit === "number" && args.limit > 0 ? args.limit : 3000;
+      const density = givenNumber("density", args.density, { min: 0.05, max: 1, fallback: 0.7 });
+      const limit = givenNumber("limit", args.limit, { min: 1, max: Infinity, whole: true, fallback: 3000 });
       const range = args.scaleRange;
       if (range !== undefined && !(Array.isArray(range) && range.length === 2 && range.every((n) => typeof n === "number" && n > 0) && range[0] <= range[1])) throw new Error("scaleRange must be [smallest, biggest].");
       const scaleRange = range as [number, number] | undefined;
@@ -1185,7 +1196,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
+      if (!Number.isInteger(index)) throw new Error("index must be the object's number from list_placed.");
       const { handle } = await liveEditor();
+      // A place off the map, a facing or scale that isn't a number: refused, nothing moved (values.ts).
+      const why = placedValueProblem({ x, y, facing: facing as number | undefined, scale: scale === undefined ? undefined : [scale as number] }, wholeMap(handle));
+      if (why) throw new Error(`Not moved: ${why}`);
       // A building, a gold mine and a start location go on their grid, as the World Editor moves them (placement.ts
       // unitGridCells).
       const key = fileKey(kind);
@@ -2944,6 +2959,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const movesOrTurns = (p: Placed, c: Partial<Props>) =>
           (!!c.position && (c.position[0] !== p.position[0] || c.position[1] !== p.position[1])) || (c.angle !== undefined && c.angle !== p.angle);
         const editProps = (entry: Placed, change: Partial<Props>) => {
+          // A place off the map, a scale below 0, a number a placement file can't store: refused, the boxes show the
+          // values again (values.ts).
+          const why = placedValueProblem({ x: change.position?.[0], y: change.position?.[1], z: change.position?.[2],
+            facing: change.angle === undefined ? undefined : (change.angle * 180) / Math.PI, scale: change.scale }, wholeMap(handle));
+          if (why) {
+            void w3.window.showWarning(`Not changed: ${why}`);
+            if (selected) selectObject(selected);
+            return;
+          }
           const before = snapshot(entry);
           const moved = movesOrTurns(entry, change);
           Object.assign(entry, change);
@@ -3167,6 +3191,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           try { node = compileExpr(src); } catch (e) { return (e as Error).message; }
           const vals = entries.map((p, i) => { const v = varsOf(p); return evalFor(node, v, v[field], i, entries.length); });
           if (vals.some((v) => !Number.isFinite(v))) return "the expression gives no number for some objects";
+          // A value an object can't take refuses the whole edit, with its first such object named (values.ts): it isn't
+          // held to the nearest one that fits.
+          for (const [i, p] of entries.entries()) {
+            const v = vals[i];
+            const asked = field === "owner" ? (p.player !== undefined ? { player: v - 1 } : {})
+              : field === "variation" ? { variation: v, numVar: skinOf(p)?.numVar ?? 1 }
+                : field === "scale" ? { scale: [v] } : { [field]: v };
+            const why = placedValueProblem(asked, wholeMap(handle));
+            if (why) return `${p.id}: ${why}`;
+          }
           applyMass(entries, (p, i) => {
             const v = vals[i];
             switch (field) {
@@ -3176,9 +3210,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               }
               case "z": return { position: [p.position[0], p.position[1], v] };
               case "facing": return { angle: v / DEG };
-              case "scale": return v > 0 ? { scale: [v, v, v] } : null;
-              case "variation": return { variation: Math.max(0, Math.min((skinOf(p)?.numVar ?? 1) - 1, Math.round(v))) };
-              case "owner": return p.player !== undefined ? { player: Math.max(0, Math.min(27, Math.round(v) - 1)) } : null;
+              case "scale": return { scale: [v, v, v] };
+              case "variation": return { variation: v };
+              case "owner": return p.player !== undefined ? { player: v - 1 } : null;
             }
           });
           return null;
@@ -3782,8 +3816,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Editable fields commit on Enter/blur; each change is one undo step.
           const num = (value: number, step: string, commit: (v: number) => void) =>
             h("input.terrain-sel-num", { type: "number", step, value: fmt(value), onchange: (e: Event) => {
-              const v = Number((e.target as HTMLInputElement).value);
-              if (Number.isFinite(v)) commit(v);
+              const typed = (e.target as HTMLInputElement).value, v = Number(typed);
+              // An empty box or one that isn't a number changes nothing, and says so (Number("") would be 0).
+              if (typed.trim() !== "" && Number.isFinite(v)) return commit(v);
+              void w3.window.showWarning("Not changed: type a number.");
+              if (selected) selectObject(selected);
             } });
           const triple = (values: number[], step: string, commit: (v: [number, number, number]) => void) =>
             h("span.terrain-sel-triple", {}, ...values.map((v, i) => num(v, step, (nv) => {

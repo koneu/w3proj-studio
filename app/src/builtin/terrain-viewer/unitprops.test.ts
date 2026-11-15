@@ -467,3 +467,18 @@ test("the item browser's random item group holds the same ids as the random cont
   assert.equal(entries.find((e) => e.id === "YkI2")?.name, "Random Level 2 Power Up Item");
   assert.equal(entries.find((e) => e.id === "YiI0")?.name, "Random Level 0 Permanent Item");
 });
+
+test("a table, region or random group number past its 32-bit field, below 0 or not whole is refused, also with the map's lists unreadable", () => {
+  // No lists in the context: war3map.w3i or war3map.w3r couldn't be read, so no number is checked against them.
+  const bad = [-2, 1.5, 0x80000000, NaN, Infinity];
+  for (const table of bad) assert.match(checkChange(unit("hfoo"), facts(), { field: "drops", value: { mode: "table", table } }) ?? "", /item table's number is a whole number from 0/, `table ${table}`);
+  assert.equal(checkChange(unit("hfoo"), facts(), { field: "drops", value: { mode: "table", table: 0x7fffffff } }), null);
+  const gate = facts({ waygate: true });
+  for (const value of bad) assert.match(checkChange(unit("nwgt"), gate, { field: "waygate", value }) ?? "", /region's number is a whole number from 0/, `waygate ${value}`);
+  assert.equal(checkChange(unit("nwgt"), gate, { field: "waygate", value: -1 }), null, "-1: no destination");
+  const r = unit("uDNR"), f = facts({ attacks: false });
+  for (const n of bad) {
+    assert.match(checkChange(r, f, { field: "random", value: { by: "group", group: n, position: 0 } }) ?? "", /whole numbers/, `group ${n}`);
+    assert.match(checkChange(r, f, { field: "random", value: { by: "group", group: 0, position: n } }) ?? "", /whole numbers/, `position ${n}`);
+  }
+});
