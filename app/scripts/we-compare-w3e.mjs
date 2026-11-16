@@ -114,6 +114,25 @@ export function doodadPlaces(json) {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.x - b.x || a.y - b.y)) };
 }
 
+/** A minimap picture (war3mapMap.blp decoded: { width, height, rgba }) reduced to the mean colour of each `block` x
+ *  `block` square, rounded: the two editors' JPEGs and grain never agree pixel by pixel, which tile colour lies where
+ *  does (compared with a spec's "tolerance" per channel). Keys "bx,by", rows from the top. */
+export function minimapView(image, block = 16) {
+  const { width, height, rgba } = image;
+  const blocks = {};
+  for (let by = 0; by * block < height; by++) {
+    for (let bx = 0; bx * block < width; bx++) {
+      const sum = [0, 0, 0];
+      let n = 0;
+      for (let y = by * block; y < Math.min(height, (by + 1) * block); y++) {
+        for (let x = bx * block; x < Math.min(width, (bx + 1) * block); x++, n++) for (let k = 0; k < 3; k++) sum[k] += rgba[(y * width + x) * 4 + k];
+      }
+      blocks[`${bx},${by}`] = sum.map((s) => Math.round(s / n));
+    }
+  }
+  return { size: [width, height], blocks };
+}
+
 /** war3mapUnits.doo as the codecs' JSON, reduced to how its objects are numbered, for runs that place a different number
  *  of objects at random spots (a scatter fill against the editor's pastes): whether every editor id is its own, whether
  *  they run 0, 1, 2, … in file order, and the kinds of object there (id, and a random object's type, group and position),

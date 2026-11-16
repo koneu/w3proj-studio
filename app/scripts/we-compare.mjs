@@ -30,7 +30,8 @@
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
 //               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run.
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
-//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in). Studio step { "ui": [["tab","Terrain"],
+//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
+//               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],
 //               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.
 //
 // Output: a short report on stdout (OK / UNEXPECTED per spec, MATCH / DIFFERS per file with the first differences:
@@ -42,11 +43,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { asExpected, autoKind, compareFile, formatReport, parseSpecFile } from "./we-compare-core.mjs";
-import { doodadPlaces, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
@@ -245,6 +246,22 @@ function reader(cli, game, dir, map) {
   };
 }
 
+/** The app's own image decoder (lib/image, BLP and the rest), bundled into the work folder for the "minimap" kind. */
+async function imageDecoder(work) {
+  const { build } = await import("esbuild");
+  const app = resolve(here, "..");
+  const out = join(work, `image-decoder-${process.pid}.mjs`);
+  await build({
+    stdin: { contents: `export { decodeImage } from "./src/lib/image/index";`, resolveDir: app, loader: "ts" },
+    bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "warning",
+  });
+  try {
+    return (await import(pathToFileURL(out).href)).decodeImage;
+  } finally {
+    rmSync(out, { force: true });
+  }
+}
+
 function compareSpec(spec, cli, game, opts) {
   const dir = join(opts.work, spec.name);
   const limit = opts.limit ?? spec.limit;
@@ -260,6 +277,7 @@ function compareSpec(spec, cli, game, opts) {
       if (kind === "doodad-places") return r.unpackedAs(c.file) === "json" ? { json: doodadPlaces(r.json(c.file)) } : null;
       if (kind === "unit-ids") return r.unpackedAs(c.file) === "json" ? { json: unitIds(r.json(c.file)) } : null;
       if (kind === "parsed") return r.unpackedAs(c.file) === "json" ? { json: r.json(c.file) } : null;
+      if (kind === "minimap") return { json: minimapView(opts.decodeImage(new Uint8Array(r.bytes(c.file)), c.file).mip(0)) };
       if (kind === "text") return { text: r.text(c.file) };
       return { bytes: r.bytes(c.file) };
     };
@@ -297,6 +315,7 @@ async function main() {
     }
   }
   const tWe = Date.now();
+  if (specs.some((s) => s.compare.some((c) => c.as === "minimap"))) o.decodeImage = await imageDecoder(o.work);
   const results = [];
   for (const s of specs) {
     const r = { name: s.name, description: s.description, files: [], error: s.error ?? null };

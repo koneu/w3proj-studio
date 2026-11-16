@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { doodadPlaces, heightSpread, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
@@ -126,4 +126,22 @@ test("doodadPlaces: which doodads are left, by the 64 square, whatever their ord
   assert.deepEqual(doodadPlaces({ doodads: [d("LTlt", -1530, 70, { angle: 3 }), d("XOmr", 1024, -128)] }), a, "snapped within the square, order and angle don't count");
   assert.notDeepEqual(doodadPlaces({ doodads: [d("XOmr", 1056, -96)] }), a, "control: one doodad fewer");
   assert.notDeepEqual(doodadPlaces({ doodads: [d("XOmr", 1120, -96), d("LTlt", -1536, 64)] }), a, "control: another square");
+});
+
+test("minimapView: mean colour per square, compared within the tolerance; swapped stripes differ", () => {
+  // 32x16 pixels: the west half one colour, the east half another, with a little noise.
+  const picture = (west, east, noise = 0) => {
+    const rgba = new Uint8Array(32 * 16 * 4);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) {
+      const c = x < 16 ? west : east, i = (y * 32 + x) * 4;
+      for (let k = 0; k < 3; k++) rgba[i + k] = c[k] + ((x + y) % 2 ? noise : -noise);
+      rgba[i + 3] = 255;
+    }
+    return { width: 32, height: 16, rgba };
+  };
+  const dirt = [147, 96, 43], grass = [23, 121, 15];
+  assert.deepEqual(minimapView(picture(dirt, grass), 16), { size: [32, 16], blocks: { "0,0": dirt, "1,0": grass } });
+  const kind = (a, b) => compareFile("war3mapMap.blp", "minimap", { json: minimapView(a) }, { json: minimapView(b) }, 10, 24).status;
+  assert.equal(kind(picture(dirt, grass), picture([140, 100, 40], [30, 115, 20], 5)), "MATCH", "close colours, noise: the same");
+  assert.equal(kind(picture(dirt, grass), picture(grass, dirt)), "DIFFERS", "control: the stripes the other way round");
 });
