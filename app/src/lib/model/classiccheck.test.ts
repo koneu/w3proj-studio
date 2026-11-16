@@ -3,10 +3,10 @@
 // control that the checker doesn't refuse what the game draws, on the Classic models of real maps (smoketest_maps).
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { gameFiles, mainCheckout } from "../testhelpers/gamefiles";
 import { toClassicMdx } from "./classic";
 import { checkClassicModel } from "./classiccheck";
 import { parseMdx, type Model } from "./mdx";
@@ -113,30 +113,6 @@ test("a model with nothing to draw is an error (mutations)", () => {
 });
 
 // --- the game's own art and real maps, when they are here --------------------------------------------------------
-
-function mainCheckout(): { repo: string; main: string } | null {
-  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
-  const repo = git("--show-toplevel"), common = git("--git-common-dir");
-  return repo ? { repo, main: common ? dirname(resolve(common)) : repo } : null;
-}
-
-/** The game's files by full storage path (War3.w3mod:_HD.w3mod:…), read with the release CLI; those it has. */
-function gameFiles(names: string[]): { name: string; bytes: Uint8Array }[] {
-  const where = mainCheckout();
-  if (!where) return [];
-  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
-  const bin = [process.env.W3PROJ_BIN, join(where.repo, "target", "release", exe), join(where.main, "target", "release", exe)].find((p) => p && existsSync(p));
-  const gameFile = join(where.main, ".game-path");
-  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
-  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
-  if (!bin) return [];
-  const out: { name: string; bytes: Uint8Array }[] = [];
-  for (const name of names) {
-    const r = spawnSync(bin, ["game", "cat", name, ...(game ? ["--install", game] : [])], { maxBuffer: 1 << 28 });
-    if (r.status === 0 && r.stdout.length) out.push({ name, bytes: new Uint8Array(r.stdout) });
-  }
-  return out;
-}
 
 test("the Reforged art of the 14a/14c doodads, converted as Convert to Classic does, has the shape of Classic models", (ctx) => {
   const lc = (n: string) => `War3.w3mod:_HD.w3mod:Doodads/LordaeronCapital/Structures/${n}/${n}.mdx`;
