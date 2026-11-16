@@ -21,6 +21,8 @@ interface PackReport {
   output: string;
   files: number;
   bytes: number;
+  /** What the packed map has that the user should know (w3proj PackReport.warnings). */
+  warnings?: string[];
 }
 
 const MAP_FILTERS = [{ name: "Warcraft III map or campaign", extensions: ["w3x", "w3m", "w3n"] }];
@@ -149,6 +151,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       out.append(`unused strings kept in war3map.wts: ${e instanceof Error ? e.message : String(e)}`);
     }
     const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
+    for (const w of r.warnings ?? []) out.append(`warning: ${w}`);
     out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
     return r;
   };

@@ -898,6 +898,10 @@ pub struct PackReport {
     /// What `pack_pruned` did to war3map.wts; `None` for `pack`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strings: Option<wts::PruneOutcome>,
+    /// What the packed map has that the user should know (chapter maps' as `maps/<folder>/…`): a
+    /// script whose ally priorities aren't those the pack worked out (`allies::script_agrees`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Project files (relative to `map/`) → archive files.
@@ -1046,11 +1050,6 @@ fn chapter_for<'a>(
     ChapterFolder::Gone
 }
 
-/// Builds a project's archive (chapter maps under `maps/` are packed into it first).
-fn pack_bytes(project: &Path, codecs: &Registry) -> Result<(Vec<u8>, usize)> {
-    pack_bytes_with(project, codecs, None)
-}
-
 /// The app's record of dropped strings: `None` when it isn't there, `Err` (why) when it is there
 /// and can't be read.
 fn read_pruned_record(project: &Path) -> std::result::Result<Option<String>, String> {
@@ -1064,19 +1063,40 @@ fn read_pruned_record(project: &Path) -> std::result::Result<Option<String>, Str
 
 /// `prune`: the map's war3map.wts goes into the archive without the strings nothing refers to
 /// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
-/// Chapter maps are packed as they are.
-fn pack_bytes_with(project: &Path, codecs: &Registry, prune: Option<&mut wts::PruneOutcome>) -> Result<(Vec<u8>, usize)> {
+/// Chapter maps are packed as they are. Builds a project's archive (chapter maps under `maps/` are
+/// packed into it first); what the user should know about it goes into `warnings`.
+fn pack_bytes_with(
+    project: &Path,
+    codecs: &Registry,
+    prune: Option<&mut wts::PruneOutcome>,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<u8>, usize)> {
     let (manifest, prefix, mut files) = read_project(project)?;
     if let Some(outcome) = prune {
         *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
     }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
     // The ally priorities the World Editor's save works out (`allies`); a map whose masks already
-    // match goes in byte for byte.
-    if let Some((_, w3i)) = encoded.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i")) {
-        if let Some(worked) = allies::pack_w3i(w3i, codecs) {
-            *w3i = worked;
+    // match goes in byte for byte. The script stays as it is: when its priorities aren't those, it
+    // was made from other start locations or players, and only the app's save makes it again.
+    let worked = encoded
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i"))
+        .and_then(|(k, w3i)| Some((k.clone(), allies::pack_w3i(w3i, codecs)?)));
+    if let Some((key, worked)) = worked {
+        for (name, script) in encoded.iter().filter(|(k, _)| k.eq_ignore_ascii_case("war3map.j") || k.eq_ignore_ascii_case("war3map.lua")) {
+            let what = match allies::script_agrees(&worked, script, codecs) {
+                allies::ScriptPriorities::Agree => continue,
+                allies::ScriptPriorities::Disagree => "doesn't set",
+                allies::ScriptPriorities::Unknown => "can't be told to set",
+            };
+            warnings.push(format!(
+                "{MAP_DIR}/{name}: InitAllyPriorities {what} the ally priorities this pack worked out for war3map.w3i from the \
+                 players' start locations; the script goes in as the project has it (a pack can't make it again): save the map \
+                 in W3Proj Studio, which rebuilds the script"
+            ));
         }
+        encoded.insert(key, worked);
     }
     let maps_dir = project.join(MAPS_DIR);
     for dir in nested_projects(&maps_dir)? {
@@ -1086,7 +1106,9 @@ fn pack_bytes_with(project: &Path, codecs: &Registry, prune: Option<&mut wts::Pr
                 "{MAPS_DIR}/{dir} and {MAP_DIR}/{dir} both map to archive file {name}"
             )));
         }
-        let (bytes, _) = pack_bytes(&maps_dir.join(&dir), codecs)?;
+        let mut inner = Vec::new();
+        let (bytes, _) = pack_bytes_with(&maps_dir.join(&dir), codecs, None, &mut inner)?;
+        warnings.extend(inner.into_iter().map(|w| format!("{MAPS_DIR}/{dir}/{w}")));
         encoded.insert(name, bytes);
     }
     let count = encoded.len();
@@ -1139,7 +1161,8 @@ fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool
     if chapter {
         outcome.kept = Some("a campaign's chapter maps aren't pruned".into());
     }
-    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome))?;
+    let mut warnings = Vec::new();
+    let (bytes, count) = pack_bytes_with(project, codecs, (prune && !chapter).then_some(&mut outcome), &mut warnings)?;
     let output = match output {
         Some(o) => o.to_path_buf(),
         None => default_output(project, &manifest)?,
@@ -1152,6 +1175,7 @@ fn pack_to(project: &Path, output: Option<&Path>, codecs: &Registry, prune: bool
         files: count,
         bytes: bytes.len(),
         strings: prune.then_some(outcome),
+        warnings,
     })
 }
 

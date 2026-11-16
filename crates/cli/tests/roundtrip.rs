@@ -847,3 +847,35 @@ fn a_pack_works_out_stale_ally_priorities_unless_the_map_keeps_its_own() {
     assert_eq!(masks(&own, 0), [2, 0, 0, 2], "Modify ally priorities: the map's own masks");
     assert_eq!(masks(&own, 1), [2, 0, 0, 2]);
 }
+
+/// A pack can't make the script again: when it works out ally priorities the project's war3map.j
+/// doesn't set (the start locations or players changed outside the app), it says so and packs the
+/// script as it is. A script that already sets them (the World Editor's, after masks were edited
+/// by hand) gets no warning.
+#[test]
+fn a_pack_warns_when_the_script_hasnt_the_ally_priorities_it_worked_out() {
+    let dir = workdir("ally-priorities-script");
+    let first = dir.join("first.w3x");
+    assert!(!ok(&["pack", s(&fixture()), "-o", s(&first)]).contains("warning"), "the fixture's masks need no change");
+    let project = dir.join("project");
+    unpack(&first, &project);
+    let info = project.join("map/war3map.w3i.json");
+    let mut v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&info).unwrap()).unwrap();
+    let mut second = v["players"][0].clone();
+    second["id"] = 1.into();
+    second["start"] = serde_json::json!([0.0, 1280.0]);
+    v["players"].as_array_mut().unwrap().push(second);
+    fs::write(&info, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let script = project.join("map/war3map.j");
+    let original = fs::read_to_string(&script).unwrap();
+    assert!(!original.contains("InitAllyPriorities"));
+    let out = ok(&["pack", s(&project), "-o", s(&dir.join("stale.w3x"))]);
+    assert!(out.contains("warning: map/war3map.j: InitAllyPriorities doesn't set the ally priorities"), "{out}");
+    // As the app's generator writes it for these two players (setup.ts playersSection).
+    let prio = "function InitAllyPriorities takes nothing returns nothing\r\n\r\n    call SetStartLocPrioCount( 0, 1 )\r\n    \
+                call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )\r\n\r\n    call SetStartLocPrioCount( 1, 1 )\r\n    \
+                call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )\r\nendfunction\r\n";
+    fs::write(&script, format!("{original}{prio}")).unwrap();
+    let out = ok(&["pack", s(&project), "-o", s(&dir.join("matching.w3x"))]);
+    assert!(!out.contains("warning"), "{out}");
+}

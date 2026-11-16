@@ -643,6 +643,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     println!("left {} unused string(s) out of war3map.wts: {}", s.dropped.len(), list(&s.dropped));
                 }
             }
+            for w in &r.warnings {
+                eprintln!("warning: {w}");
+            }
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, baseline, update_baseline, quiet, warnings_fail, game, trigger_data } => {
