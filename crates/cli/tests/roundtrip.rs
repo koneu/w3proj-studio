@@ -879,3 +879,24 @@ fn a_pack_warns_when_the_script_hasnt_the_ally_priorities_it_worked_out() {
     let out = ok(&["pack", s(&project), "-o", s(&dir.join("matching.w3x"))]);
     assert!(!out.contains("warning"), "{out}");
 }
+
+#[test]
+fn verify_finds_no_map_in_an_empty_folder_and_says_so() {
+    let dir = workdir("verify-empty");
+    let empty = dir.join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    fs::write(empty.join("notes.txt"), "hello").unwrap();
+    let o = w3proj(&["verify", s(&empty), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("no maps"), "{}", text(&o));
+    assert!(!text(&o).contains("0 ok"), "{}", text(&o));
+    // A bad file path is a failed map, reported once, not as "no maps".
+    let o = w3proj(&["verify", s(&dir.join("missing.w3x")), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert_eq!(text(&o).matches("missing.w3x").count(), 1, "{}", text(&o));
+    // Control: a folder with one small map still verifies and exits 0.
+    pack(&fixture(), &empty.join("Mini.w3x"));
+    let o = w3proj(&["verify", s(&empty), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("1 ok"), "{}", text(&o));
+}

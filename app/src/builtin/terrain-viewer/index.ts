@@ -25,6 +25,7 @@ import { gridDefault, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
+import { textureCandidates } from "../../lib/model/texpath";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
@@ -84,7 +85,7 @@ import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -1736,8 +1737,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rows = wanted.length ? new Map(parseSlk(await w3.game.readText("TerrainArt\\Weather.slk").catch(() => "")).map((r) => [r.effectID, r])) : new Map<string, Record<string, string>>();
           const list = renderer.setWeather(wanted.filter((w) => rows.has(w.id)).map((w) => ({ effect: weatherEffect(rows.get(w.id)!), box: w.box })));
           for (const w of list) {
-            const read = (ext: string) => readFile(w3, doc, w.effect.texture + ext).then((buf) => renderer.setWeatherTexture(w, decodeImage(buf, w.effect.texture + ext)));
-            void read(".blp").catch(() => read(".dds")).catch(() => { /* white streaks show it's there */ });
+            const read = (p: string) => readFile(w3, doc, p).then((buf) => renderer.setWeatherTexture(w, decodeImage(buf, p)));
+            void textureCandidates(w.effect.texture + ".blp").reduce<Promise<void>>((p, c) => p.catch(() => read(c)), Promise.reject(new Error("no candidates"))).catch(() => { /* white streaks show it's there */ });
           }
           redraw();
         };
@@ -1905,7 +1906,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const groundFacts = h("div");
         /** Adds tile i's row to the side list and loads its texture. */
         const loadTile = (i: number, paths: Map<string, string>) => {
-          const id = terrain.groundTiles[i], path = paths.get(id);
+          const drawn = () => drawnGroundTiles(terrain, ownTiles?.get(terrain.tileset))[i];
+          const id = drawn(), path = paths.get(id);
           const row = h("div.model-row", { title: path ?? id }, h("span.model-dot.pending", {}, "●"), h("span", {}, `${id} `), h("small.muted", {}, path?.split("\\").pop() ?? "unknown tile"));
           texList.append(row);
           texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
@@ -1918,7 +1920,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           void artLoad(img.then(({ img: mip, name }) => {
             // The list may have changed meanwhile; only the current index gets it.
-            if (terrain.groundTiles[i] !== id) return;
+            if (drawn() !== id) return;
             renderer.setGroundTexture(i, mip);
             row.title = name;
             status(row, "ok");
@@ -1930,6 +1932,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Rebuilds the side list and the renderer's textures after the tile list changed. */
         const syncTileList = async () => {
           const paths = await tilePaths(w3);
+          await ownReady;
           // Emptied only now: rows added meanwhile (another sync, a tile being added) would stay otherwise.
           texList.replaceChildren();
           texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
@@ -1944,7 +1947,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ownTiles = new Map(sets.map((s) => [s.id, s.tiles]));
           return sets;
         });
-        void tilesetList().catch(() => { /* the flag stays set; the palettes say what's missing */ });
+        /** Settles once the own lists are read (or failed: then the file's list is drawn). */
+        const ownReady = tilesetList().then(() => undefined, () => undefined /* the flag stays set; the palettes say what's missing */);
         /** Changes the map's ground tile list: `tiles` is the new list, `map`
          *  gives each old index's new index. Corners and cliff types are
          *  remapped; one undo step. */
@@ -2002,7 +2006,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
           loadRedraw();
         }).catch(() => { /* blight shows as the placeholder colour */ }));
-        tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
+        Promise.all([tilePaths(w3), ownReady]).then(([paths]) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
         // The tileset's water (TerrainArt\Water.slk, row "<tileset>Sha"): animation frames
         // <texFile>00…, frames per second, and the shallow/deep colour ramp (alpha, r, g, b).
@@ -2063,6 +2067,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             w3.window.showWarning(`This map already uses ${MAX_GROUND_TILES} ground tile types, the most a map can have.`);
             return null;
           }
+          const drawnAsOwn = terrain.customTilesetsRaw === 0;
           terrain.groundTiles.push(id);
           // The tile list no longer matches the tileset's default (as a rule).
           terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
@@ -2074,7 +2079,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           const added = terrain.groundTiles.length - 1;
           // Load in the background so the stroke starts right away. A paste that was refused took it out again meanwhile.
-          void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
+          // The flag going from 0 to 1 changes what the other slots are drawn with (drawnGroundTiles): all of them reload.
+          if (drawnAsOwn && terrain.customTilesetsRaw !== 0) void syncTileList();
+          else void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
           minimapStale.set();
           return terrain.groundTiles.length - 1;
         };
@@ -2307,7 +2314,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           readImage: async (path) => {
             const read = (p: string) => readFile(w3, doc, p, terrain.tileset).then((buf) => decodeImage(buf, p));
-            return read(path).catch(() => read(path.replace(/\.blp$/i, ".dds")));
+            return textureCandidates(path).reduce<Promise<DecodedImage>>((p, c) => p.catch(() => read(c)), Promise.reject(new Error("no candidates")));
           },
           predict: editable ? (t, doodads, pause) => {
             const sun = { azimuth: w3.settings.get<number>("terrain.shadows.sunAzimuth") ?? 225, elevation: w3.settings.get<number>("terrain.shadows.sunElevation") ?? 30 };
@@ -5053,6 +5060,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lightsKey = "";
         const showLightRanges = () => {
           const rings: { x: number; y: number; r: number; rgb: [number, number, number] }[] = [];
+          const mode = artMode();
           if (shown.lightRanges) {
             for (const b of renderer.batches) {
               const lights = b.gpu.model.lights;
@@ -5061,7 +5069,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const inst of b.instances) {
                 for (const l of lights) {
                   const id = l.node.objectId;
-                  rings.push(...lightRings(inst.world, [pivots[id * 3] ?? 0, pivots[id * 3 + 1] ?? 0, pivots[id * 3 + 2] ?? 0], l));
+                  rings.push(...lightRings(inst.world, [pivots[id * 3] ?? 0, pivots[id * 3 + 1] ?? 0, pivots[id * 3 + 2] ?? 0], l, mode));
                 }
               }
             }
@@ -5916,6 +5924,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const stopArtMode = w3.settings.onDidChange((key) => {
+          if (key === "game.graphicsMode") showLightRanges();
           if (key === "game.graphicsMode" && artMode() !== openedMode) void reopenForArt(doc.path);
         });
         // Changed while it opened: its tab is still loading, and opens again once it's there.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** A 2 × 2-corner terrain of `version`, every field in range. */
 function tiny(version = 11): Terrain {
@@ -78,4 +78,23 @@ test("writeW3e refuses a corner field past its bits, or not whole, instead of cu
   const short = tiny();
   short.corners.pop();
   assert.match(w3eWriteProblem(short) ?? "", /2 × 2 corners, but 3/);
+});
+
+test("drawnGroundTiles: with the custom tilesets flag 0 the tileset's own list is drawn, slot by slot", () => {
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  const list = (tiles: string[], raw: number) => ({ groundTiles: tiles, customTilesetsRaw: raw });
+  // The World Editor (maps custom-tilesets-<list>-0 of tests/fixtures/we-specs): another order, 3 and 9 tiles.
+  assert.deepEqual(drawnGroundTiles(list(["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"], 0), own), own);
+  assert.deepEqual(drawnGroundTiles(list(["Lgrs", "Lrok", "Ldrt"], 0), own), ["Ldrt", "Ldro", "Ldrg"]);
+  assert.deepEqual(drawnGroundTiles(list(["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt", "Wsnw", "Bdsr", "Ndrt"], 0), own),
+    [...own, "Ldrt", "Ldrt", "Ldrt"]);
+  // The flag set (any value), or the tileset's list unknown: the file's list; the file's list itself is untouched.
+  const file = ["Lgrd", "Lgrs"];
+  assert.deepEqual(drawnGroundTiles(list(file, 1), own), file);
+  assert.deepEqual(drawnGroundTiles(list(file, 7), own), file);
+  assert.deepEqual(drawnGroundTiles(list(file, 0), undefined), file);
+  assert.deepEqual(drawnGroundTiles(list(file, 0), []), file);
+  const t = list(file, 0);
+  assert.notEqual(drawnGroundTiles(t, own), t.groundTiles);
+  assert.deepEqual(t.groundTiles, ["Lgrd", "Lgrs"]);
 });

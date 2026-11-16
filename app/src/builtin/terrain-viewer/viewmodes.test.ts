@@ -206,6 +206,10 @@ test("lightRings: as far as the World Editor's Light Ranges ring reaches, by the
   assert.deepEqual(lightRings(at0, [0, 0, 0], light([0, 0, 0], 5)), []);
   assert.deepEqual(lightRings(at0, [0, 0, 0], light(white, 0.001)), []);
   assert.deepEqual(lightRings([NaN, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, NaN, 0, 0, 1], [0, 0, 0], light(white, 1)), []);
+  // SD (classic graphics): the editor drew no rings; HD and the default are as before.
+  assert.deepEqual(lightRings(at0, [0, 0, 0], light(white, 1.5), "sd"), []);
+  assert.equal(lightRings(at0, [0, 0, 0], light(white, 1.5), "hd").length, 1);
+  assert.deepEqual(lightRings(at0, [0, 0, 0], light(white, 1.5), "hd"), lightRings(at0, [0, 0, 0], light(white, 1.5)));
 });
 
 test("View and camera keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {

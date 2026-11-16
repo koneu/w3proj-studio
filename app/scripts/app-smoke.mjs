@@ -13,6 +13,7 @@
 //   node scripts/app-smoke.mjs --no-build runs what was built last
 //   W3_APP_BIN=<app> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>   runs a prebuilt app (verify-build.mjs)
 //   node scripts/app-smoke.mjs --break    breaks a file on purpose: this run has to fail
+//   node scripts/app-smoke.mjs --only=placerAndCampaign --break-autocycle   Auto Cycle Random Groups stays off: that check alone fails
 //   node scripts/app-smoke.mjs --part=1/2 the project checks and the first half of the full run's checks
 //   node scripts/app-smoke.mjs --part=2/2 the second half (with --no-build while part 1 builds: they run side by side)
 //   --verbose shows what each editor put on screen
@@ -984,6 +985,7 @@ async function tileCleanup(page, found) {
 async function heightKit(page, name) {
   const tool = mcpTool(page), hands = new Hands(page);
   const folder = join(work, "heights", name);
+  rmSync(folder, { recursive: true, force: true }); // a killed run left it, and new_map refuses an existing folder
   mkdirSync(folder, { recursive: true });
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   await tool("new_map", { name, width: 64, height: 64, folder });
@@ -1195,13 +1197,17 @@ async function verify3Steps(page, found) {
     await k.save();
   };
   const tree = () => k.doodads()[0];
+  // The editor's handle, through a tool group of the smoke's own (made for the open editor at once).
+  await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__dragGroup = s.registerToolGroup({ id: "smoke-drag", title: "SmokeDrag", order: 997, create: (ed) => { window.__dragEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+  if (!(await page.evaluate(`!!window.__dragEd`))) return fail("no handle of the terrain editor (control)");
   const dragTree = async () => {
-    // The view on the tree first (the drag takes hold of what it is on: the tree stands 64 over the ground it looks at,
-    // so its middle is a little above the centre), then a drag a few steps long.
+    // The view on the tree first, then a drag a few steps long from the tree's projected point (as mineStartGrid does), so it
+    // holds in a small view too: the tree's middle is about 100 over its own height.
     const [x, y] = tree().position;
     await k.look(x, y, { id: "LTlt", x, y });
-    const c = await hands.where(".model-stage canvas");
-    await hands.drag({ x: c.x, y: c.y - 15 }, { x: c.x + 20, y: c.y - 15 });
+    const p = await page.evaluate(`(() => { return window.__dragEd.project([${x}, ${y}, ${tree().position[2]} + 100]); })()`);
+    if (!p) return fail("the tree isn't in the view (control)");
+    await hands.drag({ x: p[0], y: p[1] }, { x: p[0] + 20, y: p[1] });
     await k.save();
   };
   await fixUp();
@@ -1225,6 +1231,7 @@ async function verify3Steps(page, found) {
   await k.save();
   if (JSON.stringify(tree()) !== beforeDrag) fail(`one undo of the drag didn't give the tree back: ${JSON.stringify(tree())} vs ${beforeDrag}`);
   await k.reset();
+  await page.evaluate(`window.__dragGroup?.dispose(); window.__dragGroup = window.__dragEd = null;`).catch(() => {});
 
   // ---- The running day/night cycle ----------------------------------------------------------------------------------------
   const hourBox = `[...document.querySelectorAll("select")].find((s) => s.options.length === 24 && s.options[0].textContent === "0:00")`;
@@ -4539,6 +4546,7 @@ async function restoreWindow(page) {
 
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
 let checkEnded = Date.now();
+const SCRIPT_QUESTION_CHECKS = new Set(["moduleFunctions", "graphicsModes", "drawCalls", "contextLoss"]);
 async function leftOpen(page, check, found) {
   // How long each check took, so the gate's log shows where the run's minutes go.
   const now = Date.now();
@@ -4547,6 +4555,8 @@ async function leftOpen(page, check, found) {
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
   for (const text of left) {
     console.log(`  left open after ${check}: ${text}`);
+    // Known: these checks write their own war3map.j, so the script question ("isn't the script Studio wrote last") stays open.
+    if (SCRIPT_QUESTION_CHECKS.has(check) && /script/i.test(text)) continue;
     found.push(`${check} left a question open: ${text}`);
   }
   // A check that replaced a w3.window function (confirm, inputBox...) and didn't put it back would answer the next
@@ -10919,7 +10929,8 @@ async function placerAndCampaign(page, found) {
     const held = await lineNow();
     await sleep(12000);
     if (await lineNow() !== held) fail(`with Auto Cycle Random Groups off the drawn line changed from ${held} to ${await lineNow()}`);
-    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", true)`);
+    // --break-autocycle leaves it off here, so this check alone has to fail.
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", ${!process.argv.includes("--break-autocycle")})`);
     const started = Date.now();
     await soon(async () => await lineNow() !== held, 40000);
     const now = await lineNow();
@@ -13856,6 +13867,7 @@ async function run() {
         atmosphereTools,
         byHand,
         cameraEditing,
+        campaignFieldFocus,
         campaignPresets,
         chapterObjects,
         cliCheck,
@@ -13879,6 +13891,7 @@ async function run() {
         heightsUniform,
         importArtReload,
         importListCleanup,
+        importListWriteFail,
         importPathTab,
         importWarnings,
         importWriteOrder,
@@ -13888,6 +13901,7 @@ async function run() {
         keyChords,
         mapInfoColorTools,
         mapInfoUndoKept,
+        mapSizeUi,
         mcpGuides,
         mcpLimits,
         mcpReplaceSnap,
@@ -13901,6 +13915,7 @@ async function run() {
         niceToHaves,
         objectCopy,
         objectEditorColorTools,
+        objectEditorWtsWriteFail,
         objectFilePicker: (p, f) => objectFilePicker(p, f, project),
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
@@ -13928,6 +13943,7 @@ async function run() {
         soundEditorKeys,
         specialDoodads,
         staleEditors,
+        startGoldPalette,
         startPreviewFollow,
         stringsBeforeListing,
         syncSafety,
@@ -14284,8 +14300,219 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "tabsBeforeListing", found);
   await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
   await leftOpen(page, "drawCalls", found);
+  await objectEditorWtsWriteFail(page, found).catch((e) => found.push(`Object Editor wts write failure: ${e.message}`));
+  await leftOpen(page, "objectEditorWtsWriteFail", found);
+  await importListWriteFail(page, found).catch((e) => found.push(`import list write failure: ${e.message}`));
+  await leftOpen(page, "importListWriteFail", found);
+  await startGoldPalette(page, found).catch((e) => found.push(`start gold by the palette: ${e.message}`));
+  await leftOpen(page, "startGoldPalette", found);
+  await mapSizeUi(page, found).catch((e) => found.push(`map size by the UI: ${e.message}`));
+  await leftOpen(page, "mapSizeUi", found);
+  await campaignFieldFocus(page, found).catch((e) => found.push(`campaign number field focus: ${e.message}`));
+  await leftOpen(page, "campaignFieldFocus", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
   await leftOpen(page, "contextLoss", found);
+}
+
+/** The Object Editor's save when war3map.wts really can't be written (read-only file; not on Windows, not as root): the
+ *  error names the strings, the tab stays dirty with the edit in it, and once the file is writable the next save
+ *  writes the name (round 15). */
+async function objectEditorWtsWriteFail(page, found) {
+  if (process.platform === "win32" || process.getuid?.() === 0) return;
+  const fail = (what) => found.push(`Object Editor wts write failure: ${what}`);
+  let strings = null;
+  try {
+    const k = await heightKit(page, "ObjEdWtsFail");
+    const { hands } = k;
+    strings = join(k.root, "map", "war3map.wts");
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: "TRIGSTR_001" }] });
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+    await until("the object's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
+    await hands.click("input.obj-field-search");
+    await hands.type("unam");
+    const field = ".obj-table .obj-value-cell input:not(.color-tools-picker)";
+    await until("the name field", () => page.evaluate(`document.querySelectorAll(${JSON.stringify(field)}).length === 1`), 5000);
+    const objects = "map/war3map.w3u.json";
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(objects)})`);
+    await retype(hands, field, "Kept Name");
+    chmodSync(strings, 0o444);
+    try { writeFileSync(strings, readFileSync(strings)); return fail("war3map.wts can still be written after chmod (control)"); } catch { /* locked, as wanted */ }
+    await k.clearToasts();
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (readFileSync(strings, "utf8").includes("Kept Name")) fail("the name got into the read-only war3map.wts");
+    if (!/strings not saved/.test(await k.toasts())) fail(`no error after the failed write of war3map.wts: "${await k.toasts()}"`);
+    if (!(await dirty())) fail("the object file is marked as saved although its strings weren't written");
+    if ((await page.evaluate(`document.querySelector(${JSON.stringify(field)})?.value`)) !== "Kept Name") fail("the typed name is gone from the field after the failed save");
+    chmodSync(strings, 0o644);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (!readFileSync(strings, "utf8").includes("Kept Name")) fail("the edit was lost: the save after the file became writable didn't write the name");
+    if (await dirty()) fail("the object file is still marked as changed after the retried save");
+  } finally {
+    if (strings) { try { chmodSync(strings, 0o644); } catch { /* gone */ } }
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** The Import Manager's list when its file can't be written (read-only; not on Windows, not as root): the tab stays dirty;
+ *  once the file is writable, Ctrl+S writes the list and the tab is clean (listwrite.ts is otherwise unit-tested only). */
+async function importListWriteFail(page, found) {
+  if (process.platform === "win32" || process.getuid?.() === 0) return;
+  const fail = (what) => found.push(`import list write failure: ${what}`);
+  let list = null;
+  try {
+    const k = await heightKit(page, "ImportListFail");
+    const { hands } = k;
+    const IMP = "map/war3map.imp.json", A = "war3mapImported\\FailA.txt";
+    list = join(k.root, "map", "war3map.imp.json");
+    const listed = () => { try { return k.read("war3map.imp.json").files.map((f) => f.path); } catch { return null; } };
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(IMP)})`);
+    await page.evaluate(`(async () => {
+      await w3.workspace.writeText("map/war3mapImported/FailA.txt", "a");
+      await w3.workspace.writeText(${JSON.stringify(IMP)}, ${JSON.stringify(JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [] }))});
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    const row = `[...document.querySelectorAll(".imp-editor:not([hidden]) .imp-unlisted-row")].find((r) => /FailA\\.txt/.test(r.textContent))`;
+    if (!(await soon(() => page.evaluate(`!!${row}`), 20000))) return fail("the Import Manager doesn't show the file as unlisted");
+    await settled(page);
+    chmodSync(list, 0o444);
+    try { writeFileSync(list, readFileSync(list)); return fail("the list file can still be written after chmod (control)"); } catch { /* locked, as wanted */ }
+    await k.clearToasts();
+    await page.evaluate(`${row}.querySelector("button").click()`);
+    if (!(await soon(() => k.toasts().then((t) => t.length > 0), 10000))) fail("a failed list write showed no error");
+    await settled(page);
+    if (JSON.stringify(listed()) !== "[]") fail(`the read-only list changed: ${JSON.stringify(listed())}`);
+    if (!(await dirty())) fail("the tab is clean although the list wasn't written");
+    chmodSync(list, 0o644);
+    await hands.key("s", "KeyS", 83, 2);
+    if (!(await soon(async () => JSON.stringify(listed()) === JSON.stringify([A]), 10000))) fail(`Ctrl+S after the file became writable left the list at ${JSON.stringify(listed())}`);
+    await settled(page);
+    if (await dirty()) fail("the tab is still dirty after the list was written");
+  } finally {
+    if (list) { try { chmodSync(list, 0o644); } catch { /* gone */ } }
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Start gold through the placing path (round 15): a unit picked into the palette (Select In Tool Palette) and placed by a
+ *  click gets the start gold, 12500 by default and, once the map's gold mine ability (Agld) sets Gld1, that amount. */
+async function startGoldPalette(page, found) {
+  const fail = (what) => found.push(`start gold by the palette: ${what}`);
+  try {
+    const k = await heightKit(page, "StartGold");
+    const { hands } = k;
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 0, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    const footmen = () => k.units().filter((u) => u.id === "hfoo");
+    const placeAt = async (x, y) => {
+      await k.tab("Select");
+      await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
+      await k.run("w3.terrain.selectInPalette");
+      if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`);
+      await k.look(x, y);
+      const n = footmen().length;
+      await hands.click(".model-stage canvas");
+      await k.save();
+      if (footmen().length !== n + 1) { fail(`the click placed ${footmen().length - n} footmen`); return null; }
+      return footmen().find((u) => u.position[0] !== 0 || u.position[1] !== 0 ? Math.abs(u.position[0] - x) < 200 && Math.abs(u.position[1] - y) < 200 : false) ?? null;
+    };
+    const first = await placeAt(512, 512);
+    if (first && first.gold !== 12500) fail(`a footman placed from the palette has gold ${first.gold}, the default is 12500 (control)`);
+    // The map's gold mine ability sets the amount a new unit gets (read again when the ability file is saved).
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3a.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [{ base: "Agld", mods: [{ field: "Gld1", type: "int", level: 1, value: 54321 }] }], custom: [] }))}).then(() => w3.workspace.refresh())`);
+    await settled(page);
+    const second = await placeAt(-512, 512);
+    if (second && second.gold !== 54321) fail(`a footman placed from the palette after Agld's Gld1 was set to 54321 has gold ${second.gold}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Map Size by the UI: +32 tiles typed into the first side's box and Apply; the terrain, the pathing map and the shadow
+ *  map grow together, the pathing map's header holding the new size (4 cells a tile). */
+async function mapSizeUi(page, found) {
+  const fail = (what) => found.push(`map size by the UI: ${what}`);
+  try {
+    const k = await heightKit(page, "MapSizeUi");
+    const { hands } = k;
+    const size = () => {
+      const w3e = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+      const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(w3e) ?? [];
+      const wpm = readFileSync(join(k.root, "map", "war3map.wpm"));
+      return { tiles: [Number(w) - 1, Number(h) - 1], wpm: [wpm.readUInt32LE(8), wpm.readUInt32LE(12)] };
+    };
+    const before = size();
+    if (before.tiles[0] !== 64 || before.wpm[0] !== 256 || before.wpm[1] !== 256) return fail(`a new 64 x 64 map is ${JSON.stringify(before)} (control)`);
+    // The question before a resize is answered "Apply" (put back by the finally).
+    await page.evaluate(`(() => { window.__sizeAsk = w3.window.showWarning; w3.window.showWarning = async () => "Apply"; })()`);
+    await k.tab("Map Size");
+    await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
+    await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[0]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await settled(page);
+    await hands.click(".mapsize-buttons button.primary");
+    const grew = await soon(async () => { await settled(page); const s = size(); return s.tiles[0] * s.tiles[1] > 64 * 64; }, 30000);
+    if (!grew) return fail(`Apply left the map at ${JSON.stringify(size())}`);
+    await settled(page);
+    const after = size();
+    const area = after.tiles[0] * after.tiles[1];
+    if (area !== 96 * 64) fail(`+32 tiles on one side made ${after.tiles.join(" x ")} tiles, wanted 96 x 64 on one of the axes`);
+    if (after.wpm[0] !== after.tiles[0] * 4 || after.wpm[1] !== after.tiles[1] * 4) fail(`the pathing map is ${after.wpm.join(" x ")} cells for ${after.tiles.join(" x ")} tiles`);
+    const shd = readFileSync(join(k.root, "map", "war3map.shd")).length;
+    if (shd !== after.tiles[0] * 4 * after.tiles[1] * 4) fail(`the shadow map has ${shd} cells for ${after.tiles.join(" x ")} tiles`);
+  } finally {
+    await page.evaluate(`(() => { if (window.__sizeAsk) w3.window.showWarning = window.__sizeAsk; window.__sizeAsk = null; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** The Campaign Editor's number field keeps focus (and what was typed) after Ctrl+S, which saves the campaign file. A new
+ *  campaign project stands in for a .w3n: the editor opens a campaign by its project. */
+async function campaignFieldFocus(page, found) {
+  const fail = (what) => found.push(`campaign number field focus: ${what}`);
+  try {
+    const camp = join(work, "campaign-focus");
+    rmSync(camp, { recursive: true, force: true });
+    const hands = new Hands(page);
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Focus Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Focus Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const num = ".camp-editor input.form-num";
+    await until("a number field", () => page.evaluate(`!!document.querySelector(${JSON.stringify(num)})`), 20000);
+    await settled(page);
+    const state = () => page.evaluate(`(() => { const a = document.activeElement; return { num: !!a?.matches?.(".camp-editor input.form-num"), value: a?.value ?? null, dirty: w3.editors.isDirty("map/war3campaign.w3f.json") }; })()`);
+    await hands.click(num);
+    await hands.key("a", "KeyA", 65, 2);
+    await hands.type("7");
+    const typed = await state();
+    if (!typed.num || typed.value !== "7") return fail(`typing into the number field: ${JSON.stringify(typed)} (control)`);
+    if (!typed.dirty) fail("the campaign isn't marked as changed while a number is typed");
+    await hands.key("s", "KeyS", 83, 2);
+    await settled(page);
+    await sleep(500);
+    const after = await state();
+    if (!after.num) fail(`the number field lost focus after Ctrl+S (focus is on ${await page.evaluate(`document.activeElement?.tagName + "." + document.activeElement?.className`)})`);
+    else if (after.value !== "7") fail(`the number field shows ${JSON.stringify(after.value)} after Ctrl+S, not what was typed`);
+    if (after.dirty) fail("the campaign is still marked as changed after Ctrl+S");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
 }
 
 try {
