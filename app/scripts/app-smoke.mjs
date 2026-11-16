@@ -7125,6 +7125,35 @@ async function testMapWithoutGame(page, found) {
   }
 }
 
+/** A line placed right after the map opens (add-path ready): the pieces of a destructable with a pathing texture and a
+ *  fixed rotation (LTlt, 270) are stored at 270° even though place_line comes before anything read the texture. */
+async function addPathReady(page, found) {
+  const fail = (what) => found.push(`add path ready: ${what}`);
+  const tool = mcpTool(page);
+  const dir = join(work, "add-path-ready");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  await page.evaluate(`(() => { window.__addPathKept = w3.window.confirm; w3.window.confirm = async () => true; })()`);
+  try {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+    const root = join(dir, "map");
+    cpSync(FIXTURE, root, { recursive: true });
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    // At once: no wait for the editor to settle, nothing read the types' pathing textures.
+    await tool("place_line", { kind: "doodads", id: "LTlt", from: [-100, 150], to: [360, 150], spacing: 100, facingOffset: 30, ignoreRoom: true });
+    const placed = JSON.parse(await page.evaluate(`(async () => JSON.stringify((await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null))()`)) ?? [];
+    const trees = placed.filter((d) => d.id === "LTlt");
+    if (trees.length < 2) { fail(`only ${trees.length} LTlt placed (control)`); return; }
+    const want = Math.fround((270 * Math.PI) / 180);
+    const wrong = trees.filter((d) => Math.fround(d.angle) !== want);
+    if (wrong.length) fail(`${wrong.length} of ${trees.length} LTlt (fixed rotation 270) stored at ${JSON.stringify(wrong.slice(0, 2).map((d) => d.angle))}, not ${want}`);
+  } finally {
+    await page.evaluate(`(async () => { if (window.__addPathKept) w3.window.confirm = window.__addPathKept; delete window.__addPathKept; await w3.editors.closeAll(); })()`).catch(() => {});
+  }
+}
+
 /** Snap Doodads on Load (terrain.doodads.snapOnLoad, doodadgrid.ts): opening a map in the terrain editor puts its
  *  doodads on their grids as the World Editor does, without marking the map as changed or writing anything; the next
  *  save writes them so. With the setting off nothing moves and the save keeps the stored places. On copies of the mini
@@ -13942,6 +13971,7 @@ async function run() {
       // One check per line, in alphabetical order (check-scripts.mjs keeps it so): branches that add checks then touch
       // different lines and merge without conflicts.
       const onlyChecks = {
+        addPathReady,
         areaLevels,
         artModeReload,
         atmosphereTools,
@@ -14335,6 +14365,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "rebuildCli", found);
   await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
   await leftOpen(page, "cliCheck", found);
+  await addPathReady(page, found).catch((e) => found.push(`add path ready: ${e.message}`));
+  await leftOpen(page, "addPathReady", found);
   await doodadSnapOnLoad(page, found).catch((e) => found.push(`doodad snap on load: ${e.message}`));
   await leftOpen(page, "doodadSnapOnLoad", found);
   await mcpReplaceSnap(page, found).catch((e) => found.push(`mcp replace after snap: ${e.message}`));
