@@ -4974,6 +4974,70 @@ async function resizeLimits(page, found) {
   }
 }
 
+/** Map Size with saves whose shadow update is refused (the doodad's model can't be read: war3map.shd is left as it is):
+ *  the terrain, war3map.shd and war3map.wpm say the same size after the save the resize makes first, after the resize,
+ *  and after a refused save straight after it. */
+async function resizeRefusedShadows(page, found) {
+  const fail = (what) => found.push(`resize refused shadows: ${what}`);
+  await page.evaluate(`(() => { window.__refusedKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; window.__refusedWarned = []; w3.window.confirm = async () => true; w3.window.showWarning = async (m) => { window.__refusedWarned.push(String(m)); return "Apply"; }; })()`);
+  try {
+    const tool = mcpTool(page);
+    const folder = join(work, "resize-refused-shadows");
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "ResizeRefusedShadows", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const read = (f) => readFileSync(join(root, "map", f));
+    const editorUp = async () => {
+      await until("the editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+      await settled(page);
+    };
+    /** The terrain, shadow map and pathing map all say `w` × `h` tiles. */
+    const sizes = (w, h, label) => {
+      const [, cw, ch] = /corners ([0-9]+) ([0-9]+)/.exec(read("war3map.w3e.txt").toString("utf8")) ?? [];
+      if (Number(cw) !== w + 1 || Number(ch) !== h + 1) fail(`${label}: the terrain has ${Number(cw) - 1} × ${Number(ch) - 1} tiles, not ${w} × ${h}`);
+      const shd = read("war3map.shd").length;
+      if (shd !== w * h * 16) fail(`${label}: the shadow map has ${shd} cells, not ${w * h * 16} (${w} × ${h} tiles)`);
+      const wpm = read("war3map.wpm");
+      if (wpm.readUInt32LE(8) !== w * 4 || wpm.readUInt32LE(12) !== h * 4) fail(`${label}: the pathing map is ${wpm.readUInt32LE(8)} × ${wpm.readUInt32LE(12)}, not ${w * 4} × ${h * 4}`);
+    };
+    const takeWarnings = () => page.evaluate(`window.__refusedWarned.splice(0)`);
+    const refusedShadows = async (label) => {
+      const said = await takeWarnings();
+      if (!said.some((m) => /war3map\.shd.*left as it is/.test(m))) fail(`${label}: the shadow update wasn't refused (control): ${JSON.stringify(said)}`);
+    };
+    const save = async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
+    const raise = (left) => tool("sculpt_terrain", { mode: "raise", amount: 256, left, bottom: -256, right: left + 256, top: 256 });
+
+    // A doodad that bakes a shadow (rib bones, shadow=1 in its skin), with a model that isn't there: every save's shadow
+    // update is refused.
+    const id = JSON.parse(await tool("create_object", { kind: "doodads", base: "LOrb" })).id;
+    await tool("set_object_fields", { kind: "doodads", id, changes: [{ field: "dfil", value: "NoSuchShadowModel.mdl" }] });
+    await tool("place_objects", { objects: [{ id, x: 0, y: 0 }] });
+    await raise(-1024);
+    await save();
+    await refusedShadows("the first save");
+    sizes(64, 64, "before the resize");
+
+    // An unsaved edit: the resize saves it first (refused again), then grows the map.
+    await raise(-512);
+    await takeWarnings();
+    await tool("resize_map", { right: 32 });
+    await editorUp();
+    await refusedShadows("the save the resize makes first");
+    sizes(96, 64, "after the resize");
+
+    // The save straight after the resize, refused too.
+    await raise(512);
+    await save();
+    await refusedShadows("the save after the resize");
+    sizes(96, 64, "after the refused save after the resize");
+  } finally {
+    await page.evaluate(`(() => { const k = window.__refusedKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__refusedKept; delete window.__refusedWarned; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
  *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
  *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
@@ -13851,6 +13915,7 @@ async function run() {
         rebuildCli,
         replaceUndoLife,
         resizeLimits,
+        resizeRefusedShadows,
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
@@ -14104,6 +14169,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeUndo", found);
   await resizeLimits(page, found).catch((e) => found.push(`resize limits: ${e.message}`));
   await leftOpen(page, "resizeLimits", found);
+  await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));
+  await leftOpen(page, "resizeRefusedShadows", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety", found);
   await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
