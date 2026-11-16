@@ -1,11 +1,14 @@
 // Makes custom-tilesets-<list>-<flag>.w3x from flat.w3x (Lordaeron Summer; its own list is Ldrt Ldro Ldrg Lrok Lgrs Lgrd):
 //
-//   node tests/fixtures/we-specs/make-custom-tilesets.mjs <w3proj cli> <game folder>
+//   node tests/fixtures/we-specs/make-custom-tilesets.mjs <w3proj cli> <game folder> [name…]
 //
 // The ground is in vertical stripes, one per slot of the file's ground list (stripe x = slot, the last one takes the
 // rest). The list is not the tileset's own one (another order, more or fewer tiles), the w3e flag "custom-tilesets" is
 // 0 or 1: what the World Editor draws with 0 tells which slots it takes from the tileset's default list.
 //   rev6: the six own tiles in reverse order      more9: those and Wsnw Bdsr Ndrt      few3: Lgrs Lrok Ldrt
+//   rev6c: rev6 with the w3e's cliff list the other way round (CLgr CLdi; flat.w3x has CLdi CLgr): which list the
+//          editor's cliff type numbers follow
+// Names given: only those lists are made (the others stay as they are).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,7 +16,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const [cli, game] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
+const only = process.argv.slice(4);
 if (!game) { console.error("usage: make-custom-tilesets.mjs <w3proj cli> <game folder>"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -23,8 +27,12 @@ const LISTS = {
   rev6: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"],
   more9: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt", "Wsnw", "Bdsr", "Ndrt"],
   few3: ["Lgrs", "Lrok", "Ldrt"],
+  rev6c: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"],
 };
+/** The cliff list of the lists that change it. */
+const CLIFFS = { rev6c: ["CLgr", "CLdi"] };
 for (const [name, tiles] of Object.entries(LISTS)) {
+  if (only.length && !only.includes(name)) continue;
   for (const flag of [0, 1]) {
     const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
     try {
@@ -39,6 +47,7 @@ for (const [name, tiles] of Object.entries(LISTS)) {
       };
       set("custom-tilesets ", `custom-tilesets ${flag}`);
       set("ground ", `ground ${tiles.join(" ")}`);
+      if (CLIFFS[name]) set("cliffs ", `cliffs ${CLIFFS[name].join(" ")}`);
       const at = lines.findIndex((l) => l.startsWith("[texture]"));
       const stripe = Math.floor(65 / tiles.length);
       const row = Array.from({ length: 65 }, (_, x) => Math.min(tiles.length - 1, Math.floor(x / stripe)).toString(16)).join("");

@@ -1,0 +1,83 @@
+[
+  {
+    "name": "ct0-minimap-rev6-0",
+    "description": "custom-tilesets 0 with the file's ground list the tileset's own reversed (make-custom-tilesets.mjs, stripes per slot): the editor's saved minimap shows the stripes as the terrain view draws them, with the tileset's own list (Dirt west, Grass east), not the file's (we-drive 2026-11-16, branch tileset0-lists). Studio: minimapgen.ts drawnGroundTiles. HD on both sides (Studio's colours follow game.graphicsMode)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "limit": 20
+  },
+  {
+    "name": "ct0-minimap-rev6-1",
+    "description": "the control: the same list with custom-tilesets 1, the stripes in the file's order (Grass west, Dirt east) in both",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-1.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "limit": 20
+  },
+  {
+    "name": "ct0-minimap-few3-0",
+    "description": "custom-tilesets 0 with a list of 3 (Lgrs Lrok Ldrt): the minimap shows the tileset's first three (Ldrt Ldro Ldrg), as the view",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "limit": 20
+  },
+  {
+    "name": "ct0-minimap-more9-0",
+    "description": "custom-tilesets 0 with a list of 9: slots 6 to 8, past the tileset's six, show its first tile (Ldrt), as the view",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "limit": 20
+  },
+  {
+    "name": "ct0-cliff-grass-rev6-0",
+    "description": "custom-tilesets 0, file ground list the own one reversed, cliff list CLdi CLgr: Decrease One (1441,282), size 1, Grass Cliff (thumb 1409,367) at the map's middle. Which cliff type number the lowered and typed corners get: by the list drawn (Ldrt's CLdi first, Lgrs's CLgr second: 1), the w3e's cliff list (1) or the file's ground list (CLgr first: 0). The editor's save writes the tileset's own list as the file's ground list (header.ground, ignored: a difference of its own). KNOWN DIFFERENCE (2026-11-16, branch tileset0-lists): the editor gives 1, Studio 0; with ct0-cliff-grass-rev6c-0 the editor's numbers follow the w3e's cliff list (cliffs), not the list drawn nor the ground list (Studio's cliffList)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"], "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-dirt-rev6-0",
+    "description": "the same with Dirt Cliff (thumb 1441,367). KNOWN DIFFERENCE: the editor gives 0 (the w3e's cliff list), Studio 1 (the ground list)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1441,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Dirt"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"], "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-grass-rev6c-0",
+    "description": "custom-tilesets 0, the same ground list, the w3e's cliff list the other way round (CLgr CLdi): Grass Cliff by the list drawn is 1, by the w3e's cliff list 0. MATCH (2026-11-16): the editor gives 0, so drawnGroundTiles is not what its cliff type numbers follow",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6c-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"] }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-grass-rev6-1",
+    "description": "custom-tilesets 1, the reversed ground list, cliff list CLdi CLgr: Grass Cliff by the file's ground list is 0 (Studio's cliffList), by the w3e's cliff list or the tileset's order 1. KNOWN DIFFERENCE (2026-11-16): the editor gives 1, with the flag 1 too",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-1.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-grass-rev6c-1",
+    "description": "custom-tilesets 1, the reversed ground list, cliff list CLgr CLdi: Grass Cliff by the file's ground list or the w3e's cliff list is 0, by the tileset's order 1. MATCH (2026-11-16): the editor gives 0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6c-1.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  }
+]
