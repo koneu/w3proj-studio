@@ -27,12 +27,13 @@ import { groundHeight, setGroundHeight, setLayer, type Terrain } from "./w3e";
  *  is put. */
 export const SHORE_LIFT = 35;
 
-/** The World Editor's water brush round one stamp, before the brush's own corners become water: `centre` is the
+/** The World Editor's water brush round one stamp (`enforce`: Enforce Water Height Limits; off, the corners next to the
+ *  water stay on their level and get no 35-unit lift: we-compare water-off-edge-high, 2026-11-16), before the brush's own corners become water: `centre` is the
  *  corner the brush is centred on, `brush` its corners (those about to become water), `size` the brush size,
  *  `square` its shape, `level` the cliff level the stroke started on (the water one or two below it). `touch` is told
  *  of each corner before it changes. The changed corners. */
 export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number>, size: number, square: boolean, level: number,
-  touch: (i: number) => void, chosen?: number): number[] {
+  touch: (i: number) => void, chosen?: number, enforce = true): number[] {
   const W = t.width, H = t.height, cx = centre % W, cy = Math.floor(centre / W);
   const ground = groundHeight(t.corners[centre]), reach = Math.max(1, Math.round(size)) + 1;
   const levelAll = foreignCliffNear(t, cx, cy, reach, chosen);
@@ -51,7 +52,7 @@ export function waterBasin(t: Terrain, centre: number, brush: ReadonlySet<number
       const dx = x - cx, dy = y - cy;
       const flat = square || dx * dx + dy * dy <= reach * reach;
       const shore = !own && byWater(x, y);
-      const to = own ? c.layer : shore ? Math.max(c.layer, level) : levelAll ? level : c.layer;
+      const to = own ? c.layer : shore ? (enforce ? Math.max(c.layer, level) : c.layer) : levelAll ? level : c.layer;
       const h = flat ? (to > c.layer && shore ? ground + SHORE_LIFT : ground) : groundHeight(c);
       if (to === c.layer && h === groundHeight(c)) continue;
       touch(i);

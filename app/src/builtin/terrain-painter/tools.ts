@@ -370,7 +370,7 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
         stroke.touch(t, i);
         if (!moved.has(i)) moved.set(i, t.corners[i].layer);
       };
-      if (waterBasin(t, cy * t.width + cx, brush, b.radius + 1, !!b.square, start, touch, target.cliffType).length) changed = true;
+      if (waterBasin(t, cy * t.width + cx, brush, b.radius + 1, !!b.square, start, touch, target.cliffType, enforceWater).length) changed = true;
     }
   }
   for (const { i } of inside) {
