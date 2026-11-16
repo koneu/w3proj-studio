@@ -14,5 +14,5 @@
     "types": ["vite/client"]
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/headless"]
+  "exclude": ["src/**/*.test.ts", "src/lib/testhelpers", "src/headless"]
 }

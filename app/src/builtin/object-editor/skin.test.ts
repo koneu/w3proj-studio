@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { gameTable } from "../../lib/testhelpers/gamefiles";
 import type { FieldMeta } from "../../lib/objects/metadata";
 import type { EditFile, EditMod, EditObject } from "./objectedit";
 import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withSkin } from "./skin";
@@ -139,30 +140,6 @@ test("which fields belong in the Skin file comes from the metadata's netsafe col
 });
 
 // --- the game's own metadata tables, when the game and the release CLI are here -----------------------------------
-
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-
-/** A game table's rows through the release CLI (`game slk`); null without the game or the CLI. */
-function gameTable(path: string, cols: string): Record<string, string>[] | null {
-  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
-  const repo = git("--show-toplevel"), common = git("--git-common-dir");
-  if (!repo) return null;
-  const main = common ? dirname(resolve(common)) : repo;
-  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
-  const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
-  const gameFile = join(main, ".game-path");
-  // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
-  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
-  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
-  if (!bin) return null;
-  const r = spawnSync(bin, ["game", "slk", path, "--col", cols, ...(game ? ["--install", game] : [])], { encoding: "utf8", maxBuffer: 1 << 26 });
-  if (r.status !== 0) return null;
-  const [head, ...rows] = r.stdout.split(/\r?\n/).filter((l) => l);
-  const names = head.split("\t");
-  return rows.map((l) => Object.fromEntries(l.split("\t").map((v, i) => [names[i], v])));
-}
 
 test("isSkinField on the game's real metadata tables: every netsafe value is understood and the known fields land right", (ctx) => {
   const tables = ["Units/UnitMetaData.slk", "Units/AbilityMetaData.slk", "Units/UpgradeMetaData.slk", "Units/DestructableMetaData.slk", "Units/AbilityBuffMetaData.slk"];
