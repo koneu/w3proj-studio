@@ -1,0 +1,271 @@
+[
+  {
+    "name": "uniform-heights",
+    "description": "test.md 'Terrain edits made as the WE does': Set Uniform Doodad Heights (key Y, nothing asked) on five hay carts on rising ground, three on the ground (flags 2) and two with a height of their own (flags 6, 100 and 300) (make-uniform-heights.mjs). WE: all five box-selected in the Doodads brush, Y. Studio: Select All, w3.terrain.setUniformDoodadHeightsToMean. Every cart gets the selection's mean height and the fixed-height flag in both",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/uniform-heights.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "Num_Lock"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--drag",
+          "170,100:1320,880"
+        ],
+        [
+          "--key",
+          "y"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('w3.terrain.setUniformDoodadHeightsToMean'); await new Promise((r) => setTimeout(r, 1000)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "uniform-heights-reopen",
+    "description": "The same Studio edit, then the editor opens the map Studio saved and saves it again: the editor reads what Studio wrote (the doodads' heights and flags) and writes it back unchanged",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/uniform-heights.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('w3.terrain.setUniformDoodadHeightsToMean'); await new Promise((r) => setTimeout(r, 1000)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "cliff-adjust-plateau-plus1",
+    "description": "Advanced > Adjust Cliff Levels +1 on a map with a level-3 plateau (plateau.w3x): w3e corner by corner, WE against Studio",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "299,206"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--key",
+          "1"
+        ],
+        [
+          "--key",
+          "Return"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "command": "w3.terrain.adjustCliffLevels",
+          "args": 1
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ]
+  },
+  {
+    "name": "cliff-adjust-plateau-minus1",
+    "description": "the same by -1",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "299,206"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--key",
+          "minus"
+        ],
+        [
+          "--key",
+          "1"
+        ],
+        [
+          "--key",
+          "Return"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "command": "w3.terrain.adjustCliffLevels",
+          "args": -1
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ]
+  },
+  {
+    "name": "cliff-adjust-plateau-reopen",
+    "description": "Adjust Cliff Levels +1 in Studio, then the editor opens the map Studio saved and saves it again: the terrain comes back as Studio wrote it",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "command": "w3.terrain.adjustCliffLevels",
+          "args": 1
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ]
+  }
+]
