@@ -46,7 +46,7 @@ patch(8, 20, (i) => ({ ground: -128, wet: true, water: -89.6 + 30 * (i - 8) }));
 for (let i = 60; i <= 64; i++) for (let j = 8; j <= 12; j++) set(i, j, { ground: -128, wet: true });
 
 const X = (i) => -4096 + 128 * i;
-// [id, i, j (corner coordinates, fractions allowed), z, flags]
+// [id, i, j (corner coordinates, fractions allowed), z, flags, life (100), scale ([1, 1, 1])]
 const DOODADS = [
   ["LTlt", 32, 40, 0, 2],
   ["LPfp", 9.3, 10.2, 37.5, 2], ["ZWsw", 10.6, 10.7, 37.5, 2],                       // A
@@ -60,6 +60,11 @@ const DOODADS = [
   ["LPfp", 9.3, 22, 37.5, 2], ["LPfp", 9.7, 22.3, 37.5, 2], ["LPfp", 10.6, 21.4, 37.5, 2], ["ZWsw", 11.4, 23, 37.5, 2], // J
   ["LPfp", 62.9, 10, 37.5, 2], ["ZWsw", 63.3, 10.6, 37.5, 2],                          // H: past 63.5 after the nudge
   ["LPfp", 20, 30, 37.5, 2], ["ZPsh", 22, 30, 37.5, 2],                                // dry ground
+  // Appended (the indices above stay): a non-floating doodad on D's slope (whose ground: the editor's between
+  // corners), life and scale (ZPsh and LPfp 0.8 to 1.2), a fixed one with life 0, a destructable with life 50.
+  ["ZPsh", 32.3, 9.4, 37.5, 2],
+  ["ZPsh", 20, 32, 37.5, 2, 50, [3, 0.2, 1]], ["LPfp", 22, 32, 37.5, 6, 0, [0.5, 1.1, 1.3]],
+  ["LTlt", 36, 40, 37.5, 2, 50],
 ];
 
 /** A section's rows as the text keeps them: the top row (y = 64) first. */
@@ -101,9 +106,9 @@ try {
   writeFileSync(w3e, out.join("\n"));
   const dooFile = join(dir, "map", "war3map.doo.json");
   const doo = JSON.parse(readFileSync(dooFile, "utf8"));
-  doo.doodads = DOODADS.map(([id, i, j, z, flags], k) => ({
-    id, variation: 0, position: [X(i), X(j), z], angle: (270 * Math.PI) / 180, scale: [1, 1, 1], skinId: id,
-    preFlags: 4294967295, flags, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [k, 0, 0], extras: [],
+  doo.doodads = DOODADS.map(([id, i, j, z, flags, life = 100, scale = [1, 1, 1]], k) => ({
+    id, variation: 0, position: [X(i), X(j), z], angle: (270 * Math.PI) / 180, scale, skinId: id,
+    preFlags: 4294967295, flags, life, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [k, 0, 0], extras: [],
   }));
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
