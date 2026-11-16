@@ -1300,6 +1300,73 @@ async function verify3Steps(page, found) {
   }
 }
 
+/** Floating doodads (Doodads.slk floats 1; lily pads, LPfp) stand on the water where there is water, not on its bed,
+ *  however they get there (objheights.ts doodadGround): placed by an AI tool, placed from the palette by a click,
+ *  pasted, and put back by Reset Fixed Object Heights. A tree placed beside them stays on the bed (control). The lake
+ *  (set_water) is cut into flat ground 0: its surface is 8 under that, its middle about 100 deeper. */
+async function floatingDoodads(page, found) {
+  const fail = (what) => found.push(`floating doodads: ${what}`);
+  try {
+    const k = await heightKit(page, "Floating");
+    const SURFACE = -8;
+    const onWater = (d) => Math.abs(d.position[2] - SURFACE) < 0.5;
+    const show = (list) => JSON.stringify(list.map((d) => [d.id, d.position, d.flags]));
+    await k.tool("set_water", { mode: "lake", left: -768, bottom: -768, right: 768, top: 768 });
+    await k.tool("place_objects", { objects: [{ id: "LPfp", x: 0, y: 0 }, { id: "LTlt", x: -256, y: -256 }], ignoreRoom: true });
+    await k.save();
+    const pad = k.doodads().find((d) => d.id === "LPfp"), tree = k.doodads().find((d) => d.id === "LTlt");
+    if (!pad || !tree) return fail(`the placed doodads: ${show(k.doodads())}`);
+    if (!(tree.position[2] < SURFACE - 50)) return fail(`the tree in the lake isn't on its bed (control): ${show([tree])}`);
+    if (!onWater(pad)) fail(`a lily pad placed by place_objects: ${show([pad])}, the water is at ${SURFACE}`);
+    const home = pad.position;
+    const known = new Set(k.doodads().map((d) => JSON.stringify(d.position)));
+    const fresh = () => { const got = k.doodads().filter((d) => !known.has(JSON.stringify(d.position))); for (const d of got) known.add(JSON.stringify(d.position)); return got; };
+
+    // Placed from the palette by a click (Select In Tool Palette takes the selected lily pad's type).
+    await k.tab("Select");
+    await k.look(home[0], home[1], { id: "LPfp", x: home[0], y: home[1] });
+    await k.run("w3.terrain.selectInPalette");
+    if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`);
+    await k.look(256, -256);
+    await k.hands.click(".model-stage canvas");
+    await k.save();
+    const placed = fresh();
+    if (placed.length !== 1 || placed[0].id !== "LPfp" || !onWater(placed[0])) fail(`a lily pad placed by a click: ${show(placed)}, the water is at ${SURFACE}`);
+
+    // Copied and pasted (Preserve Copied Object Height off, the default: the copy takes the ground where it lands).
+    await k.tab("Select");
+    await k.look(home[0], home[1], { id: "LPfp", x: home[0], y: home[1] });
+    await k.focusMap();
+    await k.hands.key("c", "KeyC", 67, 2);
+    await k.look(-256, 256);
+    await k.focusMap();
+    await k.hands.key("v", "KeyV", 86, 2);
+    await k.clickMiddle();
+    await k.hands.key("Escape", "Escape", 27);
+    await k.save();
+    const pasted = fresh();
+    if (pasted.length !== 1 || !onWater(pasted[0])) fail(`a lily pad pasted: ${show(pasted)}, the water is at ${SURFACE}`);
+
+    // Given a height of its own (four PageUp: 64 up, flag 4), then Reset Fixed Object Heights on it.
+    const before = k.doodads().find((d) => d.id === "LPfp" && d.position[0] === home[0] && d.position[1] === home[1]);
+    await k.look(home[0], home[1], { id: "LPfp", x: home[0], y: home[1] });
+    await k.focusMap();
+    for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
+    await k.save();
+    const raised = k.doodads().find((d) => d.id === "LPfp" && d.position[0] === home[0] && d.position[1] === home[1]);
+    if (!before || !raised || Math.abs(raised.position[2] - (before.position[2] + 64)) > 0.5 || !(raised.flags & k.FIXED)) return fail(`the raised lily pad (control): ${show(raised ? [raised] : k.doodads())}`);
+    const why = await k.run("w3.terrain.resetFixedObjectHeights");
+    if (why) return fail(`Reset Fixed Object Heights: ${why}`);
+    await k.save();
+    const reset = k.doodads().find((d) => d.id === "LPfp" && d.position[0] === home[0] && d.position[1] === home[1]);
+    if (!reset || !onWater(reset) || (reset.flags & k.FIXED)) fail(`a lily pad after Reset Fixed Object Heights: ${show(reset ? [reset] : [])}, the water is at ${SURFACE}`);
+    await k.reset();
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** The cycle steps twice a second: two ticks' time, in which the view has seen the clock it has now. */
 const sleepTicks = (page) => sleep(1100);
 
@@ -14411,6 +14478,7 @@ async function run() {
         editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
+        floatingDoodads,
         flyingHeights,
         gameReadsOnce,
         graphicsModes,
@@ -14859,6 +14927,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importListWriteFail", found);
   await startGoldPalette(page, found).catch((e) => found.push(`start gold by the palette: ${e.message}`));
   await leftOpen(page, "startGoldPalette", found);
+  await floatingDoodads(page, found).catch((e) => found.push(`floating doodads: ${e.message}`));
+  await leftOpen(page, "floatingDoodads", found);
   await mapSizeUi(page, found).catch((e) => found.push(`map size by the UI: ${e.message}`));
   await leftOpen(page, "mapSizeUi", found);
   await campaignFieldFocus(page, found).catch((e) => found.push(`campaign number field focus: ${e.message}`));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { drawnGroundTiles, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
@@ -206,6 +206,22 @@ test("objects near the change follow the ground, except doodads with a fixed hei
   const unit = { position: [1024, 1024, 0], flags: 6 };
   assert.equal(followGround([unit], t, changed, false), 1, "the flag is a doodad's");
   assert.equal(followGround([on], t, [], true), 0);
+});
+
+test("a floating doodad follows the edited ground onto the water, a plain one onto the bed", () => {
+  const t = field();
+  const changed = setWater(t, hill, "ellipse", "lake", []);
+  const pad = { id: "ZPlp", position: [1024, 1024, 0] }, plant = { id: "ZPfw", position: [1024, 1024, 0] };
+  const floats = (id: string) => id === "ZPlp";
+  assert.equal(followGround([pad, plant], t, changed, true, floats), 2);
+  const water = floatingLevelAt(t, 1024, 1024);
+  assert.ok(water !== null && water > heightAt(t, 1024, 1024), "the lake has water over its bed there");
+  assert.equal(pad.position[2], water, "on the water");
+  assert.equal(plant.position[2], heightAt(t, 1024, 1024), "on the bed");
+  // Units never float by this rule, whatever their id.
+  const unit = { id: "ZPlp", position: [1024, 1024, 0] };
+  followGround([unit], t, changed, false, floats);
+  assert.equal(unit.position[2], heightAt(t, 1024, 1024));
 });
 
 test("the height grid has north first and stays small", () => {

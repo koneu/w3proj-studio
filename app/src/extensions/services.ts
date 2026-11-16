@@ -307,6 +307,8 @@ export interface TerrainObjectType {
   fixedRot: number | null;
   /** A unit type's movement type (UnitData.slk `movetp`: "foot", "fly", "float", …); absent for other kinds. */
   moveType?: string;
+  /** A doodad type that stands on the water where there is water (Doodads.slk `floats`); absent otherwise. */
+  floats?: boolean;
 }
 
 export interface TerrainObjects {

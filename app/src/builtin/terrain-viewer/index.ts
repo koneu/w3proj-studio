@@ -515,7 +515,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const path = projectTerrain(w3);
     if (!path) throw new Error("This project has no war3map.w3e.");
     if (!isTerrainText(path)) throw new Error("This project keeps its terrain raw, so it can't be edited here.");
-    await liveEditor();
+    const { handle } = await liveEditor();
+    // Floating doodads (lily pads, …) follow onto the water where there is water, as the terrain editor puts them.
+    const floats = (id: string) => !!handle.objects.type(id)?.floats;
     const own = await ownGroundLists();
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
     const states = { before: null as { terrain: Terrain; doodads: Placed[] } | null, after: null as { terrain: Terrain; doodads: Placed[] } | null };
@@ -542,7 +544,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const parsed = JSON.parse(doc) as Record<string, Placed[]>;
         const list = parsed[key] ?? [];
         if (key === "doodads") states.before.doodads = structuredClone(list);
-        const count = followGround(list, terrain, touched, key === "doodads");
+        const count = followGround(list, terrain, touched, key === "doodads", floats);
         if (key === "doodads") states.after.doodads = list;
         moved += count;
         if (count) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
@@ -653,9 +655,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random, startGold = DEFAULT_START_GOLD) => {
     // At the height the World Editor saves it with: a ship in water on the surface, anything else (doodads have no
-    // movement type) on the ground.
+    // movement type) on the ground, a floating doodad on the water where there is water.
     const type = handle.objects.type(id);
-    const z = savedUnitZ(type?.moveType, heightAt(handle.terrain, x, y), waterSurfaceAt(handle.terrain, x, y));
+    const z = savedUnitZ(type?.moveType, doodadGround(handle.terrain, x, y, !!type?.floats), waterSurfaceAt(handle.terrain, x, y));
     const entry = newEntry(f, id, [x, y, z], player, type?.kind, startGold);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
@@ -1217,7 +1219,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await editPlaced(`Move ${String(id)}`, key, async (f) => {
         const e = f.list[Number(index)];
         if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
-        e.position = [gx, gy, heightAt(handle.terrain, gx, gy)];
+        e.position = [gx, gy, doodadGround(handle.terrain, gx, gy, key === "doodads" && !!handle.objects.type(e.id)?.floats)];
         if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
         if (typeof scale === "number") e.scale = [scale, scale, scale];
         // A doodad goes on its grid and keeps to its scale range, as the World Editor puts it (doodadedit.ts).
@@ -1892,7 +1894,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const follow = groundFollowers(st.corners);
           const setZ = (z: number[]) => follow.forEach((p, i) => { p.position = [p.position[0], p.position[1], z[i]]; });
           const zBefore = follow.map((p) => p.position[2]);
-          const zAfter = follow.map((p) => heightAt(terrain, p.position[0], p.position[1]));
+          const zAfter = follow.map((p) => groundFor(p.id, p.position[0], p.position[1]));
           const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
           pushEdit({
             undo: () => { st.undo(); if (moved) setZ(zBefore); },
@@ -2792,6 +2794,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const skinById = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
         const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
+        /** Whether type `id` is a doodad that stands on the water where there is water (Skin.floats: lily pads, …). */
+        const floatsType = (id: string) => { const s = skinById(id); return s?.kind === "w3d" && !!s.floats; };
+        /** The height an object of type `id` without a height of its own stands at, x, y: the water's level for a
+         *  floating doodad over water (objheights.ts doodadGround), otherwise the ground. */
+        const groundFor = (id: string, x: number, y: number) => doodadGround(terrain, x, y, floatsType(id));
         /** A destructable type's fixed rotation (degrees; the map's bfxr on top), which the World Editor turns its
          *  destructables to; null for none and for doodads, whose own it doesn't enforce (doodadgrid.ts). */
         const destructableFixedRot = (id: string): number | null => { const s = skinById(id); return s?.kind === "w3b" ? s.fixedRot : null; };
@@ -2816,7 +2823,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rules = doodadRules();
           let changed = false;
           for (const p of entries) {
-            if (!isDoodadType(p.id) || !settleDoodad(p as Placed & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what)) continue;
+            if (!isDoodadType(p.id) || !settleDoodad(p as Placed & { flags?: number }, rules, (x, y) => groundFor(p.id, x, y), what)) continue;
             changed = true;
             if (what.place) repositioned.add(p);
           }
@@ -2915,7 +2922,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const setPlacement = (entry: Placed, wanted: [number, number, number], angle: number, flags?: number) => {
           const inst = findInstance(entry);
           const [gx, gy] = onGrid(entry.id, wanted[0], wanted[1]);
-          const position: [number, number, number] = gx === wanted[0] && gy === wanted[1] ? wanted : [gx, gy, heightAt(terrain, gx, gy)];
+          const position: [number, number, number] = gx === wanted[0] && gy === wanted[1] ? wanted : [gx, gy, groundFor(entry.id, gx, gy)];
           const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1];
           if (dx || dy) {
             repositioned.add(entry);
@@ -3286,8 +3293,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  objheights.ts doodadGround). */
         const landed = (from: Pose, x: number, y: number, id: string): { position: [number, number, number]; flags: number | undefined } => {
           const moved = x !== from.position[0] || y !== from.position[1];
-          const floats = skinById(id)?.kind === "w3d" && !!skinById(id)?.floats;
-          const r = movedHeight({ position: from.position, flags: from.flags }, doodadGround(terrain, x, y, floats), moved, resetFixedOn());
+          const r = movedHeight({ position: from.position, flags: from.flags }, groundFor(id, x, y), moved, resetFixedOn());
           return { position: [x, y, r.z], flags: r.flags };
         };
         /** The World Editor's keys for the selection. Height and size are for doodads and destructables. */
@@ -3348,7 +3354,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             else if (p.variation !== undefined && before[i].variation !== undefined) p.variation = variationAfter(before[i].variation as number, numVar(p.id));
             // A building of another size has another spot on the grid.
             const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
-            if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
+            if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, groundFor(p.id, x, y)]; repositioned.add(p); }
           });
           // A doodad of another texture size has another grid, facing and scale range (as place and move do).
           settleDoodads(swapped, { place: true, scale: true });
@@ -3415,7 +3421,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
             const steps = history.length, atBefore = at;
-            applyMass(doodads, (p) => resetFixedHeight({ position: p.position, flags: flagsOf(p) }, heightAt(terrain, p.position[0], p.position[1])));
+            applyMass(doodads, (p) => resetFixedHeight({ position: p.position, flags: flagsOf(p) }, groundFor(p.id, p.position[0], p.position[1])));
             return history.length === steps && at === atBefore ? "None of the selected doodads has a fixed height." : null;
           },
         };
@@ -3603,7 +3609,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [at.x, at.y];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const ground = heightAt(terrain, x, y);
-          if (o.list === "doodads") return [x, y, pastedHeight(ground, o.z ?? ground + o.at[2], preserveHeight())];
+          if (o.list === "doodads") {
+            // A floating doodad's ground is the water where there is water (objheights.ts doodadGround).
+            const own = groundFor(String(o.entry.id), x, y);
+            return [x, y, pastedHeight(own, o.z ?? ground + o.at[2], preserveHeight())];
+          }
           // A unit stands on the ground (the World Editor writes its height from the ground on save).
           const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0;
           return [x, y, fixed && preserveHeight() ? ground + o.at[2] : ground];
@@ -4119,7 +4129,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   const k = sk.minScale + Math.random() * (sk.maxScale - sk.minScale);
                   return { scale: [k, k, k] };
                 })),
-                quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], heightAt(terrain, p.position[0], p.position[1])] }))),
+                quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], groundFor(p.id, p.position[0], p.position[1])] }))),
                 h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
               h("div.muted", {}, `Drag one to move all · [ ] turn each · ${faceKey()} face point · Del delete · Ctrl+click adds/removes · Shift+box adds`),
             ] : []),
@@ -4473,7 +4483,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // A destructable whose type has no pathing texture isn't turned to its fixed rotation by the World Editor
               // (placed: any angle, as a doodad; moved: it stays; doodad-turn-we spec): none, and none while the texture is unread (a path that skipped ready).
               const fixedRot = skin ? presetFixedRot(skin.kind, skin.fixedRot, doodadCells.get(id)) : null;
-              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}), ...(skin.kind === "w3d" && skin.floats ? { floats: true } : {}) } : null;
             },
             ready: async (id) => { if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* its type stays as it is */ }); },
             create: (kind, id, at) => {
@@ -4481,7 +4491,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
               // A ship in water on the surface, as the World Editor saves it; anything else on the ground.
               const moveType = kind === "w3u" ? (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.moveType : undefined;
-              const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
+              const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, kind === "w3d" ? groundFor(id, at.x, at.y) : heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
               entry.angle = at.angle;
               repositioned.add(entry);
               entryFile.set(entry, f);
@@ -4510,7 +4520,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             settleDoodads: async (entries, what) => {
               await Promise.all([...new Set(entries.map((e) => e.id))].filter(isDoodadType).map((id) => loadDoodadCells(id).catch(() => { /* stays where it is put */ })));
               const rules = doodadRules();
-              for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => heightAt(terrain, x, y), what);
+              for (const e of entries) if (isDoodadType(e.id)) settleDoodad(e as typeof e & { flags?: number }, rules, (x, y) => groundFor(e.id, x, y), what);
             },
             openRules: (entries) => openRules(entries as Placed[]),
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
@@ -4539,7 +4549,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const skin = objCtx?.skins.get(shown) ?? objCtx?.skins.get(objCtx.bases.get(shown) ?? "");
               if (!skin) { renderer.ghost = null; redraw(); return; }
               const req = ghostReq;
-              const entry = { id: shown, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
+              const entry = { id: shown, variation: g.variation ?? 0, position: [g.x, g.y, groundFor(shown, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
               void loader.modelFor(skin, entry.variation).then((gpu) => {
                 if (req !== ghostReq) return;
                 renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType, skin), scaleRange(skin)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };

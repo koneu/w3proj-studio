@@ -9,6 +9,7 @@ import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
+import { doodadGround } from "./objheights";
 import { paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
@@ -538,11 +539,12 @@ function refuseGroundPast(heights: Iterable<number>) {
   if (past) throw new Error(groundLimitText(past));
 }
 
-interface Follower { position: number[]; flags?: number }
+interface Follower { id?: string; position: number[]; flags?: number }
 
 /** Puts objects near changed corners back on the ground, as the terrain editor does: all units and
- *  items, and doodads unless they have a fixed height (flag 4). How many moved. */
-export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean) {
+ *  items, and doodads unless they have a fixed height (flag 4); a doodad of a type `floats` names goes on the water
+ *  where there is water (objheights.ts doodadGround). How many moved. */
+export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean, floats: (id: string) => boolean = () => false) {
   if (!corners.length) return 0;
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const i of corners) {
@@ -554,7 +556,7 @@ export function followGround(list: Follower[], t: Terrain, corners: number[], do
   let moved = 0;
   for (const p of list) {
     if ((doodads && (p.flags ?? 0) & 4) || !inArea(p.position[0], p.position[1], near)) continue;
-    const z = heightAt(t, p.position[0], p.position[1]);
+    const z = doodadGround(t, p.position[0], p.position[1], doodads && p.id !== undefined && floats(p.id));
     if (Math.abs(z - p.position[2]) > 0.01) { p.position = [p.position[0], p.position[1], z]; moved++; }
   }
   return moved;
