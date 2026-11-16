@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CAMERA_FIELDS, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -170,8 +172,9 @@ test("typedCameraValue: a value war3map.w3c's float can't hold is refused for ev
       assert.ok(got.refused.startsWith(`${title} must be a number`), got.refused);
       assert.deepEqual(cams, before, `${key} = ${typed} changed a camera`);
     }
-    // Controls: the float's ends and a plain value go through, for the cameras whose value they change.
-    for (const typed of ["3.4028234663852886e38", "-3.4028234663852886e38", "128"]) {
+    // Controls: a plain value goes through (and the float's ends where the field has no narrower range), for the cameras whose value it changes.
+    const ends = CAMERA_RANGES[key] ? [] : ["3.4028234663852886e38", "-3.4028234663852886e38"];
+    for (const typed of [...ends, key === "farZ" ? "6000" : "100"]) {
       const got = typedCameraValue(cams, cams, key, typed);
       assert.ok(!("refused" in got), `${key} = ${typed} was refused (control)`);
       assert.equal(got.value, Number(typed));
@@ -184,4 +187,66 @@ test("typedCameraValue: a value war3map.w3c's float can't hold is refused for ev
   const [a, b] = [camera(), camera()];
   const got = typedCameraValue([a], [a, b], "distance", "2000");
   assert.ok(!("refused" in got) && got.changing.length === 1 && got.changing[0] === a);
+});
+
+test("typedCameraValue: what the World Editor's Camera Properties would move (we-drive 2026-11-16) is refused, its own limits go through", () => {
+  const camera = () => ({ targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70,
+    farZ: 5000, nearZ: 100 });
+  const refused = (key: CameraField, typed: string, c = camera()) => {
+    const got = typedCameraValue([c], [c], key, typed);
+    assert.ok("refused" in got, `${key} = ${typed} was taken`);
+    return got.refused;
+  };
+  const taken = (key: CameraField, typed: string, c = camera()) => {
+    const got = typedCameraValue([c], [c], key, typed);
+    assert.ok(!("refused" in got), `${key} = ${typed} was refused: ${"refused" in got ? got.refused : ""}`);
+    assert.equal(got.value, Number(typed));
+  };
+  // [field, the refused values (editor's results), the accepted ones (the ends, and a value inside)]
+  const table: [CameraField, string[], string[]][] = [
+    ["distance", ["0", "-100", "0.3", "0.49", "100000.5", "1000000"], ["0.5", "1", "100000"]],
+    ["rotation", ["-50", "-0.5", "360.5", "400"], ["0", "90", "360"]],
+    ["angleOfAttack", ["-100", "360.5", "500"], ["0", "304", "360"]],
+    ["roll", ["-1", "360.5", "500"], ["0", "180", "360"]],
+    ["fieldOfView", ["0", "4.5", "120.5", "180", "200"], ["5", "70", "119.9", "120"]],
+    ["zOffset", ["-4096.5", "4097", "10000000", "-10000000"], ["-4096", "-300", "4096"]],
+    ["nearZ", ["-5", "9500.5", "10000000", "4999.5", "5000", "6000"], ["0", "0.5", "4999", "100"]],
+    ["farZ", ["0", "1", "10", "50", "-50", "100.5", "100", "100000.5", "10000000"], ["101", "5000", "100000"]],
+  ];
+  for (const [key, bad, good] of table) {
+    for (const typed of bad) refused(key, typed);
+    for (const typed of good) taken(key, typed);
+  }
+  // The gap between near and far: far 150 with near 149 and near 100 with far 101 stay, a gap under 1 doesn't.
+  taken("farZ", "150", { ...camera(), nearZ: 149 });
+  refused("farZ", "150", { ...camera(), nearZ: 149.5 });
+  taken("nearZ", "4999", camera());
+  assert.match(refused("nearZ", "5000"), /below the far clipping \(5000\)/);
+  assert.match(refused("farZ", "101", { ...camera(), nearZ: 100.5 }), /above the near clipping \(100.5\)/);
+  assert.match(refused("distance", "0"), /must be from 0\.5 to 100000\./);
+  // A camera that already holds an out-of-range value keeps it: typing its own value is no change, no refusal.
+  const odd = { ...camera(), distance: 0, fieldOfView: 200 };
+  const same = typedCameraValue([odd], [odd], "distance", "0");
+  assert.ok(!("refused" in same) && same.changing.length === 0);
+});
+
+test("typedCameraValue agrees with every Camera Properties value recorded from the World Editor (camera-region-limits-we.json)", () => {
+  // Found from where the tests run (app/ or the repository).
+  let file = "";
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    file = join(dir, "tests", "fixtures", "we-specs", "camera-region-limits-we.json");
+    if (existsSync(file)) break;
+    if (dirname(dir) === dir) throw new Error("tests/fixtures/we-specs/camera-region-limits-we.json not found");
+  }
+  const rec = JSON.parse(readFileSync(file, "utf8")) as { cameras: { field: CameraField; typed: number; we: number; moved?: boolean }[] };
+  assert.ok(rec.cameras.length > 30);
+  let kept = 0, changed = 0;
+  for (const row of rec.cameras) {
+    const c = { targetX: 0, targetY: 0, zOffset: 1, rotation: 91, angleOfAttack: 305, distance: 1650, roll: 1, fieldOfView: 71, farZ: 5000, nearZ: 100 };
+    const got = typedCameraValue([c], [c], row.field, String(row.typed));
+    const editorKept = row.we === row.typed && !row.moved;
+    if (editorKept) { kept++; assert.ok(!("refused" in got), `${row.field} = ${row.typed}: the editor kept it, Studio refused: ${"refused" in got ? got.refused : ""}`); }
+    else { changed++; assert.ok("refused" in got, `${row.field} = ${row.typed}: the editor changed it (to ${row.we}), Studio took it`); }
+  }
+  assert.ok(kept >= 10 && changed >= 15, `${kept} kept, ${changed} changed`);
 });

@@ -620,6 +620,12 @@ async function atmosphereTools(page, found) {
   const past = await tool("add_region", { name: "Huge", left: 0, bottom: 0, right: 1e39, top: 512 }).then(() => "added", (e) => e.message);
   if (!/32-bit float/.test(past)) fail(`add_region with right 1e39 wasn't refused with why: ${past}`);
   if (await edits() !== editsBefore) fail("the refused add_region made an edit");
+  // A region outside the map is refused too, wholly or across an edge (regionBoxProblem, we-drive 2026-11-16: the editor makes none).
+  for (const box of [{ left: 1e6, bottom: 0, right: 2e6, top: 512 }, { left: 0, bottom: 0, right: 1e6, top: 512 }]) {
+    const out = await tool("add_region", { name: "Outside", ...box }).then(() => "added", (e) => e.message);
+    if (!/inside the map/.test(out)) fail(`add_region ${JSON.stringify(box)} wasn't refused for the map: ${out}`);
+  }
+  if (await edits() !== editsBefore) fail("the add_region outside the map made an edit");
   await tool("save_project");
   if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused add_region changed war3map.w3r.json");
   // The same on the Regions tab: Storm's Right edge typed as 1e39 is refused with why, the field marked, no edit.
@@ -633,6 +639,10 @@ async function atmosphereTools(page, found) {
   await settled(page);
   const said = await page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
   if (typed !== "marked" || !/Not changed: Right must be a number/.test(said)) fail(`Right typed as 1e39 on the Regions tab: ${typed}, said "${said}"`);
+  const outside = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-right"); i.classList.remove("invalid"); i.value = "1000000"; i.dispatchEvent(new Event("change", { bubbles: true })); return i.classList.contains("invalid") ? "marked" : "not marked"; })()`);
+  await settled(page);
+  const saidOut = await page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  if (outside !== "marked" || !/Not changed: Right: a region must lie inside the map/.test(saidOut)) fail(`Right typed past the map on the Regions tab: ${outside}, said "${saidOut}"`);
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused Right edge left unsaved changes");
   await tool("save_project");
   if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
@@ -4105,6 +4115,24 @@ async function cameraEditing(page, found) {
   if (await dirty()) fail("the refused distance left unsaved changes");
   await k.save();
   if (JSON.stringify(cameras()) !== keptCams) fail(`the refused distance changed the cameras: ${JSON.stringify(cameras().map((c) => c.distance))}`);
+  // What the World Editor's Camera Properties would move is refused too (lib/terrain/cameras.ts CAMERA_RANGES, we-drive 2026-11-16).
+  for (const [label, typed, why] of [["Dist", "0", /must be from 0\.5 to 100000\./], ["FoV", "200", /must be from 5 to 120\./], ["Far", "50", /must be from 101 to 100000\./]]) {
+    await k.clearToasts();
+    await type(label, typed, "change");
+    await settled(page);
+    if (!why.test(await k.toasts())) fail(`${label} ${typed} wasn't refused with why: ${await k.toasts()}`);
+    if (await dirty()) fail(`the refused ${label} ${typed} left unsaved changes`);
+    await k.save();
+    if (JSON.stringify(cameras()) !== keptCams) fail(`the refused ${label} ${typed} changed the cameras`);
+  }
+  // Control: the editor's own end (distance 0.5) goes through, and one undo takes it back.
+  await type("Dist", "0.5", "change");
+  await settled(page);
+  await k.save();
+  if (cameras().some((c) => c.distance !== 0.5)) fail(`a distance of 0.5 wasn't taken: ${JSON.stringify(cameras().map((c) => c.distance))}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (JSON.stringify(cameras()) !== keptCams) fail("the undo didn't bring back the distance");
 
   // Duplicate the two (still selected after the undo): two copies with new names, one step.
   if ((await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`)) !== "2 cameras") fail("the undo didn't keep the two cameras selected");
