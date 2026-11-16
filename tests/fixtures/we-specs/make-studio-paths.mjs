@@ -14,10 +14,12 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
+import { requireFresh } from "../../binfresh.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const main = mainCheckout();
 const cli = join(main, "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const src = join(main, "smoketest_maps", "blizzard", "(2)EchoIsles_S2_v2.2.w3x");
 const out = join(repo, "target", "studio-paths");
 const env = { ...process.env, W3PROJ_GAME: chosenGamePath() };

@@ -9,8 +9,10 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { requireFresh } from "../../binfresh.mjs";
 
 const [xMap, cli, game, outDir] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!outDir) { console.error("usage: make-doodad-inputs.mjs <X.w3x> <w3proj cli> <game folder> <out folder>"); process.exit(2); }
 mkdirSync(outDir, { recursive: true });
 const run = (...args) => {

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addLookCameras, parseLook, resolveLook, terrainHead } from "../../../app/scripts/we-camera.mjs";
+import { requireFresh } from "../../binfresh.mjs";
 
 export const OFFSETS = [30, 45, 60, 80, 100, 130];
 export const DIRS = { E: [1, 0], W: [-1, 0], N: [0, 1], S: [0, -1] };
@@ -114,6 +115,7 @@ export function buildSpec() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [base, cli, out, specOut] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+  requireFresh(cli, "cli");
   if (!out) { console.error("usage: make-doodad-pick-input.mjs <base map> <w3proj cli> <out.w3m> [<spec.json>]"); process.exit(2); }
   const run = (...args) => {
     const r = spawnSync(cli, args, { encoding: "utf8" });

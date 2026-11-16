@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
+import { checkFresh, staleAllowed } from "../../tests/binfresh.mjs";
 
 export const LINUX = process.platform === "linux";
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,7 +52,7 @@ export function buildApp(id, work, appDir = app) {
 /** The release CLI, built if it isn't there (and W3PROJ_BIN doesn't name another). */
 export function ensureCli() {
   const cli = cliPath();
-  if (existsSync(cli)) return cli;
+  if (existsSync(cli)) return checkFresh(cli, { kind: "cli", allowStale: staleAllowed() });
   if (process.env.W3PROJ_BIN) throw new Error(`no w3proj at W3PROJ_BIN=${cli}`);
   const r = spawnSync("cargo", ["build", "--release", "-p", "w3proj-cli", "--quiet"], { cwd: repo, stdio: ["ignore", process.stderr, process.stderr] });
   if (r.status !== 0 || !existsSync(cli)) throw new Error("building the w3proj CLI failed");
@@ -74,6 +75,8 @@ function freePort() {
 export async function startApp({ id, work, game, settings = {}, env = {} }) {
   const exe = appExe();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: build it first`);
+  // A prebuilt app (W3_APP_BIN) can be of any age; the one built here is rebuilt by buildApp.
+  if (prebuilt()) checkFresh(exe, { kind: "app", allowStale: staleAllowed() });
   // Settings in the run's own folder (W3PROJ_CONFIG_DIR, else under `work`) and the webview's storage too (Linux), so
   // two runs of one build, or of a prebuilt one, never share them.
   const dir = process.env.W3PROJ_CONFIG_DIR ? resolve(process.env.W3PROJ_CONFIG_DIR) : join(work, "config");

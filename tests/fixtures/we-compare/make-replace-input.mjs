@@ -8,8 +8,10 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { requireFresh } from "../../binfresh.mjs";
 
 const [empty, cli, out] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!out) { console.error("usage: make-replace-input.mjs <empty map> <w3proj cli> <out.w3m>"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });

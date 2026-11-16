@@ -11,9 +11,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 // "more" as the third argument makes doodad-snap-custom-more.w3x: other textures and fixed rotations (below)
 const more = process.argv[4] === "more";
 // "tex": doodad-snap-custom-tex.w3x: doodads whose pathing texture is a file of the map's own (Custom/own-*.tga), square
