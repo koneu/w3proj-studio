@@ -1,22 +1,19 @@
-// Groups of placed things that stand close together: each member is within `gap` of another member of its group
-// (single linkage), as creeps make up a camp. Used by the melee check's camps and the Item Drops overview.
+// Creep camps as the World Editor groups them. Measured: pairs up to 828 apart make one camp, 832 and more two
+// (CreepCampPathingCellDistance = 26 cells of 32 = 832). Not transitive: a creep joins a camp by its distance to
+// the camp's icon creep, not to any member. Used by the melee check, the Item Drops overview and the camp count.
+// Not measured: diagonals (taken as straight distance) and which creep carries the icon when several would
+// (taken as the first one in order).
 
-/** The items in groups, in the order they were given (a group's first member is its first item). */
-export function clusterNear<T>(items: readonly T[], at: (item: T) => readonly [number, number], gap: number): T[][] {
-  const left = new Set(items);
+/** Creeps closer than this to a camp's icon creep belong to the camp. */
+export const SAME_CAMP = 832;
+
+/** The items in camps, in the order they were given (a camp's first member is its icon creep). */
+export function campGroups<T>(items: readonly T[], at: (item: T) => readonly [number, number]): T[][] {
   const out: T[][] = [];
-  for (const first of items) {
-    if (!left.has(first)) continue;
-    left.delete(first);
-    const group = [first];
-    for (let i = 0; i < group.length; i++) {
-      const [x, y] = at(group[i]);
-      for (const other of left) {
-        const [ox, oy] = at(other);
-        if (Math.hypot(ox - x, oy - y) < gap) { group.push(other); left.delete(other); }
-      }
-    }
-    out.push(group);
+  for (const item of items) {
+    const [x, y] = at(item);
+    const home = out.find((g) => { const [gx, gy] = at(g[0]); return Math.hypot(x - gx, y - gy) < SAME_CAMP; });
+    if (home) home.push(item); else out.push([item]);
   }
   return out;
 }

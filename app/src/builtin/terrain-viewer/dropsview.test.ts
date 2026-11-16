@@ -78,10 +78,10 @@ test("creeps standing together make a camp; others go by owner", () => {
   assert.match(camps[0].detail, /^3 objects · 1 drop · at 3751, 3731$/);
   assert.match(camps[2].detail, /^2 creeps · 1 drop/);
   assert.deepEqual(camps[3].rows.map((r) => r.entry), [mine]);
-  // Two creeps just over the camp distance apart are two camps; just under, one.
+  // Two creeps from 832 apart are two camps; 828, one.
   const near = (gap: number) => groupDroppers([row(unit("nftt", 0, 0, 24)), row(unit("nftt", gap, 0, 24))], "camp", names).length;
-  assert.equal(near(449), 1);
-  assert.equal(near(451), 2);
+  assert.equal(near(828), 1);
+  assert.equal(near(832), 2);
 });
 
 test("a camp's level: its creeps' levels added up, in the game minimap's bands", () => {
