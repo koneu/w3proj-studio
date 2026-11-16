@@ -4,6 +4,7 @@
 // person closed stays closed.
 
 import type { W3Api } from "../../extensions/api";
+import { errorText, isNotFoundError } from "../../lib/oserror";
 import type { TerrainToolGroup } from "../../extensions/services";
 import { parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes } from "../../lib/terrain/w3etext";
@@ -27,6 +28,26 @@ export async function editMapDoc(w3: W3Api, name: string, change: (d: Record<str
   if (change(d) === false) return;
   if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
   else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
+}
+
+/** Why a map file `editMapDoc` would edit can't be read: it is in the project (as `map/<name>.json` or raw) but its
+ *  text can't be read, parsed or decoded. Null when it reads, and when it is absent (editMapDoc skips that). A step
+ *  that must change every such file (a resize) asks first: editMapDoc on its own skips an unreadable file as absent. */
+export async function mapDocProblem(w3: W3Api, name: string): Promise<string | null> {
+  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const path = `map/${name}`, root = w3.workspace.project()?.root;
+  try {
+    if (files.has(`${path}.json`.toLowerCase())) JSON.parse(await w3.workspace.readText(`${path}.json`));
+    else if (files.has(path.toLowerCase()) && root) JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path }));
+    return null;
+  } catch (e) {
+    return `${name} can't be read (${errorText(e)})`;
+  }
+}
+
+/** Why the shadow map (war3map.shd) can't be read; null when it reads or is absent. */
+export async function shadowFileProblem(w3: W3Api): Promise<string | null> {
+  return w3.workspace.readBytes("map/war3map.shd").then(() => null, (e) => (isNotFoundError(e) ? null : `war3map.shd can't be read (${errorText(e)})`));
 }
 
 /** The minimap icons (war3map.mmp) of the placed units on a terrain, written only when they

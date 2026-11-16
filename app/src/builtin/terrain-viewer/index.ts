@@ -3,7 +3,7 @@ import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
-import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { deriveFromProject, editMapDoc, fullShadows, mapDocProblem, shadowFileProblem, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
 import { importOr, mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
@@ -4295,12 +4295,37 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
         const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
+        /** The files a resize rewrites that are in the project but can't be read (absent ones are fine). */
+        const resizeReadProblems = async (): Promise<string[]> => {
+          const out: string[] = [];
+          // The placed objects are what the resize writes the doodad and unit files from: none loaded while the file is
+          // there means it couldn't be read when the editor opened.
+          if (projectObjects) {
+            await firstLoad.catch(() => {});
+            const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+            for (const [f, name] of [[dooFile, "war3map.doo"], [unitsFile, "war3mapUnits.doo"]] as const) {
+              const lower = `map/${name}`.toLowerCase();
+              if (!f && (files.has(lower) || files.has(`${lower}.json`))) out.push(`${name} couldn't be read when the terrain editor opened`);
+            }
+          }
+          for (const name of ["war3map.w3i", "war3map.w3r"]) {
+            const p = await mapDocProblem(w3, name);
+            if (p) out.push(p);
+          }
+          const shd = await shadowFileProblem(w3);
+          if (shd) out.push(shd);
+          return out;
+        };
         const resizeLocked = async (asked: Sides, askedBorder: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
           // Growth past the coordinate limit moves the playable edge instead (limitResize).
           const { change, complements } = limitResize(terrain, asked, askedBorder);
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
+          // A file the resize must rewrite that is there but can't be read would be left at the old size (a half-resized
+          // map): refused before anything is written. An absent one is skipped, as always.
+          const unread = await resizeReadProblems();
+          if (unread.length) throw new Error(`The map wasn't resized: ${unread.join("; ")}. Nothing was changed.`);
           // The messages already on screen: an undo withdraws only those the resize brought.
           const shownBefore = new Set<unknown>(document.querySelectorAll(".toast"));
           // Work still due from the last edit (pathing, shadows, minimap, script) is done first: it would land on the new files otherwise.
@@ -4425,7 +4450,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             d.regions = list.filter((r) => r.right > r.left && r.top > r.bottom);
           });
-          const shd = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
+          // Absent: none is made here. Unreadable since the check before the resize: it fails, and the files go back.
+          const shd = await w3.workspace.readBytes("map/war3map.shd").catch((e) => { if (isNotFoundError(e)) return null; throw e; });
           if (shd) await w3.workspace.writeBytes("map/war3map.shd", resizeGrid(shd, terrain, change, 4));
           // Pathing and minimap from the new terrain. Pathing Editor overrides are by cell: they move
           // with the ground (cells that no longer exist go) and are applied to the new pathing here,

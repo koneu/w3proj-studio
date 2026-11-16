@@ -5435,6 +5435,84 @@ async function resizeRefusedShadows(page, found) {
   }
 }
 
+/** Map Size with a file it must rewrite there but unreadable (a folder in place of war3map.shd, a war3map.w3r the codec
+ *  can't decode): refused, by the MCP tool and with a message from the Map Size tab, and every file of the map as it was.
+ *  An unreadable file taken for absent was left at the old size in the resized map. With the files fixed it resizes (control). */
+async function resizeUnreadable(page, found) {
+  const fail = (what) => found.push(`resize unreadable: ${what}`);
+  await page.evaluate(`(() => { window.__unreadKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; w3.window.showWarning = async () => "Apply"; })()`);
+  try {
+    const tool = mcpTool(page), hands = new Hands(page);
+    const folder = join(work, "resize-unreadable");
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "ResizeUnreadable", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await until("the map's editor drawn", () => page.evaluate(`!!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await tool("save_project");
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const map = join(root, "map");
+    // A folder counts as one entry: its name with a slash (snapshot walks into it and would see nothing for an empty one).
+    const state = () => new Map([...snapshot(map), ...readdirSync(map).filter((n) => statSync(join(map, n)).isDirectory()).map((n) => [`${n}/`, "folder"])]);
+    const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k));
+    const toasts = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+    const refused = async (pattern, label) => {
+      const before = state();
+      const err = await tool("resize_map", { right: 32 }).then(() => null, (e) => String(e.message ?? e));
+      if (!err) fail(`${label}: the resize by the tool wasn't refused`);
+      else if (!pattern.test(err) || !/Nothing was changed/.test(err)) fail(`${label}: the resize was refused with "${err}"`);
+      await settled(page);
+      const moved = differ(before, state());
+      if (moved.length) fail(`${label}: the refused resize changed ${moved.join(", ")}`);
+      // The same by the Map Size tab: its message says why.
+      await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+      await hands.click(".terrain-tab", "Map Size");
+      await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
+      await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[1]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+      await settled(page);
+      await hands.click(".mapsize-buttons button.primary");
+      await until(`${label}: the Map Size tab's message`, async () => pattern.test(await toasts()), 15000).catch(async () => fail(`${label}: the Map Size tab said "${(await toasts()).slice(0, 300)}"`));
+      await settled(page);
+      const tabMoved = differ(before, state());
+      if (tabMoved.length) fail(`${label}: the resize refused by the Map Size tab changed ${tabMoved.join(", ")}`);
+      if (await page.evaluate(`w3.editors.activePath()`) !== "map/war3map.w3e.txt") fail(`${label}: the terrain editor isn't open after the refusal`);
+    };
+
+    // war3map.shd: a folder in its place (unreadable on every system; not a file the project lists).
+    const shdPath = join(map, "war3map.shd");
+    const shd = readFileSync(shdPath);
+    rmSync(shdPath);
+    mkdirSync(shdPath);
+    await refused(/war3map\.shd can't be read/, "a folder for war3map.shd");
+    if (!statSync(shdPath).isDirectory()) fail("the folder in place of war3map.shd is gone after the refusal");
+    rmSync(shdPath, { recursive: true });
+    writeFileSync(shdPath, shd);
+
+    // war3map.w3r kept raw, with bytes the codec can't decode.
+    const w3rJson = join(map, "war3map.w3r.json"), w3r = join(map, "war3map.w3r");
+    const regions = existsSync(w3rJson) ? readFileSync(w3rJson) : null;
+    if (!regions) fail("the new map has no war3map.w3r.json (control)");
+    else {
+      rmSync(w3rJson);
+      writeFileSync(w3r, Buffer.from("not a region file"));
+      await page.evaluate(`w3.workspace.refresh()`);
+      await refused(/war3map\.w3r can't be read/, "an undecodable war3map.w3r");
+      rmSync(w3r);
+      writeFileSync(w3rJson, regions);
+      await page.evaluate(`w3.workspace.refresh()`);
+    }
+
+    // Control: the same resize with the files readable again goes through, the shadow map with the new size.
+    await tool("resize_map", { right: 32 }).catch((e) => fail(`the resize with readable files failed: ${e.message ?? e}`));
+    await until("the editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await settled(page);
+    if (readFileSync(shdPath).length !== 96 * 64 * 16) fail(`the control resize left the shadow map at ${readFileSync(shdPath).length} cells, not ${96 * 64 * 16}`);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__unreadKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__unreadKept; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** The shadow update a save makes says how many doodads it left out when only some models can't be read ("N doodads left
  *  out, their models couldn't be read"; none at all unreadable is the refusal resizeRefusedShadows checks). The control:
  *  the same save without the doodad whose model isn't there says nothing of the kind, and the stored file is written. */
@@ -14796,6 +14874,7 @@ async function run() {
         resizeLimits,
         resizeRefusedShadows,
         resizeUndo,
+        resizeUnreadable,
         scriptGuard,
         scriptQuestionsOnSwitch,
         shadowLeftOut,
@@ -15062,6 +15141,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeLimits", found);
   await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));
   await leftOpen(page, "resizeRefusedShadows", found);
+  await resizeUnreadable(page, found).catch((e) => found.push(`resize unreadable: ${e.message}`));
+  await leftOpen(page, "resizeUnreadable", found);
   await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
   await leftOpen(page, "shadowLeftOut", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
