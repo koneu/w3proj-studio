@@ -3,6 +3,7 @@
 // was: not clamped, wrapped or rounded to the nearest one that fits (decision 2026-11-15; TESTING.md "Refused values").
 
 import type { Area } from "../../lib/terrain/area";
+import { storableFloat32 } from "../../lib/formats/float32";
 
 /** What is given to a placed object; anything left out isn't checked. */
 export interface PlacedValues {
@@ -17,9 +18,8 @@ export interface PlacedValues {
   player?: number;
 }
 
-/** The placement files store positions, facings and scales as 32-bit floats: past this a number is stored as infinity. */
-const FLOAT32_MAX = 3.4028234663852886e38;
-const storable = (v: number) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= FLOAT32_MAX;
+/** The placement files store positions, facings and scales as 32-bit floats: past them a number is stored as infinity. */
+const storable = storableFloat32;
 
 /** A tool's number setting: `fallback` when it isn't given; else it has to be a number from `min` to `max` (whole with
  *  `whole`; `above`: past `min`, not on it), or the tool is refused with what it takes, not held to the nearest end. */

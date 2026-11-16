@@ -827,7 +827,9 @@ with doodads, custom doodad types and units added by the release CLI, the editor
 Decision 2026-11-15: a value past what its stored field holds is refused with a message and the map left as it was, never
 wrapped, clamped without a word, truncated or overflowed. "Measured, kept": the World Editor does that too and a
 we-compare spec or we-drive record relies on it, so Studio does it as well (the user decides those, see the last rows).
-Tests: `values.test.ts`, `aitools.test.ts`, `lib/terrain/w3e.test.ts`, `unitprops.test.ts`, app-smoke `mcpLimits`.
+Tests: `values.test.ts`, `aitools.test.ts`, `lib/terrain/w3e.test.ts`, `unitprops.test.ts`, `lib/terrain/cameras.test.ts`,
+`lib/terrain/regions.test.ts`, Rust `camera_and_region_values_past_their_fields_are_refused` and
+`refused_camera_and_region_values_leave_the_files_unchanged`, app-smoke `mcpLimits`.
 
 | Field | Bound | Checked in | Behaviour |
 |---|---|---|---|
@@ -843,7 +845,11 @@ Tests: `values.test.ts`, `aitools.test.ts`, `lib/terrain/w3e.test.ts`, `unitprop
 | ground variation | 0..17 written by Studio (5 bits) | `randomVariation`; text form `w3etext.ts` | only Studio writes it; the text form refuses past 31 |
 | map size | 32..480 per side, multiples of 4 | `resize.ts` `resizeProblem` | refused; measured, kept: growth past ±32256 moves the playable edge instead (map-size-limits) |
 | new map | sizes 32..480 by 32, cliff level 0..14 | `newmap.ts` `mapChoices`, the dialog's lists | refused |
-| camera target typed | camera bounds | terrain-cameras (not audited here) | measured, kept: with Enforce Camera Bounds on put on the bound (camera-bounds) |
+| camera target typed | camera bounds | terrain-cameras `typeValue` | measured, kept: with Enforce Camera Bounds on put on the bound (camera-bounds) |
+| camera values typed (all 13 fields of the Cameras tab) | a 32-bit float; an empty field or text is no value | `cameras.ts` `typedCameraValue` | refused: "Not changed: Distance to the target must be a number from -3.4e38 to 3.4e38" (app-smoke `cameraEditing`) |
+| region edges typed, `add_region` | a 32-bit float; left below right, bottom below top | `regions.ts` `typedRegionEdge`, `regionBoxProblem` | refused, the field marked and a toast (app-smoke `atmosphereTools`) |
+| new region's number (drawn, `add_region`) | up to 2^32-1 | `regions.ts` `nextRegionIndex` | refused, not wrapped to 0 |
+| any f32 field of a codec-backed file on write (w3c, w3r, doo, w3i, …) | the f32 range | format engine `write_prim` | refused: the save or canonicalize fails, nothing written (was stored as infinity); integer fields were already refused past their width |
 | object position typed (Selection panel, Edit all x/y), `move_object` | inside the map's corners; a 32-bit float | `values.ts` `placedValueProblem` | refused: "Not changed: x ... is off the map"; `place_objects` skips one off the map with that reason, also with ignoreRoom |
 | object nudge and drag | the object's limit | `limits.ts` `scaledNudge`, `moveedit.ts` | measured: a nudge step past it is refused (edge-last-step), a drag stops at the last motion that fits (we-drive, see "edge" above), kept |
 | z, facing | finite 32-bit float | `placedValueProblem` | refused; any finite facing is stored as given (a turn more is the same facing) |

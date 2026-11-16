@@ -419,3 +419,35 @@ pub fn game_read(g: &casc::GameData, path: &str, mode_name: &str, tileset: &Opti
 pub fn game_resolve(g: &casc::GameData, path: &str, mode_name: &str, tileset: &Option<String>) -> CmdResult<Option<String>> {
     Ok(g.resolve(path, mode(mode_name)?, tileset_letter(tileset)).map(str::to_string))
 }
+
+#[cfg(test)]
+mod codec_tests {
+    use super::*;
+
+    /// A camera or region value past what its field holds (an f32 past its range) is refused by both ways an editor
+    /// writes: the raw file (codec_write) stays byte for byte as it was, and the JSON form gets no canonical text to
+    /// write. A valid value goes through both (control).
+    #[test]
+    fn refused_camera_and_region_values_leave_the_files_unchanged() {
+        let dir = std::env::temp_dir().join(format!("w3proj-backend-refuse-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("map")).unwrap();
+        let root = dir.to_str().unwrap();
+        let cameras = r#"{"format":"w3proj.cameras/1","version":3,"cameras":[{"targetX":1,"targetY":2,"zOffset":0,"rotation":90,"angleOfAttack":304,"distance":1650,"roll":0,"fieldOfView":70,"farZ":5000,"nearZ":16,"localPitch":0,"localYaw":0,"localRoll":0,"dofDistance":0,"dofScale":0,"posAbsoluteZ":0,"name":"Look","trailer":0}]}"#;
+        let regions = r#"{"format":"w3proj.regions/1","version":5,"regions":[{"left":0,"bottom":0,"right":64,"top":64,"name":"Area","index":0,"weather":"0x00000000","sound":"","color":{"blue":1,"green":2,"red":3,"alpha":255}}]}"#;
+        for (file, text, field, value) in [("map/war3map.w3c", cameras, "\"distance\":1650", "\"distance\":1e39"), ("map/war3map.w3r", regions, "\"right\":64", "\"right\":1e39")] {
+            codec_write(root, file, text, &[]).unwrap();
+            let before = std::fs::read(dir.join(file)).unwrap();
+            let bad = text.replace(field, value);
+            assert_ne!(bad, text);
+            assert!(codec_write(root, file, &bad, &[]).is_err(), "{file}: {value} was written");
+            assert_eq!(std::fs::read(dir.join(file)).unwrap(), before, "{file}: a refused write changed the file");
+            assert!(codec_canonicalize(root, &format!("{file}.json"), &bad, &[]).is_err(), "{file}.json: {value} was taken");
+            // Control: a value the field holds is written.
+            let good = text.replace(field, &value.replace("1e39", "128"));
+            codec_write(root, file, &good, &[]).unwrap();
+            assert_ne!(std::fs::read(dir.join(file)).unwrap(), before, "{file}: the control value wasn't written");
+            codec_canonicalize(root, &format!("{file}.json"), &good, &[]).unwrap();
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

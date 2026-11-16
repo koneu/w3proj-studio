@@ -13,8 +13,9 @@ import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type Terra
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { horizontalFov, verticalFov } from "../../lib/terrain/camerafov";
-import { cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, ViewClipping } from "../../lib/terrain/cameras";
+import { CAMERA_FIELDS, cameraMarkers, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, typedCameraValue, VIEW_OUTSIDE_BOUNDS, viewInCameraBounds, ViewClipping, type CameraField } from "../../lib/terrain/cameras";
 import { readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
+import { storableFloat32 } from "../../lib/formats/float32";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
 
@@ -54,15 +55,8 @@ interface Camera {
 }
 interface CamerasDoc { format?: string; version: number; cameras: Camera[] }
 
-/** The editable values, in panel order. */
-const FIELDS: [keyof Camera, string, string][] = [
-  ["targetX", "X", "Target X"], ["targetY", "Y", "Target Y"], ["zOffset", "Z", "Height offset above the ground"],
-  ["rotation", "Rot", "Rotation (degrees; 90 looks north)"], ["angleOfAttack", "AoA", "Angle of attack (degrees; 304 is the game camera)"],
-  ["distance", "Dist", "Distance to the target"], ["roll", "Roll", "Roll (degrees; not shown in the preview)"],
-  ["fieldOfView", "FoV", "Field of view (degrees)"], ["farZ", "Far", "Far clipping"], ["nearZ", "Near", "Near clipping"],
-  ["dofDistance", "DoF", "Depth of field distance (the World Editor's DoF Distance)"], ["dofScale", "DoF ×", "Depth of field scale (DoF Scale)"],
-  ["posAbsoluteZ", "Abs Z", "Absolute height of the camera's position (Pos Absolute Z)"],
-];
+/** The editable values, in panel order (lib/terrain/cameras.ts). */
+const FIELDS = CAMERA_FIELDS;
 
 const wrap = (a: number) => ((a % 360) + 360) % 360;
 
@@ -213,15 +207,22 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** A value typed into the panel for `cams`, as one undo step. A Target X or Y past the camera bounds lands on the
    *  bound while Enforce Camera Bounds is on, as in the World Editor's Camera Properties (targetInCameraBounds);
    *  cameras that went while the bounds were read are left out. */
-  const typeValue = async (cams: Camera[], key: keyof Camera, typed: number) => {
-    let v = typed;
-    if (key === "targetX" || key === "targetY") {
-      const [x, y] = targetInCameraBounds(await enforcedBounds(), typed, typed);
-      v = key === "targetX" ? x : y;
-      if (gone || !ed.editable) return;
+  const typeValue = async (cams: Camera[], key: CameraField, typed: string) => {
+    // A value war3map.w3c can't hold is refused with a word, before anything changes (typedCameraValue).
+    let t = typedCameraValue(doc.cameras, cams, key, typed);
+    if ("refused" in t) {
+      w3.window.showWarning(`Not changed: ${t.refused}`);
+      renderPanel();
+      return;
     }
-    const changing = cams.filter((x) => doc.cameras.includes(x) && x[key] !== v);
-    if (changing.length) updateAll(changing, { [key]: v });
+    if (key === "targetX" || key === "targetY") {
+      const [x, y] = targetInCameraBounds(await enforcedBounds(), t.value, t.value);
+      if (gone || !ed.editable) return;
+      // The cameras as they are after the wait: ones deleted meanwhile are left out.
+      t = typedCameraValue(doc.cameras, cams, key, String(key === "targetX" ? x : y));
+      if ("refused" in t) { renderPanel(); return; }
+    }
+    if (t.changing.length) updateAll(t.changing, { [key]: t.value });
     // The box shows what the camera has, not what was typed.
     else renderPanel();
   };
@@ -343,14 +344,12 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         // Each value typed shows at once through the camera it's for (the last selected), before it's an edit.
         oninput: () => {
           const v = Number(input.value);
-          if (input.value.trim() !== "" && Number.isFinite(v)) previewTyped({ ...c, [key]: v });
+          if (input.value.trim() !== "" && storableFloat32(v)) previewTyped({ ...c, [key]: v });
         },
         onblur: () => endTypedPreview(),
         onchange: () => {
           endTypedPreview();
-          const v = Number(input.value);
-          if (input.value.trim() === "" || !Number.isFinite(v)) { renderPanel(); return; }
-          void typeValue([...selection], key, v);
+          void typeValue([...selection], key, input.value);
         },
       });
       return h("label.terrain-camera-field", { title }, label, input);

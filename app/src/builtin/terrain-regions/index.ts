@@ -13,6 +13,7 @@ import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
+import { nextRegionIndex, regionBoxProblem, typedRegionEdge } from "../../lib/terrain/regions";
 
 const FILE = "map/war3map.w3r";
 /** Regions snap to this grid (World Editor default). */
@@ -53,16 +54,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.mcp.registerTool("add_region", async ({ name, left, bottom, right, top }) => {
       if (typeof name !== "string" || !name.trim()) throw new Error("add_region needs a name.");
-      const box = [left, bottom, right, top];
-      if (!box.every((n) => typeof n === "number" && Number.isFinite(n)) || Number(left) >= Number(right) || Number(bottom) >= Number(top)) {
-        throw new Error("left, bottom, right and top must be numbers, with left below right and bottom below top.");
-      }
+      const problem = regionBoxProblem({ left, bottom, right, top });
+      if (problem) throw new Error(`Not added: ${problem}`);
       await editRegions(w3, `Add region ${name}`, (doc) => {
         if (doc.regions.some((r) => r.name.toLowerCase() === name.trim().toLowerCase())) throw new Error(`There's already a region "${name}".`);
+        const index = nextRegionIndex(doc.regions);
+        if (typeof index !== "number") throw new Error(`Not added: ${index.refused}`);
         const [red, green, blue] = PALETTE[doc.regions.length % PALETTE.length];
         doc.regions.push({
           left: Number(left), bottom: Number(bottom), right: Number(right), top: Number(top), name: name.trim(),
-          index: 1 + Math.max(-1, ...doc.regions.map((r) => r.index)), weather: NO_WEATHER, sound: "",
+          index, weather: NO_WEATHER, sound: "",
           color: { red, green, blue, alpha: 255 }, ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
         });
       });
@@ -243,7 +244,6 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
   /** `origs`: every region a move takes along, as it was. */
   let drag: { kind: "new" | "move" | "resize"; start: [number, number]; orig: Region; grab: ReturnType<typeof edges>; moved: boolean; origs: Map<Region, Region> } | null = null;
-  const nextIndex = () => 1 + Math.max(-1, ...doc.regions.map((r) => r.index));
 
   // ---- toolbar -----------------------------------------------------------------------
   const count = h("span.muted");
@@ -282,18 +282,19 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       const v = name.value.trim();
       if (v && v !== r.name) update(r, { name: v });
     } });
-    // The bounds as numbers (world units): a value that leaves the region with no size is refused and put back.
+    // The bounds as numbers (world units): a value that leaves the region with no size, or that war3map.w3r can't hold,
+    // is refused with a word (typedRegionEdge); the field stays marked with it.
     const bound = (key: "left" | "right" | "bottom" | "top", label: string) => {
       const input = h(`input.terrain-region-bound.terrain-region-${key}`, { type: "number", step: String(GRID), value: String(r[key]), title: `${label} edge (world units)` });
       input.addEventListener("change", () => {
-        const v = Number(input.value);
-        const box = { left: r.left, right: r.right, bottom: r.bottom, top: r.top, [key]: v };
-        if (input.value.trim() === "" || !Number.isFinite(v) || box.left >= box.right || box.bottom >= box.top) {
+        const t = typedRegionEdge(r, key, input.value);
+        if (t && "refused" in t) {
           input.classList.add("invalid");
-          input.title = `${label}: left must be below right and bottom below top`;
+          input.title = t.refused;
+          w3.window.showWarning(`Not changed: ${t.refused}`);
           return;
         }
-        if (v !== r[key]) update(r, { [key]: v });
+        if (t) update(r, t.change);
       });
       return h("label.terrain-region-boundrow", {}, h("span.muted", {}, `${label} `), input);
     };
@@ -367,9 +368,16 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       } else {
         selected = null;
         extra = new Set();
+        const index = nextRegionIndex(doc.regions);
+        if (typeof index !== "number") {
+          w3.window.showWarning(`No region drawn: ${index.refused}`);
+          renderPanel();
+          render();
+          return true;
+        }
         const [c0, c1, c2] = PALETTE[doc.regions.length % PALETTE.length];
         draft = {
-          left: snap(x), right: snap(x), bottom: snap(y), top: snap(y), name: "", index: nextIndex(), weather: NO_WEATHER, sound: "",
+          left: snap(x), right: snap(x), bottom: snap(y), top: snap(y), name: "", index, weather: NO_WEATHER, sound: "",
           color: { red: c0, green: c1, blue: c2, alpha: 255 }, ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
         };
         drag = { kind: "new", start: [x, y], orig: draft, grab: { l: false, r: false, b: false, t: false }, moved: false, origs: new Map() };

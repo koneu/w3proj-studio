@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraMarkers, DEPTH_OF_FIELD, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
+import { CAMERA_FIELDS, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
 const part = (data: number[], from: number, to: number) => Array.from({ length: data.length / MARKER_STRIDE }, (_, i) => data.slice(i * MARKER_STRIDE + from, i * MARKER_STRIDE + to));
@@ -153,4 +153,35 @@ test("ViewClipping: a camera from the view takes the view's clipping, the World 
   assert.equal(clip.current().farZ, 9000);
   // Each view starts with the editor's own clipping.
   assert.deepEqual(new ViewClipping().current(), { farZ: 50000, nearZ: 16 });
+});
+
+test("typedCameraValue: a value war3map.w3c's float can't hold is refused for every field, and the cameras stay as they were", () => {
+  const camera = () => ({ targetX: 1, targetY: 2, zOffset: 3, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70,
+    farZ: 5000, nearZ: 16, dofDistance: 0, dofScale: 0, posAbsoluteZ: 0, name: "Look" });
+  assert.equal(CAMERA_FIELDS.length, 13);
+  for (const [key] of CAMERA_FIELDS) {
+    const title = cameraFieldName(key);
+    assert.ok(title && !title.includes("("), title);
+    const cams = [camera(), camera()];
+    const before = structuredClone(cams);
+    for (const typed of ["1e39", "-1e39", "Infinity", "NaN", "", "  ", "abc"]) {
+      const got = typedCameraValue(cams, cams, key, typed);
+      assert.ok("refused" in got, `${key} = ${JSON.stringify(typed)} was taken`);
+      assert.ok(got.refused.startsWith(`${title} must be a number`), got.refused);
+      assert.deepEqual(cams, before, `${key} = ${typed} changed a camera`);
+    }
+    // Controls: the float's ends and a plain value go through, for the cameras whose value they change.
+    for (const typed of ["3.4028234663852886e38", "-3.4028234663852886e38", "128"]) {
+      const got = typedCameraValue(cams, cams, key, typed);
+      assert.ok(!("refused" in got), `${key} = ${typed} was refused (control)`);
+      assert.equal(got.value, Number(typed));
+      assert.equal(got.changing.length, 2);
+    }
+    const same = typedCameraValue(cams, [cams[0]], key, String(cams[0][key]));
+    assert.ok(!("refused" in same) && same.changing.length === 0, `${key}: its own value is no change`);
+  }
+  // A camera no longer in the list (deleted while the value was typed) isn't changed.
+  const [a, b] = [camera(), camera()];
+  const got = typedCameraValue([a], [a, b], "distance", "2000");
+  assert.ok(!("refused" in got) && got.changing.length === 1 && got.changing[0] === a);
 });

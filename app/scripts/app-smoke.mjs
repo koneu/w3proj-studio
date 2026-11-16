@@ -610,6 +610,27 @@ async function atmosphereTools(page, found) {
   if (read("war3map.w3i.json").weather !== "0x00000000") fail("none didn't clear the global weather");
   if (await tool("set_weather", { region: "Nowhere", effect: "RAlr" }).then(() => true, (e) => !/no region/i.test(e.message))) fail("an unknown region wasn't refused");
   if (await tool("set_weather", { effect: "Snowstorm of doom" }).then(() => true, (e) => !/Choices: /.test(e.message))) fail("an unknown weather wasn't refused with the choices");
+  // A region edge war3map.w3r's float can't hold is refused with why, and is no edit (lib/terrain/regions.ts).
+  const regionsBefore = readFileSync(join(root, "map", "war3map.w3r.json"), "utf8"), editsBefore = await edits();
+  const past = await tool("add_region", { name: "Huge", left: 0, bottom: 0, right: 1e39, top: 512 }).then(() => "added", (e) => e.message);
+  if (!/32-bit float/.test(past)) fail(`add_region with right 1e39 wasn't refused with why: ${past}`);
+  if (await edits() !== editsBefore) fail("the refused add_region made an edit");
+  await tool("save_project");
+  if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused add_region changed war3map.w3r.json");
+  // The same on the Regions tab: Storm's Right edge typed as 1e39 is refused with why, the field marked, no edit.
+  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Regions").click()`);
+  await until("the Regions tab", () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === "Regions"`), 5000);
+  await until("Storm in the region list", () => page.evaluate(`(() => { const s = [...document.querySelectorAll(".terrain-group-tools select")].find((x) => [...x.options].some((o) => o.textContent === "Storm"));
+    if (!s) return false; s.value = [...s.options].find((o) => o.textContent === "Storm").value; s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`), 10000);
+  await settled(page);
+  await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+  const typed = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-right"); if (!i) return "no Right field"; i.value = "1e39"; i.dispatchEvent(new Event("change", { bubbles: true })); return i.classList.contains("invalid") ? "marked" : "not marked"; })()`);
+  await settled(page);
+  const said = await page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  if (typed !== "marked" || !/Not changed: Right must be a number/.test(said)) fail(`Right typed as 1e39 on the Regions tab: ${typed}, said "${said}"`);
+  if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused Right edge left unsaved changes");
+  await tool("save_project");
+  if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
   if (read("war3map.w3i.json").weather !== "0x00000000" || !existsSync(join(root, "map", "war3map.w3r.json")) === false && read("war3map.w3r.json").regions.length) fail("the undos didn't bring back the map as it was");
@@ -3893,6 +3914,15 @@ async function cameraEditing(page, found) {
   if (cameras().some((c) => c.dofScale !== 123 || "unknown" in c)) fail(`a DoF Scale typed for two cameras saved ${JSON.stringify(cameras().map((c) => [c.dofDistance, c.dofScale, c.posAbsoluteZ, c.unknown]))}`);
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
+  // A value war3map.w3c's float can't hold is refused with why, for both, and is no edit (typedCameraValue).
+  const keptCams = JSON.stringify(cameras());
+  await k.clearToasts();
+  await type("Dist", "1e39", "change");
+  await settled(page);
+  if (!/Not changed: Distance to the target must be a number/.test(await k.toasts())) fail(`a distance of 1e39 wasn't refused with why: ${await k.toasts()}`);
+  if (await dirty()) fail("the refused distance left unsaved changes");
+  await k.save();
+  if (JSON.stringify(cameras()) !== keptCams) fail(`the refused distance changed the cameras: ${JSON.stringify(cameras().map((c) => c.distance))}`);
 
   // Duplicate the two (still selected after the undo): two copies with new names, one step.
   if ((await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`)) !== "2 cameras") fail("the undo didn't keep the two cameras selected");

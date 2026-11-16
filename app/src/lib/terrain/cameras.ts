@@ -2,6 +2,8 @@
 // and on the Cameras tab: one small camera model with an arrow to its target per camera (cameraMarkers), and where
 // a click takes one (markerHandles).
 
+import { float32Text, storableFloat32 } from "../formats/float32";
+
 /** The values of a camera object the drawing needs (the w3c entry has more). */
 export interface CameraObject { name?: string; targetX: number; targetY: number; zOffset?: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number }
 
@@ -45,6 +47,32 @@ export function targetInCameraBounds(cameraBounds: readonly number[] | null | un
   const b = boundsRect(cameraBounds);
   if (!b || !Number.isFinite(x) || !Number.isFinite(y)) return [x, y];
   return [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))];
+}
+
+/** The values the Cameras tab edits, in panel order: key, label, tooltip. Each is a 32-bit float in war3map.w3c. */
+export const CAMERA_FIELDS = [
+  ["targetX", "X", "Target X"], ["targetY", "Y", "Target Y"], ["zOffset", "Z", "Height offset above the ground"],
+  ["rotation", "Rot", "Rotation (degrees; 90 looks north)"], ["angleOfAttack", "AoA", "Angle of attack (degrees; 304 is the game camera)"],
+  ["distance", "Dist", "Distance to the target"], ["roll", "Roll", "Roll (degrees; not shown in the preview)"],
+  ["fieldOfView", "FoV", "Field of view (degrees)"], ["farZ", "Far", "Far clipping"], ["nearZ", "Near", "Near clipping"],
+  ["dofDistance", "DoF", "Depth of field distance (the World Editor's DoF Distance)"], ["dofScale", "DoF ×", "Depth of field scale (DoF Scale)"],
+  ["posAbsoluteZ", "Abs Z", "Absolute height of the camera's position (Pos Absolute Z)"],
+] as const;
+export type CameraField = (typeof CAMERA_FIELDS)[number][0];
+/** A field's name in a message: its tooltip without the note in brackets ("Rotation", "Depth of field scale"). */
+export const cameraFieldName = (key: CameraField) => (CAMERA_FIELDS.find(([k]) => k === key)?.[2] ?? key).replace(/ \(.*\)$/, "");
+
+/**
+ * A value typed for `key` of the cameras `targets`, as the Cameras tab takes it (TESTING.md "Refused values"): the
+ * cameras of `cameras` among them whose value it changes, or why it is refused. A refused value changes nothing: it
+ * isn't held to the nearest float, and an empty field or text is no value. `typed`: the field's text.
+ */
+export function typedCameraValue<C extends Partial<Record<CameraField, number>>>(cameras: readonly C[], targets: readonly C[], key: CameraField, typed: string):
+  { value: number; changing: C[] } | { refused: string } {
+  const label = cameraFieldName(key);
+  const v = Number(typed);
+  if (typed.trim() === "" || !storableFloat32(v)) return { refused: float32Text(label) };
+  return { value: v, changing: targets.filter((c) => cameras.includes(c) && c[key] !== v) };
 }
 
 /** A view's far and near clipping, which a camera made or set from the view takes. */
