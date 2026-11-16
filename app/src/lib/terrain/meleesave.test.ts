@@ -80,9 +80,9 @@ test("the facts come from the project; missing and unreadable files set nothing"
   // The file's name as the project has it (case differs on disk).
   assert.equal((await readMeleeFacts(files({ "map/War3MapMisc.txt": "[Misc]\nA=1\n" }))).customConstants, true);
   const none = await readMeleeFacts(files({}));
-  assert.deepEqual(none, { customConstants: false, terrain: null });
+  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false });
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
-  assert.deepEqual(broken, { customConstants: false, terrain: null }, "unreadable: not known, so the flag stays");
+  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false }, "unreadable: not known, so the flag stays");
   // The ground being saved wins over the project's.
   const given = await readMeleeFacts(files({ "map/war3map.w3e": new Uint8Array([1]) }), t);
   assert.equal(given.terrain, t);
@@ -183,8 +183,8 @@ test("the facts for putting the flag back come from the project; unreadable ones
   renamed.items.find((i) => i.type === 8)!.name = "Mine";
   assert.equal(await flags(project({ "map/war3map.wtg.json": writeWtgJson(renamed) })), OFF, "custom triggers");
   assert.equal(await flags(project({ "map/war3map.wtg.json": new Error("EACCES") })), OFF, "triggers unreadable");
-  assert.equal(await flags(project({ "map/war3map.w3u.json": "{}" })), OFF, "custom unit data");
-  assert.equal(await flags(project({ "map/war3mapSkin.txt": "" })), OFF, "a custom game interface");
+  assert.equal(await flags(project({ "map/war3map.w3u.json": JSON.stringify({ custom: [{ id: "h000" }] }) })), OFF, "custom unit data");
+  assert.equal(await flags(project({ "map/war3mapSkin.txt": "[Misc]\r\nFoo=1\r\n" })), OFF, "a custom game interface");
   assert.equal(await flags(project({ "map/war3mapMisc.txt": new Error("EACCES") })), OFF, "gameplay constants unreadable");
   assert.equal(await flags(project({ "map/war3mapMisc.txt": "" })), MELEE, "control: an empty war3mapMisc.txt sets none");
   assert.equal(await flags(project({ "map/war3map.doo.json": doo([{ position: [MID + 150, MID, 0] }]) })), OFF, "a tree close by");
@@ -238,4 +238,42 @@ test("with the custom tilesets flag 0 the start's ground is buildable by the til
   };
   assert.equal(await saved(0), MELEE, "drawn as Ldrt: buildable");
   assert.equal(await saved(1), OFF, "control: with the flag set the file's Lrok, not buildable");
+});
+
+test("custom object data and interface files count only when they change something, in both directions", async () => {
+  const t = flat();
+  const entry = JSON.stringify({ original: [{ base: "hfoo", mods: [] }], custom: [] });
+  const header = (originals: number, customs: number) => { const b = new Uint8Array(12); const v = new DataView(b.buffer); v.setUint32(0, 2, true); v.setUint32(4, originals, true); v.setUint32(8, customs, true); return b; };
+  const empty: [string, string | Uint8Array][] = [];
+  for (const ext of ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"]) {
+    empty.push([`map/war3map.${ext}.json`, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] })], [`map/war3map.${ext}`, header(0, 0)]);
+  }
+  empty.push(["map/war3map.w3u.json", "{}"], ["map/war3mapSkin.txt", ""], ["map/war3mapSkin.txt", "// nothing\r\n[Misc]\r\n"]);
+  const base = { "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
+  const project = (own: Record<string, string | Uint8Array | Error>) => ({ ...files({ ...base, ...own }), gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; } });
+  const units = [startMid];
+  const putBack = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(project(own), { flags: OFF }, units)).flags;
+  const kept = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(project(own), { flags: MELEE }, units));
+  for (const [path, body] of empty) {
+    assert.equal(await putBack({ [path]: body }), MELEE, `${path} without entries doesn't keep the flag off`);
+    assert.equal((await kept({ [path]: body })).flags, MELEE, `${path} without entries doesn't take it off`);
+  }
+  const changing: [string, string | Uint8Array][] = [
+    ["map/war3map.w3t.json", entry], ["map/war3map.w3u", header(1, 0)], ["map/war3map.w3q", header(0, 2)], ["map/war3mapSkin.txt", "[Misc]\nA=1"],
+    ["map/war3map.w3b.json", JSON.stringify({ custom: [{ id: "B000" }] })],
+  ];
+  for (const [path, body] of changing) {
+    assert.equal(await putBack({ [path]: body }), OFF, `${path} with entries: stays off`);
+    const r = await kept({ [path]: body });
+    assert.equal(r.flags, OFF, `${path} with entries takes the flag off`);
+    assert.ok(r.reasons.includes("Custom object data or game interface"), path);
+  }
+  // Not known: the flag is never put back, and never taken off by it.
+  for (const bad of ["{", "[]", '{"custom":3}']) {
+    assert.equal(await putBack({ "map/war3map.w3u.json": bad }), OFF, `unreadable ${bad}: not put back`);
+    assert.equal((await kept({ "map/war3map.w3u.json": bad })).flags, MELEE, `unreadable ${bad}: not taken off`);
+  }
+  assert.equal(await putBack({ "map/war3map.w3u.json": new Error("EACCES") }), OFF, "unreadable file: not put back");
+  assert.equal((await kept({ "map/war3map.w3u.json": new Error("EACCES") })).flags, MELEE, "unreadable file: not taken off");
+  assert.equal(await putBack({ "map/war3map.w3u": new Uint8Array(5) }), OFF, "a short raw file");
 });
