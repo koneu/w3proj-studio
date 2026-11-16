@@ -140,7 +140,8 @@ falls short, rather than copying their insides into a scratch file.
 | apply testers' verdicts to the open points | `node scripts/openpoints-close.mjs <verdicts-file> [--dry-run]` (repo root): lines `<id>: PASS \| FAIL \| DIFFERS \| NOT DONE — <text>`. PASS removes the item block; FAIL/DIFFERS add a one-line item to `bugs.md` "From verification" pointing at the old one; NOT DONE adds `(not done: reason, date)`, the second moves the item to `user.md` (game/Windows/user) or `onhold.md`. Unknown ids refuse the whole run; changed files are copied to `openpoints/.backup/<timestamp>/` first. Tested in `app/scripts/openpoints.test.mjs` |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
 | check the save's Melee-flag rule against the game's maps | `node scripts/melee-corpus.mjs [--filter TEXT] [--why] [--save F] [--baseline F]` (in `app/`): clears each game map's Melee flag and runs `savedMelee` (meleesave.ts); a map stored melee should get it back, others not. `--why` names the reasons for each miss, `--baseline` lists maps whose result changed (exit 1 if an agreement was lost) |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--wheel N[@X,Y]`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--move X,Y`, `--wheel N[@X,Y]`, `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs` (see "Preferences"). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| run a built binary that may be older than its sources | `tests/binfresh.mjs` refuses a `w3proj` or app binary older than a tracked source it is built from (CLI: `crates/`, Cargo files; app: also `app/src-tauri`, `app/src`, `index.html`, the vite/TS configs, the npm packages), as we-compare and the `make-*.mjs` generators use them: rebuild, or pass `--allow-stale` (where the tool parses its own flags) / `W3_ALLOW_STALE=1`. mtimes are compared, so a fresh checkout refuses a binary built before it |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh` and
 `scripts/setup-windows.bat`; one folder per line after `#` comments, the first that exists counts, so a checkout
@@ -201,8 +202,7 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   the opening camera's angles at distance 3000 the pointer at 748,404 is the camera target, 300,404 is 1153.1 west of
   it, 748,750 is 927.8 south (how the target was read where the bar is empty off the map). Camera Properties (a row,
   Return) has Target X at 709,328 and OK at 684,727 of the display. A run that closed the editor with a module window
-  open (the Sound Editor) leaves it over the next run's view in the shared farm; a farm of its own (`W3PROJ_WE_DIR`)
-  avoids that. Studio: lib/terrain/cameras.ts `viewInCameraBounds`, `targetInCameraBounds`, wheelzoom.ts `heldPan`;
+  open (the Sound Editor) leaves it over the next run's view in the shared farm; `--wait-ready` closes it (below, "A module window the editor reopens"). Studio: lib/terrain/cameras.ts `viewInCameraBounds`, `targetInCameraBounds`, wheelzoom.ts `heldPan`;
   app-smoke heightsLimits.
 - **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
   through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
@@ -232,7 +232,9 @@ It never starts the game itself.
   CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
   at a time, machine-wide: the lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
   every worktree and every `W3PROJ_WE_DIR`; a second run says once who holds it and since when, and waits
-  (`takeLock`'s timeout; a dead pid is taken over). `we-setup.mjs --snapshot` and `--compare` show the
+  (`takeLock`'s timeout; a dead pid is taken over). we-drive takes the lock before it sets the farm up, which may rebuild it
+  for another game build; `setup` refuses to replace a farm another live run holds, and the folder must pass `guardedWeDir`
+  (inside this repository or the main checkout, not holding or inside the game folder). `we-setup.mjs --snapshot` and `--compare` show the
   install and the user's `Documents/Warcraft III` unchanged; the user's own Battle.net app writes elsewhere in that
   prefix while it runs (and touches the install's `shmem` files when it checks the game), which `--compare` lists.
 - **Nothing is ever sent to Blizzard.** The editor crashes on close with View > Light Ranges on, and its crash
@@ -268,7 +270,7 @@ It never starts the game itself.
   1 draws SD); the registry and the install showed no mode value in a before/after diff. SD has round trees, HD flat grass with
   pointed trees, DE feathered pines and a detailed terrain. Switching in the dialog crashes the hidden editor
   (it re-opens its archive over the network), so write the key instead. The install's text locale goes into the prefix's registry (else the editor shows
-  `WESTRING_…` names). The first start of a new prefix shows the editor's welcome, which asks to accept Blizzard's
+  `WESTRING_…` names); it must be enUS (we-drive finds the dialogs by their English titles and refuses an install without it). The first start of a new prefix shows the editor's welcome, which asks to accept Blizzard's
   terms. The user accepted them in their own install (which the farm is made from) and agreed on 2026-11-08 that
   we-drive presses Continue in its own prefix; `W3PROJ_WE_ACCEPT_TERMS=0` makes it report the dialog instead. The
   shared prefix keeps the answer, so this comes up once per new prefix.
@@ -471,7 +473,7 @@ under the work folder, Linux) are per run, so testers sharing a binary share not
 the same for all (`W3_SMOKE_ID` only names the build). Proven with two `app-drive` and two `app-smoke --only=byHand` runs
 at once on one binary. Costs (this machine, sccache warm): archive 0 s, `npm ci` 3 s, app build 142 s, CLI about 10 s more.
 
-**we-compare** (`node scripts/we-compare.mjs [--app P] [--work D] [--json F] [--no-we] <spec.json…>`, local only like
+**we-compare** (`node scripts/we-compare.mjs [--app P] [--work D] [--json F] [--no-we] [--strict-ignore] [--keep-prefs] [--allow-stale] <spec.json…>`, local only like
 we-drive): the common check "do the same in the World Editor and in Studio, save both, diff the saved files". A spec
 (the list of fields is at the top of the script; `tests/we-compare/examples/` has three from verification round 3
 package 6) names the input map (copied; `${MAIN}` is the main checkout), the World Editor's steps (we-drive's steps
@@ -557,7 +559,7 @@ Regions and Pathing - Ground over the playable map (branch region-fill-we, 2026-
 - **View > Lighting comes back with every map**: `--view Lighting=off` holds for the map shown; the next `--map` of the run is lit again though the menu still isn't ticked (the earlier "Ashenvale is 1.3 times brighter also unlit" was that). Switch it per map.
 - **HD waves**: seen straight down (`--look center,1500,270,70,90` and 3000; 1.39 and 2.78 world units a pixel, from the band map's rows) the pattern's autocorrelation (green, the smooth trend of a 16 px Gaussian taken away) falls to half over 24 units east-west and 9 north-south: the green channel of ReplaceableTextures\Water\Water_Normal (12.7 and 4.8 of its 512 texels) at 1024 units a repeat. Pictures 1.2 s apart match where one is moved north-east and, as well, south-west, by 45 units a second east and north each (correlation 0.4 falling to 0.2 over five seconds): two layers against each other. Through the opening camera the blotches are shorter (7.6 by 4.1 px at 3000 where the green alone gives 10.7 by 3.3): the map's red comes in as the view gets level. Their strength is about the same over bright and dark water, 0.003 to 0.008 of linear light in green (2.6 to 4.6 levels), red and blue three quarters of it, one pattern in all channels (correlation 0.9); the w3i's `wavesNormalMapStrength` 0 takes them away (0.0007), 50 leaves about 0.6 of them, `wavesVertexDisplacement` 0 changes nothing. Studio (hdwater.ts `HD_WAVES`, `hdWaveLean`, `HD_WAVE_LIGHT`; the old ripple of the classic texture is gone) against the editor, four boxes each through the opening camera at 3000, at 1650, and turned east and west: strength 0.0057 against 0.0054 on average (per box 0.0043 to 0.0080 against 0.0031 to 0.0086: the editor's follows the sky behind it more), autocorrelation 7.8 by 4.3 px against 7.6 by 4.1 (3000), 13.6 by 6.0 against 11.3 by 5.0 (1650), 5.2 by 6.1 against 4.1 by 6.6 (east), 5.1 by 6.0 against 3.1 by 4.9 (west); before, 0.0005 and 2 px. The mean colour stays: the 3 × 3 box means of those pictures moved by 0.1 to 0.5 levels. What the model leaves out: the editor's blotches are dark on bright water and bright on dark (a real reflection of a sky with edges; Studio adds and takes alike), and its speed may go by frames, not seconds (measured under lavapipe).
 - **Sunken Ruins**: its shallow water has another colour than its deep (0, 142, 181 against 0, 91, 171; the colour the water itself needs once the bed's share is taken away is 0, 142, 181 at 12 deep, 0, 135, 176 at 38.4, 0, 95, 170 at 96), mixed by depth (hdwater.ts `HD_SHALLOW_SHARE`, renderer.ts `HD_SHALLOW`). With the reflection off the model is within 2 of the editor's bands on the editor's bed (green was 16 short at 64 deep); Studio's picture with the default reflection, bands 12 to 800 in five columns: 2.2, 1.9, 3.3 off on average (5 at most), over a bed that is 4.5 to 6 brighter in Studio than in the editor (water off). The blue stays 3 to 5 high in deep water (171 against 167: the reflection's dimming, fitted on Lordaeron, seems stronger on this blue). Murgul Oasis in game view (the opening view, 148 × 140 px cells of open water): green was 6 to 10 short and is 3 to 5 over, blue 0 to 4 over, where Studio's sand beside it is 5 to 9 brighter than the editor's in every channel.
-- **A module window the editor reopens** (another run closed it with the Trigger Editor open; the farm's prefix is shared) covers the view, and we-drive's own close at the start can come too early: `--wait-ready --sleep 4000 --close-modules --sleep 2000 --close-modules` closed it. Check a run's first picture (a grey 240).
+- **A module window the editor reopens** (another run closed it with the Trigger Editor open; the farm's prefix is shared) covers the view (a grey 240 picture). `--wait-ready` isn't ready while one is open: it closes it, and again every 3 s while it stays (a close before the editor has drawn the window is lost; `we-drive.test.mjs`). `--close-modules` still closes the ones a run opened itself.
 
 **Map preferences** (branch map-settings-we, 2026-11-14; specs `tests/we-compare/map-prefs.json`; saves of
 empty_map_on_newest_world_editor.w3m after each switch): the Trigger Editor's JassHelper menu (F4, menu 200,111: Enable
@@ -594,9 +596,10 @@ when the editor starts) / 1441,367 (Dirt Cliff), Apply Cliff box 1373,244, sizes
 at y=534, Variation slider 589 to 773 at y=494, OK 669,573, "Continue anyway" 767,523). The editor's Create New Map
 dialog (`ctrl+n`) lists 22 tilesets and no Misc, so a Misc-tileset base tile can't be compared there.
 The water brush specs hold with the editor's Enforce Water Height Limits on, its default. we-drive now writes
-`Enforce Water Limits=true` and `Enforce Camera Boundaries=1` (`PINNED_PREFS`) before each editor start, so a run no
+`Enforce Water Limits=true` and `Enforce Camera Boundaries=1` (`PINNED_PREFS`) and `[Minimap] Show Creep Camps=false`
+(`PINNED_MINIMAP_PREFS`; `withEditorPrefs`) before each editor start, so a run no
 longer depends on what the last one left in the shared prefix (with the limit off, seen 2026-11-14, the editor leaves out
-the 35-unit lift next to the water and the dry rim's water word). `--keep-prefs` (we-drive, we-compare) leaves them as
+the 35-unit lift next to the water and the dry rim's water word). `--keep-prefs` (we-drive, we-compare) leaves all three as
 they are. The other View toggles aren't in the preferences file. Within one running editor (several specs of a
 we-compare process share it) a toggle a spec switched stays until the editor restarts.
 Height brushes (branch raise-brush-we, 2026-11-15, spec `height-brush`, flat.w3x, clicks at 748,500): the palette's
@@ -998,11 +1001,12 @@ In order of what I'd do next.
 2. **Hostile input on the TypeScript side.** Covered by `lib/hostile.test.ts` (terrain, AI, model and image
    parsers; hidden app PASS 2026-11-11, see `openpoints/test.md`). Unproven: textures in other people's maps
    (the limits were checked on the game's own 1,658).
-3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is
-   at 37%. A small made-up TriggerData fixes that.
+3. **`war3map.wtg` in the mini map.** Done: `tests/fixtures/TriggerData.txt` is a small made-up TriggerData
+   (the app smoke test reads it through `W3PROJ_TRIGGERDATA`, debug builds only), so the mini map's wtg goes through the JSON codec.
+   What stays unproven is the codec on triggers the made-up table doesn't name.
 4. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist
    is all there is. Saved-by-World-Editor samples of each file version would at least pin the
    formats, and could settle the unknown fields listed in `openpoints/test.md`.
-5. **The generated script isn't identical yet.** Of the 326 JASS maps, 196 match the World Editor's
-   file exactly, 99 have the same lines in another order, and 31 really differ, mostly by a few
-   lines. `openpoints/test.md` lists what's left.
+5. **The generated script isn't identical yet.** Of the 326 JASS maps, 219 match the World Editor's
+   file exactly (`script-check`, 2026-11-17; the 41 of 49 Lua maps too, the 375 trigger files byte-exact); the other 107 differ
+   in some section, mostly by a few lines. `openpoints/bugs.md` lists what's left.
