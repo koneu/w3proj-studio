@@ -793,3 +793,18 @@ fn a_wts_write_cut_short_by_the_file_system_leaves_the_old_file_whole() {
     let now = fs::read_to_string(&path).unwrap();
     assert!(now.len() > 12_000 && now.contains("long text long text"), "the retry didn't write the whole file ({} bytes)", now.len());
 }
+
+/// A project folder given to verify used to print "0 ok" and exit 0 (it searches folders for maps
+/// and a project holds none). It has to fail with a message that says what to do; the packed map
+/// of the same project (the control) still passes.
+#[test]
+fn verify_refuses_a_project_folder() {
+    let dir = workdir("verify_project_folder");
+    let map = dir.join("mini.w3x");
+    pack(&fixture(), &map);
+    ok(&["verify", s(&map), "--game", "none"]);
+    let o = w3proj(&["verify", s(&fixture()), "--game", "none"]);
+    let out = text(&o);
+    assert!(!o.status.success(), "{out}");
+    assert!(out.contains("project folder") && !out.contains("0 ok"), "{out}");
+}

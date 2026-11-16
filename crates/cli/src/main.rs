@@ -188,6 +188,12 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
         if a.is_dir() {
             let mut found = Vec::new();
             walk(a, &mut found, true)?;
+            if found.is_empty() && a.join(w3proj::project::MANIFEST).is_file() {
+                anyhow::bail!(
+                    "{} is a project folder with no packed map in it: verify checks packed maps (.w3x/.w3m/.w3n). Pack it first (`w3proj pack`) and verify the result",
+                    a.display()
+                );
+            }
             out.extend(found.into_iter().map(|p| {
                 let rel = p.strip_prefix(a).unwrap_or(&p);
                 let key = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
