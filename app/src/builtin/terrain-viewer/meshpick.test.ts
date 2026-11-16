@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { worldSphere } from "../../lib/model/frustum";
-import type { Placed } from "../../lib/terrain/objects";
 import type { Vec3 } from "../../lib/model/renderer";
 import { inverseAffine, rayBox } from "./meshpick";
-import { boxSphere, placement } from "./objects";
+import { boxSphere, placement, type Placed } from "./objects";
 import { TerrainRenderer, type ObjectBatch, type ObjectInstance } from "./renderer";
 
 const W = 1184, H = 844;
