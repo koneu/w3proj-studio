@@ -146,13 +146,13 @@ test("using a shop: which camps it alerts", () => {
 });
 
 test("camps on top of each other are found, however they overlap", () => {
-  const close = checkMelee(map([...camp(0, 600), ...camp(0, 1300)]));
+  const close = checkMelee(map([...camp(0, 600), ...camp(0, 1500)]));
   assert.ok(close.findings.some((x) => x.rule === "camp overlap" && /Two camps stand/.test(x.message)));
   const merged = checkMelee(map([...camp(0, 0), ...camp(300, 0), ...camp(150, 200)]));
   assert.ok(merged.findings.some((x) => x.rule === "camp overlap" && x.severity === "error" && /run into each other/.test(x.message)));
   const stacked = checkMelee(map([unit("nogr", 0, 0), unit("nogr", 30, 0, { drops: false })]));
   assert.ok(stacked.findings.some((x) => /on top of each other/.test(x.message)));
-  assert.ok(checkMelee(map([unit("nogr", 0, 0), unit("nogr", 440, 0), unit("nogr", 880, 0), unit("nogr", 1320, 0)])).findings.some((x) => /spreads/.test(x.message)));
+  assert.ok(checkMelee(map([unit("nogr", 0, 0), unit("nogr", 410, 0), unit("nogr", 820, 0), unit("nogr", 1230, 0)])).findings.some((x) => /spreads/.test(x.message)));
 });
 
 test("a narrow way to a camp is an error, a tight one a warning, and guards don't count", () => {

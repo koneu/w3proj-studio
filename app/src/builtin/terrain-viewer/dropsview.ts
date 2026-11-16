@@ -4,8 +4,7 @@
 // and the edits that go over several objects at once (the same drops for all, a set added to each, drops copied).
 // The changes themselves are unitprops.ts's: checked first, all or none.
 
-import { clusterNear } from "./clusters";
-import { SAME_CAMP } from "./meleecheck";
+import { campGroups } from "./clusters";
 import type { Placed } from "./objects";
 import { dropsOf, randomItemLabel, setTotal, type DropItem, type Drops } from "./unitprops";
 
@@ -180,7 +179,7 @@ export function groupDroppers(rows: readonly DropperRow[], by: GroupBy, names: {
       .sort((a, b) => a.title.localeCompare(b.title) || a.key.localeCompare(b.key));
   }
   const inCamps = rows.filter((r) => playerOf(r.entry) === undefined || playerOf(r.entry) === NEUTRAL_HOSTILE);
-  const camps = clusterNear(inCamps, (r) => [r.entry.position[0], r.entry.position[1]], SAME_CAMP)
+  const camps = campGroups(inCamps, (r) => [r.entry.position[0], r.entry.position[1]])
     .map((list) => ({ list, centre: centreOf(list) }))
     // North first (the top of the map), then west: rows of 1024 so a camp a little lower doesn't jump the queue.
     .sort((a, b) => Math.floor(b.centre[1] / 1024) - Math.floor(a.centre[1] / 1024) || a.centre[0] - b.centre[0]);

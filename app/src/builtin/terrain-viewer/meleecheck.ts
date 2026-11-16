@@ -1,7 +1,7 @@
 // Tests a melee map against what ladder maps do, and says how far each answer can be trusted.
 // Limits come from the same six 1v1 maps as the melee guide, with some room around what was measured.
 
-import { clusterNear } from "./clusters";
+import { campGroups } from "./clusters";
 
 type Point = readonly [number, number];
 
@@ -68,8 +68,6 @@ const HOSTILE = 24, MINE = "ngol", START = "sloc";
 const OWN_MINE = [700, 850] as const;
 /** Measured: nothing nearer than 1,758. */
 const NEAREST_CAMP = 1750;
-/** Creeps this close form one camp (the Item Drops overview's camps too). */
-export const SAME_CAMP = 450;
 /** A camp this close to a mine guards it. */
 const GUARD = 750;
 /** Measured over the ladder maps, with a little room. */
@@ -117,12 +115,12 @@ export function unitLevels(balance: readonly Record<string, string>[], mods: Rea
 export const CAMP_SIGHT = 200;
 interface Camp { centre: [number, number]; creeps: MeleeUnit[]; level: number; strongest: number }
 
-/** Neutral hostile units in groups: each within reach of another of the group. */
+/** Neutral hostile units in groups: each within 832 of the camp's first creep (clusters.ts). */
 export function campsOf(units: readonly MeleeUnit[], facts: Pick<MeleeFacts, "level">): Camp[] {
   const levelOf = (u: MeleeUnit) => u.randomLevel ?? facts.level(u.id) ?? 0;
   const hostile = units.filter((u) => u.player === HOSTILE && u.id !== START && u.id !== MINE);
   const camps: Camp[] = [];
-  for (const creeps of clusterNear(hostile, (u) => [u.x, u.y], SAME_CAMP)) {
+  for (const creeps of campGroups(hostile, (u) => [u.x, u.y])) {
     const count = creeps.length, x = creeps.reduce((n, u) => n + u.x, 0) / count, y = creeps.reduce((n, u) => n + u.y, 0) / count;
     const levels = creeps.map(levelOf);
     camps.push({ centre: [x, y], creeps, level: levels.reduce((a, b) => a + b, 0), strongest: Math.max(...levels) });
