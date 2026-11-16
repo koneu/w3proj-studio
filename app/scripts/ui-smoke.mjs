@@ -19,6 +19,10 @@ const app = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(app, "dist");
 const work = join(app, "..", "target", "ui-smoke");
 const TIMEOUT = 45_000;
+// Total limit for the whole run, so a hang fails in minutes: --limit=<seconds> or W3_UI_SMOKE_LIMIT (seconds).
+const LIMIT_S = Number(process.argv.find((a) => a.startsWith("--limit="))?.slice(8) ?? process.env.W3_UI_SMOKE_LIMIT ?? 300);
+let currentStep = "starting";
+let liveBrowser = null;
 
 /** Runs in the page before the app. Commands the fake doesn't know are rejected and listed, so
  *  the app's own error handling runs. */
@@ -85,7 +89,10 @@ function findEdge() {
   return found;
 }
 
-const until = (what, check) => untilFor(what, check, TIMEOUT);
+const until = (what, check) => {
+  currentStep = `waiting for ${what}`;
+  return untilFor(what, check, TIMEOUT);
+};
 
 async function run() {
   if (process.argv.includes("--build")) {
@@ -109,6 +116,7 @@ async function run() {
     "--window-size=1400,900",
     "about:blank",
   ], { stdio: "ignore" });
+  liveBrowser = browser;
 
   try {
     const portFile = join(profile, "DevToolsActivePort");
@@ -247,6 +255,12 @@ async function run() {
     server.close();
   }
 }
+
+const limitTimer = setTimeout(() => {
+  console.error(`FAIL ui-smoke exceeded its ${LIMIT_S} s limit; last step: ${currentStep}`);
+  liveBrowser?.kill("SIGKILL");
+  process.exit(1);
+}, LIMIT_S * 1000);
 
 try {
   const found = await run();
