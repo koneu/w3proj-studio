@@ -1,0 +1,101 @@
+{
+  "name": "replace-doodads-hillsbrad",
+  "description": "test.md 'Replace Doodads FTtw to LTcr on HillsbradCreek': smoketest_maps HillsbradCreek, Replace Doodads FTtw (Herbstliches Lordaeron, Trees/Destructibles, first row) to LTcr in every doodad. Measured 2026-11-16 (branch we-package-specials-camps): the editor says '94 doodads could not be replaced in their current locations' in the view's text. Studio: w3.terrain.replaceDoodads. Counts: 2786 FTtw in the map; the editor replaced 2692 (94 left, matching its message), Studio 2701 (85 left): nine FTtw at (7616,3648) (7104,3776) (7232,3648) (5952,3520) (6336,3520) (7168,5568) (7104,5440) (7552,5568) (7808,5440), all angle 4.71, the editor keeps and Studio replaces (expect differs: bugs.md).",
+  "input": {
+    "map": "${MAIN}/smoketest_maps/10_w3c_251104_0950_HillsbradCreek.w3x"
+  },
+  "we": {
+    "mode": "sd",
+    "saveAccept": [
+      "Warning"
+    ],
+    "steps": [
+      [
+        "--key",
+        "d"
+      ],
+      [
+        "--sleep",
+        "300"
+      ],
+      [
+        "--click",
+        "260,41"
+      ],
+      [
+        "--sleep",
+        "800"
+      ],
+      [
+        "--click",
+        "288,257"
+      ],
+      [
+        "--sleep",
+        "3500"
+      ],
+      [
+        "--click",
+        "663,341"
+      ],
+      [
+        "--sleep",
+        "800"
+      ],
+      [
+        "--click",
+        "513,515"
+      ],
+      [
+        "--sleep",
+        "800"
+      ],
+      [
+        "--click",
+        "520,408"
+      ],
+      [
+        "--sleep",
+        "500"
+      ],
+      [
+        "--click",
+        "791,674"
+      ],
+      [
+        "--sleep",
+        "4000"
+      ]
+    ]
+  },
+  "studio": {
+    "steps": [
+      {
+        "setting": [
+          "script.generateOnSave",
+          false
+        ]
+      },
+      {
+        "terrain": true
+      },
+      {
+        "eval": "const s = await w3.services.get('w3.terrain'); const loaded = () => (s.placedObjects()?.doodads?.length ?? 0) > 0; for (let i = 0; i < 60 && !loaded(); i++) await new Promise((r) => setTimeout(r, 500)); if (!loaded()) throw new Error('the doodads were not loaded'); await new Promise((r) => setTimeout(r, 3000)); const n = await w3.commands.execute('w3.terrain.replaceDoodads', { from: 'FTtw', to: 'LTcr' }); console.log('STUDIO_REPLACED ' + n); if (!(n >= 1)) throw new Error('replaced ' + n); await new Promise((r) => setTimeout(r, 500)); await w3.editors.saveAll();"
+      }
+    ]
+  },
+  "compare": [
+    {
+      "file": "war3map.doo",
+      "as": "parsed",
+      "expect": "differs",
+      "ignore": [
+        "doodads[].preFlags",
+        "doodads[].editorId",
+        "doodads[].trailer",
+        "doodads[].extras"
+      ]
+    }
+  ],
+  "limit": 40
+}
