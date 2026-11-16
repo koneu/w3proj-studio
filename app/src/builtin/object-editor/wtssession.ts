@@ -39,9 +39,12 @@ export class WtsSession {
   private saves = 0;
   /** Per save that is writing: the strings undo/redo put back since its strings were taken (typing takes one out). */
   private writes = new Set<Set<number>>();
-  /** The last write failed: the file as it was read for it (null: it was missing) and the text being written. A write
-   *  is not atomic (the file is emptied first), so a failure halfway (disk full) can leave the file cut short; the
-   *  next save tells that by the file being the start of `tried`, and merges onto `before` instead. */
+  /** The last write failed (disk full, locked, denied): the file as it was read for it (null: it was missing) and the
+   *  text being written. Until a save gets through the session stays dirty, even if undo put its strings back. The
+   *  app's write replaces the file in one step (w3proj::atomic behind fs_write_text), so a failure leaves the old file
+   *  whole and the save after it merges onto that as usual. Only a `write` that isn't atomic (it is the caller's) can
+   *  leave the file cut short: the next save tells that by the file being the start of `tried`, and merges onto
+   *  `before` instead. */
   private torn: { before: string | null; tried: string } | null = null;
   constructor(text: string) {
     this.saved = text;
