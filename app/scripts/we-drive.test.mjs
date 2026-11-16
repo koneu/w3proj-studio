@@ -536,7 +536,8 @@ test("Session: start waits for the editor before it to exit, and refuses one tha
   const r = rig(t);
   await r.s.start(r.maps["a.w3m"]);
   const first = r.children[0];
-  setTimeout(() => first.emit("exit", 0), 5);
+  // Not a real timer: the fake clock's sleeps (400 of them, one setImmediate each) can all pass within 5 ms of real time.
+  setImmediate(() => first.emit("exit", 0));
   r.s.editorExited = true;
   await r.s.start(r.maps["b.w3m"]);
   assert.equal(first.exited, true);
@@ -580,6 +581,26 @@ test("Session: waitReady wants this map's name in the title, not the map before'
   assert.equal(ready.ready, true);
   assert.match(ready.title, /b\.w3m/);
   assert.ok(r.clock.t - t0 >= 9000, "not ready while the title still named a.w3m");
+});
+
+test("Session: waitReady isn't ready while a reopened module window covers the view, and closes it again", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  // The first closes come too early: the editor takes the window's close only 5 s after the start.
+  let open = true;
+  const closes = [];
+  const base = r.x11;
+  r.x11 = (cmd, ...rest) => {
+    if (cmd === "close" && rest[0] === 50) { closes.push(r.clock.t - t0); if (r.clock.t - t0 >= 5000) open = false; return { pressed: true }; }
+    return base(cmd, ...rest);
+  };
+  r.windows = () => [mainWin("a.w3m"), ...(open ? [dialogWin(50, "Trigger Editor", [300, 100, 900, 600])] : [])];
+  const ready = await r.s.waitReady();
+  assert.equal(ready.ready, true, JSON.stringify(ready));
+  assert.equal(open, false, "the window is closed when ready is reported");
+  assert.ok(closes.length >= 2, `closed again: ${closes}`);
+  assert.ok(r.clock.t - t0 >= 5000, "not ready while the module window was open");
 });
 
 test("Session: waitReady gives up at the timeout and stops when the editor exits", async (t) => {

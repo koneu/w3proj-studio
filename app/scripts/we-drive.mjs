@@ -165,6 +165,7 @@ export function viewChecks(column, items = VIEW_ITEMS) {
 // The first-start dialog's Continue button, from the dialog's corner.
 const WELCOME = { title: "Welcome to the Warcraft III World Editor", button: { x: 473, y: 470 } };
 /** The editor's module windows: it opens those that were open when it was last closed again at the start. */
+const MODULE_RECLOSE_MS = 3000;
 const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager", "Asset Manager"]);
 /** Whether a window is one of those modules. The Campaign Editor's title names its campaign ("Campaign Editor -
  *  [Untitled]" when it reopens with none), so it goes by the start of the title. */
@@ -827,11 +828,12 @@ export class Session {
         }
       } else if (isReopenedModule(d.title)) {
         // A module window the editor opens again because a run before closed the editor with it open (the farm's
-        // prefix is shared): closed, once per window, so the map's view is what's shown.
-        if (!this.clicked.has(d.id)) {
+        // prefix is shared): closed, and again every 3 s while it stays (a close that comes before the editor has
+        // drawn it is lost), so the map's view is what's shown. waitReady counts it as not ready.
+        if (this.now() - (this.clicked.get(d.id) ?? -Infinity) > MODULE_RECLOSE_MS) {
           this.x("close", d.id);
+          if (!this.clicked.has(d.id)) this.answered = [...(this.answered ?? []), d.title];
           this.clicked.set(d.id, this.now());
-          this.answered = [...(this.answered ?? []), d.title];
         }
       } else rest.push(d);
     }
@@ -939,7 +941,9 @@ export class Session {
       // The map's own name in the title: right after an open the title still names the map before.
       const titled = main && (!this.mapName || (main.title.includes("[") && main.title.includes(this.mapName)));
       let drawn = false;
-      if (titled && !unknown.length) {
+      // A module window the editor opened again covers the view (a grey picture that isn't black): not ready until
+      // it's gone (answerKnown closes it, again every few seconds).
+      if (titled && !unknown.length && !dialogs.some((d) => isReopenedModule(d.title))) {
         // The middle of the view (counting the whole of it in Python takes seconds).
         const [vx, vy, vw, vh] = this.viewRect(main);
         const s = this.x("stats", "--rect", [vx + Math.round(vw / 2) - 150, vy + Math.round(vh / 2) - 100, 300, 200].join(","));
