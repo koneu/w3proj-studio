@@ -2270,6 +2270,26 @@ async function problemsIgnore(page, found) {
     await click("problems-show-ignored");
     await until("Orphan listed", () => has("Orphan Smoke"), 10000).catch(() => fail("an un-ignored report isn't listed"));
     if (await has("Quest Smoke")) fail("un-ignoring one report brought the library back");
+
+    // 'Disable this check for the project' in a folder without w3proj.toml makes the file ("format = 1", then [checks]
+    // disable = [...]) and the check's group goes. Control: the folder had a manifest, which is removed first.
+    const MANIFEST = join(k.root, "w3proj.toml");
+    rmSync(MANIFEST, { force: true });
+    if (existsSync(MANIFEST)) fail("the project's w3proj.toml couldn't be removed (control)");
+    await click("problems-show-ignored"); // back to the plain list
+    await check();
+    await until("a report of Orphan Smoke before disabling", () => has("Orphan Smoke"), 30000).catch(() => fail("no report of Orphan Smoke before disabling (control)"));
+    const groupHead = `(() => { const r = ${rowOf("Orphan Smoke")}; return r?.closest(".tree")?.previousElementSibling ?? null; })()`;
+    const groupTitle = await page.evaluate(`(${groupHead})?.firstChild?.textContent?.replace(/^[▸▾]\\s*/, "") ?? null`);
+    const pressed = await page.evaluate(`(() => { const b = ${groupHead}?.querySelector("button.problem-disable-check"); if (!b) return false; b.click(); return true; })()`);
+    if (!pressed) fail(`the group of "has no events" (${JSON.stringify(groupTitle)}) has no Disable this check button`);
+    else {
+      await until("w3proj.toml made", async () => existsSync(MANIFEST), 15000).catch(() => fail("Disable this check made no w3proj.toml in a folder without one"));
+      await until("the check gone", async () => !(await has("Orphan Smoke")) && !(await page.evaluate(`[...document.querySelectorAll(".problems-head")].some((e) => e.firstChild?.textContent?.includes(${JSON.stringify(groupTitle ?? "")}))`)), 30000)
+        .catch(() => fail("the disabled check's reports or group are still listed"));
+      const toml = existsSync(MANIFEST) ? readFileSync(MANIFEST, "utf8").replace(/\r\n/g, "\n") : "";
+      if (!/^format = 1\n\n?\[checks\]\ndisable = \["triggerNoEvents"\]\n?$/.test(toml)) fail(`w3proj.toml reads ${JSON.stringify(toml)}, not format = 1, then [checks] disable = ["triggerNoEvents"]`);
+    }
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
@@ -5590,6 +5610,10 @@ async function toggleGroups(page, found) {
     for (let i = 0; i < 4; i++) await run("w3.terrain.cycleGrid");
     // Effects and Cliffs have a tooltip of their own.
     for (const label of ["Effects", "Cliffs"]) if (!(await box(label))?.title) fail(`the ${label} box has no tooltip`);
+    // The naval toggle says what its colours are: light red where ships can't sail (the control is another box's tooltip).
+    const navalTip = (await box("Naval pathing"))?.title ?? "";
+    if (!/ships can't sail/.test(navalTip) || !/light red/.test(navalTip)) fail(`the Naval pathing tooltip reads ${JSON.stringify(navalTip)}, not light red where ships can't sail`);
+    if (/light red/.test((await box("Ground pathing"))?.title ?? "")) fail("the Ground pathing tooltip also says light red (the naval check can't tell the boxes apart)");
     // Game view: Doodads off and Fog off first; greyed, they show what is drawn.
     await run("w3.terrain.toggleDoodads");
     await page.evaluate(`w3.settings.set("terrain.fog", false, "user")`);
@@ -6414,6 +6438,29 @@ async function soundEditorKeys(page, found) {
   await k.clearToasts();
   await press("Ctrl+Shift+PageDown");
   if (!/Music volume \d+%/.test(await toasts())) fail("Ctrl+Shift+PageDown gave no music volume message");
+
+  // The same dialogue text typed into a keyless sound makes no keys; another text does (control).
+  await page.evaluate(`w3.editors.closeAll()`);
+  const spoken = (name) => ({ ...sound(name), speakerUnitType: "hfoo", dialogueText: "For the king", speakerName: "Arthas" });
+  await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(w3s)}, ${JSON.stringify(JSON.stringify({ ...body, sounds: ["gg_snd_Same", "gg_snd_Diff"].map(spoken) }))}); await w3.workspace.refresh(); })()`);
+  await page.evaluate(`w3.editors.open(${JSON.stringify(w3s)})`);
+  await until("the two spoken sounds", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 2`), 20000);
+  const typeText = async (row, value) => {
+    await hands.click(`tr.snd-row:nth-child(${row})`);
+    await until("the dialogue text box", () => page.evaluate(`!!document.querySelector("textarea.snd-dialogue-text")`), 10000);
+    await page.evaluate(`(() => { const t = document.querySelector("textarea.snd-dialogue-text"); t.value = ${JSON.stringify(value)}; t.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await settled(page);
+  };
+  const keysOnDisk = () => JSON.parse(readFileSync(join(k.root, w3s), "utf8")).sounds.map((s) => [s.name, s.dialogueTextKey, s.speakerNameKey]);
+  await until("the dialogue text shown", () => page.evaluate(`(async () => { document.querySelector("tr.snd-row:nth-child(1)")?.click(); return document.querySelector("textarea.snd-dialogue-text")?.value === "For the king"; })()`), 10000)
+    .catch(() => fail("a keyless sound doesn't show its file's own dialogue text (control)"));
+  await typeText(1, "For the king");
+  await typeText(2, "Another text");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await settled(page);
+  await until("the second sound's keys", async () => keysOnDisk().find((s) => s[0] === "gg_snd_Diff")?.[1] >= 0, 15000).catch(() => fail(`another text made no keys for a keyless sound (control): ${JSON.stringify(keysOnDisk())}`));
+  const same = keysOnDisk().find((s) => s[0] === "gg_snd_Same");
+  if (!same || same[1] >= 0 || same[2] >= 0) fail(`the same dialogue text made keys for a keyless sound: ${JSON.stringify(same)}`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally { await restoreWindow(page); }
   } catch (e) { found.push(`sound editor keys: ${e.message}`); }
@@ -7095,6 +7142,16 @@ async function mcpReplaceSnap(page, found) {
     const barrel = pose(back.find((d) => d.id === "LTbr"));
     if (!same(barrel?.slice(0, 2), [992, 992])) fail(`the save after undo_last_edit wrote the barrel at ${JSON.stringify(barrel)}, not on its grid at 992, 992`);
 
+    // A reload of the saved (now snapped) map says nothing about a grid either.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await settled(page);
+    await page.evaluate(`window.__mrsInfos.length = 0`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the doodads loaded again", async () => (await live()) !== null, 30000);
+    await settled(page);
+    if (!(await live()).some((d) => d.id === "LTbr")) fail("the reloaded map has no barrel (control)");
+    if ((await gridMsgs()) > 0) fail("reloading the saved map brought the 'on their grid' message");
+
     // Opened again from the stored places: only the snapped barrel (992, 992) is in this area, not the stored one (1000, 1000).
     await page.evaluate(`w3.editors.closeAll()`);
     writeFileSync(file, JSON.stringify(doo, null, 2));
@@ -7111,6 +7168,54 @@ async function mcpReplaceSnap(page, found) {
     await page.evaluate(`if (window.__mrsKept) { w3.window.showInfo = window.__mrsKept; window.__mrsKept = null; }`).catch(() => {});
     await page.evaluate(`window.__mrsGroup?.dispose(); window.__mrsGroup = null; window.__mrsEd = null;`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
+/** Replace Doodads through its dialog with Swap Both: a barrel (LTbr) and the hay cart (LOch) trade types and trade back; each
+ *  takes the new type's life (the file shows it), and two undos bring the hay cart back as it was (a doodad, life 255). */
+async function replaceUndoLife(page, found) {
+  const fail = (what) => found.push(`replace undo life: ${what}`);
+  const k = await heightKit(page, "ReplaceUndoLife");
+  try {
+    await k.tool("place_objects", { objects: [{ id: "LOch", x: 512, y: 512 }, { id: "LTbr", x: -512, y: 512 }], ignoreRoom: true });
+    await k.save();
+    const carts = () => k.doodads().filter((d) => d.id === "LOch");
+    const lives = () => JSON.stringify(k.doodads().map((d) => [d.id, d.life]).sort());
+    const start = lives(), whole = JSON.stringify(k.doodads());
+    const cart = carts()[0];
+    if (carts().length !== 1 || cart?.life !== 255) return fail(`the placed hay cart isn't one doodad of life 255 (control): ${start}`);
+    const replace = async (from, to) => {
+      await page.evaluate(`void (window.__replace = w3.commands.execute("w3.terrain.replaceDoodads"))`);
+      await until("the Replace Doodads dialog", () => page.evaluate(`!!document.querySelector(".replace-dialog")`), 20000);
+      const missing = await page.evaluate(`(() => {
+        const d = document.querySelector(".replace-dialog"), set = (sel, v) => { const s = d.querySelector(sel); if (![...s.options].some((o) => o.value === v)) return sel + " has no " + v; s.value = v; return null; };
+        const why = set(".replace-from", ${JSON.stringify(from)}) ?? set(".replace-to", ${JSON.stringify(to)});
+        if (why) return why;
+        d.querySelector(".replace-swap").checked = true;
+        d.querySelector(".newmap-buttons button.primary").click();
+        return null;
+      })()`);
+      if (missing) { await page.evaluate(`document.querySelector(".replace-overlay")?.remove()`); throw new Error(missing); }
+      const err = await page.evaluate(`window.__replace.then(() => null, (e) => String(e))`);
+      if (err) throw new Error(err);
+      await k.save();
+    };
+    // Swap Both (the dialog's old/new lists hold only placed types): the barrel becomes the hay cart and the cart a barrel, then back.
+    await replace("LTbr", "LOch");
+    const swapped = JSON.stringify(k.doodads().map((d) => [d.id, d.life, d.position[0]]));
+    if (JSON.stringify(k.doodads()) === whole) return fail(`the barrel and the hay cart didn't trade types: ${swapped}`);
+    await replace("LTbr", "LOch");
+    if (lives() !== start) return fail(`trading back gave ${lives()}, not ${start} (control)`);
+    const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await k.save(); };
+    await undo();
+    await undo();
+    if (lives() !== start) fail(`two undos left ${lives()}, not ${start}`);
+    if (JSON.stringify(k.doodads()) !== whole) fail(`two undos left the doodads as ${JSON.stringify(k.doodads())}, not as placed ${whole}`);
+    const back = carts()[0];
+    if (carts().length !== 1 || back?.life !== 255) fail(`the hay cart didn't return as a doodad of life 255: ${JSON.stringify(back)}`);
+  } finally {
+    await page.evaluate(`document.querySelector(".replace-overlay")?.remove(); w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
   }
 }
 
@@ -13665,6 +13770,7 @@ async function run() {
         problemsIgnore,
         realMapSave,
         rebuildCli,
+        replaceUndoLife,
         resizeLimits,
         resizeUndo,
         scriptGuard,
@@ -13985,6 +14091,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "mcpReplaceSnap", found);
   await mcpReplaceUnitsRoom(page, found).catch((e) => found.push(`mcp replace units room: ${e.message}`));
   await leftOpen(page, "mcpReplaceUnitsRoom", found);
+  await replaceUndoLife(page, found).catch((e) => found.push(`replace undo life: ${e.message}`));
+  await leftOpen(page, "replaceUndoLife", found);
   await doodadRulesEdit(page, found).catch((e) => found.push(`doodad rules on edit: ${e.message}`));
   await leftOpen(page, "doodadRulesEdit", found);
   await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));
