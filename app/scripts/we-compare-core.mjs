@@ -2,9 +2,56 @@
 // Studio's) field by field, cell by cell or byte by byte. No process is started here; we-compare.test.mjs tests it.
 
 import { dirname, isAbsolute, resolve } from "node:path";
+import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 
 const KINDS = ["auto", "parsed", "text", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
+/** The kinds compared as JSON (diffJson): only these take "tolerance", "ignore" and "expectPaths". */
+export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
+/** Folder names inside the work folder that are we-compare's own: a spec can't be named so (any case: Windows). */
+export const RESERVED_NAMES = ["studio-app", "we-drive", "report.json", "we-compare.lock"];
+
+// ---------------------------------------------------------------- the "ui" step's actions (we-compare-ui.mjs)
+
+/** The World Editor's terrain view on its 1600x1000 display: positions of a "click" / "drag" must fall inside it. */
+export const WE_VIEW = { left: 156, top: 79, width: 1184, height: 844 };
+export const inWeView = (x, y) => Number.isFinite(x) && Number.isFinite(y) && x >= WE_VIEW.left && y >= WE_VIEW.top && x < WE_VIEW.left + WE_VIEW.width && y < WE_VIEW.top + WE_VIEW.height;
+
+/** A "key" action's KeyboardEvent { key, code }: "d" is KeyD, "6" Digit6, "Numpad6" the key 6 on the number pad, " "
+ *  Space; a named key (Escape, ArrowUp, Delete, F2) is its own code. `code` given in the action wins. */
+export function uiKey(key, code) {
+  const k = String(key);
+  if (code !== undefined) return { key: k, code: String(code) };
+  if (/^[a-z]$/i.test(k)) return { key: k, code: `Key${k.toUpperCase()}` };
+  if (/^[0-9]$/.test(k)) return { key: k, code: `Digit${k}` };
+  const pad = /^Numpad([0-9])$/.exec(k);
+  if (pad) return { key: pad[1], code: k };
+  if (k === " ") return { key: k, code: "Space" };
+  return { key: k, code: k };
+}
+
+/** Checks a "ui" step's actions before anything runs: the kinds, the numbers, and that clicks and drags are inside the
+ *  editor's terrain view (a point outside it would land on a panel in one editor and on nothing in the other). */
+export function checkUiActions(actions, where = "ui") {
+  const num = (v) => typeof v === "number" && Number.isFinite(v);
+  for (const [i, act] of actions.entries()) {
+    const [kind, ...a] = act;
+    const bad = (m) => { throw new Error(`${where}[${i}] ${JSON.stringify(act)}: ${m}`); };
+    if (["view", "tab", "tool", "texture", "cliff", "shape"].includes(kind)) { if (typeof a[0] !== "string") bad("wants a name"); }
+    else if (kind === "size") { if (!num(a[0])) bad("wants a number"); }
+    else if (kind === "sleep") { if (!(num(a[0]) && a[0] >= 0)) bad("wants milliseconds"); }
+    else if (kind === "key") { if (typeof a[0] !== "string" || !a[0] || (a[1] !== undefined && typeof a[1] !== "string")) bad("wants a key (and a code)"); }
+    else if (kind === "clickGround") { if (!(a.length >= 2 && a.length <= 3 && a.every(num))) bad("wants X, Y[, Z] world units"); }
+    else if (kind === "click") { if (!(a.length === 2 && a.every(num))) bad("wants X, Y"); if (!inWeView(a[0], a[1])) bad("is outside the editor's terrain view (156,79 to 1340,923)"); }
+    // A drag starts in the view; it may end past its edge (a box selection held on past it, edge-group-nudge), on the display.
+    else if (kind === "drag") {
+      if (!(a.length === 4 && a.every(num))) bad("wants X, Y, X2, Y2");
+      if (!inWeView(a[0], a[1])) bad("starts outside the editor's terrain view (156,79 to 1340,923)");
+      if (!(a[2] >= 0 && a[3] >= 0 && a[2] < 1600 && a[3] < 1000)) bad("ends outside the editor's 1600x1000 display");
+    }
+    else bad(`unknown ui action ${kind}`);
+  }
+}
 
 const isObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 
@@ -56,7 +103,8 @@ function studioStep(step, where, vars = {}) {
   if (k === "sleep" && !(Number.isFinite(step.sleep) && step.sleep >= 0)) throw new Error(`${where}: "sleep" is milliseconds`);
   if (k === "open" && typeof step.open !== "string") throw new Error(`${where}: "open" is a project file`);
   if (k === "setting" && !(Array.isArray(step.setting) && step.setting.length === 2 && typeof step.setting[0] === "string")) throw new Error(`${where}: "setting" is [key, value]`);
-  if (k === "ui" && !(Array.isArray(step.ui) && step.ui.every(Array.isArray))) throw new Error(`${where}: "ui" is a list of actions, each a list (["tool", "Paint:"], ...: we-compare-ui.mjs)`);
+  if (k === "ui" && !(Array.isArray(step.ui) && step.ui.every((x) => Array.isArray(x) && x.length))) throw new Error(`${where}: "ui" is a list of actions, each a list (["tool", "Paint:"], ...: we-compare-ui.mjs)`);
+  if (k === "ui") checkUiActions(step.ui, `${where}: ui`);
   if (k === "command" && typeof step.command !== "string") throw new Error(`${where}: "command" is a command id`);
   if (k === "eval") {
     const paths = Object.fromEntries(Object.entries(vars).filter(([n]) => n === "REPO" || n === "MAIN"));
@@ -78,6 +126,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
   if (!isObject(raw)) throw new Error(`${label}: a spec is an object`);
   const name = raw.name;
   if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`${label}: "name" is needed (letters, digits, . _ -; it names the folder)`);
+  if (RESERVED_NAMES.includes(name.toLowerCase())) throw new Error(`${label}: the name ${name} is one of we-compare's own folders (${RESERVED_NAMES.join(", ")})`);
   const where = `${label} (${name})`;
   const unknown = Object.keys(raw).filter((k) => !["name", "description", "input", "we", "studio", "compare", "limit"].includes(k));
   if (unknown.length) throw new Error(`${where}: unknown key ${unknown.join(", ")}`);
@@ -107,10 +156,21 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
     if (e.expect !== undefined && !["match", "differs"].includes(e.expect)) throw new Error(`${where}: compare[${i}].expect is match or differs`);
     if (e.tolerance !== undefined && !(Number.isFinite(e.tolerance) && e.tolerance >= 0)) throw new Error(`${where}: compare[${i}].tolerance is a number of 0 or more (numbers within it count as equal)`);
     if (e.ignore !== undefined && !(Array.isArray(e.ignore) && e.ignore.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].ignore is a list of paths ("doodads[3].scale", "units[].itemTable")`);
-    return { file: e.file, as: e.as ?? "auto", expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [] };
+    if (e.expectPaths !== undefined) {
+      if (!(Array.isArray(e.expectPaths) && e.expectPaths.length && e.expectPaths.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].expectPaths is a list of paths that must all differ ("players[].start")`);
+      if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectPaths goes with "expect": "differs"`);
+    }
+    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths"].includes(k));
+    if (unknownKey.length) throw new Error(`${where}: compare[${i}]: unknown key ${unknownKey.join(", ")}`);
+    // A kind compared as text, bytes or cells has no use for these: refused, so a spec never believes it is applied.
+    const kind = e.as ?? "auto";
+    for (const opt of ["tolerance", "ignore", "expectPaths"]) {
+      if (e[opt] !== undefined && kind !== "auto" && !JSON_KINDS.includes(kind)) throw new Error(`${where}: compare[${i}].${opt} has no effect on "as": "${kind}" (only on ${JSON_KINDS.join(", ")})`);
+    }
+    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}) };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
-  const dup = compare.map((c) => c.file).filter((f, i, a) => a.indexOf(f) !== i);
+  const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
   if (dup.length) throw new Error(`${where}: compare names ${dup[0]} twice`);
   if (raw.limit !== undefined && !(Number.isInteger(raw.limit) && raw.limit > 0)) throw new Error(`${where}: limit is a positive whole number`);
   return {
@@ -130,9 +190,16 @@ export function parseSpecFile(text, file, vars = {}) {
   try { raw = JSON.parse(text); } catch (e) { throw new Error(`${file}: not JSON: ${e.message}`); }
   const list = Array.isArray(raw) ? raw : [raw];
   const specs = list.map((r, i) => parseSpec(r, dirname(file), vars, `${file}${Array.isArray(raw) ? `[${i}]` : ""}`));
-  const dup = specs.map((s) => s.name).filter((n, i, a) => a.indexOf(n) !== i);
-  if (dup.length) throw new Error(`${file}: two specs are named ${dup[0]}`);
+  const dup = duplicateName(specs);
+  if (dup) throw new Error(`${file}: two specs are named ${dup}`);
   return specs;
+}
+
+/** The first name two specs share, any case (each names a folder, and Windows' folders don't tell case apart), or null. */
+export function duplicateName(specs) {
+  const names = specs.map((s) => s.name.toLowerCase());
+  const i = names.findIndex((n, j) => names.indexOf(n) !== j);
+  return i < 0 ? null : specs[i].name;
 }
 
 // ---------------------------------------------------------------- comparing
@@ -147,19 +214,50 @@ const show = (v) => {
  * difference with its path (`doodads[3].angle`); a list of another length also counts its extra entries, one each
  * ("doodads[210]: WE absent, Studio {…}"). `entries` counts the differing elements of the top-level lists ({ list: { total, differing } }).
  * `a` is the World Editor's, `b` Studio's. `limit` is how many differences are kept in `diffs` (the count is all).
+ *
+ * `tolerance` is a number, or a function of the path giving one (the minimap: its blocks only). `ignore` and
+ * `expectPaths` are path patterns (pathPattern). Also returned: `ignoreUnmatched`, the ignore patterns that name no path
+ * of either document (a typo, or a field that is gone: it ignores nothing); with `expectPaths`, `expectMissing` (the
+ * expected paths that don't differ) and `unexpected` ({ count, paths }: differences outside them).
  */
-export function diffJson(a, b, limit = 10, tolerance = 0, ignore = []) {
+export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPaths = []) {
   const diffs = [];
   let count = 0;
   const entries = {};
+  const tol = typeof tolerance === "function" ? tolerance : () => tolerance;
   // Two numbers within `tolerance` of each other are the same (a known, bounded difference of the two editors).
-  const same = (x, y) => x === y || (Number.isNaN(x) && Number.isNaN(y)) || (tolerance > 0 && typeof x === "number" && typeof y === "number" && Math.abs(x - y) <= tolerance);
+  const same = (x, y, path) => x === y || (Number.isNaN(x) && Number.isNaN(y)) || (typeof x === "number" && typeof y === "number" && Math.abs(x - y) <= tol(path));
   // `ignore`: paths whose differences don't count (a known, named difference): "doodads[3].scale" (with everything below
   // it), "units[].itemTable" ([] is any index).
-  const ignored = ignore.map((p) => new RegExp(`^${p.split("[]").map((part) => part.replace(/[.[\]]/g, (c) => `\\${c}`)).join("\\[\\d+\\]")}(?:$|[.[])`));
+  const ignored = ignore.map(pathPattern);
+  const unseen = new Set(ignored.keys());
+  const see = (path) => { if (path) for (const i of unseen) if (ignored[i].test(path)) unseen.delete(i); };
+  // Every path of a value that only one side has (for `ignoreUnmatched`).
+  const seeAll = (v, path) => {
+    if (!unseen.size) return;
+    see(path);
+    if (Array.isArray(v)) v.forEach((e, i) => seeAll(e, `${path}[${i}]`));
+    else if (isObject(v)) for (const k of Object.keys(v)) seeAll(v[k], path ? `${path}.${k}` : k);
+  };
+  const expected = expectPaths.map(pathPattern);
+  const expectHit = new Set();
+  const unexpected = { count: 0, paths: [] };
   const paths = [];
-  const add = (path, x, y) => { if (ignored.some((re) => re.test(path))) return; count++; paths.push(path); if (diffs.length < limit) diffs.push({ path, we: x, studio: y }); };
+  const add = (path, x, y) => {
+    seeAll(x, path);
+    seeAll(y, path);
+    if (ignored.some((re) => re.test(path))) return;
+    count++;
+    paths.push(path);
+    if (diffs.length < limit) diffs.push({ path, we: x, studio: y });
+    if (expected.length) {
+      const hits = expected.flatMap((re, i) => (re.test(path) ? [i] : []));
+      for (const i of hits) expectHit.add(i);
+      if (!hits.length) { unexpected.count++; if (unexpected.paths.length < limit) unexpected.paths.push(path); }
+    }
+  };
   const walk = (x, y, path) => {
+    if (unseen.size) see(path);
     if (Array.isArray(x) && Array.isArray(y)) {
       const n = Math.max(x.length, y.length);
       for (let i = 0; i < n; i++) {
@@ -173,7 +271,7 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = []) {
         else if (!(k in y)) add(path ? `${path}.${k}` : k, x[k], undefined);
         else walk(x[k], y[k], path ? `${path}.${k}` : k);
       }
-    } else if (!same(x, y)) add(path, x, y);
+    } else if (!same(x, y, path)) add(path, x, y);
   };
   walk(a, b, "");
   // Entries of the top-level lists: how many of them differ (a list element is one entry, whatever fields differ).
@@ -186,7 +284,18 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = []) {
       entries[k] = { total: Math.max(a[k].length, b[k].length), differing: indices.length, indices: indices.slice(0, 50) };
     }
   }
-  return { equal: count === 0, count, entries, diffs: diffs.map((d) => ({ ...d, text: `${d.path}: WE ${show(d.we)}, Studio ${show(d.studio)}` })) };
+  return {
+    equal: count === 0, count, entries, diffs: diffs.map((d) => ({ ...d, text: `${d.path}: WE ${show(d.we)}, Studio ${show(d.studio)}` })),
+    ignoreUnmatched: [...unseen].map((i) => ignore[i]),
+    ...(expected.length ? { expectMissing: expectPaths.filter((p, i) => !expectHit.has(i)), unexpected } : {}),
+  };
+}
+
+/** A path pattern of "ignore" / "expectPaths" as a RegExp: "doodads[3].scale" is that path and everything below it,
+ *  "units[].itemTable" has [] for any index; every other character is itself. */
+export function pathPattern(p) {
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${p.split("[]").map(escape).join("\\[\\d+\\]")}(?:$|[.[])`);
 }
 
 /** Bytes: { equal, count (differing positions, the extra length included), lengths, diffs (offsets) }. */
@@ -242,25 +351,84 @@ export function diffText(a, b, limit = 10) {
 }
 
 /**
- * The comparison of one file: `kind` as the spec names it, `files` what was found: { we, studio } each a Buffer, a
- * parsed JSON value ({ json }), or null when the map has no such file. Returns { file, kind, status, ... } where status is
- * "MATCH", "DIFFERS" or "MISSING" (the file is absent in one or both).
+ * The comparison of one file: `kind` as the spec names it (resolved, not "auto"), `we` and `studio` what was found:
+ * each { bytes }, { text } or a parsed JSON value ({ json }), or null when the map has no such file. Returns
+ * { file, kind, status, ... } where status is
+ *   "MATCH"    no difference that counts;
+ *   "DIFFERS"  a real difference of values (diffJson, diffText, diffWpm, diffBytes);
+ *   "MISSING"  the file is absent in one or both saves (never what "expect": "differs" means);
+ *   "ERROR"    the comparison can't be made (an option the kind doesn't use; see also compareEntry's load errors).
+ * `limit`, `tolerance`, `ignore`, `expectPaths` as the spec's compare entry has them.
  */
-export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = []) {
+export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = [], expectPaths = []) {
   if (!we || !studio) {
-    const only = !we && !studio ? "neither" : !we ? "Studio only" : "WE only";
-    return { file, kind, status: !we && !studio ? "MISSING" : "DIFFERS", count: 1, diffs: [{ text: `the file is in ${only === "neither" ? "neither map" : only === "WE only" ? "the World Editor's save only" : "Studio's save only"}` }] };
+    const where = !we && !studio ? "neither map" : !we ? "Studio's save only" : "the World Editor's save only";
+    return { file, kind, status: "MISSING", count: 1, diffs: [{ text: `the file is in ${where}` }] };
   }
-  // The terrain's w3e and the units' heights: both sides are the reduced tables of we-compare-w3e.mjs, compared as parsed
-  // (exactly; "ignore" names known differences, e.g. "header.ground").
-  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation" || kind === "unit-heights" || kind === "unit-ids" || kind === "doodad-places") { const w = diffJson(we.json, studio.json, limit, 0, ignore); return { file, kind, status: w.equal ? "MATCH" : "DIFFERS", ...w }; }
+  if (!JSON_KINDS.includes(kind)) {
+    const used = [tolerance > 0 && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
+    if (used.length) return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `${used.join(", ")} has no effect on a file compared as ${kind} (only on ${JSON_KINDS.join(", ")})` }] };
+  }
   let r;
-  // The minimap: block colours (we-compare-w3e.mjs minimapView), each channel within the spec's tolerance.
-  if (kind === "parsed" || kind === "minimap") r = diffJson(we.json, studio.json, limit, tolerance, ignore);
+  // The JSON kinds: the codecs' JSON (parsed) and the reduced tables of we-compare-w3e.mjs (w3e…, unit-…, doodad-places,
+  // minimap), field by field; "ignore" names known differences ("header.ground"), "tolerance" bounds numbers. The
+  // minimap's tolerance is for its block colours only: its size is compared exactly.
+  if (JSON_KINDS.includes(kind)) r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tolerance : 0) : tolerance, ignore, expectPaths);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
   else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
   else r = diffBytes(we.bytes, studio.bytes, limit);
   return { file, kind, status: r.equal ? "MATCH" : "DIFFERS", ...r };
+}
+
+/**
+ * One file of a map for a compare kind, from a reader of an unpacked map (we-compare.mjs `reader`: has, listed,
+ * unpackedAs, json, text, bytes). null when the map has no such file; throws when it has one that can't be read as
+ * the kind wants (a w3e that is cut short, a file that didn't unpack as JSON): that is never "absent".
+ */
+export function loadSide(r, file, kind, decodeImage) {
+  if (!r.has(file) && !r.listed(file)) return null;
+  const json = () => {
+    if (r.unpackedAs(file) !== "json") throw new Error(`${file} is in the map but the unpack made no JSON of it (${r.unpackedAs(file) ?? "not unpacked"})`);
+    return r.json(file);
+  };
+  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(file)) };
+  if (kind === "unit-heights") return { json: unitHeights(json()) };
+  if (kind === "doodad-places") return { json: doodadPlaces(json()) };
+  if (kind === "unit-ids") return { json: unitIds(json()) };
+  if (kind === "parsed") return { json: json() };
+  if (kind === "minimap") {
+    if (!decodeImage) throw new Error("no image decoder for the minimap kind");
+    return { json: minimapView(decodeImage(new Uint8Array(r.bytes(file)), file).mip(0)) };
+  }
+  if (kind === "text") return { text: r.text(file) };
+  return { bytes: r.bytes(file) };
+}
+
+/**
+ * One "compare" entry of a spec (parsed: { file, as, expect, tolerance, ignore, expectPaths }) on the two saves' readers:
+ * the kind worked out, both sides loaded, compared. A side that can't be loaded gives status "ERROR" naming it.
+ */
+export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImage } = {}) {
+  let kind = c.as;
+  const base = { file: c.file, expect: c.expect, ...(c.expectPaths ? { expectPaths: c.expectPaths } : {}) };
+  const sides = [["the World Editor's save", weReader], ["Studio's save", studioReader]];
+  let loaded;
+  try {
+    if (kind === "auto") {
+      const [a, b] = sides.map(([, r]) => r.unpackedAs(c.file));
+      kind = autoKind(c.file, a === "json" && b === "json" ? "json" : a ?? b);
+    }
+  } catch (e) {
+    return { ...base, kind, status: "ERROR", count: 1, diffs: [{ text: `reading the saves: ${e.message}` }] };
+  }
+  try {
+    loaded = sides.map(([who, r]) => {
+      try { return loadSide(r, c.file, kind, decodeImage); } catch (e) { throw new Error(`${who}: ${e.message}`); }
+    });
+  } catch (e) {
+    return { ...base, kind, status: "ERROR", count: 1, diffs: [{ text: e.message }] };
+  }
+  return { ...base, ...compareFile(c.file, kind, loaded[0], loaded[1], limit, c.tolerance, c.ignore, c.expectPaths ?? []) };
 }
 
 /** What the kind "auto" means for a file: the codecs' form when the unpack made one (json), else by name. */
@@ -271,16 +439,73 @@ export function autoKind(file, unpackedAs) {
   return "bytes";
 }
 
-/** Whether a file's result is what its spec expected: a match, or a difference where the spec says it differs. */
-export const asExpected = (f) => (f.expect === "differs" ? f.status === "DIFFERS" : f.status === "MATCH");
+/**
+ * Whether a file's result is what its spec expected: a match, or a difference where the spec says it differs (with
+ * `expectPaths`: every one of them differs and nothing else does). MISSING and ERROR are never as expected.
+ * `strictIgnore`: an ignore pattern that names no path makes it unexpected too (else it is only a warning).
+ */
+export function asExpected(f, { strictIgnore = false } = {}) {
+  if (strictIgnore && f.ignoreUnmatched?.length) return false;
+  if (f.expect !== "differs") return f.status === "MATCH";
+  if (f.status !== "DIFFERS") return false;
+  return !f.expectMissing?.length && !f.unexpected?.count;
+}
+
+/**
+ * The run's verdict from its spec results ({ error, files, notCompared }): { ok, code, unexpected (a test per result) }.
+ * Exit codes: 0 every file as expected, 1 a file not as expected (or MISSING), 2 something couldn't run (a spec's
+ * error, a file's ERROR), 3 nothing was compared (--no-we: Studio's side only), never "ok".
+ */
+export function runOutcome(results, { strictIgnore = false } = {}) {
+  const unexpected = (r) => Boolean(r.error || r.notCompared || r.files.some((f) => !asExpected(f, { strictIgnore })));
+  const ok = results.length > 0 && !results.some(unexpected);
+  const code = results.some((r) => r.error || r.files.some((f) => f.status === "ERROR")) ? 2
+    : results.some((r) => !r.notCompared && unexpected(r)) ? 1
+      : results.some((r) => r.notCompared) ? 3 : ok ? 0 : 1;
+  return { ok, code, unexpected };
+}
+
+/**
+ * What one we-drive process did for its `n` specs, from its JSON output lines (`outs`, parsed): per spec `error` (null
+ * when its save was made) and `rerun`, the indices of the specs that never ran because the process stopped at an earlier
+ * one's failure (they go to the next process; a spec that was saved, or failed itself, is not run again).
+ */
+export function weOutcome(n, outs) {
+  // Which spec each line belongs to: the --map lines start one.
+  let at = -1;
+  const state = Array.from({ length: n }, () => ({ saved: false, failure: null }));
+  for (const o of outs) {
+    if (o.step === "--map" && !o.error) { at = Math.min(at + 1, n - 1); continue; }
+    const i = Math.max(at, 0);
+    if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
+    else if (o.step === "--save") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
+    else if (o.step === "--wait-ready" && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
+  }
+  const firstBad = state.findIndex((s) => s.failure || !s.saved);
+  const rerun = [];
+  const errors = state.map((s, i) => {
+    if (s.failure) return `World Editor: ${s.failure}`;
+    if (s.saved) return null;
+    if (i > firstBad) { rerun.push(i); return null; }
+    return "World Editor: no save (the run stopped before it)";
+  });
+  return { errors, rerun };
+}
 
 /** One spec's result as text: a line per file, then its first differences. */
-export function formatReport(result, limit = 10) {
+export function formatReport(result, limit = 10, { strictIgnore = false } = {}) {
   const lines = [];
-  const ok = !result.error && result.files.every(asExpected);
-  lines.push(`${result.name}: ${result.error ? `ERROR ${result.error}` : ok ? "OK" : "UNEXPECTED"}${result.description ? `  (${result.description})` : ""}`);
+  const ok = !result.error && !result.notCompared && result.files.every((f) => asExpected(f, { strictIgnore }));
+  const head = result.error ? `ERROR ${result.error}` : result.notCompared ? "NOT COMPARED (--no-we: Studio's side only, nothing was compared)" : ok ? "OK" : "UNEXPECTED";
+  lines.push(`${result.name}: ${head}${result.description ? `  (${result.description})` : ""}`);
   for (const f of result.files) {
-    const expected = f.expect === "differs" ? (f.status === "DIFFERS" ? " (expected)" : " (expected to differ, but matches)") : "";
+    let expected = "";
+    if (f.expect === "differs") {
+      if (f.status === "MATCH") expected = " (expected to differ, but matches)";
+      else if (f.status !== "DIFFERS") expected = " (expected to differ: a missing or unreadable file is not a difference)";
+      else if (f.expectMissing?.length || f.unexpected?.count) expected = " (not the expected difference)";
+      else expected = " (expected)";
+    }
     let extent = "";
     const after = [];
     if (f.kind === "parsed" && f.status !== "MATCH" && f.entries) {
@@ -294,6 +519,9 @@ export function formatReport(result, limit = 10) {
     for (const d of (f.diffs ?? []).slice(0, limit)) lines.push(`    ${d.text}`);
     if (f.count > (f.diffs ?? []).length && f.diffs?.length) lines.push(`    ... and ${f.count - f.diffs.length} more`);
     if (f.note) lines.push(`    (${f.note})`);
+    if (f.expectMissing?.length) lines.push(`    expected to differ but don't: ${f.expectMissing.join(", ")}`);
+    if (f.unexpected?.count) lines.push(`    ${f.unexpected.count} difference${f.unexpected.count === 1 ? "" : "s"} outside expectPaths: ${f.unexpected.paths.join(", ")}${f.unexpected.count > f.unexpected.paths.length ? ", ..." : ""}`);
+    if (f.ignoreUnmatched?.length) lines.push(`    ${strictIgnore ? "error" : "warning"}: ignore names no path of either file: ${f.ignoreUnmatched.join(", ")}`);
   }
   return lines.join("\n");
 }

@@ -481,8 +481,18 @@ running editor; `--restart-per-map` is the old editor start per map, for timing)
 by restart, 47 s by open (an extra map costs about 9 s instead of 18 s; the start of a cold prefix is longer). Both saves are unpacked with the release CLI's codecs and compared per file: `parsed`
 (the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
 entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect": "differs"` marks a known difference
-(not a failure). Exit 0 as expected, 1 not, 2 something couldn't run; the JSON report is `<work>/report.json`. Unit
-tests: `we-compare.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
+(not a failure); `"expectPaths": ["players[].start", …]` (JSON kinds) says which: every listed path must differ and no
+other may, else the file is UNEXPECTED. Without it any difference passes, so a new `expect: differs` spec should name
+its paths. A file missing from a save is MISSING and one that can't be read (a w3e cut short, a file that didn't unpack
+as JSON, a BLP that doesn't decode) is ERROR: neither is ever the expected difference. `tolerance`, `ignore` and
+`expectPaths` are refused on `text`, `bytes` and `wpm`; the minimap's tolerance is for its colours, not its size. An
+`ignore` pattern that names no path of either file is listed as a warning (`--strict-ignore` makes it fail the file).
+Exit 0 as expected, 1 not (or MISSING), 2 something couldn't run (ERROR included), 3 `--no-we` (nothing compared, NOT
+COMPARED); the JSON report is `<work>/report.json`. The work folder is locked (`we-compare.lock`): give parallel runs
+their own `--work`. Kinds that can give a false DIFFERS between two random draws: `w3e-variation` (a value worn by
+about 5% of a texture's corners sits on the cut), `doodad-places` (a doodad at a 64 square's edge), `w3e-spread`
+(a rare offset drawn in one run only): rerun before calling it a finding. Unit tests: `we-compare.test.mjs`,
+`we-compare-w3e.test.mjs`, `we-compare-runner.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
 `W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
 
 Saved-file specs of package D (branch we-specs-d, 2026-11-14; `ramp-wpm`, `boundary-wpm`, `doodad-snap-custom`, `map-size-38x42`, `paint-variation`; inputs and generators `make-doodad-snap.mjs`, `make-odd-size.mjs` in `tests/fixtures/we-specs/`): compare kind `w3e-variation` (per texture the corner count and the ground variations that 5% of its corners wear: the draw is random). The editor's palette: Blight 1552,111, Boundary 1552,143, Remove Boundary 1552,175, Ramp 1505,311. Known differences recorded as `expect: differs`: its Blight brush also turns corners round it to the map's second ground tile (`boundary-flags-wpm`'s w3e). Boundary matches since branch boundary-we (2026-11-14): its brush is centred on the lower-left corner of the tile under the pointer, not the nearest corner (16 size-1 clicks at 0.2 to 0.8 of a tile, sizes 2, 3, 5: 5, 13, 49 corners round that corner), and its wpm makes a tile whose lower-left corner is painted 0xce, the border's byte, over a cliff or water alike, 0xee when blighted; Remove Boundary frees it. A palette tile (Boundary, Blight) picked after a water brush leaves the water brush on: the next click paints water too, so a spec picks the water last.
