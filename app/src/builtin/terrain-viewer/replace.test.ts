@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CornerUndo } from "../../lib/terrain/cliffs";
 import type { Corner, Terrain } from "../../lib/terrain/w3e";
 import { replacePlaced } from "./aitools";
-import { replaceCorners, roomCells, roomForReplaced, swapsOf } from "./replace";
+import { replaceCorners, roomCells, roomForReplaced, swapsOf, variationAfter } from "./replace";
 import { roomShape, type RoomShape } from "./occupancy";
 import type { PathingData } from "./pathmap";
 
@@ -141,7 +141,7 @@ test("Replace Units: footmen to farms, as the World Editor did (tests/we-compare
   ]), [false, false]);
 });
 
-test("roomShape: a building takes in its texture's no-build ring (blue), a doodad only the red part", async () => {
+test("roomShape: a building and a doodad take in their texture's no-build ring (blue)", async () => {
   // 4x4 pixels: red in the middle 2x2, blue over all of it (a barracks' 12x12 over 8x8, small).
   const rgba = new Uint8Array(4 * 4 * 4);
   for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const i = (y * 4 + x) * 4; rgba[i] = x > 0 && x < 3 && y > 0 && y < 3 ? 255 : 0; rgba[i + 2] = 255; rgba[i + 3] = 255; }
@@ -154,5 +154,27 @@ test("roomShape: a building takes in its texture's no-build ring (blue), a dooda
   } as unknown as PathingData;
   const count = (s: RoomShape) => (s && "mask" in s ? s.mask.reduce((a, b) => a + b, 0) : -1);
   assert.equal(count(await roomShape(data, "hbar", "w3u")), 16);
-  assert.equal(count(await roomShape(data, "LTlt", "w3d")), 4);
+  assert.equal(count(await roomShape(data, "LTlt", "w3d")), 16);
+});
+
+test("roomForReplaced: a rock's no-build corner stops the crate that only touches its red part (HillsbradCreek)", () => {
+  // BRrs 12x12 at (7424,3840) with 2x2 blue corners; the FTtw at (7616,3648) as a 4x4 crate (cells x 7552..7680, y 3584..3712, 32 per cell).
+  const w = 400, cell = (x: number, y: number) => (y / 32) * w + x / 32, block = (x0: number, y0: number, n: number, skip: (cx: number, cy: number) => boolean = () => false) => {
+    const out: number[] = [];
+    for (let cy = 0; cy < n; cy++) for (let cx = 0; cx < n; cx++) if (!skip(cx, cy)) out.push(cell(x0 + cx * 32, y0 + cy * 32));
+    return out;
+  };
+  const crate = block(7552, 3584, 4);
+  const redOnly = block(7232, 3648, 12, (cx, cy) => (cx < 2 || cx > 9) && (cy < 2 || cy > 9));
+  const withBlue = block(7232, 3648, 12);
+  assert.deepEqual(roomForReplaced([redOnly], [{ before: crate, after: crate }]), [true]);
+  assert.deepEqual(roomForReplaced([withBlue], [{ before: crate, after: crate }]), [false]);
+});
+
+test("variationAfter: a variation the new type has stays, another is random among the new type's", () => {
+  assert.equal(variationAfter(0, 2), 0);
+  assert.equal(variationAfter(1, 2), 1);
+  assert.equal(variationAfter(7, 2, () => 0.2), 0);
+  assert.equal(variationAfter(7, 2, () => 0.7), 1);
+  assert.equal(variationAfter(7, 1, () => 0.7), 0);
 });

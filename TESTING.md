@@ -501,7 +501,7 @@ on the middle one). Measured along one axis only.
 **Replace Doodads on HillsbradCreek** (spec `replace-doodads-hillsbrad`, Advanced > Replace Doodads: old tileset box
 663,341, "Herbstliches Lordaeron" 513,515, [FTtw] first row 520,408; new LTcr kept from the earlier run): of 2786 FTtw the editor
 replaced 2692 and says "94 doodads could not be replaced in their current locations" in the view; Studio replaces 2701
-(85 left): nine crates the editor refuses, in rows of FTtw/LTcr 128 apart, e.g. (7616,3648), (7168,5568) (expect differs).
+(85 left): nine crates the editor refuses, in rows of FTtw/LTcr 128 apart, e.g. (7616,3648), (7168,5568): they touch only the rounded no-build (blue) 2x2 corner of a large rock (BRrs, 12x12), and the editor counts other objects' blue cells as room taken (Studio's roomShape, branch replace-doodads-we: matches, 94 refused). The new variation: 0 and 1 stay, 2 to 9 become 0 or 1 at random (Studio's `variationAfter`), so the spec ignores variation.
 **TurtleRock v2.0** opens in the editor with no dialog and no message (the unused cliff type CLno), `--map` then `--wait-ready`.
 **Specials** YCr3, LCc0, YCx7 (AutumnLeaves_S2, tiles (16,37), (108,55), (13,24)): not measured; the editor's picture of them
 (cliff models, flat shot from `--look`) can't be told from Studio's by eye for facing or height, and nothing in the editor reads them out.

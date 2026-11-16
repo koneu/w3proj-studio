@@ -68,7 +68,7 @@ import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
-import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
+import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -3309,12 +3309,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let before = swapped.map(look);
           const numVar = (id: string) => handle.objects.type(id)?.numVar ?? 1;
           replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar, (id) => objCtx?.skins?.get(id)?.kind);
-          for (const p of swapped) {
+          swapped.forEach((p, i) => {
             if (newVariations && p.variation !== undefined) p.variation = Math.floor(Math.random() * numVar(p.id));
+            else if (p.variation !== undefined && before[i].variation !== undefined) p.variation = variationAfter(before[i].variation as number, numVar(p.id));
             // A building of another size has another spot on the grid.
             const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
             if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
-          }
+          });
           // A doodad of another texture size has another grid, facing and scale range (as place and move do).
           settleDoodads(swapped, { place: true, scale: true });
           if (room) {

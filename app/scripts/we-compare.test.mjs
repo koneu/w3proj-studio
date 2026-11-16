@@ -194,7 +194,7 @@ test("verify-build: folders per commit and per tester differ", () => {
   assert.equal(a.env.W3_APP_BIN, l.exe);
 });
 
-test("no spec under tests/we-compare reads openpoints, and every input map is in the repository", () => {
+test("no spec under tests/we-compare reads openpoints, and every input map is in the repository (or in smoketest_maps)", () => {
   const root = resolve(process.cwd(), "..", "tests", "we-compare");
   const files = [];
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith(".json") && files.push(join(d, e.name)); };
@@ -205,7 +205,8 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
   for (const f of files) {
     const text = readFileSync(f, "utf8");
     assert.ok(!/openpoints/i.test(text), `${f} mentions openpoints`);
-    for (const s of parseSpecFile(text, f, vars)) if (s.input.map) assert.ok(existsSync(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
+    // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one there.
+    for (const s of parseSpecFile(text, f, vars)) if (s.input.map && !/[\\/]smoketest_maps[\\/]/.test(s.input.map)) assert.ok(existsSync(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
   }
   // The control: a spec text that does name it is caught by the same check.
   assert.ok(/openpoints/i.test('{"input":{"map":"${MAIN}/openpoints/x.w3x"}}'));
