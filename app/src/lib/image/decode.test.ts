@@ -109,6 +109,35 @@ test("TGA RLE: repeated and literal packets, an overlong run stops at the image"
   assert.deepEqual(px(decodeImage(tga(10, 24, 0x20, [0xff, 1, 2, 3]), "a.tga").mip(0), 3), [3, 2, 1, 255]);
 });
 
+test("TGA without RLE must hold the pixel data its header names", () => {
+  // Header only, claiming 16384×16384: refused before any pixel array is made.
+  const header = tga(2, 24, 0, [], 0, 0);
+  header[13] = 0x40; header[15] = 0x40;
+  assert.throws(() => decodeImage(header, "a.tga"), /TGA of 16384×16384 needs 805306386 bytes, file has 18/);
+  // 2048×2048 32-bit in 64 KB: the RLE allowance of 64 pixels per byte would have let it through.
+  const big = tga(2, 32, 0x28, new Array(65536).fill(0), 0, 0);
+  big[13] = 8; big[15] = 8;
+  assert.throws(() => decodeImage(big, "a.tga"), /TGA of 2048×2048 needs/);
+  // One byte short is refused, exact size reads; the image ID field counts as header.
+  const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  assert.throws(() => decodeImage(tga(2, 24, 0x20, rows.slice(0, 11)), "a.tga"), /needs 30 bytes, file has 29/);
+  const withId = tga(2, 24, 0x20, [0xaa, ...rows]);
+  withId[0] = 1;
+  assert.deepEqual(px(decodeImage(withId, "a.tga").mip(0), 3), [12, 11, 10, 255]);
+  assert.throws(() => decodeImage(withId.subarray(0, 30), "a.tga"), /needs 31 bytes/);
+});
+
+test("TGA RLE keeps the generous limit: small files for big images and cut-off files still read", () => {
+  // 64×64 in 32 runs of 128 pixels: 146 bytes for 12 KB of pixels.
+  const runs: number[] = [];
+  for (let i = 0; i < 32; i++) runs.push(0xff, 1, 2, 3);
+  const m = decodeImage(tga(10, 24, 0x20, runs, 64, 64), "a.tga").mip(0);
+  assert.deepEqual([m.width, m.height, px(m, 4095)], [64, 64, [3, 2, 1, 255]]);
+  // Cut off after the first packet: the rest of the image stays black.
+  const cut = decodeImage(tga(10, 24, 0x20, [0x81, 1, 2, 3], 4, 4), "a.tga").mip(0);
+  assert.deepEqual([px(cut, 1), px(cut, 2)], [[3, 2, 1, 255], [0, 0, 0, 255]]);
+});
+
 test("TGA colour-mapped", () => {
   const b = new Uint8Array(18 + 6 + 1);
   b[1] = 1; b[2] = 1; b[5] = 2; b[7] = 24; b[12] = 1; b[14] = 1; b[16] = 8;
