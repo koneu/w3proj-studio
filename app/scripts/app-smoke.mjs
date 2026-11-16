@@ -12890,6 +12890,55 @@ async function objectManagerLive(page, found) {
   }
 }
 
+/** Object data values past what the file stores are refused, never wrapped or overflowed: an int past 32 bits
+ *  (99999999999) and a real past a 32-bit float (1e39, which would be stored as infinity), from set_object_fields and
+ *  typed into the Object Editor, with a warning; the unit's object file stays byte for byte what it was. */
+async function objectValueRange(page, found) {
+  const fail = (what) => found.push(`object value range: ${what}`);
+  const k = await heightKit(page, "ValueRange");
+  await page.evaluate(`(() => { window.__ovrWarn = w3.window.showWarning; window.__ovrWarnings = []; w3.window.showWarning = async (m) => { window.__ovrWarnings.push(String(m)); }; })()`);
+  try {
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Smoke Range" })).id;
+    // Something set by hand first, so the file holds the unit's mods.
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "uhpm", value: 500 }, { field: "ucol", value: 20 }] });
+    await k.save();
+    const w3uFile = join(k.root, "map", "war3map.w3u.json");
+    const before = readFileSync(w3uFile);
+    const refusedBy = (changes) => k.tool("set_object_fields", { kind: "units", id: unit, changes }).then(() => null, (e) => e.message);
+    const intWhy = await refusedBy([{ field: "uhpm", value: 99999999999 }]);
+    if (!/range of a whole number/.test(intWhy ?? "")) fail(`set_object_fields with hit points 99999999999 gave ${JSON.stringify(intWhy)}`);
+    const realWhy = await refusedBy([{ field: "ucol", value: 1e39 }]);
+    if (!/range of a real number/.test(realWhy ?? "")) fail(`set_object_fields with collision 1e39 gave ${JSON.stringify(realWhy)}`);
+    // Typed in the Object Editor.
+    await page.evaluate(`w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+    await until("the unit's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000).catch(() => fail("the Object Editor shows no fields"));
+    const type = async (field, v) => {
+      await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = ${JSON.stringify(field)}; s.dispatchEvent(new Event("input")); })()`);
+      await until(`the field ${field}`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000).catch(() => fail(`the field filter doesn't find ${field} alone`));
+      return page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")?.classList.contains("invalid") ?? null; })()`);
+    };
+    if ((await type("uhpm", "99999999999")) !== true) fail("typing 99999999999 into hit points wasn't refused");
+    if ((await type("ucol", "1e39")) !== true) fail("typing 1e39 into collision wasn't refused");
+    const warnings = await page.evaluate(`window.__ovrWarnings.slice()`);
+    if (!warnings.some((w) => /^99999999999 is past the range of a whole number/.test(w))) fail(`typed 99999999999 warned ${JSON.stringify(warnings)}`);
+    if (!warnings.some((w) => /^1e39 is past the range of a real number/.test(w))) fail(`typed 1e39 warned ${JSON.stringify(warnings)}`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)) fail("the refused values made the unit file unsaved");
+    await k.save();
+    if (!readFileSync(w3uFile).equals(before)) fail("the refused values changed war3map.w3u.json");
+    // The control: a value in range is taken, so the refusals above aren't the editor refusing everything.
+    if ((await type("uhpm", "2147483647")) !== false) fail("typing 2147483647 into hit points was refused");
+    await k.save();
+    const mod = (k.read("war3map.w3u.json").custom.find((o) => o.id === unit)?.mods ?? []).find((m) => m.field === "uhpm");
+    if (mod?.value !== 2147483647) fail(`typed 2147483647 left hit points at ${JSON.stringify(mod?.value)}`);
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    await page.evaluate(`(() => { w3.window.showWarning = window.__ovrWarn; w3.editors.closeAll(); })()`).catch(() => {});
+    // The new map's questions (heightKit) answered too.
+    await restoreWindow(page);
+  }
+}
+
 async function editorExtras(page, found) {
   try {
   const fail = (what) => found.push(`editor extras: ${what}`);
@@ -14137,6 +14186,7 @@ async function run() {
         objectManagerSkin,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
+        objectValueRange,
         paletteMouse,
         pasteWaitsForSizes,
         pathingImport,
@@ -14432,6 +14482,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
   await leftOpen(page, "editorExtras", found);
+  await objectValueRange(page, found).catch((e) => found.push(`object value range: ${e.message}`));
+  await leftOpen(page, "objectValueRange", found);
   await triggerMultiSelect(page, found).catch((e) => found.push(`trigger multi-select: ${e.message}`));
   await leftOpen(page, "triggerMultiSelect", found);
   await importArtReload(page, found).catch((e) => found.push(`import art reload: ${e.message}`));

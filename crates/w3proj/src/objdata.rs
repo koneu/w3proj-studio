@@ -39,6 +39,18 @@ impl Id {
     }
 }
 
+/// As the JSON writes it: "hfoo", or "0x…" for an id that isn't printable.
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.iter().all(|b| (0x20..0x7F).contains(b)) {
+            f.write_str(std::str::from_utf8(&self.0).unwrap())
+        } else {
+            f.write_str("0x")?;
+            self.0.iter().try_for_each(|b| write!(f, "{b:02x}"))
+        }
+    }
+}
+
 impl Serialize for Id {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         if self.0.iter().all(|b| (0x20..0x7F).contains(b)) {
@@ -317,21 +329,23 @@ fn write_mods(out: &mut Vec<u8>, mods: &[Mod], end: Id, opt_ints: bool) -> Resul
             out.extend(m.level.unwrap_or(0).to_le_bytes());
             out.extend(m.data.unwrap_or(0).to_le_bytes());
         }
-        let bad = || Error::Format(format!("field {:?}: value is not a valid {err}", m.field));
+        let bad = || Error::Format(format!("field {}: value is not a valid {err}", m.field));
+        let past = |range: &str| Error::Format(format!("field {}: {} is past the range of a {range}", m.field, m.value));
         match m.ty {
             ValueType::Int => {
-                let v = m.value.as_i64().ok_or_else(bad)?;
-                let v = i32::try_from(v).map_err(|_| bad())?;
+                // Refused, not wrapped: a whole number past 32 bits.
+                let v = match (m.value.as_i64(), m.value.as_u64()) {
+                    (Some(v), _) => i32::try_from(v).map_err(|_| past("32-bit integer"))?,
+                    (None, Some(_)) => return Err(past("32-bit integer")),
+                    _ => return Err(bad()),
+                };
                 out.extend(v.to_le_bytes());
             }
             ValueType::Real | ValueType::Unreal => {
                 // A number past the f32 range would be stored as infinity: refused, not overflowed.
                 let v = m.value.as_f64().ok_or_else(bad)? as f32;
                 if !v.is_finite() {
-                    return Err(Error::Format(format!(
-                        "field {:?}: {} is past the range of a 32-bit float",
-                        m.field, m.value
-                    )));
+                    return Err(past("32-bit float"));
                 }
                 out.extend(v.to_bits().to_le_bytes());
             }
@@ -454,7 +468,9 @@ mod tests {
         assert!(from_json(&with_value("int", "2147483647"), false).is_ok());
         assert!(from_json(&with_value("int", "-2147483648"), false).is_ok());
         let e = from_json(&with_value("int", "99999999999"), false).unwrap_err().to_string();
-        assert!(e.contains("not a valid int"), "{e}");
+        assert!(e.contains("field usca: 99999999999 is past the range of a 32-bit integer"), "{e}");
+        assert!(from_json(&with_value("int", "18446744073709551615"), false).is_err());
+        assert!(from_json(&with_value("int", "1.5"), false).unwrap_err().to_string().contains("not a valid int"));
         assert!(from_json(&with_value("int", "-2147483649"), false).is_err());
     }
 
