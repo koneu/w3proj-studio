@@ -2657,6 +2657,37 @@ async function mapInfoColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The Object Editor's list shows "Name - Editor Suffix": a custom unit with its own suffix (kept as a TRIGSTR with colour
+ *  codes), a modified standard ability with the game's, and the filter box matches the suffix. */
+async function objectListSuffix(page, found) {
+  const fail = (what) => found.push(`object list suffix: ${what}`);
+  try {
+    const k = await heightKit(page, "ObjListSuffix");
+    const wtsFile = join(k.root, "map", "war3map.wts");
+    const wts = readFileSync(wtsFile, "utf8"), eol = wts.includes("\r\n") ? "\r\n" : "\n";
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wts", ${JSON.stringify(`${wts.replace(/(\r?\n)*$/, "")}${eol}${eol}STRING 8${eol}{${eol}|cffff0000Smoke|r suffix${eol}}${eol}`)})`);
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "unam", value: "Suffixed" }, { field: "unsf", value: "TRIGSTR_008" }] });
+    const plain = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await k.tool("set_object_fields", { kind: "units", id: plain, changes: [{ field: "unam", value: "Plain" }] });
+    await k.tool("set_object_fields", { kind: "abilities", id: "ANfb", changes: [{ field: "atp1", level: 1, value: "Changed tip" }] });
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    const rowText = (id) => page.evaluate(`[...(${ed}?.querySelectorAll(".obj-item") ?? [])].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)})?.querySelector("span")?.textContent ?? null`);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+    await until("the custom unit's row", async () => (await rowText(unit)) !== null, 30000);
+    const search = (text) => page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ${JSON.stringify(text)}; s.dispatchEvent(new Event("input")); })()`);
+    await search(""); // opening one object filters the list to it
+    await until("the game data", async () => (await rowText(plain)) === "Plain", 30000);
+    if ((await rowText(unit)) !== "Suffixed - Smoke suffix") fail(`the custom unit shows ${JSON.stringify(await rowText(unit))}`);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3a", "ANfb")`);
+    await until("the standard ability's row", async () => (await rowText("ANfb")) !== null, 30000);
+    const std = await rowText("ANfb");
+    if (!/ - \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${JSON.stringify(std)}`);
+    await search("neutral hostile");
+    if (!(await soon(async () => (await rowText("ANfb")) !== null))) fail("the filter doesn't find the suffix");
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The colour tools under the Object Editor's text fields: on a name kept in war3map.wts (the TRIGSTR id stays, the table
  *  holds the tags) and on a plain tooltip (the object file holds them); the workbench undo takes each colour back. */
 async function objectEditorColorTools(page, found) {
@@ -14567,6 +14598,7 @@ async function run() {
         objectFilePicker: (p, f) => objectFilePicker(p, f, project),
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectListKept: (p, f) => objectListKept(p, f, project),
+        objectListSuffix,
         objectManagerLive,
         objectManagerSkin,
         objectPreview: (p, f) => objectPreview(p, f, project),
@@ -14819,6 +14851,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "mapInfoColorTools", found);
   await objectEditorColorTools(page, found).catch((e) => found.push(`Object Editor colour tools: ${e.message}`));
   await leftOpen(page, "objectEditorColorTools", found);
+  await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
+  await leftOpen(page, "objectListSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));

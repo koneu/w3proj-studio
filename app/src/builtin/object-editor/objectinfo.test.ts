@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, objectName, type MapObjects } from "./objectinfo";
+import { changedFields, editorSuffix, labelWithSuffix, gameFields, gameObjectList, mapObjectList, modelPacks, objectName, type MapObjects } from "./objectinfo";
 
 const field = (id: string, label: string, repeat = 0) => ({ id, label, repeat }) as FieldMeta;
 const kind = { names: new Map([["hfoo", "Footman"], ["AHbz", "Blizzard"]]), fieldById: new Map([["unam", field("unam", "Name")], ["uhpm", field("uhpm", "Hit Points")]]) };
@@ -135,4 +135,20 @@ test("game fields skip what's empty, and repeating fields show level 1", () => {
   };
   assert.deepEqual(gameFields("hfoo", game).map((f) => f.field), ["uhpm", "udam"]);
   assert.deepEqual(levels, [0, 1, 0]);
+});
+
+test("the list label is the name with the Editor Suffix, own value else the game's", () => {
+  const unsf = { id: "unsf", label: "Name - Editor Suffix", repeat: 0 } as FieldMeta, ansf = { id: "ansf", label: "Editor Suffix", repeat: 3 } as FieldMeta;
+  const defaults: Record<string, string> = { hfoo: "|cff00ff00Std|r", hpea: "", AHbz: "Level 1" };
+  const k = (f: FieldMeta) => ({ fields: [field("unam", "Name"), f], defaultValue: (id: string) => defaults[id] });
+  const res = (v: string) => (v === "TRIGSTR_007" ? "|cffff0000Mine|r" : v);
+  assert.equal(editorSuffix({ base: "hfoo" }, k(unsf), res), "Std", "standard: the game's, colours stripped");
+  assert.equal(editorSuffix({ base: "hpea" }, k(unsf), res), "", "empty");
+  assert.equal(editorSuffix({ base: "hfoo", id: "h000", mods: [{ field: "unsf", value: "TRIGSTR_007" }] }, k(unsf), res), "Mine", "custom, TRIGSTR");
+  assert.equal(editorSuffix({ base: "hfoo", mods: [{ field: "unsf", value: "" }] }, k(unsf), res), "", "an own empty one wins");
+  assert.equal(editorSuffix({ base: "AHbz", mods: [{ field: "ansf", level: 2, value: "L2" }] }, k(ansf), res), "Level 1", "level 1 shows");
+  assert.equal(editorSuffix({ base: "AHbz", mods: [{ field: "ansf", level: 1, value: "Mine" }] }, k(ansf), res), "Mine");
+  assert.equal(editorSuffix({ base: "hfoo" }, { fields: [field("unam", "Name")], defaultValue: () => "x" }, res), "", "no such field");
+  assert.equal(labelWithSuffix("Footman", "Std"), "Footman - Std");
+  assert.equal(labelWithSuffix("Footman", ""), "Footman");
 });

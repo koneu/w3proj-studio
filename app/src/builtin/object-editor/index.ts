@@ -27,6 +27,7 @@ import { convertVersion, describeConversion, mergeSkin } from "./w3o";
 import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
+import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
 import { isCampaignFiles, registerObjectTools } from "./tools";
 import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withLists } from "./skin";
 
@@ -312,6 +313,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return stripColors(baseName(o));
         };
+        /** The list's label: the name with the Editor Suffix (own value, else the game's). */
+        const labelOf = (o: Obj, name: string, resolve: (v: string) => string | null) =>
+          kd ? labelWithSuffix(name, editorSuffix(o as unknown as MapObject, kd, (v) => resolve(v) ?? kd!.westring(v))) : name;
         // A chapter map's campaign's objects of this kind: the chapter has them too, but they're edited in the campaign
         // (as the World Editor's Campaign Editor does), so they're listed here to look at only. One that can't be read
         // says so; its ids then aren't known to be free, and no new ids are given out.
@@ -498,12 +502,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Each object's name is asked for several times (the order, the filter, the row).
           const names = new Map<Obj, string>();
           const named = (of: (o: Obj) => string) => (o: Obj) => { let n = names.get(o); if (n === undefined) names.set(o, (n = of(o))); return n; };
-          const listed = (objs: Obj[], name: (o: Obj) => string) => {
-            const sorted = sortByName ? [...objs].sort((a, b) => name(a).localeCompare(name(b))) : objs;
+          const listed = (objs: Obj[], name: (o: Obj) => string, sortKey: (o: Obj) => string) => {
+            const sorted = sortByName ? [...objs].sort((a, b) => sortKey(a).localeCompare(sortKey(b))) : objs;
             return sorted.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${name(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
           };
-          const own = named(nameOf);
-          const custom = listed(file.custom, own), standard = listed(file.original, own);
+          const plainName = named(nameOf);
+          const own = named((o) => labelOf(o, nameOf(o), resolveStr));
+          const custom = listed(file.custom, own, plainName), standard = listed(file.original, own, plainName);
           // With a filter, only the listed entries are cleaned up.
           const unchanged = standard.filter((o) => !hasMods(o));
           const cleanUp = unchanged.length
@@ -520,7 +525,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A chapter map's campaign's objects: shown to look at, edited in the campaign.
           if (campaignError) out.push(head("campaign-error", "Campaign: its object data can't be read", { title: campaignError, cls: ".obj-campaign-error" }));
           else if (campaign) {
-            const theirs = named(campaignName), items = listed(campaignListed(), theirs);
+            const theirs = named((o) => labelOf(o, campaignName(o), campaignStr)), items = listed(campaignListed(), theirs, named(campaignName));
             out.push(head("campaign", `Campaign (${items.length})`, { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` }),
               ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
           }
