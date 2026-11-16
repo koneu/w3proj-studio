@@ -6,9 +6,9 @@
 //   echo-nowts.w3x    unpack, war3map.wts deleted, pack (Studio's save has to write it again)
 //   echo-plain.w3x    unpack, pack (the control: nothing changed)
 //   echo-zeromasks.w3x  echo with every player's allyLow/allyHigh set to 0 in the w3i (the all-zero masks of a map saved with
-//                     Modify ally priorities off by another tool), packed
+//                     Modify ally priorities off by another tool), packed as is (pack_as_is: `w3proj pack` would work them out)
 //   matrix.w3x        MatrixPCDefense_v4.3 (no war3map.wtg: the editor refuses it, "Trigger data missing or invalid") with
-//                     echo's war3map.wtg.json and war3map.wct.txt added, packed; its ally masks stay all zero
+//                     echo's war3map.wtg.json and war3map.wct.txt added, packed as is; its ally masks stay all zero
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +27,13 @@ function run(...args) {
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr || r.stdout}`);
 }
 
+// `w3proj pack` works out the World Editor's ally priorities (crates/w3proj/src/allies.rs): the inputs whose all-zero masks
+// are the point go through the pack_as_is example, which packs the project's files as they are.
+function packAsIs(project, output) {
+  const r = spawnSync("cargo", ["run", "--release", "--quiet", "-p", "w3proj", "--example", "pack_as_is", "--", project, output], { cwd: repo, env, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`pack_as_is ${project}: ${r.stderr || r.stdout}`);
+}
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 run("unpack", src, join(out, "base"));
@@ -41,9 +48,9 @@ const w3iPath = join(out, "zeromasks", "map", "war3map.w3i.json");
 const w3i = JSON.parse(readFileSync(w3iPath, "utf8"));
 for (const p of w3i.players) { p.allyLow = 0; p.allyHigh = 0; }
 writeFileSync(w3iPath, JSON.stringify(w3i, null, 2));
-run("pack", join(out, "zeromasks"), "-o", join(out, "echo-zeromasks.w3x"));
+packAsIs(join(out, "zeromasks"), join(out, "echo-zeromasks.w3x"));
 const matrixSrc = join(main, "smoketest_maps", "new(er)_maps", "MatrixPCDefense_v4.3.w3x");
 run("unpack", matrixSrc, join(out, "matrix"));
 for (const f of ["war3map.wtg.json", "war3map.wct.txt"]) cpSync(join(out, "base", "map", f), join(out, "matrix", "map", f));
-run("pack", join(out, "matrix"), "-o", join(out, "matrix.w3x"));
+packAsIs(join(out, "matrix"), join(out, "matrix.w3x"));
 console.log(`made ${out}/echo-{rebuilt,nolua,nowts,plain,zeromasks}.w3x and matrix.w3x`);
