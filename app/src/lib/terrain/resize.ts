@@ -47,14 +47,23 @@ export function limitResize(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "
   return { change: ch, complements: co };
 }
 
+/** Why the typed sides can't be taken as they are (Map Size refuses them rather than rounding or clamping), or null:
+ *  tiles added or removed and the borders are whole numbers, the borders 0 or more. */
+export function sidesProblem(change: Sides, complements: Sides): string | null {
+  if (change.some((c) => !Number.isInteger(c))) return "Tiles to add or remove are whole numbers.";
+  if (complements.some((c) => c < 0 || !Number.isInteger(c))) return "Borders are whole numbers of tiles, 0 or more.";
+  return null;
+}
+
 /** Why `change` can't be applied, or null. */
 export function resizeProblem(t: Terrain, change: Sides, complements: Sides): string | null {
+  const sides = sidesProblem(change, complements);
+  if (sides) return sides;
   const [w, h] = resizedSize(t, change);
   for (const [n, what] of [[w, "width"], [h, "height"]] as const) {
     if (n < MIN_SIZE || n > MAX_SIZE) return `The ${what} must be ${MIN_SIZE}–${MAX_SIZE} tiles (${n}).`;
     if (n % SIZE_STEP) return `The ${what} must be a multiple of ${SIZE_STEP} tiles (${n}).`;
   }
-  if (complements.some((c) => c < 0 || !Number.isInteger(c))) return "Borders are whole numbers of tiles, 0 or more.";
   if (w - complements[0] - complements[1] < 16 || h - complements[2] - complements[3] < 16) return "The playable area must stay at least 16 tiles wide and high.";
   return null;
 }

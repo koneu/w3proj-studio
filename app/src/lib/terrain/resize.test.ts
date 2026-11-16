@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraBounds, doodadStays, limitResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
+import { cameraBounds, doodadStays, limitResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -65,6 +65,21 @@ test("the whole map's size goes in steps of 4 tiles, as the World Editor's, from
   assert.match(resizeProblem(t, [388, 0, 0, 0], none) ?? "", /484/);
   assert.equal(resizeProblem(t, [384, 0, 0, 0], none), null, "480 is the largest");
   assert.equal(resizeProblem(t, [-64, 0, 0, 0], none), null, "32 the smallest");
+});
+
+test("Map Size refuses typed sides that aren't whole numbers and borders below 0, rather than rounding or clamping them", () => {
+  const t = terrain(97, 97);
+  const border: Sides = [6, 6, 4, 8];
+  for (const change of [[3.5, 0.5, 0, 0], [Number.NaN, 0, 0, 0], [Infinity, 0, 0, 0], [0, 0, -Infinity, 0]] as Sides[]) {
+    assert.equal(sidesProblem(change, border), "Tiles to add or remove are whole numbers.", String(change));
+    assert.equal(resizeProblem(t, change, border), "Tiles to add or remove are whole numbers.");
+  }
+  for (const co of [[-1, 6, 4, 8], [6, 6.5, 4, 8], [6, 6, Number.NaN, 8]] as Sides[]) {
+    assert.equal(sidesProblem([4, 0, 0, 0], co), "Borders are whole numbers of tiles, 0 or more.", String(co));
+    assert.equal(resizeProblem(t, [4, 0, 0, 0], co), "Borders are whole numbers of tiles, 0 or more.");
+  }
+  assert.equal(sidesProblem([4, -4, 0, 0], [0, 0, 0, 0]), null, "edges: 0 borders, a cut");
+  assert.equal(resizeProblem(t, [4, -4, 0, 0], [0, 0, 0, 0]), null);
 });
 
 test("doodads stay only strictly inside the new map, as the World Editor keeps them", () => {

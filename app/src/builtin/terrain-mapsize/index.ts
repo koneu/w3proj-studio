@@ -9,7 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
-import { COORD_LIMIT, limitResize, playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
+import { COORD_LIMIT, limitResize, playableSize, resizedSize, resizeProblem, sidesProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
 import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
@@ -99,10 +99,13 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const info = h("div.mapsize-info");
   const apply = h("button.primary", { disabled: true, onclick: () => void run() }, "Apply");
   const reset = h("button", { onclick: () => { change = [0, 0, 0, 0]; complements = [...stored]; build(); render(); } }, "Reset");
+  // Taken as typed (an empty box is 0): a value that isn't a whole number, or a border below 0, is refused with a word
+  // and Apply stays off (sidesProblem), never rounded or clamped.
+  const typed = (e: Event) => { const v = (e.target as HTMLInputElement).value; return v.trim() === "" ? 0 : Number(v); };
   const changeInputs = SIDES.map((_, k) => h("input.mapsize-num", { type: "number", step: SIZE_STEP, value: 0, title: "Tiles to add (negative: remove)",
-    oninput: (e: Event) => { change[k] = Math.round(Number((e.target as HTMLInputElement).value) || 0); render(); } }));
+    oninput: (e: Event) => { change[k] = typed(e); render(); } }));
   const borderInputs = SIDES.map((_, k) => h("input.mapsize-num", { type: "number", min: 0, step: 1, value: 0, title: "Unplayable border in tiles",
-    oninput: (e: Event) => { complements[k] = Math.max(0, Math.round(Number((e.target as HTMLInputElement).value) || 0)); render(); } }));
+    oninput: (e: Event) => { complements[k] = typed(e); render(); } }));
   const build = () => {
     changeInputs.forEach((i, k) => { (i as HTMLInputElement).value = String(change[k]); });
     borderInputs.forEach((i, k) => { (i as HTMLInputElement).value = String(complements[k]); });
@@ -117,7 +120,8 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const { change: ch, complements: co } = limitResize(t, change, complements);
     const [w, hgt] = resizedSize(t, ch);
     const [pw, ph] = playableSize({ ...t, width: w + 1, height: hgt + 1 }, co);
-    const problem = resizeProblem(t, ch, co);
+    // What was typed is checked before the coordinate limit moves any of it.
+    const problem = sidesProblem(change, complements) ?? resizeProblem(t, ch, co);
     const same = change.every((c) => c === 0) && complements.every((c, k) => c === stored[k]);
     (apply as HTMLButtonElement).disabled = !ed.editable || !!problem || same;
     info.replaceChildren(
