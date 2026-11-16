@@ -314,7 +314,15 @@ fn write_prim(p: Prim, v: &Value, out: &mut Vec<u8>, what: &str) -> Result<()> {
         Prim::F32 => {
             let bits = match v.as_str().and_then(|s| s.strip_prefix("f32:0x")) {
                 Some(hex) => u32::from_str_radix(hex, 16).map_err(|_| bad())?,
-                None => (v.as_f64().ok_or_else(bad)? as f32).to_bits(),
+                None => {
+                    // A number past the f32 range would be stored as infinity: refused, not overflowed (infinity and
+                    // NaN from a file come as "f32:0x…" and keep their bits).
+                    let f = v.as_f64().ok_or_else(bad)? as f32;
+                    if !f.is_finite() {
+                        return Err(Error::Format(format!("{what}: {v} is past the range of a 32-bit float")));
+                    }
+                    f.to_bits()
+                }
             };
             out.extend(bits.to_le_bytes());
         }

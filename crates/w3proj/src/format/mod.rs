@@ -691,6 +691,61 @@ mod classic_tests {
         assert_eq!(got["cameras"][1]["name"], "Camera 02 Teleport In");
     }
 
+    /// A camera's and a region's numbers past what their fields hold are refused, never stored wrapped or overflowed
+    /// (an f32 past its range would be infinity): no bytes come out, so nothing is written. Each field, with controls
+    /// that the field's ends still go through.
+    #[test]
+    fn camera_and_region_values_past_their_fields_are_refused() {
+        use serde_json::json;
+        let cam = exact("cameras", &[u(3), u(1), f(16), z("look"), u(0)].concat());
+        let reg = exact("regions", &[u(7), u(1), f(4), z("Area"), u(0), b"RAlr".to_vec(), z(""), vec![1, 2, 3, 255], u(0), u(0)].concat());
+        let cases = |name: &str, doc: &Value, list: &str, path: &[&str], bad: &[Value], good: &[Value]| {
+            let d = def(name);
+            let set = |v: &Value| {
+                let mut doc = doc.clone();
+                let mut at = &mut doc[list][0];
+                for p in path {
+                    at = match p.parse::<usize>() {
+                        Ok(i) => &mut at[i],
+                        Err(_) => &mut at[*p],
+                    };
+                }
+                assert!(!at.is_null(), "{name} has no field {path:?}");
+                *at = v.clone();
+                doc
+            };
+            for v in bad {
+                assert!(encode(&d, &set(v)).is_err(), "{name} {path:?} = {v} was written");
+            }
+            for v in good {
+                assert!(encode(&d, &set(v)).is_ok(), "{name} {path:?} = {v} was refused (control)");
+            }
+        };
+        let float_bad = [json!(1e39), json!(-1e39), json!(f64::MAX), json!("12"), Value::Null];
+        let float_good = [json!(f32::MAX as f64), json!(-(f32::MAX as f64)), json!(3.4028235e38), json!(0.5)];
+        let u32_bad = [json!(-1), json!(4294967296u64), json!(1.5), json!("1")];
+        let u32_good = [json!(0), json!(4294967295u32)];
+        for k in ["targetX", "targetY", "zOffset", "rotation", "angleOfAttack", "distance", "roll", "fieldOfView", "farZ", "nearZ",
+            "dofDistance", "dofScale", "posAbsoluteZ"] {
+            cases("cameras", &cam, "cameras", &[k], &float_bad, &float_good);
+        }
+        // The local angles: also held to the plausibility checks a reading uses, but those don't refuse a write.
+        for k in ["localPitch", "localYaw", "localRoll"] {
+            cases("cameras", &cam, "cameras", &[k], &float_bad, &[json!(0.0)]);
+        }
+        cases("cameras", &cam, "cameras", &["trailer"], &u32_bad, &u32_good);
+        for k in ["left", "bottom", "right", "top"] {
+            cases("regions", &reg, "regions", &[k], &float_bad, &float_good);
+        }
+        cases("regions", &reg, "regions", &["index"], &u32_bad, &u32_good);
+        for k in ["blue", "green", "red", "alpha"] {
+            cases("regions", &reg, "regions", &["color", k], &[json!(256), json!(-1), json!(1.5)], &[json!(0), json!(255)]);
+        }
+        for i in ["0", "1"] {
+            cases("regions", &reg, "regions", &["trailer", i], &u32_bad, &u32_good);
+        }
+    }
+
     #[test]
     fn version_7_doodads_have_no_item_drops() {
         let one = [b"ATtr".to_vec(), u(2), f(7), vec![2, 100], u(9)].concat();
