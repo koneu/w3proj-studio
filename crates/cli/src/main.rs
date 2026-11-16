@@ -383,7 +383,9 @@ enum Cmd {
     ///
     /// Strings nothing refers to are left out of war3map.wts, as the World Editor's save and the
     /// app's packing drop them (the project's files stay as they are; chapter maps and
-    /// war3campaign.wts aren't pruned).
+    /// war3campaign.wts aren't pruned). Unless a map has "Modify ally priorities" on, its user
+    /// players get the ally priorities in war3map.w3i the World Editor's save works out from their
+    /// start locations.
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.

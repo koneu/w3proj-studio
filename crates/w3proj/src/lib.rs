@@ -1,6 +1,7 @@
 //! Warcraft III map projects: unpack a `.w3x` into a git-friendly folder and
 //! pack it back as a release step.
 
+pub mod allies;
 pub mod atomic;
 pub mod codec;
 pub mod derived;
