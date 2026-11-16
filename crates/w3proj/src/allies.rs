@@ -7,6 +7,14 @@
 //! and no enemy priorities. Computer and neutral players keep what they have. The app applies it
 //! on its saves; a pack applies it too, so a map packed from a project whose masks went stale
 //! (edited by hand, or by another tool) comes out as the World Editor's save would write it.
+//!
+//! The map script isn't made again: masks only come out different when the start locations,
+//! controllers or players changed (or "Modify ally priorities" went off), and those go into the
+//! rest of the script too (DefineStartLocation, SetPlayerController, …), which only the app's
+//! generator writes. So a pack tells when the script's InitAllyPriorities doesn't set the
+//! priorities it worked out (`script_agrees`).
+
+use std::collections::BTreeSet;
 
 use serde_json::Value;
 
@@ -106,6 +114,94 @@ pub fn pack_w3i(bytes: &[u8], codecs: &Registry) -> Option<Vec<u8>> {
         return None;
     }
     encode(def, &value).ok()
+}
+
+/// One start location priority of a map script: (enemy, player index, the other player's index,
+/// low). Indices are positions in war3map.w3i's player list, as `SetStartLocPrio` takes them.
+type Priority = (bool, usize, usize, bool);
+
+/// Whether a map script sets the ally priorities of a war3map.w3i (`script_agrees`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptPriorities {
+    Agree,
+    Disagree,
+    /// InitAllyPriorities has a line this doesn't read: it can't be told.
+    Unknown,
+}
+
+/// The priorities the app's generator writes into InitAllyPriorities for these masks
+/// (`app/src/lib/script/setup.ts` playersSection): for each player, the others whose id bit is in
+/// low | high, LOW when the low mask has it; ids no player has count for nothing.
+fn mask_priorities(info: &Value) -> BTreeSet<Priority> {
+    let players = info.get("players").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let ids: Vec<Option<u64>> = players.iter().map(|p| p.get("id").and_then(Value::as_u64)).collect();
+    let mask = |p: &Value, key: &str| p.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let mut out = BTreeSet::new();
+    for (index, p) in players.iter().enumerate() {
+        for (enemy, low_key, high_key) in [(false, "allyLow", "allyHigh"), (true, "enemyLow", "enemyHigh")] {
+            let (low, high) = (mask(p, low_key), mask(p, high_key));
+            for (other, id) in ids.iter().enumerate() {
+                let Some(id) = id.filter(|id| *id < 64) else { continue };
+                if other != index && ((low | high) >> id) & 1 == 1 {
+                    out.insert((enemy, index, other, (low >> id) & 1 == 1));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The priorities a map script's InitAllyPriorities sets (war3map.j or war3map.lua; none when it
+/// has no such function), or `None` when it has a line this doesn't read.
+fn script_priorities(script: &str) -> Option<BTreeSet<Priority>> {
+    let mut out = BTreeSet::new();
+    let mut lines = script.lines().map(str::trim);
+    let starts = |l: &str| {
+        l.strip_prefix("function InitAllyPriorities").is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+    };
+    if !lines.any(starts) {
+        return Some(out);
+    }
+    for line in lines {
+        // JASS ends it with endfunction, Lua with end.
+        if line == "endfunction" || line == "end" {
+            return Some(out);
+        }
+        if line.is_empty() || line.starts_with("//") || line.starts_with("--") {
+            continue;
+        }
+        let call = line.strip_prefix("call ").unwrap_or(line);
+        let (name, rest) = call.split_once('(')?;
+        let args: Vec<&str> = rest.strip_suffix(')')?.split(',').map(str::trim).collect();
+        let enemy = match name.trim() {
+            "SetStartLocPrioCount" | "SetEnemyStartLocPrioCount" => continue,
+            "SetStartLocPrio" => false,
+            "SetEnemyStartLocPrio" => true,
+            _ => return None,
+        };
+        let [index, _, other, prio] = args.as_slice() else { return None };
+        let low = match *prio {
+            "MAP_LOC_PRIO_LOW" => true,
+            "MAP_LOC_PRIO_HIGH" => false,
+            "MAP_LOC_PRIO_NONE" => continue,
+            _ => return None,
+        };
+        out.insert((enemy, index.parse().ok()?, other.parse().ok()?, low));
+    }
+    // No end: not a function this reads.
+    None
+}
+
+/// Whether a map script's InitAllyPriorities sets the ally priorities of war3map.w3i bytes. A pack
+/// works them out anew in war3map.w3i (`pack_w3i`) but can't make the script again (only the app's
+/// generator can), so it tells.
+pub fn script_agrees(w3i: &[u8], script: &[u8], codecs: &Registry) -> ScriptPriorities {
+    let Some(info) = mapinfo_definition(codecs).and_then(|def| decode(def, w3i).ok()) else { return ScriptPriorities::Unknown };
+    match script_priorities(&String::from_utf8_lossy(script)) {
+        None => ScriptPriorities::Unknown,
+        Some(set) if set == mask_priorities(&info.value) => ScriptPriorities::Agree,
+        Some(_) => ScriptPriorities::Disagree,
+    }
 }
 
 /// The cases of the app's tests (`startlocations.test.ts`, we-drive saves v1-v9), so both carry the same rule.
@@ -262,6 +358,54 @@ mod tests {
             user(1, 0.0, 1280.0),
         ]);
         assert_eq!(pack_w3i(&own, &codecs), None);
+    }
+
+    /// InitAllyPriorities as the app's generator (setup.ts playersSection) writes it for players 0
+    /// and 1 at the mini map's starts: 0 has 1 as High, 1 has 0 as High.
+    const JASS: &str = "function InitCustomTeams takes nothing returns nothing\r\nendfunction\r\n\r\n\
+        function InitAllyPriorities takes nothing returns nothing\r\n\r\n\
+        \x20   call SetStartLocPrioCount( 0, 1 )\r\n    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )\r\n\r\n\
+        \x20   call SetStartLocPrioCount( 1, 1 )\r\n    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )\r\nendfunction\r\n\r\n\
+        function config takes nothing returns nothing\r\n    call InitAllyPriorities(  )\r\nendfunction\r\n";
+    /// The same as the generator's Lua (lua.ts jassToLua).
+    const LUA: &str = "function InitAllyPriorities()\r\nSetStartLocPrioCount(0, 1)\r\nSetStartLocPrio(0, 0, 1, MAP_LOC_PRIO_HIGH)\r\n\
+        SetStartLocPrioCount(1, 1)\r\nSetStartLocPrio(1, 0, 0, MAP_LOC_PRIO_HIGH)\r\nend\r\n\r\nfunction config()\r\nInitAllyPriorities()\r\nend\r\n";
+
+    #[test]
+    fn a_script_agrees_when_its_ally_priorities_are_those_of_the_info() {
+        let codecs = Registry::with_formats(&[]).unwrap();
+        let worked = |flags| pack_w3i(&mini_w3i(&codecs, flags, vec![with(user(0, 0.0, 0.0), json!({ "allyLow": 2 })), user(1, 0.0, 1280.0)]), &codecs).unwrap();
+        let w3i = worked(MELEE_FLAGS);
+        assert_eq!(script_agrees(&w3i, JASS.as_bytes(), &codecs), ScriptPriorities::Agree);
+        assert_eq!(script_agrees(&w3i, LUA.as_bytes(), &codecs), ScriptPriorities::Agree);
+        // Controls: a LOW instead of HIGH, a missing player, no function at all, an enemy priority more.
+        let low = JASS.replacen("1, MAP_LOC_PRIO_HIGH", "1, MAP_LOC_PRIO_LOW", 1);
+        assert_eq!(script_agrees(&w3i, low.as_bytes(), &codecs), ScriptPriorities::Disagree);
+        let one = LUA.replace("SetStartLocPrio(1, 0, 0, MAP_LOC_PRIO_HIGH)\r\n", "");
+        assert_eq!(script_agrees(&w3i, one.as_bytes(), &codecs), ScriptPriorities::Disagree);
+        let none = "function config takes nothing returns nothing\r\nendfunction\r\n";
+        assert_eq!(script_agrees(&w3i, none.as_bytes(), &codecs), ScriptPriorities::Disagree);
+        let enemy = JASS.replace("endfunction\r\n\r\nfunction config", "    call SetEnemyStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_LOW )\r\nendfunction\r\n\r\nfunction config");
+        assert_eq!(script_agrees(&w3i, enemy.as_bytes(), &codecs), ScriptPriorities::Disagree);
+        // A lone player has no priorities: a script without the function agrees.
+        let alone = mini_w3i(&codecs, MELEE_FLAGS, vec![user(0, 0.0, 0.0)]);
+        assert_eq!(script_agrees(&alone, none.as_bytes(), &codecs), ScriptPriorities::Agree);
+    }
+
+    #[test]
+    fn a_script_line_that_isnt_read_cant_be_told() {
+        let codecs = Registry::with_formats(&[]).unwrap();
+        let w3i = mini_w3i(&codecs, MELEE_FLAGS, vec![with(user(0, 0.0, 0.0), json!({ "allyHigh": 2 })), with(user(1, 0.0, 1280.0), json!({ "allyHigh": 1 }))]);
+        assert_eq!(script_agrees(&w3i, JASS.as_bytes(), &codecs), ScriptPriorities::Agree);
+        for odd in [
+            JASS.replace("MAP_LOC_PRIO_HIGH )\r\nendfunction", "ConvertStartLocPrio(2) )\r\nendfunction"),
+            JASS.replace("    call SetStartLocPrioCount( 1, 1 )", "    call DoSomething(  )"),
+            JASS.replace("( 1, 0, 0,", "( x, 0, 0,"),
+            JASS.split("    call SetStartLocPrioCount( 1, 1 )").next().unwrap().to_string(),
+        ] {
+            assert_eq!(script_agrees(&w3i, odd.as_bytes(), &codecs), ScriptPriorities::Unknown, "{odd}");
+        }
+        assert_eq!(script_agrees(&w3i[..10], JASS.as_bytes(), &codecs), ScriptPriorities::Unknown, "info that can't be read");
     }
 
     #[test]
