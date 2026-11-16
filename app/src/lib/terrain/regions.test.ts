@@ -43,3 +43,31 @@ test("nextRegionIndex: one past the highest, refused (not wrapped to 0) past the
   const got = nextRegionIndex([{ index: 0 }, { index: MAX_REGION_INDEX }]);
   assert.ok(typeof got === "object" && /4294967295/.test(got.refused));
 });
+
+test("regionBoxProblem and typedRegionEdge: a region outside the map is refused as the World Editor never makes one (we-drive 2026-11-16)", () => {
+  const map = { left: -4096, bottom: -4096, right: 4096, top: 4096 };
+  const box = { left: -64, bottom: -32, right: 64, top: 96 };
+  assert.equal(regionBoxProblem(box, map), null);
+  // The whole map, the border outside the playable part (the editor made one at x -3936), and no map to go by.
+  assert.equal(regionBoxProblem({ ...map }, map), null);
+  assert.equal(regionBoxProblem({ left: -3936, bottom: -1376, right: -3552, top: 128 }, map), null);
+  assert.equal(regionBoxProblem({ left: 5000, bottom: 0, right: 6000, top: 32 }), null);
+  for (const key of REGION_EDGES) {
+    const out = key === "left" || key === "bottom" ? -4096.5 : 4096.5;
+    const got = regionBoxProblem({ ...box, [key]: out }, map);
+    assert.match(got ?? "", /inside the map/, `${key} = ${out} was taken`);
+  }
+  // Wholly outside, and across an edge.
+  assert.match(regionBoxProblem({ left: 4200, bottom: 0, right: 4300, top: 32 }, map) ?? "", /inside the map/);
+  assert.match(regionBoxProblem({ left: 4000, bottom: 0, right: 5000, top: 32 }, map) ?? "", /inside the map/);
+  // Typed into one edge: refused with the edge's name, the region unchanged; an edge on the map's edge goes through.
+  const r = { ...box, name: "Area", index: 1 };
+  const before = structuredClone(r);
+  const got = typedRegionEdge(r, "right", "5000", map);
+  assert.ok(got && "refused" in got && got.refused.startsWith("Right: a region must lie inside the map"), JSON.stringify(got));
+  assert.deepEqual(r, before);
+  assert.deepEqual(typedRegionEdge(r, "right", "4096", map), { change: { right: 4096 } });
+  assert.deepEqual(typedRegionEdge(r, "left", "-4096", map), { change: { left: -4096 } });
+  // The shape rules still come first.
+  assert.match(regionBoxProblem({ left: 32, bottom: 0, right: 0, top: 32 }, map) ?? "", /left must be below right/);
+});

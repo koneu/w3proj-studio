@@ -9,11 +9,12 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { weatherName } from "../../lib/terrain/weather";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
-import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
 import { nextRegionIndex, regionBoxProblem, typedRegionEdge } from "../../lib/terrain/regions";
+import { worldRect } from "../../lib/terrain/resize";
 
 const FILE = "map/war3map.w3r";
 /** Regions snap to this grid (World Editor default). */
@@ -54,7 +55,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.mcp.registerTool("add_region", async ({ name, left, bottom, right, top }) => {
       if (typeof name !== "string" || !name.trim()) throw new Error("add_region needs a name.");
-      const problem = regionBoxProblem({ left, bottom, right, top });
+      // Inside the map as the terrain file has it (no terrain file: nothing to hold it to); a terrain file that can't be read refuses.
+      const facts = await terrainFacts(w3);
+      const problem = regionBoxProblem({ left, bottom, right, top }, facts && worldRect(facts));
       if (problem) throw new Error(`Not added: ${problem}`);
       await editRegions(w3, `Add region ${name}`, (doc) => {
         if (doc.regions.some((r) => r.name.toLowerCase() === name.trim().toLowerCase())) throw new Error(`There's already a region "${name}".`);
@@ -287,7 +290,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     const bound = (key: "left" | "right" | "bottom" | "top", label: string) => {
       const input = h(`input.terrain-region-bound.terrain-region-${key}`, { type: "number", step: String(GRID), value: String(r[key]), title: `${label} edge (world units)` });
       input.addEventListener("change", () => {
-        const t = typedRegionEdge(r, key, input.value);
+        const t = typedRegionEdge(r, key, input.value, worldRect(ed.terrain));
         if (t && "refused" in t) {
           input.classList.add("invalid");
           input.title = t.refused;

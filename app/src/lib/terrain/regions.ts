@@ -14,20 +14,33 @@ export const MAX_REGION_INDEX = 0xffffffff;
 
 const LABEL: Record<RegionEdge, string> = { left: "Left", bottom: "Bottom", right: "Right", top: "Top" };
 
-/** Why `box` can't be a region's rectangle, or null: each edge a 32-bit float, left below right and bottom below top. */
-export function regionBoxProblem(box: Record<RegionEdge, unknown>): string | null {
+/** The rectangle a region must lie in: the map's, border included (world units). */
+export interface RegionArea { left: number; bottom: number; right: number; top: number }
+
+/**
+ * Why `box` can't be a region's rectangle, or null: each edge a 32-bit float, left below right and bottom below top,
+ * and, when the map's rectangle `within` is known, the box inside it (edges included). The World Editor never makes a
+ * region outside the map (we-drive 2026-11-16, branch cam-region-limits, the empty 64x64 map, ±4096): a drag that
+ * starts outside makes none; one that runs out stops at the last point inside, east 3968 and 4000, west -3744, south
+ * -3872, north 3392; the border outside the playable part is fine (a region at x -3936). It has no typed edges, so
+ * Studio refuses what it can't make rather than clamping it.
+ */
+export function regionBoxProblem(box: Record<RegionEdge, unknown>, within?: RegionArea | null): string | null {
   for (const k of REGION_EDGES) if (!storableFloat32(box[k])) return float32Text(LABEL[k]);
   const b = box as RegionBox;
   if (b.left >= b.right || b.bottom >= b.top) return "left must be below right and bottom below top.";
+  if (within && (b.left < within.left || b.right > within.right || b.bottom < within.bottom || b.top > within.top)) {
+    return `a region must lie inside the map (x ${within.left} to ${within.right}, y ${within.bottom} to ${within.top}).`;
+  }
   return null;
 }
 
 /** An edge typed for region `r` (`typed`: the field's text): the change, null when it is the value `r` has, or why it
- *  is refused (nothing changes then). */
-export function typedRegionEdge(r: RegionBox, key: RegionEdge, typed: string): { change: Partial<RegionBox> } | { refused: string } | null {
+ *  is refused (nothing changes then). `within`: the map's rectangle (regionBoxProblem). */
+export function typedRegionEdge(r: RegionBox, key: RegionEdge, typed: string, within?: RegionArea | null): { change: Partial<RegionBox> } | { refused: string } | null {
   const v = typed.trim() === "" ? NaN : Number(typed);
   if (!storableFloat32(v)) return { refused: float32Text(LABEL[key]) };
-  const problem = regionBoxProblem({ left: r.left, bottom: r.bottom, right: r.right, top: r.top, [key]: v });
+  const problem = regionBoxProblem({ left: r.left, bottom: r.bottom, right: r.right, top: r.top, [key]: v }, within);
   if (problem) return { refused: `${LABEL[key]}: ${problem}` };
   return v === r[key] ? null : { change: { [key]: v } };
 }

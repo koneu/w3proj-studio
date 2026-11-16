@@ -63,6 +63,32 @@ export type CameraField = (typeof CAMERA_FIELDS)[number][0];
 export const cameraFieldName = (key: CameraField) => (CAMERA_FIELDS.find(([k]) => k === key)?.[2] ?? key).replace(/ \(.*\)$/, "");
 
 /**
+ * What the World Editor's Camera Properties keeps of a typed value: it puts anything outside these ranges on the
+ * nearest end without a word (we-drive 2026-11-16, branch cam-region-limits, a map of 7 cameras each edited and saved:
+ * distance 0 and -100 gave 0.5, 0.3 gave 0.5, 1000000 gave 100000; Rotation, Angle of Attack and Roll -50 gave 0, 400
+ * and 500 gave 360, 360.5 gave 360; FoV 0 and 4.5 gave 5, 180 and 200 gave 120, 119.9 stayed; Z Offset 10000000 gave
+ * 4096, -10000000 gave -4096, -300 stayed; Near Clipping -5 gave 0, 10000000 gave 9500, 4999 stayed; Far Clipping 0, 1,
+ * 10, 50 and -50 gave 101, 10000000 gave 100000). Studio refuses such a value instead (decision 2026-11-15). The
+ * depth-of-field values and Pos Absolute Z weren't measured and keep only the float's range.
+ */
+export const CAMERA_RANGES: Partial<Record<CameraField, readonly [number, number]>> = {
+  distance: [0.5, 100000], rotation: [0, 360], angleOfAttack: [0, 360], roll: [0, 360], fieldOfView: [5, 120],
+  zOffset: [-4096, 4096], nearZ: [0, 9500], farZ: [101, 100000],
+};
+/** The least the far clipping lies beyond the near: the editor moves one to keep it (near 6000 over far 5000 gave far
+ *  6001; far 150 then near 200 gave near 149; near 100 with far 100.5 gave far 101). */
+export const MIN_CLIP_GAP = 1;
+
+/** Why `value` can't be `key` of a camera that has `other` (its camera values), or null. */
+function cameraValueProblem(key: CameraField, value: number, label: string, other: Partial<Record<CameraField, number>>): string | null {
+  const range = CAMERA_RANGES[key];
+  if (range && (value < range[0] || value > range[1])) return `${label} must be from ${range[0]} to ${range[1]}.`;
+  if (key === "nearZ" && Number.isFinite(other.farZ) && other.farZ! - value < MIN_CLIP_GAP) return `${label} must be at least ${MIN_CLIP_GAP} below the far clipping (${other.farZ}).`;
+  if (key === "farZ" && Number.isFinite(other.nearZ) && value - other.nearZ! < MIN_CLIP_GAP) return `${label} must be at least ${MIN_CLIP_GAP} above the near clipping (${other.nearZ}).`;
+  return null;
+}
+
+/**
  * A value typed for `key` of the cameras `targets`, as the Cameras tab takes it (TESTING.md "Refused values"): the
  * cameras of `cameras` among them whose value it changes, or why it is refused. A refused value changes nothing: it
  * isn't held to the nearest float, and an empty field or text is no value. `typed`: the field's text.
@@ -72,7 +98,12 @@ export function typedCameraValue<C extends Partial<Record<CameraField, number>>>
   const label = cameraFieldName(key);
   const v = Number(typed);
   if (typed.trim() === "" || !storableFloat32(v)) return { refused: float32Text(label) };
-  return { value: v, changing: targets.filter((c) => cameras.includes(c) && c[key] !== v) };
+  const changing = targets.filter((c) => cameras.includes(c) && c[key] !== v);
+  for (const c of changing) {
+    const problem = cameraValueProblem(key, v, label, c);
+    if (problem) return { refused: problem };
+  }
+  return { value: v, changing };
 }
 
 /** A view's far and near clipping, which a camera made or set from the view takes. */
