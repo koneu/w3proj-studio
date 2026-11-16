@@ -1,0 +1,169 @@
+[
+  {
+    "name": "doodad-open-z",
+    "description": "Heights on load: doodad-open-z.w3x (make-doodad-open-z.mjs), every doodad and destructable stored at z 400 with flags 2, opened in the terrain view and saved after an empty edit. The World Editor puts each on its ground: ZPsh on the ramps' cells by the corners rampLift lifts (a ramp's middle corner half a level up only where it climbs along one axis beside a straight tile: not at the bend (44, 42), not at (54, 30)), the stone walls LTw0 and icy rocks ITcr (Elevation Sample Radius 50) on the mean of the ground at (x +- 64, y +- 64), and so the bridge YT00 (100) and the walls the map's original table gives 1, 25, 64 and 100; LTw1 changed to 0, trees LTlt and every custom destructable (B000..B005, radius 0 to 200 or unchanged) on the point. Studio: lib/terrain/w3e.ts rampLift, objheights.ts doodadGround, objects.ts Skin.elevRadius since branch doodad-open-z-we (2026-11-16); before, 29 of 204 differed (the walls and rocks, 23 ZPsh on ramps).",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-open-z.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-wide",
+    "description": "doodad-open-z-wide.w3x (make-doodad-open-z.mjs wide): doodad-open-z.w3x with the destructables whose ground isn't worked out: the bridge YT04 (Elevation Sample Radius 200), the walls ITw0 and ITw1 the map's original table gives 150 and 128. The editor puts them neither on the point nor on any mean of 4, 9 or 16 points on a square or a ring tried (2026-11-16, e.g. YT04 at 96.25 and 95.81 over ground 56 and 56); Studio keeps a stored height for radius 128 or more (objheights.ts ELEVATION_RADIUS_UNKNOWN), but these snap to their grid on load and land on the point. The editor also snaps YT04 to another grid point (32 further west and south). Known difference.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-open-z-wide.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-nudge",
+    "description": "doodad-open-z.w3x after Select All and Numpad 6 (the doodad layer; Num Lock first): the moved ones land on the same ground as on load (doodadGround with the type's sample radius, rampLift). Run after doodad-open-z (this one switches Num Lock on).",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-open-z.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--key",
+          "Num_Lock"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--key",
+          "ctrl+a"
+        ],
+        [
+          "--sleep",
+          "700"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--sleep",
+          "700"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  }
+]

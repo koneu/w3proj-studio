@@ -1,0 +1,348 @@
+[
+  {
+    "name": "doodad-open-z-hammerfall",
+    "description": "smoketest_maps blizzard/(2)Hammerfall_S3.w3x opened in the terrain view and saved after an empty edit. The World Editor keeps every stored height (they are its own ground); Studio's Fix Doodads on Load rewrote its 13 stone walls LTw0..LTw3 (Elevation Sample Radius 50) until branch doodad-open-z-we (2026-11-16: lib/terrain/w3e.ts rampLift, objheights.ts doodadGround's sample radius, floats by the skin).",
+    "input": {
+      "map": "${MAIN}/smoketest_maps/blizzard/(2)Hammerfall_S3.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-autumnleaves",
+    "description": "smoketest_maps blizzard/(2)AutumnLeaves_S2_v2.0.w3x opened in the terrain view and saved after an empty edit. The World Editor keeps every stored height (they are its own ground); Studio's Fix Doodads on Load rewrote 24 doodads on ramps until branch doodad-open-z-we (2026-11-16: lib/terrain/w3e.ts rampLift, objheights.ts doodadGround's sample radius, floats by the skin). Known: seaweed ZWsw 2213 (-5696.4, 3219.4) on a cliff tile, its nearest corner (19, 89) wet at 419.15 over ground 252.75 (level 4) and the corner east of it dry on level 6: the editor keeps it on the ground (379.93), Studio floats it; the 1986 other floating doodads of smoketest_maps fit floatingLevelAt.",
+    "input": {
+      "map": "${MAIN}/smoketest_maps/blizzard/(2)AutumnLeaves_S2_v2.0.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds",
+          "doodads[2213].position"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-snowarebay",
+    "description": "smoketest_maps 4v4_SnowareBay_w3c_260125_1357_5658.w3x opened in the terrain view and saved after an empty edit. The World Editor keeps every stored height (they are its own ground); Studio's Fix Doodads on Load rewrote 34 walls, gates and icy rocks (radius 50), 7 tree walls on ramps and 2 LWw0 drawn as the floating NWfp until branch doodad-open-z-we (2026-11-16: lib/terrain/w3e.ts rampLift, objheights.ts doodadGround's sample radius, floats by the skin).",
+    "input": {
+      "map": "${MAIN}/smoketest_maps/4v4_SnowareBay_w3c_260125_1357_5658.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-firebrand",
+    "description": "smoketest_maps new(er)_maps/Firebrand Exarchate Race.w3x opened in the terrain view and saved after an empty edit. The World Editor keeps every stored height (they are its own ground); Studio's Fix Doodads on Load rewrote 19 stone walls (radius 50) until branch doodad-open-z-we (2026-11-16: lib/terrain/w3e.ts rampLift, objheights.ts doodadGround's sample radius, floats by the skin).",
+    "input": {
+      "map": "${MAIN}/smoketest_maps/new(er)_maps/Firebrand Exarchate Race.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-hammerfall-tweak",
+    "description": "hammerfall-tweak.w3x (make-doodad-open-z-real.mjs: blizzard/(2)Hammerfall_S3.w3x with some of the doodads Studio's old ground missed raised by 37.5). The World Editor puts each back on its stored height, which is so its ground; Studio's Fix Doodads on Load does the same since branch doodad-open-z-we.",
+    "input": {
+      "map": "${REPO}/target/doodad-open-z/hammerfall-tweak.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-autumnleaves-tweak",
+    "description": "autumnleaves-tweak.w3x (make-doodad-open-z-real.mjs: blizzard/(2)AutumnLeaves_S2_v2.0.w3x with some of the doodads Studio's old ground missed raised by 37.5). The World Editor puts each back on its stored height, which is so its ground; Studio's Fix Doodads on Load does the same since branch doodad-open-z-we. Known: seaweed ZWsw 2213 (-5696.4, 3219.4) on a cliff tile, its nearest corner (19, 89) wet at 419.15 over ground 252.75 (level 4) and the corner east of it dry on level 6: the editor keeps it on the ground (379.93), Studio floats it; the 1986 other floating doodads of smoketest_maps fit floatingLevelAt.",
+    "input": {
+      "map": "${REPO}/target/doodad-open-z/autumnleaves-tweak.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds",
+          "doodads[2213].position"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-snowarebay-tweak",
+    "description": "snowarebay-tweak.w3x (make-doodad-open-z-real.mjs: 4v4_SnowareBay_w3c_260125_1357_5658.w3x with some of the doodads Studio's old ground missed raised by 37.5). The World Editor puts each back on its stored height, which is so its ground; Studio's Fix Doodads on Load does the same since branch doodad-open-z-we.",
+    "input": {
+      "map": "${REPO}/target/doodad-open-z/snowarebay-tweak.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-open-z-firebrand-tweak",
+    "description": "firebrand-tweak.w3x (make-doodad-open-z-real.mjs: new(er)_maps/Firebrand Exarchate Race.w3x with some of the doodads Studio's old ground missed raised by 37.5). The World Editor puts each back on its stored height, which is so its ground; Studio's Fix Doodads on Load does the same since branch doodad-open-z-we.",
+    "input": {
+      "map": "${REPO}/target/doodad-open-z/firebrand-tweak.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "skinIds"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  }
+]
