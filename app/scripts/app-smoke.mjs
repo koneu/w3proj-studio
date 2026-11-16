@@ -8335,6 +8335,77 @@ async function derivedAfterDeletes(page, found) {
   }
 }
 
+/** A terrain editor's save while a rebuild of the derived files runs (w3.terrain.rebuildFromFiles, as after Delete
+ *  Invalid Objects): the save's pathing, shadows and minimap wait for the rebuild, in the rebuilds' turn, rather than
+ *  being written at the same time. Every read and write of war3map.wpm, .shd and war3mapMap.blp is held 1.5 s (the
+ *  rebuild's first pathing write 5 s, so it would land after the save's); no two writes may be in flight at once, and the
+ *  files afterwards are what a clean rebuild of the saved files makes. Controls: the save changed the pathing (barrels
+ *  replaced with hay carts), and both the rebuild and the save wrote it. */
+async function derivedSaveQueue(page, found) {
+  const fail = (what) => found.push(`derived save queue: ${what}`);
+  const k = await heightKit(page, "DerivedSaveQueue");
+  const file = (name) => readFileSync(join(k.root, "map", name));
+  const same = (a, b) => Buffer.compare(a, b) === 0;
+  const DERIVED = ["map/war3map.wpm", "map/war3map.shd", "map/war3mapMap.blp"];
+  try {
+    await k.tool("place_objects", { kind: "doodads", objects: [-512, -256, 0, 256, 512].map((x) => ({ id: "LTbr", x, y: 0 })), ignoreRoom: true });
+    await k.save();
+    await k.tool("rebuild_map");
+    await settled(page);
+    const wpmStart = file("war3map.wpm");
+    // The edit in the editor, unsaved: the barrels (2×2 pathing) become hay carts (4×2).
+    const e = await k.run("w3.terrain.replaceDoodads", { from: "LTbr", to: "LOch" });
+    if (e) return fail(`Replace Doodads: ${e}`);
+    await settled(page);
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) return fail("the replace left the terrain editor saved (control)");
+    await page.evaluate(`(() => {
+      const ws = w3Workbench.workspace, S = window.__derivedQueue = { inFlight: 0, most: 0, log: [], wpmWrites: 0 };
+      const paths = ${JSON.stringify(DERIVED)};
+      for (const m of ["readBytes", "writeBytes"]) {
+        const o = (S["orig_" + m] = ws[m]);
+        ws[m] = function (p, ...rest) {
+          if (!paths.includes(String(p).toLowerCase())) return o.call(this, p, ...rest);
+          const write = m === "writeBytes", first = write && p.toLowerCase() === "map/war3map.wpm" && S.wpmWrites++ === 0;
+          // Only writes count: the view reads the shadow map again after each write of it.
+          if (write) { S.inFlight++; S.most = Math.max(S.most, S.inFlight); }
+          S.log.push(m + " " + p + " start");
+          return new Promise((r) => setTimeout(r, first ? 5000 : 1500)).then(() => o.call(this, p, ...rest))
+            .finally(() => { if (write) S.inFlight--; S.log.push(m + " " + p + " end"); });
+        };
+      }
+    })()`);
+    try {
+      // The rebuild from the saved files (the barrels) first, then the save at once (the hay carts).
+      const err = await page.evaluate(`(async () => {
+        const rebuild = w3.commands.execute("w3.terrain.rebuildFromFiles");
+        const save = w3.editors.saveAll();
+        const r = await Promise.allSettled([rebuild, save]);
+        return r.filter((x) => x.status === "rejected").map((x) => String(x.reason)).join("; ") || null;
+      })()`, { timeout: 120000 });
+      if (err) fail(`the rebuild or the save failed: ${err}`);
+      await settled(page);
+      const S = await page.evaluate(`(() => { const S = window.__derivedQueue; return { most: S.most, log: S.log, wpmWrites: S.wpmWrites }; })()`);
+      if (S.wpmWrites < 2) fail(`the pathing was written ${S.wpmWrites} times, not by both the rebuild and the save (control): ${S.log.join(", ")}`);
+      if (S.most > 1) fail(`the save wrote the derived files while the rebuild did: ${S.most} writes at once (${S.log.join(", ")})`);
+    } finally {
+      await page.evaluate(`(() => { const S = window.__derivedQueue, ws = w3Workbench.workspace; if (S) for (const m of ["readBytes", "writeBytes"]) if (S["orig_" + m]) ws[m] = S["orig_" + m]; delete window.__derivedQueue; })()`);
+    }
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is still unsaved after the save");
+    if (!k.doodads().every((d) => d.id === "LOch")) fail(`the save didn't write the hay carts: ${k.doodads().map((d) => d.id).join()}`);
+    const saved = { wpm: file("war3map.wpm"), blp: file("war3mapMap.blp") };
+    if (same(saved.wpm, wpmStart)) fail("the pathing after the save is the barrels' (the rebuild's, written last)");
+    // A clean rebuild of the saved files: the same bytes.
+    await page.evaluate(`w3.commands.execute("w3.terrain.rebuildFromFiles")`);
+    await settled(page);
+    if (same(file("war3map.wpm"), wpmStart)) fail("a clean rebuild makes the barrels' pathing (control)");
+    if (!same(file("war3map.wpm"), saved.wpm)) fail("the pathing after the save and the rebuild differs from a clean rebuild's");
+    if (!same(file("war3mapMap.blp"), saved.blp)) fail("the minimap after the save and the rebuild differs from a clean rebuild's");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** `w3proj rebuild` (crates/cli/src/rebuild.rs running src/headless in Node) writes what the app writes. Two copies of
  *  one new map get the same edit made outside the app (a rock and a footman moved in the placement files); then the
  *  app makes the derived files from the saved files (w3.terrain.rebuildFromFiles, Calculate Shadows, Generate Map
@@ -14869,6 +14940,7 @@ async function run() {
         contextLoss,
         dataSafety,
         derivedAfterDeletes,
+        derivedSaveQueue,
         doodadRulesEdit,
         doodadSnapOnLoad,
         drawCalls,
@@ -15270,6 +15342,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "moduleFunctions", found);
   await derivedAfterDeletes(page, found).catch((e) => found.push(`derived after deletes: ${e.message}`));
   await leftOpen(page, "derivedAfterDeletes", found);
+  await derivedSaveQueue(page, found).catch((e) => found.push(`derived save queue: ${e.message}`));
+  await leftOpen(page, "derivedSaveQueue", found);
   await rebuildCli(page, found).catch((e) => found.push(`rebuild cli: ${e.message}`));
   await leftOpen(page, "rebuildCli", found);
   await cliCheck(page, found).catch((e) => found.push(`cli check: ${e.message}`));
