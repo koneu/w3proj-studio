@@ -1111,7 +1111,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 
 /* Colour tools under the text fields of game texts (extensions/colortools.ts) */
 .color-tools { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 640px; } /* as wide as the text fields (.form-input) */
-.color-tools:not(:focus-within) > .color-tools-bar { display: none; }
+.color-tools:not(:focus-within):not(.color-tools-picking) > .color-tools-bar { display: none; } /* kept while the colour picker is open (colortools.ts) */
 .color-tools-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 0; min-width: 100%; box-sizing: border-box; } /* the bar wraps inside the field's width and adds nothing to it */
 .color-tools-picker { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
 .color-tools-swatches { display: inline-flex; flex-wrap: wrap; gap: 2px; }

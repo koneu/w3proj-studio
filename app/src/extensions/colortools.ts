@@ -56,7 +56,24 @@ export function withColorTools(field: HTMLInputElement | HTMLTextAreaElement, op
   const keepField = (e: Event) => e.preventDefault();
 
   const picker = h("input.color-tools-picker", { type: "color", value: "#ffffff", tabIndex: -1 });
-  picker.addEventListener("change", () => run((t, a, b) => wrapColor(t, a, b, picker.value)));
+  // The bar shows while the field has the focus (styles.css). A native colour dialog takes the window's focus, so the
+  // field loses :focus-within, the bar (and the picker in it) would go to display: none, and the engine closes a picker
+  // whose input is no longer laid out: the dialog opened and closed at once. So the bar stays while the picker is open:
+  // until it gives a colour, the window has the focus back (the dialog closed, also when cancelled), or a press lands
+  // outside the tools.
+  let picking: AbortController | null = null;
+  const endPicking = () => { picking?.abort(); picking = null; root.classList.remove("color-tools-picking"); };
+  const openPicker = () => {
+    endPicking();
+    picking = new AbortController();
+    const { signal } = picking;
+    root.classList.add("color-tools-picking");
+    const mine = picking;
+    window.addEventListener("focus", () => setTimeout(() => { if (picking === mine) endPicking(); }, 0), { signal });
+    document.addEventListener("pointerdown", (e) => { if (!(e.target instanceof Node && root.contains(e.target))) endPicking(); }, { signal, capture: true });
+    picker.click();
+  };
+  picker.addEventListener("change", () => { endPicking(); run((t, a, b) => wrapColor(t, a, b, picker.value)); });
   const button = (label: string, title: string, click: () => void, cls = "") => {
     const b = h(`button.color-tools-button${cls}`, { type: "button", title, tabIndex: -1 }, label);
     b.addEventListener("mousedown", keepField);
@@ -75,7 +92,7 @@ export function withColorTools(field: HTMLInputElement | HTMLTextAreaElement, op
     return s;
   });
   const bar = h("div.color-tools-bar", { role: "toolbar", "aria-label": "Text colour" },
-    button("Color…", "Colour the selection (a pair of tags at the caret without a selection)", () => { picker.click(); }),
+    button("Color…", "Colour the selection (a pair of tags at the caret without a selection)", openPicker),
     picker,
     h("span.color-tools-swatches", {}, ...swatches),
     button("Remove color", "Take the colour off the selection (the colour around the caret without one)", () => run((t, a, b) => removeColor(t, a, b))),
@@ -90,5 +107,6 @@ export function withColorTools(field: HTMLInputElement | HTMLTextAreaElement, op
   };
   field.addEventListener("input", paint);
   paint();
-  return h("div.color-tools", {}, field, bar, preview);
+  const root = h("div.color-tools", {}, field, bar, preview);
+  return root;
 }

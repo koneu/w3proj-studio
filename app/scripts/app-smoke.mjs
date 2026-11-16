@@ -2411,12 +2411,37 @@ async function techtreeRandomLevels(page, found) {
   }
 }
 
+/** The "Color…" button, clicked with the mouse after a click into the field (`fieldSel`, the first match): the picker
+ *  opens and the toolbar holding it stays shown when the field loses the focus, as it does to the native colour dialog
+ *  (the window's focus goes to the dialog; a bar gone to display: none closed the picker at once); the colour the picker
+ *  gives then wraps the selection. Returns the field's value after the colour, or null after a failure. */
+async function colorButtonStaysOpen(page, hands, fieldSel, fail) {
+  const field = `document.querySelector(${JSON.stringify(fieldSel)})`;
+  const root = `${field}.closest(".color-tools")`;
+  await hands.click(fieldSel);
+  await page.evaluate(`(() => { const e = ${field}; e.setSelectionRange(0, 5); e.dispatchEvent(new Event("select")); })()`);
+  await page.evaluate(`(() => { window.__pickerClicks = 0; ${root}.querySelector(".color-tools-picker").addEventListener("click", () => window.__pickerClicks++, { once: true }); })()`);
+  await hands.click(`.color-tools:focus-within .color-tools-button`, "Color…");
+  const state = () => page.evaluate(`(() => { const r = ${root}, bar = r.querySelector(".color-tools-bar"), p = r.querySelector(".color-tools-picker");
+    return { clicks: window.__pickerClicks, barShown: getComputedStyle(bar).display !== "none", pickerLaidOut: p.getClientRects().length > 0, fieldFocused: document.activeElement === ${field} }; })()`);
+  const now = await state();
+  if (now.clicks !== 1 || !now.barShown || !now.fieldFocused) { fail(`after clicking Color… ${JSON.stringify(now)}`); return null; }
+  // The dialog takes the focus: the field (and so :focus-within) loses it.
+  await page.evaluate(`${field}.blur()`);
+  await sleep(300);
+  const away = await state();
+  if (!away.barShown || !away.pickerLaidOut) { fail(`the colour toolbar closed while the picker is open: ${JSON.stringify(away)}`); return null; }
+  await page.evaluate(`(() => { const p = ${root}.querySelector(".color-tools-picker"); p.value = "#12ab34"; p.dispatchEvent(new Event("input", { bubbles: true })); p.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await sleep(200);
+  return page.evaluate(`document.querySelector(${JSON.stringify(fieldSel)})?.value ?? null`);
+}
+
 /** The colour tools under Map Properties' name: a colour button wraps the selection in the tags, "Remove color" takes
  *  them off, the preview shows the colour, and the workbench undo takes the edit back. */
 async function mapInfoColorTools(page, found) {
   try {
   const fail = (what) => found.push(`Map Properties colour tools: ${what}`);
-  await heightKit(page, "MapInfoColors");
+  const k = await heightKit(page, "MapInfoColors");
   const field = `(() => { const l = [...document.querySelectorAll(".map-info label.form-row")].find((x) => x.querySelector(".form-label")?.textContent === "Name"); return l?.querySelector("input, textarea"); })()`;
   const root = `${field}.closest(".color-tools")`;
   const nameNow = () => page.evaluate(`${field}?.value ?? null`);
@@ -2455,6 +2480,10 @@ async function mapInfoColorTools(page, found) {
     return { viaTable, label: b.textContent, was, now: e.value }; })()`);
   if (!brk) fail("the description box is missing");
   else if (brk.label !== "Line break" || brk.now !== (brk.viaTable ? "|n" : "\n") + brk.was) fail(`line break gave ${JSON.stringify(brk)}`);
+  // The Color… button with the mouse: the picker stays open and its colour lands.
+  await page.evaluate(`(() => { const e = ${field}; e.value = "Hello world"; e.dispatchEvent(new Event("input", { bubbles: true })); e.dataset.smokeColor = "name"; })()`);
+  const picked = await colorButtonStaysOpen(page, k.hands, `[data-smoke-color="name"]`, fail);
+  if (picked !== null && picked !== "|cff12AB34Hello|r world") fail(`the picked colour gave ${JSON.stringify(picked)}`);
   void before;
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
@@ -2499,6 +2528,13 @@ async function objectEditorColorTools(page, found) {
       if (!(await soon(async () => (await value()) === "Hello world"))) fail(`undo of the ${label} colour left ${JSON.stringify(await value())}`);
       await k.save();
       if (code === "unam" ? strings().get(7) !== "Hello world" : mod("utip") !== "Hello world") fail(`the ${label} after undo and save isn't the plain text again`);
+      // The Color… button with the mouse: the picker stays open and its colour lands in the field.
+      const picked = await colorButtonStaysOpen(page, k.hands, input, (what) => fail(`${label}: ${what}`));
+      if (picked !== null && picked !== "|cff12AB34Hello|r world") fail(`the ${label} after the picked colour: ${JSON.stringify(picked)}`);
+      else if (picked !== null) {
+        await page.evaluate(`w3.commands.execute("workbench.undo")`);
+        if (!(await soon(async () => (await value()) === "Hello world"))) fail(`undo of the picked ${label} colour left ${JSON.stringify(await value())}`);
+      }
     }
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
