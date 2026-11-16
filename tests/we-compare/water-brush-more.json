@@ -184,7 +184,7 @@
   },
   {
     "name": "water-brush-swapped",
-    "description": "Shallow Water size 3 at the middle of slope-swapped.w3x (the w3e's cliff list CLgr CLdi, which the game ignores: lib cliffList). KNOWN DIFFERENCE (2026-11-13): the editor writes 0, Grass Cliff's place in the file's own list; Studio writes 1, Grass Cliff's number by the ground tiles (as the game reads it). It shows the palette starts on Grass Cliff whatever the list's order",
+    "description": "Shallow Water size 3 at the middle of slope-swapped.w3x (the w3e's cliff list CLgr CLdi): the editor writes 0, Grass Cliff's place in the file's own cliff list. MATCH since branch cliff-by-cliff-list (2026-11-16, cliffs.ts cliffList by the cliff list; Studio wrote 1, the number by the ground tiles). It shows the palette starts on Grass Cliff whatever the list's order",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope-swapped.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -204,7 +204,7 @@
       ]
     },
     "compare": [
-      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+      { "file": "war3map.w3e", "as": "w3e" }
     ],
     "limit": 30
   },
