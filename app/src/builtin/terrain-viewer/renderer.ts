@@ -1208,13 +1208,14 @@ export class TerrainRenderer {
 
   /** The playable map as the w3i's camera complements leave it (null: the terrain's marks stand in). The border's
    *  shade and its black water follow; nothing is made again when they didn't change. */
-  setPlayable(complements: readonly number[] | null) {
+  setPlayable(complements: readonly number[] | null): boolean {
     const next = complements ? [...complements] : null;
-    if (JSON.stringify(next) === JSON.stringify(this.complements)) return;
+    if (JSON.stringify(next) === JSON.stringify(this.complements)) return false;
     this.complements = next;
     this.refreshBorder();
     this.freeVao(this.water.vao);
     this.water = this.buildWater();
+    return true;
   }
 
   /** The tiles past the playable map (1 per tile, rows from the south): by the w3i's complements, as the World Editor
