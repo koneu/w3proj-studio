@@ -283,6 +283,8 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
             report.unnamed.push(file);
             continue;
         };
+        // The archive's own bookkeeping isn't map data and isn't kept in the project: pack writes a
+        // new (listfile) and leaves (attributes) and (signature) out (`build_archive`).
         if names::is_meta(name) {
             continue;
         }
@@ -933,6 +935,12 @@ pub fn encode_files(
     Ok(out)
 }
 
+/// The archive gets a (listfile) of its files and nothing else of the MPQ's bookkeeping, so a packed
+/// map has one entry fewer than a World Editor save: (attributes), which holds a CRC32 (and maybe a
+/// time and MD5) per block, is left out on purpose. Its values describe the original's blocks, so
+/// carried over it would be wrong for the new ones, and the game loads maps without it (every map of
+/// smoketest_maps that had one: only it went missing, 2026-11-16). (signature) is left out too: a
+/// signature over other bytes is worse than none. `tests/pack_meta_files.rs` pins both.
 pub fn build_archive(manifest: &Manifest, prefix: &[u8], files: BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
     let mut builder = ArchiveBuilder::new(WriteOptions {
         sector_size_shift: manifest.archive.sector_size_shift,
