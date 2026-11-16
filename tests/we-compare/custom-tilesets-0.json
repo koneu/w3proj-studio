@@ -37,29 +37,29 @@
   },
   {
     "name": "ct0-save-rev6-0",
-    "description": "custom-tilesets 0, the file's ground list the tileset's own reversed: opened and saved with no edit. The editor's save writes the tileset's own list whole (Ldrt Ldro Ldrg Lrok Lgrs Lgrd) as the ground list, the flag and the cliff list kept (we-drive 2026-11-16, branch ct0-slots). Known difference: Studio writes no terrain it hasn't changed, so the file keeps its list; after an edit Studio writes the own list too (w3e.ts savedTerrain; the ct0-cliff-* and ct0-paint-* specs)",
+    "description": "custom-tilesets 0, the file's ground list the tileset's own reversed: opened and saved with no edit. The editor's save writes the tileset's own list whole (Ldrt Ldro Ldrg Lrok Lgrs Lgrd) as the ground list, the flag and the cliff list kept (we-drive 2026-11-16, branch ct0-slots). MATCH: Studio's save writes the own list too (w3e.ts savedTerrain) when the terrain view is open and its save runs, as Ctrl+S does; the spec's Studio side opens the view and makes an empty edit (as doodad-life) so that save runs. Without the view open the file is repacked as it is",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
     "name": "ct0-save-few3-0",
-    "description": "the same with a list of 3 (Lgrs Lrok Ldrt): the editor writes all six own tiles (the list grows), corners keep their slots. Known difference as ct0-save-rev6-0",
+    "description": "the same with a list of 3 (Lgrs Lrok Ldrt): the editor writes all six own tiles (the list grows), corners keep their slots. Matches as ct0-save-rev6-0",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
     "name": "ct0-save-more9-0",
-    "description": "the same with a list of 9: the editor writes the six own tiles (the list shrinks) and the corners on slots 6 to 8 get slot 0 (Ldrt, what they were drawn with). Known difference as ct0-save-rev6-0",
+    "description": "the same with a list of 9: the editor writes the six own tiles (the list shrinks) and the corners on slots 6 to 8 get slot 0 (Ldrt, what they were drawn with). Matches as ct0-save-rev6-0",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
@@ -103,7 +103,7 @@
     "description": "the control: the list of 9 with custom-tilesets 1, kept as it is",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-1.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
