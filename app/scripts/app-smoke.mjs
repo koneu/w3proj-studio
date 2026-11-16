@@ -2688,6 +2688,36 @@ async function objectListSuffix(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The Object Editor's pickers list standard units as "Name - Editor Suffix" (the game's suffix, read from its profile
+ *  table: nmr3 is a Mercenary Camp "(Lordaeron Winter)"), for "Edit standard…" and "New … based on…", and the search
+ *  box finds a row by its suffix word. */
+async function objectPickerSuffix(page, found) {
+  const fail = (what) => found.push(`object picker suffix: ${what}`);
+  try {
+    const k = await heightKit(page, "ObjPickerSuffix");
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+    await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
+    const rowName = (id) => page.evaluate(`[...document.querySelectorAll(".picker-rows > .picker-row")].find((r) => r.querySelector("code")?.textContent === ${JSON.stringify(id)})?.querySelector(".picker-name")?.textContent ?? null`);
+    const shownIds = () => page.evaluate(`[...document.querySelectorAll(".picker-rows > .picker-row code")].map((c) => c.textContent)`);
+    for (const label of ["Edit standard…", "+ New"]) {
+      const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".obj-toolbar-buttons button")].find((x) => x.textContent === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
+      if (!clicked) { fail(`no "${label}" button`); continue; }
+      await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 30000);
+      await k.hands.click("input.picker-search");
+      await k.hands.type("lordaeron winter");
+      await soon(async () => (await rowName("nmr3")) !== null, 5000);
+      const name = await rowName("nmr3");
+      // The value is the one the game's table holds (NeutralUnitStrings.txt, [nmr3]: " (Lordaeron Winter)").
+      if (name !== "Mercenary Camp - (Lordaeron Winter)") fail(`${label}: nmr3 shows ${JSON.stringify(name)}`);
+      const ids = await shownIds();
+      if (!ids.includes("nmr3") || ids.includes("hfoo")) fail(`${label}: "lordaeron winter" finds ${JSON.stringify(ids.slice(0, 8))}`);
+      await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the picker closed", () => page.evaluate(`!document.querySelector(".picker-rows")`), 5000);
+    }
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The colour tools under the Object Editor's text fields: on a name kept in war3map.wts (the TRIGSTR id stays, the table
  *  holds the tags) and on a plain tooltip (the object file holds them); the workbench undo takes each colour back. */
 async function objectEditorColorTools(page, found) {
@@ -14601,6 +14631,7 @@ async function run() {
         objectListSuffix,
         objectManagerLive,
         objectManagerSkin,
+        objectPickerSuffix,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
         objectValueRange,
@@ -14853,6 +14884,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectEditorColorTools", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
+  await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));
+  await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));

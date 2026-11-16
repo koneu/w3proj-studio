@@ -6,6 +6,7 @@ import { focusAfterClick, h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { shownValue, type EditorType } from "./fields";
+import { editorSuffix, labelWithSuffix } from "./objectinfo";
 import { builderField, compare, formatFilter, defaultOp, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, tokenize, type FieldFilter, type Op } from "./filters";
 
 const MAX_ROWS = 300;
@@ -19,6 +20,8 @@ interface Entry {
   /** A built-in entry the caller adds (a random item): listed first, found by words only, no facets or fields. */
   extra?: boolean;
   name: string;
+  /** What a row shows: the name with the Editor Suffix ("Mercenary Camp - (Lordaeron Winter)"); the name for sorting stays plain. */
+  label: string;
   facets: Record<string, string>;
   haystack: string;
 }
@@ -65,14 +68,16 @@ export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pin
   }
   const entry = (id: string, name: string, base?: string, campaign?: boolean): Entry => {
     const facets = kd.facets(base ?? id);
-    return { id, base, campaign, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
+    // Game objects only: a custom one's own suffix isn't known here, its base's would mislead.
+    const suffix = base === undefined ? editorSuffix({ base: id }, kd, (v) => kd.westring?.(v) ?? v) : "";
+    return { id, base, campaign, name, label: labelWithSuffix(name, suffix), facets, haystack: `${name} ${suffix} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
   };
   const entries: Entry[] = [
     ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base, c.campaign)),
     ...kd.baseIds.map((id) => entry(id, strip(kd.names.get(id) ?? id))),
   ];
-  entries.sort((a, b) => (a.id === opts.pinned ? -1 : b.id === opts.pinned ? 1 : a.name.localeCompare(b.name)));
-  entries.unshift(...(opts.extra ?? []).map((x): Entry => ({ id: x.id, name: x.name, extra: true, facets: {}, haystack: `${x.name} ${x.id}`.toLowerCase() })));
+  entries.sort((a, b) => (a.id === opts.pinned ? -1 : b.id === opts.pinned ? 1 : a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+  entries.unshift(...(opts.extra ?? []).map((x): Entry => ({ id: x.id, name: x.name, label: x.name, extra: true, facets: {}, haystack: `${x.name} ${x.id}`.toLowerCase() })));
 
   // Field values are looked up lazily and cached (level 1 for per-level fields).
   const valueCache = new Map<string, Map<string, string | undefined>>();
@@ -248,7 +253,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           onmouseenter: () => { active = i; for (const [j, r] of [...rowsEl.children].entries()) r.classList.toggle("active", j === i); },
         },
           opts.iconOf ? (e.extra ? h("img.picker-icon.none", { alt: "" }) : icon(e)) : null,
-          h("span.picker-name", {}, e.name),
+          h("span.picker-name", {}, e.label),
           h("code", {}, e.id),
           e.extra ? h("span.badge", { title: "Picked when the game starts" }, "random") : null,
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,

@@ -72,3 +72,21 @@ test("extra entries (random items) are listed first, found by words, and hidden 
   // Control: without the option there are none.
   assert.deepEqual(pickerList(kd, {}).entries.map((e) => e.id), ["earc", "hfoo"]);
 });
+
+test("game rows show 'Name - Editor Suffix', and the suffix is searched; the sort stays by name then id", () => {
+  const unsf = { id: "unsf", label: "Name - Editor Suffix", type: "string", field: "EditorSuffix", repeat: 0 } as FieldMeta;
+  const SUF: Record<string, string> = { nmr0: "(Lordaeron Winter)", nmr3: "WES_X", nmer: "" };
+  const k = {
+    kind: "w3u", facetDefs: [], facets: () => ({}), fields: [unsf], fieldById: new Map([["unsf", unsf]]),
+    names: new Map([["nmr3", "Mercenary Camp"], ["nmr0", "Mercenary Camp"], ["nmer", "Mercenary Camp"]]), searchText: () => "",
+    baseIds: ["nmr3", "nmr0", "nmer"], levels: () => 1, fieldsFor: () => [unsf], defaultValue: (id: string) => SUF[id],
+    westring: (v: string) => (v === "WES_X" ? "|cffff0000(Dalaran)|r" : v),
+  } as unknown as KindData;
+  const list = pickerList(k, { custom: [{ id: "h000", base: "nmr0", name: "Mine" }] });
+  assert.deepEqual(list.entries.map((e) => e.label), ["Mercenary Camp", "Mercenary Camp - (Lordaeron Winter)", "Mercenary Camp - (Dalaran)", "Mine"]);
+  assert.deepEqual(list.entries.map((e) => e.id), ["nmer", "nmr0", "nmr3", "h000"]);
+  list.setQuery("winter");
+  assert.deepEqual(list.entries.filter((e) => list.matches(e)).map((e) => e.id), ["nmr0"]);
+  list.setQuery("dalaran");
+  assert.deepEqual(list.entries.filter((e) => list.matches(e)).map((e) => e.id), ["nmr3"]);
+});
