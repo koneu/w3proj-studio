@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::Registry;
 use crate::header::MapHeader;
-use crate::{names, paths, wts, Error, Result};
+use crate::{allies, names, paths, wts, Error, Result};
 
 pub const MANIFEST: &str = "w3proj.toml";
 pub const MAP_DIR: &str = "map";
@@ -1071,6 +1071,13 @@ fn pack_bytes_with(project: &Path, codecs: &Registry, prune: Option<&mut wts::Pr
         *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
     }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
+    // The ally priorities the World Editor's save works out (`allies`); a map whose masks already
+    // match goes in byte for byte.
+    if let Some((_, w3i)) = encoded.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i")) {
+        if let Some(worked) = allies::pack_w3i(w3i, codecs) {
+            *w3i = worked;
+        }
+    }
     let maps_dir = project.join(MAPS_DIR);
     for dir in nested_projects(&maps_dir)? {
         let name = paths::to_archive_name(&dir);
@@ -1102,7 +1109,8 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// Packs the project's files as they are (the app drops unused strings in the project first).
+/// Packs the project's files as they are (the app drops unused strings in the project first), with
+/// the ally priorities in war3map.w3i the World Editor's save works out (`allies`).
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
     pack_to(project, output, codecs, false)
 }
