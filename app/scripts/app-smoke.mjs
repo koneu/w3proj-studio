@@ -1924,6 +1924,34 @@ async function viewModes(page, found) {
   await k.hands.click(".model-toggle", "Light ranges");
   if (!(await state()).lightRanges) fail("the Light ranges box didn't turn them on");
   await k.hands.click(".model-toggle", "Light ranges");
+  // Light Ranges and the graphics mode: rings for the brazier in HD, none in SD, back in HD.
+  {
+    const mode = await k.setting("game.graphicsMode");
+    const setMode = (m) => page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(m)})`);
+    const lightRings = async () => { const v = await state(); return v?.lightRanges ? (v.rings?.lights ?? 0) : -1; };
+    /** Waits for the rings count to match `want` (the editor may open again on a mode change, its models load later). */
+    const ringsBecome = async (what, want) => {
+      let n = -2;
+      await until(what, async () => {
+        // The editor opened again for the mode: Light Ranges is a choice of the view, put it on if the new one lost it.
+        if ((await state())?.lightRanges === false) await k.hands.click(".model-toggle", "Light ranges");
+        n = await lightRings();
+        return want(n);
+      }, 30000).catch(() => fail(`${what}: ${n} rings`));
+    };
+    try {
+      await setMode("hd");
+      await until("the editor in HD", async () => (await state()) !== null, 20000).catch(() => {});
+      await ringsBecome("Light Ranges in HD shows rings", (n) => n > 0);
+      await setMode("sd");
+      await ringsBecome("Light Ranges in SD shows no rings", (n) => n === 0);
+      await setMode("hd");
+      await ringsBecome("Light Ranges back in HD shows rings again", (n) => n > 0);
+    } finally {
+      await setMode(mode ?? "hd");
+      if ((await state())?.lightRanges) await k.hands.click(".model-toggle", "Light ranges");
+    }
+  }
   // Looking isn't editing.
   await settled(page);
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the View keys left unsaved changes");
