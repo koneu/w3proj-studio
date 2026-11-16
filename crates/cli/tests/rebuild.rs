@@ -182,6 +182,107 @@ fn shadows_whose_models_are_all_unreadable_keep_the_stored_file() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The packed map's war3map.j.
+fn packed_script(map: &Path, game: &str) -> String {
+    let o = w3proj(&["cat", s(map), "war3map.j"], game);
+    assert!(o.status.success(), "{}", text(&o));
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+/// `w3proj pack` makes the script Studio wrote last again before packing, so a second player added to war3map.w3i
+/// outside the app reaches the packed war3map.j (its InitAllyPriorities is what the pack works out for the w3i:
+/// allies.rs script_agrees gives no warning). Controls: --keep-script packs the stale script and warns; a script
+/// edited by hand isn't made again (kept, with the warning).
+#[test]
+fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
+    let Some(game) = game() else {
+        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("pack-script");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let script = project.join("map/war3map.j");
+    // No script there: Studio writes its own, and records it (.w3proj/generated-script).
+    fs::remove_file(&script).unwrap();
+    let o = w3proj(&["rebuild", s(&project), "--only=script"], &game);
+    assert!(o.status.success() && text(&o).contains("written    map/war3map.j"), "{}", text(&o));
+    let studios = fs::read_to_string(&script).unwrap();
+    assert!(!studios.contains("SetStartLocPrio("), "one player has no priorities: {studios}");
+
+    // Nothing changed: the pack makes the same script and writes nothing.
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("same.w3x"))], &game);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!text(&o).contains("warning") && !text(&o).contains("written"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&script).unwrap(), studios);
+
+    // A second user player, near the first: both get the other as High.
+    let info = project.join("map/war3map.w3i.json");
+    let mut v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&info).unwrap()).unwrap();
+    let mut second = v["players"][0].clone();
+    second["id"] = 1.into();
+    second["start"] = serde_json::json!([0.0, 1280.0]);
+    v["players"].as_array_mut().unwrap().push(second);
+    fs::write(&info, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let prio = "call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )";
+    let stale = "InitAllyPriorities doesn't set the ally priorities";
+
+    // Control: --keep-script packs the stale script, and the pack's check says so.
+    let o = w3proj(&["pack", s(&project), "--keep-script", "-o", s(&dir.join("kept.w3x"))], &game);
+    assert!(o.status.success() && text(&o).contains(stale), "{}", text(&o));
+    assert!(!packed_script(&dir.join("kept.w3x"), &game).contains(prio));
+    assert_eq!(fs::read_to_string(&script).unwrap(), studios);
+
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("made.w3x"))], &game);
+    let said = text(&o);
+    assert!(o.status.success(), "{said}");
+    assert!(said.contains("written    map/war3map.j (map script made again"), "{said}");
+    assert!(!said.contains("warning"), "the made script agrees with the w3i the pack worked out: {said}");
+    let made = fs::read_to_string(&script).unwrap();
+    assert!(made.contains(prio) && made.contains("call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )"), "{made}");
+    assert!(made.contains("call DefineStartLocation( 1, 0.0, 1280.0 )"), "the new player's start is in the script: {made}");
+    assert_eq!(packed_script(&dir.join("made.w3x"), &game), made, "the pack took the script it made");
+
+    // Edited by hand: not Studio's any more, so it stays as it is, with the warning, after a third player came.
+    let edited = format!("{made}// my own line\n");
+    fs::write(&script, &edited).unwrap();
+    let mut third = v["players"][0].clone();
+    third["id"] = 2.into();
+    third["start"] = serde_json::json!([1280.0, 0.0]);
+    v["players"].as_array_mut().unwrap().push(third);
+    fs::write(&info, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("edited.w3x"))], &game);
+    assert!(o.status.success() && text(&o).contains(stale), "{}", text(&o));
+    assert!(!text(&o).contains("written"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&script).unwrap(), edited);
+    assert_eq!(packed_script(&dir.join("edited.w3x"), &game), edited);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Studio's script, but its generator can't run (no game to read the tables from): the pack goes on with the script
+/// as it is and says why it wasn't made again.
+#[test]
+fn a_script_that_cant_be_made_again_is_packed_as_it_is_with_a_warning() {
+    let Some(game) = game() else {
+        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("pack-script-no-game");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let script = project.join("map/war3map.j");
+    fs::remove_file(&script).unwrap();
+    let o = w3proj(&["rebuild", s(&project), "--only=script"], &game);
+    assert!(o.status.success(), "{}", text(&o));
+    let studios = fs::read(&script).unwrap();
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("out.w3x"))], s(&dir.join("no-such-game")));
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("warning: map script not made again"), "{}", text(&o));
+    assert_eq!(fs::read(&script).unwrap(), studios);
+    assert!(dir.join("out.w3x").is_file());
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn an_unknown_part_is_refused() {
     let dir = workdir("unknown-part");

@@ -302,10 +302,8 @@ fn check_trigger_data(file: &Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// Pathing, shadows and the minimap that no longer follow the terrain and doodads (`w3proj::derived`) stop a pack, in the
-/// project and its chapter maps: the app makes them again a moment after an edit, this program can't.
-fn check_derived(project: &std::path::Path) -> Result<()> {
-    use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
+/// A project and its chapter maps (`maps/<folder>/` with a manifest), as a pack takes them: (place in the pack, folder).
+fn packed_projects(project: &std::path::Path) -> Vec<(String, PathBuf)> {
     let mut projects = vec![(String::new(), project.to_path_buf())];
     let maps = project.join(w3proj::project::MAPS_DIR);
     if let Ok(entries) = std::fs::read_dir(&maps) {
@@ -317,6 +315,14 @@ fn check_derived(project: &std::path::Path) -> Result<()> {
         chapters.sort();
         projects.extend(chapters);
     }
+    projects
+}
+
+/// Pathing, shadows and the minimap that no longer follow the terrain and doodads (`w3proj::derived`) stop a pack, in the
+/// project and its chapter maps: the app makes them again a moment after an edit, this program can't.
+fn check_derived(project: &std::path::Path) -> Result<()> {
+    use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
+    let projects = packed_projects(project);
     let again = "`w3proj rebuild` makes them again (W3Proj Studio does a few seconds after an edit made there and on every \
                  terrain save), then pack again; --force-stale packs them as they are";
     for (at, dir) in projects {
@@ -385,7 +391,8 @@ enum Cmd {
     /// app's packing drop them (the project's files stay as they are; chapter maps and
     /// war3campaign.wts aren't pruned). Unless a map has "Modify ally priorities" on, its user
     /// players get the ally priorities in war3map.w3i the World Editor's save works out from their
-    /// start locations.
+    /// start locations. A map script W3Proj Studio wrote last is made again first (see
+    /// --keep-script), so it follows them.
     Pack {
         project: PathBuf,
         /// Output map; defaults to [pack].output or build/<folder>.w3x.
@@ -398,6 +405,16 @@ enum Cmd {
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
         force_stale: bool,
+        /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
+        /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
+        /// --only script` makes it (so it follows changed players, start locations and ally
+        /// priorities); a script edited by hand or from the World Editor stays as it is anyway.
+        #[arg(long)]
+        keep_script: bool,
+        /// Game install folder: its tables go into a map script made again ("none": the script
+        /// isn't made again).
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
+        game: String,
     },
     /// Make a project's derived files again from its files, as W3Proj Studio makes them: pathing
     /// (war3map.wpm), shadows (war3map.shd), the minimap (war3mapMap.blp, war3map.mmp) and the map
@@ -623,9 +640,22 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale } => {
+        Cmd::Pack { project, output, keep_unused_strings, force_stale, keep_script, game } => {
             if !force_stale {
                 check_derived(&project)?;
+            }
+            // The script Studio wrote last, made again from the files now there (the pack works out war3map.w3i's ally
+            // priorities as the generator does, so the two agree); one that isn't Studio's goes in as it is, and
+            // allies.rs's check of it warns when its priorities aren't those.
+            if !keep_script && game != "none" {
+                for (at, dir) in packed_projects(&project) {
+                    if let rebuild::PackScript::NotMade(why) = rebuild::script_for_pack(&dir, &at, &game, &extra) {
+                        eprintln!(
+                            "warning: {at}map script not made again ({why}): packed as the project has it, so it may not follow \
+                             the players, start locations and ally priorities of war3map.w3i (--keep-script packs it as it is without trying)"
+                        );
+                    }
+                }
             }
             let codecs = Registry::for_project(&project, &extra)?;
             let pack = if keep_unused_strings { w3proj::pack } else { w3proj::pack_pruned };

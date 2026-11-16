@@ -8,10 +8,11 @@
 //! on its saves; a pack applies it too, so a map packed from a project whose masks went stale
 //! (edited by hand, or by another tool) comes out as the World Editor's save would write it.
 //!
-//! The map script isn't made again: masks only come out different when the start locations,
+//! The map script isn't made again here: masks only come out different when the start locations,
 //! controllers or players changed (or "Modify ally priorities" went off), and those go into the
 //! rest of the script too (DefineStartLocation, SetPlayerController, …), which only the app's
-//! generator writes. So a pack tells when the script's InitAllyPriorities doesn't set the
+//! generator writes (`w3proj pack` runs it first for a script Studio wrote, crates/cli rebuild.rs
+//! `script_for_pack`). So a pack tells when the script's InitAllyPriorities doesn't set the
 //! priorities it worked out (`script_agrees`).
 
 use std::collections::BTreeSet;

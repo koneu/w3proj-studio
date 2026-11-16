@@ -1078,7 +1078,8 @@ fn pack_bytes_with(
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
     // The ally priorities the World Editor's save works out (`allies`); a map whose masks already
     // match goes in byte for byte. The script stays as it is: when its priorities aren't those, it
-    // was made from other start locations or players, and only the app's save makes it again.
+    // was made from other start locations or players; only the app's generator makes it again (its
+    // save, and `w3proj pack` before it packs, for a script Studio wrote).
     let worked = encoded
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("war3map.w3i"))
@@ -1092,8 +1093,8 @@ fn pack_bytes_with(
             };
             warnings.push(format!(
                 "{MAP_DIR}/{name}: InitAllyPriorities {what} the ally priorities this pack worked out for war3map.w3i from the \
-                 players' start locations; the script goes in as the project has it (a pack can't make it again): save the map \
-                 in W3Proj Studio, which rebuilds the script"
+                 players' start locations; the script goes in as the project has it (only the script W3Proj Studio wrote last \
+                 is made again, by its save and by `w3proj pack`): Generate Map Script in W3Proj Studio replaces it"
             ));
         }
         encoded.insert(key, worked);

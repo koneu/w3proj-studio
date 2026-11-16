@@ -118,4 +118,6 @@ test("a script's hash follows its text", () => {
   assert.equal(scriptHash("abc"), scriptHash("abc"));
   assert.notEqual(scriptHash("abc"), scriptHash("abd"));
   assert.match(scriptHash(""), /^[0-9a-f]{8}$/);
+  // The values `w3proj pack` checks the record with (crates/cli/src/rebuild.rs script_hash): UTF-16 code units.
+  assert.deepEqual([scriptHash(""), scriptHash("abc"), scriptHash("ä€\u{1F600}")], ["811c9dc5", "1a47e90b", "3702d130"]);
 });
