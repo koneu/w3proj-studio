@@ -10,7 +10,7 @@
 import type { W3Api } from "../../extensions/api";
 import { readIni } from "../formats/iniedit";
 import { parseSlk } from "../formats/text";
-import { isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
+import { hasCustomTriggers, isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
 import { drawnGroundTiles, mapEdgeTiles, parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
@@ -182,6 +182,9 @@ export interface MeleeFacts {
   constantsKnown?: boolean;
   /** The trigger file is there, readable, and only the default (isDefaultTriggers). */
   defaultTriggers?: boolean;
+  /** The trigger file is there and parsed, and the World Editor counts it as custom triggers (hasCustomTriggers). Not
+   *  read, missing or unreadable: not set, which keeps the flag. */
+  customTriggers?: boolean;
   /** A file of custom object data or game interface changes something (customDataState); null: not known. */
   customData?: boolean | null;
   /** What stands around the start locations: the doodads, which tiles are buildable and which units have no pathing. */
@@ -229,15 +232,17 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   }
   const facts: MeleeFacts = { customConstants: misc !== null && hasCustomConstants(misc), terrain: ground };
   facts.customData = await customDataState(ws, files);
+  const wtg = wtgPath(files.map((path) => ({ path })));
+  let triggers: ReturnType<typeof parseWtgJson> | null = null;
+  try {
+    triggers = !wtg ? null : wtg.toLowerCase().endsWith(".json") ? parseWtgJson(await ws.readText(wtg)) : parseWtgWithoutArgs(await ws.readBytes(wtg));
+    if (triggers && hasCustomTriggers(triggers)) facts.customTriggers = true;
+  } catch { triggers = null; }
   if (!forSet) return facts;
   facts.constantsKnown = !miscPath || misc !== null;
   // The rest only matters when nothing above already leaves the flag off.
   if (facts.customData || !facts.constantsKnown || facts.customConstants || !ground) return facts;
-  const wtg = wtgPath(files.map((path) => ({ path })));
-  try {
-    const file = !wtg ? null : wtg.toLowerCase().endsWith(".json") ? parseWtgJson(await ws.readText(wtg)) : parseWtgWithoutArgs(await ws.readBytes(wtg));
-    facts.defaultTriggers = !!file && isDefaultTriggers(file);
-  } catch { facts.defaultTriggers = false; }
+  facts.defaultTriggers = !!triggers && isDefaultTriggers(triggers);
   if (!facts.defaultTriggers) return facts;
   /** A game table's rows that have `key`; empty when it can't be read. */
   const table = async (path: string, key: string) => {
@@ -283,6 +288,7 @@ export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], f
   if (!(info.flags & MELEE_MAP)) return { flags: meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP, reasons: [] };
   const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, facts.terrain ? startsInvalidPlaces(facts.terrain, placed) : false);
   if (facts.customData === true) reasons.push("Custom object data or game interface");
+  if (facts.customTriggers === true) reasons.push("Custom triggers");
   return { flags: reasons.length ? info.flags & ~MELEE_MAP : info.flags, reasons };
 }
 

@@ -94,6 +94,26 @@ export function isDefaultTriggers(file: TriggerFile): boolean {
 }
 
 /**
+ * Whether the World Editor's save counts the triggers as custom (its WESTRING_NOTMELEE_CUSTOMTRIGGERS) and takes the
+ * Melee flag off. Measured with we-compare melee-flag-we (2026-11-16): any variable, a second trigger, a missing one,
+ * a disabled one, one with Initially On off, one with its actions changed (another action in its place) counted;
+ * a renamed category, Run on Map Initialization, the trigger's description and the custom script header didn't.
+ * Narrower than !isDefaultTriggers, which also refuses what wasn't tried: this one is for taking the flag off, so
+ * only the measured reasons count.
+ */
+export function hasCustomTriggers(file: TriggerFile): boolean {
+  if (file.variables.length) return true;
+  const triggers = file.items.filter((i) => i.type === 8 || i.type === 16 || i.type === 32);
+  if (triggers.length !== 1) return true;
+  const trigger = triggers[0];
+  if (trigger.type !== 8 || trigger.name !== "Melee Initialization" || trigger.isComment) return true;
+  if (!trigger.enabled || trigger.initiallyOff || trigger.isCustom) return true;
+  const want = [{ kind: 0, name: "MapInitializationEvent" }, ...MELEE_ACTIONS.map((name) => ({ kind: 2, name }))];
+  return trigger.ecas.length !== want.length || !trigger.ecas.every((e, i) =>
+    e.kind === want[i].kind && e.name === want[i].name && e.enabled && !e.params.length && !e.children.length);
+}
+
+/**
  * The World Editor's Reset Triggers ("Clear all triggers and reset to default?") on `file`: the default trigger and
  * its category, no variables, and no map header script (`custom`'s comment and version are kept). A Reforged file
  * keeps its version, its counts start again as a new map's; as World Editor 3.0.1 does (s.w3m reset and saved,

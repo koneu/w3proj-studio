@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultTriggerFile, defaultWct, defaultWtg, isDefaultTriggers, parseWtgWithoutArgs, resetTriggers } from "./defaults";
+import { defaultTriggerFile, defaultWct, defaultWtg, hasCustomTriggers, isDefaultTriggers, parseWtgWithoutArgs, resetTriggers } from "./defaults";
 import { parseWct, parseWtg, textTriggers, writeWct, writeWtg, type CustomTextFile, type TriggerFile, type TriggerItem } from "./wtg";
 import type { TriggerData } from "./triggerdata";
 
@@ -100,4 +100,30 @@ test("only the default trigger file counts as the default", () => {
   assert.equal(changed((f) => { f.variables.push(worked().file.variables[0]); }), false, "a variable");
   assert.equal(changed((f, m) => { f.items.push({ ...structuredClone(m), name: "Second", id: 0x03000001 }); }), false, "a trigger more");
   assert.equal(isDefaultTriggers(worked().file), false);
+});
+
+test("hasCustomTriggers counts what the World Editor's save counted (melee-flag-we) and nothing it didn't", () => {
+  const plain = () => defaultTriggerFile("x");
+  const trigger = (f: TriggerFile) => f.items.find((i) => i.type === 8) as TriggerItem;
+  assert.equal(hasCustomTriggers(plain()), false, "control: the default");
+  const f1 = plain(); f1.variables.push({ name: "x", type: "integer", unknown: 1, isArray: false, arraySize: 1, initialized: false, initialValue: "", id: 0x06000000, parent: -1 });
+  assert.equal(hasCustomTriggers(f1), true, "a variable");
+  const f2 = plain(); f2.items.push({ ...structuredClone(trigger(f2)), name: "Second", id: 0x03000001 } as TriggerItem);
+  assert.equal(hasCustomTriggers(f2), true, "a second trigger");
+  const f3 = plain(); f3.items = f3.items.filter((i) => i.type !== 8);
+  assert.equal(hasCustomTriggers(f3), true, "no trigger");
+  const f4 = plain(); trigger(f4).enabled = false;
+  assert.equal(hasCustomTriggers(f4), true, "disabled");
+  const f5 = plain(); trigger(f5).initiallyOff = true;
+  assert.equal(hasCustomTriggers(f5), true, "Initially On off");
+  const f6 = plain(); trigger(f6).ecas[3].name = "MeleeStartingHeroLimit";
+  assert.equal(hasCustomTriggers(f6), true, "an action replaced");
+  const f7 = plain(); trigger(f7).name = "Mine";
+  assert.equal(hasCustomTriggers(f7), true, "renamed");
+  // What the editor kept the flag for.
+  const k1 = plain(); k1.items.find((i) => i.type === 4)!.name = "Setup";
+  assert.equal(hasCustomTriggers(k1), false, "a renamed category");
+  const k2 = plain(); trigger(k2).runOnInit = true; trigger(k2).description = "Mine";
+  assert.equal(hasCustomTriggers(k2), false, "Run on Map Initialization, the description");
+  assert.equal(isDefaultTriggers(k1), false, "control: isDefaultTriggers still refuses what wasn't tried");
 });
