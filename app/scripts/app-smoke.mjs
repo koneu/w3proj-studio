@@ -10691,6 +10691,61 @@ async function contextLossChecks(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Calculate Shadows reads a banner's alpha texture (named .tif by Reforged, stored as .dds) as the .dds first: the game has no .tif,
+ *  so a .tif asked for first is a read that only fails (backendMisses). Fails with the order as before (a .tif first); a banner is used as it has an alpha-tested .tif texture and bakes a shadow (trees and flowers do not). */
+async function shadowTextureOrder(page, found) {
+  const fail = (what) => found.push(`shadow texture order: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  try {
+    const root = join(work, "shadow-texture-order");
+    rmSync(root, { recursive: true, force: true });
+    cpSync(FIXTURE, root, { recursive: true });
+    const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+    ["LOh1"].forEach((id, i) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position: [256 + i * 128, 256, 0], editorId: 900 + i }));
+    writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
+    await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await page.evaluate(`w3Workbench.game.reload()`);
+    const cmd = await page.evaluate(`w3.commands.execute("w3.terrain.calculateShadows").then(() => null, (e) => String(e))`, { timeout: 180000 });
+    if (cmd) { fail(`Calculate Shadows: ${cmd}`); return; }
+    const misses = await page.evaluate(`w3Workbench.game.backendMisses.slice()`);
+    const tifs = misses.filter((m) => /\.tif$/i.test(m));
+    if (tifs.length) fail(`${tifs.length} .tif names asked for before their .dds: ${tifs.slice(0, 3).join(", ")}`);
+    // The control: the banner's alpha texture was read (as .dds), or the check proves nothing.
+    if (!(await page.evaluate(`w3Workbench.game.backendReads`))) fail("Calculate Shadows read nothing from the game (control)");
+  } finally {
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(original ?? "hd")})`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
+/** The model viewer on a game model loads its textures: every texture with a path ends as a found one (green dot), not a missing one.
+ *  Reforged (HD) names the textures as .tif, the game stores them as .dds, so a loader that doesn't map the names finds none. */
+async function modelViewerTextures(page, found) {
+  const fail = (what) => found.push(`model viewer textures: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  try {
+    await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
+    const model = `game:${["Units", "Human", "Footman", "Footman.mdx"].join(String.fromCharCode(92))}`;
+    await page.evaluate(`w3.editors.open(${JSON.stringify(model)}, "w3.modelViewer")`);
+    const dots = (c) => page.evaluate(`document.querySelectorAll(".model-list .model-dot${c}").length`);
+    await until("the model viewer's texture list", async () => (await dots("")) > 0 && (await dots(".pending")) === 0, 30000)
+      .catch(() => fail("the textures didn't finish loading"));
+    const ok = await dots(".ok"), missing = await dots(".missing");
+    if (ok === 0) fail("no texture of the model loaded");
+    if (missing > 0) {
+      const names = await page.evaluate(`[...document.querySelectorAll(".model-list .model-dot.missing")].map((d) => d.parentElement.title)`);
+      fail(`${missing} textures not found: ${names.join(" | ")}`);
+    }
+  } finally {
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(original ?? "hd")})`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** The Replace dialogs (doodads with Swap Both, units with Selected Only, tiles), each one undo step; regions: bounds as
  *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a } anywhere (a } line, a " }"
  *  line, a } at a line's end) is marked as typed and refused by the save, the loading texts greyed on the default screen. */
@@ -14020,6 +14075,7 @@ async function run() {
         mcpStartMove,
         meleeByHand,
         mineStartGrid,
+        modelViewerTextures,
         moduleFunctions,
         moveTextsToTable,
         newMaps,
@@ -14050,6 +14106,7 @@ async function run() {
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
+        shadowTextureOrder,
         shouldHaves,
         soundEditorKeys,
         specialDoodads,
@@ -14380,6 +14437,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "doodadRulesEdit", found);
   await mineStartGrid(page, found).catch((e) => found.push(`mine and start grid: ${e.message}`));
   await leftOpen(page, "mineStartGrid", found);
+  await modelViewerTextures(page, found).catch((e) => found.push(`model viewer textures: ${e.message}`));
+  await leftOpen(page, "modelViewerTextures", found);
+  await shadowTextureOrder(page, found).catch((e) => found.push(`shadow texture order: ${e.message}`));
+  await leftOpen(page, "shadowTextureOrder", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await verify3Steps(page, found).catch((e) => found.push(`verify 3 steps: ${e.message}`));
