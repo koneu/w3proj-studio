@@ -1,0 +1,7 @@
+{
+  "note": "Icons read off the World Editor's minimap (read-camp-icons.py, Show Creep Camp Icon ticked), per layout case: the indices of the creeps that carry an icon. 2026-11-16, branch camp-icon-we.",
+  "c": [[0], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0], [0], [0]],
+  "d": [[0], [0], [0], [0], [0, 3], [0], [0, 2], [0], [0]],
+  "e": [[0], [0], [0], [0], [0], [0], [0], [0], [0]],
+  "f": [[0], [0], [0], [0], [0], [0], [0, 1], [0, 1], [0]]
+}
