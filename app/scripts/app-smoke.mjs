@@ -9669,6 +9669,158 @@ async function realMapSave(page, found) {
   }
 }
 
+/** The sections of a w3e text as arrays of one value per corner (a section is `[name] all v`, or `[name]` and rows: a
+ *  value per character, per space-separated word for height, "v*n" repeating one). */
+function w3eSections(text) {
+  const head = text.split("\n[")[0], out = { head: head.split("\n").filter((l) => /^(ground|cliffs|custom-tilesets) /.test(l)), cw: 0, ch: 0 };
+  const size = /^corners (\d+) (\d+)/m.exec(head);
+  out.cw = Number(size[1]); out.ch = Number(size[2]);
+  const n = out.cw * out.ch;
+  for (const part of text.split("\n[").slice(1)) {
+    const name = part.slice(0, part.indexOf("]"));
+    const body = part.slice(part.indexOf("]") + 1);
+    const all = /^ all (\S+)/.exec(body);
+    if (all) { out[name] = Array(n).fill(all[1]); continue; }
+    const rows = body.trim().split("\n");
+    out[name] = rows.flatMap((r) => (name === "height" ? r.trim().split(/\s+/).flatMap((v) => { const [x, k] = v.split("*"); return Array(Number(k ?? 1)).fill(x); }) : [...r]));
+  }
+  return out;
+}
+
+/** TurtleRock v2.0's w3e has the cliff list CLdi CLgr CLno CFdi CFgr CWsn … while the tileset's own would run without
+ *  CLno, and its ground list differs from it too: cliff numbers follow the file's own cliff list (CLno's slot stays),
+ *  never the ground list or the game's order. A Cliff Increase and a Decrease by mouse with another cliff type
+ *  chosen each, Ctrl+S, the saved war3map.w3e.txt read: every corner whose cliff type changed names the chosen cliff
+ *  in the file's own list (CFgr is 4 there, CWsn after CLno 5), the corners the stroke changed are within one brush
+ *  of the click, and the rest is as before. Skipped without the map (W3PROJ_CORPUS, else smoketest_maps). */
+async function turtleCliffSave(page, found) {
+  const fail = (what) => found.push(`TurtleRock cliff save: ${what}`);
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "12_w3c_251104_0950_TurtleRock_v2.0.w3x");
+  if (!existsSync(map)) { console.log(`TurtleRock cliff save: skipped, ${map} isn't there`); return; }
+  const hands = new Hands(page);
+  try {
+    const base = join(work, "turtle-cliff");
+    rmSync(base, { recursive: true, force: true });
+    mkdirSync(base, { recursive: true });
+    const copy = join(base, "TurtleRock.w3x"), dir = join(base, "project");
+    cpSync(map, copy);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(copy)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+    const ground = join(dir, "map", "war3map.w3e.txt");
+    const TXT = "map/war3map.w3e.txt";
+    const read = () => w3eSections(readFileSync(ground, "utf8"));
+    const first = read();
+    const OPTIONS = "-1=Match the ground, 0=Dirt cliff, 1=Grass cliff, 3=Dirt cliff, 4=Grass cliff, 5=Snow cliff, 6=Grass cliff, 7=Desert cliff, 8=Grass cliff, 9=Dirt cliff, 10=Snow cliff, 11=Grass cliff, 12=Dirt cliff, 13=Grass cliff, 14=Dirt cliff, 15=Dirt cliff, 16=Square Tiles cliff";
+    const LIST = ["CLdi", "CLgr", "CLno", "CFdi", "CFgr", "CWsn"];
+    if (!first.head.includes(`cliffs ${LIST.join(" ")} CWgr CBde CBgr CNdi CNsn CAgr CAdi CCgr CCdi CYdi CYsq`) || first.head.some((l) => l === "custom-tilesets 1")) {
+      return fail(`the map's cliff list isn't the one the check knows (control): ${first.head.join(" | ")}`);
+    }
+    await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 60000);
+    let quietSince = 0;
+    await until("the terrain editor's files", async () => {
+      const busy = await page.evaluate(`w3Workbench.game.readsPending > 0 || [...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`);
+      if (busy) { quietSince = 0; return false; }
+      quietSince ||= Date.now();
+      return Date.now() - quietSince > 1000;
+    }, 120000);
+    await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
+    await until("the tools", () => page.evaluate(`!!document.querySelector('button.tool-button[title^="+1:"]')`), 20000);
+    const canvas = await hands.where(".terrain-view canvas, canvas");
+    const hash0 = hash(ground);
+    // Ctrl+S in the tab, then at rest.
+    const save = async () => {
+      await settled(page);
+      await hands.key("s", "KeyS", 83, 2);
+      await until("the file saved", () => page.evaluate(`!w3.editors.isDirty(${JSON.stringify(TXT)})`), 30000);
+      await settled(page);
+    };
+    /** Chooses the cliff type whose option has the cliff list's number `n`, and says what the option is called. */
+    const choose = async (n, tool) => {
+      await page.evaluate(`document.querySelector('button.tool-button[title^=${JSON.stringify(tool)}]').click()`);
+      const label = await page.evaluate(`(() => {
+        const s = [...document.querySelectorAll("label.terrain-tool-opt")].find((l) => l.textContent.startsWith("Cliff type"))?.querySelector("select");
+        const o = s && [...s.options].find((o) => o.value === ${JSON.stringify(String(n))});
+        if (!o) return null;
+        s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true }));
+        return [...s.options].map((o) => o.value + "=" + o.textContent).join(", ");
+      })()`);
+      if (label === null) fail(`the cliff type choice has no number ${n} (the file's own list: ${LIST[n]})`);
+      // The choice's numbers are the file's own list's, CLno's 2 left out and nothing after it moved.
+      else if (label !== OPTIONS) fail(`the cliff type choice is "${label}", not the file's own list: "${OPTIONS}"`);
+      return label === null ? null : label.split(", ").find((o) => o.startsWith(`${n}=`));
+    };
+    const press = async (title, at) => {
+      await hands.mouse("mouseMoved", at.x, at.y);
+      await hands.mouse("mousePressed", at.x, at.y, 1);
+      await hands.mouse("mouseReleased", at.x, at.y);
+      await until("the stroke to mark the file changed", () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`), 10000).catch(() => fail(`${title} by mouse at ${at.x},${at.y} left the file unchanged`));
+      await save();
+    };
+    /** What changed from `before` to now, checked: the corners whose layer or cliff type changed, all of them within a
+     *  brush of each other, the ones that now stand on a cliff of the chosen type, and no section changed elsewhere. */
+    const check = (what, before, n, tile) => {
+      const now = read(), w = now.cw;
+      if (now.head.join("|") !== before.head.join("|")) return fail(`${what}: the ground, cliff or custom-tilesets lines changed`);
+      const moved = [];
+      for (let i = 0; i < w * now.ch; i++) {
+        if (now["cliff-texture"][i] !== before["cliff-texture"][i] || now.layer[i] !== before.layer[i]) moved.push(i);
+      }
+      if (!moved.length) return fail(`${what}: no corner changed (control)`);
+      const xs = moved.map((i) => i % w), ys = moved.map((i) => Math.floor(i / w));
+      if (Math.max(...xs) - Math.min(...xs) > 12 || Math.max(...ys) - Math.min(...ys) > 12) return fail(`${what}: the changed corners span ${Math.max(...xs) - Math.min(...xs)} by ${Math.max(...ys) - Math.min(...ys)} corners, more than a brush`);
+      const layerMoved = moved.filter((i) => now.layer[i] !== before.layer[i]);
+      if (!layerMoved.length) return fail(`${what}: no corner changed its level (control)`);
+      for (const i of moved) {
+        const type = parseInt(now["cliff-texture"][i], 36);
+        if (type !== n && now["cliff-texture"][i] !== before["cliff-texture"][i]) return fail(`${what}: corner ${i % w},${Math.floor(i / w)} got cliff type ${type}, which in the file's own list is ${LIST[type] ?? type}, not ${LIST[n]} (${tile})`);
+      }
+      // The corners the stroke moved hold the chosen type.
+      const typed = layerMoved.filter((i) => parseInt(now["cliff-texture"][i], 36) === n).length;
+      if (typed === 0) return fail(`${what}: none of the ${layerMoved.length} corners with a new level has cliff type ${n} (${LIST[n]}, ${tile}); first ones: ${layerMoved.slice(0, 4).map((i) => now["cliff-texture"][i]).join(",")}`);
+      const movedSet = new Set(moved);
+      for (const name of Object.keys(now)) {
+        if (!Array.isArray(now[name]) || name === "layer" || name === "cliff-texture") continue;
+        let off = 0;
+        for (let i = 0; i < now[name].length; i++) if (now[name][i] !== before[name][i] && !movedSet.has(i)) off++;
+        // Height, the cliff variation and the water's flags follow the stroke's own corners and their neighbours (a
+        // cliff tile's four corners): a brush of the size away, none far off.
+        if (off && !["height", "cliff-variation", "water", "water-bits", "flags", "texture", "variation"].includes(name)) return fail(`${what}: ${off} corners' ${name} changed away from the changed corners`);
+        if (off) {
+          const far = [];
+          for (let i = 0; i < now[name].length; i++) {
+            if (now[name][i] === before[name][i]) continue;
+            if (!moved.some((m) => Math.abs((m % w) - (i % w)) <= 12 && Math.abs(Math.floor(m / w) - Math.floor(i / w)) <= 12)) far.push(i);
+          }
+          if (far.length) return fail(`${what}: ${far.length} corners' ${name} changed far from the changed corners`);
+        }
+      }
+      return now;
+    };
+    // Increase: CFgr, the 4 of the file's list (the tileset's own list has no CLno, the game's tile list is another order).
+    const labelUp = await choose(4, "+1:");
+    await press("+1:", { x: canvas.x - 120, y: canvas.y - 40 });
+    const afterUp = check("Increase with CFgr", first, 4, labelUp ?? "Fall Grass cliff");
+    if (!afterUp) return;
+    // Decrease: CWsn, the 5 after CLno's slot, somewhere else.
+    const labelDown = await choose(5, "−1:");
+    await press("−1:", { x: canvas.x + 120, y: canvas.y + 60 });
+    const afterDown = check("Decrease with CWsn", afterUp, 5, labelDown ?? "Winter Snow cliff");
+    if (!afterDown) return;
+    // Everything undone, saved: the file as it came.
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await save();
+    if (hash(ground) !== hash0) fail("two undos and a save didn't give the file back as it came");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    // The map's Lua script isn't one its triggers make: the save leaves it and asks, and the answer here is none.
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks] .toast-close").forEach((b) => b.click())`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** One round of realMapSave: `prepare` changes the unpacked project before it's opened (null: the map as it is). */
 async function realMapSaveRound(page, found, map, name, prepare) {
   const two = prepare !== null;
@@ -14349,6 +14501,7 @@ async function run() {
         triggerMultiSelect,
         triggerParamColorTools,
         triggersAndAi,
+        turtleCliffSave,
         typedFieldSave,
         unitProperties,
         unreadableChapter,
@@ -14627,6 +14780,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "soundEditorKeys", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
+  await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));
+  await leftOpen(page, "turtleCliffSave", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));
   await leftOpen(page, "editDuringSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
