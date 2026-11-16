@@ -36,12 +36,84 @@
     "limit": 20
   },
   {
+    "name": "ct0-save-rev6-0",
+    "description": "custom-tilesets 0, the file's ground list the tileset's own reversed: opened and saved with no edit. The editor's save writes the tileset's own list whole (Ldrt Ldro Ldrg Lrok Lgrs Lgrd) as the ground list, the flag and the cliff list kept (we-drive 2026-11-16, branch ct0-slots). Known difference: Studio writes no terrain it hasn't changed, so the file keeps its list; after an edit Studio writes the own list too (w3e.ts savedTerrain; the ct0-cliff-* and ct0-paint-* specs)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-save-few3-0",
+    "description": "the same with a list of 3 (Lgrs Lrok Ldrt): the editor writes all six own tiles (the list grows), corners keep their slots. Known difference as ct0-save-rev6-0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-save-more9-0",
+    "description": "the same with a list of 9: the editor writes the six own tiles (the list shrinks) and the corners on slots 6 to 8 get slot 0 (Ldrt, what they were drawn with). Known difference as ct0-save-rev6-0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-grass-few3-0",
+    "description": "an edit and a save under custom-tilesets 0 with the list of 3: Grass Cliff, Decrease One, size 1 at the map's middle (as ct0-cliff-grass-rev6-0). The editor's save writes the own list of six; Studio's too since branch ct0-slots (savedTerrain)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-cliff-grass-more9-0",
+    "description": "the same with the list of 9: the save writes the own six and puts the corners of slots 6 to 8 on slot 0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-paint-lgrs-few3-0",
+    "description": "the Paint palette under custom-tilesets 0, the list of 3 (Lgrs Lrok Ldrt, drawn Ldrt Ldro Ldrg): Lgrs (palette 1409,144: the editor's palette has the own six), size 1, at the map's middle. Lgrs is in the file's list (slot 0, drawn Ldrt) but the editor paints slot 4, the own list's: Studio since branch ct0-slots (w3e.ts paintSlot; was slot 0)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1409,144"], ["--click", "1392,569"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-paint-lgrd-more9-0",
+    "description": "the same with the list of 9 (its slot 0 is Lgrd, drawn Ldrt) and Lgrd (palette 1441,144): the editor paints slot 5, the own list's",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1441,144"], ["--click", "1392,569"], ["--click", "748,500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrd"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-save-more9-1",
+    "description": "the control: the list of 9 with custom-tilesets 1, kept as it is",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-1.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
     "name": "ct0-cliff-grass-rev6-0",
-    "description": "custom-tilesets 0, file ground list the own one reversed, cliff list CLdi CLgr: Decrease One (1441,282), size 1, Grass Cliff (thumb 1409,367) at the map's middle. Which cliff type number the lowered and typed corners get: by the list drawn (Ldrt's CLdi first, Lgrs's CLgr second: 1), the w3e's cliff list (1) or the file's ground list (CLgr first: 0). The editor's save writes the tileset's own list as the file's ground list (header.ground, ignored: a difference of its own). The editor gives 1; with ct0-cliff-grass-rev6c-0 its numbers follow the w3e's cliff list (cliffs), not the list drawn nor the ground list. MATCH since branch cliff-by-cliff-list (2026-11-16, cliffs.ts cliffList by the cliff list; was a known difference, Studio 0)",
+    "description": "custom-tilesets 0, file ground list the own one reversed, cliff list CLdi CLgr: Decrease One (1441,282), size 1, Grass Cliff (thumb 1409,367) at the map's middle. Which cliff type number the lowered and typed corners get: by the list drawn (Ldrt's CLdi first, Lgrs's CLgr second: 1), the w3e's cliff list (1) or the file's ground list (CLgr first: 0). The editor's save writes the tileset's own list as the file's ground list (header.ground: Studio's too since branch ct0-slots, w3e.ts savedTerrain; was ignored). The editor gives 1; with ct0-cliff-grass-rev6c-0 its numbers follow the w3e's cliff list (cliffs), not the list drawn nor the ground list. MATCH since branch cliff-by-cliff-list (2026-11-16, cliffs.ts cliffList by the cliff list; was a known difference, Studio 0)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"] }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
@@ -50,7 +122,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1441,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Dirt"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"] }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {
@@ -59,7 +131,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6c-0.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,569"], ["--click", "1441,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "ignore": ["header.ground"] }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
   },
   {

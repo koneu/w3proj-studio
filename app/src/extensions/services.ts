@@ -247,8 +247,13 @@ export interface TerrainEditorHandle {
   /** The tileset Map Properties (war3map.w3i) names (null without map info), and setting it there. */
   mapTileset(): Promise<string | null>;
   setMapTileset(id: string): Promise<void>;
-  /** Index of a ground tile type in the map's list, adding it if needed (null when the list is full). */
+  /** Index of the slot drawn as a ground tile type, adding it to the map's list if needed (null when the list is full).
+   *  With the w3e flag "custom tilesets" 0 a slot is drawn by the tileset's own list, not the file's (drawnGroundTiles). */
   ensureGroundTile(id: string): Promise<number | null>;
+  /** The map's ground tiles as the paint palette shows them, once the tilesets' own lists are read: each slot's tile as
+   *  drawn (w3e.ts drawnGroundTiles), once each; with the flag 0 the rest of the tileset's own list too, as the World
+   *  Editor's palette (painting one grows the list, w3e.ts paintSlot). */
+  paletteGroundTiles(): Promise<string[]>;
   /** Corners using each ground tile (by index). */
   groundTileUsage(): number[];
   /** Moves a tile in the map's list (later tiles are drawn over earlier ones at transitions); one undo step. */

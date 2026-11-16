@@ -193,10 +193,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (texSelect.value) paintTile = texSelect.value;
     void fillPalette();
   } });
-  const fillPalette = async () => {
+  /** `reset`: a chosen tile no slot is drawn with goes back to the first slot's (after the list changed). */
+  const fillPalette = async (reset = false) => {
     const names = await tileNames(w3);
+    // The tiles as drawn: with the w3e flag "custom tilesets" 0 the tileset's own list, not the file's.
+    const was = paintTile, shown = await ed.paletteGroundTiles().catch(() => [...new Set(terrain.groundTiles)]);
+    if (reset && paintTile === was && !shown.includes(paintTile)) paintTile = shown[0] ?? "";
     const opt = (id: string) => h("option", { value: id, selected: id === paintTile }, `${names.get(id) ?? id} (${id})`);
-    thumbs.replaceChildren(...terrain.groundTiles.map((id) => {
+    thumbs.replaceChildren(...shown.map((id) => {
       const img = h("img", { alt: id });
       void ed.groundTileThumb(id).then((src) => { if (src) img.src = src; });
       return h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
@@ -204,7 +208,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         onclick: () => { paintTile = id; void fillPalette(); ed.focus(); },
       }, img);
     }));
-    const inMap = new Set(terrain.groundTiles);
+    const inMap = new Set(shown);
     const byTileset = new Map<string, string[]>();
     for (const id of names.keys()) if (!inMap.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
     const own = byTileset.get(terrain.tileset) ?? [];
@@ -216,7 +220,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         .map(([ts, ids]) => h("optgroup", { label: `${TILESETS[ts] ?? ts}: adds to the map` }, ...ids.map(opt))),
     );
   };
-  void fillPalette();
+  void fillPalette(true);
 
   // ---- the map's tile list: order (drawing order at transitions) and removal ----------
   const tilePanel = h("div.terrain-tilemgr", { hidden: true });
@@ -462,8 +466,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       // Tile list edits (and their undo) change the palette and the panel.
       if (!what.terrain) return;
       if (paintTex >= terrain.groundTiles.length) paintTex = 0;
-      if (!terrain.groundTiles.includes(paintTile)) paintTile = terrain.groundTiles[0] ?? "";
-      void fillPalette();
+      void fillPalette(true);
       void renderTiles();
       void fillCliffTypes();
     },

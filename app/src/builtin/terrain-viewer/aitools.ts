@@ -9,7 +9,7 @@ import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
-import { groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -143,13 +143,13 @@ function cliffGrounds(t: Terrain, kinds: readonly CliffKind[]) {
 }
 
 /** Cliffs next to changed corners take the type of their ground, as after a brush stroke. All the
- *  corners changed, those of the cliffs included. */
-export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly CliffKind[], cliffTile?: string) {
+ *  corners changed, those of the cliffs included. `own`: the tileset's own ground list (see groundSlot). */
+export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly CliffKind[], cliffTile?: string, own?: readonly string[]) {
   const grounds = cliffGrounds(t, kinds), log = new Touched();
   for (const i of changed) log.corners.add(i);
   let fixed: number | undefined;
   if (cliffTile !== undefined) {
-    if (kinds.some((k) => k.groundTile === cliffTile)) { cliffSlot(t, cliffTile, kinds); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
+    if (kinds.some((k) => k.groundTile === cliffTile)) { cliffSlot(t, cliffTile, kinds, own); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
     fixed = grounds.indexOf(cliffTile);
     if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.filter((g) => g).join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
   }
@@ -177,7 +177,7 @@ const middleOf = (corners: readonly { i: number; r: number }[]) => corners.reduc
 /** Brings the ground of an area to one cliff level: `level`, or `by` levels from where the middle
  *  of the area is. The changed corners, with their ramps gone: a ramp needs the levels it was
  *  built on. */
-export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?: number; by?: number }, kinds: readonly CliffKind[], cliffTile?: string) {
+export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?: number; by?: number }, kinds: readonly CliffKind[], cliffTile?: string, own?: readonly string[]) {
   const inside = cornersIn(t, area, shape);
   if (!inside.length) throw new Error("That area has no ground in the map.");
   const level = target.level ?? t.corners[middleOf(inside).i].layer + (target.by ?? 0);
@@ -190,17 +190,17 @@ export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?
     dropRamp(t, i, changed);
     changed.push(i);
   }
-  if (changed.length) return withCliffTypes(t, changed, kinds, cliffTile);
-  return cliffTile === undefined ? changed : setCliffType(t, area, shape, cliffTile, kinds);
+  if (changed.length) return withCliffTypes(t, changed, kinds, cliffTile, own);
+  return cliffTile === undefined ? changed : setCliffType(t, area, shape, cliffTile, kinds, own);
 }
 
 /** Gives the cliffs of an area the look of a ground tile's cliff, adding that tile to the map's list
  *  if needed: any tileset's cliffs work. The changed corners. */
-export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string, kinds: readonly CliffKind[]) {
+export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string, kinds: readonly CliffKind[], own?: readonly string[]) {
   const inside = cornersIn(t, area, shape);
   if (!inside.length) throw new Error("That area has no ground in the map.");
   if (!kinds.some((k) => k.groundTile === tile)) throw new Error(`"${tile}" has no cliff. list_ground_tiles marks the tiles that have one.`);
-  cliffSlot(t, tile, kinds);
+  cliffSlot(t, tile, kinds, own);
   const grounds = cliffGrounds(t, kinds), log = new Touched();
   matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, grounds.indexOf(tile));
   return [...log.corners];
@@ -352,11 +352,14 @@ export function setUnitChoices(o: UnitChoices, e?: UnitEntry) {
 }
 
 /** The slot of a ground tile, added to the map's list if needed, with its cliff type if it has one
- *  (`kinds`), as painting with the brush does. */
-export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[] = []): number {
-  const at = t.groundTiles.indexOf(tile);
+ *  (`kinds`), as painting with the brush does. The slot is the one drawn as the tile: with the w3e flag "custom
+ *  tilesets" 0 that goes by the tileset's own list (`own`, w3e.ts paintSlot), not the file's, and before a tile is
+ *  added the file's list becomes the one drawn (settleDrawnList), so the other slots keep their look. */
+export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[] = [], own?: readonly string[]): number {
+  const at = paintSlot(t, tile, own);
   if (at >= 0) return at;
   if (t.groundTiles.length >= 16) throw new Error(`This map already has 16 ground tiles (${t.groundTiles.join(", ")}). Use one of those.`);
+  settleDrawnList(t, own);
   t.groundTiles.push(tile);
   // The list no longer matches the tileset's own: the game goes by this flag.
   t.customTilesets = true;
@@ -368,8 +371,8 @@ export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]
 
 /** groundSlot for a tile whose cliff is wanted: its cliff type is added to the w3e's cliff list also when the tile was
  *  in the ground list already without it (cliff type numbers follow that list, see cliffList). */
-function cliffSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]) {
-  groundSlot(t, tile, kinds);
+function cliffSlot(t: Terrain, tile: string, kinds: readonly CliffKind[], own?: readonly string[]) {
+  groundSlot(t, tile, kinds, own);
   const cliff = kinds.find((k) => k.groundTile === tile);
   if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
 }

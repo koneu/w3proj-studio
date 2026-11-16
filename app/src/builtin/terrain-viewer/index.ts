@@ -85,7 +85,7 @@ import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { drawnGroundTiles, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, paintSlot, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -514,6 +514,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!path) throw new Error("This project has no war3map.w3e.");
     if (!isTerrainText(path)) throw new Error("This project keeps its terrain raw, so it can't be edited here.");
     await liveEditor();
+    const own = await ownGroundLists();
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
     const states = { before: null as { terrain: Terrain; doodads: Placed[] } | null, after: null as { terrain: Terrain; doodads: Placed[] } | null };
     let corners = 0, moved = 0;
@@ -529,7 +530,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const was = await applyTilesetWater(w3, parseW3e(bytes));
       const refused = toolWaterRefusal(w3, was, terrain, touched);
       if (refused) throw new Error(refused);
-      const files = [{ path, text: w3eToText(writeW3e(terrain)) }];
+      // With the flag 0 the tileset's own list, as the World Editor's save writes it (savedTerrain).
+      const files = [{ path, text: w3eToText(writeW3e(savedTerrain(terrain, own.get(terrain.tileset)))) }];
       states.before = { terrain: was, doodads: [] };
       states.after = { terrain, doodads: [] };
       for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
@@ -630,6 +632,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   let cliffKindsRead: Promise<CliffKind[]> | null = null;
   const cliffKinds = () => (cliffKindsRead ??= w3.game.readText("TerrainArt\\CliffTypes.slk").then((slk) => parseSlk(slk).filter((r) => r.cliffID).map((r) => ({ cliffID: r.cliffID, groundTile: r.groundTile }))));
+  /** Each tileset's own ground list (what a slot is drawn with under the w3e flag "custom tilesets" 0, see groundSlot);
+   *  empty when the game's tilesets can't be read (then the file's list counts, as the view draws it). */
+  const ownGroundLists = async () => new Map((await (await liveEditor()).handle.tilesets().catch(() => [])).map((s) => [s.id, s.tiles] as const));
 
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
@@ -876,8 +881,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const across = givenNumber("width", width, { min: 0, max: Infinity, above: true, fallback: 256 });
       const fray = givenNumber("edge", edge, { min: 0, max: 1, fallback: 0.4 });
       const seed = seedOf(args.seed), random = seededRandom(seed);
-      const kinds = await cliffKinds();
-      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => withCliffTypes(t, paintPath(t, points as [number, number][], across, groundSlot(t, tile, kinds), fray, flatten === true, random), kinds)) };
+      const kinds = await cliffKinds(), own = await ownGroundLists();
+      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => withCliffTypes(t, paintPath(t, points as [number, number][], across, groundSlot(t, tile, kinds, own.get(t.tileset)), fray, flatten === true, random), kinds)) };
     }),
     w3.mcp.registerTool("paint_terrain", async (args) => {
       const { tile } = args;
@@ -889,8 +894,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const edge = givenNumber("edge", args.edge, { min: 0, max: 1, fallback: 0.3 });
       const shape = args.shape === "box" ? "box" : "ellipse";
       const seed = seedOf(args.seed), random = seededRandom(seed);
-      const kinds = await cliffKinds();
-      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => withCliffTypes(t, paintCorners(t, area, shape, groundSlot(t, tile, kinds), edge, random), kinds)) };
+      const kinds = await cliffKinds(), own = await ownGroundLists();
+      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => withCliffTypes(t, paintCorners(t, area, shape, groundSlot(t, tile, kinds, own.get(t.tileset)), edge, random), kinds)) };
     }),
     w3.mcp.registerTool("sculpt_terrain", async (args) => {
       const { mode, amount } = args;
@@ -913,17 +918,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (cliffTile !== undefined && typeof cliffTile !== "string") throw new Error("cliffTile must be a ground tile, like Lrok.");
       const area = await readArea(w3, args);
       if (!area) throw new Error("set_cliff_level needs a region, or left, bottom, right and top.");
-      const kinds = await cliffKinds();
+      const kinds = await cliffKinds(), own = await ownGroundLists();
       const target = { level: level as number | undefined, by: by as number | undefined };
-      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile));
+      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile, own.get(t.tileset)));
     }),
     w3.mcp.registerTool("set_cliff_type", async (args) => {
       const { tile } = args;
       if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Ldrt. list_ground_tiles marks those with a cliff.");
       const area = await readArea(w3, args);
       if (!area) throw new Error("set_cliff_type needs a region, or left, bottom, right and top.");
-      const kinds = await cliffKinds();
-      return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds));
+      const kinds = await cliffKinds(), own = await ownGroundLists();
+      return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds, own.get(t.tileset)));
     }),
     w3.mcp.registerTool("set_water", async (args) => {
       const { mode, points, width } = args;
@@ -2065,13 +2070,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Index of a ground tile type, adding it to the map's list if needed
          *  (null when the list is full). At once, with no wait: see placePaste. */
         const ensureTile = (id: string): number | null => {
-          const have = terrain.groundTiles.indexOf(id);
-          if (have >= 0) return have;
+          // The slot drawn as the tile: with the flag 0 by the tileset's own list, not the file's (paintSlot).
+          const own = ownTiles?.get(terrain.tileset);
+          const listed = terrain.groundTiles.length;
+          const have = paintSlot(terrain, id, own);
+          if (have >= 0) {
+            // The list grown with own tiles up to it (the flag 0): the new slots' rows and textures.
+            if (terrain.groundTiles.length !== listed) { void syncTileList(); minimapStale.set(); }
+            return have;
+          }
           if (terrain.groundTiles.length >= MAX_GROUND_TILES) {
             w3.window.showWarning(`This map already uses ${MAX_GROUND_TILES} ground tile types, the most a map can have.`);
             return null;
           }
           const drawnAsOwn = terrain.customTilesetsRaw === 0;
+          // The file's list becomes the one drawn first, so the flag going to 1 leaves the other slots' look.
+          settleDrawnList(terrain, own);
           terrain.groundTiles.push(id);
           // The tile list no longer matches the tileset's default (as a rule).
           terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
@@ -4325,7 +4339,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await savePlacedFile(w3, f);
           }
           markMapEdge(next, complements, true);
-          await writeTerrainBytes(doc.path, writeW3e(next), doc);
+          await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset))), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
             info.cameraBounds = cameraBounds(next, complements);
@@ -4402,7 +4416,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return id;
           },
           setMapTileset: (id) => editDoc("war3map.w3i", (d) => { if (d.tileset === id) return false; d.tileset = id; }),
-          ensureGroundTile: async (id) => ensureTile(id),
+          // The own lists first: until they are read a slot would be looked up by the file's list.
+          ensureGroundTile: async (id) => { await ownReady; return ensureTile(id); },
+          paletteGroundTiles: async () => {
+            await ownReady;
+            const own = ownTiles?.get(terrain.tileset);
+            return [...new Set([...drawnGroundTiles(terrain, own), ...(terrain.customTilesetsRaw === 0 ? own ?? [] : [])])];
+          },
           groundTileUsage: () => {
             const n = terrain.groundTiles.map(() => 0);
             for (const c of terrain.corners) if (c.texture < n.length) n[c.texture]++;
@@ -5957,6 +5977,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
             if (objectsTouched) await settleMoved();
+            // The tilesets' own lists, which the w3e is written with under the flag 0 (savedTerrain).
+            await ownReady;
             // Every unit at the height the World Editor's save gives it (setting Units on the Ground on Save). An item
             // or a start location is drawn at its stored height: drawn again.
             if (groundUnitsForSave()) { objectsTouched = true; void rebuildObjects(); }
@@ -5972,7 +5994,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const snap = await saveSnapshot(mark, {
               at: () => at,
               take: () => ({
-                w3e: writeW3e(terrain),
+                // With the flag 0 the tileset's own list, as the World Editor's save writes it (the terrain kept).
+                w3e: writeW3e(savedTerrain(terrain, ownTiles?.get(terrain.tileset))),
                 placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [],
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,
                 doodads: dooFile ? structuredClone(dooFile.list) : null,

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { drawnGroundTiles, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -153,6 +153,46 @@ test("a tile not in the map's list gets a slot, while there's room", () => {
   assert.deepEqual([t.customTilesets, t.customTilesetsRaw], [true, 1]);
   t.groundTiles = Array.from({ length: 16 }, (_, i) => `T${i}`);
   assert.throws(() => groundSlot(t, "Lgrs"), /already has 16/);
+});
+
+test("custom tilesets 0: the paint tools' slot is the one drawn as the tile (the tileset's own list, not the file's)", () => {
+  // The we-spec map custom-tilesets-rev6-0: the file's list the own one reversed, drawn as the own one.
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  const rev6 = () => { const t = field(); t.tileset = "L"; t.groundTiles = [...own].reverse(); t.customTilesetsRaw = 0; t.customTilesets = false; return t; };
+  for (const tile of own) {
+    const t = rev6(), slot = groundSlot(t, tile, [], own);
+    assert.equal(drawnGroundTiles(t, own)[slot], tile, `${tile}: the slot painted is drawn as ${tile}`);
+    assert.deepEqual([t.groundTiles, t.customTilesetsRaw], [[...own].reverse(), 0], "a tile drawn already changes nothing");
+  }
+  // few3 (Lgrs Lrok Ldrt, drawn Ldrt Ldro Ldrg): Lgrs is in the file's list but no slot is drawn with it. It is the
+  // own list's fifth: the list grows with the own tiles up to it, the flag stays 0 (the World Editor's slot 4).
+  const few = field();
+  Object.assign(few, { tileset: "L", groundTiles: ["Lgrs", "Lrok", "Ldrt"], customTilesetsRaw: 0, customTilesets: false });
+  const before = drawnGroundTiles(few, own);
+  const slot = groundSlot(few, "Lgrs", [], own);
+  assert.equal(slot, 4);
+  assert.deepEqual(drawnGroundTiles(few, own).slice(0, 3), before, "the other slots keep their look");
+  assert.deepEqual([few.groundTiles, few.customTilesetsRaw], [["Lgrs", "Lrok", "Ldrt", "Lrok", "Lgrs"], 0]);
+  // painted with it: the corners are drawn as the tile asked
+  paintCorners(few, hill, "box", slot, 0, seeded());
+  assert.equal(drawnGroundTiles(few, own)[few.corners[8 * 17 + 8].texture], "Lgrs");
+  // A tile not of the tileset: the file's list becomes the one drawn, then the tile is added (the flag 1), each slot
+  // drawn as before.
+  const other = rev6(), was = drawnGroundTiles(other, own);
+  const snow = groundSlot(other, "Wsnw", [], own);
+  assert.deepEqual([snow, other.customTilesetsRaw, drawnGroundTiles(other, own)], [6, 1, [...was, "Wsnw"]]);
+  // The cliff type tools look the tile up the same way: Ldrt's cliff on a map whose file's list lacks Ldrt but whose
+  // slot 0 is drawn with it adds no tile, and the flag stays 0.
+  const cliffy = field();
+  Object.assign(cliffy, { tileset: "L", groundTiles: ["Lgrd", "Lgrs", "Lrok"], cliffTiles: ["CLgr"], customTilesetsRaw: 0, customTilesets: false });
+  for (const c of cliffy.corners.slice(0, 17 * 4)) c.layer = 3;
+  setCliffType(cliffy, hill, "box", "Ldrt", [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }], own);
+  assert.deepEqual([cliffy.groundTiles, cliffy.customTilesetsRaw, cliffy.cliffTiles], [["Lgrd", "Lgrs", "Lrok"], 0, ["CLgr", "CLdi"]]);
+  assert.deepEqual(drawnGroundTiles(cliffy, own), ["Ldrt", "Ldro", "Ldrg"], "drawn as before");
+  // With the flag set the file's list counts, as before.
+  const set = rev6();
+  set.customTilesetsRaw = 1;
+  assert.equal(groundSlot(set, "Ldrt", [], own), 5);
 });
 
 test("objects near the change follow the ground, except doodads with a fixed height", () => {

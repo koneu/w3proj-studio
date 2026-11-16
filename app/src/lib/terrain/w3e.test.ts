@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { drawnGroundTiles, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, drawnSlot, paintSlot, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** A 2 × 2-corner terrain of `version`, every field in range. */
 function tiny(version = 11): Terrain {
@@ -97,4 +97,62 @@ test("drawnGroundTiles: with the custom tilesets flag 0 the tileset's own list i
   const t = list(file, 0);
   assert.notEqual(drawnGroundTiles(t, own), t.groundTiles);
   assert.deepEqual(t.groundTiles, ["Lgrd", "Lgrs"]);
+});
+
+const OWN_L = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+
+test("drawnSlot and settleDrawnList: with the flag 0 a tile's slot is the one drawn so, and adding keeps the look", () => {
+  const t = { groundTiles: ["Lgrs", "Lrok", "Ldrt"], customTilesetsRaw: 0 };
+  assert.equal(drawnSlot(t, "Ldro", OWN_L), 1);
+  assert.equal(drawnSlot(t, "Lgrs", OWN_L), -1, "in the file's list, but no slot is drawn with it");
+  assert.equal(drawnSlot({ ...t, customTilesetsRaw: 1 }, "Lgrs", OWN_L), 0, "the flag set: the file's list");
+  assert.equal(drawnSlot(t, "Lgrs", undefined), 0, "the own list unknown: the file's list");
+  const held = t.groundTiles;
+  settleDrawnList(t, OWN_L);
+  assert.equal(t.groundTiles, held, "the same array");
+  assert.deepEqual(t.groundTiles, ["Ldrt", "Ldro", "Ldrg"]);
+  const set = { groundTiles: ["Lgrs"], customTilesetsRaw: 1 };
+  settleDrawnList(set, OWN_L);
+  assert.deepEqual(set.groundTiles, ["Lgrs"], "the flag set: unchanged");
+});
+
+test("paintSlot: with the flag 0 an own tile past the file's list grows it to that slot; another tileset's needs adding", () => {
+  const few = { groundTiles: ["Lgrs", "Lrok", "Ldrt"], customTilesetsRaw: 0 };
+  assert.equal(paintSlot(few, "Ldrg", OWN_L), 2, "drawn already");
+  assert.deepEqual(few.groundTiles, ["Lgrs", "Lrok", "Ldrt"]);
+  assert.equal(paintSlot(few, "Lgrd", OWN_L), 5);
+  assert.deepEqual([few.groundTiles, few.customTilesetsRaw], [["Lgrs", "Lrok", "Ldrt", "Lrok", "Lgrs", "Lgrd"], 0]);
+  assert.deepEqual(drawnGroundTiles(few, OWN_L), OWN_L);
+  assert.equal(paintSlot(few, "Wsnw", OWN_L), -1, "not the tileset's");
+  const set = { groundTiles: ["Lgrs"], customTilesetsRaw: 1 };
+  assert.equal(paintSlot(set, "Ldrt", OWN_L), -1, "the flag set: the file's list, nothing grown");
+  assert.deepEqual(set.groundTiles, ["Lgrs"]);
+});
+
+test("savedTerrain: with the flag 0 the save writes the tileset's own list, corners past it on slot 0, as the World Editor's", () => {
+  const terrain = (tiles: string[], textures: number[], raw = 0): Terrain => {
+    const t = tiny(12);
+    t.groundTiles = tiles;
+    t.customTilesetsRaw = raw;
+    t.customTilesets = raw !== 0;
+    textures.forEach((x, i) => { t.corners[i].texture = x; });
+    return t;
+  };
+  // we-compare ct0-save-rev6-0, few3-0, more9-0: the list written is the own one, whole, and slots 6 to 8 become 0.
+  const rev6 = terrain([...OWN_L].reverse(), [0, 1, 4, 5]);
+  const out = savedTerrain(rev6, OWN_L);
+  assert.deepEqual([out.groundTiles, out.corners.map((c) => c.texture), out.cliffTiles, out.customTilesetsRaw], [OWN_L, [0, 1, 4, 5], ["CLdi"], 0]);
+  assert.deepEqual(savedTerrain(terrain(["Lgrs", "Lrok", "Ldrt"], [0, 1, 2, 2]), OWN_L).groundTiles, OWN_L);
+  const more9 = terrain([...OWN_L].reverse().concat("Wsnw", "Bdsr", "Ndrt"), [5, 6, 7, 8]);
+  const nine = savedTerrain(more9, OWN_L);
+  assert.deepEqual([nine.groundTiles, nine.corners.map((c) => c.texture)], [OWN_L, [5, 0, 0, 0]]);
+  // Each slot is drawn with what it was drawn with before.
+  assert.deepEqual(nine.corners.map((c) => drawnGroundTiles(nine, OWN_L)[c.texture]), more9.corners.map((c) => drawnGroundTiles(more9, OWN_L)[c.texture]));
+  // The terrain itself is not changed, and the written bytes read back as the saved form.
+  assert.deepEqual([more9.groundTiles.length, more9.corners[1].texture], [9, 6]);
+  assert.deepEqual(parseW3e(writeW3e(nine)).groundTiles, OWN_L);
+  // Nothing to do: the same object (the flag set, the own list unknown, the own list already with no corner past it).
+  for (const [t, own] of [[terrain(["Lgrd", "Lgrs"], [0, 1], 1), OWN_L], [rev6, undefined], [rev6, []], [terrain([...OWN_L], [0, 5]), OWN_L]] as const) {
+    assert.equal(savedTerrain(t, own), t);
+  }
 });

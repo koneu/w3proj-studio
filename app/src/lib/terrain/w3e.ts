@@ -90,12 +90,56 @@ export const WATER_LEVEL_MAX = 0x3fff;
 /** The ground tile each slot of the file's list is drawn with. With the "custom tilesets" flag 0 the World Editor
  *  ignores the file's list and takes the tileset's own one (`own`, Terrain.slk's order) by slot: a slot past its end is
  *  drawn with its first tile (we-drive 2026-11-16, Summer, lists in another order, of 3, 6 and 9 tiles). With the flag
- *  set, or the tileset's list unknown, it is the file's list. Only drawing follows this (the terrain view and the
- *  minimap, the saved one too: we-compare custom-tilesets-0): the file keeps its own list, and cliff type numbers
- *  don't follow it (the editor's follow the w3e's cliff list there, ct0-cliff-grass-rev6c-0). */
+ *  set, or the tileset's list unknown, it is the file's list. Drawing follows this (the terrain view and the minimap,
+ *  the saved one too: we-compare custom-tilesets-0), painting a tile (drawnSlot) and the save (savedTerrain); cliff
+ *  type numbers don't (the editor's follow the w3e's cliff list there, ct0-cliff-grass-rev6c-0). */
 export function drawnGroundTiles(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, own: readonly string[] | undefined): string[] {
   if (t.customTilesetsRaw !== 0 || !own?.length) return [...t.groundTiles];
   return t.groundTiles.map((_, i) => own[i] ?? own[0]);
+}
+
+/** The slot whose corners are drawn with `tile` (drawnGroundTiles: with the flag 0 by the tileset's own list, not the
+ *  file's), -1 when no slot is. What painting a tile looks up, so the slot it paints is drawn as that tile. */
+export function drawnSlot(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, tile: string, own: readonly string[] | undefined): number {
+  return drawnGroundTiles(t, own).indexOf(tile);
+}
+
+/** Before a tile is added to the list with the flag 0: the file's list becomes the list drawn, so the flag going to 1
+ *  (the list is no longer the tileset's own) leaves every slot drawn as it was. Nothing with the flag set or the
+ *  tileset's list unknown. The same array is changed (callers hold it). */
+/** The slot a tile is painted on with no slot drawn otherwise than before, -1 when the tile has to be added to the
+ *  list. The slot drawn so (drawnSlot); with the flag 0, a tile of the tileset's own list past the end of the file's
+ *  list grows the list with the own tiles up to it, the flag staying 0: the World Editor's palette has the whole own
+ *  list there, and its save writes it whole (savedTerrain), so a few3 map painted with Lgrs gets slot 4. */
+export function paintSlot(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, tile: string, own: readonly string[] | undefined): number {
+  const at = drawnSlot(t, tile, own);
+  if (at >= 0 || t.customTilesetsRaw !== 0 || !own?.length) return at;
+  // Not drawn: a tile of the own list is past the file's list's end (or not the tileset's at all: -1).
+  const k = own.indexOf(tile);
+  if (k < t.groundTiles.length || k >= MAX_GROUND_LIST) return -1;
+  for (let i = t.groundTiles.length; i <= k; i++) t.groundTiles.push(own[i]);
+  return k;
+}
+/** The most ground tiles a w3e's list has room for (the corner's 4 bits of a version 11 file). */
+const MAX_GROUND_LIST = 16;
+
+/** The terrain as a save writes it. With the flag 0 the World Editor's save writes the tileset's own list, whole, as
+ *  the file's ground list, whatever the file's was (another order, 3 or 9 tiles), and a corner on a slot past its end
+ *  gets slot 0, its first tile: what each slot was drawn with stays. The flag and the cliff list stay (we-compare
+ *  custom-tilesets-0, ct0-save-*, 2026-11-16). `t` itself when nothing changes (the flag set, the tileset's list
+ *  unknown, or already its list with no corner past it); `t` is never changed. */
+export function savedTerrain(t: Terrain, own: readonly string[] | undefined): Terrain {
+  if (t.customTilesetsRaw !== 0 || !own?.length) return t;
+  const n = own.length;
+  const sameList = t.groundTiles.length === n && t.groundTiles.every((g, i) => g === own[i]);
+  const past = t.corners.some((c) => c.texture >= n);
+  if (sameList && !past) return t;
+  return { ...t, groundTiles: [...own], corners: past ? t.corners.map((c) => (c.texture >= n ? { ...c, texture: 0 } : c)) : t.corners };
+}
+
+export function settleDrawnList(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, own: readonly string[] | undefined): void {
+  if (t.customTilesetsRaw !== 0 || !own?.length) return;
+  t.groundTiles.splice(0, t.groundTiles.length, ...drawnGroundTiles(t, own));
 }
 
 export function parseW3e(buf: Uint8Array): Terrain {
