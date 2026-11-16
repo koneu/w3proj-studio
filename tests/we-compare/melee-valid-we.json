@@ -1,0 +1,178 @@
+[
+  {
+    "name": "melee-valid-tree-256",
+    "description": "A tree (LTlt) 256 east of the start, the Melee flag cleared: its 4x4 cells reach into the start's 16x16 square, the editor's save leaves Melee off. Inputs of this file: tests/fixtures/we-specs/make-melee-valid.mjs (flat.w3x, its start at (0, -256)) into target/melee-valid/; measured with we-drive 2026-11-16 (branch melee-valid-we). Studio: lib/terrain/meleesave.ts startsPlainlyValid, run by the map script's generation as on a save.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tree-256.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-tree-320",
+    "description": "A tree 320 east: its cells only touch the square, the editor puts Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tree-320.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-tree-diag-256",
+    "description": "A tree at (256, 256), 362 away: inside the square's corner (a square, not a radius), Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tree-diag-256.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-tree-diag-320",
+    "description": "A tree at (320, 256): outside the square, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tree-diag-320.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-mine-749",
+    "description": "A gold mine 749 east: nearer than 750, Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-mine-749.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-mine-750",
+    "description": "A gold mine 750 east: Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-mine-750.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-mine-diag-528",
+    "description": "A gold mine at (528, 528), 746.7 away: Melee stays off (a radius, not a square).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-mine-diag-528.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-mine-diag-530",
+    "description": "A gold mine at (530.5, 530.5), 750.2 away: Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-mine-diag-530.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-start-488",
+    "description": "A second start (player 2, in the w3i too) 488 east: its square, centred on the nearest 32, overlaps (cell 15), Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-488.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-start-496",
+    "description": "A second start 496 east: 15.5 cells round up to 16, the squares only touch, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-496.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-start-west-496",
+    "description": "A second start 496 west: -15.5 rounds up to -15, the squares overlap, Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-west-496.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-start-west-504",
+    "description": "A second start 504 west: rounds to -16, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-west-504.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-rock-34",
+    "description": "Lrok (not buildable) from corner 34, 256 east: its unbuildable cells from 192, in the square, Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-rock-34.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-rock-35",
+    "description": "Lrok from corner 35: its unbuildable cells from 320, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-rock-35.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-cliff-34",
+    "description": "A cliff up one level at corner 34: its cliff cells from 128, Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-cliff-34.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-cliff-35",
+    "description": "A cliff up at corner 35: its cliff cells from 256, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-cliff-35.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-water-34",
+    "description": "Shallow water from corner 34: the shore's unbuildable cells from 192, Melee stays off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-water-34.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-water-35",
+    "description": "Shallow water from corner 35: its unbuildable cells from 320, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-water-35.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-blight-34",
+    "description": "Blight from corner 34: blighted cells stay buildable, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-blight-34.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-merchant-on-start",
+    "description": "A goblin merchant (ngme, a 12x12 building) standing on the start: units other than gold mines don't count, Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-merchant-on-start.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-item-64",
+    "description": "An item 64 from the start: Melee back on.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-item-64.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "melee-valid-melee-tree-256",
+    "description": "The tree of tree-256 on a map that is melee: the editor's save takes Melee off (its 'invalid positions' warning). Studio's save takes it off only for starts under water or past the playable map (startsInvalidPlaces), so it keeps it: a known gap.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-melee-tree-256.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [{ "file": "war3map.w3i", "expect": "differs" }]
+  }
+]
