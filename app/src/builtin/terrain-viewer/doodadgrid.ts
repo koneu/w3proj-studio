@@ -90,6 +90,13 @@ export function fixedAngle(degrees: number): number {
   return Math.fround((degrees * Math.PI) / 180);
 }
 
+/** The fixed rotation a placing path may preset for a type. A destructable without a pathing texture isn't turned by the
+ *  World Editor (doodad-turn-we spec), and while its texture is unread (`cell` undefined) that isn't known: none then,
+ *  so a path that skipped objects.ready never presets it (null: read and none). */
+export function presetFixedRot(kind: string, fixedRot: number | null, cell: PathSize | null | undefined): number | null {
+  return kind === "w3b" && !cell ? null : fixedRot;
+}
+
 /** The nearest point of the doodad grid for a texture `cells` pixels across: 64n plus the middle of the texture, which
  *  for an odd count is the whole cell below it (we-drive 2026-11-14, spec doodad-snap-grid, all 480 placements of
  *  pictures 1 to 8 across and high at 0° and 90°: 1 goes to 64n, 2 and 3 to 64n + 32, 4 and 8 to 64n, so 3 isn't 48).

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { decodeImage } from "../../lib/image/index.ts";
-import { doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, snapSize, type PathSize } from "./doodadgrid";
+import { presetFixedRot, doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, snapSize, type PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 
 /** The pathing texture sizes of the measured types (the game's Doodads.slk and DestructableData.slk, the textures'
@@ -324,4 +324,13 @@ test("a stored -1 is 135°, other negative whole numbers degrees, destructables 
   assert.notEqual(saved("LOcb", -1), Math.fround(2 * Math.PI - 1));
   // Through snapAsOpened's kinds: a destructable reads its whole number as degrees too.
   assert.equal(doodadSnaps([at("LTbr", 3)], (i) => sizes[i])[0].angle, Math.fround((3 * Math.PI) / 180));
+});
+
+test("a destructable's fixed rotation is preset only once its pathing texture is known to exist", () => {
+  const cell = { width: 2, height: 2 } as PathSize;
+  assert.equal(presetFixedRot("w3b", 90, cell), 90);
+  assert.equal(presetFixedRot("w3b", 90, null), null);
+  assert.equal(presetFixedRot("w3b", 90, undefined), null, "unread (placed before objects.ready) is not preset");
+  assert.equal(presetFixedRot("w3b", null, cell), null);
+  assert.equal(presetFixedRot("w3d", 90, undefined), 90, "a doodad's is untouched");
 });
