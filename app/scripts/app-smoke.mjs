@@ -1195,13 +1195,17 @@ async function verify3Steps(page, found) {
     await k.save();
   };
   const tree = () => k.doodads()[0];
+  // The editor's handle, through a tool group of the smoke's own (made for the open editor at once).
+  await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__dragGroup = s.registerToolGroup({ id: "smoke-drag", title: "SmokeDrag", order: 997, create: (ed) => { window.__dragEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+  if (!(await page.evaluate(`!!window.__dragEd`))) return fail("no handle of the terrain editor (control)");
   const dragTree = async () => {
-    // The view on the tree first (the drag takes hold of what it is on: the tree stands 64 over the ground it looks at,
-    // so its middle is a little above the centre), then a drag a few steps long.
+    // The view on the tree first, then a drag a few steps long from the tree's projected point (as mineStartGrid does), so it
+    // holds in a small view too: the tree's middle is about 100 over its own height.
     const [x, y] = tree().position;
     await k.look(x, y, { id: "LTlt", x, y });
-    const c = await hands.where(".model-stage canvas");
-    await hands.drag({ x: c.x, y: c.y - 15 }, { x: c.x + 20, y: c.y - 15 });
+    const p = await page.evaluate(`(() => { return window.__dragEd.project([${x}, ${y}, ${tree().position[2]} + 100]); })()`);
+    if (!p) return fail("the tree isn't in the view (control)");
+    await hands.drag({ x: p[0], y: p[1] }, { x: p[0] + 20, y: p[1] });
     await k.save();
   };
   await fixUp();
@@ -1225,6 +1229,7 @@ async function verify3Steps(page, found) {
   await k.save();
   if (JSON.stringify(tree()) !== beforeDrag) fail(`one undo of the drag didn't give the tree back: ${JSON.stringify(tree())} vs ${beforeDrag}`);
   await k.reset();
+  await page.evaluate(`window.__dragGroup?.dispose(); window.__dragGroup = window.__dragEd = null;`).catch(() => {});
 
   // ---- The running day/night cycle ----------------------------------------------------------------------------------------
   const hourBox = `[...document.querySelectorAll("select")].find((s) => s.options.length === 24 && s.options[0].textContent === "0:00")`;
