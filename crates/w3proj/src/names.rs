@@ -176,40 +176,49 @@ pub fn scan_candidates(bytes: &[u8], out: &mut BTreeSet<String>) {
         let Ok(s) = std::str::from_utf8(token) else {
             continue;
         };
-        // A token may hold several space-separated words; try every suffix
-        // that starts at a word boundary.
-        let starts = std::iter::once(0).chain(s.match_indices(' ').map(|(i, _)| i + 1));
-        for st in starts {
-            let cand = s[st..].trim();
-            let Some((stem, ext)) = cand.rsplit_once('.') else {
-                continue;
-            };
-            let ext = ext.to_ascii_lowercase();
-            if stem.is_empty() || !EXTS.contains(&ext.as_str()) {
-                continue;
+        scan_token(s, out);
+        // A script's string literal doubles its backslashes (JASS and Lua: "war3mapImported\\X.blp"): the path is
+        // the one with single ones (44 imports of The Chosen Ones campaign are named only this way).
+        if s.contains(r"\\") {
+            scan_token(&s.replace(r"\\", r"\"), out);
+        }
+    }
+}
+
+fn scan_token(s: &str, out: &mut BTreeSet<String>) {
+    // A token may hold several space-separated words; try every suffix
+    // that starts at a word boundary.
+    let starts = std::iter::once(0).chain(s.match_indices(' ').map(|(i, _)| i + 1));
+    for st in starts {
+        let cand = s[st..].trim();
+        let Some((stem, ext)) = cand.rsplit_once('.') else {
+            continue;
+        };
+        let ext = ext.to_ascii_lowercase();
+        if stem.is_empty() || !EXTS.contains(&ext.as_str()) {
+            continue;
+        }
+        let mut forms = vec![cand.replace('/', "\\")];
+        if ext == "mdl" || ext == "mdx" {
+            let stem = stem.replace('/', "\\");
+            forms.extend([format!("{stem}.mdx"), format!("{stem}_portrait.mdx"), format!("{stem}_Portrait.mdx")]);
+        }
+        let lower = forms[0].to_ascii_lowercase();
+        // Command button icons come with a disabled variant the game derives the name of.
+        if let Some(i) = lower.find("commandbuttons\\") {
+            let file = &forms[0][i + "commandbuttons\\".len()..];
+            if !file.contains('\\') && !lower.contains("commandbuttonsdisabled") {
+                out.insert(format!("ReplaceableTextures\\CommandButtonsDisabled\\DIS{file}"));
             }
-            let mut forms = vec![cand.replace('/', "\\")];
-            if ext == "mdl" || ext == "mdx" {
-                let stem = stem.replace('/', "\\");
-                forms.extend([format!("{stem}.mdx"), format!("{stem}_portrait.mdx"), format!("{stem}_Portrait.mdx")]);
+        }
+        // Imports may sit in the import folder of a map or a campaign.
+        let imported = lower.starts_with("war3mapimported\\") || lower.starts_with("war3campimported\\");
+        for f in forms {
+            if !imported {
+                out.insert(format!("war3mapImported\\{f}"));
+                out.insert(format!("war3campImported\\{f}"));
             }
-            let lower = forms[0].to_ascii_lowercase();
-            // Command button icons come with a disabled variant the game derives the name of.
-            if let Some(i) = lower.find("commandbuttons\\") {
-                let file = &forms[0][i + "commandbuttons\\".len()..];
-                if !file.contains('\\') && !lower.contains("commandbuttonsdisabled") {
-                    out.insert(format!("ReplaceableTextures\\CommandButtonsDisabled\\DIS{file}"));
-                }
-            }
-            // Imports may sit in the import folder of a map or a campaign.
-            let imported = lower.starts_with("war3mapimported\\") || lower.starts_with("war3campimported\\");
-            for f in forms {
-                if !imported {
-                    out.insert(format!("war3mapImported\\{f}"));
-                    out.insert(format!("war3campImported\\{f}"));
-                }
-                out.insert(f);
-            }
+            out.insert(f);
         }
     }
 }
