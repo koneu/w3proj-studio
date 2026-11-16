@@ -1,0 +1,169 @@
+[
+  {
+    "name": "water-off-slope-shallow-east",
+    "description": "Enforce Water Height Limits off (ctrl+shift+w; the editor keeps it off for the next spec of this file): the Shallow brush 100 px east of the middle of slope.w3x. The editor leaves the dry corners round the water at the old water word (8192) as the other specs; Studio matches (2026-11-16)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/slope.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "ctrl+shift+w"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1473,310"
+        ],
+        [
+          "--click",
+          "848,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Shallow:"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              848,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ],
+      "settings": {
+        "terrain.enforceWaterLimits": false
+      }
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "water-off-edge-high",
+    "description": "Enforce Water Height Limits still off from the spec before (one editor per file): water-brush-edge-high's click. With the switch off the editor does not raise the corners next to the water (no level, no 35-unit lift: 18 of 20 stay), Studio the same. KNOWN DIFFERENCES: two corners (32,27 and 32,31, two level steps out diagonally) the editor raises a level without the lift, Studio leaves them (no rule found: the corners at 10 squared out beside them stay); and the raised corners' cliff type, as in water-brush-edge-high",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1473,310"
+        ],
+        [
+          "--click",
+          "848,500"
+        ],
+        [
+          "--sleep",
+          "1500"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Shallow:"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              848,
+              500
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ],
+      "settings": {
+        "terrain.enforceWaterLimits": false
+      }
+    },
+    "compare": [
+      {
+        "file": "war3map.w3e",
+        "as": "w3e",
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  }
+]

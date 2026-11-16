@@ -151,12 +151,12 @@ const FIELDS = ["ground", "layer", "wet", "water", "type"];
 
 /** The painter's click: the brush round the nearest corner, the water one or two levels below it with the surface the
  *  water offset under its ground, Grass Cliff (the palette's start) for the cliffs (index.ts). */
-function click(t: Terrain, c: SlopeClick) {
+function click(t: Terrain, c: SlopeClick, enforce = true) {
   const [cx, cy] = c.centre, from = at(t, cx, cy);
   const stroke = new Stroke(c.mode);
   const brush = cornerBrush(t, t.offsetX + cx * 128 + 30, t.offsetY + cy * 128 - 20, c.size);
   // Enforce Water Height Limits on, as the editor had it (we-drive pins it): the ground here is far above the floor.
-  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer, cliffType: 1 }, stroke, true);
+  applyLayer(t, brush, c.mode, { layer: from.layer - (c.mode === "deep" ? 2 : 1), waterLevel: waterLevelAt(from.height - WATER_OFFSET), start: from.layer, cliffType: 1 }, stroke, enforce);
   retypeCliffs(t, stroke, ["Ldrt", "Lgrs"], 1);
   return stroke;
 }
@@ -183,6 +183,18 @@ for (const c of json<{ clicks: SlopeClick[] }>("slope-clicks.json").clicks) {
     if (notYet) assert.deepEqual([...differing].sort(), [...notYet.fields].sort(), "the known differences are all there (when one goes, take it off NOT_YET)");
   });
 }
+
+test("Enforce Water Height Limits off: the corners next to the water stay on their level with no 35-unit lift (we-compare water-off-edge-high; control: on lifts them)", () => {
+  const c = json<{ clicks: SlopeClick[] }>("slope-clicks.json").clicks.find((k) => k.name === "water-brush-edge-high")!;
+  const on = slopeMap(true), off = slopeMap(true), before = slopeMap(true);
+  click(on, c);
+  click(off, c, false);
+  for (const [x, y] of [[33, 26], [32, 27], [31, 28], [32, 30], [33, 32]]) {
+    assert.equal(at(on, x, y).layer, 3, `on ${x},${y} raised`);
+    assert.equal(at(off, x, y).layer, at(before, x, y).layer, `off ${x},${y} keeps its level`);
+    assert.equal(at(off, x, y).rawHeight - 0x2000, 48, `off ${x},${y}: the clicked corner's ground, no 35 more`);
+  }
+});
 
 test("the water brush flattens round the clicked corner, not round the nearest water corner (control: the old rule fails)", () => {
   // The size 3 click on the slope: the editor's ground of the 47 corners within 4 is the clicked corner's (0), so the
