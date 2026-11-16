@@ -158,7 +158,7 @@ export class ModelPreview {
   /** The map's import of a path, else the game's file (Reforged .tif/.blp textures ship as .dds). In Reforged (the
    *  graphics mode set, or `prefer`) the map's Reforged version (`_HD.w3mod\…`) comes first, as the game reads it. */
   private async read(path: string): Promise<Uint8Array> {
-    const variants = /\.(blp|tif|tiff|tga|png)$/i.test(path) ? textureCandidates(path) : [path];
+    const variants = /\.(blp|tif|tiff|tga|png|jpg)$/i.test(path) ? textureCandidates(path) : [path];
     for (const name of ownNames(variants, previewMode(this.opts.prefer, this.w3.settings.get<string>("game.graphicsMode")))) {
       // Under its name on disk, whatever the case asked for (as the game finds it).
       const own = importedPath(this.w3, name);

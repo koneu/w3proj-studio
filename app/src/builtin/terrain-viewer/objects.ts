@@ -7,7 +7,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseModel } from "../../lib/model/mdl";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
-import { neverStoredLast } from "../../lib/model/texpath";
+import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
@@ -478,13 +478,9 @@ export class ObjectLoader {
     const key = `${path.toLowerCase()}|${flags}`;
     let t = this.textures.get(key);
     if (!t) {
-      // Reforged models name .tif/.blp sources the game ships as .dds. Some (even the game's own DE
-      // Goldmine) name a texture by an absolute path on the artist's machine
-      // ("C:/Users/…/Art/HD//Buildings/Other/Goldmine/…"): its tail parts are tried as game paths.
-      const tails = /^([a-z]:)?[\\/]/i.test(path)
-        ? path.split(/[\\/]+/).map((_, i, parts) => parts.slice(i).join("\\")).slice(1).filter((t) => t.includes("\\"))
-        : [path];
-      const variants = neverStoredLast(tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t])));
+      // Reforged models name .tif/.blp sources the game ships as .dds, and some (even the game's own DE
+      // Goldmine) name an absolute path on the artist's machine: one rule for all views (texpath.ts).
+      const variants = neverStoredLast(textureCandidates(path));
       let load!: Promise<WebGLTexture | null>;
       load = t = this.track((async () => {
         let error = "", again = false;
