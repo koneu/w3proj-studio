@@ -87,6 +87,41 @@ test("display guard: a real command (click) on :0, or without --display, exits 2
   }
 });
 
+test("display guard: an fd that vanishes during the scan skips that fd, not the run's own Xvfb", (t) => {
+  if (py(["guard-check", "--display", ":0", "--procroot", "/nonexistent"]).status === null) return t.skip("python3 isn't here");
+  const unix = "Num RefCount\n0000: 2 0 00010000 1 1 5 @/tmp/.X11-unix/X12\n";
+  const root = fakeProc([{ argv: ["/usr/bin/Xvfb", "-displayfd", "3"], sockets: [5], unix }]);
+  try {
+    assert.equal(check(":12", root).status, 0, "control: allowed with only its socket");
+    // A plain file where an fd link was: readlink fails on it as on a client's fd closed between listdir and readlink.
+    writeFileSync(join(root, "100", "fd", "2"), "");
+    assert.equal(check(":12", root).status, 0, "still allowed");
+    assert.equal(check(":0", root).status, 2, "control: another display is still refused");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("display guard: a refusal is asked again before it counts (the scan races with /proc)", (t) => {
+  if (py(["guard-check", "--display", ":0", "--procroot", "/nonexistent"]).status === null) return t.skip("python3 isn't here");
+  const run = (failures, display = ":5") => {
+    const code = [
+      "import importlib.util, json, sys",
+      "sys.dont_write_bytecode = True",
+      "spec = importlib.util.spec_from_file_location('wx', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)",
+      "calls = []",
+      "def decide(d, p, e):",
+      "    calls.append(d)",
+      "    return (len(calls) > int(sys.argv[2]), 'n%d' % len(calls))",
+      "print(json.dumps([m.guard_with_retries(sys.argv[3], decide=decide, pause=0), len(calls)]))",
+    ].join("\n");
+    const r = spawnSync("python3", ["-I", "-c", code, HELPER, String(failures), display], { encoding: "utf8" });
+    return JSON.parse(r.stdout.trim());
+  };
+  assert.deepEqual(run(0), [[true, "n1"], 1], "allowed at once: asked once");
+  assert.deepEqual(run(2), [[true, "n3"], 3], "refused twice, then allowed: the run goes on");
+  assert.deepEqual(run(5), [[false, "n3"], 3], "control: refused three times is refused");
+  assert.deepEqual(run(5, "localhost:0"), [[false, "n1"], 1], "a display of the wrong form isn't asked again");
+});
+
 test("display guard: an Xvfb with -displayfd does not own the desktop's X0 just because net/unix lists every socket", (t) => {
   if (py(["guard-check", "--display", ":0", "--procroot", "/nonexistent"]).status === null) return t.skip("python3 isn't here");
   // net/unix is the machine's list: X0 (the desktop, inode 9) and X12 (this Xvfb, inode 5). The Xvfb holds only 5.

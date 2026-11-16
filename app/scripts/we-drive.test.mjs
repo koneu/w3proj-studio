@@ -5,10 +5,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, PINNED_PREFS, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { EventEmitter } from "node:events";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -113,8 +113,11 @@ test("parseArgs: --drag takes its two positions (and a duration) as one value; -
   assert.throws(() => parseArgs(["--drag-button", "2"]), /needs a --drag/);
 });
 
+// Tests run from app/ (the runner bundles them elsewhere, so not next to this file).
+const X11_HELPER = join(process.cwd(), "scripts", "we-x11.py");
+
 test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
-  const run = (...a) => spawnSync("python3", ["-I", join(dirname(fileURLToPath(import.meta.url)), "we-x11.py"), "drag", ...a, "--dry"], { encoding: "utf8" });
+  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "drag", ...a, "--dry"], { encoding: "utf8" });
   const probe = run("0,0", "1,1");
   if (probe.status !== 0) return t.skip("python3 with Pillow isn't here");
   const path = JSON.parse(run("100,100", "300,60", "--steps", "4").stdout).path;
@@ -389,4 +392,278 @@ test("editorPrefs pins the persisted toggles to the editor's defaults, unless ke
   for (const k of Object.keys(PINNED_PREFS)) assert.equal(k in kept, false, `${k} stays as it was with keep`);
   assert.equal(parseArgs(["--keep-prefs"]).opts.keepPrefs, true);
   assert.equal(parseArgs([]).opts.keepPrefs, undefined);
+});
+
+test("withEditorPrefs unticks the minimap's Show Creep Camp Icon before each start (the editor keeps it), unless kept", () => {
+  const left = "[Minimap]\r\nShow Creep Camps=true\r\nShow Icons=0\r\n\r\n[Misc]\r\nhd=1\r\n";
+  const out = withEditorPrefs(left, "sd", "fixed");
+  assert.match(out, /\[Minimap\]\r\nShow Creep Camps=false\r\nShow Icons=0\r\n/);
+  assert.equal(PINNED_MINIMAP_PREFS["Show Creep Camps"], "false");
+  assert.match(withEditorPrefs(left, "sd", "fixed", true), /Show Creep Camps=true/, "control: --keep-prefs leaves it");
+  assert.match(withEditorPrefs("", "sd", "fixed"), /\[Minimap\]\nShow Creep Camps=false/, "a fresh file gets it too");
+});
+
+test("parseArgs: --timeout, --sleep and --fps must be numbers (NaN waited forever or not at all)", () => {
+  assert.equal(parseArgs(["--timeout", "12.5", "--start"]).opts.timeout, 12.5);
+  for (const bad of ["abc", "0", "-5", "", "Infinity", "1e999"]) {
+    assert.throws(() => parseArgs(["--timeout", bad, "--start"]), /--timeout wants a number above 0/, bad);
+  }
+  assert.doesNotThrow(() => parseArgs(["--start", "--sleep", "0", "--sleep", "250"]));
+  for (const bad of ["abc", "-1", ""]) assert.throws(() => parseArgs(["--start", "--sleep", bad]), /--sleep wants a number of at least 0/, bad);
+  assert.doesNotThrow(() => parseArgs(["--start", "--fps", "2000"]));
+  for (const bad of ["x", "0", "-3"]) assert.throws(() => parseArgs(["--start", "--fps", bad]), /--fps wants a number above 0/, bad);
+});
+
+test("textLocale: enUS when the install has it, else refused with what it has", () => {
+  assert.equal(textLocale("Branch!STRING:0|Tags!STRING:0\nus|Windows x86_64 US? enUS speech?:Windows x86_64 US? enUS text?:\n"), "enUS");
+  assert.equal(textLocale("eu|deDE text?:enUS text?\n"), "enUS", "enUS among others");
+  assert.throws(() => textLocale("eu|deDE speech?:deDE text?\n"), /needs the game's English text.*deDE/);
+  assert.throws(() => textLocale("nothing here"), /no text locale named/);
+});
+
+test("procState reads the state after the last ')' of /proc/PID/stat; a zombie or a missing process is gone", () => {
+  const stat = (text) => () => text;
+  const fail = (code) => () => { throw Object.assign(new Error(code), { code }); };
+  assert.equal(procState(1, stat("123 (we (x) y) Z 1 2 3")), "Z");
+  assert.equal(procState(1, stat("123 (Xvfb) S 1 2 3")), "S");
+  assert.equal(procState(1, fail("ENOENT")), null);
+  assert.equal(procState(1, fail("EACCES")), "?", "unreadable isn't gone");
+  assert.equal(procGone(1, stat("1 (a) Z 0")), true);
+  assert.equal(procGone(1, fail("ENOENT")), true);
+  assert.equal(procGone(1, stat("1 (a) S 0")), false);
+  assert.equal(procGone(1, fail("EACCES")), false);
+  assert.equal(procState(process.pid) !== null && !procGone(process.pid), true, "control: this process is there");
+});
+
+test("we-x11 settle: two equal pictures in a row, else up to the timeout (python, no display)", (t) => {
+  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "settle", "--dry", ...a], { encoding: "utf8" });
+  if (run("--hashes", "a").status !== 0) return t.skip("python3 isn't here");
+  assert.deepEqual(JSON.parse(run("--hashes", "a,b,b,c", "--interval", "200").stdout), { settled: true, ms: 400, grabs: 3 });
+  assert.deepEqual(JSON.parse(run("--hashes", "a,b,c,d,e,f", "--interval", "400", "--timeout", "1000").stdout), { settled: false, ms: 1200, grabs: 4 });
+});
+
+// ---- the Session against a fake editor, a fake X server and a fake clock ------------------------------------
+
+/** pids above Linux's largest pid_max (2^22): process.kill on them (the session's group kill) can't hit anything. */
+let fakePid = 2 ** 22 + 1000;
+class FakeChild extends EventEmitter {
+  constructor() { super(); this.pid = fakePid++; }
+}
+
+function fakeClock() {
+  const c = { t: 1_000_000, now: () => c.t, sleep: async (ms) => { c.t += ms; await new Promise((r) => setImmediate(r)); } };
+  return c;
+}
+
+const mainWin = (map) => ({ id: 1, title: `Warcraft III World Editor - [Z:/w/maps/${map}]`, class: "steam_app_1", rect: [4, 30, 1352, 937], pid: 5, overrideRedirect: false });
+const dialogWin = (id, title, rect = [500, 400, 300, 120]) => ({ id, title, class: "steam_app_1", rect, pid: 5, overrideRedirect: false });
+
+/**
+ * A Session in a temporary farm folder (W3PROJ_WE_DIR) with the locale already in its registry: `x.windows` (a list
+ * or a function) is what the fake X server shows, every helper call is in `calls`, the wineserver's in `ws`, the
+ * editor processes in `children`; `onWineserver(args)` runs inside a wineserver call (as a real exit would happen).
+ */
+function rig(t, { timeout = 300 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "we-session-"));
+  const saved = process.env.W3PROJ_WE_DIR;
+  process.env.W3PROJ_WE_DIR = join(dir, "we");
+  t.after(() => {
+    if (saved === undefined) delete process.env.W3PROJ_WE_DIR; else process.env.W3PROJ_WE_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const game = join(dir, "game");
+  mkdirSync(game);
+  writeFileSync(join(game, ".build.info"), "Tags!STRING:0\nus|enUS text?\n");
+  const pfx = join(dir, "we", "prefix", "pfx");
+  mkdirSync(pfx, { recursive: true });
+  writeFileSync(join(pfx, "user.reg"), String.raw`[Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3] 1` + `\n"LOCALE"="enUS"\n`);
+  const maps = {};
+  for (const n of ["a.w3m", "b.w3m"]) { maps[n] = join(dir, n); writeFileSync(maps[n], `map ${n}`); }
+  const r = { dir, maps, calls: [], ws: [], children: [], windows: [], stats: { pixels: 100, blackPixels: 0 }, onWineserver: null };
+  r.clock = fakeClock();
+  r.x11 = (cmd, ...rest) => {
+    r.calls.push([cmd, ...rest]);
+    if (cmd === "windows") return { windows: typeof r.windows === "function" ? r.windows() : r.windows };
+    if (cmd === "stats") return r.stats;
+    if (cmd === "close" && rest[0] === 1) r.windows = [];
+    return { pressed: true };
+  };
+  r.s = new Session({ work: join(dir, "work"), timeout, mode: "sd", dayNight: "fixed", saveAccept: [] }, game, {
+    proton: { tool: "/nonexistent", steamRoot: "/nonexistent", appId: "1" },
+    clock: r.clock,
+    x11: (...a) => r.x11(...a),
+    spawnWine: () => { const c = new FakeChild(); r.children.push(c); return c; },
+    wineserver: (args) => { r.ws.push(args.join(" ")); r.onWineserver?.(args); return { status: 0 }; },
+    procGone: () => false,
+  });
+  return r;
+}
+
+test("Session: an editor's exit that comes after its close doesn't end the next map (every second map failed)", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  r.windows = [mainWin("a.w3m")];
+  assert.equal((await r.s.waitReady()).ready, true);
+  // As for real: the windows go at the close, the processes during `wineserver -w`, and node hears of the exit only
+  // when its event loop next turns.
+  const first = r.children[0];
+  r.onWineserver = (args) => { if (args[0] === "-w") setImmediate(() => first.emit("exit", 0)); };
+  assert.deepEqual((await r.s.close()).closed, true);
+  assert.equal(first.exited, true, "the close waited for the editor's own exit");
+  await r.s.start(r.maps["b.w3m"]);
+  r.windows = [mainWin("b.w3m")];
+  const ready = await r.s.waitReady();
+  assert.equal(ready.ready, true, JSON.stringify(ready));
+  assert.match(ready.title, /b\.w3m/);
+  assert.equal(r.s.running(), true);
+});
+
+test("Session: an old editor's late exit event doesn't mark the new one as exited", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const first = r.children[0];
+  // The old editor is known gone (its flag), but its exit event is still queued when the next start runs.
+  first.exited = true;
+  r.s.editorExited = true;
+  await r.s.start(r.maps["b.w3m"]);
+  first.emit("exit", 0);
+  assert.equal(r.s.running(), true, "the new editor still counts as running");
+  r.children[1].emit("exit", 0);
+  assert.equal(r.s.running(), false, "control: its own exit counts");
+});
+
+test("Session: start waits for the editor before it to exit, and refuses one that doesn't", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const first = r.children[0];
+  setTimeout(() => first.emit("exit", 0), 5);
+  r.s.editorExited = true;
+  await r.s.start(r.maps["b.w3m"]);
+  assert.equal(first.exited, true);
+  assert.equal(r.children.length, 2, "the second editor started after the first had exited");
+  // One that never exits: refused, not started over it.
+  await assert.rejects(r.s.start(r.maps["a.w3m"]), /still running/);
+  assert.equal(r.children.length, 2);
+});
+
+test("Session: killEditor kills the prefix and waits for its wineserver to go", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  r.s.killEditor();
+  assert.deepEqual(r.ws, ["-k", "-w"]);
+  assert.equal(r.s.running(), false);
+});
+
+test("Session: stop() kills the prefix's wineserver even when no editor was started", (t) => {
+  const r = rig(t);
+  r.s.stop();
+  assert.deepEqual(r.ws, ["-k"], "the locale's reg leaves a wineserver before any editor");
+});
+
+test("Session: stop() takes a zombie Xvfb as gone instead of waiting 5 s", (t) => {
+  const r = rig(t);
+  const asked = [];
+  r.s.procGone = (pid) => { asked.push(pid); return true; };
+  r.s.xvfb = { pid: fakePid++, exitCode: null, signalCode: null, kill() {} };
+  const t0 = Date.now();
+  r.s.stop();
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  assert.deepEqual(asked, [r.s.xvfb.pid]);
+});
+
+test("Session: waitReady wants this map's name in the title, not the map before's", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["b.w3m"]);
+  const t0 = r.clock.t;
+  r.windows = () => [mainWin(r.clock.t - t0 < 6000 ? "a.w3m" : "b.w3m")];
+  const ready = await r.s.waitReady();
+  assert.equal(ready.ready, true);
+  assert.match(ready.title, /b\.w3m/);
+  assert.ok(r.clock.t - t0 >= 9000, "not ready while the title still named a.w3m");
+});
+
+test("Session: waitReady gives up at the timeout and stops when the editor exits", async (t) => {
+  const r = rig(t, { timeout: 2 });
+  await r.s.start(r.maps["a.w3m"]);
+  r.windows = [];
+  const t0 = r.clock.t;
+  const res = await r.s.waitReady();
+  assert.equal(res.ready, false);
+  assert.equal(res.timeout, 2);
+  assert.ok(r.clock.t - t0 >= 2000 && r.clock.t - t0 < 4000);
+  r.children[0].emit("exit", 1);
+  await assert.rejects(r.s.waitReady(), /exited while starting/);
+});
+
+test("Session: each start answers its own welcome dialog (the clicked list starts empty)", async (t) => {
+  const r = rig(t);
+  const saved = process.env.W3PROJ_WE_ACCEPT_TERMS;
+  delete process.env.W3PROJ_WE_ACCEPT_TERMS;
+  t.after(() => { if (saved !== undefined) process.env.W3PROJ_WE_ACCEPT_TERMS = saved; });
+  const welcome = dialogWin(77, "Welcome to the Warcraft III World Editor", [300, 100, 900, 600]);
+  const clicks = () => r.calls.filter(([c, at]) => c === "click" && at === "773,570").length;
+  for (const map of ["a.w3m", "b.w3m"]) {
+    await r.s.start(r.maps[map]);
+    r.windows = [mainWin(map), welcome];
+    assert.equal((await r.s.waitReady()).ready, true);
+    r.s.editorExited = true;
+    r.children.at(-1).emit("exit", 0);
+  }
+  assert.equal(clicks(), 2, "a welcome with the same window id in the next editor is clicked again");
+});
+
+test("Session: save answers a Reminder once, and copies the file once it stood still", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  let written = false;
+  r.windows = () => {
+    if (r.clock.t - t0 < 3000) return [mainWin("a.w3m"), dialogWin(9, "Reminder")];
+    if (!written) { writeFileSync(r.s.copy, "saved by the editor"); written = true; }
+    return [mainWin("a.w3m")];
+  };
+  const dest = join(r.dir, "out.w3m");
+  const res = await r.s.save(dest);
+  assert.equal(res.saved, true, JSON.stringify(res));
+  assert.deepEqual(res.answered, ["Reminder"]);
+  assert.equal(r.calls.filter(([c, ...rest]) => c === "key" && rest.includes(9)).length, 1, "Return once, not on every poll");
+  assert.equal(readFileSync(dest, "utf8"), "saved by the editor");
+});
+
+test("Session: a save that writes nothing with no dialog open fails long before the timeout; a Reminder that stays is reported", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  r.windows = [mainWin("a.w3m")];
+  const t0 = r.clock.t;
+  const res = await r.s.save(join(r.dir, "out.w3m"));
+  assert.equal(res.saved, false);
+  assert.match(res.error, /wrote nothing/);
+  assert.ok(r.clock.t - t0 < 120000, `${r.clock.t - t0} ms, the timeout is 300 s`);
+  r.windows = [mainWin("a.w3m"), dialogWin(9, "Reminder")];
+  const stuck = await r.s.save(join(r.dir, "out.w3m"));
+  assert.equal(stuck.saved, false);
+  assert.deepEqual(stuck.dialogs.map((d) => d.title), ["Reminder"]);
+  assert.equal(r.calls.filter(([c, ...rest]) => c === "key" && rest.includes(9)).length, 1);
+});
+
+test("Session: a dead Xvfb is said as such, not as a refused display", (t) => {
+  const r = rig(t);
+  r.s.display = ":9";
+  r.s.xvfb = { pid: fakePid++, exitCode: null, signalCode: "SIGSEGV" };
+  r.s.xvfbExited = true;
+  assert.throws(() => r.s.windows(), /Xvfb died \(display :9, SIGSEGV\)/);
+  assert.equal(r.calls.length, 0, "the helper wasn't asked");
+  r.s.xvfbExited = false;
+  r.s.procGone = () => true;
+  assert.throws(() => r.s.windows(), /Xvfb died/, "a zombie before its exit event");
+  r.s.procGone = () => false;
+  assert.ok(r.s.windows(), "control: a live Xvfb");
+});
+
+test("waitExit: true once the child's exit was seen, false after the time", async () => {
+  const clock = fakeClock();
+  const c = new FakeChild();
+  setTimeout(() => { c.exited = true; }, 5);
+  assert.equal(await waitExit(c, 60000, { now: clock.now, sleep: async (ms) => { clock.t += ms; await new Promise((r) => setTimeout(r, 2)); } }), true);
+  assert.equal(await waitExit(new FakeChild(), 1000, clock), false);
 });
