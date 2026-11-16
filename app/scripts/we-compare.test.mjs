@@ -3,6 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
@@ -191,4 +192,21 @@ test("verify-build: folders per commit and per tester differ", () => {
   assert.notEqual(a.appDrive, b.appDrive);
   assert.match(a.appSmoke, /W3_SMOKE_DIR="[^"]*p1[^"]*smoke"/);
   assert.equal(a.env.W3_APP_BIN, l.exe);
+});
+
+test("no spec under tests/we-compare reads openpoints, and every input map is in the repository", () => {
+  const root = resolve(process.cwd(), "..", "tests", "we-compare");
+  const files = [];
+  const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith(".json") && files.push(join(d, e.name)); };
+  walk(root);
+  assert.ok(files.length > 50, "found the specs");
+  // A main checkout without openpoints: ${MAIN} points at a folder that has none.
+  const vars = { MAIN: join(root, "no-such-main"), REPO: resolve(root, "..", "..") };
+  for (const f of files) {
+    const text = readFileSync(f, "utf8");
+    assert.ok(!/openpoints/i.test(text), `${f} mentions openpoints`);
+    for (const s of parseSpecFile(text, f, vars)) if (s.input.map) assert.ok(existsSync(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
+  }
+  // The control: a spec text that does name it is caught by the same check.
+  assert.ok(/openpoints/i.test('{"input":{"map":"${MAIN}/openpoints/x.w3x"}}'));
 });

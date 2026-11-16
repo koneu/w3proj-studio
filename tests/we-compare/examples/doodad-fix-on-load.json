@@ -1,7 +1,7 @@
 {
   "name": "doodad-fix-on-load",
   "description": "p6 item 9: 212 doodads (200 of doodad-save-rules + 12 odd angles, scale ranges, off-grid pathing); expected to differ: 6 doodads with a zero scale get a random one in both (the editor's differs from Studio's); Studio fixes and snaps them on load, then saves; the World Editor does the same on its own load",
-  "input": { "map": "${MAIN}/openpoints/verify-2026-11-13/p6/i9/X.w3x" },
+  "input": { "map": "doodad-fix-on-load.w3x" },
   "studio": {
     "steps": [
       { "setting": ["script.generateOnSave", false] },

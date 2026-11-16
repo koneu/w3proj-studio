@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
+import { gameFiles } from "../testhelpers/gamefiles";
 import { writeLightMdl } from "./dnclight";
 import { isMdlText, parseMdl, parseModel } from "./mdl";
 import { parseMdx, type Model, type Node, type Track } from "./mdx";
@@ -528,28 +526,8 @@ test("damaged MDL text is refused or read in part, never thrown as anything but 
 
 // --- the game's own models, when the game and the release CLI are here ----------------------------------------
 
-function gameModels(names: string[]): { name: string; bytes: Uint8Array }[] {
-  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
-  const repo = git("--show-toplevel"), common = git("--git-common-dir");
-  if (!repo) return [];
-  const main = common ? dirname(resolve(common)) : repo;
-  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
-  const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
-  const gameFile = join(main, ".game-path");
-  // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
-  const listed = existsSync(gameFile) ? readFileSync(gameFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
-  const game = process.env.W3PROJ_GAME ?? listed.find((p) => existsSync(p)) ?? listed[0];
-  if (!bin) return [];
-  const out: { name: string; bytes: Uint8Array }[] = [];
-  for (const name of names) {
-    const r = spawnSync(bin, ["game", "cat", name, ...(game ? ["--install", game] : [])], { maxBuffer: 1 << 28 });
-    if (r.status === 0 && r.stdout.length) out.push({ name, bytes: new Uint8Array(r.stdout) });
-  }
-  return out;
-}
-
 test("the game's models written as MDL text read back as the MDX reader read them", (ctx) => {
-  const models = gameModels([
+  const models = gameFiles([
     "War3.w3mod:Units/Human/Footman/Footman.mdx",
     "War3.w3mod:_HD.w3mod:Units/Human/Footman/Footman.mdx",
     "War3.w3mod:Doodads/Terrain/LordaeronTree/LordaeronTree0.mdx",
