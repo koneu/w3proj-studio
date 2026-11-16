@@ -139,6 +139,49 @@ fn without_the_game_nothing_is_made() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The game is there, but the only doodad model that casts a shadow can't be read (the map's own Trough0.mdx, broken
+/// bytes on disk, which wins over the game's): the shadows would leave every doodad out, so the verdict (shadowmap.ts
+/// shadowVerdict) keeps the stored war3map.shd, the line says kept and why, and the run still exits 0. The control,
+/// without the broken model, writes the shadows over the same stored bytes.
+#[test]
+fn shadows_whose_models_are_all_unreadable_keep_the_stored_file() {
+    let Some(game) = game() else {
+        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("shd-verdict");
+    let stored: Vec<u8> = (0..4096u32).map(|i| (i.wrapping_mul(7) & 0xff) as u8).collect();
+    let make = |name: &str, broken: bool| {
+        let project = dir.join(name);
+        copy_dir(&fixture(), &project);
+        fs::write(project.join("map/war3map.shd"), &stored).unwrap();
+        if broken {
+            // LOtr (the mini map's trough, variation 0) is the one doodad with a shadow; ATtr is a destructable.
+            let model = project.join("map/Doodads/LordaeronSummer/Props/Trough/Trough0.mdx");
+            fs::create_dir_all(model.parent().unwrap()).unwrap();
+            fs::write(&model, b"MDLXbroken-not-a-model").unwrap();
+        }
+        project
+    };
+
+    let project = make("broken", true);
+    let o = w3proj(&["rebuild", s(&project), "--only=shd"], &game);
+    let said = text(&o);
+    assert!(o.status.success(), "a kept part isn't a failure: {said}");
+    let line = said.lines().find(|l| l.contains("war3map.shd")).unwrap_or_else(|| panic!("no line for the shadows: {said}"));
+    assert!(line.starts_with("kept"), "{said}");
+    assert!(line.contains("none of the 1 doodad models could be read") && line.contains("the stored war3map.shd is kept"), "{said}");
+    assert!(said.contains("not recorded as up to date"), "{said}");
+    assert_eq!(fs::read(project.join("map/war3map.shd")).unwrap(), stored, "the stored shadows changed");
+
+    let control = make("control", false);
+    let o = w3proj(&["rebuild", s(&control), "--only=shd"], &game);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("written    map/war3map.shd"), "{}", text(&o));
+    assert_ne!(fs::read(control.join("map/war3map.shd")).unwrap(), stored, "the control didn't write the shadows");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn an_unknown_part_is_refused() {
     let dir = workdir("unknown-part");
