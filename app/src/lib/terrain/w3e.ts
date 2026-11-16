@@ -87,6 +87,15 @@ export function setWaterOffset(t: Terrain, offset: number | undefined) {
 export const WATER_LEVEL_MIN = 0;
 export const WATER_LEVEL_MAX = 0x3fff;
 
+/** The ground tile each slot of the file's list is drawn with. With the "custom tilesets" flag 0 the World Editor
+ *  ignores the file's list and takes the tileset's own one (`own`, Terrain.slk's order) by slot: a slot past its end is
+ *  drawn with its first tile (we-drive 2026-11-16, Summer, lists in another order, of 3, 6 and 9 tiles). With the flag
+ *  set, or the tileset's list unknown, it is the file's list. Only drawing follows this: the file keeps its own list. */
+export function drawnGroundTiles(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, own: readonly string[] | undefined): string[] {
+  if (t.customTilesetsRaw !== 0 || !own?.length) return [...t.groundTiles];
+  return t.groundTiles.map((_, i) => own[i] ?? own[0]);
+}
+
 export function parseW3e(buf: Uint8Array): Terrain {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const id = (p: number) => String.fromCharCode(buf[p], buf[p + 1], buf[p + 2], buf[p + 3]);
