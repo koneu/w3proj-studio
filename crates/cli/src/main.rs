@@ -650,7 +650,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Verify { maps, baseline, update_baseline, quiet, warnings_fail, game, trigger_data } => {
             check_trigger_data(&trigger_data)?;
-            let maps = expand_maps(&maps)?;
+            let given = maps;
+            let maps = expand_maps(&given)?;
+            if maps.is_empty() {
+                // "0 ok" with exit 0 would pass a typo'd or empty folder as a clean run.
+                let at = given.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+                anyhow::bail!("no maps (.w3x/.w3m/.w3n) found in {at}: nothing to verify");
+            }
             let mut base = match &baseline {
                 Some(path) if path.exists() => read_baseline(path)?,
                 _ => Baseline::new(),
