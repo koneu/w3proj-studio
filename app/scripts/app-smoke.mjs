@@ -9217,7 +9217,9 @@ async function paletteMouse(page, found) {
  *  when the map opens (branch doodad-snap-pref, doodadgrid.ts): the pathing textures PathTextures\4x2Default.tga and
  *  4x4Default.tga of the scene's doodads (with terrain.doodads.snapOnLoad off it is 114 and 139 again). One more read,
  *  asked and texture since HD water has waves (branch water-waves-we): the game's ReplaceableTextures\Water\Water_Normal.blp
- *  (without that read: 116, 141, 139 again, measured alone 2026-11-14). */
+ *  (without that read: 116, 141, 139 again, measured alone 2026-11-14). The panel asked 20 alone (15 in the full part,
+ *  its tile colours kept) since gates and walls are drawn as their pathing texture's cells: the texture was asked for
+ *  its cells and again for its size; read once for both (branch game-reads-alone), 19 alone again. */
 const GAME_READS_RECORDED = { reads: 117, asked: 142, textures: 140 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
@@ -9288,8 +9290,7 @@ async function gameReadsOnce(page, found) {
   const terrainState = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
   await until("the minimap's picture", async () => (await terrainState())?.minimap?.picture === true, 30000);
   await readsSettled();
-  const panelReads = (await reads()) - panelAt[0], panelAsked = (await asked()) - panelAt[1];
-  console.log(`  game reads: the minimap panel read ${panelReads} game files, asked for ${panelAsked} (at most ${PANEL_READS_MAX.reads}, ${PANEL_READS_MAX.asked})`);
+  const panelReads = (await reads()) - panelAt[0], panelAsked = (await asked()) - panelAt[1];  console.log(`  game reads: the minimap panel read ${panelReads} game files, asked for ${panelAsked} (at most ${PANEL_READS_MAX.reads}, ${PANEL_READS_MAX.asked})`);
   if (panelReads > PANEL_READS_MAX.reads || panelAsked > PANEL_READS_MAX.asked) fail(`the minimap panel read ${panelReads} game files and asked for ${panelAsked}, at most ${PANEL_READS_MAX.reads} and ${PANEL_READS_MAX.asked} when recorded`);
   // A fixed scene: a count past what it took when recorded is a regression (a file read that wasn't, a
   // texture decoded twice, a table asked once per model) that no timing in the gate would show reliably.

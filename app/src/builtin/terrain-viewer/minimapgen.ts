@@ -197,12 +197,15 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     const skin = (await skins).get(type);
     return skin ? modelTextureColor(skin, readFile) : null;
   })().catch(() => null));
-  const footprint = memo((path: string) => (async () => {
-    const image = decodeImage(await readFile(path), path).mip(0);
-    return Math.sqrt(image.width * image.height) / CELLS_PER_TILE;
-  })().catch(() => 1));
+  // A pathing texture is read and decoded once, for its cells and its size alike (null: unreadable).
+  const pathImage = memo((path: string) => (async () => decodeImage(await readFile(path), path).mip(0))().catch(() => null));
+  const footprint = async (path: string) => {
+    const image = await pathImage(path);
+    return image ? Math.sqrt(image.width * image.height) / CELLS_PER_TILE : 1;
+  };
   const pathMask = memo((path: string) => (async () => {
-    const image = decodeImage(await readFile(path), path).mip(0);
+    const image = await pathImage(path);
+    if (!image) return null;
     const cells = new Uint8Array(image.width * image.height);
     for (let i = 0; i < cells.length; i++) cells[i] = image.rgba[i * 4] | image.rgba[i * 4 + 1] | image.rgba[i * 4 + 2] ? 1 : 0;
     return { width: image.width, height: image.height, cells };

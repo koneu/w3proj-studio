@@ -332,6 +332,40 @@ test("minimapBase: in HD and DE the ground and cliff colours are the Reforged _D
   assert.deepEqual(await colours("sd"), [[44, 108, 27], [145, 104, 60], [96, 124, 66]]);
 });
 
+test("minimapBase: a pathing texture is read once for its cells and its size, however many doodads have it", async () => {
+  const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
+  const doodRow = ["Y", "1", "1", "9", "8", "7"];
+  const tables: Record<string, string> = {
+    "TerrainArt\\Terrain.slk": slk([["tileID", "dir", "file"], ["Ypth", "TerrainArt\\Test", "Test_Path"]]),
+    "TerrainArt\\CliffTypes.slk": slk([["cliffID", "texDir", "texFile"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height", "mmAlpha", "mmRed", "mmGreen", "mmBlue"]]),
+    "Doodads\\Doodads.slk": slk([["doodID", "showInMM", "useMMColor", "MMRed", "MMGreen", "MMBlue", "pathTex"],
+      ["Ytre", ...doodRow.slice(1), "PathTextures\\Square"], ["Ygat", ...doodRow.slice(1), "PathTextures\\Strip"]]),
+    "Units\\DestructableData.slk": slk([["DestructableID"]]),
+  };
+  // A pathing texture of w × h cells, all of them blocking.
+  const pathTga = (w: number, h: number) => {
+    const t = new Uint8Array(18 + w * h * 4);
+    t[2] = 2; t[12] = w; t[14] = h; t[16] = 32; t[17] = 0x28;
+    t.fill(255, 18);
+    return t;
+  };
+  const files = new Map<string, Uint8Array>([
+    ["TerrainArt\\Test\\Test_Path.blp", tgaOf([50, 60, 70])], ["PathTextures\\Square.tga", pathTga(4, 4)], ["PathTextures\\Strip.tga", pathTga(8, 2)],
+  ]);
+  const reads = new Map<string, number>();
+  const read = async (p: string) => { reads.set(p, (reads.get(p) ?? 0) + 1); return files.get(p) ?? assert.fail(`no ${p}`); };
+  const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? "sd" : undefined) },
+    game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
+  const t = { ...flat(2, 2), tileset: "Y", groundTiles: ["Ypth"], cliffTiles: [] } as unknown as Terrain;
+  const placed = ["Ytre", "Ytre", "Ygat", "Ytre", "Ygat"].map((id, i) => ({ id, position: [i * 64, 64, 0], angle: 0 }));
+  const b = await minimapBase(w3, t, placed as unknown as Parameters<typeof minimapBase>[2], read);
+  // The control: both textures were used, the square one as a dot of its size, the strip as its cells.
+  assert.deepEqual(b.objects.map((o) => ("mask" in o && o.mask ? `mask ${o.mask.width}x${o.mask.height}` : `size ${(o as { size?: number }).size}`)),
+    ["size 1", "size 1", "mask 8x2", "size 1", "mask 8x2"]);
+  assert.deepEqual([reads.get("PathTextures\\Square.tga"), reads.get("PathTextures\\Strip.tga")], [1, 1]);
+});
+
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {
   type V = [number, number, number];
   const norm = (v: V): V => { const l = Math.hypot(...v); return [v[0] / l, v[1] / l, v[2] / l]; };
