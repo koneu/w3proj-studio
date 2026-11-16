@@ -41,9 +41,28 @@ test("names the game never stores (.tif) are read last; the first one the game h
 });
 
 test("candidates: as written, then as .dds; with no game part the model's folder, then Textures", () => {
-  assert.deepEqual(textureCandidates("C:/a/Art/HD//Doodads/T/X_Diffuse.tif"), ["Doodads/T/X_Diffuse.tif", "Doodads/T/X_Diffuse.dds"]);
+  assert.deepEqual(textureCandidates("C:/a/Art/HD//Doodads/T/X_Diffuse.tif"), [
+    "Doodads/T/X_Diffuse.tif", "Doodads/T/X_Diffuse.dds",
+    "a/Art/HD/Doodads/T/X_Diffuse.tif", "a/Art/HD/Doodads/T/X_Diffuse.dds",
+    "Art/HD/Doodads/T/X_Diffuse.tif", "Art/HD/Doodads/T/X_Diffuse.dds",
+    "HD/Doodads/T/X_Diffuse.tif", "HD/Doodads/T/X_Diffuse.dds",
+    "T/X_Diffuse.tif", "T/X_Diffuse.dds"]);
+  // The terrain view's old rule (every tail) and the model preview's (cut at the art folder) both hold.
+  const gold = textureCandidates("C:/Users/x/Art/HD//Buildings/Other/Goldmine/a.tif");
+  assert.equal(gold[0], "Buildings/Other/Goldmine/a.tif");
+  assert.equal(gold[1], "Buildings/Other/Goldmine/a.dds");
+  for (const tail of ["Users/x/Art/HD/Buildings/Other/Goldmine/a.tif", "Other/Goldmine/a.dds", "Goldmine/a.tif"]) assert.ok(gold.includes(tail), tail);
+  assert.ok(!gold.includes("a.tif"), "a bare file name is no tail");
+  // Relative: backslashes become "/", .tiff/.png/.jpg also as .dds.
+  assert.deepEqual(textureCandidates("Textures\\x.tiff"), ["Textures/x.tiff", "Textures/x.dds"]);
+  assert.deepEqual(textureCandidates("Textures/x.png"), ["Textures/x.png", "Textures/x.dds"]);
+  assert.deepEqual(textureCandidates("Textures/x.jpg"), ["Textures/x.jpg", "Textures/x.dds"]);
+  // No game part: the tails, then next to the model and in Textures.
+  assert.deepEqual(textureCandidates("D:/dl/B/Body.png", "U/M.mdx"),
+    ["dl/B/Body.png", "dl/B/Body.dds", "B/Body.png", "B/Body.dds", "U/Body.png", "U/Body.dds", "Textures/Body.png", "Textures/Body.dds"]);
   assert.deepEqual(textureCandidates("Textures/Black32.blp"), ["Textures/Black32.blp", "Textures/Black32.dds"]);
   assert.deepEqual(textureCandidates("C:/dl/B/Body.tif", "Units/Human/Arthas/Arthas.mdx"),
-    ["Units/Human/Arthas/Body.tif", "Units/Human/Arthas/Body.dds", "Textures/Body.tif", "Textures/Body.dds"]);
+    ["dl/B/Body.tif", "dl/B/Body.dds", "B/Body.tif", "B/Body.dds", "Units/Human/Arthas/Body.tif", "Units/Human/Arthas/Body.dds", "Textures/Body.tif", "Textures/Body.dds"]);
+  assert.deepEqual(textureCandidates("C:/Body.tif", "Units/A.mdx"), ["Units/Body.tif", "Units/Body.dds", "Textures/Body.tif", "Textures/Body.dds"]);
   assert.deepEqual(textureCandidates("a.dds"), ["a.dds"]);
 });
