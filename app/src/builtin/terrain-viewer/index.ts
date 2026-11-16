@@ -1997,6 +1997,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
         const loadTilesetArt = () => {
+        loadBlightAndWater();
+        Promise.all([tilePaths(w3), ownReady]).then(([paths]) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
+          .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
+        };
+        /** The tileset's blight texture and water frames (also read again when the map's imports changed). */
+        const loadBlightAndWater = () => {
         // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture).
         void artLoad(w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
           const entry = parseIni(text).get("TileSets")?.get(terrain.tileset.toLowerCase());
@@ -2006,8 +2012,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
           loadRedraw();
         }).catch(() => { /* blight shows as the placeholder colour */ }));
-        Promise.all([tilePaths(w3), ownReady]).then(([paths]) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
-          .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
         // The tileset's water (TerrainArt\Water.slk, row "<tileset>Sha"): animation frames
         // <texFile>00…, frames per second, and the shallow/deep colour ramp (alpha, r, g, b).
         void artLoad(w3.game.readText("TerrainArt\\Water.slk").then((text) => {
@@ -2526,6 +2530,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // Ground textures the map imports: read again for the tiles, without touching the tile list itself.
               tileImages.clear();
               await syncTileList();
+              loadBlightAndWater();
             }
             // Footprints come from the object data, which the skins don't show: read them again.
             if (pathing) {
