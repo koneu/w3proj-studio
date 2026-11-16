@@ -80,7 +80,7 @@ import { HD_WATER_DEFAULTS } from "./hdwater";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
-import { predictShadows } from "./shadowmap";
+import { clearShadowMeshes, predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
@@ -290,6 +290,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       clearTimeout(rebuildTimer);
       await runRebuild();
     }),
+    // Not in the manifest (no palette entry): the app smoke calls it so a step reads the models again.
+    w3.commands.register("w3.terrain.clearShadowCache", () => clearShadowMeshes()),
     // Part of the workbench's settled(): every open terrain editor's view at rest (objects, models, a frame drawn).
     w3.commands.register("w3.terrain.settleViews", async () => {
       // The custom types a Ctrl+C gathers for a paste in another map, read from the object data as it goes on.

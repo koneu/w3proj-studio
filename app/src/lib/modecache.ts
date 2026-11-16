@@ -21,4 +21,7 @@ export class ModeCache<T> {
   }
 
   get size(): number { return this.entries.size; }
+
+  /** Forgets every value (a reload of the files it was read from). */
+  clear(): void { this.entries.clear(); }
 }

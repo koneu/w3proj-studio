@@ -18,6 +18,9 @@ const NO_FACES = "no casting faces" as const;
 /** Casting triangles by graphics mode and model path (shared by all editors; HD and Classic models share paths). */
 const meshes = new ModeCache<ShadowMesh | typeof NO_FACES>();
 
+/** Forgets the casting triangles of every model read (the app smoke's way to make a calculation read the game again). */
+export function clearShadowMeshes(): void { meshes.clear(); }
+
 async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8Array>): Promise<AlphaMap | null> {
   // Reforged names .tif/.blp sources the game ships as .dds; a .tif is never there, so last.
   for (const p of neverStoredLast([...new Set([...textureCandidates(path), ...textureCandidates(path.replace(/\.\w+$/, ".blp"))])])) {
