@@ -51,7 +51,9 @@ export async function roomShape(data: PathingData, id: string, kind: string): Pr
   const info = data.placedTex(id);
   if (!info?.path || info.walkable) return null;
   const { image } = await data.placedImage(info);
-  return image ? fromImage(image) : null;
+  // The no-build (blue) cells count as well: a large rock's rounded corners stop a crate beside them
+  // (tests/we-compare/replace-doodads-hillsbrad.json).
+  return image ? fromImage(image, true) : null;
 }
 
 export class Occupancy {

@@ -111,6 +111,13 @@ export function roomForReplaced(others: Iterable<readonly number[]>, swapped: re
   });
 }
 
+/** A replaced object's variation: it keeps its own when the new type has it, else (more variations on the old type)
+ *  it takes a random one of the new type's (measured on HillsbradCreek, tests/we-compare/replace-doodads-hillsbrad.json:
+ *  FTtw's 0 to 9 became LTcr's 0 or 1, 0 and 1 stayed, 2 to 9 split about half and half, not all the last). */
+export function variationAfter(old: number, numVar: number, random: () => number = Math.random): number {
+  return old < numVar ? old : Math.floor(random() * Math.max(1, numVar));
+}
+
 /** The dialog: Old and New type, Swap Both, and for objects Selected Only (and Reset Variations for doodads).
  *  Resolves with the request, or null when cancelled. */
 export function askReplace(kind: ReplaceKind, choices: { from: ReplaceChoice[]; to: ReplaceChoice[]; selected: number },
