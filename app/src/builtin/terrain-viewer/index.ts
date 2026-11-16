@@ -5989,6 +5989,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo,
           redo,
           reloadFile,
+          // Imported art only redraws (no undo or selection change): fine with unsaved edits.
+          reloadsWithEdits: (path: string) => projectObjects && path !== doc.path.toLowerCase() && changesImports(path),
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
           watchesPath: (key: string) => projectObjects && changesImports(key),
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
