@@ -751,3 +751,45 @@ fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
         assert!(out.exists());
     }
 }
+
+/// A write of war3map.wts that fails partway at the file level: the re-sync runs under a file-size limit of 4 KiB
+/// (`ulimit -f 4`, SIGXFSZ ignored, so the write gets EFBIG after the first 4 KiB, as on a full disk) and the map's
+/// war3map.wts is 12 KiB. The writer the app and the CLI share (w3proj::atomic, behind the app's fs_write_text too)
+/// leaves the old file whole and no temporary file; a writer that truncated first would leave a 4 KiB start. The
+/// retry without the limit writes the whole new file.
+#[cfg(unix)]
+#[test]
+fn a_wts_write_cut_short_by_the_file_system_leaves_the_old_file_whole() {
+    let dir = workdir("wts_cut_short");
+    let (small, big) = (dir.join("small.w3x"), dir.join("big.w3x"));
+    pack(&fixture(), &small);
+    // STRING 3 (the map's description, referenced by war3map.w3i, so the pack keeps it) made 12 KiB long.
+    let source = dir.join("big-source");
+    unpack(&small, &source);
+    let wts = source.join("map/war3map.wts");
+    let text = fs::read_to_string(&wts).unwrap();
+    assert!(text.contains("A map for tests."), "the fixture's STRING 3 changed");
+    fs::write(&wts, text.replacen("A map for tests.", &"long text ".repeat(1200), 1)).unwrap();
+    pack(&source, &big);
+
+    let project = dir.join("project");
+    unpack(&small, &project);
+    let path = project.join("map/war3map.wts");
+    let old = fs::read(&path).unwrap();
+    let limited = "trap '' XFSZ; ulimit -f 4; exec \"$0\" unpack \"$1\" \"$2\" --game none --trigger-data \"$3\"";
+    let o = Command::new("sh")
+        .args(["-c", limited,env!("CARGO_BIN_EXE_w3proj"), s(&big), s(&project), s(&trigger_data())])
+        .env_remove("W3PROJ_FORMATS")
+        .output()
+        .unwrap();
+    // The control: the limit really stopped the write.
+    assert!(!o.status.success(), "the re-sync went through under the limit: {}", self::text(&o));
+    assert!(self::text(&o).contains("os error 27"), "not stopped by the file size: {}", self::text(&o));
+    assert_eq!(fs::read(&path).unwrap(), old, "war3map.wts is no longer the old file");
+    let left: Vec<String> = fs::read_dir(project.join("map")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+    assert!(left.is_empty(), "temporary files left: {left:?}");
+
+    unpack(&big, &project);
+    let now = fs::read_to_string(&path).unwrap();
+    assert!(now.len() > 12_000 && now.contains("long text long text"), "the retry didn't write the whole file ({} bytes)", now.len());
+}
