@@ -3572,6 +3572,26 @@ async function importArtReload(page, found) {
     writeFileSync(file, other);
     await focus();
     if (!(await soon(async () => { const r = await radius(); return r !== null && Math.abs(r - was) > 0.01; }, 20000))) fail(`the view still draws the old model after the file was overwritten outside (radius ${await radius()}, was ${was})`);
+    // The same with an unsaved terrain edit: the art follows, the edit and its undo stay.
+    const now = await radius();
+    const height = () => page.evaluate(`(() => { const t = window.__artReloadEd.terrain, i = Math.round(-t.offsetY / 128) * t.width + Math.round(-t.offsetX / 128); return t.corners[i].height; })()`);
+    const h0 = await height();
+    const raised = await page.evaluate(`(() => {
+      const ed = window.__artReloadEd, t = ed.terrain, i = Math.round(-t.offsetY / 128) * t.width + Math.round(-t.offsetX / 128), was = t.corners[i].height;
+      t.corners[i].height = was + 64;
+      return ed.commitTerrain({ corners: [i], undo: () => { t.corners[i].height = was; }, redo: () => { t.corners[i].height = was + 64; } });
+    })()`);
+    if (!raised) return fail("the raise was refused");
+    await settled(page);
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) return fail("the raise left the tab clean (control)");
+    await new Promise((r) => setTimeout(r, 1100));
+    writeFileSync(file, footman);
+    await focus();
+    if (!(await soon(async () => { const r = await radius(); return r !== null && Math.abs(r - now) > 0.01; }, 20000))) fail(`a terrain tab with unsaved edits still draws the old model after the overwrite (radius ${await radius()}, was ${now})`);
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the unsaved edit is gone after the art reload");
+    if ((await height()) !== h0 + 64) fail("the unsaved edit was undone or replaced by the art reload");
+    await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(page);
+    if ((await height()) !== h0) fail("undo after the art reload didn't take the edit back");
   } finally {
     await page.evaluate(`window.__artReloadGroup?.dispose(); window.__artReloadGroup = null; window.__artReloadEd = null;`);
   }

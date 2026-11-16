@@ -438,7 +438,13 @@ export class EditorService {
     for (const t of this.tabs.filter((x) => x.provider)) {
       if (t.loading) { for (const k of paths) t.missed?.add(k); continue; }
       if (![...paths].some((k) => this.shows(t, k)) && !(t.failed && paths.has(this.key(t.path)))) continue;
-      if (this.unsaved(t)) { kept.push(t.path); continue; }
+      if (this.unsaved(t)) {
+        // Unsaved changes stay. Only files the editor takes without touching them (imported art) are reloaded; its own file isn't.
+        const safe = [...paths].filter((k) => this.key(t.path) !== k && this.shows(t, k) && t.instance?.reloadsWithEdits?.(k.toLowerCase()));
+        if (t.instance?.reloadFile && safe.length) await Promise.all(safe.map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)));
+        if (paths.has(this.key(t.path)) || [...paths].some((k) => this.shows(t, k) && !safe.includes(k))) kept.push(t.path);
+        continue;
+      }
       const own = paths.has(this.key(t.path));
       const inPlace = !own && t.instance?.reloadFile
         ? (await Promise.all([...paths].filter((k) => this.shows(t, k)).map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)))).every(Boolean)

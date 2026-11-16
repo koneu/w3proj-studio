@@ -184,6 +184,9 @@ export interface EditorInstance {
    *  takes the change in place, keeping what it has loaded. False: opened again, which is slow.
    *  `path`: the project path in lower case (on any system), to compare with lower-cased names. */
   reloadFile?(path: string): Promise<boolean>;
+  /** True for a watched file whose reloadFile is safe with unsaved changes (it only redraws, e.g. imported art): then
+   *  it's called even while the editor has unsaved changes, which stay as they are. */
+  reloadsWithEdits?(path: string): boolean;
   /** Other project files the editor shows (e.g. "map/war3map.wts" for TRIGSTR texts): when
    *  something else saves one, the editor is opened again if it has no unsaved changes. (Its own
    *  file always counts: saved by something else, it reopens, or asks when there are unsaved
