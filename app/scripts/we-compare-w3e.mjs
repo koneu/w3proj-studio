@@ -106,6 +106,14 @@ export function unitHeights(json) {
   return { units: (json.units ?? []).map((u) => ({ id: u.id, x: u.position[0], y: u.position[1], z: u.position[2] })) };
 }
 
+/** war3map.doo (doodads and destructables) as the codecs' JSON, reduced to which ones are left and where, by the 64 square
+ *  they stand in (the editor snaps what it opens to its doodad grid: 64, a 2x2 pathing one 32 further), sorted: for runs
+ *  that delete the objects a click picks (doodad-pick-we). */
+export function doodadPlaces(json) {
+  return { doodads: (json.doodads ?? []).map((d) => ({ id: d.id, x: Math.floor(d.position[0] / 64), y: Math.floor(d.position[1] / 64) }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.x - b.x || a.y - b.y)) };
+}
+
 /** war3mapUnits.doo as the codecs' JSON, reduced to how its objects are numbered, for runs that place a different number
  *  of objects at random spots (a scatter fill against the editor's pastes): whether every editor id is its own, whether
  *  they run 0, 1, 2, … in file order, and the kinds of object there (id, and a random object's type, group and position),

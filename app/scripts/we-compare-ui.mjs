@@ -6,7 +6,7 @@
 //
 // Actions: tab NAME (the terrain editor's tab, "Terrain"); view SPEC (the terrain view at the editor's size, the camera "we" or "we:X,Y[,distance…]" as app-drive's
 // --camera); tool PREFIX (the toolbar button whose title starts so: "Paint:", "−2:"); texture TILE (a ground tile in the
-// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider); click X,Y and drag X,Y,X2,Y2 (the left button, at editor positions);
+// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider); key KEY (pressed on the view's canvas); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2 (the left button, at editor positions);
 // sleep MS. Needs window.__driveEd (the "terrain" step). Positions and tool names are those of the page, not a copy.
 
 import { Hands, sleep } from "./cdp.mjs";
@@ -51,6 +51,22 @@ export async function uiStep(page, actions) {
       await hands.mouse("mousePressed", p.x, p.y, 1);
       await hands.mouse("mouseReleased", p.x, p.y, 0);
       await sleep(500);
+      await settled();
+    } else if (kind === "clickGround") {
+      // The left button on the ground point (X, Y, 0), where Studio's own camera shows it (not where the editor's would).
+      const p = await page.evaluate(`window.__driveEd.project([${Number(a[0])}, ${Number(a[1])}, ${Number(a[2] ?? 0)}])`);
+      if (!p) throw new Error(`the ground point ${a.join(",")} is behind the camera`);
+      const [x, y] = p.map(Math.round);
+      if (!(x >= 0 && y >= 0 && x < 1184 && y < 844)) throw new Error(`the ground point ${a.join(",")} is at ${x},${y}, outside the view`);
+      await hands.mouse("mouseMoved", x, y);
+      await hands.mouse("mousePressed", x, y, 1);
+      await hands.mouse("mouseReleased", x, y, 0);
+      await sleep(500);
+      await settled();
+    } else if (kind === "key") {
+      // A key (KeyboardEvent.key, as the page's own handlers read it) pressed on the terrain view's canvas.
+      await page.evaluate(`(async () => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${JSON.stringify(a[0])}, code: ${JSON.stringify(a[0])}, bubbles: true })); await new Promise((r) => setTimeout(r, 40)); })()`);
+      await sleep(200);
       await settled();
     } else if (kind === "drag") {
       await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20);

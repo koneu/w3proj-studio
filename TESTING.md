@@ -206,6 +206,18 @@ runs in two worktrees don't share settings; none of these tools starts the game 
 - **Projection for clicks**: with `--look X,Y,D` (angle 304, fov 70, rotation 90) a ground point maps to the display
   through TESTING's Studio-equivalent camera (target y - 0.0993 D, distance 0.9127 D, pitch 57.2, vertical fov 41.06,
   the view at 156,79): the status bar read (3713.9, 515.4) where (3712, 512) was aimed (`proj.py` in that folder).
+- **Picking a doodad** (branch doodad-pick-we, 2026-11-16, SD; spec `doodad-pick-we`, input and steps by
+  `tests/fixtures/we-compare/make-doodad-pick-input.mjs`, whose `project` is the formula above): a click on bare flat
+  ground, then Delete, on a tree LTlt, a rock LRrk (4x4 pathing) and a rune XOmr (2x2), 0 and 30, 45, 60, 80, 100, 130
+  units from the centre towards E, W, N, S, from a view of 2000 (the editor snaps what it opens: 64, the rune 32 further,
+  so the input stands on those). The editor picks where the model is on the screen, not by the footprint: tree hit to 60
+  all round (W80 too, E80 no), rock to 80 all round, rune 30 (45 on one side); north (above the foot, the model's height)
+  tree and rock 130, rune 100, none of them south or beside at 100. Studio's footprint cylinder (radius 32, 64, 32) missed
+  the rock at E80 and W80, the tree at W80 and picked the rune at S30. Now (`renderer.ts` pickObject, `meshpick.ts`): the
+  model's triangles inside its bounding sphere and box, and the cylinder besides. Studio's table with the clicks put where
+  Studio's own camera shows the ground (`clickGround`: its 3D view isn't the editor's) agrees on 69 of 75 (before 66):
+  tree S60, S80, rock S60, rune S30, E45, N80 differ (the rock's and the tree's S60 also under the old rule: a click
+  there misses in Studio's frame; the rune is a thin model). Only mesh (no cylinder): rune 20 of 25, tree and rock 24.
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.

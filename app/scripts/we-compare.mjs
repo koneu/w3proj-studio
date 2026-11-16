@@ -30,7 +30,7 @@
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
 //               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run.
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
-//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object). Studio step { "ui": [["tab","Terrain"],
+//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in). Studio step { "ui": [["tab","Terrain"],
 //               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.
 //
 // Output: a short report on stdout (OK / UNEXPECTED per spec, MATCH / DIFFERS per file with the first differences:
@@ -46,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { asExpected, autoKind, compareFile, formatReport, parseSpecFile } from "./we-compare-core.mjs";
-import { unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
@@ -257,6 +257,7 @@ function compareSpec(spec, cli, game, opts) {
       if (!r.listed(c.file) && !r.has(c.file)) return null;
       if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(c.file)) };
       if (kind === "unit-heights") return r.unpackedAs(c.file) === "json" ? { json: unitHeights(r.json(c.file)) } : null;
+      if (kind === "doodad-places") return r.unpackedAs(c.file) === "json" ? { json: doodadPlaces(r.json(c.file)) } : null;
       if (kind === "unit-ids") return r.unpackedAs(c.file) === "json" ? { json: unitIds(r.json(c.file)) } : null;
       if (kind === "parsed") return r.unpackedAs(c.file) === "json" ? { json: r.json(c.file) } : null;
       if (kind === "text") return { text: r.text(c.file) };

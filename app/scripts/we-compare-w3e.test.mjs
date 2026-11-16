@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { heightSpread, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, heightSpread, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
@@ -117,4 +117,13 @@ test("variationSpread: the ground variations by texture, counted; w3e-variation 
   assert.deepEqual(w3eView("w3e-variation", many(1)).Ldrt.ground, [4, 8], "a value under 5% of the corners is left out");
   assert.deepEqual(w3eView("w3e-variation", many(1)), w3eView("w3e-variation", many(2)), "so which rare value was drawn doesn't matter");
   assert.notDeepEqual(w3eView("w3e-variation", run([3, 5])), w3eView("w3e-variation", run([3, 6])), "control: another set of values");
+});
+
+test("doodadPlaces: which doodads are left, by the 64 square, whatever their order, snapping and other fields", () => {
+  const d = (id, x, y, extra = {}) => ({ id, position: [x, y, 0], angle: 1, ...extra });
+  const a = doodadPlaces({ doodads: [d("XOmr", 1056, -96), d("LTlt", -1536, 64)] });
+  assert.deepEqual(a, { doodads: [{ id: "LTlt", x: -24, y: 1 }, { id: "XOmr", x: 16, y: -2 }] });
+  assert.deepEqual(doodadPlaces({ doodads: [d("LTlt", -1530, 70, { angle: 3 }), d("XOmr", 1024, -128)] }), a, "snapped within the square, order and angle don't count");
+  assert.notDeepEqual(doodadPlaces({ doodads: [d("XOmr", 1056, -96)] }), a, "control: one doodad fewer");
+  assert.notDeepEqual(doodadPlaces({ doodads: [d("XOmr", 1120, -96), d("LTlt", -1536, 64)] }), a, "control: another square");
 });

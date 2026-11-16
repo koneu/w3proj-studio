@@ -5,8 +5,9 @@
 import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
+import { rayBox, rayMesh } from "./meshpick";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -1405,15 +1406,15 @@ export class TerrainRenderer {
 
   /** The nearest placed object a ray hits. With `radiusOf`, objects are
    *  upright cylinders of that radius (their footprint) standing at their
-   *  position up to the top of the model; otherwise the model's bounding sphere.
+   *  position up to the top of the model (a doodad or destructable with a model: its bounding box); otherwise the model's bounding sphere.
    *  `extra` are objects drawn without a model of their own (the stand-ins of
    *  objects shown as markers), picked the same way; a hidden group's are left out too. */
   pickObject(ray: { origin: Vec3; dir: Vec3 }, radiusOf?: (inst: ObjectInstance) => number | undefined,
     extra: readonly { group: string; inst: ObjectInstance }[] = []): ObjectInstance | null {
     const { origin: o, dir: d } = ray;
     let best: ObjectInstance | null = null, bestT = Infinity;
-    const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances, editorOnly: b.editorOnly })),
-      ...extra.map((s) => ({ group: s.group, instances: [s.inst], editorOnly: s.inst.pick?.id === "sloc" }))];
+    const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances, editorOnly: b.editorOnly, box: b.gpu?.model ? bounds(b.gpu.model) : undefined, geosets: b.gpu?.model?.geosets })),
+      ...extra.map((s) => ({ group: s.group, instances: [s.inst], editorOnly: s.inst.pick?.id === "sloc", box: undefined, geosets: undefined }))];
     for (const b of sources) {
       // By the toggles alone: what's left out otherwise (the shoreline) has nothing to pick. Nor have the start
       // locations in game view.
@@ -1425,11 +1426,22 @@ export class TerrainRenderer {
         const [cx, cy, cz, sr] = inst.sphere;
         const r = inst.follows ? undefined : radiusOf?.(inst);
         let t = Infinity;
-        if (r === undefined) {
+        // A doodad or destructable is picked by its model (the World Editor, doodad-pick-we), when the ray is near it
+        // at all (the model's box is inside its bounding sphere); its footprint's cylinder (below) picks it too, so
+        // that a model of next to no triangles under the click (a rune's ring) can still be hit at its foot.
+        const meshed = !inst.follows && !!b.box && (pick.kind === "w3d" || pick.kind === "w3b");
+        if (meshed) {
           const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
           const p = ox * d[0] + oy * d[1] + oz * d[2], q = ox * ox + oy * oy + oz * oz - sr * sr;
-          const disc = p * p - q;
-          if (disc >= 0) t = -p - Math.sqrt(disc);
+          if (p * p - q >= 0 && rayBox(b.box!, inst.world, o, d) < Infinity) t = b.geosets?.some((g) => g.lod === 0 && g.faces.length >= 3) ? rayMesh(b.geosets, inst.world, o, d) : rayBox(b.box!, inst.world, o, d);
+        }
+        if (r === undefined) {
+          if (!meshed) {
+            const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
+            const p = ox * d[0] + oy * d[1] + oz * d[2], q = ox * ox + oy * oy + oz * oz - sr * sr;
+            const disc = p * p - q;
+            if (disc >= 0) t = -p - Math.sqrt(disc);
+          }
         } else {
           const [px, py, pz] = pick.placed.position;
           const bottom = pz - 16, top = Math.max(pz + 32, cz + sr * 0.8);
