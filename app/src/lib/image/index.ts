@@ -317,8 +317,13 @@ function decodeTga(b: Uint8Array): DecodedImage {
 
   const n = width * height;
   checkSize(width, height);
-  // At best a run of 128 pixels takes two bytes. Cut-off files stay readable, so this isn't exact.
-  if (n > b.length * 64) throw new Error(`TGA of ${width}×${height} in ${b.length} bytes`);
+  if (rle) {
+    // At best a run of 128 pixels takes two bytes. Cut-off files stay readable, so this isn't exact.
+    if (n > b.length * 64) throw new Error(`TGA of ${width}×${height} in ${b.length} bytes`);
+  } else if (b.length < p + n * pixelBytes) {
+    // Without RLE the header names the pixel data's size exactly: a short file is refused before allocating.
+    throw new Error(`TGA of ${width}×${height} needs ${p + n * pixelBytes} bytes, file has ${b.length}`);
+  }
   // Decode the pixel stream (raw or RLE) into storage order.
   const stream = new Uint8Array(n * pixelBytes);
   if (rle) {
