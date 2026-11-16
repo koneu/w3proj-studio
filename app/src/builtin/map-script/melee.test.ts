@@ -36,7 +36,7 @@ function lake(size?: number): Uint8Array {
 
 /** The mini map as a melee map with a neutral gold mine and Player 1's start at `start`, and the app's API around the
  *  map script extension. `own`: more files (or replacements). `off`: the Melee flag cleared. `game`: the game's files. */
-function project(opts: { generateOnSave: boolean; start?: [number, number]; mine?: [number, number]; own?: Record<string, string>; bytes?: Record<string, Uint8Array>; dirty?: boolean; off?: boolean; game?: Record<string, string> }) {
+function project(opts: { generateOnSave: boolean; start?: [number, number]; mine?: [number, number]; own?: Record<string, string>; bytes?: Record<string, Uint8Array>; dirty?: boolean; off?: boolean; game?: Record<string, string>; gameBytes?: Record<string, Uint8Array> }) {
   const info = JSON.parse(fixture("war3map.w3i.json"));
   // A melee map by every rule (the mini map's game data set 2 is a reason).
   info.flags |= MELEE;
@@ -66,7 +66,7 @@ function project(opts: { generateOnSave: boolean; start?: [number, number]; mine
     output: { channel: () => ({ append() {} }) },
     services: { provide: () => none },
     settings: { get: (key: string) => (key === "script.generateOnSave" ? opts.generateOnSave : undefined) },
-    game: { readText: async (p: string) => opts.game?.[p] ?? "", read: async (p: string) => { throw notFound(p); } },
+    game: { readText: async (p: string) => opts.game?.[p] ?? "", read: async (p: string) => { const b = opts.gameBytes?.[p]; if (!b) throw notFound(p); return b; } },
     window: { showInfo: async () => undefined, showWarning: async () => undefined, showError: async () => undefined, notify: async () => undefined },
     editors: { isDirty: (p: string) => !!opts.dirty && p === "map/war3map.w3i.json", registerProvider: () => none, open: async () => {} },
     commands: {
@@ -149,18 +149,22 @@ test("Map Properties with unsaved changes isn't written over: it gets its turn w
 // The World Editor's save makes a map melee again when it meets the rules; Studio's does when it can tell they're met.
 test("a map that meets the melee rules gets the flag back when its triggers or doodads are saved", async () => {
   const slk = 'ID;PWXL;N;E\nC;Y1;X1;K"tileID"\nC;X2;K"buildable"\nC;Y2;X1;K"Ldrt"\nC;X2;K1\nE\n';
-  const units = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"pathTex"\nC;Y2;X1;K"nftk"\nC;X2;K"_"\nE\n';
+  // A tree (LTlt) with a 4 x 4 pathing texture that blocks everything: an uncompressed 24-bit TGA.
+  const dests = 'ID;PWXL;N;E\nC;Y1;X1;K"DestructableID"\nC;X2;K"pathTex"\nC;Y2;X1;K"LTlt"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
+  const tga = new Uint8Array(18 + 4 * 4 * 3).fill(255);
+  tga.set([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 4, 0, 24, 0]);
   const doodads = (x: number) => JSON.stringify({ doodads: [{ id: "LTlt", position: [x, 1024, 0] }], specials: [] });
   const make = (treeX: number) => project({
     generateOnSave: false, off: true, start: [1024, 1024], mine: [1024 + 750, 1024], bytes: { "map/war3map.w3e": lake(17) },
-    own: { "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("Melee")), "map/war3map.doo.json": doodads(treeX) }, game: { "TerrainArt\\Terrain.slk": slk, "Units\\UnitData.slk": units },
+    own: { "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("Melee")), "map/war3map.doo.json": doodads(treeX) },
+    game: { "TerrainArt\\Terrain.slk": slk, "Units\\DestructableData.slk": dests }, gameBytes: { "PathTextures\\4x4Default.tga": tga },
   });
-  const p = make(1024 + 600);
+  const p = make(1024 + 320);
   await p.save("map/war3map.wtg.json");
   assert.equal(p.flags() & MELEE, MELEE);
-  const tree = make(1024 + 200);
+  const tree = make(1024 + 256);
   await tree.save("map/war3map.doo.json");
-  assert.equal(tree.flags() & MELEE, 0, "a tree 200 from the start: left off");
+  assert.equal(tree.flags() & MELEE, 0, "a tree 256 from the start, its cells on the start's square: left off");
   const custom = make(1024 + 600);
   await custom.save("map/war3map.wtg.json", (f) => { (f.items as { type: number; name: string }[]).find((i) => i.type === 8)!.name = "Mine"; });
   assert.equal(custom.flags() & MELEE, 0, "custom triggers: left off");

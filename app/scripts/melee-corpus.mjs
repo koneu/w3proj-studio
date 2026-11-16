@@ -53,6 +53,12 @@ const gameText = async (p) => {
   if (!tables.has(p)) tables.set(p, gameCat(p).toString("utf8"));
   return tables.get(p);
 };
+// The game's files (pathing textures), read once.
+const gameFiles = new Map();
+const gameBytes = async (p) => {
+  if (!gameFiles.has(p)) gameFiles.set(p, new Uint8Array(gameCat(p)));
+  return gameFiles.get(p);
+};
 
 const listed = run(["game", "--install", game, "ls", filter]).toString("utf8").split(/\r?\n/).filter((l) => /\.w3[xm]$/i.test(l));
 const results = [];
@@ -78,6 +84,7 @@ for (const line of listed) {
     readText: async (p) => readFileSync(join(root, p), "utf8"),
     readBytes: async (p) => new Uint8Array(readFileSync(join(root, p))),
     gameText,
+    gameBytes,
   };
   let info, placed;
   try {

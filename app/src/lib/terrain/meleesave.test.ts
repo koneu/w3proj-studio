@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtgJson } from "../triggers/wtg";
-import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startsPastPlayable, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import type { PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** Rows from the north, a char per corner: `w` ground at -100 under water at 50, `.` dry ground at 0. */
@@ -118,23 +119,49 @@ function flat(size = 17, edit?: (c: Corner, x: number, y: number) => void): Terr
 }
 /** TerrainArt's Terrain.slk with Ldrt buildable and Lrok not. */
 const TERRAIN_SLK = 'ID;PWXL;N;E\nC;Y1;X1;K"tileID"\nC;X2;K"buildable"\nC;Y2;X1;K"Ldrt"\nC;X2;K1\nC;Y3;X1;K"Lrok"\nC;X2;K0\nE\n';
-/** Units' UnitData.slk: a creep without pathing, a tavern and a gold mine with. */
-const UNIT_SLK = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"pathTex"\nC;Y2;X1;K"nftk"\nC;X2;K"_"\nC;Y3;X1;K"ntav"\nC;X2;K"PathTextures\\8x8SimpleSolid.tga"\nC;Y4;X1;K"ngol"\nC;X2;K"PathTextures\\16x16Goldmine.tga"\nE\n';
-const GAME: Record<string, string> = { "TerrainArt\\Terrain.slk": TERRAIN_SLK, "Units\\UnitData.slk": UNIT_SLK };
-/** The start locations' surroundings: `doodads`, the tile Ldrt buildable, the creep nftk without pathing. */
-const around = (doodads: { x: number; y: number; reach: number }[] = []) => ({ doodads, buildable: new Set(["Ldrt"]), unpathed: new Set(["nftk"]) });
+/** Doodads.slk: a flower (no pathing), a rock (4 × 4), a cave (special doodad, 4 × 4); DestructableData.slk: a cage
+ *  (empty), a tree (4 × 4). */
+const DOODADS_SLK = 'ID;PWXL;N;E\nC;Y1;X1;K"doodID"\nC;X2;K"pathTex"\nC;Y2;X1;K"APms"\nC;X2;K"none"\nC;Y3;X1;K"LOrk"\nC;X2;K"PathTextures\\4x4Default.tga"\nC;Y4;X1;K"DTg1"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
+const DESTS_SLK = 'ID;PWXL;N;E\nC;Y1;X1;K"DestructableID"\nC;X2;K"pathTex"\nC;Y2;X1;K"YTc1"\nC;X2;K""\nC;Y3;X1;K"LTlt"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
+const GAME: Record<string, string> = { "TerrainArt\\Terrain.slk": TERRAIN_SLK, "Doodads\\Doodads.slk": DOODADS_SLK, "Units\\DestructableData.slk": DESTS_SLK };
+/** An uncompressed 24-bit TGA of n × n white pixels: a pathing texture that blocks everything. */
+function tga(n: number): Uint8Array {
+  const b = new Uint8Array(18 + n * n * 3).fill(255);
+  b.set([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, n, 0, n, 0, 24, 0]);
+  return b;
+}
+const GAME_FILES: Record<string, Uint8Array> = { "PathTextures\\4x4Default.tga": tga(4) };
+const gameBytes = async (p: string) => { if (!(p in GAME_FILES)) throw new Error(`not found: ${p}`); return GAME_FILES[p]; };
+const RULES = new Map([["Ldrt", { walkable: true, buildable: true, flyable: true }], ["Lrok", { walkable: true, buildable: false, flyable: true }]]);
+/** A 4 × 4 pathing texture (a tree) at x, y. */
+const tree = (x: number, y: number): PathingStamp => ({ x, y, angle: 0, width: 4, height: 4, rgba: new Uint8Array(64).fill(255) });
+/** The start locations' surroundings on `t`: its pathing with `stamps`, and doodads of unknown pathing. */
+const around = (t: Terrain, stamps: PathingStamp[] = [], unknown: { x: number; y: number }[] = []) => ({ pathing: startPathing(t, RULES, stamps), unknown });
 const OFF = MELEE & ~4;
-/** The middle of flat()'s map, and a start there. */
+/** The middle of flat()'s map (corner 8, cell 32), and a start there. */
 const MID = 8 * 128, startMid = start(MID, MID);
-/** Everything known, nothing in the way. */
-const clean = (): MeleeFacts => ({ customConstants: false, terrain: flat(), constantsKnown: true, customData: false, defaultTriggers: true, around: around() });
+/** Everything known, nothing in the way; `t` the ground, `stamps` what stands on it. */
+const clean = (t = flat(), stamps: PathingStamp[] = [], unknown: { x: number; y: number }[] = []): MeleeFacts =>
+  ({ customConstants: false, terrain: t, constantsKnown: true, customData: false, defaultTriggers: true, around: around(t, stamps, unknown) });
 
 test("the flag goes back on when Studio can tell every rule is met", () => {
-  const placed = [startMid, { id: "ngol", player: 27, position: [MID + 700, MID, 0] }];
+  const placed = [startMid, { id: "ngol", player: 27, position: [MID + 750, MID, 0] }];
   assert.deepEqual(meleeSetBlockers({ flags: OFF }, placed, clean()), []);
   assert.deepEqual(meleeAfterSave({ flags: OFF }, placed, clean()), { flags: MELEE, reasons: [] });
-  // A doodad, a tree, a unit just outside the starts' surroundings.
-  assert.equal(meleeAfterSave({ flags: OFF }, [...placed, { id: "ntav", player: 27, position: [MID, MID - 600, 0] }], { ...clean(), around: around([{ x: MID + 520, y: MID, reach: 0 }]) }).flags, MELEE);
+  // What the World Editor's save measured as valid (tests/we-compare/melee-valid-we.json), each alone.
+  const on = (facts: MeleeFacts, more: object[] = []) => meleeAfterSave({ flags: OFF }, [startMid, ...more] as never[], facts).flags === MELEE;
+  assert.ok(on(clean(flat(), [tree(MID + 320, MID)])), "a tree 320 away: its cells touch the square");
+  assert.ok(on(clean(flat(), [tree(MID - 320, MID)])), "a tree 320 to the west");
+  assert.ok(on(clean(flat(), [tree(MID + 320, MID + 256)])), "a tree at (320, 256)");
+  assert.ok(on(clean(), [{ id: "ngol", player: 27, position: [MID + 530.5, MID + 530.5, 0] }]), "a gold mine 750.2 away on the diagonal");
+  assert.ok(on(clean(), [{ id: "ntav", player: 24, position: [MID, MID, 0] }]), "a tavern on the start: other units don't count");
+  assert.ok(on(clean(), [{ id: "ratc", player: 27, position: [MID + 64, MID, 0] }]), "an item 64 away");
+  for (const [dx, dy] of [[496, 0], [504, 0], [512, 0], [512, 480], [-504, 0]]) assert.ok(on(clean(), [{ ...start(MID + dx, MID + dy), player: 1 }]), `another start at (${dx}, ${dy}): rounded to the cells, the squares don't overlap`);
+  assert.ok(on(clean(flat(17, (c, x) => { if (x >= 9) c.blight = true; }))), "blight from 128 away");
+  assert.ok(on(clean(flat(17, (c, x) => { if (x >= 11) c.texture = 1; }))), "Lrok from corner 11: its cells from 320");
+  assert.ok(on(clean(flat(17, (c, x) => { if (x >= 11) c.layer = 3; }))), "a cliff up at corner 11: its cells from 256");
+  assert.ok(on(clean(flat(17, (c, x) => { if (x >= 11) { c.hasWater = true; c.water = 25; } }))), "shallow water from corner 11");
+  assert.ok(on(clean(flat(), [], [{ x: MID + 768, y: MID }])), "a doodad of unknown pathing 768 away");
 });
 
 test("the flag stays off for a reason, and where Studio can't tell", () => {
@@ -150,21 +177,34 @@ test("the flag stays off for a reason, and where Studio can't tell", () => {
   assert.equal(left({ customConstants: true }), true, "custom gameplay constants");
   assert.equal(left({ customData: true }), true, "custom object data");
   assert.equal(left({ defaultTriggers: false }), true, "custom triggers");
-  // Start locations in invalid positions: trees about 200 away and a tavern at 250 made them so in the World Editor.
-  assert.equal(left({ around: around([{ x: MID + 200, y: MID, reach: 0 }]) }), true, "a tree 200 away");
-  assert.equal(left({ around: around([{ x: MID + 400, y: MID, reach: 256 }]) }), true, "a special doodad reaching in");
-  assert.equal(left({}, [{ id: "ntav", player: 27, position: [MID + 250, MID, 0] }]), true, "a tavern 250 away");
-  assert.equal(left({}, [start(MID + 300, MID)]), true, "another start close by");
-  assert.equal(left({}, [{ id: "nftk", player: 24, position: [MID + 12, MID, 0] }]), false, "control: a creep (no pathing) doesn't count");
-  assert.equal(left({}, [{ id: "ratf", player: 27, position: [MID + 300, MID, 0] }]), true, "an item (not a unit type) counts");
-  assert.equal(left({ terrain: flat(17, (c, x) => { if (x === 11) c.layer = 3; }) }), true, "a cliff 384 away");
-  assert.equal(left({ terrain: flat(17, (c, x) => { if (x === 12) c.ramp = true; }) }), true, "a ramp");
-  assert.equal(left({ terrain: flat(17, (c, x, y) => { if (x === 9 && y === 9) c.blight = true; }) }), true, "blight");
-  assert.equal(left({ terrain: flat(17, (c, x, y) => { if (x === 10 && y === 8) c.texture = 1; }) }), true, "an unbuildable tile");
-  assert.equal(left({ terrain: flat(17, (c, x) => { if (x === 4) { c.hasWater = true; c.water = 50; } }) }), true, "water");
-  assert.equal(left({ terrain: flat(17, (c) => { c.hasWater = true; }) }), false, "control: the water flag with the surface below the ground");
-  assert.equal(left({ terrain: flat(9) }), true, "close to the map's edge");
-  assert.equal(left({ terrain: flat(17, (c, x) => { if (x === 0) c.layer = 3; }) }), false, "control: a cliff far away doesn't count");
+  // Start locations in invalid positions, as the World Editor's save measured them (melee-valid-we.json): a cell of the
+  // start's 16 × 16 square (cells 24..39 here) not buildable, another start's square overlapping, a mine within 750.
+  const at = (t: Terrain, stamps: PathingStamp[] = []) => ({ terrain: t, around: around(t, stamps) });
+  assert.equal(left(at(flat(), [tree(MID + 256, MID)])), true, "a tree 256 away");
+  assert.equal(left(at(flat(), [tree(MID - 256, MID)])), true, "a tree 256 to the west");
+  assert.equal(left(at(flat(), [tree(MID + 256, MID + 256)])), true, "a tree at (256, 256): a square, not a circle");
+  assert.equal(left({}, [{ id: "ngol", player: 27, position: [MID + 749, MID, 0] }]), true, "a gold mine 749 away");
+  assert.equal(left({}, [{ id: "ngol", player: 27, position: [MID + 528, MID + 528, 0] }]), true, "a gold mine 746.7 away on the diagonal");
+  assert.equal(left({}, [{ ...start(MID + 488, MID), player: 1 }]), true, "another start 488 away (cell 15)");
+  assert.equal(left({}, [{ ...start(MID + 480, MID + 480), player: 1 }]), true, "another start at (480, 480)");
+  assert.equal(left({}, [{ ...start(MID - 496, MID), player: 1 }]), true, "another start 496 to the west: halves round up, to cell 17");
+  assert.equal(left({}, [{ id: "nftk", player: 24, position: [MID + 12, MID, 0] }]), false, "control: a creep doesn't count");
+  assert.equal(left(at(flat(17, (c, x) => { if (x >= 10) c.layer = 3; }))), true, "a cliff up at corner 10: its cells from 128");
+  assert.equal(left(at(flat(17, (c, x) => { if (x >= 10) c.texture = 1; }))), true, "Lrok from corner 10: its cells from 192");
+  assert.equal(left(at(flat(17, (c, x) => { if (x >= 10) { c.hasWater = true; c.water = 25; } }))), true, "shallow water from corner 10: the shore's cells from 192");
+  assert.equal(left(at(flat(17, (c, x) => { if (x === 7) { c.hasWater = true; c.water = 50; } }))), true, "a line of water 128 away");
+  assert.equal(left(at(flat(17, (c) => { c.hasWater = true; }))), false, "control: the water flag with the surface below the ground");
+  assert.equal(left(at(flat(17, (c, x, y) => { if (x === 9 && y === 9) c.boundary = true; }))), true, "Boundary painted on the square");
+  assert.equal(left(at(flat(9))), true, "the square past the map's edge");
+  const edged = flat();
+  markMapEdge(edged, [0, 7, 0, 0]);
+  assert.equal(left(at(edged)), true, "the square on tiles past the playable map (from tile 9)");
+  const edgedFar = flat();
+  markMapEdge(edgedFar, [0, 6, 0, 0]);
+  assert.equal(left(at(edgedFar)), false, "control: from tile 10, outside the square");
+  assert.equal(left(at(flat(17, (c, x) => { if (x === 0) c.layer = 3; }))), false, "control: a cliff far away doesn't count");
+  assert.equal(left({ around: { ...around(flat()), unknown: [{ x: MID + 700, y: MID - 700 }] } }), true, "a doodad of unknown pathing within reach");
+  assert.equal(left({ around: { pathing: new Uint8Array(16) } }), true, "a pathing map of another size");
   // Not known.
   assert.equal(left({ constantsKnown: false }), true, "gameplay constants unreadable");
   assert.equal(left({ defaultTriggers: undefined }), true, "triggers not read");
@@ -178,15 +218,16 @@ test("the flag stays off for a reason, and where Studio can't tell", () => {
 test("the facts for putting the flag back come from the project; unreadable ones leave it", async () => {
   const t = flat();
   const units = [startMid];
-  const doo = (list: { position: number[] }[], specials: object[] = []) => JSON.stringify({ doodads: list, specials });
+  const doo = (list: { id?: string; position: number[] }[], specials: object[] = []) => JSON.stringify({ doodads: list, specials });
   const project = (own: Record<string, string | Uint8Array | Error> = {}) => ({
-    ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": doo([{ position: [MID + 600, MID, 0] }]), ...own }),
+    ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, MID, 0] }]), ...own }),
     gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; },
+    gameBytes,
   });
   const flags = async (ws: MeleeFiles) => (await savedMelee(ws, { flags: OFF }, units)).flags;
   assert.equal(await flags(project()), MELEE, "everything known and met");
   assert.equal(await flags(project({ "map/war3map.wtg.json": "", "map/war3map.wtg": defaultWtg("x") })), OFF, "an empty trigger JSON wins over the raw file");
-  const rawOnly = { ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg": defaultWtg("x"), "map/war3map.doo.json": doo([]) }), gameText: async (p: string) => GAME[p] };
+  const rawOnly = { ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg": defaultWtg("x"), "map/war3map.doo.json": doo([]) }), gameText: async (p: string) => GAME[p], gameBytes };
   assert.equal(await flags(rawOnly), MELEE, "a raw default war3map.wtg");
   const renamed = defaultTriggerFile("x");
   renamed.items.find((i) => i.type === 8)!.name = "Mine";
@@ -196,17 +237,27 @@ test("the facts for putting the flag back come from the project; unreadable ones
   assert.equal(await flags(project({ "map/war3mapSkin.txt": "[Misc]\r\nFoo=1\r\n" })), OFF, "a custom game interface");
   assert.equal(await flags(project({ "map/war3mapMisc.txt": new Error("EACCES") })), OFF, "gameplay constants unreadable");
   assert.equal(await flags(project({ "map/war3mapMisc.txt": "" })), MELEE, "control: an empty war3mapMisc.txt sets none");
-  assert.equal(await flags(project({ "map/war3map.doo.json": doo([{ position: [MID + 150, MID, 0] }]) })), OFF, "a tree close by");
-  assert.equal(await flags(project({ "map/war3map.doo.json": doo([], [{ id: "DTg1", x: 9, y: 8, z: 0 }]) })), OFF, "a special doodad close by");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 256, MID, 0] }]) })), OFF, "a tree 256 away");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 320, MID, 0] }]) })), MELEE, "control: a tree 320 away");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([], [{ id: "DTg1", x: 9, y: 8, z: 0 }]) })), OFF, "a special doodad on the square");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([], [{ id: "DTg1", x: 13, y: 8, z: 0 }]) })), MELEE, "control: a special doodad beside it");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([], [{ id: "Xzzz", x: 13, y: 8, z: 0 }]) })), OFF, "a special doodad of a type the tables don't have");
   assert.equal(await flags(project({ "map/war3map.doo.json": "{" })), OFF, "doodads unreadable");
+  assert.equal(await flags(project({ "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, Number.NaN, 0] }]) })), OFF, "a doodad without a position");
   const noDoo = project();
   assert.equal(await flags({ ...noDoo, files: () => noDoo.files().filter((f) => !f.path.endsWith(".doo.json")) }), OFF, "no doodad file");
   assert.equal(await flags({ ...project(), gameText: undefined }), OFF, "no game to read the tables from");
-  assert.equal(await flags({ ...project(), gameText: async (p: string) => (p === "Units\\UnitData.slk" ? UNIT_SLK : "") }), OFF, "an empty Terrain.slk");
-  assert.equal(await flags({ ...project(), gameText: async (p: string) => (p === "Units\\UnitData.slk" ? "" : TERRAIN_SLK) }), OFF, "an empty UnitData.slk");
+  assert.equal(await flags({ ...project(), gameText: async (p: string) => (p === "TerrainArt\\Terrain.slk" ? "" : GAME[p]) }), OFF, "an empty Terrain.slk");
+  // A doodad whose pathing can't be told (its type or texture unknown) counts within reach of a start, and only there.
+  assert.equal(await flags({ ...project(), gameText: async (p: string) => (p === "Units\\DestructableData.slk" ? "" : GAME[p]) }), OFF, "the tree's type unknown, 600 away");
+  assert.equal(await flags({ ...project(), gameBytes: undefined }), OFF, "no game to read the pathing texture from");
+  assert.equal(await flags({ ...project(), gameBytes: async () => { throw new Error("EIO"); } }), OFF, "the texture unreadable");
+  const far = project({ "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 800, MID, 0] }]) });
+  assert.equal(await flags({ ...far, gameBytes: undefined }), MELEE, "a texture that can't be read 800 away doesn't count");
   const creep = { id: "nftk", player: 24, position: [MID + 100, MID, 0] }, tavern = { ...creep, id: "ntav" };
-  assert.equal((await savedMelee(project(), { flags: OFF }, [...units, creep])).flags, MELEE, "a creep close by, as UnitData.slk tells");
-  assert.equal((await savedMelee(project(), { flags: OFF }, [...units, tavern])).flags, OFF, "a tavern close by");
+  assert.equal((await savedMelee(project(), { flags: OFF }, [...units, creep])).flags, MELEE, "a creep close by");
+  assert.equal((await savedMelee(project(), { flags: OFF }, [...units, tavern])).flags, MELEE, "a tavern close by: buildings don't count");
+  assert.equal((await savedMelee(project(), { flags: OFF }, [...units, { ...creep, id: "ngol", position: [MID + 700, MID, 0] }])).flags, OFF, "a gold mine 700 away");
   // A map that is melee reads only what taking it off needs: the ground and the triggers.
   const on = project();
   await savedMelee(on, { flags: MELEE }, units);
@@ -215,13 +266,11 @@ test("the facts for putting the flag back come from the project; unreadable ones
 
 test("doodads and destructables without a pathing texture (flowers) near a start don't block the flag", async () => {
   // Doodads.slk: a flower (no pathing) and a rock (pathing); DestructableData.slk: a cage (empty) and a tree (pathing).
-  const DOODADS = 'ID;PWXL;N;E\nC;Y1;X1;K"doodID"\nC;X2;K"pathTex"\nC;Y2;X1;K"APms"\nC;X2;K"none"\nC;Y3;X1;K"LOrk"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
-  const DESTS = 'ID;PWXL;N;E\nC;Y1;X1;K"DestructableID"\nC;X2;K"pathTex"\nC;Y2;X1;K"YTc1"\nC;X2;K""\nC;Y3;X1;K"LTlt"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
-  const game: Record<string, string> = { ...GAME, "Doodads\\Doodads.slk": DOODADS, "Units\\DestructableData.slk": DESTS };
   const near = (id: string) => ({ id, position: [MID + 150, MID, 0] });
-  const flags = async (doodads: object[], tables = game) => (await savedMelee({
+  const flags = async (doodads: object[], tables = GAME) => (await savedMelee({
     ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads, specials: [] }) }),
     gameText: async (p: string) => { if (!(p in tables)) throw new Error(p); return tables[p]; },
+    gameBytes,
   }, { flags: OFF }, [startMid])).flags;
   assert.equal(await flags([near("APms")]), MELEE, "a flower 150 away");
   assert.equal(await flags([near("YTc1")]), MELEE, "a destructable with an empty pathing texture");
@@ -229,7 +278,8 @@ test("doodads and destructables without a pathing texture (flowers) near a start
   assert.equal(await flags([near("LOrk")]), OFF, "control: a rock with pathing");
   assert.equal(await flags([near("LTlt")]), OFF, "control: a tree with pathing");
   assert.equal(await flags([near("Xzzz")]), OFF, "a type the tables don't have counts");
-  assert.equal(await flags([near("APms")], GAME), OFF, "without Doodads.slk the flower counts");
+  const { "Doodads\\Doodads.slk": _, ...noDoodads } = GAME;
+  assert.equal(await flags([near("APms")], noDoodads), OFF, "without Doodads.slk the flower counts");
   assert.equal(await flags([near("APms"), near("LOrk")]), OFF, "a flower doesn't hide a rock");
 });
 
