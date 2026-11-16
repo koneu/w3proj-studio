@@ -14054,6 +14054,7 @@ async function run() {
         soundEditorKeys,
         specialDoodads,
         staleEditors,
+        startDeleteUndo,
         startGoldPalette,
         startPreviewFollow,
         stringsBeforeListing,
@@ -14425,6 +14426,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "mapSizeUi", found);
   await campaignFieldFocus(page, found).catch((e) => found.push(`campaign number field focus: ${e.message}`));
   await leftOpen(page, "campaignFieldFocus", found);
+  await startDeleteUndo(page, found).catch((e) => found.push(`start delete and undo: ${e.message}`));
+  await leftOpen(page, "startDeleteUndo", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
   await leftOpen(page, "contextLoss", found);
 }
@@ -14631,21 +14634,117 @@ async function campaignFieldFocus(page, found) {
     await page.evaluate(`w3.editors.closeAll()`);
     await settled(page);
 
-    // Second pass: a real .w3n (smoketest_maps), unpacked into the work folder, opened as a project.
+    // Second pass: a real .w3n (smoketest_maps), opened the way the app opens it (Welcome's "Import Map or Campaign…":
+    // w3.project.importMap with the file), not unpacked first.
     const w3n = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "campaign", "Curse of the Forsaken Classic v4.0.1.w3n");
     if (!existsSync(w3n)) { console.log(`campaign number field focus: real campaign skipped, ${w3n} isn't there`); return; }
     const realDir = join(work, "campaign-focus-real");
     rmSync(realDir, { recursive: true, force: true });
-    const copy = join(work, "campaign-focus-real.w3n");
-    cpSync(w3n, copy);
-    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(copy)}, dir: ${JSON.stringify(realDir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
-    await page.evaluate(`w3.workspace.open(${JSON.stringify(realDir)})`);
-    await until("the real campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(realDir)}`), 60000);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(() => { window.__cfKept = { folder: w3.window.pickFolder, input: w3.window.inputBox }; w3.window.pickFolder = async () => ${JSON.stringify(work)}; w3.window.inputBox = async () => "campaign-focus-real"; })()`);
+    try {
+      const imported = await page.evaluate(`w3.commands.execute("w3.project.importMap", ${JSON.stringify(w3n)}).then(() => null, (e) => String(e))`);
+      if (imported) return fail(`importing the .w3n: ${imported}`);
+    } finally {
+      await page.evaluate(`(() => { const k = window.__cfKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
+    }
+    await until("the real campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(realDir)}`), 120000);
     await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
     await typeAndSave("real .w3n");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
+  }
+}
+
+/** A start location of a real map (cliff.w3m), clicked in the terrain view, Delete, Ctrl+Z: the start is back with the same
+ *  position, player and preview, and the saved files are as before. Twice: with its model loaded, and as a stray (the model
+ *  file in the project is not a model, so the start has no model to draw). */
+async function startDeleteUndo(page, found) {
+  try {
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
+  if (!existsSync(map)) { console.log(`start delete and undo: skipped, ${map} isn't there`); return; }
+  for (const stray of [false, true]) await startDeleteUndoRound(page, map, stray, found);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+async function startDeleteUndoRound(page, map, stray, found) {
+  const fail = (what) => found.push(`start delete and undo${stray ? " (stray)" : ""}: ${what}`);
+  const hands = new Hands(page);
+  const dir = join(work, "start-delete", stray ? "stray" : "loaded");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dirname(dir), { recursive: true });
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+  if (stray) {
+    // The start location's model is the project's own file, which isn't a model.
+    const at = join(dir, "map", "Objects", "StartLocation");
+    mkdirSync(at, { recursive: true });
+    for (const f of ["StartLocation.mdl", "StartLocation.mdx"]) writeFileSync(join(at, f), "not a model");
+  }
+  const file = (f) => join(dir, "map", f);
+  const units = () => JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units;
+  const info = () => JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+  const unitsBefore = units(), infoBefore = info();
+  const start = unitsBefore.find((u) => u.id === "sloc");
+  if (!start) return fail("the real map has no start location (control)");
+  const TXT = "map/war3map.w3e.txt";
+  await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    await page.evaluate(`(async () => {
+      const s = await w3.services.get("w3.terrain");
+      window.__sdEd = null;
+      window.__sdGroup?.dispose();
+      window.__sdGroup = s.registerToolGroup({ id: "smoke-startdel", title: "smoke-startdel", order: 998, create: (ed) => { window.__sdEd = ed; return { toolbar: document.createElement("div") }; } });
+    })()`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)} && !!window.__sdEd`), 60000);
+    let quietSince = 0;
+    await until("the terrain editor's files", async () => {
+      const busy = await page.evaluate(`w3Workbench.game.readsPending > 0 || [...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`);
+      if (busy) { quietSince = 0; return false; }
+      quietSince ||= Date.now();
+      return Date.now() - quietSince > 1000;
+    }, 120000);
+    const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.filter((u) => u.id === "sloc").map((u) => ({ player: u.player, position: u.position, angle: u.angle })) ?? null)()`);
+    const drawn = () => page.evaluate(`window.__sdEd.drawnUnits().filter((u) => u.id === "sloc").length`);
+    const previews = () => page.evaluate(`window.__sdEd.drawnStartBuildings()`);
+    const was = await live(), previewsWas = await previews();
+    if (JSON.stringify(was) !== JSON.stringify([{ player: start.player, position: start.position, angle: start.angle }])) return fail(`the editor's start locations: ${JSON.stringify(was)} (control)`);
+    const modelDrawn = await drawn();
+    if (stray && modelDrawn !== 0) return fail(`the start location has a model drawn although its file isn't one (control: ${modelDrawn})`);
+    if (!stray && modelDrawn !== 1) return fail(`the start location's model isn't drawn (control: ${modelDrawn})`);
+    // Click it where it stands.
+    await page.evaluate(`window.__sdEd.lookAt(${start.position[0]}, ${start.position[1]})`);
+    await settled(page);
+    const view = await page.evaluate(`window.__sdEd.view()`);
+    const at = await page.evaluate(`window.__sdEd.project([${start.position[0]}, ${start.position[1]}, ${view.target[2]}])`);
+    if (!at) return fail("the start location doesn't project into the view (control)");
+    await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select")?.click()`);
+    await hands.mouse("mouseMoved", at[0], at[1]);
+    await hands.mouse("mousePressed", at[0], at[1], 1);
+    await hands.mouse("mouseReleased", at[0], at[1]);
+    await settled(page);
+    const selected = () => page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent ?? null`);
+    if ((await selected()) !== "Start location") return fail(`a click on the start location selected ${JSON.stringify(await selected())}`);
+    const key = async (k, code, vk, mods = 0) => { await page.evaluate(`document.querySelector(".model-stage canvas").focus()`); await hands.key(k, code, vk, mods); await settled(page); };
+    await key("Delete", "Delete", 46);
+    if ((await live())?.length !== 0) return fail(`Delete left ${JSON.stringify(await live())} (control)`);
+    await key("z", "KeyZ", 90, 2);
+    const back = await live();
+    if (JSON.stringify(back) !== JSON.stringify(was)) fail(`after Ctrl+Z the start locations are ${JSON.stringify(back)}, were ${JSON.stringify(was)}`);
+    await until("the start location drawn again", async () => (await drawn()) === modelDrawn, 10000).catch(async () => fail(`after Ctrl+Z ${await drawn()} start locations are drawn, were ${modelDrawn}`));
+    await until("the start's preview back", async () => JSON.stringify(await previews()) === JSON.stringify(previewsWas), 10000).catch(async () => fail(`after Ctrl+Z the start previews are ${JSON.stringify(await previews())}, were ${JSON.stringify(previewsWas)}`));
+    await settled(page);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    if (JSON.stringify(units()) !== JSON.stringify(unitsBefore)) fail(`war3mapUnits.doo.json differs after Delete, Ctrl+Z and save: ${JSON.stringify(units().filter((u) => u.id === "sloc"))} (was ${JSON.stringify(unitsBefore.filter((u) => u.id === "sloc"))})`);
+    if (JSON.stringify(info().players) !== JSON.stringify(infoBefore.players)) fail(`war3map.w3i's players differ after Delete, Ctrl+Z and save: ${JSON.stringify(info().players.map((p) => p.start))} (was ${JSON.stringify(infoBefore.players.map((p) => p.start))})`);
+  } finally {
+    await page.evaluate(`window.__sdGroup?.dispose(); window.__sdGroup = window.__sdEd = null; w3.settings.set("script.generateOnSave", undefined); w3.editors.closeAll()`).catch(() => {});
   }
 }
 
