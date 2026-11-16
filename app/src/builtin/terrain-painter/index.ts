@@ -305,7 +305,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const sync = mapSet && mapSet !== terrain.tileset ? h("div.terrain-tilemgr-sync", {},
       h("span", {}, `Map Properties says ${nameOf(mapSet)}.`),
       h("button", { title: "Switch the terrain to Map Properties' tileset", onclick: () => { ed.setTileset(mapSet); ed.focus(); } }, "Use it here"),
-      h("button", { title: "Write the terrain's tileset into Map Properties (war3map.w3i)", onclick: () => { void ed.setMapTileset(terrain.tileset).then(() => renderTiles()); } }, `Set Map Properties to ${nameOf(terrain.tileset)}`)) : null;
+      h("button", { title: "Write the terrain's tileset into Map Properties (war3map.w3i)", onclick: () => { void ed.setMapTileset(terrain.tileset).then(() => renderTiles(), (e) => { void w3.window.showError(`Map Properties not changed: ${(e as Error).message ?? e}`); }); } }, `Set Map Properties to ${nameOf(terrain.tileset)}`)) : null;
     tilePanel.replaceChildren(
       h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Tileset"), tilesetSelect),
       h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Template"), templateSelect, applyTemplate),

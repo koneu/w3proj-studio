@@ -18,15 +18,21 @@ import type { Placed, loadSkins } from "./objects";
 
 export type Skins = Awaited<ReturnType<typeof loadSkins>>;
 
-/** Edits a JSON-backed map file in either project form; `change` returning false skips the write. */
+/** Edits a JSON-backed map file in either project form; `change` returning false skips the write. A file the project
+ *  doesn't list is skipped; one that is listed but can't be read, parsed or decoded throws, before anything is written. */
 export async function editMapDoc(w3: W3Api, name: string, change: (d: Record<string, unknown>) => void | boolean) {
   const root = w3.workspace.project()!.root, path = `map/${name}`;
-  const json = await w3.workspace.readText(`${path}.json`).catch(() => null);
-  const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path }).catch(() => null) : null;
-  if (json === null && raw === null) return;
-  const d = JSON.parse((json ?? raw)!) as Record<string, unknown>;
+  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const hasJson = files.has(`${path}.json`.toLowerCase());
+  if (!hasJson && !files.has(path.toLowerCase())) return;
+  let d: Record<string, unknown>;
+  try {
+    d = JSON.parse(hasJson ? await w3.workspace.readText(`${path}.json`) : await w3.backend.invoke<string>("codec_decode", { root, path })) as Record<string, unknown>;
+  } catch (e) {
+    throw new Error(`${name} can't be read (${errorText(e)}); nothing was changed`);
+  }
   if (change(d) === false) return;
-  if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
+  if (hasJson) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
   else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
 }
 
@@ -55,7 +61,7 @@ export async function shadowFileProblem(w3: W3Api): Promise<string | null> {
 export async function updateMinimapIcons(w3: W3Api, t: Terrain, units: Placed[]) {
   try {
     const icons = await buildMinimapIcons(w3, t, units);
-    const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp").catch(() => null);
+    const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp");
     if (!stored) {
       const text = JSON.stringify({ format: "w3proj.minimap/1", version: 0, icons });
       const root = w3.workspace.project()!.root;

@@ -766,6 +766,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
       await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
       refuseLostView(projectTerrain(w3));
+      // An unreadable map info (war3map.w3i) refuses the change before the editor or any file is touched.
+      const infoProblem = await mapDocProblem(w3, "war3map.w3i");
+      if (infoProblem) throw new Error(`${infoProblem}. Nothing was changed.`);
       handle.setTileset(set.id);
       // The custom tiles flag follows the new list and tileset in both (see customTilesFlag), in the same undo step.
       if (swap) handle.replaceGroundTiles(tiles);
@@ -6099,6 +6102,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 stale: minimapStale.take(),
               }),
               write: async (t) => {
+                // Placed or removed starts sync the players into war3map.w3i: an unreadable one refuses the whole save
+                // before any file is written (the edits stay unsaved), rather than skip the sync or save half.
+                if (t.starts) {
+                  const problem = await mapDocProblem(w3, "war3map.w3i");
+                  if (problem) throw new Error(`Not saved: the players can't be synced, ${problem}. Fix or restore the file; no file was changed.`);
+                }
                 await writeTerrainBytes(doc.path, t.w3e, doc);
                 for (const { f, text } of t.placed) {
                   await savePlacedFile(w3, f, text);

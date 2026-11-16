@@ -5483,6 +5483,55 @@ async function resizeRefusedShadows(page, found) {
 /** Map Size with a file it must rewrite there but unreadable (a folder in place of war3map.shd, a war3map.w3r the codec
  *  can't decode): refused, by the MCP tool and with a message from the Map Size tab, and every file of the map as it was.
  *  An unreadable file taken for absent was left at the old size in the resized map. With the files fixed it resizes (control). */
+// A map info (war3map.w3i) that is there but can't be read refuses a tileset change before anything is written.
+async function tilesetUnreadable(page, found) {
+  const fail = (what) => found.push(`tileset unreadable: ${what}`);
+  await page.evaluate(`(() => { window.__tsKept = { confirm: w3.window.confirm }; w3.window.confirm = async () => true; })()`);
+  try {
+    const tool = mcpTool(page);
+    const folder = join(work, "tileset-unreadable");
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "TilesetUnreadable", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await until("the map's editor drawn", () => page.evaluate(`!!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await tool("save_project");
+    await settled(page);
+    const root = await page.evaluate(`w3.workspace.project()?.root`);
+    const map = join(root, "map");
+    const w3iPath = join(map, "war3map.w3i.json");
+    if (!existsSync(w3iPath)) return fail("the new map has no war3map.w3i.json (control)");
+    const good = readFileSync(w3iPath);
+    const info = await tool("terrain_info");
+    const current = (info.tileset ?? info.structuredContent?.tileset);
+    const other = ["L", "A"].find((t) => t !== current) ?? "A";
+    // Kept raw, with bytes the codec can't decode (the checkpoint taken before a change doesn't read it).
+    const rawPath = join(map, "war3map.w3i");
+    rmSync(w3iPath);
+    writeFileSync(rawPath, Buffer.from("not a map info"));
+    await page.evaluate(`w3.workspace.refresh()`);
+    const bad = snapshot(map);
+    const err = await tool("set_tileset", { tileset: other }).then(() => null, (e) => String(e.message ?? e));
+    if (!err || !/war3map\.w3i can't be read/.test(err)) fail(`the tileset change by the tool wasn't refused as unreadable: ${err}`);
+    await settled(page);
+    const inEditor = (await tool("terrain_info")).tileset ?? (await tool("terrain_info")).structuredContent?.tileset;
+    if (inEditor !== current) fail(`the refused change left the editor's tileset at ${inEditor}, not ${current}`);
+    const after = snapshot(map);
+    const moved = [...new Set([...bad.keys(), ...after.keys()])].filter((k) => bad.get(k) !== after.get(k));
+    if (moved.length) fail(`the refused tileset change changed ${moved.join(", ")}`);
+    // Control: with the file readable again the same change goes through.
+    if (!readFileSync(rawPath).equals(Buffer.from("not a map info"))) fail("the unreadable war3map.w3i was changed");
+    rmSync(rawPath);
+    writeFileSync(w3iPath, good);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await tool("set_tileset", { tileset: other }).catch((e) => fail(`the change with a readable file failed: ${e.message ?? e}`));
+    await settled(page);
+    if (!new RegExp(`"tileset": ?"${other}"`).test(readFileSync(w3iPath, "utf8"))) fail("the control change didn't reach war3map.w3i");
+  } finally {
+    await page.evaluate(`(() => { const k = window.__tsKept; if (k) w3.window.confirm = k.confirm; delete window.__tsKept; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function resizeUnreadable(page, found) {
   const fail = (what) => found.push(`resize unreadable: ${what}`);
   await page.evaluate(`(() => { window.__unreadKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; w3.window.showWarning = async () => "Apply"; })()`);
@@ -15285,6 +15334,7 @@ async function run() {
           return testMapWithoutGame(p, f);
         },
         tileCleanup,
+        tilesetUnreadable,
         tilesInPlace,
         tileTemplate,
         toggleGroups,
@@ -15438,6 +15488,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "waterPathing", found);
   await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
   await leftOpen(page, "tileTemplate", found);
+  await tilesetUnreadable(page, found).catch((e) => found.push(`tileset unreadable: ${e.message}`));
+  await leftOpen(page, "tilesetUnreadable", found);
   await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
   await leftOpen(page, "tilesInPlace", found);
   await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
