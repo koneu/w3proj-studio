@@ -84,7 +84,7 @@ import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -1905,7 +1905,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const groundFacts = h("div");
         /** Adds tile i's row to the side list and loads its texture. */
         const loadTile = (i: number, paths: Map<string, string>) => {
-          const id = terrain.groundTiles[i], path = paths.get(id);
+          const drawn = () => drawnGroundTiles(terrain, ownTiles?.get(terrain.tileset))[i];
+          const id = drawn(), path = paths.get(id);
           const row = h("div.model-row", { title: path ?? id }, h("span.model-dot.pending", {}, "●"), h("span", {}, `${id} `), h("small.muted", {}, path?.split("\\").pop() ?? "unknown tile"));
           texList.append(row);
           texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
@@ -1918,7 +1919,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           void artLoad(img.then(({ img: mip, name }) => {
             // The list may have changed meanwhile; only the current index gets it.
-            if (terrain.groundTiles[i] !== id) return;
+            if (drawn() !== id) return;
             renderer.setGroundTexture(i, mip);
             row.title = name;
             status(row, "ok");
@@ -1930,6 +1931,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Rebuilds the side list and the renderer's textures after the tile list changed. */
         const syncTileList = async () => {
           const paths = await tilePaths(w3);
+          await ownReady;
           // Emptied only now: rows added meanwhile (another sync, a tile being added) would stay otherwise.
           texList.replaceChildren();
           texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
@@ -1944,7 +1946,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ownTiles = new Map(sets.map((s) => [s.id, s.tiles]));
           return sets;
         });
-        void tilesetList().catch(() => { /* the flag stays set; the palettes say what's missing */ });
+        /** Settles once the own lists are read (or failed: then the file's list is drawn). */
+        const ownReady = tilesetList().then(() => undefined, () => undefined /* the flag stays set; the palettes say what's missing */);
         /** Changes the map's ground tile list: `tiles` is the new list, `map`
          *  gives each old index's new index. Corners and cliff types are
          *  remapped; one undo step. */
@@ -2002,7 +2005,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
           loadRedraw();
         }).catch(() => { /* blight shows as the placeholder colour */ }));
-        tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
+        Promise.all([tilePaths(w3), ownReady]).then(([paths]) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
         // The tileset's water (TerrainArt\Water.slk, row "<tileset>Sha"): animation frames
         // <texFile>00…, frames per second, and the shallow/deep colour ramp (alpha, r, g, b).
@@ -2063,6 +2066,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             w3.window.showWarning(`This map already uses ${MAX_GROUND_TILES} ground tile types, the most a map can have.`);
             return null;
           }
+          const drawnAsOwn = terrain.customTilesetsRaw === 0;
           terrain.groundTiles.push(id);
           // The tile list no longer matches the tileset's default (as a rule).
           terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
@@ -2074,7 +2078,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           const added = terrain.groundTiles.length - 1;
           // Load in the background so the stroke starts right away. A paste that was refused took it out again meanwhile.
-          void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
+          // The flag going from 0 to 1 changes what the other slots are drawn with (drawnGroundTiles): all of them reload.
+          if (drawnAsOwn && terrain.customTilesetsRaw !== 0) void syncTileList();
+          else void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
           minimapStale.set();
           return terrain.groundTiles.length - 1;
         };
