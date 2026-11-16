@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
 import { givenNumber, placedValueProblem } from "./values";
-import { doodadGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { doodadGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { gridDefault, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -518,6 +518,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const { handle } = await liveEditor();
     // Floating doodads (lily pads, …) follow onto the water where there is water, as the terrain editor puts them.
     const floats = (id: string) => !!handle.objects.type(id)?.floats;
+    // Stone walls, gates, icy rocks: the mean of the ground round them (objheights.ts doodadGround).
+    const radius = (id: string) => handle.objects.type(id)?.elevRadius ?? 0;
     const own = await ownGroundLists();
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
     const states = { before: null as { terrain: Terrain; doodads: Placed[] } | null, after: null as { terrain: Terrain; doodads: Placed[] } | null };
@@ -544,7 +546,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const parsed = JSON.parse(doc) as Record<string, Placed[]>;
         const list = parsed[key] ?? [];
         if (key === "doodads") states.before.doodads = structuredClone(list);
-        const count = followGround(list, terrain, touched, key === "doodads", floats);
+        const count = followGround(list, terrain, touched, key === "doodads", floats, radius);
         if (key === "doodads") states.after.doodads = list;
         moved += count;
         if (count) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
@@ -1219,7 +1221,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await editPlaced(`Move ${String(id)}`, key, async (f) => {
         const e = f.list[Number(index)];
         if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
-        e.position = [gx, gy, doodadGround(handle.terrain, gx, gy, key === "doodads" && !!handle.objects.type(e.id)?.floats)];
+        const type = key === "doodads" ? handle.objects.type(e.id) : null;
+        e.position = [gx, gy, doodadGround(handle.terrain, gx, gy, !!type?.floats, type?.elevRadius ?? 0)];
         if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
         if (typeof scale === "number") e.scale = [scale, scale, scale];
         // A doodad goes on its grid and keeps to its scale range, as the World Editor puts it (doodadedit.ts).
@@ -2796,9 +2799,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const isDoodadType = (id: string) => { const k = skinById(id)?.kind; return k === "w3d" || k === "w3b"; };
         /** Whether type `id` is a doodad that stands on the water where there is water (Skin.floats: lily pads, …). */
         const floatsType = (id: string) => { const s = skinById(id); return s?.kind === "w3d" && !!s.floats; };
+        /** A destructable type's Elevation Sample Radius (Skin.elevRadius; none for a custom type, whose own entry
+         *  hasn't one), 0 for anything else. */
+        const elevRadiusOf = (id: string) => { const s = objCtx?.skins.get(id); return s?.kind === "w3b" ? s.elevRadius ?? 0 : 0; };
         /** The height an object of type `id` without a height of its own stands at, x, y: the water's level for a
-         *  floating doodad over water (objheights.ts doodadGround), otherwise the ground. */
-        const groundFor = (id: string, x: number, y: number) => doodadGround(terrain, x, y, floatsType(id));
+         *  floating doodad over water, the mean round a destructable with an Elevation Sample Radius (objheights.ts
+         *  doodadGround), otherwise the ground. */
+        const groundFor = (id: string, x: number, y: number) => doodadGround(terrain, x, y, floatsType(id), elevRadiusOf(id));
         /** A destructable type's fixed rotation (degrees; the map's bfxr on top), which the World Editor turns its
          *  destructables to; null for none and for doodads, whose own it doesn't enforce (doodadgrid.ts). */
         const destructableFixedRot = (id: string): number | null => { const s = skinById(id); return s?.kind === "w3b" ? s.fixedRot : null; };
@@ -2867,8 +2874,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             outside: edge ? (x, y) => !inArea(x, y, edge) : null,
             kindOf: (id) => skins?.get(id)?.kind,
             ground: (x, y) => heightAt(terrain, x, y),
-            // A map's own doodad data that can't be read may make a type float: heights stay then.
-            restingZ: scales && skins ? (id, x, y) => { const s = skinById(id); return doodadGround(terrain, x, y, s?.kind === "w3d" && !!s.floats); } : undefined,
+            // A map's own doodad data that can't be read may make a type float: heights stay then. Whether one floats
+            // goes by the skin it is drawn as (LWw0 drawn as the lily pad NWfp floats: SnowareBay, doodad-open-z), its
+            // sample radius by its type; one whose radius samples wider than known keeps its height.
+            restingZ: scales && skins ? (id, x, y, skinId) => {
+              const radius = elevRadiusOf(id);
+              if (radius >= ELEVATION_RADIUS_UNKNOWN) return Number.NaN;
+              const s = (skinId !== undefined ? skins.get(skinId) : undefined) ?? skinById(id);
+              return doodadGround(terrain, x, y, s?.kind === "w3d" && !!s.floats, radius);
+            } : undefined,
           };
         };
         /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
@@ -4485,7 +4499,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               // A destructable whose type has no pathing texture isn't turned to its fixed rotation by the World Editor
               // (placed: any angle, as a doodad; moved: it stays; doodad-turn-we spec): none, and none while the texture is unread (a path that skipped ready).
               const fixedRot = skin ? presetFixedRot(skin.kind, skin.fixedRot, doodadCells.get(id)) : null;
-              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}), ...(skin.kind === "w3d" && skin.floats ? { floats: true } : {}) } : null;
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}), ...(skin.kind === "w3d" && skin.floats ? { floats: true } : {}), ...(elevRadiusOf(id) > 0 ? { elevRadius: elevRadiusOf(id) } : {}) } : null;
             },
             ready: async (id) => { if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* its type stays as it is */ }); },
             create: (kind, id, at) => {

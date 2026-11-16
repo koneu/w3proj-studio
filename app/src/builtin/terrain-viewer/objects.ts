@@ -82,6 +82,11 @@ export interface Skin {
   /** Doodads: stands on the water where there is water (Doodads.slk `floats`, field `dflt`: lily pads, seaweed,
    *  bubbles; lib/terrain/w3e.ts floatingLevelAt). */
   floats?: boolean;
+  /** Destructables: Elevation Sample Radius (DestructableData.slk `radius`, field `brad`), by which the World Editor
+   *  puts one on the mean of the ground round it (objheights.ts doodadGround); absent for 0. A custom type has none,
+   *  whatever its data says (we-compare doodad-open-z, 2026-11-16: custom copies of the stone wall LTw0 with radius
+   *  0, 25, 50, 100, 200 and none changed all stood on the point under them). */
+  elevRadius?: number;
 }
 
 /**
@@ -99,6 +104,14 @@ export function addClickHelpers(skins: Map<string, Skin>, rows: readonly Record<
     const skin = r.doodID ? skins.get(r.doodID) : undefined;
     if (skin?.kind === "w3d" && r.useClickHelper?.trim() === "1") skin.clickHelper = true;
     if (skin?.kind === "w3d" && r.floats?.trim() === "1") skin.floats = true;
+  }
+}
+
+/** Puts DestructableData.slk's Elevation Sample Radii on the destructables' skins. */
+export function addElevationRadii(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
+  for (const r of rows) {
+    const skin = r.DestructableID ? skins.get(r.DestructableID) : undefined, n = Number(r.radius);
+    if (skin?.kind === "w3b" && r.radius?.trim() && Number.isFinite(n) && n > 0) skin.elevRadius = n;
   }
 }
 
@@ -257,6 +270,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   for (const f of UNIT_FUNC) addAnimProps(out, tables.get(f) ?? "");
   addMoveTypes(out, rows("Units\\UnitData.slk"));
   addClickHelpers(out, rows("Doodads\\Doodads.slk"));
+  addElevationRadii(out, rows("Units\\DestructableData.slk"));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
@@ -280,7 +294,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch", floats: "dflt" },
-  w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd" },
+  w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd", elevRadius: "brad" },
 };
 
 interface ArtMod { field: string; value: number | string }
@@ -296,6 +310,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
   for (const f of files) {
     const fields = ART_FIELDS[f.kind];
     if (!fields) continue;
+    const custom = new Set(f.custom ?? []);
     for (const o of [...(f.original ?? []), ...(f.custom ?? [])]) {
       const id = o.id ?? o.base;
       const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((x) => x.mods)];
@@ -317,9 +332,12 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "customColor") { if (n === 1) skin.customColor = true; else delete skin.customColor; }
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
+        else if (key === "elevRadius") { if (Number.isFinite(n) && n > 0) skin.elevRadius = n; else delete skin.elevRadius; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
           || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
       }
+      // A custom type stands on the point under it, whatever its Elevation Sample Radius (Skin.elevRadius).
+      if (custom.has(o)) delete skin.elevRadius;
       if (skin.file) out.set(id, skin);
     }
   }

@@ -151,6 +151,14 @@ test("fixAsOpened: each doodad without a height of its own goes to its resting h
   // A place that isn't a number is left alone.
   const odd = [entry("ZPsh", Number.NaN, 37.5)];
   assert.equal(restAsOpened(odd, src).length, 0);
+  // The skin the file names goes to restingZ (SnowareBay's LWw0 drawn as the floating NWfp, doodad-open-z), and a type
+  // whose ground isn't known (NaN: a sample radius of 128 or more) keeps its height.
+  const skins: (string | undefined)[] = [];
+  const bySkin: OpenRuleSource = { ...src, restingZ: (id, x, _y, skinId) => { skins.push(skinId); return id === "YT04" ? Number.NaN : skinId === "NWfp" ? 38.4 : floor(x); } };
+  const drawn = [{ ...entry("LWw0", -100, 0), skinId: "NWfp" }, { ...entry("LWw0", -100, 0), skinId: "" }, entry("YT04", 100, 37.5)];
+  assert.deepEqual(restAsOpened(drawn, bySkin), [drawn[0], drawn[1]]);
+  assert.deepEqual(drawn.map((e) => e.position[2]), [38.4, -128, 37.5]);
+  assert.deepEqual(skins, ["NWfp", undefined, undefined], "an empty skin id is none");
 });
 
 test("snapAsOpened: a doodad moved to its grid lands at its resting height (a lily pad on the water), not on the bed", () => {
@@ -167,6 +175,10 @@ test("snapAsOpened: a doodad moved to its grid lands at its resting height (a li
   const plain = [pad()];
   snapAsOpened(plain, { ...src, restingZ: undefined });
   assert.deepEqual(plain[0].position, [32, 32, -128]);
+  // A ground that isn't known (NaN) for one that moves: on the ground there, never NaN.
+  const unknown = [pad()];
+  snapAsOpened(unknown, { ...src, restingZ: () => Number.NaN });
+  assert.deepEqual(unknown[0].position, [32, 32, -128]);
 });
 
 // we-compare neutral-facing and neutral-facing-neg (tests/we-compare/neutral-facing.json, 2026-11-15): gold mines,

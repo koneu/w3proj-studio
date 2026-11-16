@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { doodadGround, ELEVATION_RADIUS_UNKNOWN, ELEVATION_SAMPLE_OFFSET, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
 import { floatingLevelAt, heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -240,4 +240,25 @@ test("a floating doodad stands on the water level of its nearest corner when tha
   assert.equal(opened.filter(([x, y, f, z]) => f && Math.abs(heightAt(terrain, x, y) - z) > 0.001).length, 12);
   assert.equal(floatingLevelAt(terrain, Number.NaN, 0), null);
   assert.equal(floatingLevelAt(terrain, 1e9, -2816), -89.6, "past the edge: the nearest corner on it");
+});
+
+test("a destructable with an Elevation Sample Radius stands on the mean of the ground 64 off along both axes", () => {
+  // make-doodad-open-z.mjs's bumpy ground (32 * ((5i + 3j) mod 7)) and where the World Editor put the destructables on it
+  // when it opened the map (we-compare doodad-open-z, 2026-11-16, SD): [corner x, corner y, radius, z].
+  const N = 24;
+  const rows = (f: (i: number, j: number) => string, sep: string) =>
+    Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, i) => f(i, N - 1 - r)).join(sep));
+  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt", "cliffs CLdi CLgr", `corners ${N} ${N}`, "offset 0 0",
+    "[height]", ...rows((i, j) => String(32 * ((5 * i + 3 * j) % 7) * 4), " "), "[water] all 0", "[water-bits] all 0", "[texture] all 0",
+    "[variation] all 0", "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags] all 0"].join("\n");
+  const terrain = parseW3e(w3eFromText(text));
+  const placed: [number, number, number, number][] = [
+    [8.25, 8.25, 50, 106.5], [10.75, 8.25, 50, 90], [12.25, 12.75, 50, 107.5], [14.75, 14.75, 50, 90.5], [8, 16, 50, 100], [12.5, 16, 50, 92], // LTw0, ITcr
+    [16, 8, 0, 192], [16.5, 10.5, 0, 120], // LTlt
+  ];
+  for (const [i, j, radius, z] of placed) assert.equal(doodadGround(terrain, i * 128, j * 128, false, radius), z, `${i}, ${j} radius ${radius}`);
+  // Control: the point itself, as Studio had it, is elsewhere for all but one of the radius-50 ones.
+  assert.equal(placed.filter(([i, j, r, z]) => r > 0 && heightAt(terrain, i * 128, j * 128) !== z).length, 5);
+  assert.equal(ELEVATION_SAMPLE_OFFSET, 64);
+  assert.ok(ELEVATION_RADIUS_UNKNOWN > 100 && ELEVATION_RADIUS_UNKNOWN <= 128, "100 is known (YT00, LTw2 changed), 128 isn't");
 });

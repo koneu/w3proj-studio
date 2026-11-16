@@ -68,15 +68,23 @@ export interface OpenRuleSource {
   outside: ((x: number, y: number) => boolean) | null;
   kindOf(id: string): string | undefined;
   ground(x: number, y: number): number;
-  /** Where a doodad of type `id` without a height of its own stands at (x, y): a floating one on the water
-   *  (objheights.ts doodadGround). Absent: the types' data can't be read, and such doodads keep their heights. */
-  restingZ?(id: string, x: number, y: number): number;
+  /** Where a doodad of type `id` (drawn as `skinId` where the file names one) without a height of its own stands at
+   *  (x, y): a floating one on the water (objheights.ts doodadGround). Absent: the types' data can't be read, and such
+   *  doodads keep their heights; NaN for one whose ground isn't known, which keeps its height too. */
+  restingZ?(id: string, x: number, y: number, skinId?: string): number;
 }
 
 /** How far a stored height may be from the one the World Editor works out and still be kept: the doodads without
- *  flag 4 of the maps of smoketest_maps fit Studio's ground (doodadGround) within 0.001 (2026-11-16; all but 43 of
- *  SnowareBay's, 6 to 65 off), so a map the editor saved isn't rewritten for float noise. */
+ *  flag 4 of the maps of smoketest_maps fit Studio's ground (doodadGround) within 0.001 (2026-11-16, after the ramp and
+ *  elevation radius rules of branch doodad-open-z-we: every one of the 26 maps), so a map the editor saved isn't
+ *  rewritten for float noise. */
 export const RESTING_Z_TOLERANCE = 0.01;
+
+/** The skin a doodad of the file is drawn as (war3map.doo `skinId`, version 8 with skin ids and later), when it names one. */
+const skinOf = (entry: Placed): string | undefined => {
+  const s = (entry as Placed & { skinId?: unknown }).skinId;
+  return typeof s === "string" && s ? s : undefined;
+};
 
 /** Snap Doodads on Load on a list as stored, in place (doodadgrid.ts doodadSnaps): each doodad on its grid and facing;
  *  one that moves and follows the ground (no flag 4) lands on it. `moved` hears of each one that moved. The number
@@ -87,7 +95,8 @@ export function snapAsOpened(list: Placed[], src: OpenRuleSource, moved?: (entry
   for (const { entry, x, y, angle } of snaps) {
     if (x !== entry.position[0] || y !== entry.position[1]) {
       const flags = (entry as Placed & { flags?: number }).flags ?? 0;
-      entry.position = [x, y, flags & 4 ? entry.position[2] : src.restingZ?.(entry.id, x, y) ?? src.ground(x, y)];
+      const resting = flags & 4 ? entry.position[2] : src.restingZ?.(entry.id, x, y, skinOf(entry));
+      entry.position = [x, y, resting !== undefined && Number.isFinite(resting) ? resting : src.ground(x, y)];
       moved?.(entry);
     }
     entry.angle = angle;
@@ -119,7 +128,7 @@ export function restAsOpened(list: Placed[], src: OpenRuleSource): Placed[] {
     if (((entry as Placed & { flags?: number }).flags ?? 0) & 4) continue;
     const [x, y, z] = entry.position;
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const want = src.restingZ(entry.id, x, y);
+    const want = src.restingZ(entry.id, x, y, skinOf(entry));
     if (!Number.isFinite(want) || Math.abs(want - z) <= RESTING_Z_TOLERANCE) continue;
     entry.position = [x, y, want];
     changed.push(entry);

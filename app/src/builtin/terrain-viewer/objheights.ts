@@ -132,12 +132,33 @@ export function resetFixedHeight(p: HeightHolder, ground: number): HeightChange 
 }
 
 /** The height a doodad without a height of its own stands at, x, y: the ground there (heightAt), or for a floating type
- *  (Skin.floats) the water's level where floatingLevelAt finds water over its nearest corner. The World Editor
- *  works it out again whenever it saves (we-compare doodad-water-z-open: lily pads and a ZPsh stored at 37.5 came out
- *  at it), and Studio when a doodad moves (doodad-water-z-nudge). */
-export function doodadGround(t: Terrain, x: number, y: number, floats: boolean): number {
-  return (floats ? floatingLevelAt(t, x, y) : null) ?? heightAt(t, x, y);
+ *  (Skin.floats) the water's level where floatingLevelAt finds water over its nearest corner; a destructable with an
+ *  Elevation Sample Radius (`sampleRadius` > 0) the mean of the ground round it (ELEVATION_SAMPLE_OFFSET). The World
+ *  Editor works it out again when it opens a map (we-compare doodad-water-z-open: lily pads and a ZPsh stored at 37.5
+ *  came out at it; doodad-open-z: smoketest_maps' stored heights are all its own, copies raised by 37.5 went back), and
+ *  Studio when a doodad moves (doodad-water-z-nudge). */
+export function doodadGround(t: Terrain, x: number, y: number, floats: boolean, sampleRadius = 0): number {
+  const water = floats ? floatingLevelAt(t, x, y) : null;
+  if (water !== null) return water;
+  if (sampleRadius > 0) {
+    const d = ELEVATION_SAMPLE_OFFSET;
+    return (heightAt(t, x - d, y - d) + heightAt(t, x + d, y - d) + heightAt(t, x - d, y + d) + heightAt(t, x + d, y + d)) / 4;
+  }
+  return heightAt(t, x, y);
 }
+
+/** Where the World Editor samples the ground for a destructable whose type has an Elevation Sample Radius
+ *  (DestructableData `radius`, field `brad`; Skin.elevRadius): the mean of the ground at the four points this far
+ *  off along both axes (doodadGround). we-compare doodad-open-z (2026-11-16, SD): every stone wall, gate and icy rock
+ *  (radius 50) of smoketest_maps' SnowareBay, Hammerfall and Firebrand (75) and of make-doodad-open-z.mjs sits there,
+ *  and so do types the map's original table gives a radius of 1, 25, 64 or 100 and the bridge YT00 (100); radius 0
+ *  is the point itself, and so is any custom type, whatever its radius. */
+export const ELEVATION_SAMPLE_OFFSET = 64;
+
+/** The smallest Elevation Sample Radius whose ground isn't known: 128, 150 and the bridge YT04's 200 sample wider than
+ *  ELEVATION_SAMPLE_OFFSET in a way not worked out (doodad-open-z, 2026-11-16). Opening a map keeps such a
+ *  destructable's height; a move puts it at the radius-64 mean. */
+export const ELEVATION_RADIUS_UNKNOWN = 128;
 
 /** Where a doodad stands, and with what flags, after it was moved from `p` to a new x/y over ground of height `ground`.
  *  The World Editor's Advanced switch Reset Fixed Object Heights (Ctrl+Shift+H, on by default) decides, as we-drive

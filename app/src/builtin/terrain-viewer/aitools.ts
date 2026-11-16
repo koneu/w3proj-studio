@@ -543,20 +543,24 @@ interface Follower { id?: string; position: number[]; flags?: number }
 
 /** Puts objects near changed corners back on the ground, as the terrain editor does: all units and
  *  items, and doodads unless they have a fixed height (flag 4); a doodad of a type `floats` names goes on the water
- *  where there is water (objheights.ts doodadGround). How many moved. */
-export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean, floats: (id: string) => boolean = () => false) {
+ *  where there is water, one of a destructable type with an Elevation Sample Radius (`radius`) on the mean of the ground
+ *  round it (objheights.ts doodadGround). How many moved. */
+export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean, floats: (id: string) => boolean = () => false, radius: (id: string) => number = () => 0) {
   if (!corners.length) return 0;
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const i of corners) {
     const x = i % t.width, y = Math.floor(i / t.width);
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
   }
-  // Tiles next to a changed corner change too.
-  const near = { left: t.offsetX + (x0 - 1) * TILE, right: t.offsetX + (x1 + 1) * TILE, bottom: t.offsetY + (y0 - 1) * TILE, top: t.offsetY + (y1 + 1) * TILE };
+  // Tiles next to a changed corner change too; the ground a sampling destructable reads reaches half a tile further.
+  const around = (m: number) => ({ left: t.offsetX + (x0 - m) * TILE, right: t.offsetX + (x1 + m) * TILE, bottom: t.offsetY + (y0 - m) * TILE, top: t.offsetY + (y1 + m) * TILE });
+  const near = around(1), wider = around(1.5);
   let moved = 0;
   for (const p of list) {
-    if ((doodads && (p.flags ?? 0) & 4) || !inArea(p.position[0], p.position[1], near)) continue;
-    const z = doodadGround(t, p.position[0], p.position[1], doodads && p.id !== undefined && floats(p.id));
+    if (doodads && (p.flags ?? 0) & 4) continue;
+    const typed = doodads && p.id !== undefined, r = typed ? radius(p.id!) : 0;
+    if (!inArea(p.position[0], p.position[1], r > 0 ? wider : near)) continue;
+    const z = doodadGround(t, p.position[0], p.position[1], typed && floats(p.id!), r);
     if (Math.abs(z - p.position[2]) > 0.01) { p.position = [p.position[0], p.position[1], z]; moved++; }
   }
   return moved;

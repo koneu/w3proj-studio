@@ -358,20 +358,42 @@ export function groundHeight(c: Corner): number {
   return (c.rawHeight - 0x2000) / 4;
 }
 
-/** Extra height of a ramp's middle corner: a ramp climbs one layer over two
- *  tiles, so the ramp corner between its high and low end (on the lower
- *  layer) sits half a layer up. 0 for every other corner. */
+/** Extra height of a ramp's middle corner: a ramp climbs one layer over two tiles, so the ramp corner between its
+ *  high and low end (on the lower layer) sits half a layer up. That is a ramp corner with, along one axis, a ramp
+ *  corner one layer up on one side and one on its own layer on the other, where one of the two tiles between it and
+ *  the upper one is split straight across that axis (its two corners on this side on the corner's layer, the two on
+ *  the far side one up). A corner where both axes climb so (the inside of a ramp's bend) stays down. 0 for every
+ *  other corner.
+ *  we-compare doodad-open-z (2026-11-16, SD): the World Editor's heights of doodads opened on ramps, 196 on the ramps
+ *  of smoketest_maps' AutumnLeaves and SnowareBay and those of make-doodad-open-z.mjs's three-wide and one-column
+ *  ramps, bend (44, 42) and climb without a straight tile (54, 30), all fit it; the climb alone left 33 of them 2 to
+ *  64 too high. */
 export function rampLift(t: Terrain, x: number, y: number): number {
   const c = t.corners[y * t.width + x];
   if (!c.ramp) return 0;
   const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : null);
+  /** The tile with lower-left corner (x0, y0) is split straight across axis (dx, dy): the corners on its side
+   *  towards `s` one layer above c, the others on c's. */
+  const straight = (x0: number, y0: number, dx: number, s: number) =>
+    [[0, 0], [1, 0], [0, 1], [1, 1]].every(([a, b]) => {
+      const k = at(x0 + a, y0 + b), along = dx ? a : b;
+      return !!k && k.layer === c.layer + ((s > 0 ? along === 1 : along === 0) ? 1 : 0);
+    });
+  let climbs = 0, split = false;
   for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    let climb = false;
     for (const s of [1, -1]) {
       const up = at(x + dx * s, y + dy * s), down = at(x - dx * s, y - dy * s);
-      if (up?.ramp && down?.ramp && up.layer === c.layer + 1 && down.layer === c.layer) return 64;
+      if (!(up?.ramp && down?.ramp && up.layer === c.layer + 1 && down.layer === c.layer)) continue;
+      climb = true;
+      // The two tiles between c and `up`, side by side across the axis.
+      const x0 = s > 0 ? x : x - dx, y0 = s > 0 ? y : y - dy;
+      const tiles = dx ? [[x0, y], [x0, y - 1]] : [[x, y0], [x - 1, y0]];
+      if (tiles.some(([i, j]) => straight(i, j, dx, s))) split = true;
     }
+    if (climb) climbs++;
   }
-  return 0;
+  return climbs === 1 && split ? 64 : 0;
 }
 
 /** Unit normal of the ground at a corner, from central differences of its neighbours.

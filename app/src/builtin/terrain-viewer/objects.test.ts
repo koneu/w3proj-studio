@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -210,6 +210,26 @@ test("doodads float by Doodads.slk's floats, and a map's own (dflt) wins", () =>
   assert.equal(out.get("LPfp")?.floats, undefined, "a standard doodad the map changed");
   assert.equal(out.get("D000")?.floats, true, "a custom doodad keeps its base's");
   assert.equal(out.get("D001")?.floats, true);
+});
+
+test("destructables sample the ground by DestructableData.slk's radius; a map's original table changes it, a custom type has none", () => {
+  const dest = (file: string): Skin => ({ ...skin(file), kind: "w3b" });
+  const skins = new Map([["LTw0", dest("wall")], ["LTw1", dest("wall45")], ["LTlt", dest("trees")], ["ZPsh", { ...skin("shrub"), kind: "w3d" }]]);
+  addElevationRadii(skins, [{ DestructableID: "LTw0", radius: "50" }, { DestructableID: "LTw1", radius: " 50 " }, { DestructableID: "LTlt", radius: "0" },
+    { DestructableID: "ZPsh", radius: "50" }, { DestructableID: "LTxx", radius: "50" }]);
+  assert.equal(skins.get("LTw0")?.elevRadius, 50);
+  assert.equal(skins.get("LTw1")?.elevRadius, 50);
+  assert.equal(skins.get("LTlt")?.elevRadius, undefined, "radius 0: none");
+  assert.equal(skins.get("ZPsh")?.elevRadius, undefined, "a doodad doesn't, whatever a row of that id says");
+  // we-compare doodad-open-z (2026-11-16): LTw1 changed to 0 stood on the point, LTw2 changed to 100 sampled; custom
+  // copies of LTw0 stood on the point with radius 0, 25, 50, 100, 200 and with nothing changed, B000 (LTlt, 50) too.
+  const out = withObjectArt(skins, [{ kind: "w3b", original: [{ base: "LTw1", mods: [{ field: "brad", value: 0 }] }, { base: "LTlt", mods: [{ field: "brad", value: 100 }] }],
+    custom: [{ base: "LTw0", id: "B005", mods: [] }, { base: "LTw0", id: "B002", mods: [{ field: "brad", value: 100 }] }, { base: "LTlt", id: "B000", mods: [{ field: "brad", value: 50 }] }] }]);
+  assert.equal(out.get("LTw0")?.elevRadius, 50, "a standard type the map leaves");
+  assert.equal(out.get("LTw1")?.elevRadius, undefined, "changed to 0");
+  assert.equal(out.get("LTlt")?.elevRadius, 100, "changed to 100");
+  for (const id of ["B005", "B002", "B000"]) assert.equal(out.get(id)?.elevRadius, undefined, `custom ${id}`);
+  assert.equal(skins.get("LTw1")?.elevRadius, 50, "the game's skins stay as they were");
 });
 
 test("units get their flying height from the unit table, and a map's own wins", () => {

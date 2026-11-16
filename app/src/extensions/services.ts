@@ -309,6 +309,9 @@ export interface TerrainObjectType {
   moveType?: string;
   /** A doodad type that stands on the water where there is water (Doodads.slk `floats`); absent otherwise. */
   floats?: boolean;
+  /** A destructable type's Elevation Sample Radius (DestructableData.slk `radius`), by which it stands on the mean of the
+   *  ground round it; absent for 0 and for custom types. */
+  elevRadius?: number;
 }
 
 export interface TerrainObjects {

@@ -1,6 +1,35 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { drawnGroundTiles, drawnSlot, paintSlot, replaceSlots, replaceTileNames, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, drawnSlot, heightAt, paintSlot, rampLift, replaceSlots, replaceTileNames, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+
+/** A terrain from rows of corners, the north row first: each a layer, "R" for a ramp corner; the height is the layer's. */
+function layered(rows: string[]): Terrain {
+  const cells = rows.map((r) => r.trim().split(/\s+/)).reverse();
+  const corners = cells.flatMap((row) => row.map((s): Corner => {
+    const layer = Number(s[0]);
+    return { height: (layer - 2) * 128, water: -89.6, texture: 0, variation: 0, cliffVariation: 0, cliffTexture: 1, layer, ramp: s.includes("R"), blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0 };
+  }));
+  return { version: 11, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"],
+    width: cells[0].length, height: cells.length, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array() };
+}
+
+test("a ramp's middle corner is half a layer up where it climbs along one axis beside a straight tile, as the World Editor's ground", () => {
+  // we-compare doodad-open-z (2026-11-16, make-doodad-open-z.mjs; AutumnLeaves, SnowareBay): the doodads opened on these
+  // cells stood where these lifts put the ground.
+  const wide = layered(["3  3  3  3  3", "3  3R 3R 3R 3", "2  2R 2R 2R 2", "2  2R 2R 2R 2"]);
+  for (let x = 0; x < 5; x++) for (let y = 0; y < 4; y++) assert.equal(rampLift(wide, x, y), y === 1 && x >= 1 && x <= 3 ? 64 : 0, `three wide: ${x}, ${y}`);
+  assert.equal(heightAt(wide, 192, 192), 96, "between the middle and the top row: (64 + 128) / 2");
+  const column = layered(["3 3  3", "3 3R 3", "2 2R 2", "2 2R 2"]);
+  assert.equal(rampLift(column, 1, 1), 64, "one column (AutumnLeaves 15, 26)");
+  // The inside of a bend: up to level 3 east and north (SnowareBay 44, 40; make-doodad-open-z 44, 42).
+  const bend = layered(["2  3R 3", "2R 2R 3R", "2  2R 2"]);
+  assert.equal(rampLift(bend, 1, 1), 0, "climbs along both axes");
+  // A climb west with no straight tile beside it (AutumnLeaves 17, 33; make-doodad-open-z 54, 30).
+  const crooked = layered(["4  2  2", "3R 2R 2R", "2  2  2"]);
+  assert.equal(rampLift(crooked, 1, 1), 0, "no straight tile");
+  // Control: with the tile north-west of it made straight (3, 2 over 3, 2) the crooked one lifts.
+  assert.equal(rampLift(layered(["3  2  2", "3R 2R 2R", "2  2  2"]), 1, 1), 64, "a straight tile beside the climb");
+});
 
 /** A 2 × 2-corner terrain of `version`, every field in range. */
 function tiny(version = 11): Terrain {
