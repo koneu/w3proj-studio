@@ -10,7 +10,12 @@
 //   --limit N       differences listed per file (default: the spec's "limit", else 10)
 //   --restart-per-map  the World Editor is closed and started again for each map (the old way, for timing); the default
 //                   is one editor per mode, each next map opened in it (we-drive --map on a running editor)
-//   --no-we         only Studio's side (its saves are in <work>/<spec>/studio.w3x)
+//   --no-we         only Studio's side (its saves are in <work>/<spec>/studio.w3x); reported NOT COMPARED, exit 3
+//   --strict-ignore an "ignore" pattern that names no path of either file fails the file (else a warning in the report)
+//
+// The work folder is locked (<work>/we-compare.lock, the pid): a second run in it stops at once. Spec names are
+// folders there: "studio-app", "we-drive", "report.json" and "we-compare.lock" are refused, and two names that differ
+// only in case.
 //
 // A spec file holds one spec or a list. A spec (we-compare-core.mjs `parseSpec` has the full form):
 //   name        letters, digits, . _ - (the spec's folder)
@@ -28,7 +33,10 @@
 //   compare     files of the map: "war3map.w3i", or { "file": "war3map.wpm", "as": "wpm", "expect": "differs", "tolerance": 0.01 (parsed: numbers this close are equal),
 //               "ignore": ["doodads[3].scale", "units[].itemTable"] (parsed: paths whose differences are known and named; [] is any index) }. "as": auto
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
-//               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run.
+//               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
+//               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may.
+//               A file missing from a save, or one that can't be read, is MISSING / ERROR: never the expected difference.
+//               "tolerance", "ignore" and "expectPaths" are refused on text, bytes and wpm (they'd do nothing there).
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
 //               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
 //               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],
@@ -36,7 +44,8 @@
 //
 // Output: a short report on stdout (OK / UNEXPECTED per spec, MATCH / DIFFERS per file with the first differences:
 // "doodads[3].angle: WE 4.71, Studio 0", counts of fields and entries) and the same as JSON. Exit 0 when every file is
-// as its spec expects, 1 when not, 2 when something couldn't run. Local only (the World Editor: see we-drive.mjs).
+// as its spec expects, 1 when not (or a file is MISSING), 2 when something couldn't run (a file's ERROR included), 3
+// when nothing was compared (--no-we). Local only (the World Editor: see we-drive.mjs).
 // Never starts the game; the World Editor is we-drive's, in its sandbox, with its machine-wide lock; the crash dialog is
 // never touched (we-drive).
 
@@ -46,16 +55,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { asExpected, autoKind, compareFile, formatReport, parseSpecFile } from "./we-compare-core.mjs";
-import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
+import { compareEntry, duplicateName, formatReport, parseSpecFile, runOutcome, weOutcome } from "./we-compare-core.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const say = (m) => console.error(`we-compare: ${m}`);
 
-function parseArgs(argv) {
-  const o = { work: join(repo, "target", "we-compare"), game: null, json: null, limit: null, we: true, files: [] };
+export function parseArgs(argv) {
+  const o = { work: join(repo, "target", "we-compare"), game: null, json: null, limit: null, we: true, strictIgnore: false, files: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -63,8 +71,12 @@ function parseArgs(argv) {
     else if (a === "--work") o.work = resolve(value());
     else if (a === "--game") o.game = resolve(value());
     else if (a === "--json") o.json = resolve(value());
-    else if (a === "--limit") o.limit = Number(value());
-    else if (a === "--no-we") o.we = false;
+    else if (a === "--limit") {
+      const v = value();
+      if (!/^[1-9][0-9]*$/.test(v)) throw new Error(`--limit is a positive whole number, got ${JSON.stringify(v)}`);
+      o.limit = Number(v);
+    } else if (a === "--no-we") o.we = false;
+    else if (a === "--strict-ignore") o.strictIgnore = true;
     else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs: a binary older than its sources is used anyway
     else if (a === "--keep-prefs") o.keepPrefs = true;
     else if (a === "--restart-per-map") o.restart = true;
@@ -187,52 +199,67 @@ async function runWorldEditor(specs, opts, game, mode, saveAccept) {
     }
     const t0 = Date.now();
     say(`the World Editor on ${rest.length} map${rest.length === 1 ? "" : "s"} (${mode}), one we-drive process`);
-    const lines = [];
-    const code = await new Promise((ok) => {
-      const child = spawn("node", args, { stdio: ["ignore", "pipe", "inherit"] });
-      let buf = "";
-      child.stdout.on("data", (d) => {
-        buf += d;
-        let nl;
-        while ((nl = buf.indexOf("\n")) >= 0) { lines.push(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
-      });
-      child.on("exit", (c) => ok(c));
-    });
+    let code, lines;
+    try {
+      ({ code, lines } = await runLines(process.execPath, args));
+    } catch (e) {
+      for (const s of rest) s.error = `World Editor: we-drive didn't start: ${e.message}`;
+      return;
+    }
     const outs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     if (outs.some((o) => o.skipped)) { for (const s of rest) s.error = `the World Editor can't run here: ${outs.find((o) => o.skipped).skipped}`; return; }
-    // Which spec each line belongs to: the --map lines start one.
-    let at = -1;
-    const state = rest.map(() => ({ saved: false, closed: false, failure: null }));
-    for (const o of outs) {
-      if (o.step === "--map" && !o.error) { at++; continue; }
-      const i = Math.max(at, 0);
-      if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, rest.length - 1) : i].failure = o.error ?? "the World Editor crashed";
-      else if (o.step === "--save") { if (o.saved) state[i].saved = true; else state[i].failure = `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
-      else if (o.step === "--wait-ready" && o.ready === false) state[i].failure = `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
-    }
     say(`the World Editor part took ${Math.round((Date.now() - t0) / 1000)} s (exit ${code})`);
-    let next = rest.length;
-    rest.forEach((s, i) => {
-      if (state[i].failure) { s.error = `World Editor: ${state[i].failure}`; next = Math.min(next, i + 1); }
-      else if (!state[i].saved) { s.error = "World Editor: no save (the run stopped before it)"; next = Math.min(next, i + 1); }
-    });
-    // After a failure at spec i the process stopped; the specs behind it haven't run: they go again, without it.
-    const failedAt = rest.findIndex((s, i) => state[i].failure || !state[i].saved);
-    rest = failedAt < 0 ? [] : rest.slice(failedAt + 1).map((s) => { s.error = undefined; return s; }).filter((s) => !existsSync(join(opts.work, s.name, "we.w3x")) || true);
-    if (code === 0) rest = [];
+    // After a failure the process stopped; the specs behind it that haven't run go again in the next process.
+    const { errors, rerun } = weOutcome(rest.length, outs);
+    rest.forEach((s, i) => { s.error = errors[i] ?? undefined; });
+    rest = rerun.map((i) => rest[i]);
   }
+}
+
+/**
+ * Runs `command args` with stdout piped: resolves { code, lines } once the process has ended AND its output is drained
+ * ("close", not "exit": the last line may still be in the pipe at "exit"), the last line kept without its line break.
+ * Rejects when the process can't be started ("error").
+ */
+export function runLines(command, args, options = {}) {
+  return new Promise((ok, fail) => {
+    const lines = [];
+    let buf = "";
+    let child;
+    try {
+      child = spawn(command, args, { stdio: ["ignore", "pipe", "inherit"], ...options });
+    } catch (e) { fail(e); return; }
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d) => {
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) { lines.push(buf.slice(0, nl).replace(/\r$/, "")); buf = buf.slice(nl + 1); }
+    });
+    child.on("error", fail);
+    child.on("close", (c, signal) => {
+      if (buf) lines.push(buf.replace(/\r$/, ""));
+      ok({ code: c ?? (signal ? `signal ${signal}` : null), lines });
+    });
+  });
 }
 
 // ---------------------------------------------------------------- reading and comparing
 
 /** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
-function reader(cli, game, dir, map) {
+export function reader(cli, game, dir, map) {
   const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
   const mapFile = join(dir, map);
   rmSync(project, { recursive: true, force: true });
   const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
   if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
   const names = new Set(readdirSync(join(project, "map")));
+  let listing = null;
+  const list = () => {
+    if (listing) return listing;
+    const l = spawnSync(cli, ["ls", mapFile], { encoding: "utf8", maxBuffer: 1 << 26 });
+    if (l.status !== 0) throw new Error(`w3proj ls ${map}: ${String(l.stderr || l.error?.message || "").trim()}`);
+    return (listing = l.stdout.split("\n").map((x) => x.trim()));
+  };
   return {
     has: (f) => names.has(f) || names.has(`${f}.json`) || names.has(`${f}.txt`),
     unpackedAs: (f) => (names.has(`${f}.json`) ? "json" : names.has(`${f}.txt`) ? "text" : names.has(f) ? "raw" : null),
@@ -243,7 +270,7 @@ function reader(cli, game, dir, map) {
       if (c.status !== 0) throw new Error(`w3proj cat ${map} ${f}: ${String(c.stderr).trim()}`);
       return c.stdout;
     },
-    listed: (f) => spawnSync(cli, ["ls", mapFile], { encoding: "utf8", maxBuffer: 1 << 26 }).stdout.split("\n").some((l) => l.trim().endsWith(` ${f}`) || l.trim() === f),
+    listed: (f) => list().some((l) => l.endsWith(` ${f}`) || l === f),
   };
 }
 
@@ -266,27 +293,35 @@ async function imageDecoder(work) {
 function compareSpec(spec, cli, game, opts) {
   const dir = join(opts.work, spec.name);
   const limit = opts.limit ?? spec.limit;
-  const files = [];
   const we = reader(cli, game, dir, "we.w3x"), studio = reader(cli, game, dir, "studio.w3x");
-  for (const c of spec.compare) {
-    let kind = c.as;
-    if (kind === "auto") kind = autoKind(c.file, we.unpackedAs(c.file) === "json" && studio.unpackedAs(c.file) === "json" ? "json" : we.unpackedAs(c.file) ?? studio.unpackedAs(c.file));
-    const load = (r) => {
-      if (!r.listed(c.file) && !r.has(c.file)) return null;
-      if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(c.file)) };
-      if (kind === "unit-heights") return r.unpackedAs(c.file) === "json" ? { json: unitHeights(r.json(c.file)) } : null;
-      if (kind === "doodad-places") return r.unpackedAs(c.file) === "json" ? { json: doodadPlaces(r.json(c.file)) } : null;
-      if (kind === "unit-ids") return r.unpackedAs(c.file) === "json" ? { json: unitIds(r.json(c.file)) } : null;
-      if (kind === "parsed") return r.unpackedAs(c.file) === "json" ? { json: r.json(c.file) } : null;
-      if (kind === "minimap") return { json: minimapView(opts.decodeImage(new Uint8Array(r.bytes(c.file)), c.file).mip(0)) };
-      if (kind === "text") return { text: r.text(c.file) };
-      return { bytes: r.bytes(c.file) };
-    };
-    let a, b;
-    try { a = load(we); b = load(studio); } catch (e) { files.push({ file: c.file, kind, expect: c.expect, status: "DIFFERS", count: 1, diffs: [{ text: e.message }] }); continue; }
-    files.push({ expect: c.expect, ...compareFile(c.file, kind, a, b, limit, c.tolerance, c.ignore) });
+  return spec.compare.map((c) => compareEntry(c, we, studio, { limit, decodeImage: opts.decodeImage }));
+}
+
+/**
+ * The work folder's lock: two runs in one folder would wipe each other's specs, studio-app and we-drive. Takes
+ * <work>/we-compare.lock (this process's pid); one left by a process that is gone is taken over. Returns a release
+ * function; throws when a live process holds it.
+ */
+export function lockWork(work, pid = process.pid) {
+  const file = join(work, "we-compare.lock");
+  mkdirSync(work, { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(file, String(pid), { flag: "wx" });
+      return () => { try { if (readFileSync(file, "utf8").trim() === String(pid)) rmSync(file, { force: true }); } catch { /* already gone */ } };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let holder = NaN;
+      try { holder = Number(readFileSync(file, "utf8").trim()); } catch { /* removed meanwhile: try again */ }
+      if (Number.isInteger(holder) && holder > 0 && alive(holder)) throw new Error(`another we-compare (pid ${holder}) uses ${work}: wait for it, or give this run its own --work`);
+      rmSync(file, { force: true });
+    }
   }
-  return files;
+  throw new Error(`can't take the lock ${file}`);
+}
+
+function alive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
 
 async function main() {
@@ -297,11 +332,19 @@ async function main() {
   }
   const vars = { MAIN: mainCheckout(repo), REPO: repo };
   const specs = o.files.flatMap((f) => parseSpecFile(readFileSync(f, "utf8"), f, vars));
-  const dup = specs.map((s) => s.name).filter((n, i, a) => a.indexOf(n) !== i);
-  if (dup.length) throw new Error(`two specs are named ${dup[0]}`);
+  const dup = duplicateName(specs);
+  if (dup) throw new Error(`two specs are named ${dup} (names are folders: any case)`);
   for (const s of specs) if (s.input.map && !existsSync(s.input.map)) throw new Error(`${s.name}: no input map at ${s.input.map}`);
   const game = o.game ?? chosenGamePath() ?? gamePath(repo);
-  mkdirSync(o.work, { recursive: true });
+  const release = lockWork(o.work);
+  try {
+    return await runSpecs(specs, o, game);
+  } finally {
+    release();
+  }
+}
+
+async function runSpecs(specs, o, game) {
   for (const s of specs) rmSync(join(o.work, s.name), { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   const cli = ensureCli();
   const t0 = Date.now();
@@ -320,19 +363,20 @@ async function main() {
   const results = [];
   for (const s of specs) {
     const r = { name: s.name, description: s.description, files: [], error: s.error ?? null };
+    // --no-we: Studio's side only; nothing was compared, which is never "ok" (runOutcome: exit 3).
+    if (!s.error && !o.we) r.notCompared = true;
     if (!s.error && o.we) {
       try { r.files = compareSpec(s, cli, game, o); } catch (e) { r.error = `compare: ${e.message}`; }
     }
     results.push(r);
   }
-  const unexpected = (r) => r.error || r.files.some((f) => !asExpected(f));
-  for (const r of results) console.log(formatReport(r, o.limit ?? specs.find((s) => s.name === r.name).limit));
+  const { ok, code, unexpected } = runOutcome(results, { strictIgnore: o.strictIgnore });
+  for (const r of results) console.log(formatReport(r, o.limit ?? specs.find((s) => s.name === r.name).limit, { strictIgnore: o.strictIgnore }));
   const seconds = { studio: Math.round((tStudio - t0) / 1000), worldEditor: Math.round((tWe - tStudio) / 1000), compare: Math.round((Date.now() - tWe) / 1000) };
-  const json = { specs: results, seconds, ok: !results.some(unexpected) };
+  const json = { specs: results, seconds, ok, ...(o.we ? {} : { notCompared: true }) };
   writeFileSync(o.json ?? join(o.work, "report.json"), JSON.stringify(json, null, 2));
-  console.log(`\n${results.length} spec${results.length === 1 ? "" : "s"}, ${results.filter(unexpected).length} unexpected; Studio ${seconds.studio} s, World Editor ${seconds.worldEditor} s, compare ${seconds.compare} s; report ${o.json ?? join(o.work, "report.json")}`);
-  if (results.some((r) => r.error)) return 2;
-  return json.ok ? 0 : 1;
+  console.log(`\n${results.length} spec${results.length === 1 ? "" : "s"}, ${o.we ? `${results.filter(unexpected).length} unexpected` : "NOT COMPARED (--no-we)"}; Studio ${seconds.studio} s, World Editor ${seconds.worldEditor} s, compare ${seconds.compare} s; report ${o.json ?? join(o.work, "report.json")}`);
+  return code;
 }
 
 if (process.argv[1] && basename(process.argv[1]) === "we-compare.mjs") {

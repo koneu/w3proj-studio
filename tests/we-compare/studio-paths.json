@@ -543,7 +543,12 @@
           "players[].hudSkin"
         ],
         "tolerance": 0.01,
-        "expect": "differs"
+        "expect": "differs",
+        "expectPaths": [
+          "players[].start",
+          "players[].allyLow",
+          "players[].name"
+        ]
       }
     ],
     "limit": 30

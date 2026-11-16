@@ -61,7 +61,8 @@ export function readW3e(buf, withVariations = false) {
 /**
  * What a random height change did, without the randomness: the set of the ground words' offsets from `base` (the
  * input's word, 0 for the flat map), as { count, min, max, values }: how many different offsets, the extremes, and
- * the offsets themselves, sorted. Two runs of one setting have the same set when the corners are many enough.
+ * the offsets themselves, sorted. Two runs of one setting have the same set when the corners are many enough; with few
+ * corners a rare offset may be drawn in one run and not the other (a false DIFFERS of `values` and `count`).
  */
 export function heightSpread(buf, base = 0) {
   const { corners } = readW3e(buf);
@@ -91,7 +92,8 @@ export function variationSpread(buf) {
 
 /** The compared form of variationSpread: the corner counts and the ground variations that at least 5% of a texture's
  *  corners wear (the editor draws a few rare values besides its main ones, a stroke of 149 corners shows the main ones
- *  at 15 to 35 corners and each rare one at 1 to 3). */
+ *  at 15 to 35 corners and each rare one at 1 to 3). Flaky at the edge: a value worn by about 5% of the corners can
+ *  fall on either side of the cut in two random draws (a false DIFFERS; rerun before reading it as a finding). */
 export function variationView(buf) {
   const out = {};
   for (const [t, e] of Object.entries(variationSpread(buf))) {
@@ -108,7 +110,8 @@ export function unitHeights(json) {
 
 /** war3map.doo (doodads and destructables) as the codecs' JSON, reduced to which ones are left and where, by the 64 square
  *  they stand in (the editor snaps what it opens to its doodad grid: 64, a 2x2 pathing one 32 further), sorted: for runs
- *  that delete the objects a click picks (doodad-pick-we). */
+ *  that delete the objects a click picks (doodad-pick-we). A doodad within a unit or so of a square's edge can land in
+ *  either square in the two saves (a false DIFFERS: look at the positions before reading it as a finding). */
 export function doodadPlaces(json) {
   return { doodads: (json.doodads ?? []).map((d) => ({ id: d.id, x: Math.floor(d.position[0] / 64), y: Math.floor(d.position[1] / 64) }))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.x - b.x || a.y - b.y)) };
@@ -119,6 +122,9 @@ export function doodadPlaces(json) {
  *  does (compared with a spec's "tolerance" per channel). Keys "bx,by", rows from the top. */
 export function minimapView(image, block = 16) {
   const { width, height, rgba } = image;
+  // An empty picture has no blocks: two of them would compare equal, whatever was saved.
+  if (!(Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0)) throw new Error(`the minimap picture is ${width}x${height}: nothing to compare`);
+  if (!rgba || rgba.length < width * height * 4) throw new Error(`the minimap picture ${width}x${height} has ${rgba?.length ?? 0} bytes of colour, not ${width * height * 4}`);
   const blocks = {};
   for (let by = 0; by * block < height; by++) {
     for (let bx = 0; bx * block < width; bx++) {

@@ -5,7 +5,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
+import * as core from "./we-compare-core.mjs";
+import { asExpected, autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
 
 const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.wpm"] });
@@ -162,9 +163,15 @@ test("diffText counts lines", () => {
   assert.match(d.diffs[0].text, /line 2: WE "b", Studio "x"/);
 });
 
-test("compareFile: a missing file is a difference, both missing is MISSING; formatReport shows it", () => {
-  assert.equal(compareFile("f", "bytes", null, { bytes: Buffer.alloc(1) }).status, "DIFFERS");
+test("compareFile: a file missing from one save or both is MISSING, never DIFFERS; formatReport shows it", () => {
+  const one = compareFile("f", "bytes", null, { bytes: Buffer.alloc(1) });
+  assert.equal(one.status, "MISSING");
+  assert.match(one.diffs[0].text, /Studio's save only/);
+  assert.equal(compareFile("f", "bytes", { bytes: Buffer.alloc(1) }, null).status, "MISSING");
   assert.equal(compareFile("f", "bytes", null, null).status, "MISSING");
+  // A file only one save has doesn't satisfy "expect": "differs" (it was the runner's way to go green on a lost file).
+  assert.equal(asExpected({ ...one, expect: "differs" }), false);
+  assert.match(formatReport({ name: "s", files: [{ ...one, expect: "differs" }] }), /s: UNEXPECTED/);
   const r = compareFile("war3map.w3i", "parsed", { json: { flags: 1 } }, { json: { flags: 2 } });
   assert.equal(r.status, "DIFFERS");
   const text = formatReport({ name: "s", files: [{ ...r, expect: "match" }] });
