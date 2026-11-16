@@ -4,7 +4,7 @@
 
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
-import { neverStoredLast } from "../../lib/model/texpath";
+import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
@@ -20,7 +20,7 @@ const meshes = new ModeCache<ShadowMesh | typeof NO_FACES>();
 
 async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8Array>): Promise<AlphaMap | null> {
   // Reforged names .tif/.blp sources the game ships as .dds; a .tif is never there, so last.
-  for (const p of neverStoredLast([path, path.replace(/\.\w+$/, ".blp"), path.replace(/\.\w+$/, ".dds")])) {
+  for (const p of neverStoredLast([...new Set([...textureCandidates(path), ...textureCandidates(path.replace(/\.\w+$/, ".blp"))])])) {
     try {
       const mip = decodeImage(await readFile(p), p).mip(0);
       const alpha = new Uint8Array(mip.width * mip.height);
