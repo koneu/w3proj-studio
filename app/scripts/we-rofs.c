@@ -24,12 +24,20 @@ static int wants_write(int flags) {
   return (flags & O_ACCMODE) != O_RDONLY || (flags & (O_TRUNC | O_APPEND));
 }
 
+// open(2) reads a mode argument only with O_CREAT or O_TMPFILE. O_TMPFILE includes the O_DIRECTORY bit, so a plain
+// O_DIRECTORY open must not count: compare against the whole value.
+static int takes_mode(int flags) {
+  return (flags & O_CREAT) || ((flags & O_TMPFILE) == O_TMPFILE);
+}
+
+// Not covered (only a gap if the editor uses them; TESTING.md notes none): openat2, creat, fopen's internal calls
+// that bypass these symbols (static glibc), and direct syscalls. Wine's own file opens go through open/openat.
 #define OPEN_WRAPPER(name)                                                    \
   int name(const char *path, int flags, ...) {                               \
     static open_fn real;                                                     \
     if (!real) real = (open_fn)dlsym(RTLD_NEXT, #name);                      \
     mode_t mode = 0;                                                         \
-    if (flags & (O_CREAT | O_TMPFILE)) {                                     \
+    if (takes_mode(flags)) {                                                 \
       va_list ap;                                                            \
       va_start(ap, flags);                                                   \
       mode = va_arg(ap, mode_t);                                             \
@@ -49,7 +57,7 @@ static int wants_write(int flags) {
     static openat_fn real;                                                   \
     if (!real) real = (openat_fn)dlsym(RTLD_NEXT, #name);                    \
     mode_t mode = 0;                                                         \
-    if (flags & (O_CREAT | O_TMPFILE)) {                                     \
+    if (takes_mode(flags)) {                                                 \
       va_list ap;                                                            \
       va_start(ap, flags);                                                   \
       mode = va_arg(ap, mode_t);                                             \
