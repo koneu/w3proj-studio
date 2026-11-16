@@ -90,7 +90,9 @@ for (const line of listed) {
   const r = await savedMelee(ws, cleared, placed);
   const studio = (r.flags & MELEE_MAP) !== 0;
   const why = showWhy && melee !== studio ? meleeSetBlockers(cleared, placed, await readMeleeFacts(ws, undefined, true)) : [];
-  results.push({ name, melee, studio, why });
+  // The other direction: a map stored melee must keep its flag through a save.
+  const kept = !melee || (((await savedMelee(ws, info, placed)).flags & MELEE_MAP) !== 0);
+  results.push({ name, melee, studio, why, kept });
 }
 results.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -101,6 +103,9 @@ for (const r of results) {
   else if (listAll || r.melee !== r.studio) console.log(`${r.name}: stored ${r.melee ? "melee" : "not melee"}, Studio ${r.studio ? "sets it" : "leaves it off"}${r.why.length ? `: ${r.why.join("; ")}` : ""}`);
 }
 console.log(`melee maps: Studio sets the flag on ${meleeMaps.filter((r) => r.studio).length} of ${meleeMaps.length}`);
+const droppedOn = meleeMaps.filter((r) => !r.kept);
+for (const r of droppedOn) console.log(`${r.name}: stored melee, a save would take the flag OFF`);
+console.log(`melee maps: a save keeps the flag on ${meleeMaps.length - droppedOn.length} of ${meleeMaps.length} (should be all)`);
 console.log(`other maps: Studio sets it on ${other.filter((r) => r.studio).length} of ${other.length} (should be 0)`);
 
 const now = Object.fromEntries(done.map((r) => [r.name, { melee: r.melee, studio: r.studio }]));

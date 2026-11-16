@@ -8,6 +8,7 @@
 // default, start locations in invalid positions beyond the plain case) leave the flag as it is.
 
 import type { W3Api } from "../../extensions/api";
+import { readIni } from "../formats/iniedit";
 import { parseSlk } from "../formats/text";
 import { isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
@@ -22,9 +23,48 @@ interface PlacedLike { id: string; player?: number; position?: readonly number[]
 export const MISC_TXT = "map/war3mapMisc.txt";
 
 /** Files of the World Editor's other reasons: custom unit, item, destructible, doodad, ability, buff and upgrade data
- *  (WESTRING_NOTMELEE_CUSTOMUNITS … CUSTOMUPGRADEDATA) and a custom game interface (CUSTOMSKINDATA). A file being there
- *  is enough to leave the flag off: one with no change in it isn't told apart. */
+ *  (WESTRING_NOTMELEE_CUSTOMUNITS … CUSTOMUPGRADEDATA) and a custom game interface (CUSTOMSKINDATA). Only a file that
+ *  changes something counts (customDataState): an empty one (no objects, no values) is the default. */
 const CUSTOM_DATA = /^map\/(war3map\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?|war3mapSkin\.txt)$/i;
+
+/** Whether a custom-data file changes anything: false for no entry (JSON objects: `original` and `custom` empty or
+ *  absent; the raw w3u family: the header's two counts 0; war3mapSkin.txt: no value in any section); null when it can't
+ *  be told (unreadable, malformed, another layout). */
+export function customFileChanges(path: string, content: string | Uint8Array): boolean | null {
+  try {
+    if (typeof content !== "string") {
+      if (/\.json$/i.test(path) || /\.txt$/i.test(path)) return null;
+      if (content.length < 12) return null;
+      const v = new DataView(content.buffer, content.byteOffset, content.byteLength);
+      return content.length === 12 && v.getUint32(4, true) === 0 && v.getUint32(8, true) === 0 ? false : true;
+    }
+    if (/\.txt$/i.test(path)) return [...readIni(content).values()].some((section) => section.size > 0);
+    const doc = JSON.parse(content) as { original?: unknown; custom?: unknown } | null;
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+    let any = false;
+    for (const list of [doc.original, doc.custom]) {
+      if (list === undefined) continue;
+      if (!Array.isArray(list)) return null;
+      if (list.length) any = true;
+    }
+    return any;
+  } catch { return null; }
+}
+
+/** Whether the project's custom object data and interface files change anything: true when one does, false when
+ *  none is there or all are empty, null when one can't be told and none is known to change something. */
+export async function customDataState(ws: MeleeFiles, files: readonly string[]): Promise<boolean | null> {
+  let unknown = false;
+  for (const path of files.filter((p) => CUSTOM_DATA.test(p))) {
+    let r: boolean | null;
+    try {
+      r = customFileChanges(path, /\.(json|txt)$/i.test(path) ? await ws.readText(path) : await ws.readBytes(path));
+    } catch { r = null; }
+    if (r) return true;
+    if (r === null) unknown = true;
+  }
+  return unknown ? null : false;
+}
 
 /** How far around a start location Studio looks before it calls its position plainly valid. The World Editor's save
  *  found starts invalid with trees about 200 away, a tavern 250 away (we-drive 2026-11-09) and close to cliffs; the
@@ -142,8 +182,8 @@ export interface MeleeFacts {
   constantsKnown?: boolean;
   /** The trigger file is there, readable, and only the default (isDefaultTriggers). */
   defaultTriggers?: boolean;
-  /** A file of custom object data or game interface is there. */
-  customData?: boolean;
+  /** A file of custom object data or game interface changes something (customDataState); null: not known. */
+  customData?: boolean | null;
   /** What stands around the start locations: the doodads, which tiles are buildable and which units have no pathing. */
   around?: StartSurroundings | null;
 }
@@ -188,9 +228,9 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
     try { ground = bytes ? parseW3e(bytes) : null; } catch { ground = null; }
   }
   const facts: MeleeFacts = { customConstants: misc !== null && hasCustomConstants(misc), terrain: ground };
+  facts.customData = await customDataState(ws, files);
   if (!forSet) return facts;
   facts.constantsKnown = !miscPath || misc !== null;
-  facts.customData = files.some((p) => CUSTOM_DATA.test(p));
   // The rest only matters when nothing above already leaves the flag off.
   if (facts.customData || !facts.constantsKnown || facts.customConstants || !ground) return facts;
   const wtg = wtgPath(files.map((path) => ({ path })));
@@ -230,7 +270,7 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
   const t = facts.terrain;
   const out = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, t ? startsInvalidPlaces(t, placed) : false);
   if (facts.constantsKnown !== true) out.push("Gameplay constants not known");
-  if (facts.customData !== false) out.push("Custom object data or game interface");
+  if (facts.customData !== false) out.push(facts.customData ? "Custom object data or game interface" : "Custom object data or game interface not known");
   if (facts.defaultTriggers !== true) out.push("Triggers other than the default Melee Initialization, or not known");
   if (!t || !facts.around) out.push("Start locations' surroundings not known");
   else if (!startsPlainlyValid(t, placed, facts.around)) out.push("Start locations not plainly valid");
@@ -242,6 +282,7 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
 export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): { flags: number; reasons: string[] } {
   if (!(info.flags & MELEE_MAP)) return { flags: meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP, reasons: [] };
   const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed, facts.terrain ? startsInvalidPlaces(facts.terrain, placed) : false);
+  if (facts.customData === true) reasons.push("Custom object data or game interface");
   return { flags: reasons.length ? info.flags & ~MELEE_MAP : info.flags, reasons };
 }
 
