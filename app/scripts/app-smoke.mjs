@@ -10793,6 +10793,119 @@ async function modelViewerTextures(page, found) {
   }
 }
 
+/** Every game read the page makes from now on is logged as [path, 1 = found | 0 = not found] in window.__texLog (the
+ *  wrapper sits over the game's read cache: a file read by an earlier step is logged too). */
+async function watchGameReads(page) {
+  await page.evaluate(`(() => {
+    const g = w3Workbench.game;
+    delete g.read;
+    const orig = g.read;
+    window.__texLog = [];
+    g.read = function (p, ...a) {
+      const r = orig.call(this, p, ...a);
+      r.then(() => window.__texLog.push([p, 1]), () => window.__texLog.push([p, 0]));
+      return r;
+    };
+  })()`);
+}
+const unwatchGameReads = (page) => page.evaluate(`delete w3Workbench.game.read`);
+const foundReads = (page, re) => page.evaluate(`window.__texLog.filter(([p, ok]) => ok && ${re}.test(p)).map(([p]) => p)`);
+
+/** A model's textures in the terrain view (HD names them .tif, the game has .dds): the footman placed in the map has its
+ *  Footman .dds textures read and found. */
+async function terrainModelTexture(page, found) {
+  const fail = (what) => found.push(`terrain model texture: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  const dir = join(work, "terrain-model-texture");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  try {
+    await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(dir)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+    await page.evaluate(`w3Workbench.game.reload()`);
+    await watchGameReads(page);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas")`), 30000);
+    await settled(page);
+    await until("a footman texture", async () => (await foundReads(page, "/footman.*\\.dds$/i")).length > 0, 30000)
+      .catch(() => fail("no Footman texture was loaded as .dds"));
+    const tifs = await page.evaluate(`window.__texLog.filter(([p, ok]) => ok && /\\.tif$/i.test(p)).length`);
+    if (tifs) fail(`${tifs} .tif names were found in the game (it stores none)`);
+  } finally {
+    await unwatchGameReads(page);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(original ?? "hd")})`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
+/** Convert to a Classic model refuses a model that fails the Classic check (classiccheck.ts, run page-side in the built
+ *  app): the game's model is served without its geosets, nothing is written. The control: served as it is, the same
+ *  conversion goes through. */
+async function classicRefusal(page, found) {
+  const fail = (what) => found.push(`classic refusal: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const dir = join(work, "classic-refusal");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(FIXTURE, dir, { recursive: true });
+  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const put = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2));
+  const doo = json(join(dir, "map", "war3map.doo.json"));
+  doo.doodads.push({ ...doo.doodads[0], id: "LCcb", skinId: "LCcb", variation: 0, position: [256, 256, 0] });
+  put(join(dir, "map", "war3map.doo.json"), doo);
+  const w3i = json(join(dir, "map", "war3map.w3i.json"));
+  w3i.supportedModes = 1;
+  put(join(dir, "map", "war3map.w3i.json"), w3i);
+  const fix = () => page.evaluate(`(async () => {
+    const svc = await w3.services.get("w3.problems");
+    await svc.run();
+    const p = svc.problems().find((q) => q.message.includes("(LCcb)") && (q.fixes ?? []).some((f) => f.label.startsWith("Convert")));
+    if (!p) return "no problem (LCcb) with a Convert fix";
+    await p.fixes.find((f) => f.label.startsWith("Convert")).run();
+    return null;
+  })().catch((e) => String(e && e.message || e))`);
+  const mdxFiles = () => page.evaluate(`w3.workspace.files().map((f) => f.path).filter((p) => /\\.mdx$/i.test(p))`);
+  try {
+    await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(dir)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+    // Models come without their GEOS chunk (MDX: "MDLX", then chunks of a 4-letter tag, a u32 size, the data).
+    await page.evaluate(`(() => {
+      const g = w3Workbench.game;
+      delete g.read;
+      const orig = g.read;
+      window.__stripped = 0;
+      g.read = async function (p, ...a) {
+        const bytes = await orig.call(this, p, ...a);
+        if (!/\\.mdx$/i.test(p)) return bytes;
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), out = [bytes.subarray(0, 4)];
+        for (let at = 4; at + 8 <= bytes.length; ) {
+          const size = dv.getUint32(at + 4, true), end = at + 8 + size;
+          if (String.fromCharCode(...bytes.subarray(at, at + 4)) === "GEOS") window.__stripped++;
+          else out.push(bytes.subarray(at, end));
+          at = end;
+        }
+        return Uint8Array.from(out.flatMap((c) => [...c]));
+      };
+    })()`);
+    const refused = await fix();
+    if (!refused) fail("a model without a geoset was converted");
+    else if (!/unusable for Classic graphics|nothing to draw/.test(refused)) fail(`refused for another reason: ${refused}`);
+    if (!(await page.evaluate(`window.__stripped`))) fail("no model was served stripped (control)");
+    const written = (await mdxFiles()).filter((p) => /Classic/i.test(p));
+    if (written.length) fail(`a refused conversion left ${written.join(", ")}`);
+    // The control: the same conversion with the model as the game has it.
+    await page.evaluate(`delete w3Workbench.game.read`);
+    const err = await fix();
+    if (err) fail(`the conversion with the game's own model failed: ${err}`);
+    else if (!(await mdxFiles()).some((p) => /Classic/i.test(p))) fail("the control conversion wrote no model");
+  } finally {
+    await page.evaluate(`delete w3Workbench.game.read`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** The Replace dialogs (doodads with Swap Both, units with Selected Only, tiles), each one undo step; regions: bounds as
  *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a } anywhere (a } line, a " }"
  *  line, a } at a line's end) is marked as typed and refused by the save, the loading texts greyed on the default screen. */
@@ -14131,6 +14244,7 @@ async function run() {
         campaignFieldFocus,
         campaignPresets,
         chapterObjects,
+        classicRefusal,
         cliCheck,
         configSafety,
         contextLoss,
@@ -14215,6 +14329,7 @@ async function run() {
         syncSafety,
         tabsBeforeListing,
         techtreeRandomLevels,
+        terrainModelTexture,
         terrainSelectCameras,
         terrainWiring,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
@@ -14540,6 +14655,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "modelViewerTextures", found);
   await shadowTextureOrder(page, found).catch((e) => found.push(`shadow texture order: ${e.message}`));
   await leftOpen(page, "shadowTextureOrder", found);
+  await terrainModelTexture(page, found).catch((e) => found.push(`terrain model texture: ${e.message}`));
+  await leftOpen(page, "terrainModelTexture", found);
+  await classicRefusal(page, found).catch((e) => found.push(`classic refusal: ${e.message}`));
+  await leftOpen(page, "classicRefusal", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
   await leftOpen(page, "objectCopy", found);
   await verify3Steps(page, found).catch((e) => found.push(`verify 3 steps: ${e.message}`));
