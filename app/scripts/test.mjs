@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testBatches } from "./test-batches.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const cache = join(app, "node_modules", ".cache", "w3-tests");
@@ -58,6 +59,7 @@ if (only.size) {
 if (!tests.length) { console.log("no tests"); process.exit(0); }
 
 rmSync(out, { recursive: true, force: true });
+// logLevel "error" prints esbuild's messages; anything else that stops the build must not end the run silently.
 await build({
   entryPoints: tests,
   outdir: out,
@@ -76,8 +78,20 @@ await build({
       b.onLoad({ filter: /.*/, namespace: "raw" }, (a) => ({ contents: readFileSync(a.path, "utf8"), loader: "text" }));
     },
   }],
+}).catch((e) => {
+  console.error(`bundling the tests failed: ${e?.message ?? e}`);
+  if (own) rmSync(out, { recursive: true, force: true });
+  process.exit(1);
 });
 const bundles = tests.map((t) => join(out, relative(app, t)).replace(/\.m?ts$|\.mjs$/, ".mjs"));
-const run = spawnSync(process.execPath, ["--enable-source-maps", "--test", ...args, ...bundles], { stdio: "inherit" });
+const fixed = ["--enable-source-maps", "--test", ...args];
+// One node per batch that fits on a command line (scripts/test-batches.mjs): Windows refuses longer ones.
+let status = 0;
+for (const batch of testBatches(bundles, fixed, process.execPath)) {
+  const run = spawnSync(process.execPath, [...fixed, ...batch], { stdio: "inherit" });
+  if (run.error) console.error(`could not start node --test with ${batch.length} files: ${run.error.message}`);
+  else if (run.status === null) console.error(`node --test ended by signal ${run.signal}`);
+  if (run.status !== 0) status = run.status || 1;
+}
 if (own) rmSync(out, { recursive: true, force: true });
-process.exit(run.status ?? 1);
+process.exit(status);
