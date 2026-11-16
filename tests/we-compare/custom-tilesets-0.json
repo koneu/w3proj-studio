@@ -151,5 +151,41 @@
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "−1:"], ["cliff", "Grass"], ["size", 1], ["click", 748, 500]] }, { "sleep": 1000 }] },
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
     "limit": 40
+  },
+  {
+    "name": "ct0-replace-rev6-0",
+    "description": "Advanced (260,41) > Replace Tiles (288,223; dialog 'Replace Tiles' 260x100 at 550,448, Old Tile box arrow 795,464, New Tile 795,486, OK 690,534) under custom-tilesets 0, the file's list the own one reversed: both boxes list the tileset's own six in its order (Ldrt first), whatever the file's list (few3 too: we-drive 2026-11-16, branch ct0-tile-names). The defaults Dirt > Rough Dirt: the corners drawn Ldrt (file slot 0, Lgrd) go to slot 1. Studio: w3.terrain.replaceTiles by the list drawn (w3e.ts replaceTileNames, replaceSlots; was slot 5, the file's Ldrt). MATCH since branch ct0-tile-names (the three ct0-replace-*-0 differed before)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "260,41"], ["--sleep", "800"], ["--click", "288,223"], ["--sleep", "2500"], ["--click", "690,534"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "command": "w3.terrain.replaceTiles", "args": { "from": "Ldrt", "to": "Ldro" } }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-replace-few3-0",
+    "description": "the same with the list of 3 (Lgrs Lrok Ldrt, drawn Ldrt Ldro Ldrg): Old Tile Rough Dirt (row 2, 700,495), New Tile Grass (row 5, 700,556). Rough Dirt is not in the file's list (Studio refused it) but drawn on slot 1; Grass is the own list's slot 4, past the file's",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "260,41"], ["--sleep", "800"], ["--click", "288,223"], ["--sleep", "2500"], ["--click", "795,464"], ["--sleep", "600"], ["--click", "700,495"], ["--sleep", "400"], ["--click", "795,486"], ["--sleep", "600"], ["--click", "700,556"], ["--sleep", "400"], ["--click", "690,534"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "command": "w3.terrain.replaceTiles", "args": { "from": "Ldro", "to": "Lgrs" } }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-replace-more9-0",
+    "description": "the same with the list of 9 (slots 6 to 8 drawn Ldrt, as slot 0), the defaults Dirt > Rough Dirt: the corners of slots 6 to 8, drawn Ldrt, go to Rough Dirt too (the editor lists Dirt once)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "260,41"], ["--sleep", "800"], ["--click", "288,223"], ["--sleep", "2500"], ["--click", "690,534"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "command": "w3.terrain.replaceTiles", "args": { "from": "Ldrt", "to": "Ldro" } }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-replace-rev6-1",
+    "description": "the control: custom-tilesets 1, the reversed list, the defaults: the boxes list the file's list (Dark Grass > Grass, seen), Lgrd > Lgrs by slot. MATCH before and after branch ct0-tile-names",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-1.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "260,41"], ["--sleep", "800"], ["--click", "288,223"], ["--sleep", "2500"], ["--click", "690,534"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "command": "w3.terrain.replaceTiles", "args": { "from": "Lgrd", "to": "Lgrs" } }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
   }
 ]

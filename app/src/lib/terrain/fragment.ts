@@ -4,7 +4,7 @@
 // map, or turned. Tile and cliff types are kept by name, as a map numbers them its own way.
 
 import type { Copied } from "../objects/copydeps";
-import { setGroundHeight, setLayer, setWaterLevel, groundHeight, waterOffsetOf, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, setGroundHeight, setLayer, setWaterLevel, groundHeight, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 
 export const FRAGMENT_FORMAT = "w3proj.fragment/1";
 
@@ -129,8 +129,9 @@ export function areaBetween(a: readonly [number, number], b: readonly [number, n
   return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]) + 1, y1: Math.max(a[1], b[1]) + 1 };
 }
 
-/** The ground of an area, around `centre`. */
-export function groundOf(t: Terrain, a: CornerArea, centre: readonly [number, number]): FragmentGround {
+/** The ground of an area, around `centre`. Its tiles are named as they are drawn (w3e.ts drawnGroundTiles: with the
+ *  flag "custom tilesets" 0 by the tileset's own list `own`, not the file's), so a paste looks as what was copied. */
+export function groundOf(t: Terrain, a: CornerArea, centre: readonly [number, number], own?: readonly string[]): FragmentGround {
   const width = a.x1 - a.x0 + 1, height = a.y1 - a.y0 + 1;
   const corners: FragmentCorner[] = [];
   for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) {
@@ -142,7 +143,7 @@ export function groundOf(t: Terrain, a: CornerArea, centre: readonly [number, nu
   }
   return {
     at: [t.offsetX + a.x0 * TILE - centre[0], t.offsetY + a.y0 * TILE - centre[1]],
-    width, height, tiles: [...t.groundTiles], cliffs: [...t.cliffTiles], corners,
+    width, height, tiles: drawnGroundTiles(t, own), cliffs: [...t.cliffTiles], corners,
   };
 }
 

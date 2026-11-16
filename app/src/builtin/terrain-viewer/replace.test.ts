@@ -20,6 +20,19 @@ test("Replace Tiles: the old tile's corners get the new one, the rest stays", ()
   assert.deepEqual(t.corners.map((c) => c.variation), [3, 3, 3, 3]);
 });
 
+test("Replace Tiles of several slots drawn as one tile (custom tilesets 0): all of them go; a swap gives back the first", () => {
+  const t = ground(), log = new CornerUndo();
+  t.corners[2].texture = 0;
+  assert.deepEqual(replaceCorners(t, "texture", [0, 2], 1, false, log), [0, 2]);
+  assert.deepEqual(t.corners.map((c) => c.texture), [1, 1, 1, 1]);
+  const s = ground();
+  assert.deepEqual(replaceCorners(s, "texture", [0, 2], 1, true, log), [0, 1, 2, 3]);
+  assert.deepEqual(s.corners.map((c) => c.texture), [1, 0, 1, 0]);
+  // The new tile among them (a tile replaced by itself), or none: nothing.
+  assert.deepEqual(replaceCorners(ground(), "texture", [0, 1], 1, false, log), []);
+  assert.deepEqual(replaceCorners(ground(), "texture", [], 1, true, log), []);
+});
+
 test("Swap Both Tiles: each takes the other's corners; undo puts every corner back", () => {
   const t = ground(), log = new CornerUndo();
   assert.deepEqual(replaceCorners(t, "texture", 0, 1, true, log), [0, 1, 3]);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
-import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, paintSlot, parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
 
 const tree = (x: number, y: number, z = 0, angle = 0) => ({ list: "doodads" as const, entry: { id: "LTlt", position: [x, y, z], angle, scale: [1, 1, 1], life: 100 } });
 const flat = () => 0;
@@ -120,6 +120,24 @@ test("types keep their name in a map that numbers them otherwise", () => {
   assert.equal(to.groundTiles[to.corners[0].texture], "Lgrs");
   assert.equal(to.corners[0].cliffTexture, 0);
   assert.equal(to.corners[1].cliffTexture, 15, "no cliff type stays that");
+});
+
+test("custom tilesets 0: copied ground names its tiles as drawn, so a paste in the same map looks as what was copied", () => {
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  // The file's list the own one reversed (custom-tilesets-rev6-0): slot 0 is the file's Lgrd but drawn Ldrt.
+  const t = land(3, 3, [...own].reverse());
+  t.corners[0].texture = 0;
+  t.corners[1].texture = 5;
+  const g = groundOf(t, { x0: 0, y0: 0, x1: 1, y1: 1 }, [0, 0], own);
+  assert.deepEqual(g.tiles, own, "the list drawn, not the file's");
+  // Pasted where the paste looks its tiles up (index.ts tileNumbers: ensureTile, paintSlot), each corner drawn as before.
+  const slots = g.tiles.map((id) => paintSlot(t, id, own));
+  stampGround(t, g, [1, 1], slots, [0, 1]);
+  const look = (i: number) => drawnGroundTiles(t, own)[t.corners[i].texture];
+  assert.deepEqual([look(1 * 3 + 1), look(1 * 3 + 2)], ["Ldrt", "Lgrd"]);
+  // The control: the flag set, or the own list unknown, names them by the file's list, as before.
+  assert.deepEqual(groundOf({ ...t, customTilesetsRaw: 1 }, { x0: 0, y0: 0, x1: 1, y1: 1 }, [0, 0], own).tiles, [...own].reverse());
+  assert.deepEqual(groundOf(t, { x0: 0, y0: 0, x1: 1, y1: 1 }, [0, 0]).tiles, [...own].reverse());
 });
 
 test("stamping restores on undo, redoes, and survives the file", () => {

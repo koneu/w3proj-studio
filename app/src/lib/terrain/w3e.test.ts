@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { drawnGroundTiles, drawnSlot, paintSlot, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, drawnSlot, paintSlot, replaceSlots, replaceTileNames, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** A 2 × 2-corner terrain of `version`, every field in range. */
 function tiny(version = 11): Terrain {
@@ -127,6 +127,36 @@ test("paintSlot: with the flag 0 an own tile past the file's list grows it to th
   const set = { groundTiles: ["Lgrs"], customTilesetsRaw: 1 };
   assert.equal(paintSlot(set, "Ldrt", OWN_L), -1, "the flag set: the file's list, nothing grown");
   assert.deepEqual(set.groundTiles, ["Lgrs"]);
+});
+
+test("replaceTileNames and replaceSlots: with the flag 0 Replace Tiles names and takes tiles by the list drawn", () => {
+  const terrain = (tiles: string[], textures: number[], raw = 0): Terrain => {
+    const t = tiny(12);
+    t.groundTiles = tiles;
+    t.customTilesetsRaw = raw;
+    textures.forEach((x, i) => { t.corners[i].texture = x; });
+    return t;
+  };
+  const names = (t: Terrain) => replaceTileNames(t, OWN_L).map((n) => `${n.id}:${n.count}`);
+  // we-compare ct0-replace-rev6-0: the file's list reversed; the editor's boxes list the own six in their order.
+  const rev6 = terrain([...OWN_L].reverse(), [0, 0, 1, 5]);
+  assert.deepEqual(names(rev6), ["Ldrt:2", "Ldro:1", "Ldrg:0", "Lrok:0", "Lgrs:0", "Lgrd:1"]);
+  assert.deepEqual(replaceSlots(rev6, "Ldrt", OWN_L), [0], "drawn on slot 0, the file's Lgrd");
+  assert.deepEqual(replaceSlots(rev6, "Lgrd", OWN_L), [5]);
+  // ct0-replace-few3-0: a list of 3 lists the own six too; Ldro (not in the file's list) is drawn on slot 1, Lgrs on none.
+  const few = terrain(["Lgrs", "Lrok", "Ldrt"], [1, 1, 2, 2]);
+  assert.deepEqual(replaceTileNames(few, OWN_L).map((n) => n.id), OWN_L);
+  assert.deepEqual([replaceSlots(few, "Ldro", OWN_L), replaceSlots(few, "Lgrs", OWN_L)], [[1], []]);
+  // ct0-replace-more9-0: slots 6 to 8 are drawn Ldrt, as slot 0: once in the list, counted together, taken along.
+  const more9 = terrain([...OWN_L].reverse().concat("Wsnw", "Bdsr", "Ndrt"), [6, 7, 8, 0]);
+  assert.deepEqual(names(more9), ["Ldrt:4", "Ldro:0", "Ldrg:0", "Lrok:0", "Lgrs:0", "Lgrd:0"]);
+  assert.deepEqual(replaceSlots(more9, "Ldrt", OWN_L), [0, 6, 7, 8]);
+  // The flag set, or the own list unknown: the file's list slot by slot and its first slot, as before.
+  const set = terrain([...OWN_L].reverse(), [0, 0, 1, 5], 1);
+  assert.deepEqual(replaceTileNames(set, OWN_L).map((n) => n.id), [...OWN_L].reverse());
+  assert.deepEqual(replaceSlots(set, "Ldrt", OWN_L), [5]);
+  assert.deepEqual(replaceSlots(rev6, "Ldrt", undefined), [5]);
+  assert.deepEqual(replaceSlots(set, "Wsnw", OWN_L), []);
 });
 
 test("savedTerrain: with the flag 0 the save writes the tileset's own list, corners past it on slot 0, as the World Editor's", () => {

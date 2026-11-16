@@ -104,6 +104,31 @@ export function drawnSlot(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">,
   return drawnGroundTiles(t, own).indexOf(tile);
 }
 
+/** The slots whose corners a Replace of `tile` takes: with the flag 0 every slot drawn as it (a list of 9 draws slots 6
+ *  to 8 as slot 0, and the World Editor's Replace Tiles takes them along: we-compare ct0-replace-more9-0); with the flag
+ *  set, or the tileset's list unknown, the file's first slot with it, as before. Empty when none is. */
+export function replaceSlots(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, tile: string, own: readonly string[] | undefined): number[] {
+  if (t.customTilesetsRaw !== 0 || !own?.length) {
+    const at = t.groundTiles.indexOf(tile);
+    return at < 0 ? [] : [at];
+  }
+  return drawnGroundTiles(t, own).flatMap((g, i) => (g === tile ? [i] : []));
+}
+
+/** The ground tiles a Replace Tiles names, each with its corner count: with the flag 0 the tiles drawn and the rest of
+ *  the tileset's own list, once each in its order (the World Editor's Old Tile and New Tile boxes list the own list
+ *  whole, whatever the file's: we-compare ct0-replace-*), the corners counted by the tile they are drawn with. With the
+ *  flag set, or the tileset's list unknown, the file's list slot by slot. */
+export function replaceTileNames(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw" | "corners">, own: readonly string[] | undefined): { id: string; count: number }[] {
+  const perSlot = t.groundTiles.map(() => 0);
+  for (const c of t.corners) if (c.texture < perSlot.length) perSlot[c.texture]++;
+  if (t.customTilesetsRaw !== 0 || !own?.length) return t.groundTiles.map((id, i) => ({ id, count: perSlot[i] }));
+  const counts = new Map<string, number>();
+  drawnGroundTiles(t, own).forEach((g, i) => counts.set(g, (counts.get(g) ?? 0) + perSlot[i]));
+  for (const g of own) if (!counts.has(g)) counts.set(g, 0);
+  return [...counts].map(([id, count]) => ({ id, count }));
+}
+
 /** Before a tile is added to the list with the flag 0: the file's list becomes the list drawn, so the flag going to 1
  *  (the list is no longer the tileset's own) leaves every slot drawn as it was. Nothing with the flag set or the
  *  tileset's list unknown. The same array is changed (callers hold it). */

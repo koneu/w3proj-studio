@@ -85,7 +85,7 @@ import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectBatch, type ObjectInstance } from "./renderer";
-import { drawnGroundTiles, paintSlot, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerrain, settleDrawnList, groundHeight, markMapEdge, validComplements, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -3521,8 +3521,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const inArea: Corner[] = [];
           for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) inArea.push(terrain.corners[y * terrain.width + x]);
           const label = (id: string) => [id, `${names.get(id) ?? id} (${id})`] as [string, string];
-          const usedTiles = [...new Set(inArea.map((c) => terrain.groundTiles[c.texture]))];
-          const ownTiles = sets.find((s) => s.id === terrain.tileset)?.tiles ?? [];
+          // Tiles by the list drawn: with the flag 0 the tileset's own, not the file's (as Replace Tiles: replaceTileNames).
+          const own = sets.find((s) => s.id === terrain.tileset)?.tiles ?? [];
+          const drawn = drawnGroundTiles(terrain, own);
+          const usedTiles = [...new Set(inArea.map((c) => drawn[c.texture]))];
           // A cliff's number past the list stands for the first type, as when it's drawn.
           const cliffOf = (c: Corner) => (c.cliffTexture < cliffGrounds.length ? c.cliffTexture : 0);
           const layers = new Set(inArea.map((c) => c.layer));
@@ -3544,11 +3546,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.replaceChildren(
             h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),
             h("div.muted", {}, "Ctrl+C copies it · Esc clears it"),
-            replaceRow("Ground tile", usedTiles.map(label), [...new Set([...terrain.groundTiles, ...ownTiles])].map(label), async (from, to) => {
+            replaceRow("Ground tile", usedTiles.map(label), [...new Set([...replaceTileNames(terrain, own).map((n) => n.id), ...own])].map(label), async (from, to) => {
               const number = await handle.ensureGroundTile(to);
               if (number === null) { void w3.window.showWarning("This map can't take another ground tile."); return; }
-              const was = terrain.groundTiles.indexOf(from);
-              commit(changeArea(terrain, a, (c) => { if (c.texture !== was || was === number) return false; c.texture = number; return true; }));
+              // After the wait: adding the tile may have settled the list (each slot drawn as before).
+              const was = replaceSlots(terrain, from, ownTiles?.get(terrain.tileset));
+              commit(changeArea(terrain, a, (c) => { if (!was.includes(c.texture) || was.includes(number)) return false; c.texture = number; return true; }));
             }),
             ...(usedCliffs.length && cliffGrounds.length ? [replaceRow("Cliff type", usedCliffs.map((n) => [String(n), label(cliffGrounds[n])[1]] as [string, string]),
               cliffGrounds.flatMap((g, n) => (g ? [[String(n), label(g)[1]] as [string, string]] : [])), (from, to) => {
@@ -3574,7 +3577,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const inside = { left: worldX(a.x0), right: worldX(a.x1), bottom: worldY(a.y0), top: worldY(a.y1) };
           const items = !a.objects ? [] : ([["doodads", dooFile], ["units", unitsFile]] as const).flatMap(([list, f]) => (f?.list ?? [])
             .filter((p) => p.id !== "sloc" && inArea(p.position[0], p.position[1], inside)).map((entry) => ({ list, entry })));
-          clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre) };
+          clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre, ownTiles?.get(terrain.tileset)) };
           takeTypes(clipboard);
         };
         /** Where the fragment's centre lands for a pointer on the ground: objects alone on the World Editor's 64 grid
@@ -4828,10 +4831,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const names = await readTileNames();
             const tileLabel = (id: string) => `${names.get(id) ?? id} (${id})`;
             if (kind === "tiles") {
-              const use = handle.groundTileUsage();
               const own = (await handle.tilesets().catch(() => [])).find((s) => s.id === terrain.tileset)?.tiles ?? [];
-              const from = terrain.groundTiles.map((id, i) => ({ id, label: tileLabel(id), count: use[i] ?? 0 }));
-              return { from, to: [...from, ...own.filter((id) => !terrain.groundTiles.includes(id)).map((id) => ({ id, label: tileLabel(id), count: 0 }))], selected: 0 };
+              // With the flag 0 by the list drawn and the own list whole, as the World Editor's boxes (replaceTileNames).
+              const from = replaceTileNames(terrain, own).map(({ id, count }) => ({ id, label: tileLabel(id), count }));
+              return { from, to: [...from, ...own.filter((id) => !from.some((f) => f.id === id)).map((id) => ({ id, label: tileLabel(id), count: 0 }))], selected: 0 };
             }
             if (kind === "cliffs") {
               const use = handle.groundTileUse();
@@ -4857,13 +4860,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!editable) throw new Error("This terrain is read-only.");
             if (glDead) throw new Error(VIEW_LOST);
             if (kind === "tiles" || kind === "cliffs") {
-              let from: number, to: number;
+              let from: number | number[], to: number;
               if (kind === "tiles") {
-                from = terrain.groundTiles.indexOf(req.from);
-                if (from < 0) throw new Error(`${req.from} isn't one of this map's ground tiles: ${terrain.groundTiles.join(", ")}.`);
+                // The tiles by the list drawn (with the flag 0 the tileset's own: replaceTileNames), once the own lists are read.
+                await ownReady;
+                if (glDead) throw new Error(VIEW_LOST);
+                const names = replaceTileNames(terrain, ownTiles?.get(terrain.tileset)).map((n) => n.id);
+                if (!names.includes(req.from)) throw new Error(`${req.from} isn't one of this map's ground tiles: ${names.join(", ")}.`);
                 const slot = await handle.ensureGroundTile(req.to);
                 if (slot === null) throw new Error("This map has 16 ground tiles, the most it can have: remove one first.");
                 to = slot;
+                // Taken after the wait: adding the new tile may have settled the list (settleDrawnList), each slot drawn as before.
+                from = replaceSlots(terrain, req.from, ownTiles?.get(terrain.tileset));
+                if (!from.length) return 0;
               } else {
                 const grounds = handle.cliffGroundTiles();
                 if (!grounds.length) throw new Error("The game's cliff types aren't read yet. Try again in a moment.");

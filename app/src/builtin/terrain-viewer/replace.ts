@@ -47,12 +47,14 @@ export const replaceTitle = (kind: ReplaceKind) => WORDS[kind].title;
 
 /** Corners whose `field` (a ground tile or cliff type number) is `from` get `to`, and with `swap` those with `to` get
  *  `from`. Each corner is told to `log` before it changes. The corners changed. (A number past the map's list, such
- *  as the cliff type 15 that flat ground often has, is neither, so it stays.) */
-export function replaceCorners(t: Terrain, field: "texture" | "cliffTexture", from: number, to: number, swap: boolean, log: CornerLog): number[] {
+ *  as the cliff type 15 that flat ground often has, is neither, so it stays.) `from` may be several numbers (the slots
+ *  drawn as one tile: w3e.ts replaceSlots); a swap gives `to`'s corners the first. Nothing when `to` is among them. */
+export function replaceCorners(t: Terrain, field: "texture" | "cliffTexture", from: number | readonly number[], to: number, swap: boolean, log: CornerLog): number[] {
   const changed: number[] = [];
-  if (from === to) return changed;
+  const froms = typeof from === "number" ? [from] : from;
+  if (!froms.length || froms.includes(to)) return changed;
   t.corners.forEach((c, i) => {
-    const next = c[field] === from ? to : swap && c[field] === to ? from : null;
+    const next = froms.includes(c[field]) ? to : swap && c[field] === to ? froms[0] : null;
     if (next === null) return;
     log.touch(t, i);
     c[field] = next;
