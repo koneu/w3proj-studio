@@ -21,6 +21,20 @@ export function negativeRefused(valueType: string, n: number, allowNegative: boo
   return valueType === "unreal" && n < 0 && !allowNegative ? "can't be negative (the setting Allow negative real values lets it)" : null;
 }
 
+/** Why `n` doesn't fit a field of `valueType` as the file stores it, or null if it does: an int is a 32-bit whole
+ *  number, a real or unreal a 32-bit float (a number past its range would be stored as infinity). Refused, never
+ *  wrapped or overflowed. */
+export function rangeRefused(valueType: string, n: number): string | null {
+  if (valueType === "int" && (n < -2147483648 || n > 2147483647)) return "is past the range of a whole number (-2147483648 to 2147483647)";
+  if ((valueType === "real" || valueType === "unreal") && !Number.isFinite(Math.fround(n))) return "is past the range of a real number (about -3.4e38 to 3.4e38)";
+  return null;
+}
+
+/** Why `n` can't be a value of a field of `valueType` (rangeRefused, then negativeRefused), or null if it can. */
+export function valueRefused(valueType: string, n: number, allowNegative: boolean): string | null {
+  return rangeRefused(valueType, n) ?? negativeRefused(valueType, n, allowNegative);
+}
+
 /** What's typed as a value of a field; throws if it can't be one. `allowNegative`: the setting Allow negative
  *  real values (unreal fields take values below 0). */
 export function fieldValue(f: Pick<FieldMeta, "id" | "label" | "valueType">, value: unknown, opts: { allowNegative?: boolean } = {}): number | string {
@@ -28,7 +42,7 @@ export function fieldValue(f: Pick<FieldMeta, "id" | "label" | "valueType">, val
   const n = Number(value);
   if (value === "" || value === null || typeof value === "boolean" || !Number.isFinite(n)) throw new Error(`${f.label} (${f.id}) takes a number.`);
   if (f.valueType === "int" && !Number.isInteger(n)) throw new Error(`${f.label} (${f.id}) takes a whole number.`);
-  const refused = negativeRefused(f.valueType, n, opts.allowNegative === true);
+  const refused = valueRefused(f.valueType, n, opts.allowNegative === true);
   if (refused) throw new Error(`${f.label} (${f.id}) ${refused}.`);
   return n;
 }

@@ -325,7 +325,14 @@ fn write_mods(out: &mut Vec<u8>, mods: &[Mod], end: Id, opt_ints: bool) -> Resul
                 out.extend(v.to_le_bytes());
             }
             ValueType::Real | ValueType::Unreal => {
+                // A number past the f32 range would be stored as infinity: refused, not overflowed.
                 let v = m.value.as_f64().ok_or_else(bad)? as f32;
+                if !v.is_finite() {
+                    return Err(Error::Format(format!(
+                        "field {:?}: {} is past the range of a 32-bit float",
+                        m.field, m.value
+                    )));
+                }
                 out.extend(v.to_bits().to_le_bytes());
             }
             ValueType::String => {
@@ -432,5 +439,50 @@ mod tests {
                 assert_eq!(from_json(&json, opt).unwrap(), bin, "v{v} opt={opt}");
             }
         }
+    }
+
+    /// The sample's JSON with the usca mod as `ty` holding `value` (a JSON literal).
+    fn with_value(ty: &str, value: &str) -> Vec<u8> {
+        let text = String::from_utf8(to_json(&sample(2, false), false).unwrap()).unwrap();
+        let text = text.replace("\"type\": \"real\"", &format!("\"type\": \"{ty}\"")).replace("1.1", value);
+        assert!(text.contains(value), "{text}");
+        text.into_bytes()
+    }
+
+    #[test]
+    fn int_past_i32_is_refused() {
+        assert!(from_json(&with_value("int", "2147483647"), false).is_ok());
+        assert!(from_json(&with_value("int", "-2147483648"), false).is_ok());
+        let e = from_json(&with_value("int", "99999999999"), false).unwrap_err().to_string();
+        assert!(e.contains("not a valid int"), "{e}");
+        assert!(from_json(&with_value("int", "-2147483649"), false).is_err());
+    }
+
+    #[test]
+    fn real_past_f32_is_refused() {
+        for ty in ["real", "unreal"] {
+            assert!(from_json(&with_value(ty, "3.4e38"), false).is_ok(), "{ty}");
+            for v in ["1e39", "-1e39"] {
+                let e = from_json(&with_value(ty, v), false).unwrap_err().to_string();
+                assert!(e.contains("past the range of a 32-bit float"), "{ty} {v}: {e}");
+            }
+        }
+    }
+
+    /// Infinity or NaN in a map's file isn't decoded: the unpack keeps that file's bytes as they are (project.rs
+    /// stores a file raw when its codec fails), so they still pack back byte for byte.
+    #[test]
+    fn non_finite_in_a_file_stays_raw() {
+        for bits in [f32::INFINITY.to_bits(), f32::NAN.to_bits()] {
+            let mut bin = sample(2, false);
+            let at = bin.len() - 8;
+            bin[at..at + 4].copy_from_slice(&bits.to_le_bytes());
+            assert!(to_json(&bin, false).is_err());
+        }
+    }
+
+    #[test]
+    fn string_values_still_write() {
+        assert!(from_json(&with_value("string", "\"1e39\""), false).is_ok());
     }
 }

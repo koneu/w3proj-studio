@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, rangeRefused, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
@@ -29,6 +29,25 @@ test("Allow negative real values: unreal fields take values below 0 only with th
   assert.equal(negativeRefused("unreal", -1, false) !== null, true);
   assert.equal(negativeRefused("unreal", -1, true), null);
   assert.equal(negativeRefused("real", -1, false), null);
+});
+
+test("values past what the file stores are refused, not wrapped: int is 32-bit, real and unreal 32-bit float", () => {
+  // int
+  assert.equal(fieldValue(field("uhpm", "int"), "2147483647"), 2147483647);
+  assert.equal(fieldValue(field("uhpm", "int"), -2147483648), -2147483648);
+  assert.throws(() => fieldValue(field("uhpm", "int"), "99999999999"), /range of a whole number/);
+  assert.throws(() => fieldValue(field("uhpm", "int"), -2147483649), /range of a whole number/);
+  // real
+  assert.equal(fieldValue(field("ucol", "real"), "3.4e38"), 3.4e38);
+  assert.throws(() => fieldValue(field("ucol", "real"), "1e39"), /range of a real number/);
+  assert.throws(() => fieldValue(field("ucol", "real"), -1e39), /range of a real number/);
+  // unreal: the range is told before the negative setting
+  assert.equal(fieldValue(field("usca", "unreal"), "3.4e38"), 3.4e38);
+  assert.throws(() => fieldValue(field("usca", "unreal"), "1e39"), /range of a real number/);
+  assert.throws(() => fieldValue(field("usca", "unreal"), "-1e39", { allowNegative: true }), /range of a real number/);
+  // string: any text
+  assert.equal(fieldValue(field("unam", "string"), "1e39"), "1e39");
+  assert.equal(rangeRefused("string", 1e39), null);
 });
 
 test("levels: from 1 where a field has them, none elsewhere", () => {

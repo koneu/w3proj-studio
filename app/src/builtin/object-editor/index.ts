@@ -24,7 +24,7 @@ import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, p
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { isCampaignFiles, registerObjectTools } from "./tools";
@@ -104,7 +104,7 @@ function parseValue(type: ValueType, text: string, allowNegative: boolean): numb
   if (type === "string") return text;
   const n = Number(text);
   if (text.trim() === "" || Number.isNaN(n) || (type === "int" && !Number.isInteger(n))) return null;
-  if (negativeRefused(type, n, allowNegative)) return null;
+  if (valueRefused(type, n, allowNegative)) return null;
   return n;
 }
 
@@ -813,7 +813,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (v === null) {
                 input.classList.add("invalid");
                 const n = Number(input.value);
-                if (negativeRefused(type, n, allowNegative)) void w3.window.showWarning(`${input.value} ${negativeRefused(type, n, allowNegative)}.`);
+                const why = valueRefused(type, n, allowNegative);
+                if (why) void w3.window.showWarning(`${input.value} ${why}.`);
                 return;
               }
               input.classList.remove("invalid");
@@ -949,7 +950,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
             const value = parseValue(type, newValue.value, allowNegative);
             if (value === null) {
-              const why = negativeRefused(type, Number(newValue.value), allowNegative);
+              const why = valueRefused(type, Number(newValue.value), allowNegative);
               return w3.window.showWarning(why ? `${newValue.value} ${why}.` : `"${newValue.value}" is not a valid ${type}.`);
             }
             const mod: Mod = { field: newField.value, type, value };
