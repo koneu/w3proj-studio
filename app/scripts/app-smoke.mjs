@@ -1111,7 +1111,49 @@ async function heightsPreserve(page, found) {
   }
 }
 
-/** Three things of verification round 3 that were proved by hand: "Don't care about undo" (the setting and what an AI
+/** A copy made while the pathing sizes aren't read (a change of the doodad data empties them, and a type that looks the
+ *  same isn't read again) counts its doodads as free and lands them at the pointer, not on the 64 grid: copied and
+ *  pasted at an off-grid spot, the doodad must land as one copied after its size was read. */
+async function pasteWaitsForSizes(page, found) {
+  try {
+  const fail = (what) => found.push(`paste waits for sizes: ${what}`);
+  const k = await heightKit(page, "PasteSizes");
+  await k.tool("place_objects", { objects: [{ id: "LTbr", x: 0, y: 0 }], ignoreRoom: true });
+  await k.save();
+  const home = k.doodads()[0].position;
+  const known = new Set(k.doodads().map((d) => JSON.stringify(d.position)));
+  const fresh = () => k.doodads().filter((d) => !known.has(JSON.stringify(d.position)));
+  const pasteOnce = async (dx) => {
+    await k.look(home[0], home[1], { id: "LTbr", x: home[0], y: home[1] });
+    await k.focusMap();
+    await k.hands.key("c", "KeyC", 67, 2);
+    await k.look(-1000 + 17 + dx, 21);
+    await k.focusMap();
+    await k.hands.key("v", "KeyV", 86, 2);
+    await k.clickMiddle();
+    await k.hands.key("Escape", "Escape", 27);
+    await k.save();
+    const got = fresh();
+    for (const d of got) known.add(JSON.stringify(d.position));
+    return got;
+  };
+  // Sizes read: the paste's landing as the World Editor has it.
+  const normal = await pasteOnce(0);
+  if (normal.length !== 1) return fail(`the paste with the size read: ${JSON.stringify(normal.map((d) => d.position))}`);
+  // A change of the doodad data, with a type that looks the same: the sizes are emptied and not read again by itself.
+  await k.tool("create_object", { kind: "destructables", base: "LTbr" });
+  await settled(page);
+  await new Promise((r) => setTimeout(r, 1500));
+  await settled(page);
+  const early = await pasteOnce(640);
+  if (early.length !== 1 || early[0].position[0] !== normal[0].position[0] + 640 || early[0].position[1] !== normal[0].position[1]) fail(`a paste copied before the size was read landed at ${JSON.stringify(early.map((d) => d.position))}, not at x ${normal[0].position[0] + 640}, y ${normal[0].position[1]}`);
+  await k.reset();
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
+/** Three things of verification round 3 that were proved by hand:"Don't care about undo" (the setting and what an AI
  *  client reads of it), Reset Fixed Object Heights on a drag (flags 2 and 6, one undo), and the running day/night cycle
  *  (the hour moves with time, waits while the view is hidden, goes back to the stored hour when switched off). The
  *  cycle's clock is performance.now, which the page gets an offset on: a jump of it instead of twenty seconds' wait. */
@@ -13657,6 +13699,7 @@ async function run() {
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
         paletteMouse,
+        pasteWaitsForSizes,
         pathingImport,
         pathingSquare,
         placeObjects,
@@ -13851,7 +13894,7 @@ async function firstHalf(page, found) {
   // Test Map needs a map it could start: the one objectsWhileOpening left open.
   await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
   await leftOpen(page, "testMapWithoutGame", found);
-  for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+  for (const check of [heightsPreserve, heightsUniform, heightsLimits, pasteWaitsForSizes]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
   await leftOpen(page, "height tools", found);
   await mcpLimits(page, found).catch((e) => found.push(`mcp limits: ${e.message}`));
   await leftOpen(page, "mcpLimits", found);

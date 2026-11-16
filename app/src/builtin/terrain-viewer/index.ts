@@ -3421,15 +3421,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const items = [...entries].sort((a, b) => fileOrder(a) - fileOrder(b)).map((entry) => ({ list: doodadAt.has(entry) ? "doodads" as const : "units" as const, entry }));
           // The centre as the World Editor's (copyCentre): from where each would stand on its own grid, and only on the
           // 64 grid when something of the group has a grid.
-          const own = items.map(({ list, entry: p }): [number, number] => {
-            if (list === "units") return onGrid(p.id, p.position[0], p.position[1]);
-            const at = ruledPose(p.id, p.position[0], p.position[1], p.angle);
-            return [at.x, at.y];
-          });
-          const rules = doodadRules();
-          const free = !items.some(({ list, entry: p }) => (list === "doodads" ? rules.snap && hasPathSize(rules.size(p.id)) : unitGridCells(p.id, buildingCells.get(p.id)) !== null));
-          clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), copyCentre(own, free)), ...(free ? { free } : {}) };
-          takeTypes(clipboard);
+          const build = (): Fragment => {
+            const own = items.map(({ list, entry: p }): [number, number] => {
+              if (list === "units") return onGrid(p.id, p.position[0], p.position[1]);
+              const at = ruledPose(p.id, p.position[0], p.position[1], p.angle);
+              return [at.x, at.y];
+            });
+            const rules = doodadRules();
+            const free = !items.some(({ list, entry: p }) => (list === "doodads" ? rules.snap && hasPathSize(rules.size(p.id)) : unitGridCells(p.id, buildingCells.get(p.id)) !== null));
+            return { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), copyCentre(own, free)), ...(free ? { free } : {}) };
+          };
+          const root = w3.workspace.project()?.root;
+          const unread = [...new Set(items.filter(({ list, entry: p }) => (list === "doodads" ? isDoodadType(p.id) && !doodadCells.has(p.id) : p.id !== "sloc" && !buildingCells.has(p.id))).map(({ entry: p }) => p.id))];
+          const made = clipboard = build();
+          takeTypes(made);
+          if (unread.length) {
+            // Sizes still unread (an object data change empties them): the grid of each is its size's, so the centre and
+            // `free` are worked out again once they are, and a paste waits for that.
+            made.sizesReady = Promise.all(unread.map((id) => (isDoodadType(id) ? loadDoodadCells(id) : loadCells(id)).catch(() => { /* stays free */ }))).then(() => {
+              if (clipboard !== made || disposed || w3.workspace.project()?.root !== root) return;
+              const again = build();
+              again.typesReady = made.typesReady;
+              if (made.types) again.types = made.types;
+              clipboard = again;
+            });
+          }
           return true;
         };
         /** The block of ground Ctrl+C takes. */
@@ -3587,8 +3603,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return bringing.renames;
         };
-        const startPaste = () => {
+        /** Waits for the pathing sizes of the types (objects.ready: a size that can't be read stays unknown). */
+        const objectsReady = (of: readonly { list: string; id: string }[]) => Promise.all([...new Set(of.map((o) => `${o.list}:${o.id}`))].map((k) => {
+          const [list, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)];
+          return (list === "units" ? loadCells(id) : isDoodadType(id) ? loadDoodadCells(id) : Promise.resolve()).catch(() => { /* stays as it is */ });
+        }));
+        const startPaste = (): boolean => {
           if (!clipboard) return false;
+          // Its centre is still being worked out from the objects' pathing sizes (copySelection): the paste begins after.
+          const waiting = clipboard.sizesReady;
+          if (waiting) { void waiting.then(() => { if (!disposed && clipboard && !clipboard.sizesReady) startPaste(); }); return true; }
           setArea(null);
           showTab(null);
           clearSelection();
@@ -3637,6 +3661,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // What the pasted objects are made of, before anything is placed: the user may refuse.
           const root = w3.workspace.project()?.root;
           const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
+          // The pathing sizes of what's pasted: the grid it lands on, and a destructable's fixed rotation, hold only once read.
+          await objectsReady(f.objects.map((o) => ({ list: o.list, id: String(o.entry.id) })));
           // Another project, or the paste ended, while the question was open: nothing is placed.
           if (!renames || pasting !== f || w3.workspace.project()?.root !== root || refuseLost()) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
