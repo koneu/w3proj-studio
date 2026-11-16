@@ -159,9 +159,11 @@ export function lightBrightness(light: RangeLight): number {
  * Light Ranges for one light of one placed object: a ring on the ground round where the light is (`pivot`, in the
  * model, through the object's `world` matrix: column-major 4×4), as far as the World Editor draws it
  * (lightRangeRadius: by the light's brightness, not by the object's size), in the light's colour (the file's order
- * read as red, green, blue, as the editor shows it; brightest channel full). None for a light that reaches nowhere.
+ * read as red, green, blue, as the editor shows it; brightest channel full). None for a light that reaches nowhere,
+ * and none in SD (classic graphics, `graphicsMode` "sd"): the editor drew no rings there (light-radius, 2026-11-13).
  */
-export function lightRings(world: ArrayLike<number>, pivot: readonly number[], light: RangeLight): RangeRing[] {
+export function lightRings(world: ArrayLike<number>, pivot: readonly number[], light: RangeLight, graphicsMode = "hd"): RangeRing[] {
+  if (graphicsMode === "sd") return [];
   const [px, py, pz] = [pivot[0] ?? 0, pivot[1] ?? 0, pivot[2] ?? 0];
   const x = world[0] * px + world[4] * py + world[8] * pz + world[12];
   const y = world[1] * px + world[5] * py + world[9] * pz + world[13];

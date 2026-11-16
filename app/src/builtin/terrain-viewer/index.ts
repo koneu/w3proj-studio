@@ -5059,6 +5059,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lightsKey = "";
         const showLightRanges = () => {
           const rings: { x: number; y: number; r: number; rgb: [number, number, number] }[] = [];
+          const mode = artMode();
           if (shown.lightRanges) {
             for (const b of renderer.batches) {
               const lights = b.gpu.model.lights;
@@ -5067,7 +5068,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const inst of b.instances) {
                 for (const l of lights) {
                   const id = l.node.objectId;
-                  rings.push(...lightRings(inst.world, [pivots[id * 3] ?? 0, pivots[id * 3 + 1] ?? 0, pivots[id * 3 + 2] ?? 0], l));
+                  rings.push(...lightRings(inst.world, [pivots[id * 3] ?? 0, pivots[id * 3 + 1] ?? 0, pivots[id * 3 + 2] ?? 0], l, mode));
                 }
               }
             }
@@ -5922,6 +5923,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const stopArtMode = w3.settings.onDidChange((key) => {
+          if (key === "game.graphicsMode") showLightRanges();
           if (key === "game.graphicsMode" && artMode() !== openedMode) void reopenForArt(doc.path);
         });
         // Changed while it opened: its tab is still loading, and opens again once it's there.
