@@ -23,6 +23,22 @@ export function objectName(o: MapObject, kind: Kind, resolve: Resolve): string {
   return plain(own ? resolve(own.value as string) : kind.names.get(o.base) ?? o.base);
 }
 
+/** The object's Editor Suffix (the field is found by its label, "Name - Editor Suffix" on units: unsf, ansf, fnsf …), colour codes stripped: its own
+ *  value when it has one (even an empty one), else the game's. Empty when the kind has no such field. */
+export function editorSuffix(o: MapObject, kind: Pick<KindData, "fields" | "defaultValue">, resolve: Resolve): string {
+  const f = kind.fields.find((x) => /(^|- )Editor Suffix$/i.test(x.label));
+  if (!f) return "";
+  const own = modsOf(o).find((m) => m.field === f.id && typeof m.value === "string" && (!f.repeat || (m.level ?? 1) <= 1));
+  if (own) return plain(resolve(own.value as string)).trim();
+  const def = kind.defaultValue(o.base, f, f.repeat ? 1 : 0);
+  return def ? plain(resolve(def)).trim() : "";
+}
+
+/** The list label: "Name - Suffix", the name alone without a suffix. */
+export function labelWithSuffix(name: string, suffix: string): string {
+  return suffix ? `${name} - ${suffix}` : name;
+}
+
 /** Where a kind says which tilesets an object is made for. */
 const TILESET_FIELDS = ["btil", "dtil"];
 
