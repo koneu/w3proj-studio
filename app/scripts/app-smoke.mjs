@@ -7280,6 +7280,19 @@ async function typedFieldSave(page, found) {
     // ---- Gameplay Constants: Max Unit Speed ----
     // A value set takes the Melee flag off, as the World Editor's save does ("Custom gameplay constants have been specified").
     const meleeFlag = () => k.read("war3map.w3i.json").flags & 4;
+    // The Footman's hit points above are custom unit data, which the World Editor's save takes the Melee flag off for
+    // ("Custom unit data has been specified"); Map Properties' save did (lib/terrain/meleesave.ts customDataState).
+    await until("the Melee flag off for the custom unit data", () => meleeFlag() === 0, 10000)
+      .catch(() => fail("a melee map with custom unit data saved (the Footman's hit points) is still a melee map"));
+    // For the gameplay constants' own proof the unit data goes and the flag comes back, by file: then they are the
+    // only reason left to take it off.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(w3u)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+    const melee = k.read("war3map.w3i.json");
+    melee.flags |= 4;
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(w3i)}, ${JSON.stringify(JSON.stringify(melee, null, 2))})`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
     const meleeBefore = meleeFlag();
     if (!meleeBefore) fail("the map isn't a melee map before its gameplay constants change (control)");
     await page.evaluate(`w3.editors.closeAll()`);
@@ -10523,6 +10536,9 @@ async function moveTextsToTable(page, found) {
   if (info.players[0].name !== "TRIGSTR_001" || !/STRING 2\r\n\{\r\nForce 1\r\n\}/.test(wtsBefore)) return fail(`cliff.w3m isn't as the test knows it (control): ${info.players[0].name}, ${JSON.stringify(wtsBefore.slice(0, 60))}`);
   info.players[0].name = "Lit Player";
   info.forces[0].name = "Lit Force";
+  // With the custom object data below the map isn't a melee map: the World Editor's save takes the flag off for it
+  // (lib/terrain/meleesave.ts customDataState), so a melee flag left on would change w3i on the first save.
+  info.flags &= ~4;
   writeFileSync(file("war3map.w3i.json"), JSON.stringify(info, null, 2));
   const str = (field, value, level) => ({ field, type: "string", ...(level === undefined ? {} : { level, data: 0 }), value });
   writeFileSync(file("war3map.w3u.json"), JSON.stringify({ format: "w3proj.objects/1", version: 2,
