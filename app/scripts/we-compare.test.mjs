@@ -198,7 +198,15 @@ function isGenerated(map, repo, gens) {
   const rel = relative(join(repo, "target"), map);
   if (rel.startsWith("..") || resolve(rel) === rel) return false;
   const folder = basename(dirname(map));
-  return gens.some((g) => g.includes(basename(map)) && g.includes(folder));
+  const file = basename(map);
+  // A generator names its output either literally or as a template (`melee-valid-${name}.w3x`): then the template's
+  // fixed prefix and suffix must fit the file and the case name between them must appear in the generator.
+  const templated = (g) => [...g.matchAll(/([\w.-]*)\$\{[^}]+\}([\w.-]*)/g)].some(([, pre, post]) => {
+    if (!pre && !post) return false;
+    if (!file.startsWith(pre) || !file.endsWith(post) || file.length <= pre.length + post.length) return false;
+    return g.includes(file.slice(pre.length, file.length - post.length));
+  });
+  return gens.some((g) => g.includes(folder) && (g.includes(file) || templated(g)));
 }
 
 test("no spec under tests/we-compare reads openpoints, and every input map is in the repository (or in smoketest_maps)", () => {
@@ -228,4 +236,9 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
   assert.ok(!isGenerated(join(repo, "target", "studio-paths", "other.w3x"), repo, gen));
   assert.ok(!isGenerated(join(repo, "target", "nowhere", "echo-plain.w3x"), repo, gen));
   assert.ok(!isGenerated(join(repo, "tests", "echo-plain.w3x"), repo, gen));
+  // A templated name counts when the case name appears in the generator and the fixed parts fit; an unnamed case does not.
+  const tpl = ['// into <repo>/target/melee-valid/\nconst cases = { "tree-256": 1 };\nwrite(join(out, `melee-valid-${name}.w3x`));'];
+  assert.ok(isGenerated(join(repo, "target", "melee-valid", "melee-valid-tree-256.w3x"), repo, tpl));
+  assert.ok(!isGenerated(join(repo, "target", "melee-valid", "melee-valid-other.w3x"), repo, tpl));
+  assert.ok(!isGenerated(join(repo, "target", "melee-valid", "other-tree-256.w3x"), repo, tpl));
 });
