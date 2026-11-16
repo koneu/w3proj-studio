@@ -14476,10 +14476,30 @@ async function mapSizeUi(page, found) {
  *  campaign project stands in for a .w3n: the editor opens a campaign by its project. */
 async function campaignFieldFocus(page, found) {
   const fail = (what) => found.push(`campaign number field focus: ${what}`);
+  const num = ".camp-editor input.form-num";
+  const state = () => page.evaluate(`(() => { const a = document.activeElement; return { num: !!a?.matches?.(".camp-editor input.form-num"), value: a?.value ?? null, dirty: w3.editors.isDirty("map/war3campaign.w3f.json") }; })()`);
+  // Types "7" into the first number field, Ctrl+S, and checks focus, the typed value and a clean tab.
+  const typeAndSave = async (label) => {
+    const hands = new Hands(page);
+    await until("a number field", () => page.evaluate(`!!document.querySelector(${JSON.stringify(num)})`), 20000);
+    await settled(page);
+    await hands.click(num);
+    await hands.key("a", "KeyA", 65, 2);
+    await hands.type("7");
+    const typed = await state();
+    if (!typed.num || typed.value !== "7") return fail(`${label}: typing into the number field: ${JSON.stringify(typed)} (control)`);
+    if (!typed.dirty) fail(`${label}: the campaign isn't marked as changed while a number is typed`);
+    await hands.key("s", "KeyS", 83, 2);
+    await settled(page);
+    await sleep(500);
+    const after = await state();
+    if (!after.num) fail(`${label}: the number field lost focus after Ctrl+S (focus is on ${await page.evaluate(`document.activeElement?.tagName + "." + document.activeElement?.className`)})`);
+    else if (after.value !== "7") fail(`${label}: the number field shows ${JSON.stringify(after.value)} after Ctrl+S, not what was typed`);
+    if (after.dirty) fail(`${label}: the campaign is still marked as changed after Ctrl+S`);
+  };
   try {
     const camp = join(work, "campaign-focus");
     rmSync(camp, { recursive: true, force: true });
-    const hands = new Hands(page);
     await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Focus Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
     await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
@@ -14492,23 +14512,22 @@ async function campaignFieldFocus(page, found) {
       await w3.workspace.refresh();
     })()`);
     await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
-    const num = ".camp-editor input.form-num";
-    await until("a number field", () => page.evaluate(`!!document.querySelector(${JSON.stringify(num)})`), 20000);
+    await typeAndSave("new campaign");
+    await page.evaluate(`w3.editors.closeAll()`);
     await settled(page);
-    const state = () => page.evaluate(`(() => { const a = document.activeElement; return { num: !!a?.matches?.(".camp-editor input.form-num"), value: a?.value ?? null, dirty: w3.editors.isDirty("map/war3campaign.w3f.json") }; })()`);
-    await hands.click(num);
-    await hands.key("a", "KeyA", 65, 2);
-    await hands.type("7");
-    const typed = await state();
-    if (!typed.num || typed.value !== "7") return fail(`typing into the number field: ${JSON.stringify(typed)} (control)`);
-    if (!typed.dirty) fail("the campaign isn't marked as changed while a number is typed");
-    await hands.key("s", "KeyS", 83, 2);
-    await settled(page);
-    await sleep(500);
-    const after = await state();
-    if (!after.num) fail(`the number field lost focus after Ctrl+S (focus is on ${await page.evaluate(`document.activeElement?.tagName + "." + document.activeElement?.className`)})`);
-    else if (after.value !== "7") fail(`the number field shows ${JSON.stringify(after.value)} after Ctrl+S, not what was typed`);
-    if (after.dirty) fail("the campaign is still marked as changed after Ctrl+S");
+
+    // Second pass: a real .w3n (smoketest_maps), unpacked into the work folder, opened as a project.
+    const w3n = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "campaign", "Curse of the Forsaken Classic v4.0.1.w3n");
+    if (!existsSync(w3n)) { console.log(`campaign number field focus: real campaign skipped, ${w3n} isn't there`); return; }
+    const realDir = join(work, "campaign-focus-real");
+    rmSync(realDir, { recursive: true, force: true });
+    const copy = join(work, "campaign-focus-real.w3n");
+    cpSync(w3n, copy);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(copy)}, dir: ${JSON.stringify(realDir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+    await page.evaluate(`w3.workspace.open(${JSON.stringify(realDir)})`);
+    await until("the real campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(realDir)}`), 60000);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    await typeAndSave("real .w3n");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     await restoreWindow(page);
