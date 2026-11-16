@@ -3783,6 +3783,58 @@ async function groundTextureReload(page, found) {
   }
 }
 
+/** The blight texture and the water frames of the tileset are read through the same import path as the ground textures:
+ *  a map importing them, and another program overwriting the files, shows in the open view at the next focus (they're read
+ *  again, as the ground textures are). Judged by the reads the view makes, as a blighted or watered spot may not be in view. */
+async function importedBlightWaterReload(page, found) {
+  try {
+  const fail = (what) => found.push(`imported blight and water reload: ${what}`);
+  const k = await heightKit(page, "BlightWaterReload");
+  try {
+    const w3e = readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+    const tileset = (/tileset\W+([A-Za-z])/i.exec(w3e) ?? [])[1];
+    if (!tileset) return fail(`no tileset in the terrain file: ${w3e.slice(0, 120)}`);
+    const ini = await page.evaluate(`w3.game.readText(${JSON.stringify("UI\\WorldEditData.txt")})`);
+    const sets = ini.slice(ini.indexOf("[TileSets]"));
+    const blight = sets.split(/\r?\n/).map((l) => l.split("=")).find((x) => x[0].trim().toLowerCase() === tileset.toLowerCase())?.[1]?.split(",")[1]?.trim();
+    const paths = { blight: blight ? blight + ".blp" : null, water: true };
+    if (!paths.blight || !paths.water) return fail(`no blight or water row for tileset ${tileset}: ${JSON.stringify(paths)}`);
+    // The water frames' texture file, as the view reads it (Water.slk's texFile column, then <file>00.blp).
+    const slk = spawnSync(cli, ["game", ...installArgs, "slk", "TerrainArt/Water.slk", tileset + "Sha", "--col", "waterID,texFile,numTex"], { encoding: "utf8" });
+    const row = slk.stdout.trim().split(/\r?\n/)[1]?.split("\t");
+    if (!row?.[1] || !(Number(row[2]) > 1)) return fail(`no water frames for tileset ${tileset}: ${slk.stdout}${slk.stderr}`);
+    const water = row[1];
+    const frame = water ? `${water}00.blp` : null;
+    const targets = [paths.blight, ...(frame ? [frame] : [])];
+    const read = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+    const list = await page.evaluate(`w3.game.list()`);
+    const other = list.find((p) => /TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i.test(p));
+    if (!other) return fail("no texture to overwrite with");
+    const [a, b] = [await read(other), await read(paths.blight)];
+    if (a.equals(b)) return fail("the texture to write is the blight texture itself (control)");
+    await page.evaluate(`(() => { const read = w3.workspace.readBytes.bind(w3.workspace); window.__reads = []; w3.workspace.readBytes = (p, ...r) => { window.__reads.push(String(p).split(String.fromCharCode(92)).join("/").toLowerCase()); return read(p, ...r); }; })()`);
+    for (const t of targets) { const f = join(k.root, "map", ...t.split("\\")); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, a); }
+    const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
+    await focus();
+    const reads = () => page.evaluate(`window.__reads.splice(0)`);
+    // The first save of the files: the reads that follow include the ones the view makes of them.
+    const names = targets.map((t) => t.replace(/\\/g, "/").toLowerCase());
+    await reads();
+    await new Promise((r) => setTimeout(r, 1100));
+    for (const t of targets) writeFileSync(join(k.root, "map", ...t.split("\\")), b);
+    await focus();
+    // The reload follows the focus after its debounce: collect the reads until every file was read again.
+    const seen = new Set();
+    await soon(async () => { for (const r of await reads()) for (const n of names) if (r.endsWith(n)) seen.add(n); return seen.size === names.length; }, 15000);
+    for (const n of names) if (!seen.has(n)) fail(`${n} wasn't read again after it was overwritten outside`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+  } finally {
+    await restoreWindow(page);
+  }
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -13918,6 +13970,7 @@ async function run() {
         heightsPreserve,
         heightsUniform,
         importArtReload,
+        importedBlightWaterReload,
         importListCleanup,
         importListWriteFail,
         importPathTab,
@@ -14256,6 +14309,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importListCleanup", found);
   await groundTextureReload(page, found).catch((e) => found.push(`ground texture reload: ${e.message}`));
   await leftOpen(page, "groundTextureReload", found);
+  await importedBlightWaterReload(page, found).catch((e) => found.push(`imported blight and water reload: ${e.message}`));
+  await leftOpen(page, "importedBlightWaterReload", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
