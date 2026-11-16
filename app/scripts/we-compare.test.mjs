@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
 
@@ -194,6 +194,13 @@ test("verify-build: folders per commit and per tester differ", () => {
   assert.equal(a.env.W3_APP_BIN, l.exe);
 });
 
+function isGenerated(map, repo, gens) {
+  const rel = relative(join(repo, "target"), map);
+  if (rel.startsWith("..") || resolve(rel) === rel) return false;
+  const folder = basename(dirname(map));
+  return gens.some((g) => g.includes(basename(map)) && g.includes(folder));
+}
+
 test("no spec under tests/we-compare reads openpoints, and every input map is in the repository (or in smoketest_maps)", () => {
   const root = resolve(process.cwd(), "..", "tests", "we-compare");
   const files = [];
@@ -202,12 +209,23 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
   assert.ok(files.length > 50, "found the specs");
   // A main checkout without openpoints: ${MAIN} points at a folder that has none.
   const vars = { MAIN: join(root, "no-such-main"), REPO: resolve(root, "..", "..") };
+  // A map under <repo>/target/ is made by a make-*.mjs in tests/fixtures/we-specs (from maps that must not be committed,
+  // e.g. the game's own): that generator has to name the file and its folder.
+  const gens = readdirSync(resolve(root, "..", "fixtures", "we-specs")).filter((n) => /^make-.*\.mjs$/.test(n)).map((n) => readFileSync(resolve(root, "..", "fixtures", "we-specs", n), "utf8"));
+  const generated = (map) => isGenerated(map, vars.REPO, gens);
   for (const f of files) {
     const text = readFileSync(f, "utf8");
     assert.ok(!/openpoints/i.test(text), `${f} mentions openpoints`);
     // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one there.
-    for (const s of parseSpecFile(text, f, vars)) if (s.input.map && !/[\\/]smoketest_maps[\\/]/.test(s.input.map)) assert.ok(existsSync(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
+    for (const s of parseSpecFile(text, f, vars)) if (s.input.map && !/[\\/]smoketest_maps[\\/]/.test(s.input.map)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
   }
   // The control: a spec text that does name it is caught by the same check.
   assert.ok(/openpoints/i.test('{"input":{"map":"${MAIN}/openpoints/x.w3x"}}'));
+  // Controls: a target/ input needs a generator that names it; anything outside target/ never counts as generated.
+  const gen = ['// into <repo>/target/studio-paths/\n// echo-plain.w3x  unpack, pack\nconst out = join(repo, "target", "studio-paths");'];
+  const repo = vars.REPO;
+  assert.ok(isGenerated(join(repo, "target", "studio-paths", "echo-plain.w3x"), repo, gen));
+  assert.ok(!isGenerated(join(repo, "target", "studio-paths", "other.w3x"), repo, gen));
+  assert.ok(!isGenerated(join(repo, "target", "nowhere", "echo-plain.w3x"), repo, gen));
+  assert.ok(!isGenerated(join(repo, "tests", "echo-plain.w3x"), repo, gen));
 });
