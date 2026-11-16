@@ -587,6 +587,11 @@ async function atmosphereTools(page, found) {
   if ((w3i.flags & 0x12000) !== 0x12000) fail(`fog and tint flags not on: ${w3i.flags}`);
   const refused = await tool("set_sky", { lightEnvironment: "Nowhere Land" }).then(() => "not refused", (e) => e.message);
   if (!/Choices: .*Ashenvale/.test(refused)) fail(`an unknown light environment wasn't refused with the choices: ${refused.slice(0, 300)}`);
+  // A fog value war3map.w3i's float can't hold is refused with why, and is no edit (atmosphere.ts).
+  const editsPast = await edits();
+  const pastFog = await tool("set_sky", { fogStart: 1e39 }).then(() => "not refused", (e) => e.message);
+  if (!pastFog.includes("fogStart must be a number from -3.4e38 to 3.4e38")) fail(`set_sky fogStart 1e39 wasn't refused with why: ${pastFog}`);
+  if (await edits() !== editsPast) fail("the refused set_sky made an edit");
   await tool("undo_last_edit");
   await tool("save_project");
   const back = read("war3map.w3i.json");
@@ -5206,6 +5211,18 @@ async function resizeUndoChecks(page, found) {
   await page.evaluate(`window.__warned.length = 0`);
   await hands.click(".terrain-tab", "Map Size");
   await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
+  // Typed sides that aren't whole numbers, or a border below 0, are refused with why and Apply stays off (they were
+  // rounded and clamped): sidesProblem. Set back to 0, Apply has nothing to do again.
+  const typeSide = (n, v) => page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[${n}]; i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event("input", { bubbles: true }));
+    return { problem: document.querySelector(".mapsize-problem")?.textContent ?? null, apply: !document.querySelector(".mapsize-buttons button.primary").disabled }; })()`);
+  for (const [n, v, said] of [[0, "4.5", "Tiles to add or remove are whole numbers."], [4, "-4", "Borders are whole numbers of tiles, 0 or more."], [4, "1.5", "Borders are whole numbers of tiles, 0 or more."]]) {
+    const got = await typeSide(n, v);
+    if (got.problem !== said || got.apply) fail(`Map Size field ${n} typed as ${v}: ${JSON.stringify(got)}`);
+    if (n < 4) await typeSide(n, "0");
+  }
+  await hands.click(".mapsize-buttons button", "Reset");
+  await settled(page);
+  if (differ(state(), grown).length) fail(`the refused Map Size values changed ${differ(state(), grown).join(", ")}`);
   await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[0]; i.value = "-32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
   await settled(page);
   await hands.click(".mapsize-buttons button.primary");
@@ -7229,6 +7246,20 @@ async function typedFieldSave(page, found) {
     await until("the typed Start Z saved", () => fog() === 1234, 5000).catch(() => fail(`Ctrl+S right after typing 1234 as Start Z saved ${JSON.stringify(fog())}`));
     await settled(page);
     if (await dirty(w3i)) fail("Ctrl+S right after typing in Map Properties left it unsaved");
+    // A value war3map.w3i can't hold is refused with why, the box shows the value kept, and it is no edit
+    // (map-info/numbers.ts): Start Z past a 32-bit float, the water tint's alpha past a byte (it was cut to 255).
+    for (const [what, expr, typed, said] of [
+      ["Start Z", startZ, "1e39", "Fog start Z must be a number from -3.4e38 to 3.4e38"],
+      ["the water tint's alpha", `document.querySelector(".map-info input[data-field=waterTintAlpha]")`, "256", "Water tint alpha must be a whole number from 0 to 255"],
+    ]) {
+      await k.clearToasts();
+      const shown = await page.evaluate(`(() => { const i = ${expr}; if (!i) return null; const was = i.value; i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event("change", { bubbles: true })); return [was, i.value]; })()`);
+      await settled(page);
+      const toasts = await k.toasts();
+      if (!shown || shown[0] !== shown[1] || !toasts.includes(said)) fail(`${what} typed as ${typed} in Map Properties: box ${JSON.stringify(shown)}, said "${toasts}"`);
+      if (await dirty(w3i)) fail(`${what} typed as ${typed} left Map Properties unsaved`);
+    }
+    if (fog() !== 1234) fail(`the refused Start Z changed the saved file: ${JSON.stringify(fog())}`);
     // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
     await until("the fog's Start Z again", () => mark(startZ), 5000);
     await hands.click("[data-smoke=typed]");
@@ -7319,6 +7350,22 @@ async function typedFieldSave(page, found) {
         .catch(() => fail(`Ctrl+S right after typing a variable's name saved the variables ${JSON.stringify(wtgFile().variables.map((v) => v.name))}`));
       await settled(page);
       if (await dirty(wtgPath)) fail("Ctrl+S right after typing a variable's name left the Trigger Editor unsaved");
+      // An initial value the script can't hold is refused with why, the box shows the value kept, no edit (literals.ts);
+      // the same for add_trigger_variable's size and initial value.
+      const wtgBefore = readFileSync(join(root, "map", "war3map.wtg.json"), "utf8");
+      await k.clearToasts();
+      const shown = await page.evaluate(`(() => { const row = [...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "SavedVar")?.closest("tr");
+        const i = row?.querySelector("input.trig-var-value"); if (!i) return null; const was = i.value; i.value = "2147483648"; i.dispatchEvent(new Event("change", { bubbles: true })); return [was, i.value]; })()`);
+      await settled(page);
+      const said = await k.toasts();
+      if (!shown || shown[0] !== shown[1] || !said.includes("Initial value of SavedVar: An integer is from -2147483648 to 2147483647.")) fail(`SavedVar's initial value typed as 2147483648: box ${JSON.stringify(shown)}, said "${said}"`);
+      if (await dirty(wtgPath)) fail("the refused initial value left the Trigger Editor unsaved");
+      for (const args of [{ size: 0, array: true }, { size: 32769, array: true }, { initialValue: "2147483648" }]) {
+        const r = await k.tool("add_trigger_variable", { name: "RefusedVar", type: "integer", ...args }).then(() => "added", (e) => e.message);
+        if (!/size must be a whole number from 1 to 32768|initialValue: An integer is from/.test(r)) fail(`add_trigger_variable ${JSON.stringify(args)} wasn't refused with why: ${r}`);
+      }
+      await k.save();
+      if (readFileSync(join(root, "map", "war3map.wtg.json"), "utf8") !== wtgBefore) fail("the refused initial values changed war3map.wtg.json");
     } finally {
       await page.evaluate(`(() => { if (window.__typedWarn) w3.window.showWarning = window.__typedWarn.kept; delete window.__typedWarn; })()`);
     }

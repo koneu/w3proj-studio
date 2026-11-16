@@ -836,7 +836,9 @@ wrapped, clamped without a word, truncated or overflowed. "Measured, kept": the 
 we-compare spec or we-drive record relies on it, so Studio does it as well (the user decides those, see the last rows).
 Tests: `values.test.ts`, `aitools.test.ts`, `lib/terrain/w3e.test.ts`, `unitprops.test.ts`, `lib/terrain/cameras.test.ts`,
 `lib/terrain/regions.test.ts`, Rust `camera_and_region_values_past_their_fields_are_refused` and
-`refused_camera_and_region_values_leave_the_files_unchanged`, app-smoke `mcpLimits`.
+`refused_camera_and_region_values_leave_the_files_unchanged`, `map_properties_numbers_past_their_fields_are_refused`,
+app-smoke `mcpLimits`; the Map Properties, Map Size and trigger rows: `numbers.test.ts`, `techtree.test.ts`,
+`atmosphere.test.ts`, `resize.test.ts`, `literals.test.ts`, `triggerinfo.test.ts`, `wtg.test.ts`.
 
 | Field | Bound | Checked in | Behaviour |
 |---|---|---|---|
@@ -868,6 +870,13 @@ Tests: `values.test.ts`, `aitools.test.ts`, `lib/terrain/w3e.test.ts`, `unitprop
 | `place_objects` unit choices | acquireRange above 0..5000, gold 0..1000000, drop level 0..8 | `aitools.ts` `setUnitChoices` | refused |
 | tool settings | `edge` 0..1, `width` above 0, `density` 0.05..1, `limit` 1 up, `jitter` 0 up, `count` 1..30 | `values.ts` `givenNumber` | refused (were held to the nearest end or replaced by the default) |
 | Reset Height Field Random | variation 0..20, smoothing 0..8, whole | `wholemap.ts` `randomizeHeightField` | refused |
+| Map Properties number fields (loading screen, crest race, game data set/version, camera zoom, fog, terrain fog, water rendering, colour alphas, a player's start x/y) | the field's type in `w3i.json` (i32, u32, u8, f32) | map-info `numbers.ts` `setInfoNumber` (`numbers.test.ts` holds the types against `w3i.json`) | refused with a toast, the box shows the value kept, no undo step (the alphas were clamped to 0..255; app-smoke `typedFieldSave`) |
+| upgrade level, random group / item table chance (Map Properties) | level 1..2^32 (stored from 0 in a u32), chance 0..100 | map-info `techtree.ts` `techNumber` | refused, the field marked |
+| `set_sky` fogStart, fogEnd, fogDensity, overSky | f32, i32 | `atmosphere.ts` `applySky` | refused with why, no edit (app-smoke `atmosphereTools`) |
+| Map Size sides and borders typed | whole numbers, borders 0 up | `resize.ts` `sidesProblem` | refused, the problem shown and Apply off (were rounded and clamped to 0; app-smoke `resizeUndo`) |
+| trigger parameter Value (integer, real) | an integer -2^31..2^31-1 in decimal or 0x hex; a real in the f32 range without an exponent (the script takes the text as it is) | `lib/triggers/literals.ts` `literalProblem` | refused in the dialog with why |
+| variable initial value (Variables table, `add_trigger_variable`), array size from `add_trigger_variable` | as above (a real is kept with 2 decimals, never with an exponent); size 1..32768 | `literals.ts` `typedInitialValue`, `triggerinfo.ts` `variableArgs` | refused with a toast / error, no edit (app-smoke `typedFieldSave`) |
+| any u32/i32 of war3map.wtg written by the app | its width | `wtg.ts` Writer | refused, nothing written (was `>>> 0`, a wrap) |
 
 ## Process
 
