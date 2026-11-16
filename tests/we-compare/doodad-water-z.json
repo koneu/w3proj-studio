@@ -1,7 +1,7 @@
 [
   {
     "name": "doodad-water-z-open",
-    "description": "Floating doodads (Doodads.slk floats 1) on load: doodad-water-z.w3x (make-doodad-water-z.mjs) opened and saved, no edit. The editor works out every non-fixed doodad's height again on save (all stored at 37.5: lily pads -128 where the corners have no water flag, -89.6 on wet corners, 0 where the water is under the ground, the level-3 patch 0, by column -59.6/-29.6/0.4; ZPsh on its ground), writes life 255 for 100 and puts ZWsw's scale 1 at its least, 1.5; Studio's plain save keeps what the file had (known, 2026-11-16). Run before doodad-water-z-nudge (that one switches Num Lock on).",
+    "description": "Floating doodads (Doodads.slk floats 1) on load: doodad-water-z.w3x (make-doodad-water-z.mjs) opened in the terrain view and saved after an empty edit. The editor works out the height of every doodad and destructable without flag 4 again (stored at 37.5: lily pads -128 where the corners have no water flag, -89.6 on wet corners, 0 where the water is under the ground, the level-3 patch 0, by column -59.6/-29.6/0.4; ZPsh and the tree LTlt on their ground, ZPsh on D's slope -89.6 between -128 and 0); the fixed ones (flags 6) keep theirs; life 255 for every doodad (100, 50, 0), a destructable's 50 kept; scales into the type's range (ZWsw 1 to 1.5, ZPsh 3, 0.2, 1 to 1.2, 0.8, 1). Studio: Fix Doodads on Load (doodadedit.ts restAsOpened, fixAsOpened) since branch doodad-open-rules (2026-11-16); before, the heights stayed at 37.5. Run before doodad-water-z-nudge (that one switches Num Lock on).",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/doodad-water-z.w3x"
     },
@@ -15,7 +15,13 @@
     "studio": {
       "steps": [
         {
-          "sleep": 500
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
         }
       ]
     },
@@ -30,8 +36,7 @@
           "doodads[].trailer",
           "doodads[].extras"
         ],
-        "tolerance": 0.01,
-        "expect": "differs"
+        "tolerance": 0.01
       }
     ],
     "limit": 40
