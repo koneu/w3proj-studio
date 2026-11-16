@@ -21,6 +21,14 @@ export function startLocations(units: readonly Placed[]): Map<number, number[]> 
   return out;
 }
 
+/** The start a map with no start location unit is given when saved: the first user player the w3i already has, at the
+ *  start the w3i holds for it (a map made by another tool keeps its players' places, and the sync with the starts must
+ *  not move them), else null: the caller adds Player 1's in the middle. */
+export function startToAdd(players: readonly Pick<StartPlayer, "id" | "controller" | "start">[]): { player: number; at: number[] } | null {
+  const p = players.find((q) => q.controller === USER && q.start.length >= 2 && q.start.every(Number.isFinite));
+  return p ? { player: p.id, at: [p.start[0], p.start[1]] } : null;
+}
+
 /** Adds player `id` (a new user player of selectable race in the first force), sorted by id. */
 export function addPlayer(info: PlayerInfo, id: number, start: number[]): StartPlayer {
   const like = info.players[0];

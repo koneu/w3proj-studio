@@ -90,7 +90,7 @@ import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, firstStart, startLocations, syncPlayers, startToAdd, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
@@ -5975,15 +5975,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           save: editable ? serial(async () => {
             // The map-edge marks are written from the w3i, as the World Editor's save does (we-drive, 2026-11-13: a copy
             // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
-            const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+            const edgeInfo = await readMapDoc<{ cameraComplements?: number[]; players?: StartPlayer[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
             // The game won't start a map with no players, so one always gets Player 1's start.
+            const had = edgeInfo ? startToAdd(Array.isArray(edgeInfo.players) ? edgeInfo.players : []) : null;
             const startAdded = !!edgeInfo && !!unitsFile && !unitsFile.list.some((p) => p.id === "sloc");
             if (startAdded && unitsFile) {
-              const [x, y] = firstStart(playableArea(edgeInfo, terrain));
-              unitsFile.list.push(newEntry(unitsFile, "sloc", [x, y, heightAt(terrain, x, y)], 0));
+              // A map that has players (made by another tool) gets the start its w3i holds for the first, not the middle.
+              const [x, y] = had?.at ?? firstStart(playableArea(edgeInfo, terrain));
+              unitsFile.list.push(newEntry(unitsFile, "sloc", [x, y, heightAt(terrain, x, y)], had?.player ?? 0));
               objectsTouched = true;
-              void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
+              void w3.window.showInfo("This map had no start location, which the game can't start. Added " + (had ? `${had.player + 1}'s start where the map's players file has it.` : "Player 1's in the middle of the map."));
             }
             if (objectsTouched) await settleMoved();
             // The tilesets' own lists, which the w3e is written with under the flag 0 (savedTerrain).

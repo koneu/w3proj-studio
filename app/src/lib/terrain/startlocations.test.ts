@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer,
+  addPlayer, applyAllyPriorities, startToAdd, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer,
 } from "./startlocations";
 
 /** A map that lost its only player: what a deleted start location left behind. */
@@ -109,4 +109,21 @@ test("ally priorities: not only for melee maps, and a lone player has none (we-d
   applyAllyPriorities({ flags: MELEE_FLAGS, players: old });
   assert.equal("enemyLow" in old[0] && old[0].enemyLow !== undefined, false);
   assert.deepEqual(editorAllyPriorities(old), new Map([[0, [0, 2]], [1, [0, 1]]]));
+});
+
+test("a map with no start location unit is given the first user player's own start, not the middle", () => {
+  const players = [
+    { id: 3, controller: 2, start: [9, 9] },
+    { id: 0, controller: 1, start: [-3400, 6300] },
+    { id: 1, controller: 1, start: [-6300, 3400] },
+  ];
+  assert.deepEqual(startToAdd(players), { player: 0, at: [-3400, 6300] });
+  // Control: no user player, or a start the file can't hold, falls back to the middle (null).
+  assert.equal(startToAdd([{ id: 3, controller: 2, start: [9, 9] }]), null);
+  assert.equal(startToAdd([]), null);
+  assert.equal(startToAdd([{ id: 0, controller: 1, start: [NaN, 1] }]), null);
+  // Syncing the added start with the players moves nobody.
+  const info = { version: 31, players: players.map((p) => ({ ...p, race: 0, fixedStart: 1, name: "x", allyLow: 0, allyHigh: 0 })), forces: [{ players: 3 }], flags: 0 } as unknown as Parameters<typeof syncPlayers>[0];
+  const at = startToAdd(players)!;
+  assert.deepEqual(syncPlayers(info, new Map([[at.player, at.at]]), new Map()), []);
 });
