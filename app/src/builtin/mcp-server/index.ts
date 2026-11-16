@@ -301,7 +301,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     (() => {
       const onFocus = () => { if (guideList.isConnected) void showGuides().catch(() => {}); };
       window.addEventListener("focus", onFocus);
-      return { dispose: () => window.removeEventListener("focus", onFocus) };
+      // ... and so is a slow look while the panel is on screen: nothing tells when a program writes there, and the
+      // window may never lose or regain the focus.
+      const timer = window.setInterval(() => { if (guideList.isConnected && guideList.offsetParent !== null && !document.hidden) void showGuides().catch(() => {}); }, 3000);
+      return { dispose: () => { window.removeEventListener("focus", onFocus); window.clearInterval(timer); } };
     })(),
     w3.settings.onDidChange((key) => {
       if (key === "mcp.enabled") void apply();
