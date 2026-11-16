@@ -51,6 +51,7 @@ import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgr
 import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
+import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -240,8 +241,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // A failure is shown by the rebuild itself.
     rebuildTimer = setTimeout(() => void runRebuild().catch(() => {}), REBUILD_DELAY);
   };
-  /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back). */
-  let rebuilding: Promise<void> = Promise.resolve();
+  /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back).
+   *  A terrain editor's save updates them in this turn too. */
+  const rebuilding = new Turns();
   const rebuildFailed = (why: unknown) => {
     const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
     w3.window.showError(text);
@@ -260,28 +262,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       stillOpen: () => w3.workspace.project()?.root === key,
     }).catch((e) => { throw rebuildFailed(e); });
   };
-  const runRebuild = () => {
-    const run = rebuilding.then(async () => {
-      const job = rebuild;
-      if (!job || job.key !== w3.workspace.project()?.root) return;
-      // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
-      // it stays closed: the files are made from the project's saved ones.
-      const editor = ownEditor();
-      if (!editor) {
-        const path = projectTerrain(w3);
-        if (!path) return;
-        rebuild = null;
-        await deriveSaved(job.key, path, job.from);
-        return;
-      }
-      // The wait was long enough for another project to be opened: its job and editor are not this one's.
-      if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
+  const runRebuild = () => rebuilding.run(async () => {
+    const job = rebuild;
+    if (!job || job.key !== w3.workspace.project()?.root) return;
+    // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
+    // it stays closed: the files are made from the project's saved ones.
+    const editor = ownEditor();
+    if (!editor) {
+      const path = projectTerrain(w3);
+      if (!path) return;
       rebuild = null;
-      await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
-    });
-    rebuilding = run.catch(() => {});
-    return run;
-  };
+      await deriveSaved(job.key, path, job.from);
+      return;
+    }
+    // The wait was long enough for another project to be opened: its job and editor are not this one's.
+    if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
+    rebuild = null;
+    await editor.derive(job.from).catch((e) => { throw rebuildFailed(e); });
+  });
   ctx.subscriptions.push(
     { dispose: () => clearTimeout(rebuildTimer) },
     // What saves or packs the project first waits here: pathing, shadows and the minimap still due from the last edit
@@ -325,7 +323,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (stored) await checkpointIfOn(w3, "Calculate Shadows");
         // Written in the rebuilds' turn, which write the same file; only over the file the work started from: another
         // project, or an edit's rebuild meanwhile, and nothing is written.
-        const run = rebuilding.then(async () => {
+        const done = await rebuilding.run(async () => {
           if (w3.workspace.project()?.root !== root) return "gone";
           const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
           const now = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
@@ -334,8 +332,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!stored) await w3.workspace.refresh();
           return "written";
         });
-        rebuilding = run.then(() => {}, () => {});
-        const done = await run;
         if (done === "gone") return null;
         if (done === "moved") throw new Error("The shadow map changed while the shadows were being calculated (an edit's rebuild): nothing was written. Calculate them again.");
       }
@@ -366,15 +362,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       clearTimeout(rebuildTimer);
       const due = rebuild?.key === root ? rebuild.from : null;
       if (due) rebuild = null;
-      const run = rebuilding.then(async () => {
+      return rebuilding.run(async () => {
         if (w3.workspace.project()?.root !== root) return;
         const before = due?.doodads ?? (Array.isArray(doodadsBefore) ? doodadsBefore as Placed[] : null);
         // Unchanged doodads: the file's are those before too. One that is there but unreadable fails the rebuild.
         const doodads = before ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch((e) => { throw rebuildFailed(e); }))?.list ?? [];
         await deriveSaved(root, path, { terrain: due?.terrain, doodads });
       });
-      rebuilding = run.catch(() => {});
-      return run;
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
@@ -952,7 +946,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("rebuild_map", async () => {
       // Only the derived files are written, without the GPU: it works on a lost view too.
       const editor = await liveEditor("read");
-      await editor.derive();
+      // In the rebuilds' turn, which write the same files.
+      await rebuilding.run(() => editor.derive());
       return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
     }),
     w3.mcp.registerTool("set_ramp", async ({ at, width, remove }) => {
@@ -6140,9 +6135,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (startAdded) void rebuildObjects();
             // The derived files follow what was written, not what an edit made meanwhile changed.
             const doodads = snap.doodads ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
-            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units, snap.stale);
-            savedW3e = snap.w3e;
-            savedDoodads = snap.doodads ?? structuredClone(doodads);
+            // In the rebuilds' turn, which write the same files: a rebuild running now ends first (else its files, made
+            // from what was saved before, could land over these, or the shadow map be read by both and one update lost).
+            // One that doesn't end in time doesn't hold the save: the files are left as they are, and the state they
+            // follow is kept, so the next save updates them from there (the minimap stays due).
+            const derived = await rebuilding.runWithin(
+              () => updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units, snap.stale),
+              SETTLE_LIMIT,
+            );
+            if (derived.ran) {
+              savedW3e = snap.w3e;
+              savedDoodads = snap.doodads ?? structuredClone(doodads);
+            } else {
+              w3.window.showError(`Saved, but pathing, shadows and the minimap weren't updated: a rebuild of them was still running after ${Math.round(SETTLE_LIMIT / 1000)} s. The next save updates them.`);
+            }
             for (const g of groupInsts.values()) {
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
