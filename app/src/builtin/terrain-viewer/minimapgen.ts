@@ -11,6 +11,7 @@ import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
+import { textureCandidates } from "../../lib/model/texpath";
 import { maxPlayers } from "../../lib/terrain/startlocations";
 import { ModeCache } from "../../lib/modecache";
 import type { Terrain } from "../../lib/terrain/w3e";
@@ -229,7 +230,7 @@ export async function minimapIconImage(w3: W3Api, type: 0 | 1 | 2, readFile: (pa
   const data = parseIni(await w3.game.readText("UI\\WorldEditData.txt").catch(() => ""));
   const art = [...data].find(([s]) => s.toLowerCase() === "worldeditart")?.[1];
   const path = art?.get(ICON_KEYS[type]) ?? ICON_FALLBACK[type];
-  for (const p of [path, path.replace(/\.blp$/i, ".dds")]) {
+  for (const p of textureCandidates(path)) {
     try {
       const mip = decodeImage(await readFile(p), p).mip(0);
       return { width: mip.width, height: mip.height, rgba: Uint8Array.from(mip.rgba) };

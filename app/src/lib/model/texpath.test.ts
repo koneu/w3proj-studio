@@ -66,3 +66,29 @@ test("candidates: as written, then as .dds; with no game part the model's folder
   assert.deepEqual(textureCandidates("C:/Body.tif", "Units/A.mdx"), ["Units/Body.tif", "Units/Body.dds", "Textures/Body.tif", "Textures/Body.dds"]);
   assert.deepEqual(textureCandidates("a.dds"), ["a.dds"]);
 });
+
+// The callers that used to spell the ".dds" fallback by hand: what they read, in which order, as before.
+test("shadow map: the name, its .dds and its .blp, the .tif last", () => {
+  const old = (path: string) => neverStoredLast([path, path.replace(/\.\w+$/, ".blp"), path.replace(/\.\w+$/, ".dds")]);
+  const now = (path: string) => neverStoredLast([...new Set([...textureCandidates(path), ...textureCandidates(path.replace(/\.\w+$/, ".blp"))])]);
+  for (const p of ["Textures/Leaves.blp", "Textures/Leaves.dds"]) assert.deepEqual(new Set(now(p)), new Set(old(p)), p);
+  assert.deepEqual(now("Textures/Leaves.blp"), ["Textures/Leaves.blp", "Textures/Leaves.dds"]);
+  // .tif: the same three names; the .dds now comes before the .blp (the game has no .blp of a Reforged texture).
+  assert.deepEqual(new Set(now("Textures/Leaves.tif")), new Set(old("Textures/Leaves.tif")));
+  assert.deepEqual(now("Textures/Leaves.tif"), ["Textures/Leaves.dds", "Textures/Leaves.blp", "Textures/Leaves.tif"]);
+});
+
+test("minimap icon: the .blp, then its .dds", () => {
+  assert.deepEqual(textureCandidates("UI/MiniMap/MinimapIcon/MinimapIconGold.blp"), ["UI/MiniMap/MinimapIcon/MinimapIconGold.blp", "UI/MiniMap/MinimapIcon/MinimapIconGold.dds"]);
+  // The path's "\\" now reads as "/" (as the model preview does).
+  assert.deepEqual(textureCandidates("UI\\MiniMap\\X.blp"), ["UI/MiniMap/X.blp", "UI/MiniMap/X.dds"]);
+});
+
+test("weather texture and shadow image: .blp then .dds", () => {
+  assert.deepEqual(textureCandidates("ReplaceableTextures/Weather/Rain.blp"), ["ReplaceableTextures/Weather/Rain.blp", "ReplaceableTextures/Weather/Rain.dds"]);
+});
+
+test("model viewer: same as before for .blp/.tif/.tga, other names alone", () => {
+  const old = (p: string) => neverStoredLast(/\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p]);
+  for (const p of ["T/a.blp", "T/a.tif", "T/a.tga", "T/a.dds", "T/a.bmp"]) assert.deepEqual(neverStoredLast(textureCandidates(p)), old(p), p);
+});

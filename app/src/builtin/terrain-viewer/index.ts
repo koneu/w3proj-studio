@@ -25,6 +25,7 @@ import { gridDefault, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
+import { textureCandidates } from "../../lib/model/texpath";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
@@ -1736,8 +1737,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rows = wanted.length ? new Map(parseSlk(await w3.game.readText("TerrainArt\\Weather.slk").catch(() => "")).map((r) => [r.effectID, r])) : new Map<string, Record<string, string>>();
           const list = renderer.setWeather(wanted.filter((w) => rows.has(w.id)).map((w) => ({ effect: weatherEffect(rows.get(w.id)!), box: w.box })));
           for (const w of list) {
-            const read = (ext: string) => readFile(w3, doc, w.effect.texture + ext).then((buf) => renderer.setWeatherTexture(w, decodeImage(buf, w.effect.texture + ext)));
-            void read(".blp").catch(() => read(".dds")).catch(() => { /* white streaks show it's there */ });
+            const read = (p: string) => readFile(w3, doc, p).then((buf) => renderer.setWeatherTexture(w, decodeImage(buf, p)));
+            void textureCandidates(w.effect.texture + ".blp").reduce<Promise<void>>((p, c) => p.catch(() => read(c)), Promise.reject(new Error("no candidates"))).catch(() => { /* white streaks show it's there */ });
           }
           redraw();
         };
@@ -2313,7 +2314,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           readImage: async (path) => {
             const read = (p: string) => readFile(w3, doc, p, terrain.tileset).then((buf) => decodeImage(buf, p));
-            return read(path).catch(() => read(path.replace(/\.blp$/i, ".dds")));
+            return textureCandidates(path).reduce<Promise<DecodedImage>>((p, c) => p.catch(() => read(c)), Promise.reject(new Error("no candidates")));
           },
           predict: editable ? (t, doodads, pause) => {
             const sun = { azimuth: w3.settings.get<number>("terrain.shadows.sunAzimuth") ?? 225, elevation: w3.settings.get<number>("terrain.shadows.sunElevation") ?? 30 };

@@ -4,7 +4,7 @@ import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { parseModel } from "../../lib/model/mdl";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { watchContextLoss } from "../../lib/model/contextloss";
-import { neverStoredLast } from "../../lib/model/texpath";
+import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
 import { errorText } from "../../lib/oserror";
 import { readImportedFor } from "../../lib/imports";
@@ -18,7 +18,7 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
   // "War3.w3mod:_HD.w3mod:Units/…/X.mdx" → "War3.w3mod:_HD.w3mod:"
   const layer = gamePath ? gamePath.slice(0, gamePath.lastIndexOf(":") + 1) : null;
   // HD models name .tif/.blp sources that the game ships as .dds; a .tif is never there, so last.
-  const variants = (p: string) => neverStoredLast(/\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p]);
+  const variants = (p: string) => neverStoredLast(textureCandidates(p));
   return async (path: string): Promise<Uint8Array> => {
     const slash = path.replace(/\\/g, "/");
     if (layer) {
