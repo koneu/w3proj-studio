@@ -4,7 +4,8 @@ its own), through python-xlib and its XTest extension. Every command prints one 
 
   we-x11.py --display :N windows                       mapped top-level windows: id, title, class, rect, pid, transient
   we-x11.py --display :N key KEY [--window ID] [--hold MS]  press and release a key ("v", "Escape", "ctrl+s", "alt+F4",
-                                                       "Return"), held MS (default 50)
+                                                       "Return"), held MS (default 50); a --window that is gone gets
+                                                       nothing ("pressed": false)
   we-x11.py --display :N type TEXT [--window ID]       type TEXT, with Shift where a character needs it (a path)
   we-x11.py --display :N click X,Y [--button 1|3] [--double]   click at a screen position
   we-x11.py --display :N move X,Y                      move the pointer
@@ -17,6 +18,9 @@ its own), through python-xlib and its XTest extension. Every command prints one 
   we-x11.py --display :N close ID                      ask a window to close (WM_DELETE_WINDOW)
   we-x11.py --display :N stats [--rect X,Y,W,H]        counts of a part of the screen (see stats())
   we-x11.py --display :N frames MS [--rect X,Y,W,H]    how often a part of the screen changes during MS
+  we-x11.py --display :N settle [--rect R] [--interval MS] [--timeout MS]   wait until two grabs MS apart are the same
+                                                       picture (at most --timeout); `settle --dry --hashes a,b,…` runs
+                                                       the rule on given hashes
   we-x11.py stats FILE [--rect X,Y,W,H]                the same counts of a picture
 
 Every command that touches a display is refused (exit 2) unless it is an Xvfb started for tests (guard_decision;
@@ -75,12 +79,18 @@ def guard_decision(display, procroot="/proc", environ=None):
             # this very process holds open (its fd links, matched by inode) counts as its display.
             own = set()
             try:
-                for fd in os.listdir(os.path.join(procroot, pid, "fd")):
-                    m2 = re.fullmatch(r"socket:\[(\d+)\]", os.readlink(os.path.join(procroot, pid, "fd", fd)))
-                    if m2:
-                        own.add(m2.group(1))
+                fds = os.listdir(os.path.join(procroot, pid, "fd"))
             except OSError:
                 continue
+            for fd in fds:
+                # A client's fd can close between the listing and the readlink: that one fd is skipped, not the
+                # whole Xvfb (which once refused the run's own display: "is not an Xvfb started for tests").
+                try:
+                    m2 = re.fullmatch(r"socket:\[(\d+)\]", os.readlink(os.path.join(procroot, pid, "fd", fd)))
+                except OSError:
+                    continue
+                if m2:
+                    own.add(m2.group(1))
             try:
                 with open(os.path.join(procroot, pid, "net", "unix"), "r", errors="replace") as f:
                     for line in f:
@@ -90,6 +100,21 @@ def guard_decision(display, procroot="/proc", environ=None):
             except OSError:
                 pass
     return False, "display %s is not an Xvfb started for tests (set W3_ALLOW_REAL_DISPLAY=1 to use a real one on purpose)" % display
+
+
+def guard_with_retries(display, procroot="/proc", environ=None, tries=3, pause=0.4, decide=None):
+    """guard_decision, asked again (`tries` times, `pause` s apart) before refusing: /proc changes under the scan
+    (a process or an fd going away), and a refusal of the run's own Xvfb ends the run. A display that is refused for
+    its form (or a missing one) isn't asked again."""
+    import time
+    decide = decide or guard_decision
+    ok, why = decide(display, procroot, environ)
+    for _ in range(tries - 1):
+        if ok or not display or not re.fullmatch(r":(\d+)(\.\d+)?", display):
+            break
+        time.sleep(pause)
+        ok, why = decide(display, procroot, environ)
+    return ok, why
 
 
 def parse_rect(s):
@@ -252,12 +277,6 @@ def drag_path(a, b, steps):
     return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
 
 
-def drag_path(a, b, steps):
-    """The pointer positions after the press: `steps` points on the line from a to b, the last one b."""
-    steps = max(1, steps)
-    return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
-
-
 def drag(d, a, b, button=1, ms=400, steps=20, mod=None):
     from Xlib import X
     from Xlib.ext import xtest
@@ -340,6 +359,24 @@ def frames(d, rect, ms):
             "changesPerSecond": round(changes / secs, 1)}
 
 
+def settle(grab_hash, sleep_ms, now_ms, timeout_ms, interval_ms):
+    """Grabs every `interval_ms` until two grabs in a row are the same picture (the view stands still), at most
+    `timeout_ms`. `grab_hash` returns a picture's hash (None: no more pictures, the dry run's end)."""
+    start = now_ms()
+    last = grab_hash()
+    grabs = 1
+    while last is not None and now_ms() - start < timeout_ms:
+        sleep_ms(interval_ms)
+        h = grab_hash()
+        if h is None:
+            break
+        grabs += 1
+        if h == last:
+            return {"settled": True, "ms": now_ms() - start, "grabs": grabs}
+        last = h
+    return {"settled": False, "ms": now_ms() - start, "grabs": grabs}
+
+
 def close_window(d, wid):
     """Asks a window to close as a window manager's close button would (WM_DELETE_WINDOW)."""
     from Xlib import X
@@ -388,10 +425,13 @@ def main(argv):
         out({"path": drag_path(a, b, int(opt("--steps", "20")))})
         return 0
 
-    if cmd == "drag" and flag("--dry"):
-        a = tuple(int(v) for v in rest[0].split(","))
-        b = tuple(int(v) for v in rest[1].split(","))
-        out({"path": drag_path(a, b, int(opt("--steps", "20")))})
+    if cmd == "settle" and flag("--dry"):
+        # The settle rule on a list of frame hashes, one per --interval of a made-up clock (needs no display):
+        # --hashes a,b,c
+        hashes = iter(opt("--hashes", "").split(","))
+        clock = [0]
+        out(settle(lambda: next(hashes, None), lambda ms: clock.__setitem__(0, clock[0] + ms), lambda: clock[0],
+                   int(opt("--timeout", "10000")), int(opt("--interval", "200"))))
         return 0
 
     if cmd == "guard-check":
@@ -399,7 +439,7 @@ def main(argv):
         out({"allowed": ok, "reason": why})
         return 0 if ok else 2
 
-    ok, why = guard_decision(disp)
+    ok, why = guard_with_retries(disp)
     if not ok:
         sys.stderr.write("we-x11: refused, %s\n" % why)
         return 2
@@ -408,18 +448,21 @@ def main(argv):
     if cmd == "windows":
         out({"windows": windows(d)})
     elif cmd == "key":
+        # A --window that is gone (a dialog that just closed) gets no key: it would land in whatever has the focus.
         win = opt("--window")
-        if win:
-            focus(d, int(win, 0))
         hold = int(opt("--hold", "50"))
+        if win and not focus(d, int(win, 0)):
+            out({"key": rest[0], "holdMs": hold, "pressed": False, "reason": "window %s is gone or not mapped" % win})
+            return 0
         press_key(d, rest[0], hold)
-        out({"key": rest[0], "holdMs": hold})
+        out({"key": rest[0], "holdMs": hold, "pressed": True})
     elif cmd == "type":
         win = opt("--window")
-        if win:
-            focus(d, int(win, 0))
+        if win and not focus(d, int(win, 0)):
+            out({"typed": 0, "pressed": False, "reason": "window %s is gone or not mapped" % win})
+            return 0
         type_text(d, rest[0])
-        out({"typed": len(rest[0])})
+        out({"typed": len(rest[0]), "pressed": True})
     elif cmd == "click":
         button = int(opt("--button", "1"))
         double = flag("--double")
@@ -445,8 +488,7 @@ def main(argv):
         img.save(rest[0])
         out({"shot": rest[0], "size": list(img.size)})
     elif cmd == "focus":
-        focus(d, int(rest[0], 0))
-        out({"focus": int(rest[0], 0)})
+        out({"focus": int(rest[0], 0), "focused": focus(d, int(rest[0], 0))})
     elif cmd == "close":
         close_window(d, int(rest[0], 0))
         out({"close": int(rest[0], 0)})
@@ -456,17 +498,33 @@ def main(argv):
     elif cmd == "frames":
         rect = opt("--rect")
         out(frames(d, parse_rect(rect) if rect else None, int(rest[0])))
+    elif cmd == "settle":
+        import hashlib
+        import time
+        rect = opt("--rect")
+        r = parse_rect(rect) if rect else None
+        out(settle(lambda: hashlib.md5(grab(d, r).tobytes()).digest(), lambda ms: time.sleep(ms / 1000),
+                   lambda: time.monotonic() * 1000, int(opt("--timeout", "10000")), int(opt("--interval", "200"))))
     else:
         raise SystemExit(f"unknown command {cmd}")
     return 0
 
 
 def focus(d, wid):
-    from Xlib import X
+    """Raises a window and gives it the keyboard. A window that is gone or not mapped (a dialog that closed a moment
+    ago) is left alone: X would answer BadWindow / BadMatch, and only after the sync. Returns whether it was done."""
+    from Xlib import X, error
     w = d.create_resource_object("window", wid)
-    w.configure(stack_mode=X.Above)
-    w.set_input_focus(X.RevertToParent, X.CurrentTime)
+    try:
+        if w.get_attributes().map_state != X.IsViewable:
+            return False
+    except error.XError:
+        return False
+    caught = error.CatchError(error.BadWindow, error.BadMatch)
+    w.configure(stack_mode=X.Above, onerror=caught)
+    w.set_input_focus(X.RevertToParent, X.CurrentTime, onerror=caught)
     d.sync()
+    return caught.get_error() is None
 
 
 if __name__ == "__main__":

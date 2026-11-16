@@ -19,8 +19,9 @@
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
 //   --save-accept T1,T2  titles of dialogs --save answers with Return besides "Reminder" (e.g. "Warning": the notice that the
 //                       map is no longer a melee map); another dialog still stops the save
-//   --keep-prefs        leave Enforce Water Limits and Enforce Camera Boundaries in the preferences as they are (default:
-//                       written as the editor's defaults before each start, so a run doesn't depend on the last one)
+//   --keep-prefs        leave Enforce Water Limits, Enforce Camera Boundaries and the minimap's Show Creep Camp Icon in
+//                       the preferences as they are (default: written as the editor's defaults before each start, so a
+//                       run doesn't depend on the last one)
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
@@ -50,7 +51,8 @@
 //                       Every --look of the run becomes a camera object in we-drive's copy of the map before the
 //                       editor starts (unpacked with the release CLI, war3map.w3c.json changed, packed again; the
 //                       map's own cameras stay, after them), and this step shows it as TESTING.md records: the camera
-//                       layer (m), its row in the palette, View Selected Camera. Prints the camera, and Studio's
+//                       layer (m), its row in the palette, View Selected Camera, then waits until two pictures of
+//                       the view a frame apart are the same (at most 10 s; "viewSettled"). Prints the camera, and Studio's
 //                       equivalent for app-drive's --camera when there is one (we-camera.mjs)
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
@@ -301,7 +303,7 @@ export function parseArgs(argv) {
     };
     if (a === "--game") opts.game = resolve(value());
     else if (a === "--work") opts.work = resolve(value());
-    else if (a === "--timeout") opts.timeout = Number(value());
+    else if (a === "--timeout") opts.timeout = positiveNumber("--timeout", value());
     else if (a === "--mode") opts.mode = value();
     else if (a === "--save-accept") opts.saveAccept.push(...value().split(",").filter(Boolean));
     else if (a === "--screen") {
@@ -336,6 +338,11 @@ export function parseArgs(argv) {
       pendingMod = null;
       pendingButton = null;
     }
+  }
+  // A number that isn't one would wait forever (NaN never passes a deadline) or not at all.
+  for (const [step, v] of steps) {
+    if (step === "--sleep") positiveNumber("--sleep", v, { orEqual: true });
+    else if (step === "--fps") positiveNumber("--fps", v);
   }
   if (pendingMod) throw new Error("--drag-mod needs a --drag after it");
   if (pendingButton) throw new Error("--drag-button needs a --drag after it");
@@ -412,16 +419,56 @@ export const openMapsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "s
 export const openCopyName = (n, map) => `we-open-${n}-${basename(map)}`;
 export const winePath = (p) => `Z:${p.split("/").join("\\")}`;
 
-/** The text locale the install has (from .build.info's tags, e.g. "enUS text?"), else enUS. */
-function textLocale(game) {
-  const m = /\b([a-z]{2}[A-Z]{2}) text\?/.exec(readFileSync(join(game, ".build.info"), "utf8"));
-  return m ? m[1] : "enUS";
+/**
+ * The text locale we-drive runs the editor in, from the install's .build.info tags ("enUS text?"): enUS, the only
+ * one it can drive (it finds dialogs by their English titles: "Warning", "Reminder", "Save As", "Open Document",
+ * "Progress", the View menu's rows). An install with enUS among its text locales gets enUS; one without (or no tag at
+ * all) is refused with the locales it has, rather than run into dialogs it can't read.
+ */
+export function textLocale(buildInfo) {
+  const have = [...new Set([...buildInfo.matchAll(/\b([a-z]{2}[A-Z]{2}) text\?/g)].map((m) => m[1]))];
+  if (have.includes("enUS")) return "enUS";
+  throw new Error(`we-drive needs the game's English text (enUS): it finds the editor's dialogs by their English titles, and this install has ${have.length ? have.join(", ") : "no text locale named in .build.info"}`);
 }
 
 function x11(display, ...args) {
   const r = spawnSync("python3", ["-I", HELPER, "--display", display, ...args.map(String)], { encoding: "utf8", timeout: 120000 });
   if (r.status !== 0) throw new Error(`we-x11 ${args[0]}: ${(r.stderr || r.stdout || "").trim().split("\n").pop()}`);
   return JSON.parse(r.stdout.trim().split("\n").pop());
+}
+
+/** A process's state letter from /proc/PID/stat ("R", "S", "Z" a zombie, …), null when there's no such process, "?"
+ *  when it couldn't be read for another reason (not taken as gone). */
+export function procState(pid, read = (p) => readFileSync(p, "utf8")) {
+  let stat;
+  try { stat = read(`/proc/${pid}/stat`); } catch (e) { return e?.code === "ENOENT" || e?.code === "ESRCH" ? null : "?"; }
+  // "PID (comm) S …": the name may hold spaces and parentheses, so the state follows the last ")".
+  const m = /\)\s+(\S)/.exec(stat.slice(stat.lastIndexOf(")")));
+  return m ? m[1] : null;
+}
+
+/** Whether a process is gone for good: no such process, or a zombie (dead, only not reaped yet). */
+export const procGone = (pid, read) => { const s = procState(pid, read); return s === null || s === "Z" || s === "X"; };
+
+/**
+ * Waits for a child process's exit (its "exit" event, marked by the Session as child.exited), up to `ms`. Returns
+ * true when it exited. The event comes only when the event loop turns, so this awaits instead of checking a flag.
+ */
+export async function waitExit(child, ms, clock = { now: Date.now, sleep }) {
+  for (const end = clock.now() + ms; !child.exited; ) {
+    if (clock.now() >= end) return false;
+    await clock.sleep(50);
+  }
+  return true;
+}
+
+/** A number option's value: finite and above `min` (or at least it, with `orEqual`), else a clear error. */
+export function positiveNumber(name, v, { orEqual = false, min = 0 } = {}) {
+  const n = Number(v);
+  if (typeof v !== "string" || v.trim() === "" || !Number.isFinite(n) || (orEqual ? n < min : n <= min)) {
+    throw new Error(`${name} wants a number ${orEqual ? "of at least" : "above"} ${min}, not "${v}"`);
+  }
+  return n;
 }
 
 /** The Reforged switches of the editor's preferences, one per kind of asset. */
@@ -457,6 +504,20 @@ export function editorPrefs(mode, dayNight, keep = false) {
  * `--keep-prefs` leaves these as they are.
  */
 export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1" });
+
+/**
+ * The [Minimap] toggle pinned the same way: the editor keeps the "Show Creep Camp Icon" box under the minimap as it
+ * was left, so a spec's click on it ticked it in one run and unticked it in the next (the "first click doesn't take
+ * half of the time" of TESTING.md: measured 2026-11-17, six runs alternating, the click took every time). Unticked,
+ * as a fresh prefix starts. `--keep-prefs` leaves it as it is.
+ */
+export const PINNED_MINIMAP_PREFS = Object.freeze({ "Show Creep Camps": "false" });
+
+/** The editor's preferences text with we-drive's keys set: [Misc] always, [Minimap] unless kept. */
+export function withEditorPrefs(text, mode, dayNight, keep = false) {
+  const misc = setPrefs(text, "Misc", editorPrefs(mode, dayNight, keep));
+  return keep ? misc : setPrefs(misc, "Minimap", PINNED_MINIMAP_PREFS);
+}
 
 /**
  * Sets keys in one section of an INI-like text (the editor's preferences): a key that is there gets the new value in
@@ -501,23 +562,63 @@ export function classify(windows) {
   return { main, palettes, dialogs, menus };
 }
 
-class Session {
-  constructor(opts, game) {
+/** How long a killed or closed editor's processes get to go before the next start (bwrap's exit, wineserver -w). */
+const EXIT_WAIT_MS = 20000;
+/** A save that wrote nothing while no dialog was open for this long has failed (a refused or no-op save). */
+const SAVE_IDLE_MS = 90000;
+
+/**
+ * One run's editor and display. `deps` replaces the outside world in the tests: `proton` (else protonFor), `x11`
+ * (the helper: (args…) => its JSON), `spawnWine`, `wineserver`, `procGone`, and a clock { now, sleep }.
+ */
+export class Session {
+  constructor(opts, game, deps = {}) {
     this.opts = opts;
     this.game = game;
-    this.proton = protonFor(game);
+    this.proton = deps.proton ?? protonFor(game);
+    this.clock = deps.clock ?? { now: Date.now, sleep };
+    if (deps.x11) this.x11Impl = deps.x11;
+    if (deps.spawnWine) this.spawnWine = deps.spawnWine;
+    if (deps.wineserver) this.wineserver = deps.wineserver;
+    this.procGone = deps.procGone ?? procGone;
     this.display = null;
     this.xvfb = null;
+    this.xvfbExited = false;
     this.editor = null;
+    this.editorExited = false;
     this.mapName = null;
     this.startedAt = 0;
+    this.clicked = new Map();
     this.log = join(opts.work, "editor.log");
+  }
+
+  now() { return this.clock.now(); }
+  wait(ms) { return this.clock.sleep(ms); }
+
+  /** Whether the run's Xvfb is gone (its exit event, or dead by /proc while the event loop hasn't turned yet). */
+  xvfbDead() {
+    if (this.xvfbExited) return true;
+    return !!this.xvfb?.pid && this.procGone(this.xvfb.pid);
+  }
+
+  /** The X11 helper on the run's display. A dead Xvfb is said as such (the helper's guard would call the display
+   *  "not an Xvfb"). */
+  x(...args) {
+    const died = (why) => new Error(`Xvfb died (display ${this.display}, ${this.xvfb.signalCode ?? `exit ${this.xvfb.exitCode}`}${why ? `; ${why}` : ""})`);
+    if (this.xvfb && this.xvfbDead()) throw died();
+    try {
+      return this.x11Impl ? this.x11Impl(...args) : x11(this.display, ...args);
+    } catch (e) {
+      if (this.xvfb && this.xvfbDead()) throw died(e.message);
+      throw e;
+    }
   }
 
   async startDisplay() {
     const size = this.opts.screen ?? SIZE;
     const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${size[0]}x${size[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
     this.xvfb = xvfb;
+    xvfb.on("exit", () => { this.xvfbExited = true; });
     const n = await new Promise((ok, fail) => {
       let got = "";
       const t = setTimeout(() => fail(new Error("Xvfb didn't start")), 15000);
@@ -580,15 +681,21 @@ class Session {
     return child;
   }
 
-  wineserver(...args) {
-    return spawnSync(join(this.proton.tool, "files", "bin", "wineserver"), args, { env: { ...process.env, WINEPREFIX: join(prefixDir(), "pfx") }, stdio: "ignore", timeout: 60000 });
+  /** Runs the prefix's wineserver with `args` ("-k" kills its processes, "-w" waits until they're gone), at most
+   *  `ms`; a failure (no wineserver, the time up) is tolerated: what's left is reported by tests/wineservers.mjs. */
+  wineserver(args, ms = 60000) {
+    try {
+      return spawnSync(join(this.proton.tool, "files", "bin", "wineserver"), args, { env: { ...process.env, WINEPREFIX: join(prefixDir(), "pfx") }, stdio: "ignore", timeout: ms });
+    } catch (e) {
+      return { error: e };
+    }
   }
 
   /** The install's text locale in the prefix's registry, where the launcher would put it (else the editor
    *  falls back to the system's language, which the install may not have, and shows WESTRING_… names). */
   async ensureLocale() {
     const reg = join(prefixDir(), "pfx", "user.reg");
-    const locale = textLocale(this.game);
+    const locale = textLocale(readFileSync(join(this.game, ".build.info"), "utf8"));
     const has = () => {
       if (!existsSync(reg)) return false;
       // user.reg writes the key as [Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3] (doubled).
@@ -601,7 +708,7 @@ class Session {
     if (has()) return;
     const child = this.spawnWine("reg", ["add", "HKCU\\Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3", "/v", "LOCALE", "/t", "REG_SZ", "/d", locale, "/f"]);
     const code = await new Promise((ok) => child.on("exit", ok));
-    this.wineserver("-w");
+    this.wineserver(["-w"], EXIT_WAIT_MS);
     if (code !== 0 || !has()) throw new Error(`couldn't set the editor's locale in the prefix (reg exited ${code}; see ${this.log})`);
   }
 
@@ -612,7 +719,7 @@ class Session {
     const file = join(dir, "WorldEditPreferences.txt");
     mkdirSync(dir, { recursive: true });
     const before = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const after = setPrefs(before, "Misc", editorPrefs(this.opts.mode, this.opts.dayNight, !!this.opts.keepPrefs));
+    const after = withEditorPrefs(before, this.opts.mode, this.opts.dayNight, !!this.opts.keepPrefs);
     if (after !== before) writeFileSync(file, after);
   }
 
@@ -623,16 +730,21 @@ class Session {
 
   /** Starts the editor, with a copy of `map` if given; `looks` are the run's --look cameras to put into the copy. */
   async start(map, looks = []) {
-    if (this.editor && !this.editorExited) {
-      // A close that finished has stopped the editor's processes; its exit event may come a moment later.
-      for (let i = 0; i < 100 && !this.editorExited; i++) await sleep(100);
-      if (!this.editorExited) throw new Error("the editor is still running: add --close before another --map");
+    if (this.editor) {
+      // The editor before (closed or killed) must be gone: its exit event comes only when the event loop turns, and
+      // its processes must not still hold the prefix when the next one starts.
+      if (!(await waitExit(this.editor, EXIT_WAIT_MS, this.clock))) {
+        if (!this.editorExited) throw new Error("the editor is still running: add --close before another --map");
+        throw new Error(`the editor before didn't exit within ${EXIT_WAIT_MS / 1000} s of its close (see ${this.log})`);
+      }
     }
     // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
     this.editor = null;
     this.editorExited = false;
     this.answered = [];
+    this.clicked = new Map();
     this.copy = null;
+    this.mapName = null;
     const exe = join(farmDir(), "_retail_", "x86_64", "World Editor.exe");
     const args = ["-launch"];
     if (map) {
@@ -647,15 +759,22 @@ class Session {
     }
     await this.ensureLocale();
     this.writePrefs();
-    this.startedAt = Date.now();
-    this.editor = this.spawnWine(exe, args);
-    this.editor.on("exit", () => { this.editorExited = true; });
+    this.startedAt = this.now();
+    const child = this.spawnWine(exe, args);
+    child.exited = false;
+    this.editor = child;
+    // Only this child's own exit counts: an editor before it may report its exit late (after this start), and must
+    // not mark this one as exited.
+    child.on("exit", () => {
+      child.exited = true;
+      if (this.editor === child) this.editorExited = true;
+    });
   }
 
   /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
    *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
   windows() {
-    const all = x11(this.display, "windows").windows;
+    const all = this.x("windows").windows;
     const crash = crashDialogs(all, programOfPid);
     if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
     return classify(all);
@@ -671,10 +790,13 @@ class Session {
     throw new EditorCrashed(dialogs, screen);
   }
 
-  /** Kills everything the editor started (its crash reporter too) instead of answering anything. */
+  /** Kills everything the editor started (its crash reporter too) instead of answering anything, and waits (bounded)
+   *  until the prefix's processes are gone, so a next start doesn't meet a dying wineserver or the old editor writing
+   *  its preferences. Synchronous (a crash is handled inside windows()); start() awaits the child's exit event. */
   killEditor() {
-    this.wineserver("-k");
-    try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
+    this.wineserver(["-k"], EXIT_WAIT_MS);
+    if (this.editor?.pid) try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
+    this.wineserver(["-w"], EXIT_WAIT_MS);
     this.editorExited = true;
   }
 
@@ -685,7 +807,7 @@ class Session {
 
   shot(file, rect) {
     mkdirSync(dirname(resolve(file)), { recursive: true });
-    return x11(this.display, "shot", resolve(file), ...(rect ? ["--rect", rect.join(",")] : []));
+    return this.x("shot", resolve(file), ...(rect ? ["--rect", rect.join(",")] : []));
   }
 
   /** Answers the dialogs we-drive knows (the first start's welcome); returns the ones it doesn't. */
@@ -698,17 +820,17 @@ class Session {
       // report the dialog instead, like any dialog we-drive doesn't know.
       if (d.title === WELCOME.title && process.env.W3PROJ_WE_ACCEPT_TERMS !== "0") {
         // Once, then again only if it's still there 15 s later (it stays until the editor has loaded the map).
-        if (Date.now() - (this.clicked.get(d.id) ?? 0) > 15000) {
-          x11(this.display, "click", `${d.rect[0] + WELCOME.button.x},${d.rect[1] + WELCOME.button.y}`);
-          this.clicked.set(d.id, Date.now());
+        if (this.now() - (this.clicked.get(d.id) ?? 0) > 15000) {
+          this.x("click", `${d.rect[0] + WELCOME.button.x},${d.rect[1] + WELCOME.button.y}`);
+          this.clicked.set(d.id, this.now());
           this.answered = [...(this.answered ?? []), d.title];
         }
       } else if (isReopenedModule(d.title)) {
         // A module window the editor opens again because a run before closed the editor with it open (the farm's
         // prefix is shared): closed, once per window, so the map's view is what's shown.
         if (!this.clicked.has(d.id)) {
-          x11(this.display, "close", d.id);
-          this.clicked.set(d.id, Date.now());
+          this.x("close", d.id);
+          this.clicked.set(d.id, this.now());
           this.answered = [...(this.answered ?? []), d.title];
         }
       } else rest.push(d);
@@ -717,7 +839,7 @@ class Session {
   }
 
   dialogShot(name) {
-    const file = join(this.opts.work, `dialog-${name}-${Date.now()}.png`);
+    const file = join(this.opts.work, `dialog-${name}-${this.now()}.png`);
     this.shot(file);
     return file;
   }
@@ -736,55 +858,57 @@ class Session {
     this.opens = (this.opens ?? 0) + 1;
     const dir = openMapsDir();
     mkdirSync(dir, { recursive: true });
-    for (const f of readdirSync(dir)) if (/^we-open-/.test(f)) rmSync(join(dir, f), { force: true });
+    // The editor's save leaves a folder beside a copy ("we-open-3-input.w3xTemp"): removed too (rm without recursive
+    // refused it with EISDIR, and every open of the run fell back to a restart).
+    for (const f of readdirSync(dir)) if (/^we-open-/.test(f)) rmSync(join(dir, f), { recursive: true, force: true });
     const copy = join(dir, openCopyName(this.opens, map));
     copyFileSync(map, copy);
     const withLooks = looks.length ? addCamerasToMap(ensureCli(), copy, join(this.opts.work, "look-project"), looks) : null;
     const { main } = this.mainOrThrow();
     const beforeTitle = main.title;
     const before = new Set(this.windows().dialogs.map((d) => d.id));
-    x11(this.display, "key", "--window", main.id, "ctrl+o");
+    this.x("key", "--window", main.id, "ctrl+o");
     const answered = [], asked = new Set();
     let dialog = null;
-    for (const end = Date.now() + 20000; !dialog && Date.now() < end;) {
-      await sleep(250);
+    for (const end = this.now() + 20000; !dialog && this.now() < end;) {
+      await this.wait(250);
       if (this.editorExited) throw new Error(`the editor exited (see ${this.log})`);
       const fresh = this.windows().dialogs.filter((d) => !before.has(d.id));
       dialog = fresh.find((d) => d.title === OPEN_DIALOG) ?? null;
       const r = openQuestion(fresh.filter((d) => d !== dialog), false);
       if (r.answer && !asked.has(r.answer.dialog.id)) {
-        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        this.x("key", "--window", r.answer.dialog.id, r.answer.key);
         asked.add(r.answer.dialog.id);
         answered.push(r.answer.dialog.title);
       } else if (r.error) throw new Error(`Ctrl+O met a dialog: "${r.error.title}"`);
     }
     if (!dialog) throw new Error(`no "${OPEN_DIALOG}" list opened for Ctrl+O`);
-    await sleep(500);
+    await this.wait(500);
     const at = (p) => `${dialog.rect[0] + p.x},${dialog.rect[1] + p.y}`;
-    x11(this.display, "click", at(OPEN_LIST.row));
-    await sleep(300);
-    x11(this.display, "click", at(OPEN_LIST.ok));
+    this.x("click", at(OPEN_LIST.row));
+    await this.wait(300);
+    this.x("click", at(OPEN_LIST.ok));
     let loading = false, closedAt = 0;
-    for (const end = Date.now() + 40000; Date.now() < end;) {
-      await sleep(250);
+    for (const end = this.now() + 40000; this.now() < end;) {
+      await this.wait(250);
       if (this.editorExited) throw new Error(`the editor exited while opening (see ${this.log})`);
       const w = this.windows();
       if (w.dialogs.some((d) => d.title === PROGRESS_TITLE)) loading = true;
       const r = openQuestion(w.dialogs.filter((d) => d.id !== dialog.id), false);
       if (r.answer && !asked.has(r.answer.dialog.id)) {
-        x11(this.display, "key", "--window", r.answer.dialog.id, r.answer.key);
+        this.x("key", "--window", r.answer.dialog.id, r.answer.key);
         asked.add(r.answer.dialog.id);
         answered.push(r.answer.dialog.title);
         continue;
       }
       if (r.error || r.answer) throw new Error(`the open met a dialog: "${(r.error ?? r.answer.dialog).title}"`);
       if (w.dialogs.some((d) => d.id === dialog.id)) continue;
-      closedAt ||= Date.now();
-      if (loading || (w.main && w.main.title !== beforeTitle) || Date.now() - closedAt > 8000) {
+      closedAt ||= this.now();
+      if (loading || (w.main && w.main.title !== beforeTitle) || this.now() - closedAt > 8000) {
         this.copy = copy;
         this.mapName = basename(copy);
         this.answered = answered;
-        this.startedAt = Date.now();
+        this.startedAt = this.now();
         if (withLooks) ({ looks: this.looks, parks: this.parks } = withLooks);
         return { answered, loading, copy };
       }
@@ -794,12 +918,12 @@ class Session {
 
   async waitReady() {
     if (!this.editor) throw new Error("the editor isn't running: add --map or --start first");
-    const deadline = Date.now() + this.opts.timeout * 1000;
+    const deadline = this.now() + this.opts.timeout * 1000;
     let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0;
     for (;;) {
       if (this.editorExited) throw new Error(`the editor exited while starting (see ${this.log})`);
       const { main, dialogs } = this.windows();
-      if (main && !mainAt) mainAt = Date.now() - this.startedAt;
+      if (main && !mainAt) mainAt = this.now() - this.startedAt;
       const unknown = this.answerKnown(dialogs);
       // A loading window (no title, or "Progress") comes and goes while the map loads; a titled dialog that stays is
       // a question. While one is open the map isn't ready (below), so a long load waits up to the timeout.
@@ -807,30 +931,31 @@ class Session {
       // How long the loading window was seen (polls of 0.5 s and more), for the report.
       if (unknown.some((d) => d.title === PROGRESS_TITLE)) progressPolls++;
       if (questions.length) {
-        dialogSince ||= Date.now();
-        if (Date.now() - dialogSince > 3000) {
+        dialogSince ||= this.now();
+        if (this.now() - dialogSince > 3000) {
           return { ready: false, dialogs: questions.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("wait") };
         }
       } else dialogSince = 0;
-      const titled = main && (!this.mapName || main.title.includes("["));
+      // The map's own name in the title: right after an open the title still names the map before.
+      const titled = main && (!this.mapName || (main.title.includes("[") && main.title.includes(this.mapName)));
       let drawn = false;
       if (titled && !unknown.length) {
         // The middle of the view (counting the whole of it in Python takes seconds).
         const [vx, vy, vw, vh] = this.viewRect(main);
-        const s = x11(this.display, "stats", "--rect", [vx + Math.round(vw / 2) - 150, vy + Math.round(vh / 2) - 100, 300, 200].join(","));
+        const s = this.x("stats", "--rect", [vx + Math.round(vw / 2) - 150, vy + Math.round(vh / 2) - 100, 300, 200].join(","));
         // Black until the view has drawn (dark ground, like Lordaeron's grass at night, isn't black).
         drawn = s.blackPixels < s.pixels * 0.5;
       }
       if (drawn) {
-        readySince ||= Date.now();
-        if (Date.now() - readySince > 3000) {
-          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: Date.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
+        readySince ||= this.now();
+        if (this.now() - readySince > 3000) {
+          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
         }
       } else readySince = 0;
-      if (Date.now() > deadline) {
+      if (this.now() > deadline) {
         return { ready: false, timeout: this.opts.timeout, title: main?.title ?? null, dialogs: unknown.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("timeout") };
       }
-      await sleep(500);
+      await this.wait(500);
     }
   }
 
@@ -844,29 +969,40 @@ class Session {
     const { main } = this.mainOrThrow();
     const stamp = () => { try { const s = statSync(this.copy); return `${s.mtimeMs}:${s.size}`; } catch { return null; } };
     const before = stamp();
-    x11(this.display, "key", "--window", main.id, "ctrl+s");
-    const deadline = Date.now() + this.opts.timeout * 1000, answered = [];
-    let last = before, stillSince = 0;
-    while (Date.now() < deadline) {
-      await sleep(500);
+    this.x("key", "--window", main.id, "ctrl+s");
+    const deadline = this.now() + this.opts.timeout * 1000, answered = [], asked = new Map();
+    let last = before, stillSince = 0, idleSince = this.now();
+    while (this.now() < deadline) {
+      await this.wait(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
+      const { dialogs } = this.windows();
       // A module window the run opened itself (the Sound Editor, F5) stays beside the map: not a question.
-      const questions = questionDialogs(this.windows().dialogs).filter((d) => !isReopenedModule(d.title));
+      const questions = questionDialogs(dialogs).filter((d) => !isReopenedModule(d.title));
       // The reminder about the default map name, and any dialog --save-accept names (e.g. "Warning", the "no longer
-      // considered a melee map" notice): answered with Return.
+      // considered a melee map" notice): answered with Return, once per dialog (a dialog still there 10 s after its
+      // Return didn't take it and is reported).
       const reminder = questions.find((d) => d.title === "Reminder" || this.opts.saveAccept.includes(d.title));
-      if (reminder) {
-        x11(this.display, "key", "--window", reminder.id, "Return");
+      if (reminder && !asked.has(reminder.id)) {
+        this.x("key", "--window", reminder.id, "Return");
+        asked.set(reminder.id, this.now());
         answered.push(reminder.title);
         stillSince = 0;
+        idleSince = this.now();
         continue;
       }
-      if (questions.length) return { saved: false, dialogs: questions.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("save") };
+      const stuck = questions.filter((d) => !asked.has(d.id) || this.now() - asked.get(d.id) > 10000);
+      if (stuck.length) return { saved: false, dialogs: stuck.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("save") };
+      // Any window besides the main one and the run's modules (a question being answered, the loading window, an
+      // untitled one) means the editor is still at it.
+      if (dialogs.some((d) => !isReopenedModule(d.title))) idleSince = this.now();
       const now = stamp();
-      if (now !== last) { last = now; stillSince = 0; continue; }
+      if (now !== last) { last = now; stillSince = 0; idleSince = this.now(); continue; }
+      if (now === before && this.now() - idleSince > SAVE_IDLE_MS) {
+        return { saved: false, error: `the editor wrote nothing in ${SAVE_IDLE_MS / 1000} s without a dialog open (a refused or no-op save)`, answered, screen: this.dialogShot("save") };
+      }
       if (now !== before && now !== null) {
-        stillSince ||= Date.now();
-        if (Date.now() - stillSince >= 2000) {
+        stillSince ||= this.now();
+        if (this.now() - stillSince >= 2000) {
           mkdirSync(dirname(resolve(dest)), { recursive: true });
           copyFileSync(this.copy, resolve(dest));
           return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered };
@@ -885,31 +1021,31 @@ class Session {
     const { main } = this.mainOrThrow();
     const waitFor = async (title) => {
       for (let i = 0; i < 40; i++) {
-        await sleep(250);
+        await this.wait(250);
         const d = this.windows().dialogs.find((w) => w.title === title);
         if (d) return d;
       }
       return null;
     };
     const at = (rect, p) => `${rect[0] + p.x},${rect[1] + p.y}`;
-    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.file));
-    await sleep(600);
-    x11(this.display, "click", at(main.rect, EXPORT_MINIMAP.item));
+    this.x("click", at(main.rect, EXPORT_MINIMAP.file));
+    await this.wait(600);
+    this.x("click", at(main.rect, EXPORT_MINIMAP.item));
     const dialog = await waitFor("Export Minimap");
     if (!dialog) return { exported: false, error: "the Export Minimap dialog didn't open", screen: this.dialogShot("export") };
-    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.imageFile));
+    this.x("click", at(dialog.rect, EXPORT_MINIMAP.imageFile));
     const saveAs = await waitFor("Save As");
     if (!saveAs) return { exported: false, error: "the Save As box didn't open", screen: this.dialogShot("export") };
-    const file = join(resolve(this.opts.work), `minimap-${Date.now()}.tga`);
-    await sleep(300);
-    x11(this.display, "type", "--window", saveAs.id, winePath(file));
-    x11(this.display, "key", "--window", saveAs.id, "Return");
-    for (let i = 0; i < 20 && this.windows().dialogs.some((w) => w.title === "Save As"); i++) await sleep(250);
-    x11(this.display, "click", at(dialog.rect, EXPORT_MINIMAP.ok));
-    const deadline = Date.now() + this.opts.timeout * 1000;
+    const file = join(resolve(this.opts.work), `minimap-${this.now()}.tga`);
+    await this.wait(300);
+    this.x("type", "--window", saveAs.id, winePath(file));
+    this.x("key", "--window", saveAs.id, "Return");
+    for (let i = 0; i < 20 && this.windows().dialogs.some((w) => w.title === "Save As"); i++) await this.wait(250);
+    this.x("click", at(dialog.rect, EXPORT_MINIMAP.ok));
+    const deadline = this.now() + this.opts.timeout * 1000;
     let last = null, stillSince = 0;
-    while (Date.now() < deadline) {
-      await sleep(500);
+    while (this.now() < deadline) {
+      await this.wait(500);
       if (this.editorExited) throw new Error(`the editor exited while exporting (see ${this.log})`);
       const others = questionDialogs(this.windows().dialogs).filter((d) => d.title !== "Export Minimap");
       if (others.length) return { exported: false, dialogs: others.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("export") };
@@ -917,8 +1053,8 @@ class Session {
       try { const s = statSync(file); now = `${s.mtimeMs}:${s.size}`; } catch { /* not yet */ }
       if (now !== last) { last = now; stillSince = 0; continue; }
       if (now && !this.windows().dialogs.some((d) => d.title === "Export Minimap")) {
-        stillSince ||= Date.now();
-        if (Date.now() - stillSince >= 2000) {
+        stillSince ||= this.now();
+        if (this.now() - stillSince >= 2000) {
           mkdirSync(dirname(resolve(dest)), { recursive: true });
           copyFileSync(file, resolve(dest));
           return { exported: true, file: resolve(dest), bytes: statSync(file).size };
@@ -937,21 +1073,21 @@ class Session {
   /** Opens the View menu; returns its window. */
   async openViewMenu() {
     const { main } = this.mainOrThrow();
-    x11(this.display, "click", `${main.rect[0] + VIEW_MENU.x},${main.rect[1] + VIEW_MENU.y}`);
+    this.x("click", `${main.rect[0] + VIEW_MENU.x},${main.rect[1] + VIEW_MENU.y}`);
     let menu = null;
     for (let i = 0; i < 20 && !menu; i++) {
-      await sleep(150);
+      await this.wait(150);
       menu = this.windows().menus.find((m) => m.rect[3] > 300) ?? null;
     }
     if (!menu) throw new Error("the View menu didn't open");
-    await sleep(200);
+    await this.wait(200);
     return menu;
   }
 
   async closeMenu() {
-    x11(this.display, "key", "Escape");
-    x11(this.display, "key", "Escape");
-    await sleep(200);
+    this.x("key", "Escape");
+    this.x("key", "Escape");
+    await this.wait(200);
   }
 
   /** The View menu's items and their check marks (from a picture of its check-mark column). */
@@ -976,9 +1112,9 @@ class Session {
     while (want !== "status" && on !== (want === "on")) {
       if (clicks >= 2) throw new Error(`View > ${spec.item} is still ${on ? "on" : "off"} after clicking it ${clicks} times`);
       const menu = await this.openViewMenu();
-      x11(this.display, "click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
+      this.x("click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
       clicks++;
-      await sleep(this.opts.mode !== "sd" ? 3000 : 1000);
+      await this.wait(this.opts.mode !== "sd" ? 3000 : 1000);
       on = await state();
     }
     return { item: spec.item, state: on ? "on" : "off", clicks };
@@ -996,15 +1132,15 @@ class Session {
     const presses = [];
     while (want !== "status" && st.on !== (want === "on")) {
       if (presses.length >= 3) throw new Error(`game view is still ${st.on ? "on" : "off"} after pressing V ${presses.length} times`);
-      x11(this.display, "key", "v");
-      await sleep(500);
+      this.x("key", "v");
+      await this.wait(500);
       st = await this.gameViewState();
       presses.push(st.on ? "on" : "off");
     }
     // The user's test: "Game View Settings" in pinkish red in the view's top-right corner.
     const { main } = this.windows();
     const [vx, vy, vw] = this.viewRect(main);
-    const corner = x11(this.display, "stats", "--rect", [vx + vw - 260, vy, 260, 40].join(","));
+    const corner = this.x("stats", "--rect", [vx + vw - 260, vy, 260, 40].join(","));
     return { gameView: st.on ? "on" : "off", pressedV: presses.length, checkDarkPixels: st.checkDarkPixels, cornerRedPixels: corner.redPixels };
   }
 
@@ -1013,30 +1149,33 @@ class Session {
     const look = this.looks?.[i];
     if (!look) throw new Error(`no camera for look ${i + 1} in the map (was it started with --map?)`);
     const { main } = this.mainOrThrow();
-    x11(this.display, "key", "--window", main.id, "m");
-    await sleep(500);
+    this.x("key", "--window", main.id, "m");
+    await this.wait(500);
     const palette = this.windows().palettes.find((p) => p.rect[0] > main.rect[0] + main.rect[2] / 2);
     if (!palette) throw new Error("no tool palette right of the main window");
     const [px, py] = palette.rect;
-    const row = (r) => x11(this.display, "click", `${px + CAMERA_PALETTE.row.x},${py + CAMERA_PALETTE.row.y + r * CAMERA_PALETTE.rowHeight}`);
+    const row = (r) => this.x("click", `${px + CAMERA_PALETTE.row.x},${py + CAMERA_PALETTE.row.y + r * CAMERA_PALETTE.rowHeight}`);
     row(i);
-    await sleep(300);
-    x11(this.display, "click", `${px + CAMERA_PALETTE.view.x},${py + CAMERA_PALETTE.view.y}`);
+    await this.wait(300);
+    this.x("click", `${px + CAMERA_PALETTE.view.x},${py + CAMERA_PALETTE.view.y}`);
     // The selected camera's circle is in the middle of the picture: selecting the parking camera farther away (only
     // selected, not viewed) moves it out.
     let parked = null;
     if (this.parks?.length) {
-      await sleep(300);
+      await this.wait(300);
       parked = fartherPark(look, this.parks);
       row(this.looks.length + parked);
     }
-    // The view draws about 14 frames a second in SD and 2 in HD.
-    await sleep(this.opts.mode !== "sd" ? 4000 : 1500);
+    // The view draws about 14 frames a second in SD and 2 in HD: after a first wait, until two pictures of the view in
+    // a row (a frame's time apart) are the same, at most 10 s (a turning day never stands still).
+    const hd = this.opts.mode !== "sd";
+    await this.wait(hd ? 1000 : 300);
+    const still = this.x("settle", "--rect", this.viewRect(main).join(","), "--interval", hd ? 1000 : 200, "--timeout", 10000);
     let studio = null;
     try { studio = studioCamera(look); } catch { /* not fitted for this angle or field of view */ }
     const camera = studio && Object.entries(studio).map(([k, v]) => `${k}=${v}`).join(",");
     const selected = parked === null ? null : [this.parks[parked].x, this.parks[parked].y];
-    return { row: i, look: { x: look.x, y: look.y, distance: look.distance, aoa: look.aoa, fov: look.fov, rotation: look.rotation }, studioCamera: camera, selectedParkingCamera: selected };
+    return { row: i, look: { x: look.x, y: look.y, distance: look.distance, aoa: look.aoa, fov: look.fov, rotation: look.rotation }, studioCamera: camera, selectedParkingCamera: selected, viewSettled: still.settled, settledMs: still.ms };
   }
 
   async close() {
@@ -1052,22 +1191,26 @@ class Session {
 
   async closeSteps(answered) {
     const { main } = this.windows();
-    if (main) x11(this.display, "close", main.id);
-    const deadline = Date.now() + Math.min(this.opts.timeout, 120) * 1000;
-    while (Date.now() < deadline) {
-      await sleep(500);
+    if (main) this.x("close", main.id);
+    const deadline = this.now() + Math.min(this.opts.timeout, 120) * 1000;
+    while (this.now() < deadline) {
+      await this.wait(500);
       const w = this.windows();
       if (!w.main && !w.dialogs.length && !w.palettes.length) {
-        this.wineserver("-w");
+        // The windows are gone; the processes follow. Waited for (bounded): the prefix's wineserver, then the
+        // editor's own exit event, so the next start neither meets them nor takes their late exit for its own.
+        this.wineserver(["-w"], EXIT_WAIT_MS);
+        const exited = await waitExit(this.editor, EXIT_WAIT_MS, this.clock);
+        if (!exited) this.killEditor();
         this.editorExited = true;
-        return { closed: true, answered };
+        return { closed: true, answered, ...(exited ? {} : { killed: "the editor's processes stayed after its windows closed" }) };
       }
       for (const d of w.dialogs) {
         // "Save changes to …?" is a message box titled "Warning" (Yes, No, Cancel): "n" is its "No".
         const action = closeAction(d, w.main);
         if (action === "crash") this.crashed([{ title: d.title, class: d.class, program: programOfPid(d) }]);
         if (action === "no") {
-          x11(this.display, "key", "--window", d.id, "n");
+          this.x("key", "--window", d.id, "n");
           answered.push(d.title || "(untitled)");
         } else {
           return { closed: false, dialogs: [{ title: d.title, rect: d.rect }], screen: this.dialogShot("close") };
@@ -1077,17 +1220,18 @@ class Session {
     return { closed: false, timeout: true, screen: this.dialogShot("close") };
   }
 
+  /** Stops whatever the run started. The prefix's wineserver is killed whether or not an editor was started (the
+   *  locale's `reg` starts one before), at most 20 s and failures tolerated. Synchronous: it runs from signal handlers. */
   stop() {
-    if (this.editor) {
-      this.wineserver("-k");
-      try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
-    }
-    if (this.xvfb && this.xvfb.exitCode === null && this.xvfb.signalCode === null) {
-      this.xvfb.kill("SIGTERM");
-      // Waited for (synchronously, as this also runs from a signal handler): gone within 5 s, else killed.
+    this.wineserver(["-k"], EXIT_WAIT_MS);
+    if (this.editor?.pid) try { process.kill(-this.editor.pid, "SIGKILL"); } catch { /* gone */ }
+    if (this.xvfb && !this.xvfbExited && this.xvfb.exitCode === null && this.xvfb.signalCode === null) {
+      try { this.xvfb.kill("SIGTERM"); } catch { /* gone */ }
+      // Waited for (synchronously): gone within 5 s, else killed. A zombie counts as gone (node reaps it only when the
+      // event loop turns, which this loop doesn't let happen).
       const until = Date.now() + 5000;
       while (Date.now() < until) {
-        try { process.kill(this.xvfb.pid, 0); } catch { return; }
+        if (this.procGone(this.xvfb.pid)) return;
         spawnSync("sleep", ["0.1"]);
       }
       try { process.kill(this.xvfb.pid, "SIGKILL"); } catch { /* gone */ }
@@ -1113,15 +1257,23 @@ async function main() {
     console.error(`we-drive: skipped, ${why} (local only: it needs the installed game, Proton, Xvfb, bubblewrap)`);
     return 0;
   }
-  setup(game);
+  // Refused before anything starts: an install without English text has dialogs we-drive can't read.
+  textLocale(readFileSync(join(game, ".build.info"), "utf8"));
+  // The lock first: setting up may rebuild the farm (another game build), which must not happen under another run's
+  // live editor, nor in two fresh runs at once.
   const release = await takeLock((m) => console.error(`we-drive: ${m}`));
-  const s = new Session(opts, game);
-  const stopAll = () => { s.stop(); release(); };
+  let s = null;
+  const stopAll = () => {
+    try { s?.stop(); } finally { release(); }
+  };
   const onSignal = () => { stopAll(); process.exit(130); };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  process.on("SIGHUP", onSignal);
   let failed = false, lookIndex = 0, mapsStarted = 0;
   try {
+    setup(game);
+    s = new Session(opts, game);
     await s.startDisplay();
     for (const [step, arg] of steps) {
       try {
@@ -1188,15 +1340,15 @@ async function main() {
           const m = /^(.+?)(?:@(\d+))?$/.exec(arg);
           const w = s.windows();
           const to = w.dialogs.at(-1) ?? w.main;
-          x11(s.display, "key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
-          await sleep(300);
-          out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
+          const r = s.x("key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
+          await s.wait(300);
+          out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), ...(r.pressed === false ? { pressed: false, reason: r.reason } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--type") {
           // Into the open dialog if there is one, else the main window, as --key.
           const w = s.windows();
           const to = w.dialogs.at(-1) ?? w.main;
-          x11(s.display, "type", ...(to ? ["--window", to.id] : []), arg);
-          await sleep(300);
+          s.x("type", ...(to ? ["--window", to.id] : []), arg);
+          await s.wait(300);
           out({ step, typed: arg.length, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--export-minimap") {
           const r = await s.exportMinimap(arg);
@@ -1204,16 +1356,16 @@ async function main() {
           if (!r.exported) { failed = true; break; }
         } else if (step === "--click" || step === "--double-click") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error(`${step} wants X,Y`);
-          x11(s.display, "click", arg, ...(step === "--double-click" ? ["--double"] : []));
-          await sleep(300);
+          s.x("click", arg, ...(step === "--double-click" ? ["--double"] : []));
+          await s.wait(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {
-          x11(s.display, "drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []));
-          await sleep(300);
+          s.x("drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []));
+          await s.wait(300);
           out({ step, from: arg.from, to: arg.to, ms: arg.ms, ...(arg.mod ? { mod: arg.mod } : {}), ...(arg.button ? { button: arg.button } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--move") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
-          x11(s.display, "move", arg);
+          s.x("move", arg);
           out({ step, at: arg });
         } else if (step === "--wheel") {
           // Mouse wheel over the terrain view (its middle, or N@X,Y at a position of the display): positive zooms in
@@ -1225,15 +1377,15 @@ async function main() {
           const [vx, vy, vw, vh] = s.viewRect(main);
           const at = m[2] ? `${m[2]},${m[3]}` : `${vx + Math.round(vw / 2)},${vy + Math.round(vh / 2)}`;
           for (let i = 0; i < Math.abs(n); i++) {
-            x11(s.display, "click", at, "--button", n > 0 ? 4 : 5);
-            await sleep(100);
+            s.x("click", at, "--button", n > 0 ? 4 : 5);
+            await s.wait(100);
           }
-          await sleep(500);
+          await s.wait(500);
           out({ step, notches: n, at });
         } else if (step === "--close-modules") {
           const mods = s.windows().dialogs.filter((d) => isReopenedModule(d.title));
-          for (const d of mods) x11(s.display, "close", d.id);
-          await sleep(1000);
+          for (const d of mods) s.x("close", d.id);
+          await s.wait(1000);
           out({ step, closed: mods.map((d) => d.title) });
         } else if (step === "--windows") {
           const w = s.windows();
@@ -1243,9 +1395,9 @@ async function main() {
           out({ step, ...(await s.gameView(arg)) });
         } else if (step === "--fps") {
           const { main } = s.mainOrThrow();
-          out({ step, ...x11(s.display, "frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
+          out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
         } else if (step === "--sleep") {
-          await sleep(Number(arg));
+          await s.wait(Number(arg));
           out({ step });
         } else if (step === "--save") {
           const r = await s.save(arg);
@@ -1254,7 +1406,8 @@ async function main() {
         } else if (step === "--close") {
           const r = await s.close();
           out({ step, ...r });
-          if (!r.closed) { failed = true; break; }
+          // A crash on close closed the editor, but the run failed (its result isn't to be trusted).
+          if (!r.closed || r.crashed) { failed = true; break; }
         }
       } catch (e) {
         failed = true;
