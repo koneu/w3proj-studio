@@ -10738,9 +10738,11 @@ async function shadowTextureOrder(page, found) {
     await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
     await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
     await page.evaluate(`w3Workbench.game.reload()`);
+    // Misses of earlier steps (other maps' barrels) stay in the list: only the ones this calculation adds count.
+    const missedBefore = await page.evaluate(`w3Workbench.game.backendMisses.length`);
     const cmd = await page.evaluate(`w3.commands.execute("w3.terrain.calculateShadows").then(() => null, (e) => String(e))`, { timeout: 180000 });
     if (cmd) { fail(`Calculate Shadows: ${cmd}`); return; }
-    const misses = await page.evaluate(`w3Workbench.game.backendMisses.slice()`);
+    const misses = await page.evaluate(`w3Workbench.game.backendMisses.slice(${missedBefore})`);
     const tifs = misses.filter((m) => /\.tif$/i.test(m));
     if (tifs.length) fail(`${tifs.length} .tif names asked for before their .dds: ${tifs.slice(0, 3).join(", ")}`);
     // The control: the banner's alpha texture was read (as .dds), or the check proves nothing.
