@@ -10,7 +10,7 @@ import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
 import { doodadGround } from "./objheights";
-import { paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -705,9 +705,11 @@ export function spotsAround(x: number, y: number, reach = 320): [number, number]
   return out;
 }
 
-/** What the ground in an area is like. */
-export function terrainSummary(t: Terrain, p: Pathing, area: Area) {
+/** What the ground in an area is like. Its tiles are named as drawn: with the w3e's "custom tilesets" flag 0 by the
+ *  tileset's own list (`own`, w3e.ts drawnGroundTiles), not the file's. */
+export function terrainSummary(t: Terrain, p: Pathing, area: Area, own?: readonly string[]) {
   const counts = new Map<string, number>();
+  const drawn = drawnGroundTiles(t, own);
   const layers = new Set<number>();
   let lowest = Infinity, highest = -Infinity, corners = 0, water = 0, ramps = 0, blight = 0;
   for (let y = 0; y < t.height; y++) {
@@ -715,7 +717,7 @@ export function terrainSummary(t: Terrain, p: Pathing, area: Area) {
       if (!inArea(t.offsetX + x * TILE, t.offsetY + y * TILE, area)) continue;
       const c = t.corners[y * t.width + x];
       corners++;
-      const tile = t.groundTiles[c.texture] ?? String(c.texture);
+      const tile = drawn[c.texture] ?? String(c.texture);
       counts.set(tile, (counts.get(tile) ?? 0) + 1);
       layers.add(c.layer);
       lowest = Math.min(lowest, c.height);

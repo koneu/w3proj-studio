@@ -12,7 +12,8 @@ import { parseSlk } from "../formats/text";
 import { isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
-import { mapEdgeTiles, parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
+import { drawnGroundTiles, mapEdgeTiles, parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
+import { ownGroundTiles } from "./tilesets";
 import { readTerrainBytes, terrainPath } from "./w3etext";
 
 interface PlacedLike { id: string; player?: number; position?: readonly number[] }
@@ -67,6 +68,9 @@ export interface StartSurroundings {
   doodads: readonly DoodadSpot[];
   /** Ground tiles the game's Terrain.slk calls buildable. */
   buildable: ReadonlySet<string>;
+  /** The terrain's tileset's own ground tiles (tilesets.ts ownGroundTiles): with the w3e's "custom tilesets" flag 0 a
+   *  corner's tile is the one drawn by that list (w3e.ts drawnGroundTiles), not the file's. Absent: the file's. */
+  ownTiles?: readonly string[];
   /** Unit types the game's UnitData.slk gives no pathing texture (creeps, critters): they don't block a building. */
   unpathed: ReadonlySet<string>;
 }
@@ -84,6 +88,7 @@ export function startsPlainlyValid(t: Terrain, placed: readonly PlacedLike[], ar
   const starts = placed.filter((p) => p.id === "sloc");
   if (!starts.length || placed.some((p) => !pos(p))) return false;
   const R = CLEAR_AROUND_START;
+  const tiles = drawnGroundTiles(t, around.ownTiles);
   const blocking = placed.filter((p) => !unpathed.has(p.id));
   return starts.every((s) => {
     const [sx, sy] = pos(s)!;
@@ -100,7 +105,7 @@ export function startsPlainlyValid(t: Terrain, placed: readonly PlacedLike[], ar
         if (x < 0 || y < 0 || x >= t.width || y >= t.height) return false;
         const c = t.corners[y * t.width + x];
         // Water counts where its surface is above the ground: the game's maps flag dry corners too.
-        if (!c || c.layer !== level || c.ramp || (c.hasWater && c.water > c.height) || c.blight || c.boundary || !buildable.has(t.groundTiles[c.texture])) return false;
+        if (!c || c.layer !== level || c.ramp || (c.hasWater && c.water > c.height) || c.blight || c.boundary || !buildable.has(tiles[c.texture])) return false;
       }
     }
     return true;
@@ -204,6 +209,7 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   facts.around = doodads && tiles.length && units.length ? {
     doodads,
     buildable: new Set(tiles.filter((r) => r.buildable !== "0").map((r) => r.tileID)),
+    ownTiles: ownGroundTiles(tiles, ground.tileset),
     unpathed: new Set(units.filter((r) => none(r.pathTex)).map((r) => r.unitID)),
   } : null;
   return facts;

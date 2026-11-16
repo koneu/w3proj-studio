@@ -196,3 +196,19 @@ test("a ramp line at a plateau's corner blocks the flat tile beside it, as the W
   corner(t, 3, 3).layer = 2;
   assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_WATER));
 });
+
+test("with the custom tilesets flag 0 a corner's pathing is its drawn tile's, by the tileset's own list", () => {
+  // The file lists Lrok first; with the flag 0 slot 0 is drawn as the tileset's first, Ldrt (w3e.ts drawnGroundTiles).
+  // Not measured in the World Editor: its painting draws that tile, and its pathing comes from the tile.
+  const t = ground();
+  t.groundTiles = ["Lrok", "Ldrt"];
+  const tileRules = new Map([["Ldrt", { walkable: true, buildable: true, flyable: true }], ["Lrok", { walkable: true, buildable: false, flyable: true }]]);
+  const own = ["Ldrt", "Lrok"];
+  const cell = (raw: number, ownTiles?: string[]) => {
+    t.customTilesetsRaw = raw;
+    return generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules, ownTiles })[16 + 4 * 16 + 4];
+  };
+  assert.equal(cell(0, own), NO_WATER, "drawn as Ldrt: buildable");
+  assert.equal(cell(1, own), NO_WATER | NO_BUILD, "control: the flag set, the file's Lrok");
+  assert.equal(cell(0), NO_WATER | NO_BUILD, "the own list unknown: the file's");
+});

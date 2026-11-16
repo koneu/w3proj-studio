@@ -476,6 +476,17 @@ test("the summary counts what's inside only", () => {
   assert.throws(() => terrainSummary(t, p, { left: 9000, bottom: 9000, right: 9500, top: 9500 }), /outside/);
 });
 
+test("the summary names tiles as drawn: with the custom tilesets flag 0 by the tileset's own list", () => {
+  const { t, p } = ground(() => {});
+  t.corners[1].texture = 1;
+  const area = { left: 0, bottom: 0, right: 128, top: 128 };
+  // The file says Adrt, Agrs; the tileset's own list (with the flag 0 what each slot is drawn with) Agrs, Avin.
+  t.customTilesetsRaw = 0;
+  assert.deepEqual(terrainSummary(t, p, area, ["Agrs", "Avin"]).groundTiles, [{ id: "Agrs", percent: 75 }, { id: "Avin", percent: 25 }]);
+  t.customTilesetsRaw = 1;
+  assert.deepEqual(terrainSummary(t, p, area, ["Agrs", "Avin"]).groundTiles, [{ id: "Adrt", percent: 75 }, { id: "Agrs", percent: 25 }], "control: the flag set, the file's");
+});
+
 test("the camera for an area looks at its middle, with room around it", () => {
   const v = viewOfArea({ left: 0, bottom: 0, right: 2000, top: 1000 }, 40, 2, Math.PI / 2, "top");
   assert.deepEqual(v.target, [1000, 500, 40]);

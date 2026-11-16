@@ -7,7 +7,7 @@
 // The rules below were worked out by comparing generated maps with the ones
 // World Editor saved for the sample maps.
 
-import { rampLift, waterOffsetOf, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, rampLift, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 import { rampSides } from "./cliffs";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
@@ -41,6 +41,10 @@ export interface PathingInput {
   /** Unplayable border in tiles: left, right, bottom, top (w3i). */
   margins: [number, number, number, number];
   tileRules: Map<string, TileRule>;
+  /** The tileset's own ground tiles (tilesets.ts ownGroundTiles). With the w3e's "custom tilesets" flag 0 a corner's
+   *  tile is the one it is drawn with, by that list (w3e.ts drawnGroundTiles), not the file's; absent: the file's.
+   *  The World Editor's pathing for such maps isn't measured: it follows the tile drawn, as its painting does. */
+  ownTiles?: readonly string[];
   stamps?: PathingStamp[];
   /** Water deeper than this can't be walked (default DEEP_WATER). */
   deepWater?: number;
@@ -74,6 +78,7 @@ export function isCliffTile(q: readonly Corner[]): boolean {
 export function generatePathing(input: PathingInput): Uint8Array {
   const { terrain: t, margins: [ml, mr, mb, mt], tileRules } = input;
   const deep = input.deepWater ?? DEEP_WATER;
+  const drawn = drawnGroundTiles(t, input.ownTiles);
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(16 + w * h);
   const view = new DataView(out.buffer);
@@ -161,7 +166,7 @@ export function generatePathing(input: PathingInput): Uint8Array {
       let p = NO_WATER;
       // Ground texture: the nearest corner's tile.
       const c = C((cx + 2) >> 2, (cy + 2) >> 2);
-      const rule = tileRules.get(t.groundTiles[c.texture]);
+      const rule = tileRules.get(drawn[c.texture]);
       const unwalkable = rule !== undefined && !rule.walkable;
       if (rule) {
         if (unwalkable) p |= NO_WALK;
