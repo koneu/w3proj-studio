@@ -196,6 +196,22 @@ test("doodads get their click helper from Doodads.slk, and a map's own useClickH
   assert.equal(skins.get("YOtf")?.clickHelper, true, "the game's skins stay as they were");
 });
 
+test("doodads float by Doodads.slk's floats, and a map's own (dflt) wins", () => {
+  const doodad = (file: string): Skin => ({ ...skin(file), kind: "w3d" });
+  const skins = new Map([["LPfp", doodad("lily")], ["ZWsw", doodad("seaweed")], ["ZPsh", doodad("shrub")], ["hbot", skin("ship")]]);
+  addClickHelpers(skins, [{ doodID: "LPfp", floats: "1" }, { doodID: "ZWsw", floats: " 1 " }, { doodID: "ZPsh", floats: "0" },
+    { doodID: "hbot", floats: "1" }]);
+  assert.equal(skins.get("LPfp")?.floats, true);
+  assert.equal(skins.get("ZWsw")?.floats, true);
+  assert.equal(skins.get("ZPsh")?.floats, undefined);
+  assert.equal(skins.get("hbot")?.floats, undefined, "a unit doesn't, whatever a row of that id says");
+  const out = withObjectArt(skins, [{ kind: "w3d", original: [{ base: "LPfp", mods: [{ field: "dflt", value: 0 }] }],
+    custom: [{ base: "ZWsw", id: "D000", mods: [] }, { base: "ZPsh", id: "D001", mods: [{ field: "dflt", value: 1 }] }] }]);
+  assert.equal(out.get("LPfp")?.floats, undefined, "a standard doodad the map changed");
+  assert.equal(out.get("D000")?.floats, true, "a custom doodad keeps its base's");
+  assert.equal(out.get("D001")?.floats, true);
+});
+
 test("units get their flying height from the unit table, and a map's own wins", () => {
   const skins = new Map([["hgry", skin("gryphon")], ["hfoo", skin("footman")], ["hbad", skin("bad")]]);
   addMoveTypes(skins, [{ unitID: "hgry", movetp: "fly", moveHeight: "240" }, { unitID: "hfoo", movetp: "foot", moveHeight: "0" },

@@ -422,6 +422,22 @@ export function heightAt(t: Terrain, wx: number, wy: number): number {
   return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
 }
 
+/** The water level a floating doodad (Doodads.slk `floats` 1: lily pads, seaweed, bubbles) stands on at a world position,
+ *  or null where it stands on the ground (heightAt). The World Editor looks at the one corner nearest to it (halves
+ *  round up, on both axes): when that corner has water and its level is above that corner's ground (the cliff level
+ *  counted), the doodad is at that corner's level, wherever the ground between the corners is. we-compare
+ *  doodad-water-z (2026-11-16, SD, make-doodad-water-z.mjs; open and Select All + Numpad 6 alike): a corner without
+ *  the water flag doesn't count, a level-3 corner at ground 0 under water at -49.6 doesn't, a doodad halfway between a
+ *  wet and a dry corner takes the east (north) one, levels -59.6, -29.6, 0.4, 30.4 by column go by the nearest
+ *  column; the 3522 doodads of (2)EchoIsles fit it, as the original and as the editor saved them. */
+export function floatingLevelAt(t: Terrain, wx: number, wy: number): number | null {
+  const fx = (wx - t.offsetX) / 128, fy = (wy - t.offsetY) / 128;
+  if (!Number.isFinite(fx) || !Number.isFinite(fy)) return null;
+  const x = Math.min(Math.max(Math.round(fx), 0), t.width - 1), y = Math.min(Math.max(Math.round(fy), 0), t.height - 1);
+  const c = t.corners[y * t.width + x];
+  return c && c.hasWater && c.water > c.height ? c.water : null;
+}
+
 /** How far up the slope the pick looks (world units): 0.125 of a tile. */
 const PICK_REACH = 16;
 

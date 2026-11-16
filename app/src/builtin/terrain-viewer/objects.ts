@@ -79,6 +79,9 @@ export interface Skin {
   /** Doodads: the World Editor draws its click helper by the model (Doodads.slk `useClickHelper`, field `duch`: fires,
    *  traps, flies, dust, …, whose models are mostly particles; see CLICK_HELPER). */
   clickHelper?: boolean;
+  /** Doodads: stands on the water where there is water (Doodads.slk `floats`, field `dflt`: lily pads, seaweed,
+   *  bubbles; lib/terrain/w3e.ts floatingLevelAt). */
+  floats?: boolean;
 }
 
 /**
@@ -90,11 +93,12 @@ export interface Skin {
  */
 export const CLICK_HELPER = { model: "Objects\\InvalidObject\\InvalidObject.mdx", scale: 0.4, tint: [1, 1, 1, 96 / 255] as [number, number, number, number] };
 
-/** Puts Doodads.slk's click helpers on the doodads' skins. */
+/** Puts Doodads.slk's click helpers and floating types on the doodads' skins. */
 export function addClickHelpers(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
   for (const r of rows) {
     const skin = r.doodID ? skins.get(r.doodID) : undefined;
     if (skin?.kind === "w3d" && r.useClickHelper?.trim() === "1") skin.clickHelper = true;
+    if (skin?.kind === "w3d" && r.floats?.trim() === "1") skin.floats = true;
   }
 }
 
@@ -275,7 +279,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
     customColor: "utcc",
   },
   w3t: { file: "ifil", modelScale: "isca" },
-  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch" },
+  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch", floats: "dflt" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd" },
 };
 
@@ -309,6 +313,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
         else if (key === "clickHelper") { if (n === 1) skin.clickHelper = true; else delete skin.clickHelper; }
+        else if (key === "floats") { if (n === 1) skin.floats = true; else delete skin.floats; }
         else if (key === "customColor") { if (n === 1) skin.customColor = true; else delete skin.customColor; }
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }

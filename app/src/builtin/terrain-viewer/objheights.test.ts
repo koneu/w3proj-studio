@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { doodadGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
-import { heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
+import { floatingLevelAt, heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 import { fragmentOf, turnFragment, type Turn } from "../../lib/terrain/fragment";
 import { copyCentre, pasteCentreAt } from "./placement";
@@ -185,4 +185,59 @@ test("pasted copies, plain, mirrored and turned, as the World Editor's: same off
       assert.equal(pastedHeight(0, o.z ?? o.at[2], false), 0, `${turn}: height`);
     }
   }
+});
+
+// we-compare doodad-water-z (2026-11-16, SD): the terrain of make-doodad-water-z.mjs, its doodads opened and saved by the
+// World Editor, then all moved 64 east (Select All, Numpad 6) and saved; the heights it wrote (stored ones: 37.5).
+test("a floating doodad stands on the water level of its nearest corner when that has water over its ground", () => {
+  const N = 65;
+  const corners = new Map<string, { ground: number; water: number; wet: boolean; layer: number }>();
+  const set = (i: number, j: number, c: Partial<{ ground: number; water: number; wet: boolean; layer: number }>) =>
+    corners.set(`${i},${j}`, { ground: 0, water: -89.6, wet: false, layer: 2, ...c });
+  const patch = (i0: number, j0: number, f: (i: number, j: number) => Partial<{ ground: number; water: number; wet: boolean; layer: number }>) => {
+    for (let i = i0; i <= i0 + 4; i++) for (let j = j0; j <= j0 + 4; j++) set(i, j, f(i, j));
+  };
+  patch(8, 8, () => ({ ground: -128 }));
+  patch(16, 8, () => ({ ground: -128, wet: true }));
+  patch(24, 8, () => ({ wet: true }));
+  patch(32, 8, (i) => (i % 2 === 0 ? { ground: -128, wet: true } : {}));
+  patch(32, 16, (_, j) => (j % 2 === 0 ? { ground: -128, wet: true } : {}));
+  patch(44, 8, () => ({ ground: 0, layer: 3, water: -49.6, wet: true }));
+  patch(8, 20, (i) => ({ ground: -128, wet: true, water: -89.6 + 30 * (i - 8) }));
+  for (let i = 60; i <= 64; i++) for (let j = 8; j <= 12; j++) set(i, j, { ground: -128, wet: true });
+  const at = (i: number, j: number) => corners.get(`${i},${j}`) ?? { ground: 0, water: -89.6, wet: false, layer: 2 };
+  const rows = (f: (i: number, j: number) => string, sep: string) =>
+    Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, i) => f(i, N - 1 - r)).join(sep));
+  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt", "cliffs CLdi CLgr", "corners 65 65", "offset -4096 -4096",
+    "[height]", ...rows((i, j) => String(Math.round((at(i, j).ground - (at(i, j).layer - 2) * 128) * 4)), " "),
+    "[water]", ...rows((i, j) => String(Math.round((at(i, j).water + 89.6) * 4)), " "),
+    "[water-bits] all 0", "[texture] all 0", "[variation] all 0", "[cliff-variation] all 0", "[cliff-texture] all f",
+    "[layer]", ...rows((i, j) => String(at(i, j).layer), ""), "[flags]", ...rows((i, j) => (at(i, j).wet ? "4" : "0"), "")].join("\n");
+  const terrain = parseW3e(w3eFromText(text));
+  // [x, y, floats, the height the editor saved]
+  const opened: [number, number, boolean, number][] = [
+    [-2905.6, -2790.4, true, -128], [-2739.2, -2726.4, true, -128], // no water flag: the ground
+    [-1881.6, -2790.4, true, -89.6], [-1715.2, -2726.4, true, -89.6], [-1868.8, -2636.8, false, -128], [-1766.4, -2611.2, true, -89.6],
+    [-857.6, -2790.4, true, 0], // water under the ground
+    [64, -2816, true, -64], [192, -2688, true, -89.6], [128, -2944, true, 0], [256, -2777.6, true, -89.6], [38.4, -2611.2, true, -89.6],
+    [153.6, -1984, true, -64], [345.6, -1856, true, -89.6], [435.2, -1728, true, -64], // halves round up, along x and along y
+    [1702.4, -2790.4, true, 0], [1817.6, -2649.6, true, 0], // level 3: the corner's ground is 0, its water -49.6
+    [-2905.6, -1280, true, -59.6], [-2854.4, -1241.6, true, -29.6], [-2739.2, -1356.8, true, 0.4], [-2636.8, -1152, true, 0.4],
+    [3955.2, -2816, true, -89.6], [4006.4, -2739.2, true, -89.6], [-1536, -256, true, 0], [-1280, -256, false, 0],
+  ];
+  const nudged: [number, number, boolean, number][] = [
+    [-2841.6, -2790.4, true, -128], [-2675.2, -2726.4, true, -128], [-1817.6, -2790.4, true, -89.6], [-1651.2, -2726.4, true, -89.6],
+    [-1804.8, -2636.8, false, -128], [-1830.4, -2905.6, true, -89.6], [-1702.4, -2611.2, true, -89.6], [-793.6, -2790.4, true, 0],
+    [128, -2816, true, 0], [256, -2688, true, -89.6], [192, -2944, true, -89.6], [320, -2777.6, true, -64], [102.4, -2611.2, true, -25.6],
+    [217.6, -1984, true, -64], [409.6, -1856, true, -89.6], [499.2, -1728, true, -64], [1766.4, -2790.4, true, 0], [1881.6, -2649.6, true, 0],
+    [-2841.6, -1280, true, -29.6], [-2790.4, -1241.6, true, -29.6], [-2675.2, -1356.8, true, 0.4], [-2572.8, -1152, true, 30.4],
+    [4019.2, -2816, true, -89.6], [4070.4, -2739.2, true, -89.6], [-1472, -256, true, 0], [-1216, -256, false, 0],
+  ];
+  for (const [x, y, floats, z] of [...opened, ...nudged]) {
+    assert.ok(Math.abs(Math.fround(doodadGround(terrain, x, y, floats)) - Math.fround(z)) < 0.001, `${floats ? "floating" : "plain"} at ${x}, ${y}: ${doodadGround(terrain, x, y, floats)}, not ${z}`);
+  }
+  // Control: those that float on water are not where the ground alone would put them.
+  assert.equal(opened.filter(([x, y, f, z]) => f && Math.abs(heightAt(terrain, x, y) - z) > 0.001).length, 12);
+  assert.equal(floatingLevelAt(terrain, Number.NaN, 0), null);
+  assert.equal(floatingLevelAt(terrain, 1e9, -2816), -89.6, "past the edge: the nearest corner on it");
 });

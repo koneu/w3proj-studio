@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
 import { givenNumber, placedValueProblem } from "./values";
-import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { doodadGround, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { gridDefault, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -3280,10 +3280,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Where `from` (a pose before a move) lands at x, y, and its flags then: on the ground, except that a doodad
          *  with a height of its own keeps it, unless the Reset Fixed Object Heights switch is on and it moved
-         *  (objheights.ts movedHeight). */
-        const landed = (from: Pose, x: number, y: number): { position: [number, number, number]; flags: number | undefined } => {
+         *  (objheights.ts movedHeight). A floating doodad's ground is the water where there is water (`id`: its type;
+         *  objheights.ts doodadGround). */
+        const landed = (from: Pose, x: number, y: number, id: string): { position: [number, number, number]; flags: number | undefined } => {
           const moved = x !== from.position[0] || y !== from.position[1];
-          const r = movedHeight({ position: from.position, flags: from.flags }, heightAt(terrain, x, y), moved, resetFixedOn());
+          const floats = skinById(id)?.kind === "w3d" && !!skinById(id)?.floats;
+          const r = movedHeight({ position: from.position, flags: from.flags }, doodadGround(terrain, x, y, floats), moved, resetFixedOn());
           return { position: [x, y, r.z], flags: r.flags };
         };
         /** The World Editor's keys for the selection. Height and size are for doodads and destructables. */
@@ -3299,7 +3301,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), steps, key.nudge);
             for (const [i, p] of entries.entries()) {
               const at = ruledPose(p.id, p.position[0] + moves[i][0], p.position[1] + moves[i][1], p.angle);
-              const to = landed(poseOf(p), at.x, at.y);
+              const to = landed(poseOf(p), at.x, at.y, p.id);
               setPlacement(p, to.position, at.angle, to.flags);
             }
             moveEdits(entries, before);
@@ -3313,7 +3315,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const p of entries) {
             const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy);
             const at = ruledPose(p.id, cx + dx, cy + dy, turnAngle(turn, p.angle));
-            const to = landed(poseOf(p), at.x, at.y);
+            const to = landed(poseOf(p), at.x, at.y, p.id);
             setPlacement(p, to.position, at.angle, to.flags);
           }
           moveEdits(entries, before);
@@ -3816,7 +3818,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Turned from where it was before: a doodad whose turn puts it on another grid point doesn't wander.
             const [x, y] = facing!.before[i].position;
             const at = ruledPose(p.id, x, y, Math.atan2(g[1] - y, g[0] - x));
-            const to = landed(facing!.before[i], at.x, at.y);
+            const to = landed(facing!.before[i], at.x, at.y, p.id);
             setPlacement(p, to.position, at.angle, to.flags);
           });
           refreshGroupRings();
@@ -3840,7 +3842,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A doodad that turns only by quarters turns a quarter (doodadedit.ts doodadTurn).
             const turned = isDoodadType(e.id) ? doodadTurn(rules, e.id, e.angle, (deg * Math.PI) / 180) : e.angle + (deg * Math.PI) / 180;
             const at = ruledPose(e.id, e.position[0], e.position[1], turned);
-            const to = landed(before[i], at.x, at.y);
+            const to = landed(before[i], at.x, at.y, e.id);
             setPlacement(e, to.position, at.angle, to.flags);
           });
           // A doodad that turns only by quarters stays as it was: no step.
@@ -5440,7 +5442,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const [x, y] = objDrag!.before[i].position;
             // A doodad jumps from grid point to grid point while it's dragged, as in the World Editor.
             const at = ruledPose(entry.id, x + dx, y + dy, objDrag!.before[i].angle);
-            const to = landed(objDrag!.before[i], at.x, at.y);
+            const to = landed(objDrag!.before[i], at.x, at.y, entry.id);
             setPlacement(entry, to.position, at.angle, to.flags);
           });
           refreshGroupRings();

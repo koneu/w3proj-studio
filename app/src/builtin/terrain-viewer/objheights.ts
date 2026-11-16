@@ -3,6 +3,7 @@
 // height of its own; any other stands on the ground, and follows it when the ground is edited.
 
 import { DEEP_WATER } from "../../lib/terrain/pathing";
+import { floatingLevelAt, heightAt, type Terrain } from "../../lib/terrain/w3e";
 import { FIXED_HEIGHT } from "./selectionkeys";
 
 /** What of a placed object these functions read. */
@@ -128,6 +129,14 @@ export function uniformHeight(p: HeightHolder, z: number): HeightChange | null {
 export function resetFixedHeight(p: HeightHolder, ground: number): HeightChange | null {
   if (!isFixed(p)) return null;
   return { position: [p.position[0], p.position[1], ground], flags: (p.flags ?? PLAIN) & ~FIXED_HEIGHT };
+}
+
+/** The height a doodad without a height of its own stands at, x, y: the ground there (heightAt), or for a floating type
+ *  (Skin.floats) the water's level where floatingLevelAt finds water over its nearest corner. The World Editor
+ *  works it out again whenever it saves (we-compare doodad-water-z-open: lily pads and a ZPsh stored at 37.5 came out
+ *  at it), and Studio when a doodad moves (doodad-water-z-nudge). */
+export function doodadGround(t: Terrain, x: number, y: number, floats: boolean): number {
+  return (floats ? floatingLevelAt(t, x, y) : null) ?? heightAt(t, x, y);
 }
 
 /** Where a doodad stands, and with what flags, after it was moved from `p` to a new x/y over ground of height `ground`.
