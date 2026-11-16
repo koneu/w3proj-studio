@@ -1664,6 +1664,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let minimapPanelSoon = (_ms?: number) => {}, minimapOutline = () => {}, minimapSetting = () => {};
         /** Set with the layers (below): after another tab opened, the layers that tab draws itself. */
         let layersAfterTab = () => {};
+        /** Set with the layers (below): after the playable map moved, every ground layer drawn (they go by its edge). */
+        let layersAfterBorder = () => {};
         /** The toolbar's boxes after the tab changed (the Regions tab holds the Regions box on). */
         let viewSyncsAfterTab = () => {};
         const applyLight = () => {
@@ -1704,8 +1706,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
           // The border's shade and black water go by the w3i's complements, as the editor's (not the terrain's marks).
-          renderer.setPlayable(validComplements(info.cameraComplements));
+          // The layers over the ground go by the edge too (renderer.edgeTiles): made again when it moved.
+          const moved = renderer.setPlayable(validComplements(info.cameraComplements));
           redraw();
+          if (moved) layersAfterBorder();
         };
         renderer.showBorder = showBoundary();
         renderer.showFog = w3.settings.get<boolean>("terrain.fog", false) === true;
@@ -5067,6 +5071,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           async () => (await readMapDoc<{ regions?: RegionBox[] }>(w3, "map/war3map.w3r.json"))?.regions ?? []);
         /** The ground layers drawn (groundLayersDrawn): those shown, except the one the active tab draws itself. */
         const groundLayersOn = () => groundLayersDrawn(shown, activeGroup);
+        layersAfterBorder = () => { if (anyGroundLayer(shown)) void refreshLayers(); };
         layersAfterTab = () => { if (shown.pathing || shown.regions || shown.cameras) void refreshLayers(); };
         const refreshLayersSoon = () => {
           if (shown.lightRanges) showLightRanges();

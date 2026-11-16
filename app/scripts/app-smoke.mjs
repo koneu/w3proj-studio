@@ -3294,7 +3294,7 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
       if (!(r.ground < 0.3)) fail(`${l.what}: the ground past the edge isn't shaded: ${got}`);
       if (l.black ? r.model > 0.06 : Math.abs(r.model - r.ground) > 0.06) fail(`${l.what}, past the playable map, isn't ${l.black ? "black" : "shaded as the ground"}: ${got}`);
     }
-    await borderFromInfo(page, k, offset, boundary, fail);
+    await borderFromInfo(page, k, offset, boundary, fail, toggle);
   } finally {
     await boundary(true);
     await page.evaluate(`w3.settings.set("terrain.animate", ${JSON.stringify(animate ?? true)})`);
@@ -3306,7 +3306,7 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
  *  (w3e.ts playableEdgeTiles): with the w3i's west margin widened from 6 to 10 tiles and saved (the terrain and its
  *  marks left alone), the ground 8 tiles in darkens; with the margin back it is lit again. From above, the Boundary
  *  switch on against off over bare ground. */
-async function borderFromInfo(page, k, offset, boundary, fail) {
+async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
   const ed = "window.__spEd", path = "map/war3map.w3i.json";
   const original = await page.evaluate(`w3.workspace.readText(${JSON.stringify(path)})`);
   const info = JSON.parse(original);
@@ -3333,6 +3333,21 @@ async function borderFromInfo(page, k, offset, boundary, fail) {
     await until("tile 8 shaded once the w3i's west margin is 10", async () => (wide = await keeps()) < 0.3, 20000)
       .catch(() => fail(`border from the w3i: with the w3i's west margin at 10, tile 8 keeps ${wide.toFixed(3)} of its colour, not shaded as the editor's`));
     if (!marks && await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("border from the w3i: reading the w3i's margins marked the terrain as changed");
+    // The pathing layer drawn before the w3i's margin moved follows it: the same picture as the layer made fresh.
+    await writeInfo(original);
+    await until("tile 8 lit again before the layer", async () => (await keeps()) > 0.95, 20000);
+    await toggle("pathing");
+    const drawn = await settledMapPicture(page);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    // (The shade ratio isn't read with a layer on: the layer lies over it.)
+    await until("the picture changed with the margin", async () => (await pixelsApart(page, drawn, await mapPicture(page))) > 150, 20000);
+    const stale = await settledMapPicture(page);
+    await toggle("pathing");
+    await toggle("pathing");
+    const fresh = await settledMapPicture(page);
+    const apart = await pixelsApart(page, stale, fresh);
+    if (apart > 150) fail(`border from the w3i: the pathing layer drawn before the margin moved differs from a fresh one in ${apart} pixels`);
+    await toggle("pathing");
   } finally {
     await writeInfo(original);
   }
