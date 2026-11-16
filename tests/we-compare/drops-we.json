@@ -1,0 +1,96 @@
+[
+  {
+    "name": "drops-we",
+    "description": "test.md 'Drops given in Studio show as Items Dropped in the WE': three neutral hostile units given drops by place_objects (one permanent level 2; any kind of any level and a charged level 5; a campaign item level 0), saved by Studio; the editor opens that map and saves it again. If the editor reads the drops (Unit Properties > Items Dropped, a picture taken apart from the spec), its save has them as Studio wrote them",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "units",
+            "objects": [
+              {
+                "id": "nfro",
+                "x": -256,
+                "y": 256,
+                "player": 24,
+                "drops": [
+                  {
+                    "level": 2,
+                    "kind": "permanent"
+                  }
+                ]
+              },
+              {
+                "id": "nfro",
+                "x": 0,
+                "y": 256,
+                "player": 24,
+                "drops": [
+                  {
+                    "level": "any",
+                    "kind": "any"
+                  },
+                  {
+                    "level": 5,
+                    "kind": "charged"
+                  }
+                ]
+              },
+              {
+                "id": "nfro",
+                "x": 256,
+                "y": 256,
+                "player": 24,
+                "drops": [
+                  {
+                    "level": 0,
+                    "kind": "campaign"
+                  }
+                ]
+              }
+            ],
+            "ignoreRoom": true
+          }
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "subversion",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ]
+      }
+    ],
+    "limit": 40
+  }
+]
