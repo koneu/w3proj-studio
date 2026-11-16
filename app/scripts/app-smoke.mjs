@@ -13096,6 +13096,95 @@ async function aiNumbersRefused(page, found) {
   } catch (e) { found.push(`AI Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
 }
 
+/** The Sound Editor refuses numbers a .w3s can't hold (app/src/builtin/sound-editor/numbers.ts): a volume typed as 1.5, 128 or -2
+ *  is refused with why, the box shows the value kept, the sound isn't changed; 77 is taken (control, one change). */
+async function soundNumbersRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`Sound Editor numbers: ${what}`);
+  const k = await heightKit(page, "SoundRefuse");
+  const w3s = "map/war3map.w3s.json";
+  await page.evaluate(`w3.editors.closeAll()`);
+  const bell = {
+    name: "gg_snd_Refuse_Bell", file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 100, pitch: 1, pitchVariance: 0, priority: 8,
+    channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+    variableName: "gg_snd_Refuse_Bell", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+    speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+  };
+  try {
+    await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(w3s)}, ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [bell] }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(w3s)})`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await k.hands.click("tr.snd-row");
+    const field = `document.querySelector("input.snd-num")`;
+    await until("the volume box", () => page.evaluate(`!!${field}`), 20000);
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(w3s)})`);
+    const dirtyWas = await dirty();
+    const was = await page.evaluate(`${field}.value`);
+    for (const bad of ["1.5", "128", "-2"]) {
+      await k.clearToasts();
+      await typeInto(page, field, bad);
+      await settled(page);
+      const said = await k.toasts();
+      if (!/Volume must be a whole number from 0 to 127/.test(said)) fail(`Volume typed as ${bad} said "${said}"`);
+      if (await page.evaluate(`${field}.value`) !== was) fail(`Volume typed as ${bad} shows ${await page.evaluate(`${field}.value`)}, not the kept ${was}`);
+      if (await dirty() !== dirtyWas) fail(`Volume typed as ${bad} changed the sound`);
+    }
+    await typeInto(page, field, "77");
+    await settled(page);
+    if (await page.evaluate(`${field}.value`) !== "77" || !(await dirty())) fail("77 wasn't taken (control)");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Sound Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The Campaign Editor refuses numbers a .w3f can't hold (app/src/builtin/campaign-editor/numbers.ts): Fog style typed as 1.5 or
+ *  3000000000 and a density of 1e39 are refused with why, the box shows the value kept, the campaign isn't changed; 2 is taken
+ *  (control, one change). */
+async function campaignNumbersRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`Campaign Editor numbers: ${what}`);
+  const k = await heightKit(page, "CampRefuse");
+  const camp = join(work, "campaign-refuse");
+  rmSync(camp, { recursive: true, force: true });
+  try {
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Refuse Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Refuse Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const box = (label) => `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === ${JSON.stringify(label)})?.querySelector("input.form-num")`;
+    await until("the Fog style box", () => page.evaluate(`!!(${box("Fog style")}) && !!(${box("Density")})`), 20000);
+    const w3f = "map/war3campaign.w3f.json";
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(w3f)})`);
+    const dirtyWas = await dirty();
+    for (const [label, bad, want] of [["Fog style", "1.5", /Fog style must be a whole number/], ["Fog style", "3000000000", /Fog style must be a whole number/], ["Density", "1e39", /Fog density must be a number from -3\.4e38 to 3\.4e38/]]) {
+      const field = box(label);
+      const was = await page.evaluate(`${field}.value`);
+      await k.clearToasts();
+      await typeInto(page, field, bad);
+      await settled(page);
+      const said = await k.toasts();
+      if (!want.test(said)) fail(`${label} typed as ${bad} said "${said}"`);
+      if (await page.evaluate(`${field}.value`) !== was) fail(`${label} typed as ${bad} shows ${await page.evaluate(`${field}.value`)}, not the kept ${was}`);
+      if (await dirty() !== dirtyWas) fail(`${label} typed as ${bad} changed the campaign`);
+    }
+    await typeInto(page, box("Fog style"), "2");
+    await settled(page);
+    if (await page.evaluate(`${box("Fog style")}.value`) !== "2" || !(await dirty())) fail("2 wasn't taken (control)");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Campaign Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
  *  value typed as 1e39 or an hour past the day is refused with why, the box shows the value kept, the model isn't
  *  changed; 0.31 is taken (control, one change). */
@@ -15086,6 +15175,7 @@ async function run() {
         byHand,
         cameraEditing,
         campaignFieldFocus,
+        campaignNumbersRefused,
         campaignPresets,
         chapterObjects,
         classicRefusal,
@@ -15172,6 +15262,7 @@ async function run() {
         shadowTextureOrder,
         shouldHaves,
         soundEditorKeys,
+        soundNumbersRefused,
         specialDoodads,
         staleEditors,
         startDeleteUndo,
@@ -15494,6 +15585,10 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "aiNumbersRefused", found);
   await lightNumbersRefused(page, found);
   await leftOpen(page, "lightNumbersRefused", found);
+  await soundNumbersRefused(page, found);
+  await leftOpen(page, "soundNumbersRefused", found);
+  await campaignNumbersRefused(page, found);
+  await leftOpen(page, "campaignNumbersRefused", found);
   await dropChancesRefused(page, found);
   await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));

@@ -5,6 +5,8 @@
 // game sound label keep their settings unset (the label's values apply), as
 // the World Editor stores them.
 
+import { soundNumber } from "./numbers";
+import type { StoredNumber } from "../../lib/formats/numbers";
 import { withColorTools } from "../../extensions/colortools";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName } from "../../lib/formats/archivepath";
@@ -645,20 +647,19 @@ class SoundEditor {
       return input;
     };
     /** Numbers; empty = unset (the label's or game's default) where allowed. */
-    const num = (key: keyof Sound, opts: { unset?: number; min?: number; max?: number; int?: boolean; hint?: string } = {}) => {
+    const num = (key: keyof Sound, label: string, opts: { unset?: number; min?: number; max?: number; kind: StoredNumber; hint?: string }) => {
       const v = s[key] as number;
       const isEmpty = opts.unset !== undefined && (opts.unset === UNSET ? isUnset(v) : v === opts.unset);
-      const input = h("input.snd-num", { type: "text", value: isEmpty ? "" : String(Math.round(v * 1000) / 1000), readOnly: ro,
+      const shown = () => (isEmpty ? "" : String(Math.round(v * 1000) / 1000));
+      const input = h("input.snd-num", { type: "text", value: shown(), readOnly: ro,
         placeholder: opts.unset !== undefined ? opts.hint ?? "default" : "", onchange: () => {
           const raw = input.value.trim();
           if (raw === "" && opts.unset !== undefined) { set(() => { (s[key] as number) = opts.unset!; }); return; }
-          let n = Number(raw);
-          if (!Number.isFinite(n)) { input.value = isEmpty ? "" : String(v); return; }
-          if (opts.int) n = Math.round(n);
-          if (opts.min !== undefined) n = Math.max(opts.min, n);
-          if (opts.max !== undefined) n = Math.min(opts.max, n);
-          set(() => { (s[key] as number) = n; });
-          input.value = String(n);
+          // A value the file can't hold, or past the editor's limits, is refused with why: the box shows the value kept.
+          const t = soundNumber(opts.kind, raw, label, opts);
+          if ("refused" in t) { void this.w3.window.showError(t.refused); input.value = shown(); return; }
+          set(() => { (s[key] as number) = t.value; });
+          input.value = String(t.value);
         } });
       return input;
     };
@@ -701,22 +702,22 @@ class SoundEditor {
       );
     }
     parts.push(
-      row("Volume", num("volume", { unset: -1, min: 0, max: 127, int: true, hint: "default" }), h("span.muted", {}, " 0–127")),
-      row("Fade in / out rate", num("fadeInRate", { int: true, min: 0 }), " / ", num("fadeOutRate", { int: true, min: 0 })),
+      row("Volume", num("volume", "Volume", { unset: -1, min: 0, max: 127, kind: "i32", hint: "default" }), h("span.muted", {}, " 0–127")),
+      row("Fade in / out rate", num("fadeInRate", "Fade in rate", { kind: "u32" }), " / ", num("fadeOutRate", "Fade out rate", { kind: "u32" })),
     );
     if (!music) {
       const unsetHint = labelled ? "label" : "default";
       parts.push(
-        row("Pitch", num("pitch", { unset: UNSET, min: 0, hint: unsetHint }), " variance ", num("pitchVariance", { unset: UNSET, min: 0, hint: unsetHint })),
-        row("Priority", num("priority", { unset: -1, int: true })),
+        row("Pitch", num("pitch", "Pitch", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint }), " variance ", num("pitchVariance", "Pitch variance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
+        row("Priority", num("priority", "Priority", { unset: -1, kind: "i32" })),
       );
       if (s.flags & THREE_D) {
         parts.push(
           h("h4", {}, "3D sound"),
-          row("Distances (min / max)", num("minDistance", { unset: UNSET, min: 0, hint: unsetHint }), " / ", num("maxDistance", { unset: UNSET, min: 0, hint: unsetHint })),
-          row("Distance cutoff", num("distanceCutoff", { unset: UNSET, min: 0, hint: unsetHint })),
-          row("Cone (inside / outside angle)", num("coneInside", { unset: UNSET, min: 0, max: 360, hint: unsetHint }), " / ", num("coneOutside", { unset: UNSET, min: 0, max: 360, hint: unsetHint })),
-          row("Outside cone volume", num("coneOutsideVolume", { int: true, min: -1, max: 127 })),
+          row("Distances (min / max)", num("minDistance", "Minimum distance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint }), " / ", num("maxDistance", "Maximum distance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
+          row("Distance cutoff", num("distanceCutoff", "Distance cutoff", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
+          row("Cone (inside / outside angle)", num("coneInside", "Inside cone angle", { unset: UNSET, min: 0, max: 360, kind: "f32", hint: unsetHint }), " / ", num("coneOutside", "Outside cone angle", { unset: UNSET, min: 0, max: 360, kind: "f32", hint: unsetHint })),
+          row("Outside cone volume", num("coneOutsideVolume", "Outside cone volume", { min: -1, max: 127, kind: "i32" })),
         );
       }
       if (!ro && !s.speakerUnitType && (s.dialogueTextKey ?? -1) < 0 && !s.facialAnimationLabel && !this.dialogueOpened.has(s)) {

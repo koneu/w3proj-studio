@@ -7,6 +7,7 @@
 // "Add map…" unpacks another map there, "Open" switches to a chapter's project.
 // "New Campaign…" starts an empty campaign project.
 
+import { campaignNumber } from "./numbers";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
@@ -351,7 +352,7 @@ class CampaignView {
     return viaTable ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3campaign.wts" }, `string table · ${get()}`)) : input;
   }
   /** `unset`: the value the World Editor stores for "not set" (shown empty; emptying the field stores it). */
-  private num(value: number, set: (n: number) => void, opts: { int?: boolean; unset?: number } = {}) {
+  private num(label: string, value: number, set: (n: number) => void, opts: { int?: boolean; unset?: number } = {}) {
     const isUnset = opts.unset !== undefined && isUnsetFog(value);
     const input = h("input.form-input.form-num", { type: "number", value: isUnset ? "" : String(value), step: opts.int ? "1" : "any", readOnly: !this.editable,
       placeholder: opts.unset !== undefined ? "not set" : "" });
@@ -364,8 +365,18 @@ class CampaignView {
         if (!isUnset) this.change(() => set(opts.unset!));
         return;
       }
-      const n = Number(input.value);
-      if (input.value === "" || !Number.isFinite(n) || (opts.int && !Number.isInteger(n))) { input.classList.add("invalid"); return; }
+      // A value the file can't hold (a fraction in a whole-number field, past the type) is refused with why: the box shows
+      // the value kept, and the campaign stays as it was.
+      const t = campaignNumber(input.value, label, !!opts.int);
+      if ("refused" in t) {
+        input.classList.remove("invalid");
+        void this.w3.window.showError(t.refused);
+        input.value = isUnset ? "" : String(value);
+        this.typing = false; this.showDirty();
+        return;
+      }
+      input.classList.remove("invalid");
+      const n = t.value;
       if (n !== value) this.change(() => set(n));
     });
     return input;
@@ -377,8 +388,8 @@ class CampaignView {
     return sel;
   }
   /** A preset dropdown (the number stored is the preset's); the number field when the game has no list. */
-  private preset(list: Preset[] | undefined, value: number, set: (n: number) => void) {
-    if (!list?.length) return this.num(value, set, { int: true });
+  private preset(label: string, list: Preset[] | undefined, value: number, set: (n: number) => void) {
+    if (!list?.length) return this.num(label, value, set, { int: true });
     return this.select(presetOptions(list, value), value, set);
   }
   /** The campaign picture: the game's pictures by name, or a custom file (the path stored as it is). */
@@ -611,18 +622,18 @@ class CampaignView {
     const c = this.info;
     return [
       h("div.form-section", {}, h("h3", {}, "Background"),
-        this.row("Background", this.preset(this.presets?.screens, c.background, (v) => { c.background = v; }), "Custom file: the model or movie below, none when that is empty"),
+        this.row("Background", this.preset("Background", this.presets?.screens, c.background, (v) => { c.background = v; }), "Custom file: the model or movie below, none when that is empty"),
         this.row("Custom background", this.text(() => c.backgroundPath, (v) => { c.backgroundPath = v; }), "Model (.mdx) or movie in the campaign or the game"),
         ...this.picture()),
       h("div.form-section", {}, h("h3", {}, "Ambient Sound"),
-        this.row("Sound", this.preset(this.presets?.sounds, c.ambientSound, (v) => { c.ambientSound = v; }), "Custom file: the file below, none when that is empty"),
+        this.row("Sound", this.preset("Sound", this.presets?.sounds, c.ambientSound, (v) => { c.ambientSound = v; }), "Custom file: the file below, none when that is empty"),
         this.row("Custom sound", this.text(() => c.ambientSoundPath, (v) => { c.ambientSoundPath = v; }))),
       h("div.form-section", {}, h("h3", {}, "Fog"),
-        this.row("Fog style", this.num(c.fogStyle, (v) => { c.fogStyle = v; }, { int: true }), "-1 or 0: no fog"),
+        this.row("Fog style", this.num("Fog style", c.fogStyle, (v) => { c.fogStyle = v; }, { int: true }), "-1 or 0: no fog"),
         this.row("Start / end height", h("div.form-inline", {},
-          this.num(c.fogStartZ, (v) => { c.fogStartZ = v; }, { unset: FOG_UNSET_Z }), this.num(c.fogEndZ, (v) => { c.fogEndZ = v; }, { unset: FOG_UNSET_Z })),
+          this.num("Fog start height", c.fogStartZ, (v) => { c.fogStartZ = v; }, { unset: FOG_UNSET_Z }), this.num("Fog end height", c.fogEndZ, (v) => { c.fogEndZ = v; }, { unset: FOG_UNSET_Z })),
           "Empty: not set (a new campaign's)"),
-        this.row("Density", this.num(c.fogDensity, (v) => { c.fogDensity = v; }, { unset: FOG_UNSET_DENSITY })),
+        this.row("Density", this.num("Fog density", c.fogDensity, (v) => { c.fogDensity = v; }, { unset: FOG_UNSET_DENSITY })),
         this.row("Color", this.color(c.fogColor, (v) => { c.fogColor = v; }))),
       h("div.form-section", {}, h("h3", {}, "Interface"),
         this.row("Race", this.select(RACES, c.race, (v) => { c.race = v; }), "Cursor and interface of the campaign screen")),
