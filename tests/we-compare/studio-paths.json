@@ -1,0 +1,592 @@
+[
+  {
+    "name": "studio-paths-rebuilt",
+    "description": "test.md 'Maps from paths other than the WE's own save' (1): EchoIsles unpacked, w3proj rebuild --force, packed (make-studio-paths.mjs); the editor opens it and re-saves; Studio's side is the plain open/save/pack",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-rebuilt.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-plain",
+    "description": "control of studio-paths-rebuilt: unpack and pack only",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-plain.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-terrain-save",
+    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-plain.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-nowts",
+    "description": "(3): war3map.wts deleted before packing; Studio's save writes it again (strings from the triggers/objects), the editor opens that map (from: studio) and re-saves; the compared wts is Studio's against the editor's",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-nolua",
+    "description": "(4): war3map.lua deleted, w3proj rebuild writes it, packed; editor re-saves it",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-nolua.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-nowts-text",
+    "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes the name inline (no table to write); the editor opens it and re-saves; names and strings as the editor reads them",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "mcp": "set_map_text",
+          "args": {
+            "field": "name",
+            "text": "Echo Isles Verified"
+          }
+        },
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "text",
+        "expect": "differs"
+      },
+      {
+        "file": "war3map.wts",
+        "as": "text"
+      },
+      {
+        "file": "war3map.lua",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "studio-paths-matrix-masks",
+    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack",
+    "input": {
+      "map": "${REPO}/target/studio-paths/matrix.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "studio-paths-zeromasks",
+    "description": "(5) control with sane start locations: echo with its two players' ally masks (2 and 1) set to 0; editor's save against Studio's pack",
+    "input": {
+      "map": "${REPO}/target/studio-paths/echo-zeromasks.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs"
+      }
+    ],
+    "limit": 30
+  }
+]
