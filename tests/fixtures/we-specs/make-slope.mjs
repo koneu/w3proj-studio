@@ -11,9 +11,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!game) { console.error("usage: make-slope.mjs <w3proj cli> <game folder>"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });

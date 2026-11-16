@@ -12,9 +12,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!game) { console.error("usage: make-fence.mjs <w3proj cli> <game folder> [angles|ints|neg|dest]"); process.exit(2); }
 // "angles": fence-angles.w3x, many facings of two rectangles (below), for the quarter the editor turns them to
 const angles = process.argv[4] === "angles";

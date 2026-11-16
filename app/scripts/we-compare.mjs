@@ -65,6 +65,7 @@ function parseArgs(argv) {
     else if (a === "--json") o.json = resolve(value());
     else if (a === "--limit") o.limit = Number(value());
     else if (a === "--no-we") o.we = false;
+    else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs: a binary older than its sources is used anyway
     else if (a === "--keep-prefs") o.keepPrefs = true;
     else if (a === "--restart-per-map") o.restart = true;
     else if (a === "-h" || a === "--help") o.help = true;

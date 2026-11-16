@@ -14,12 +14,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireFresh } from "../../binfresh.mjs";
 
 const DEPTHS = [2.4, 6.4, 12.4, 20.4, 30.4, 38.4, 45.4, 50.4, 51.4, 51.9, 52.4, 53.4, 56.4, 70.4, 102.4, 160.4];
 const WATER = 360, FIRST = 8, ROWS = [20, 44];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!game) { console.error("usage: make-ford.mjs <w3proj cli> <game folder>"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });

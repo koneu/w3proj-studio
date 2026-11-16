@@ -86,6 +86,7 @@ function parseArgs(argv) {
     };
     if (a === "--no-build") opts.build = false;
     else if (a === "--strict") opts.strict = true;
+    else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs
     else if (a === "--app") process.env.W3_APP_BIN = resolve(value());
     else if (a === "--game") opts.game = resolve(value());
     else if (a === "--work") opts.work = resolve(value());
