@@ -23,3 +23,27 @@ test("a creep joins by its distance to the camp's first creep, not transitively"
   // Control: a linked chain (each within 832 of the next) would make one camp.
   assert.deepEqual(sizes([[0, 0], [700, 0], [1400, 0], [2100, 0]]), [2, 2]);
 });
+
+// The World Editor's camp icons on the synthetic maps of tests/fixtures/we-specs (make-camps.mjs c, d, e, f; icons read
+// off its minimap, camps-icons-we.json): the camps' icon creeps are the first creep of each group, diagonals by
+// straight distance.
+test("camp icons as the World Editor shows them: diagonals, chains in every order, edge of 832", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const dir = join(process.cwd(), "..", "tests", "fixtures", "we-specs"); // the tests run in app/
+  const measured = JSON.parse(readFileSync(join(dir, "camps-icons-we.json"), "utf8"));
+  let checked = 0;
+  for (const m of ["c", "d", "e", "f"]) {
+    const layout: P[][] = JSON.parse(readFileSync(join(dir, `camps-${m}.layout.json`), "utf8"));
+    layout.forEach((creeps, i) => {
+      const icons = campGroups(creeps.map((p, k) => ({ p, k })), (c) => c.p).map((g) => g[0].k);
+      assert.deepEqual(icons, measured[m][i], `map ${m} case ${i}`);
+      checked++;
+    });
+  }
+  assert.equal(checked, 36);
+  // Control: the check can fail: a limit of 600 (the old 450 was off by more) breaks the diagonal cases.
+  const strict = campGroups([[0, 0], [600, 600]] as P[], at).length;
+  assert.equal(strict, 2);
+  assert.equal(campGroups([[0, 0], [588, 588]] as P[], at).length, 1);
+});

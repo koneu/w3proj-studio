@@ -8,6 +8,7 @@
 //   row y=0:            pairs 600 and 832 apart, then one murloc alone (level 1, weak)
 //   [b] the second map (camps-b.w3x): pairs 650, 700, 750 / 800, 832, 900 apart, a lone murloc, a chain of three 400 apart, a lone ogre lord
 //   [far d1,d2,d3,d4] camps-far-<d1-d2-d3-d4>.w3x: four pairs d apart in the corners (1700, 2800 and so on), far from the start location and each other
+//   [c|d|e|f] camps-<c|d|e|f>.w3x + .layout.json: diagonal pairs, chains in every order, off-axis pairs around 832 (see GRIDS; spacing 1800)
 //   row y=-1200:        one Green Dragon (level 10), two Green Dragons (20), an ogre lord, a furbolg and a razormane (7+7+1)
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -30,7 +31,22 @@ const second = process.argv[4] === "b";
 const chain = [["nmrl", -400, 0], ["nmrl", 0, 0], ["nmrl", 400, 0]];
 const far = process.argv[4] === "far" ? process.argv[5].split(",").map(Number) : null;
 const FAR_SLOTS = [[-1700, 2800], [1700, 2800], [-1700, -2800], [1700, -2800]];
-const CAMPS = far ? far.map((d, i) => [...FAR_SLOTS[i], pair(d)]) : second ? [
+// [c] camps-c.w3x, [d] camps-d.w3x: the diagonal and chain cases (spacing 1800, nothing of one camp within 832 of another's)
+const m = (id, dx, dy) => [id, dx, dy];
+const dg = (d) => [m("nmrl", -d / 2, -d / 2), m("nmrl", d / 2, d / 2)]; // d on both axes
+const dxy = (dx, dy) => [m("nmrl", -dx / 2, -dy / 2), m("nmrl", dx / 2, dy / 2)];
+const SLOTS = [[-1800, 1800], [0, 1800], [1800, 1800], [-1800, 0], [0, 0], [1800, 0], [-1800, -1800], [0, -1800], [1800, -1800]];
+const grid = (cases) => cases.map((c, i) => [...SLOTS[i], c]);
+const xs = (...x) => x.map((v) => m("nmrl", v, 0)); // a row of murlocs at these x, in creation order
+const ys = (...y) => y.map((v) => m("nmrl", 0, v));
+const GRIDS = {
+  f: grid([dxy(820, 100), dxy(700, 440), dxy(440, 700), dxy(826, 50), dxy(830, 40), dxy(831, 40), dxy(831, 45), dxy(100, 832), dxy(40, 831)]),
+  e: grid([xs(-400, 0, 400), xs(-400, 400, 0), xs(0, -400, 400), xs(0, 400, -400), xs(400, -400, 0), xs(400, 0, -400), xs(-400, 0, 400), xs(-400, 0, 400), xs(-400, 0, 400)]),
+  c: grid([dg(588), dg(589), dg(600), dg(700), dxy(800, 300), dxy(820, 150), xs(400, -400, 0), xs(0, -400, 400), xs(-400, 400, 0)]),
+  d: grid([xs(0, 300, 700), xs(700, 300, 0), ys(-400, 0, 400), ys(400, -400, 0), xs(-450, -150, 150, 450), xs(0, 200, 700), xs(1000, 500, 0), xs(0, 100, 200, 300, 400), [m("nmrl", 0, 300), m("nmrl", -260, -150), m("nmrl", 260, -150)]]),
+};
+const grid2 = GRIDS[process.argv[4]];
+const CAMPS = grid2 ? grid2 : far ? far.map((d, i) => [...FAR_SLOTS[i], pair(d)]) : second ? [
   [-1200, 1200, pair(650)], [0, 1200, pair(700)], [1200, 1200, pair(750)],
   [-1200, 0, pair(800)], [0, 0, pair(832)], [1200, 0, pair(900)],
   [-1200, -1200, [["nmrl", 0, 0]]], [0, -1200, chain], [1200, -1200, [["nogl", 0, 0]]],
@@ -58,7 +74,9 @@ try {
     }
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, far ? `camps-far-${far.join("-")}.w3x` : second ? "camps-b.w3x" : "camps.w3x"), "--force-stale");
+  // the creeps by camp case, for the reader of the editor's minimap (read-camp-icons.py)
+  if (grid2) writeFileSync(join(here, `camps-${process.argv[4]}.layout.json`), JSON.stringify(CAMPS.map(([cx, cy, u]) => u.map(([, dx, dy]) => [cx + dx, cy + dy]))));
+  run("pack", dir, "-o", join(here, grid2 ? `camps-${process.argv[4]}.w3x` : far ? `camps-far-${far.join("-")}.w3x` : second ? "camps-b.w3x" : "camps.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
