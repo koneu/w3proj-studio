@@ -17,18 +17,28 @@ export function tileUse(t: Terrain, types: ReadonlyMap<string, CliffType>): Tile
   const ground = t.groundTiles.map(() => 0), cliffs = t.groundTiles.map(() => 0);
   for (const c of t.corners) if (c.texture < ground.length) ground[c.texture]++;
   const list = cliffList(t, types);
-  if (!list.length) return { ground, cliffs };
-  const owner = list.map((type) => (type ? t.groundTiles.indexOf(type.groundTile) : undefined));
+  const owner = list.map((type) => (type ? t.groundTiles.indexOf(type.groundTile) : -1));
+  cliffTypeUse(t, types).forEach((n, type) => { if (owner[type] >= 0) cliffs[owner[type]] += n; });
+  return { ground, cliffs };
+}
+
+/** Cliff tiles drawn with each cliff type, by its number in the w3e's cliff list (cliffList): a tile as tileUse counts
+ *  it, a number past the list or one the game doesn't define meaning the first type (none when that one isn't
+ *  defined either). No ground tile list is involved,
+ *  so it is the same whatever the "custom tilesets" flag (Replace Cliff Type's counts). */
+export function cliffTypeUse(t: Terrain, types: ReadonlyMap<string, CliffType>): number[] {
+  const list = cliffList(t, types), use = list.map(() => 0);
+  if (!list.length) return use;
   const at = (x: number, y: number) => t.corners[y * t.width + x];
   for (let y = 0; y < t.height - 1; y++) {
     for (let x = 0; x < t.width - 1; x++) {
       const bl = at(x, y), cs = [bl, at(x, y + 1), at(x + 1, y + 1), at(x + 1, y)];
       if (cs.every((c) => c.layer === bl.layer) || cs.every((c) => c.ramp)) continue;
-      const i = owner[bl.cliffTexture] ?? owner[0];
-      if (i !== undefined && i >= 0) cliffs[i]++;
+      const type = list[bl.cliffTexture] ? bl.cliffTexture : 0;
+      if (list[type]) use[type]++;
     }
   }
-  return { ground, cliffs };
+  return use;
 }
 
 /** The tiles nothing uses, by index. */

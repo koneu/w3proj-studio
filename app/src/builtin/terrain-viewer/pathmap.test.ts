@@ -30,9 +30,9 @@ const ROCK = "PathTextures\\Rock.tga", GONE = "war3mapImported\\Gone.tga", HERE 
 
 /** A game with a rock (its own pathing texture) and a flower (none), and a map whose object data gives custom rocks
  *  and a custom flower imported textures: one that is there, two that aren't. */
-function project() {
+function project(tiles: string[][] = [["Ldrt", "1", "1", "1"]]) {
   const game: Record<string, string> = {
-    "TerrainArt\\Terrain.slk": slk([["tileID", "walkable", "flyable", "buildable"], ["Ldrt", "1", "1", "1"]]),
+    "TerrainArt\\Terrain.slk": slk([["tileID", "walkable", "flyable", "buildable"], ...tiles]),
     "Doodads\\Doodads.slk": slk([["doodID", "pathTex"], ["LOrk", ROCK], ["LFlw", "_"], ["YCx7", FLOOR]]),
     "Units\\DestructableData.slk": slk([["DestructableID", "pathTex", "walkable"]]),
     "TerrainArt\\Water.slk": slk([["waterID", "height"], ["LSha", "-0.7"], ["ASha", "-0.6"]]),
@@ -134,4 +134,18 @@ test("deep water is measured from the tileset's water surface (the game's water 
   assert.equal(await cell("L"), 0x08);
   assert.equal(await cell("Z"), 0x08);
   assert.equal(await cell("A"), 0x0a);
+});
+
+test("with the custom tilesets flag 0 the pathing map takes each corner's tile from the tileset's own list", async () => {
+  // Terrain.slk's Lordaeron tiles in its order: Ldrt (buildable), Lrok (not). The file lists them the other way round.
+  const { w3, read } = project([["Ldrt", "1", "1", "1"], ["Lrok", "1", "1", "0"], ["Ashe", "1", "1", "0"]]);
+  assert.deepEqual((await loadPathingData(w3, read)).ownTiles("L"), ["Ldrt", "Lrok"]);
+  const cell = async (raw: number) => {
+    const t = ground();
+    t.groundTiles = ["Lrok", "Ldrt"];
+    t.customTilesetsRaw = raw;
+    return (await buildPathingMap(w3, t, [], read)).wpm[16 + 3 * 28 + 3];
+  };
+  assert.equal(await cell(0), 0x40, "drawn as Ldrt: buildable");
+  assert.equal(await cell(1), 0x48, "control: the flag set, the file's Lrok");
 });

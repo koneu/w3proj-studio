@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import type { CliffType } from "./cliffs";
-import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
+import { applyTileList, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 
 const type = (cliffID: string, groundTile: string) => ({ cliffID, groundTile, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: "", texFile: "" }) as CliffType;
 const TYPES = new Map([type("CLdi", "Ldrt"), type("CLgr", "Lgrs"), type("CLro", "Lrok")].map((c) => [c.cliffID, c]));
@@ -57,6 +57,20 @@ test("flat ground and ramps are no cliffs; without the cliff types nothing count
   assert.deepEqual(tileUse(t, TYPES).cliffs, [0, 0, 0, 0]);
   mesa(t, 2);
   assert.deepEqual(tileUse(t, new Map()).cliffs, [0, 0, 0, 0]);
+});
+
+test("cliffTypeUse counts cliff tiles by cliff type number, whatever the ground list (Replace Cliff Type's counts)", () => {
+  // With the custom tilesets flag 0 the file's ground list need not hold a cliff type's tile (here Lrok): its cliffs
+  // still count, by the w3e's cliff list. Through the ground list (tileUse) they'd be lost.
+  const t = flat(["Lgrs", "Lgrd"]);
+  t.customTilesetsRaw = 0;
+  mesa(t, 2);
+  assert.deepEqual(cliffTypeUse(t, TYPES), [0, 0, 4]);
+  assert.deepEqual(tileUse(t, TYPES).cliffs, [0, 0], "the ground list has no Lrok to count them under");
+  const u = flat();
+  mesa(u, 15);
+  assert.deepEqual(cliffTypeUse(u, TYPES), [4, 0, 0], "past the list: the first type, as tileUse");
+  assert.deepEqual(cliffTypeUse(u, new Map()), [0, 0, 0]);
 });
 
 test("removing used tiles needs a replacement that stays", () => {

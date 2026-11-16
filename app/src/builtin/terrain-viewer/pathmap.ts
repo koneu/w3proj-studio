@@ -8,6 +8,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { generatePathing, type PathingStamp, type TileRule } from "../../lib/terrain/pathing";
 import type { Placed } from "./objects";
 import { parseWaterOffsets, type Terrain } from "../../lib/terrain/w3e";
+import { ownGroundTiles } from "../../lib/terrain/tilesets";
 
 /** A map file as the format engine's JSON: `map/<name>.json` if the project
  *  keeps it that way, else decoded from the raw file. */
@@ -61,6 +62,9 @@ export type PathImage = { width: number; height: number; rgba: Uint8ClampedArray
 export interface PathingData {
   margins: [number, number, number, number];
   tileRules: Map<string, TileRule>;
+  /** A tileset's own ground tiles (tilesets.ts ownGroundTiles), which a w3e with the "custom tilesets" flag 0 is
+   *  drawn with (generatePathing's `ownTiles`). */
+  ownTiles(tileset: string): string[];
   /** How far below its stored level a tileset's water surface lies (generatePathing's `waterOffset`); undefined for
    *  a tileset the game's water table doesn't have. */
   waterOffset(tileset: string): number | undefined;
@@ -87,7 +91,8 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
   const tileRules = new Map<string, TileRule>();
-  for (const r of parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"))) {
+  const tileRows = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"));
+  for (const r of tileRows) {
     if (r.tileID) tileRules.set(r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" });
   }
   // A tileset's water is the row "<letter>Sha"; its height is in tiles (128), negative below the stored level.
@@ -115,6 +120,7 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
   return {
     margins: [m[0], m[1], m[2], m[3]],
     tileRules,
+    ownTiles: (tileset) => ownGroundTiles(tileRows, tileset),
     waterOffset: (tileset) => waterOffsets.get(tileset),
     missing,
     texture,
@@ -190,7 +196,7 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
       angle: -Math.PI / 2, width: t.width, height: t.height, rgba: t.rgba, cliffDoodad: true,
     });
   }
-  const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater, waterOffset: data.waterOffset(terrain.tileset) });
+  const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, ownTiles: data.ownTiles(terrain.tileset), stamps, deepWater, waterOffset: data.waterOffset(terrain.tileset) });
   return { wpm, missing: [...missing], fellBack: [...fellBack] };
 }
 

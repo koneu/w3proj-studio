@@ -2688,6 +2688,36 @@ async function objectListSuffix(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The Object Editor's pickers list standard units as "Name - Editor Suffix" (the game's suffix, read from its profile
+ *  table: nmr3 is a Mercenary Camp "(Lordaeron Winter)"), for "Edit standard…" and "New … based on…", and the search
+ *  box finds a row by its suffix word. */
+async function objectPickerSuffix(page, found) {
+  const fail = (what) => found.push(`object picker suffix: ${what}`);
+  try {
+    const k = await heightKit(page, "ObjPickerSuffix");
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(unit)})`);
+    await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
+    const rowName = (id) => page.evaluate(`[...document.querySelectorAll(".picker-rows > .picker-row")].find((r) => r.querySelector("code")?.textContent === ${JSON.stringify(id)})?.querySelector(".picker-name")?.textContent ?? null`);
+    const shownIds = () => page.evaluate(`[...document.querySelectorAll(".picker-rows > .picker-row code")].map((c) => c.textContent)`);
+    for (const label of ["Edit standard…", "+ New"]) {
+      const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".obj-toolbar-buttons button")].find((x) => x.textContent === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
+      if (!clicked) { fail(`no "${label}" button`); continue; }
+      await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 30000);
+      await k.hands.click("input.picker-search");
+      await k.hands.type("lordaeron winter");
+      await soon(async () => (await rowName("nmr3")) !== null, 5000);
+      const name = await rowName("nmr3");
+      // The value is the one the game's table holds (NeutralUnitStrings.txt, [nmr3]: " (Lordaeron Winter)").
+      if (name !== "Mercenary Camp - (Lordaeron Winter)") fail(`${label}: nmr3 shows ${JSON.stringify(name)}`);
+      const ids = await shownIds();
+      if (!ids.includes("nmr3") || ids.includes("hfoo")) fail(`${label}: "lordaeron winter" finds ${JSON.stringify(ids.slice(0, 8))}`);
+      await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the picker closed", () => page.evaluate(`!document.querySelector(".picker-rows")`), 5000);
+    }
+  } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
+}
+
 /** The colour tools under the Object Editor's text fields: on a name kept in war3map.wts (the TRIGSTR id stays, the table
  *  holds the tags) and on a plain tooltip (the object file holds them); the workbench undo takes each colour back. */
 async function objectEditorColorTools(page, found) {
@@ -3925,7 +3955,9 @@ async function groundTextureReload(page, found) {
     const apart = (x) => mapPicture(page).then((y) => pixelsApart(page, x, y));
     if (!(await soon(async () => (await apart(plain)) > 2000, 20000))) return fail("a ground texture imported under map/ isn't drawn");
     const withA = await mapPicture(page);
-    await new Promise((r) => setTimeout(r, 1100));
+    // The picture's own noise (the same scene drawn again), which a change has to exceed.
+    await new Promise((r) => setTimeout(r, 1500));
+    const noise = await pixelsApart(page, withA, await mapPicture(page));
     writeFileSync(file, b);
     await focus();
     if (!(await soon(async () => (await apart(withA)) > 2000, 20000))) fail("the view still draws the old ground texture after the file was overwritten outside");
@@ -3958,14 +3990,18 @@ async function importedBlightWaterReload(page, found) {
     const row = slk.stdout.trim().split(/\r?\n/)[1]?.split("\t");
     if (!row?.[1] || !(Number(row[2]) > 1)) return fail(`no water frames for tileset ${tileset}: ${slk.stdout}${slk.stderr}`);
     const water = row[1];
-    const frame = water ? `${water}00.blp` : null;
-    const targets = [paths.blight, ...(frame ? [frame] : [])];
+    // Every frame of the water animation, as the view reads them (<file>00.blp .. <file>NN.blp).
+    const frames = Array.from({ length: Number(row[2]) }, (_, i) => `${water}${String(i).padStart(2, "0")}.blp`);
+    const targets = [paths.blight, ...frames];
     const read = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
     const list = await page.evaluate(`w3.game.list()`);
     const other = list.find((p) => /TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i.test(p));
     if (!other) return fail("no texture to overwrite with");
     const [a, b] = [await read(other), await read(paths.blight)];
     if (a.equals(b)) return fail("the texture to write is the blight texture itself (control)");
+    // A lake in view, so the picture can say whether the water frames were read again.
+    await k.tool("set_water", { mode: "lake", left: -768, bottom: -768, right: 768, top: 768 });
+    await k.look(0, 0);
     await page.evaluate(`(() => { const read = w3.workspace.readBytes.bind(w3.workspace); window.__reads = []; w3.workspace.readBytes = (p, ...r) => { window.__reads.push(String(p).split(String.fromCharCode(92)).join("/").toLowerCase()); return read(p, ...r); }; })()`);
     for (const t of targets) { const f = join(k.root, "map", ...t.split("\\")); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, a); }
     const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
@@ -3973,14 +4009,22 @@ async function importedBlightWaterReload(page, found) {
     const reads = () => page.evaluate(`window.__reads.splice(0)`);
     // The first save of the files: the reads that follow include the ones the view makes of them.
     const names = targets.map((t) => t.replace(/\\/g, "/").toLowerCase());
-    await reads();
-    await new Promise((r) => setTimeout(r, 1100));
+    // Every frame holds the same texture, so the animation can't change the picture between the two.
+    const firstSeen = new Set();
+    await soon(async () => { for (const r of await reads()) for (const n of names) if (r.endsWith(n)) firstSeen.add(n); return firstSeen.size === names.length; }, 15000);
+    const withA = await mapPicture(page);
+    // The picture's own noise (the same scene drawn again), which a change has to exceed.
+    await new Promise((r) => setTimeout(r, 1500));
+    const noise = await pixelsApart(page, withA, await mapPicture(page));
     for (const t of targets) writeFileSync(join(k.root, "map", ...t.split("\\")), b);
     await focus();
     // The reload follows the focus after its debounce: collect the reads until every file was read again.
     const seen = new Set();
     await soon(async () => { for (const r of await reads()) for (const n of names) if (r.endsWith(n)) seen.add(n); return seen.size === names.length; }, 15000);
     for (const n of names) if (!seen.has(n)) fail(`${n} wasn't read again after it was overwritten outside`);
+    // The picture follows: the lake is drawn from the other texture now.
+    const apart = async () => pixelsApart(page, withA, await mapPicture(page));
+    if (!(await soon(async () => (await apart()) > noise * 2 + 500, 15000))) fail(`the lake looks the same after all its water frames were overwritten outside (${await apart()} pixels apart, noise ${noise})`);
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
@@ -4164,6 +4208,102 @@ async function areaLevels(page, found) {
   } finally {
     await restoreWindow(page);
   }
+}
+/** Replacing ground under the w3e's custom tilesets flag 0 with a file list other than the tileset's own (2 of its
+ *  6 tiles, from its second: slot 0 is drawn as its first). The Area panel names the area's tile as drawn and replaces it
+ *  with one past the file's list; Replace Cliff Type counts the cliffs of a type whose tile the file's list lacks; and a
+ *  Replace that changes nothing adds no tile: the panel's Replace from a stale panel (its tile no longer in the area)
+ *  and Replace Tiles of a tile no corner shows with one of another tileset. */
+async function areaReplaceCt0(page, found) {
+  try {
+    await areaReplaceCt0Steps(page, found);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+async function areaReplaceCt0Steps(page, found) {
+  const fail = (what) => found.push(`area replace (custom tilesets 0): ${what}`);
+  const k = await heightKit(page, "AreaReplaceCt0");
+  await k.save();
+  const TXT = "map/war3map.w3e.txt", file = join(k.root, "map", "war3map.w3e.txt");
+  const text = () => readFileSync(file, "utf8");
+  const headLine = (name) => new RegExp(`^${name} (.*)$`, "m").exec(text())?.[1] ?? null;
+  const own = (headLine("ground") ?? "").split(" ").filter(Boolean);
+  if (headLine("custom-tilesets") !== "0" || own.length < 6 || !/^\[texture\] all 0$/m.test(text())) {
+    return fail(`a new map has the tileset's own list, the flag 0 and every corner on slot 0 (control): ${headLine("custom-tilesets")}, ${own.join(" ")}`);
+  }
+  // The file's list: 2 of the own tiles from the second on; the flag stays 0, so slot 0 is drawn as own[0].
+  await page.evaluate(`w3.editors.closeAll()`);
+  writeFileSync(file, text().replace(/^ground .*$/m, `ground ${own.slice(1, 3).join(" ")}`));
+  await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 20000);
+  const listed = () => page.evaluate(`Number(/^Ground textures \\((\\d+)\\)/.exec([...document.querySelectorAll("h4")].map((e) => e.textContent).find((t) => t.startsWith("Ground textures")) ?? "")?.[1] ?? -1)`);
+  await until("the file's 2 tiles listed", async () => (await listed()) === 2, 20000).catch(async () => fail(`the side panel lists ${await listed()} ground tiles, not the file's 2 (control)`));
+  const replacer = `(await w3.services.get("w3.terrain")).replaceTypes.get(${JSON.stringify(TXT)})`;
+
+  // An area block a cliff level up: its cliffs are of the map's first cliff type (Lordaeron's dirt, Ldrt's), a tile the
+  // file's ground list hasn't got. Replace Cliff Type counts them by cliff type, not through the ground list.
+  await k.tab("Select");
+  await k.hands.click(".chip", "Area");
+  await k.look(0, 0);
+  const c = await k.hands.where(".model-stage canvas");
+  await k.hands.drag({ x: c.x - 40, y: c.y - 30 }, { x: c.x + 40, y: c.y + 30 });
+  const groundRow = `[...document.querySelectorAll(".terrain-selection .terrain-sel-area")].find((d) => d.querySelector(".terrain-sel-sub")?.textContent === "Ground tile")`;
+  await until("the area panel", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row in the area panel after the drag"));
+  const levelUp = `[...document.querySelectorAll(".terrain-selection button")].find((b) => b.textContent === "Level +1")`;
+  await page.evaluate(`${levelUp}.click()`);
+  await settled(page);
+  const cliffCounts = await page.evaluate(`(async () => (await ${replacer}.choices("cliffs")).from.map((f) => f.id + "=" + f.count))()`);
+  const firstCliff = cliffCounts[0] ?? "";
+  if (!firstCliff.startsWith(`${own[0]}=`) || !(Number(firstCliff.split("=")[1]) > 0)) fail(`Replace Cliff Type counts no cliffs of ${own[0]}'s type for a raised block: ${cliffCounts.join(", ")}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+
+  // The panel names the area's tile as drawn (own[0]) and replaces it with own[4], past the file's 2 (the list grows
+  // with the own tiles up to it): one undo step.
+  await until("the panel again", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row after the undo"));
+  const fromOptions = await page.evaluate(`[...${groundRow}.querySelectorAll("select")[0].options].map((o) => o.value)`);
+  if (JSON.stringify(fromOptions) !== JSON.stringify([own[0]])) fail(`the area's tile is offered as ${JSON.stringify(fromOptions)}, not as drawn (${own[0]})`);
+  const before = text();
+  const pick = (from, to) => `(() => { const r = ${groundRow}, [f, t] = r.querySelectorAll("select"); f.value = ${JSON.stringify(from)}; t.value = ${JSON.stringify(to)}; return f.value === ${JSON.stringify(from)} && t.value === ${JSON.stringify(to)}; })()`;
+  if (!(await page.evaluate(pick(own[0], own[4])))) return fail(`the panel can't choose ${own[0]} → ${own[4]}`);
+  await page.evaluate(`[...${groundRow}.querySelectorAll("button")].find((b) => b.textContent === "Replace").click()`);
+  await k.save();
+  const tex = /^\[texture\]\n((?:[^[\n][^\n]*\n?)*)/m.exec(text())?.[1] ?? "";
+  const digits = new Set([...tex.replace(/\s/g, "")]);
+  if (headLine("custom-tilesets") !== "0" || headLine("ground") !== own.join(" ")) fail(`after the panel's Replace the file says custom-tilesets ${headLine("custom-tilesets")}, ground ${headLine("ground")} (the own list whole, flag 0)`);
+  if (digits.size !== 2 || !digits.has("0") || !digits.has("4")) fail(`after replacing ${own[0]} with ${own[4]} in the area the corners' slots are ${[...digits].join(",") || text().match(/^\[texture\].*$/m)?.[0]} (want 0 outside, 4 inside)`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (!/^\[texture\] all 0$/m.test(text())) fail("one undo of the panel's Replace didn't put every corner back on slot 0");
+  if (text().replace(/^ground .*$/m, "") !== before.replace(/^ground .*$/m, "")) fail("one undo of the panel's Replace left more than the ground list changed");
+
+  // A stale panel (its tile replaced on the whole map meanwhile): its Replace finds nothing and adds no tile.
+  await until("the panel again", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row after the second undo"));
+  const n0 = await listed();
+  const stale = await page.evaluate(`(async () => {
+    const r = ${groundRow}, [f, t] = r.querySelectorAll("select"), go = [...r.querySelectorAll("button")].find((b) => b.textContent === "Replace");
+    const whole = await w3.commands.execute("w3.terrain.replaceTiles", { from: ${JSON.stringify(own[0])}, to: ${JSON.stringify(own[1])} }).then((n) => n, (e) => String(e));
+    f.value = ${JSON.stringify(own[0])}; t.value = ${JSON.stringify(own[5])};
+    if (f.value !== ${JSON.stringify(own[0])} || t.value !== ${JSON.stringify(own[5])}) return "the stale panel can't choose its tiles";
+    go.click();
+    return whole;
+  })()`);
+  await settled(page);
+  if (typeof stale !== "number" || stale <= 0) fail(`the whole-map Replace Tiles before the stale panel's: ${stale}`);
+  if ((await listed()) !== n0) fail(`a stale panel's Replace that changed nothing grew the ground list from ${n0} to ${await listed()}`);
+
+  // Replace Tiles of a tile no slot is drawn as (own[5], past the list of 5; offered, the own list whole) with another
+  // tileset's: nothing, and no tile added (nor the flag set).
+  const n1 = await listed();
+  if (n1 !== 5) fail(`the list has ${n1} tiles before Replace Tiles of ${own[5]}, not 5 (control)`);
+  const none = await k.run("w3.terrain.replaceTiles", { from: own[5], to: "Wsnw" });
+  await settled(page);
+  if (none) fail(`Replace Tiles ${own[5]} → Wsnw: ${none}`);
+  if ((await listed()) !== n1) fail(`Replace Tiles of a tile no corner shows grew the ground list from ${n1} to ${await listed()}`);
+  await k.save();
+  if (headLine("custom-tilesets") !== "0" || /\bWsnw\b/.test(headLine("ground") ?? "")) fail(`Replace Tiles that replaced nothing left custom-tilesets ${headLine("custom-tilesets")}, ground ${headLine("ground")}`);
+  await page.evaluate(`w3.editors.closeAll()`);
 }
 /** In Objects mode a drag with A held is a box select of objects, as the World Editor's (we-drive, verify round 3,
  *  2026-11-13: a box over two trees with A held selected both, Delete removed both); Studio's A once did an area of
@@ -5291,6 +5431,42 @@ async function resizeRefusedShadows(page, found) {
     sizes(96, 64, "after the refused save after the resize");
   } finally {
     await page.evaluate(`(() => { const k = window.__refusedKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__refusedKept; delete window.__refusedWarned; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
+/** The shadow update a save makes says how many doodads it left out when only some models can't be read ("N doodads left
+ *  out, their models couldn't be read"; none at all unreadable is the refusal resizeRefusedShadows checks). The control:
+ *  the same save without the doodad whose model isn't there says nothing of the kind, and the stored file is written. */
+async function shadowLeftOut(page, found) {
+  const fail = (what) => found.push(`shadow left out: ${what}`);
+  await page.evaluate(`(() => { window.__leftKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; window.__leftWarned = []; w3.window.confirm = async () => true; w3.window.showWarning = async (m) => { window.__leftWarned.push(String(m)); return "Apply"; }; })()`);
+  try {
+    const tool = mcpTool(page);
+    const folder = join(work, "shadow-left-out");
+    rmSync(folder, { recursive: true, force: true });
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "ShadowLeftOut", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    const save = async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
+    const warned = () => page.evaluate(`window.__leftWarned.splice(0)`);
+    // Two doodads that bake a shadow, one with a model that is there.
+    const good = JSON.parse(await tool("create_object", { kind: "doodads", base: "LOrb" })).id;
+    const bad = JSON.parse(await tool("create_object", { kind: "doodads", base: "LOrb" })).id;
+    await tool("place_objects", { objects: [{ id: good, x: -256, y: 0 }] });
+    await tool("sculpt_terrain", { mode: "raise", amount: 256, left: -1024, bottom: -256, right: -768, top: 256 });
+    await save();
+    const control = (await warned()).filter((m) => /left out|left as it is/.test(m));
+    if (control.length) return fail(`the save without an unreadable model warned: ${JSON.stringify(control)}`);
+    await tool("set_object_fields", { kind: "doodads", id: bad, changes: [{ field: "dfil", value: "NoSuchShadowModel.mdl" }] });
+    await tool("place_objects", { objects: [{ id: bad, x: 256, y: 0 }, { id: bad, x: 512, y: 0 }] });
+    await tool("sculpt_terrain", { mode: "raise", amount: 256, left: 768, bottom: -256, right: 1024, top: 256 });
+    await save();
+    const said = await warned();
+    if (!said.some((m) => /2 doodads left out, their models couldn't be read/.test(m))) fail(`no "2 doodads left out" warning: ${JSON.stringify(said)}`);
+    if (said.some((m) => /left as it is/.test(m))) fail(`the update was refused, not partial (the good model couldn't be read?): ${JSON.stringify(said)}`);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__leftKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__leftKept; delete window.__leftWarned; })()`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }
@@ -14538,6 +14714,7 @@ async function run() {
       const onlyChecks = {
         addPathReady,
         areaLevels,
+        areaReplaceCt0,
         artModeReload,
         atmosphereTools,
         byHand,
@@ -14601,6 +14778,7 @@ async function run() {
         objectListSuffix,
         objectManagerLive,
         objectManagerSkin,
+        objectPickerSuffix,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
         objectValueRange,
@@ -14620,6 +14798,7 @@ async function run() {
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
+        shadowLeftOut,
         shadowTextureOrder,
         shouldHaves,
         soundEditorKeys,
@@ -14825,6 +15004,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "wholeMapGround", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
   await leftOpen(page, "areaLevels", found);
+  await areaReplaceCt0(page, found).catch((e) => found.push(`area replace (custom tilesets 0): ${e.message}`));
+  await leftOpen(page, "areaReplaceCt0", found);
   await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
   await leftOpen(page, "cameraEditing", found);
   await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
@@ -14853,6 +15034,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectEditorColorTools", found);
   await objectListSuffix(page, found).catch((e) => found.push(`object list suffix: ${e.message}`));
   await leftOpen(page, "objectListSuffix", found);
+  await objectPickerSuffix(page, found).catch((e) => found.push(`object picker suffix: ${e.message}`));
+  await leftOpen(page, "objectPickerSuffix", found);
   await triggerParamColorTools(page, found).catch((e) => found.push(`trigger parameter colour tools: ${e.message}`));
   await leftOpen(page, "triggerParamColorTools", found);
   await mapInfoUndoKept(page, found).catch((e) => found.push(`Map Properties undo: ${e.message}`));
@@ -14879,6 +15062,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeLimits", found);
   await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));
   await leftOpen(page, "resizeRefusedShadows", found);
+  await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
+  await leftOpen(page, "shadowLeftOut", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety", found);
   await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));

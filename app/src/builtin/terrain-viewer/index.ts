@@ -32,7 +32,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
-import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
+import { applyTileList, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { autoCycleLine, cycledId, startAutoCycle, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
@@ -992,10 +992,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const tiles = (await editor.handle.tilesets()).find((s) => s.id === t.tileset)?.tiles ?? [];
       const bounds = await playable().catch(() => null);
       const past = bounds && beyondPlayable(area, bounds);
+      // The tiles as drawn: with the flag 0 by the tileset's own list, not the file's (drawnGroundTiles).
+      const inMap = [...new Set(drawnGroundTiles(t, tiles))];
       return {
-        ...terrainSummary(t, { ...pathing, cells }, area),
+        ...terrainSummary(t, { ...pathing, cells }, area, tiles),
         ...(bounds ? { playable: bounds } : {}), ...(past ? { warning: past } : {}),
-        tilesInMap: t.groundTiles, otherTilesOfTheTileset: tiles.filter((id) => !t.groundTiles.includes(id)),
+        tilesInMap: inMap, otherTilesOfTheTileset: tiles.filter((id) => !inMap.includes(id)),
         tilesets: (await editor.handle.tilesets()).map((s) => ({ id: s.id, name: s.name })),
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
@@ -2113,6 +2115,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
           minimapStale.set();
           return terrain.groundTiles.length - 1;
+        };
+        /** ensureTile for an edit that may change nothing (Replace Tiles: the command and the area panel): `takeBack`
+         *  puts the tile lists back as they were before, so a run that replaced nothing leaves no tile added (nor the
+         *  list settled or the flag changed). Call it with no wait in between, as placePaste does. */
+        const tryEnsureTile = (id: string): { slot: number | null; takeBack(): void } => {
+          const before = tileSnapshot(terrain);
+          const slot = ensureTile(id);
+          return {
+            slot,
+            takeBack: () => {
+              const now = tileSnapshot(terrain);
+              if (now.raw === before.raw && now.ground.join() === before.ground.join() && now.cliffs.join() === before.cliffs.join()) return;
+              restoreTiles(terrain, before);
+              void syncTileList();
+              minimapStale.set();
+            },
+          };
         };
 
         /** The side panel's Doodads and Units boxes: the same View items as the toolbar's (kept in step by applyView). */
@@ -3577,11 +3596,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),
             h("div.muted", {}, "Ctrl+C copies it · Esc clears it"),
             replaceRow("Ground tile", usedTiles.map(label), [...new Set([...replaceTileNames(terrain, own).map((n) => n.id), ...own])].map(label), async (from, to) => {
-              const number = await handle.ensureGroundTile(to);
+              await ownReady;
+              if (glDead) return;
+              // From here to the commit there is no wait: when nothing is replaced the added tile goes again.
+              const added = tryEnsureTile(to), number = added.slot;
               if (number === null) { void w3.window.showWarning("This map can't take another ground tile."); return; }
-              // After the wait: adding the tile may have settled the list (each slot drawn as before).
+              // After adding: that may have settled the list (each slot drawn as before).
               const was = replaceSlots(terrain, from, ownTiles?.get(terrain.tileset));
-              commit(changeArea(terrain, a, (c) => { if (!was.includes(c.texture) || was.includes(number)) return false; c.texture = number; return true; }));
+              const st = changeArea(terrain, a, (c) => { if (!was.includes(c.texture) || was.includes(number)) return false; c.texture = number; return true; });
+              if (!st.corners.length) added.takeBack();
+              commit(st);
             }),
             ...(usedCliffs.length && cliffGrounds.length ? [replaceRow("Cliff type", usedCliffs.map((n) => [String(n), label(cliffGrounds[n])[1]] as [string, string]),
               cliffGrounds.flatMap((g, n) => (g ? [[String(n), label(g)[1]] as [string, string]] : [])), (from, to) => {
@@ -4871,8 +4895,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return { from, to: [...from, ...own.filter((id) => !from.some((f) => f.id === id)).map((id) => ({ id, label: tileLabel(id), count: 0 }))], selected: 0 };
             }
             if (kind === "cliffs") {
-              const use = handle.groundTileUse();
-              const from = handle.cliffGroundTiles().filter((g) => g).map((g) => ({ id: g, label: `${tileLabel(g)} cliff`, count: use?.cliffs[terrain.groundTiles.indexOf(g)] ?? 0 }));
+              // Counted by cliff type number, the w3e's cliff list, not through the ground tile list (which with the
+              // flag 0 isn't the one drawn): cliffTypeUse.
+              const use = cliffData ? cliffTypeUse(terrain, cliffData.types) : [];
+              const from = handle.cliffGroundTiles().flatMap((g, n) => (g ? [{ id: g, label: `${tileLabel(g)} cliff`, count: use[n] ?? 0 }] : []));
               return { from, to: from, selected: 0 };
             }
             const { list, fits } = replacePool(kind);
@@ -4894,19 +4920,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!editable) throw new Error("This terrain is read-only.");
             if (glDead) throw new Error(VIEW_LOST);
             if (kind === "tiles" || kind === "cliffs") {
-              let from: number | number[], to: number;
+              let from: number | number[], to: number, takeBack = () => {};
               if (kind === "tiles") {
                 // The tiles by the list drawn (with the flag 0 the tileset's own: replaceTileNames), once the own lists are read.
                 await ownReady;
                 if (glDead) throw new Error(VIEW_LOST);
                 const names = replaceTileNames(terrain, ownTiles?.get(terrain.tileset)).map((n) => n.id);
                 if (!names.includes(req.from)) throw new Error(`${req.from} isn't one of this map's ground tiles: ${names.join(", ")}.`);
-                const slot = await handle.ensureGroundTile(req.to);
-                if (slot === null) throw new Error("This map has 16 ground tiles, the most it can have: remove one first.");
-                to = slot;
-                // Taken after the wait: adding the new tile may have settled the list (settleDrawnList), each slot drawn as before.
+                // From here to the commit there is no wait: a run that replaces nothing takes the added tile back.
+                const added = tryEnsureTile(req.to);
+                if (added.slot === null) throw new Error("This map has 16 ground tiles, the most it can have: remove one first.");
+                to = added.slot;
+                takeBack = added.takeBack;
+                // Taken after adding: that may have settled the list (settleDrawnList), each slot drawn as before.
                 from = replaceSlots(terrain, req.from, ownTiles?.get(terrain.tileset));
-                if (!from.length) return 0;
+                if (!from.length) { takeBack(); return 0; }
               } else {
                 const grounds = handle.cliffGroundTiles();
                 if (!grounds.length) throw new Error("The game's cliff types aren't read yet. Try again in a moment.");
@@ -4914,10 +4942,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 to = grounds.indexOf(req.to);
                 if (from < 0 || to < 0) throw new Error(`The map's cliff types are those of ${grounds.join(", ")}.`);
               }
-              if (glDead) throw new Error(VIEW_LOST);
               const log = new CornerUndo();
               const changed = replaceCorners(terrain, kind === "tiles" ? "texture" : "cliffTexture", from, to, !!req.swap, log);
-              if (!changed.length) return 0;
+              if (!changed.length) { takeBack(); return 0; }
               commitTerrain({ ...log.step(terrain), cliffs: true });
               return changed.length;
             }
