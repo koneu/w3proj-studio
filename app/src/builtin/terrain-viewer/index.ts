@@ -2860,6 +2860,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             outside: edge ? (x, y) => !inArea(x, y, edge) : null,
             kindOf: (id) => skins?.get(id)?.kind,
             ground: (x, y) => heightAt(terrain, x, y),
+            // A map's own doodad data that can't be read may make a type float: heights stay then.
+            restingZ: scales && skins ? (id, x, y) => { const s = skinById(id); return doodadGround(terrain, x, y, s?.kind === "w3d" && !!s.floats); } : undefined,
           };
         };
         /** Gives the doodads of the map just opened the scale and flags the World Editor saves them with
@@ -2874,7 +2876,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!n) return;
           objectsTouched = true;
           if (quiet) return;
-          void w3.window.showInfo(`Set the scale, flags or life of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
+          void w3.window.showInfo(`Set the scale, flags, life or height of ${n} doodad${n === 1 ? "" : "s"} as the World Editor saves them (scale within the type's range, outside flag from the playable area, on the ground or the water unless fixed); the next save writes ${n === 1 ? "it" : "them"} so (setting Fix Doodads on Load).`);
         }
         /** Fix Doodads on Load's scales, flags and life for the doodads of `list`, in place. The number changed; 0 when
          *  `still` is false after the wait or the types aren't loaded. */

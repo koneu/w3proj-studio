@@ -7209,7 +7209,9 @@ async function addPathReady(page, found) {
  *  playable area (x 0 to 128, y 64) gets flag 3, a flower bed (LOfl) inside it stored with flag 1 gets 2, the hay
  *  cart on its edge keeps 2. The facing: a tree LTlt (fixedRot 270) at 30° turns to 270° (not with the map's object
  *  data unreadable), wheel ruts LOrb at -90° to 270°; an LTex whose range the map's w3b turns round (1.5 to 1.1) at
- *  scale 2 gets 1.5. Both off: scales, flags and facings stay as stored, opened and saved. */
+ *  scale 2 gets 1.5. Heights: a ZPsh stored at 50 without flag 4 goes to its ground (-3), a ZWsw with flag 4 keeps 50.
+ *  Opened a second time after the save, nothing changes: no note, the save writes the same file. Both off: scales,
+ *  flags, heights and facings stay as stored, opened and saved. */
 async function doodadSnapOnLoad(page, found) {
   const fail = (what) => found.push(`doodad snap on load: ${what}`);
   const KEY = "terrain.doodads.snapOnLoad", FIX = "terrain.doodads.fixOnLoad", TXT = "map/war3map.w3e.txt";
@@ -7233,6 +7235,10 @@ async function doodadSnapOnLoad(page, found) {
     add("LOrb", [-200, -200, 0], f32(-Math.PI / 2), 55);
     add("LTex", [-96, -96, 0], 4.712389, 56);
     doo.doodads.at(-1).scale = [2, 2, 2];
+    // Heights (doodadedit.ts restAsOpened): a plant ZPsh stored at 50 without flag 4 on the corner whose ground is -3
+    // goes there; seaweed ZWsw at 50 with flag 4 keeps it (its scale 1 goes to its least, 1.5).
+    add("ZPsh", [128, 64, 50], 0, 57);
+    add("ZWsw", [0, 64, 50], 0, 58, 6);
     writeFileSync(file, JSON.stringify(doo, null, 2));
     // Units the World Editor reads the facing of (doodadgrid.ts openedUnitAngle): a footman at the whole number 2 (2°),
     // a knight at -0.5 (into 0..360); the mini map's own footman at 4.5 stays.
@@ -7253,7 +7259,9 @@ async function doodadSnapOnLoad(page, found) {
   /** Fix Doodads on Load's scales and flags (single precision, as stored). */
   // The hay cart at 32, 64 is on the playable area's edge (y 64): inside, flag 2 stays.
   const FIXED = { LTbr: [f(1.1), f(1.1), f(1.1), 3], LOtr: [f(0.8), f(0.8), f(1.2), 3], LOch: [1, 1, 1, 2], APms: [1, 1, 1, 3], ATtr: [1, 1, 1, 3], LOfl: [1, 1, 1, 2],
-    LTlt: [1, 1, 1, 3], LOrb: [1, 1, 1, 3], LTex: [f(1.5), f(1.5), f(1.5), 3] };
+    LTlt: [1, 1, 1, 3], LOrb: [1, 1, 1, 3], LTex: [f(1.5), f(1.5), f(1.5), 3], ZPsh: [1, 1, 1, 2], ZWsw: [1.5, 1.5, 1.5, 6] };
+  const heights = (list) => Object.fromEntries((list ?? []).filter((d) => ["ZPsh", "ZWsw"].includes(d.id)).map((d) => [d.id, Math.fround(d.position[2])]));
+  const RESTED = { ZPsh: -3, ZWsw: 50 };
   const scaleFlagsOnDisk = (root) => scaleFlags(JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads);
   const live = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).placedObjects()?.doodads ?? null)()`);
   /** The units' facings by id, single precision: as the editor holds them, and as the file has them. */
@@ -7314,7 +7322,12 @@ async function doodadSnapOnLoad(page, found) {
     if (!same(storedFixes.LOtr, [f(0.75), f(0.75), f(1.25), 2]) || storedFixes.LOfl?.[3] !== 1) fail(`the stored scales and flags aren't the test's (control): ${JSON.stringify(storedFixes)}`);
     const fixedLive = scaleFlags(await live());
     for (const [id, want] of Object.entries(FIXED)) if (!same(fixedLive[id], want)) fail(`fix on load: ${id} has scale and flags ${JSON.stringify(fixedLive[id])}, not ${JSON.stringify(want)}`);
-    if (!/Set the scale, flags or life of 8 doodads/.test(await toasts())) fail(`no note of the 8 doodads given the World Editor's scale and flags: ${(await toasts()).slice(0, 400)}`);
+    // The 8 of scale and flags, ZPsh's height, ZWsw's scale, and the hay cart's height (turned on the spot, it stays at
+    // 0 over ground of -0.75).
+    if (!/Set the scale, flags, life or height of 11 doodads/.test(await toasts())) fail(`no note of the 11 doodads given the World Editor's scale, flags and height: ${(await toasts()).slice(0, 400)}`);
+    const storedHeights = heights(JSON.parse(readFileSync(join(on, "map", "war3map.doo.json"), "utf8")).doodads);
+    if (!same(storedHeights, { ZPsh: 50, ZWsw: 50 })) fail(`the stored heights aren't the test's (control): ${JSON.stringify(storedHeights)}`);
+    if (!same(heights(await live()), RESTED)) fail(`fix on load: the heights are ${JSON.stringify(heights(await live()))}, not ${JSON.stringify(RESTED)} (ZPsh on its ground, ZWsw's own)`);
     await page.evaluate(`w3.editors.saveAll()`);
     await settled(page);
     if (hash(join(on, "map", "war3map.doo.json")) !== before) fail("saving with nothing changed wrote the doodad file");
@@ -7327,6 +7340,20 @@ async function doodadSnapOnLoad(page, found) {
     const writtenFixes = scaleFlagsOnDisk(on);
     for (const [id, want] of Object.entries(FIXED)) if (!same(writtenFixes[id], want)) fail(`the save after an edit wrote ${id} with scale and flags ${JSON.stringify(writtenFixes[id])}, not ${JSON.stringify(want)}`);
     if (!same(facingsOnDisk(on), OPENED)) fail(`the save after an edit wrote the units facing ${JSON.stringify(facingsOnDisk(on))}, not ${JSON.stringify(OPENED)}`);
+    if (!same(heights(JSON.parse(readFileSync(join(on, "map", "war3map.doo.json"), "utf8")).doodads), RESTED)) fail("the save after an edit didn't write the heights the open gave");
+
+    // ---- on, opened a second time: what the first open's save wrote is what the rules give, so nothing changes ----
+    const savedOnce = readFileSync(join(on, "map", "war3map.doo.json"), "utf8");
+    await open(on);
+    await settled(page);
+    await sleep(1500);
+    if (/on their grid|on its grid|Set the scale, flags/.test(await toasts())) fail(`the second open changed doodads again: ${(await toasts()).slice(0, 400)}`);
+    const again = JSON.parse(savedOnce).doodads, liveAgain = await live();
+    // As the file stores them (single precision).
+    const pick = (d) => [d.id, d.position.map(f), f(d.angle), d.scale.map(f), d.flags, d.life];
+    if (!same((liveAgain ?? []).map(pick), again.map(pick))) fail("the second open holds other doodads than the first open's save wrote");
+    await saveAfterEdit();
+    if (readFileSync(join(on, "map", "war3map.doo.json"), "utf8") !== savedOnce) fail("the save after the second open wrote other doodads than the first");
 
     // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
     const broken = make("broken");
@@ -7356,6 +7383,7 @@ async function doodadSnapOnLoad(page, found) {
     if (!same(await liveFacings(), facingsOnDisk(off))) fail(`with the setting off the units face ${JSON.stringify(await liveFacings())}, not as stored ${JSON.stringify(facingsOnDisk(off))}`);
     const shownFixes = scaleFlags(await live());
     for (const id of Object.keys(FIXED)) if (!same(shownFixes[id], keptFixes[id])) fail(`with Fix Doodads on Load off ${id} has scale and flags ${JSON.stringify(shownFixes[id])}, not the map's ${JSON.stringify(keptFixes[id])}`);
+    if (!same(heights(await live()), { ZPsh: 50, ZWsw: 50 })) fail(`with Fix Doodads on Load off the heights are ${JSON.stringify(heights(await live()))}, not the map's 50`);
     await saveAfterEdit();
     const after = onDisk(off);
     for (const id of ["LTbr", "LOtr", "LOch"]) if (!same(after[id]?.slice(0, 2), kept[id].slice(0, 2)) || Math.fround(after[id][2]) !== Math.fround(kept[id][2])) fail(`with the setting off the save wrote ${id} at ${JSON.stringify(after[id])}, not ${JSON.stringify(kept[id])}`);

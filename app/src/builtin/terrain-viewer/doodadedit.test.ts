@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadNudgeSteps, fixAsOpened, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource, type RuledEntry } from "./doodadedit";
+import { doodadNudgeSteps, fixAsOpened, placedNudgeSteps, doodadPose, doodadScale, doodadTurn, RESTING_Z_TOLERANCE, restAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource, type RuledEntry } from "./doodadedit";
 import type { PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
 import type { ScaleRule } from "./doodadrules";
@@ -115,6 +115,58 @@ test("snapAsOpened and fixAsOpened: a list as stored gets the open's places, sca
   assert.equal(snapAsOpened(list, src), 0);
   assert.equal(fixAsOpened(list, src), 0);
   assert.deepEqual(list, once);
+});
+
+// we-compare doodad-water-z-open (tests/we-compare/doodad-water-z.json, 2026-11-16): opened and saved, the World Editor
+// works out the height of every doodad and destructable without flag 4 again (all stored at 37.5: lily pads on the
+// water, ZPsh and LTlt on the ground, the fixed lily pads kept), with the life and scale rules of fixAsOpened.
+test("fixAsOpened: each doodad without a height of its own goes to its resting height, flag 4 keeps its own, and a second pass changes nothing", () => {
+  const KINDS: Record<string, string> = { LTlt: "w3b", LPfp: "w3d", ZPsh: "w3d" };
+  // A pond at x < 0 (water level -89.6 over the ground -128) where only lily pads float.
+  const floor = (x: number) => (x < 0 ? -128 : 0);
+  const restingZ = (id: string, x: number) => (id === "LPfp" && x < 0 ? -89.6 : floor(x));
+  const src: OpenRuleSource = {
+    sizeOf: () => null, fixedRot: () => null, scaleRule: () => null, outside: null, kindOf: (id) => KINDS[id], ground: (x) => floor(x), restingZ,
+  };
+  type Entry = Placed & { flags: number; life: number };
+  const entry = (id: string, x: number, z: number, flags = 2, life = 255): Entry => ({ id, variation: 0, position: [x, 0, z], angle: 0, scale: [1, 1, 1], flags, life });
+  const list = [
+    entry("LPfp", -100, 37.5), entry("ZPsh", -100, 37.5), entry("LTlt", 100, 37.5, 2, 100), entry("LPfp", -100, 50, 6),
+    // Within the tolerance: a map the World Editor saved keeps its bytes.
+    entry("ZPsh", 100, 0.004), entry("LPfp", 100, 0),
+  ];
+  assert.equal(fixAsOpened(list, src), 3);
+  assert.deepEqual(list.map((e) => e.position[2]), [-89.6, -128, 0, 50, 0.004, 0]);
+  assert.ok(RESTING_Z_TOLERANCE >= 0.004 && RESTING_Z_TOLERANCE < 1);
+  const once = structuredClone(list);
+  assert.equal(fixAsOpened(list, src), 0);
+  assert.deepEqual(list, once);
+  // Without the types' data (restingZ absent) heights stay; restAsOpened alone says which it changed.
+  const kept = [entry("LPfp", -100, 37.5), entry("ZPsh", -100, 37.5, 6)];
+  assert.equal(fixAsOpened(kept, { ...src, restingZ: undefined }), 0);
+  assert.deepEqual(kept.map((e) => e.position[2]), [37.5, 37.5]);
+  assert.deepEqual(restAsOpened(kept, src), [kept[0]]);
+  // A count of entries, not of rules: a life and a height changed on one doodad count once.
+  assert.equal(fixAsOpened([entry("ZPsh", 100, 37.5, 2, 100)], src), 1);
+  // A place that isn't a number is left alone.
+  const odd = [entry("ZPsh", Number.NaN, 37.5)];
+  assert.equal(restAsOpened(odd, src).length, 0);
+});
+
+test("snapAsOpened: a doodad moved to its grid lands at its resting height (a lily pad on the water), not on the bed", () => {
+  const src: OpenRuleSource = {
+    sizeOf: (id) => SIZES[id] ?? null, fixedRot: () => null, scaleRule: () => null,
+    outside: null, kindOf: () => "w3d", ground: () => -128, restingZ: () => -89.6,
+  };
+  const pad = () => ({ id: "LTbr", variation: 0, position: [40, 40, 0], angle: deg(270), scale: [1, 1, 1], flags: 2 } as Placed);
+  const list = [pad()];
+  assert.equal(snapAsOpened(list, src), 1);
+  assert.deepEqual(list[0].position, [32, 32, -89.6]);
+  assert.equal(snapAsOpened(list, src), 0, "a second pass changes nothing");
+  // Without the types' data, as before: on the ground.
+  const plain = [pad()];
+  snapAsOpened(plain, { ...src, restingZ: undefined });
+  assert.deepEqual(plain[0].position, [32, 32, -128]);
 });
 
 // we-compare neutral-facing and neutral-facing-neg (tests/we-compare/neutral-facing.json, 2026-11-15): gold mines,
