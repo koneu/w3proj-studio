@@ -51,7 +51,8 @@
 //                       Every --look of the run becomes a camera object in we-drive's copy of the map before the
 //                       editor starts (unpacked with the release CLI, war3map.w3c.json changed, packed again; the
 //                       map's own cameras stay, after them), and this step shows it as TESTING.md records: the camera
-//                       layer (m), its row in the palette, View Selected Camera. Prints the camera, and Studio's
+//                       layer (m), its row in the palette, View Selected Camera, then waits until two pictures of
+//                       the view a frame apart are the same (at most 10 s; "viewSettled"). Prints the camera, and Studio's
 //                       equivalent for app-drive's --camera when there is one (we-camera.mjs)
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
