@@ -81,6 +81,15 @@ test("the facts come from the project; missing and unreadable files set nothing"
   assert.equal((await readMeleeFacts(files({ "map/War3MapMisc.txt": "[Misc]\nA=1\n" }))).customConstants, true);
   const none = await readMeleeFacts(files({}));
   assert.deepEqual(none, { customConstants: false, terrain: null, customData: false });
+  // A melee map with custom triggers loses its flag (the World Editor's save does: melee-flag-we); without them, or
+  // with a trigger file nobody can read, it keeps it.
+  const two = defaultTriggerFile("x");
+  two.items.push({ ...structuredClone(two.items.find((i) => i.type === 8)!), name: "Second", id: 0x03000001 } as never);
+  const keptWith = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(files(own), { flags: MELEE }, [], null)).flags;
+  assert.equal(await keptWith({ "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")) }), MELEE, "control: the default triggers");
+  assert.equal(await keptWith({ "map/war3map.wtg.json": writeWtgJson(two) }), OFF, "a second trigger");
+  assert.equal(await keptWith({ "map/war3map.wtg.json": new Error("EACCES") }), MELEE, "triggers unreadable");
+  assert.equal(await keptWith({}), MELEE, "no trigger file");
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
   assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false }, "unreadable: not known, so the flag stays");
   // The ground being saved wins over the project's.
@@ -198,10 +207,10 @@ test("the facts for putting the flag back come from the project; unreadable ones
   const creep = { id: "nftk", player: 24, position: [MID + 100, MID, 0] }, tavern = { ...creep, id: "ntav" };
   assert.equal((await savedMelee(project(), { flags: OFF }, [...units, creep])).flags, MELEE, "a creep close by, as UnitData.slk tells");
   assert.equal((await savedMelee(project(), { flags: OFF }, [...units, tavern])).flags, OFF, "a tavern close by");
-  // A map that is melee reads only what taking it off needs.
+  // A map that is melee reads only what taking it off needs: the ground and the triggers.
   const on = project();
   await savedMelee(on, { flags: MELEE }, units);
-  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), []);
+  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json"]);
 });
 
 test("doodads and destructables without a pathing texture (flowers) near a start don't block the flag", async () => {

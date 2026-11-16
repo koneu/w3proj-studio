@@ -1,0 +1,366 @@
+[
+  {
+    "name": "meleeflag-base",
+    "description": "Control: a new melee map nothing is added to; the World Editor's save keeps the Melee flag (w3i flags 0x4)",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": []
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-unit",
+    "description": "(a) a custom unit (a w3u entry): the World Editor's save and Studio's take the Melee flag off",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "create_object",
+          "args": {
+            "kind": "units",
+            "base": "hfoo",
+            "name": "Flag Footman"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-unit-removed",
+    "description": "(b) a custom unit made and deleted again, so the w3u holds no entry (or is gone): the flag stays",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "create_object",
+          "args": {
+            "kind": "units",
+            "base": "hfoo",
+            "name": "Flag Footman"
+          }
+        },
+        {
+          "mcp": "save_project"
+        },
+        {
+          "mcp": "delete_object",
+          "args": {
+            "kind": "units",
+            "id": "h000"
+          }
+        },
+        {
+          "mcp": "save_project"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-added",
+    "description": "(c1) a custom trigger next to the unchanged Melee Initialization",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "create_script_trigger",
+          "args": {
+            "name": "Custom One",
+            "script": "function Trig_Custom_One_Actions takes nothing returns nothing\nendfunction\n\nfunction InitTrig_Custom_One takes nothing returns nothing\n    set gg_trg_Custom_One = CreateTrigger()\n    call TriggerAddAction(gg_trg_Custom_One, function Trig_Custom_One_Actions)\nendfunction\n"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-disabled",
+    "description": "(c2) Melee Initialization switched off",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "set_trigger_enabled",
+          "args": {
+            "name": "Melee Initialization",
+            "enabled": false
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-removed",
+    "description": "(c3) Melee Initialization removed",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "remove_trigger",
+          "args": {
+            "name": "Melee Initialization"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-category",
+    "description": "(c4) the category Initialization renamed",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"name\\\":\\\"Initialization\\\"\")) throw new Error('no ' + \"\\\"name\\\":\\\"Initialization\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"name\\\":\\\"Initialization\\\"\", \"\\\"name\\\":\\\"Setup\\\"\"));"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-initoff",
+    "description": "(c5) Melee Initialization with Initially On off",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"initiallyOff\\\": false\")) throw new Error('no ' + \"\\\"initiallyOff\\\": false\"); await w3.workspace.writeText(p, t.replace(\"\\\"initiallyOff\\\": false\", \"\\\"initiallyOff\\\": true\"));"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-runoninit",
+    "description": "(c6) Melee Initialization with Run on Map Initialization on",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"runOnInit\\\": false\")) throw new Error('no ' + \"\\\"runOnInit\\\": false\"); await w3.workspace.writeText(p, t.replace(\"\\\"runOnInit\\\": false\", \"\\\"runOnInit\\\": true\"));"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-variable",
+    "description": "(c7) one trigger variable added",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "add_trigger_variable",
+          "args": {
+            "name": "Flag",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-action",
+    "description": "(c8) one melee action replaced by another",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\")) throw new Error('no ' + \"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"name\\\": \\\"MeleeGrantHeroItems\\\"\", \"\\\"name\\\": \\\"MeleeStartingHeroLimit\\\"\"));"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-trigger-description",
+    "description": "(c9) only the trigger's description changed: the flag stays",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "eval": "const p = 'map/war3map.wtg.json'; let t = await w3.workspace.readText(p); if (!t.includes(\"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\")) throw new Error('no ' + \"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\"); await w3.workspace.writeText(p, t.replace(\"\\\"description\\\": \\\"Default melee game initialization for all players\\\"\", \"\\\"description\\\": \\\"Mine\\\"\"));"
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  },
+  {
+    "name": "meleeflag-header",
+    "description": "(c10) only the custom script header has text: the flag stays",
+    "input": {
+      "new": {
+        "name": "MeleeFlag",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n//hello"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": []
+    },
+    "compare": [
+      "war3map.w3i"
+    ]
+  }
+]
