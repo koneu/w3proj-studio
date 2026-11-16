@@ -105,11 +105,20 @@ function playersCell(ctx: TechContext, get: () => number, set: (mask: number) =>
 }
 
 const allPlayers = (ctx: TechContext) => ctx.players.reduce((m, p) => (m | (1 << p.id)) >>> 0, 0);
-const numberInput = (get: () => number, set: (n: number) => void, ctx: TechContext, opts: { min?: number; max?: number } = {}) => {
-  const input = h("input.form-input.form-num.techtree-num", { type: "number", step: "1", min: String(opts.min ?? 0), max: opts.max !== undefined ? String(opts.max) : undefined, value: String(get()),
+/** The limits of the numbers typed here: an upgrade's level is shown from 1 and stored from 0 in a u32, a chance is a
+ *  percentage (stored in a u32). */
+export const TECH_LIMITS = { level: { min: 1, max: 2 ** 32 }, chance: { min: 0, max: 100 } } as const;
+/** A typed number within `limits`, else null (refused: the map stays as it was). */
+export function techNumber(typed: string, limits: { min: number; max: number }): number | null {
+  const n = Number(typed);
+  return typed.trim() !== "" && Number.isInteger(n) && n >= limits.min && n <= limits.max ? n : null;
+}
+const numberInput = (get: () => number, set: (n: number) => void, ctx: TechContext, opts: { min: number; max: number }) => {
+  const input = h("input.form-input.form-num.techtree-num", { type: "number", step: "1", min: String(opts.min), max: String(opts.max), value: String(get()),
     onchange: () => {
-      const n = Number(input.value);
-      if (!Number.isInteger(n) || n < (opts.min ?? 0) || (opts.max !== undefined && n > opts.max)) { input.classList.add("invalid"); return; }
+      const n = techNumber(input.value, opts);
+      if (n === null) { input.classList.add("invalid"); input.title = `A whole number from ${opts.min} to ${opts.max}; this isn't saved.`; return; }
+      input.title = "";
       input.classList.remove("invalid");
       set(n);
       ctx.changed();
@@ -149,7 +158,7 @@ function upgrades(info: TechInfo, ctx: TechContext): HTMLElement {
       h("tbody", {}, ...info.upgrades.map((u) => h("tr", {},
         h("td", {}, playersCell(ctx, () => u.players, (m) => { u.players = m; })),
         h("td", {}, objectCell(ctx, ["w3q"], () => u.id, (id) => { u.id = id; })),
-        h("td", { title: "Level, counted from 1" }, numberInput(() => u.level + 1, (n) => { u.level = n - 1; }, ctx, { min: 1 })),
+        h("td", { title: "Level, counted from 1" }, numberInput(() => u.level + 1, (n) => { u.level = n - 1; }, ctx, TECH_LIMITS.level)),
         h("td", {}, select(AVAILABILITY, () => u.availability, (v) => { u.availability = v; }, ctx)),
         h("td", {}, removeButton("Remove", () => { info.upgrades.splice(info.upgrades.indexOf(u), 1); ctx.changed(true); })))))),
     h("button", { onclick: async () => {
@@ -221,7 +230,7 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
             removeButton("Remove this position", () => { g.positions.splice(k, 1); for (const l of g.lines) l.ids.splice(k, 1); ctx.changed(true); }))),
           h("th", {}, h("button", { title: "Add a position", onclick: () => { g.positions.push(0); for (const l of g.lines) l.ids.push(NONE); ctx.changed(true); } }, "+")))),
         h("tbody", {}, ...g.lines.map((l) => h("tr", {},
-          h("td", {}, numberInput(() => l.chance, (n) => { l.chance = n; }, ctx, { max: 100 })),
+          h("td", {}, numberInput(() => l.chance, (n) => { l.chance = n; }, ctx, TECH_LIMITS.chance)),
           ...l.ids.map((_, k) => h("td", {}, objectCell(ctx, KINDS_OF_POSITION[g.positions[k]] ?? ["w3u"], () => l.ids[k], (id) => { l.ids[k] = id; }, g.positions[k]))),
           h("td", {}, removeButton("Remove this line", () => { g.lines.splice(g.lines.indexOf(l), 1); ctx.changed(true); })))))),
       h("button", { onclick: () => { g.lines.push({ chance: 0, ids: g.positions.map(() => NONE) }); ctx.changed(true); } }, "Add line"))),
@@ -244,7 +253,7 @@ function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
         h("div.techtree-table-head", {}, h("strong", {}, `Set ${k + 1}`), chanceTotal(set.map((x) => x.chance)),
           removeButton("Remove the set", () => { t.sets.splice(k, 1); ctx.changed(true); })),
         ...set.map((x) => h("div.techtree-row", {},
-          numberInput(() => x.chance, (n) => { x.chance = n; }, ctx, { max: 100 }), "% ",
+          numberInput(() => x.chance, (n) => { x.chance = n; }, ctx, TECH_LIMITS.chance), "% ",
           objectCell(ctx, ["w3t"], () => x.id, (id) => { x.id = id; }, 2),
           removeButton("Remove the item", () => { set.splice(set.indexOf(x), 1); ctx.changed(true); }))),
         h("button", { onclick: async () => {

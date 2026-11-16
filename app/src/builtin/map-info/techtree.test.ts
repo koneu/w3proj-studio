@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, type TechInfo } from "./techtree";
+import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, TECH_LIMITS, techNumber, type TechInfo } from "./techtree";
 
 const info = (itemTables?: TechInfo["itemTables"]): TechInfo => ({ upgrades: [], techs: [], unitTables: [], ...(itemTables ? { itemTables } : {}) });
 
@@ -39,4 +39,14 @@ test("the item tables as other modules see them: names through the string table,
 test("Map Properties scrolls to the item tables or to one of them", () => {
   assert.equal(ITEM_TABLES_ANCHOR, "item-tables");
   assert.notEqual(itemTableAnchor(0), itemTableAnchor(1));
+});
+
+test("an upgrade's level past war3map.w3i's u32 (stored from 0) and a chance past 100 are refused; the edges are taken", () => {
+  const { level, chance } = TECH_LIMITS;
+  for (const typed of ["0", "4294967297", "1.5", "", "abc"]) assert.equal(techNumber(typed, level), null, `level ${JSON.stringify(typed)}`);
+  assert.equal(techNumber("1", level), 1);
+  assert.equal(techNumber("4294967296", level), 4294967296, "stored as 4294967295, the u32's highest");
+  for (const typed of ["-1", "101", "50.5", ""]) assert.equal(techNumber(typed, chance), null, `chance ${JSON.stringify(typed)}`);
+  assert.equal(techNumber("0", chance), 0);
+  assert.equal(techNumber("100", chance), 100);
 });

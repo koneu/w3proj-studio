@@ -1,6 +1,7 @@
 // The map's sky and weather as the MCP tools set them (set_sky, set_weather): names are taken like Map Properties'
 // pickers take them (an id or its label), everything works on the war3map.w3i document.
 
+import { storable, storableText, type StoredNumber } from "../formats/numbers";
 import { setW3iColorHex, w3iColorHex } from "../formats/w3icolor";
 
 /** An id from `choices` ([id, label]) for what was typed: the id or the label, ignoring case. Else an error that lists the choices. */
@@ -26,8 +27,10 @@ export interface SkyLists { tilesets: readonly (readonly [string, string])[] }
 
 type Doc = Record<string, any>;
 
-function num(name: string, v: unknown, int = false): number {
-  if (typeof v !== "number" || !Number.isFinite(v) || (int && !Number.isInteger(v))) throw new Error(`${name} must be ${int ? "a whole " : "a "}number.`);
+/** A number for a w3i field of type `kind`; one the field can't hold (past a 32-bit float, not whole, past 32 bits) is
+ *  refused, never stored as infinity or wrapped. */
+function num(name: string, v: unknown, kind: StoredNumber): number {
+  if (typeof v !== "number" || !storable(kind, v)) throw new Error(storableText(kind, name));
   return v;
 }
 
@@ -63,14 +66,14 @@ export function applySky(doc: Doc, args: SkyArgs, lists: SkyLists): string[] {
   if (args.fogStyle !== undefined) { const was = fog.style; fog.style = Number(resolveChoice("fog style", args.fogStyle, FOG_STYLES)); set("fog style", was, fog.style); fogGiven = true; }
   for (const [key, field] of [["fogStart", "start"], ["fogEnd", "end"], ["fogDensity", "density"]] as const) {
     if (args[key] === undefined) continue;
-    const was = fog[field]; fog[field] = num(key, args[key]); set(`fog ${field}`, was, fog[field]); fogGiven = true;
+    const was = fog[field]; fog[field] = num(key, args[key], "f32"); set(`fog ${field}`, was, fog[field]); fogGiven = true;
   }
   if (args.fogColor !== undefined) {
     const was = w3iColorHex(fog.color); setColor("fogColor", fog.color, args.fogColor); set("fog colour", was, w3iColorHex(fog.color)); fogGiven = true;
   }
   if (args.overSky !== undefined) {
     if (!work.terrainFog) throw new Error("This map's format has no \"draw over sky\" setting (it needs the 3.0 terrain fog).");
-    const was = work.terrainFog.overSky; work.terrainFog.overSky = num("overSky", args.overSky, true); set("fog drawn over the sky", was, work.terrainFog.overSky);
+    const was = work.terrainFog.overSky; work.terrainFog.overSky = num("overSky", args.overSky, "i32"); set("fog drawn over the sky", was, work.terrainFog.overSky);
   }
   if (args.useFog !== undefined) flag(FOG_FLAG, args.useFog === true, "terrain fog");
   else if (fogGiven) flag(FOG_FLAG, true, "terrain fog");

@@ -14,6 +14,7 @@ import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/te
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { LOADING_TEXTS_UNUSED, loadingTextsUnused, mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
+import { INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumberKey } from "./numbers";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
@@ -428,13 +429,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ? h("div.form-stack", {}, shown, cut, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
             : shown;
         };
-        const num = (get: () => number, set: (n: number) => void, opts: { int?: boolean } = {}) => {
-          const input = h("input.form-input.form-num", { type: "number", value: String(get()), step: opts.int ? "1" : "any" });
+        /** A number field of war3map.w3i (numbers.ts): a value its stored type can't hold is refused with a word, and
+         *  the box shows the value kept. `then`: after a value was taken. */
+        const num = (key: InfoNumberKey, opts: { player?: number; then?: () => void } = {}) => {
+          const kind = INFO_NUMBERS[key].kind;
+          const shown = () => String(infoNumber(info, key, opts.player) ?? "");
+          const input = h("input.form-input.form-num", { type: "number", value: shown(), step: kind === "f32" ? "any" : "1" });
+          input.dataset.field = key;
           input.addEventListener("change", () => {
-            const n = Number(input.value);
-            if (input.value === "" || Number.isNaN(n) || (opts.int && !Number.isInteger(n))) { input.classList.add("invalid"); return; }
-            input.classList.remove("invalid");
-            set(n);
+            const r = setInfoNumber(info, key, input.value, opts.player);
+            if ("refused" in r) {
+              void w3.window.showError(r.refused);
+              input.value = shown();
+              return;
+            }
+            opts.then?.();
             update();
           });
           return input;
@@ -456,7 +465,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return h("label.form-check", {}, box, " ", label);
         };
         /** A w3i colour (stored blue, green, red, alpha): colour picker + alpha. */
-        const color = (bgra: number[]) => {
+        const color = (bgra: number[], alpha: InfoNumberKey) => {
           const pick = h("input", { type: "color", value: w3iColorHex(bgra) });
           // Dragging in the colour dialog is one undo step.
           let visit = {};
@@ -465,7 +474,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             update(visit);
           });
           pick.addEventListener("change", () => { visit = {}; });
-          return h("div.form-inline", {}, pick, h("span.muted", {}, "alpha"), num(() => bgra[3], (n) => { bgra[3] = Math.max(0, Math.min(255, n)); }, { int: true }));
+          return h("div.form-inline", {}, pick, h("span.muted", {}, "alpha"), num(alpha));
         };
         const section_ = (title: string, ...children: (Node | null)[]) => h("section.form-section", {}, h("h3", {}, title), ...children.filter((c): c is Node => c !== null));
 
@@ -514,7 +523,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             section_("Loading screen",
               row("Screen", lists
                 ? select<number>([[-1, "None / custom model"], ...lists.loadingScreens], () => info.loadingScreen.number, screen)
-                : num(() => info.loadingScreen.number, screen, { int: true })),
+                : num("loadingScreen", { then: () => queueMicrotask(() => show(section)) })),
               // Typed: the three texts follow at once (drawn again, the model's box would lose the typing).
               v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => {
                 info.loadingScreen.model = s;
@@ -531,7 +540,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Text", text(() => info.loadingScreen.text, (s) => { info.loadingScreen.text = s; }, { multiline: true, disabled: unused, cls: "map-info-loading-text" })),
               h("small.muted.map-info-loading-unused", { hidden: !unused }, LOADING_TEXTS_UNUSED),
               info.loadingScreen.crestRace !== undefined
-                ? row("Crest race", num(() => info.loadingScreen.crestRace!, (n) => { info.loadingScreen.crestRace = n; }, { int: true }))
+                ? row("Crest race", num("crestRace"))
                 : null,
             ),
             ];
@@ -556,9 +565,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               section_("Game data",
                 info.scriptType !== undefined ? row("Script language", select([[0, "JASS"], [1, "Lua"]], () => info.scriptType!, (n) => { info.scriptType = n; }), "Changing this needs the script itself to be converted.") : null,
                 v >= 25
-                  ? row("Game data set", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true }), "0 = default")
-                  : row("Loading screen number", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true })),
-                info.gameDataVersion !== undefined ? row("Game data version", num(() => info.gameDataVersion!, (n) => { info.gameDataVersion = n; }, { int: true })) : null,
+                  ? row("Game data set", num("gameDataSet"), "0 = default")
+                  : row("Loading screen number", num("gameDataSet")),
+                info.gameDataVersion !== undefined ? row("Game data version", num("gameDataVersion")) : null,
                 // Not row(): that wraps its content in one label, and these are labelled checkboxes.
                 info.supportedModes !== undefined ? h("div.form-row", {}, h("span.form-label", {}, "Supported graphics modes"), h("div.form-control", {},
                   ...GRAPHICS_MODES.map(([m, label]) => bit(() => info.supportedModes!, (n) => { info.supportedModes = n; }, m, label)),
@@ -566,9 +575,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("small.muted", {}, "Problems checks the map's models for each mode ticked here."))) : null,
               ),
               info.cameraZoom ? section_("Camera zoom",
-                row("Default", num(() => info.cameraZoom!.default, (n) => { info.cameraZoom!.default = n; }, { int: true })),
-                row("Maximum", num(() => info.cameraZoom!.max, (n) => { info.cameraZoom!.max = n; }, { int: true })),
-                info.cameraZoom.min !== undefined ? row("Minimum", num(() => info.cameraZoom!.min!, (n) => { info.cameraZoom!.min = n; }, { int: true })) : null,
+                row("Default", num("zoomDefault")),
+                row("Maximum", num("zoomMax")),
+                info.cameraZoom.min !== undefined ? row("Minimum", num("zoomMin")) : null,
               ) : null,
             ].filter((x): x is HTMLElement => x !== null);
           },
@@ -582,26 +591,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Light environment", lists
                 ? select<string>([["", "Default (map tileset)"], ...lists.tilesets], () => info.lightEnvironment, (s) => { info.lightEnvironment = s; })
                 : text(() => info.lightEnvironment, (s) => { info.lightEnvironment = s; }, { plain: true })),
-              row("Water tint", color(info.waterTint), "Used when “Enable water tinting” is set (Options)."),
+              row("Water tint", color(info.waterTint, "waterTintAlpha"), "Used when “Enable water tinting” is set (Options)."),
             ),
             section_("Fog",
               row("Style", select(FOG_STYLES, () => info.fog.style, (n) => { info.fog.style = n; })),
-              row("Start Z", num(() => info.fog.start, (n) => { info.fog.start = n; })),
-              row("End Z", num(() => info.fog.end, (n) => { info.fog.end = n; })),
-              row("Density", num(() => info.fog.density, (n) => { info.fog.density = n; })),
-              row("Color", color(info.fog.color), "Used when “Use terrain fog” is set (Options)."),
+              row("Start Z", num("fogStart")),
+              row("End Z", num("fogEnd")),
+              row("Density", num("fogDensity")),
+              row("Color", color(info.fog.color, "fogAlpha"), "Used when “Use terrain fog” is set (Options)."),
             ),
             info.terrainFog ? section_("Terrain fog (3.0)",
-              row("Style", num(() => info.terrainFog!.style, (n) => { info.terrainFog!.style = n; }, { int: true })),
-              row("Draw over sky", num(() => info.terrainFog!.overSky, (n) => { info.terrainFog!.overSky = n; }, { int: true })),
-              row("Linear start", num(() => info.terrainFog!.linearStart, (n) => { info.terrainFog!.linearStart = n; })),
-              row("Linear end", num(() => info.terrainFog!.linearEnd, (n) => { info.terrainFog!.linearEnd = n; })),
-              row("Max opacity", num(() => info.terrainFog!.maxOpacity, (n) => { info.terrainFog!.maxOpacity = n; })),
-              row("Height", num(() => info.terrainFog!.height, (n) => { info.terrainFog!.height = n; })),
+              row("Style", num("terrainFogStyle")),
+              row("Draw over sky", num("terrainFogOverSky")),
+              row("Linear start", num("terrainFogLinearStart")),
+              row("Linear end", num("terrainFogLinearEnd")),
+              row("Max opacity", num("terrainFogMaxOpacity")),
+              row("Height", num("terrainFogHeight")),
             ) : null,
             info.water ? section_("Water rendering (3.0)",
-              ...Object.keys(info.water).map((k) => row(k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
-                num(() => info.water![k], (n) => { info.water![k] = n; }, { int: true })))) : null,
+              ...WATER_NUMBERS.filter((k) => infoNumber(info, k) !== undefined).map((k) => row(INFO_NUMBERS[k].label, num(k)))) : null,
           ].filter((x): x is HTMLElement => x !== null),
           // The World Editor's Map Properties > Prefs and its Trigger Editor's JassHelper menu: war3mapExtra.txt.
           preferences: () => {
@@ -680,7 +688,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     const followed = starts.get(id);
                     const startCell = (axis: 0 | 1) => followed
                       ? h("td.muted", { title: `Player ${id + 1}'s start location: move it in the terrain editor (Objects ▸ Start location) and save there.` }, String(followed[axis]))
-                      : h("td", {}, num(() => p!.start[axis], (n) => { p!.start[axis] = n; }));
+                      : h("td", {}, num(axis ? "playerStartY" : "playerStartX", { player: info.players.indexOf(p!) }));
                     if (!p) {
                       const at = starts.get(id)!;
                       return h("tr.muted", {}, h("td", {}, String(id + 1)), h("td", {}, `Player ${id + 1}`), h("td", {}, controller(id)),

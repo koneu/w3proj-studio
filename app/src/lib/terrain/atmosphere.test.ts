@@ -59,6 +59,17 @@ test("a refused call leaves the document as it was", () => {
   assert.throws(() => applySky(old, { overSky: 1 }, { tilesets }), /over sky/);
 });
 
+test("set_sky refuses a fog value war3map.w3i can't hold (past a 32-bit float, overSky past 32 bits), changing nothing; the edges are taken", () => {
+  const d = doc();
+  for (const key of ["fogStart", "fogEnd", "fogDensity"] as const) {
+    for (const v of [1e39, -1e39]) assert.throws(() => applySky(d, { fogStyle: "1", [key]: v }, { tilesets }), new RegExp(`${key} must be a number from -3.4e38 to 3.4e38`));
+  }
+  for (const v of [2147483648, -2147483649, 0.5]) assert.throws(() => applySky(d, { fogEnd: 1, overSky: v }, { tilesets }), /overSky must be a whole number from -2147483648 to 2147483647/);
+  assert.deepEqual(d, doc());
+  applySky(d, { fogStart: -3.4028234663852886e38, fogEnd: 3.4028234663852886e38, overSky: -2147483648 }, { tilesets });
+  assert.deepEqual([d.fog.start, d.fog.end, d.terrainFog.overSky], [-3.4028234663852886e38, 3.4028234663852886e38, -2147483648]);
+});
+
 test("set_sky says the terrain view shows no fog while its Fog checkbox is off", async () => {
   const { fogViewNote } = await import("./atmosphere");
   assert.match(fogViewNote({ fogEnd: 4000 }, false), /Fog.*checkbox/);

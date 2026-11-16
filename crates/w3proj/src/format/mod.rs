@@ -586,6 +586,73 @@ mod w3i_tests {
         assert_eq!(encode(&def, &back).unwrap(), bin);
     }
 
+    /// Every number Map Properties types into war3map.w3i (app builtin/map-info/numbers.ts): a value past its field is
+    /// refused on write (no bytes, so nothing is written), and the field's ends still encode and read back.
+    #[test]
+    fn map_properties_numbers_past_their_fields_are_refused() {
+        let def = w3i();
+        let doc = sample(39, true);
+        let set = |path: &[&str], v: &Value| {
+            let mut doc = doc.clone();
+            let mut at = &mut doc;
+            for p in path {
+                at = match p.parse::<usize>() {
+                    Ok(i) => &mut at[i],
+                    Err(_) => &mut at[*p],
+                };
+            }
+            assert!(!at.is_null(), "no field {path:?}");
+            *at = v.clone();
+            doc
+        };
+        let i32_bad = [json!(2147483648i64), json!(-2147483649i64), json!(0.5)];
+        let i32_good = [json!(i32::MIN), json!(i32::MAX)];
+        let u32_bad = [json!(-1), json!(4294967296u64), json!(1.5)];
+        let u32_good = [json!(0), json!(u32::MAX)];
+        let u8_bad = [json!(-1), json!(256), json!(1.5)];
+        let u8_good = [json!(0), json!(255)];
+        let f32_bad = [json!(1e39), json!(-1e39)];
+        let f32_good = [json!(f32::MAX as f64), json!(-(f32::MAX as f64)), json!(0.5)];
+        let mut fields: Vec<(Vec<&str>, &[Value], &[Value])> = vec![
+            (vec!["loadingScreen", "number"], &i32_bad, &i32_good),
+            (vec!["loadingScreen", "crestRace"], &u32_bad, &u32_good),
+            (vec!["gameDataSet"], &u32_bad, &u32_good),
+            (vec!["gameDataVersion"], &u32_bad, &u32_good),
+            (vec!["fog", "color", "3"], &u8_bad, &u8_good),
+            (vec!["waterTint", "3"], &u8_bad, &u8_good),
+            (vec!["players", "0", "start", "0"], &f32_bad, &f32_good),
+            (vec!["players", "0", "start", "1"], &f32_bad, &f32_good),
+            (vec!["upgrades", "0", "level"], &u32_bad, &u32_good),
+        ];
+        for k in ["default", "max", "min"] {
+            fields.push((vec!["cameraZoom", k], &i32_bad, &i32_good));
+        }
+        for k in ["start", "end", "density"] {
+            fields.push((vec!["fog", k], &f32_bad, &f32_good));
+        }
+        for k in ["style", "overSky"] {
+            fields.push((vec!["terrainFog", k], &i32_bad, &i32_good));
+        }
+        for k in ["linearStart", "linearEnd", "maxOpacity", "height"] {
+            fields.push((vec!["terrainFog", k], &f32_bad, &f32_good));
+        }
+        for k in ["minOpacity", "maxOpacity", "reflectivity", "emissivity", "edgeSoftness", "wavesVertexDisplacement",
+            "wavesNormalMapStrength", "overrideColor", "environmentMapReflectivity", "unknown"] {
+            fields.push((vec!["water", k], &i32_bad, &i32_good));
+        }
+        for (path, bad, good) in fields {
+            for v in bad {
+                assert!(encode(&def, &set(&path, v)).is_err(), "{path:?} = {v} was written");
+            }
+            for v in good {
+                let d = set(&path, v);
+                let bin = encode(&def, &d).unwrap_or_else(|e| panic!("{path:?} = {v} was refused: {e}"));
+                // Read back and written again, the same bytes (a float's JSON is the f32's shortest form).
+                assert_eq!(encode(&def, &decode(&def, &bin).unwrap().value).unwrap(), bin, "{path:?} = {v} reads back");
+            }
+        }
+    }
+
     #[test]
     fn unsupported_versions_are_rejected() {
         let mut json = sample(31, true);
