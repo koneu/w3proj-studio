@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  bulkDrops, campLevel, campLevelText, creepLevel, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, itemTablesDiffer, setHeading, setShares, tableUse, type DropperRow,
+  bulkDrops, campLevel, dropChance, campLevelText, creepLevel, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, itemTablesDiffer, setHeading, setShares, tableUse, type DropperRow,
 } from "./dropsview";
 import type { Placed } from "./objects";
 import { changeEach, dropsOf, type TypeFacts } from "./unitprops";
@@ -187,4 +187,12 @@ test("Map Properties' item tables differ from the saved ones by name, number, it
   assert.equal(itemTablesDiffer([], []), false);
   // A war3map.w3i that couldn't be read: whatever Map Properties holds is unsaved.
   assert.equal(itemTablesDiffer(same, null), true);
+});
+
+test("the drops editor takes a chance whole from 0 to 100 or refuses it, never rounds or clamps", () => {
+  assert.deepEqual(dropChance("0"), { value: 0 });
+  assert.deepEqual(dropChance(" 33 "), { value: 33 });
+  assert.deepEqual(dropChance("100"), { value: 100 });
+  for (const bad of ["33.5", "-1", "101", "4294967296", "1e3", "", " ", "abc", "NaN"]) assert.ok("refused" in dropChance(bad), `"${bad}" must be refused`);
+  assert.match((dropChance("150") as { refused: string }).refused, /A chance must be a whole number from 0 to 100/);
 });

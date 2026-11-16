@@ -5,7 +5,7 @@
 
 import { h } from "../../workbench/dom";
 import { ITEM_CLASSES, MAX_ITEM_LEVEL, randomIdLabel, randomObjectId } from "../../lib/objects/randomids";
-import { dropsText, dropsVariants, isEmptyItem, itemLabel, setHeading, setShares, type BulkDrops } from "./dropsview";
+import { dropChance, dropsText, dropsVariants, isEmptyItem, itemLabel, setHeading, setShares, type BulkDrops } from "./dropsview";
 import type { Placed } from "./objects";
 import { dropsOf, ownSetsOnly, redistribute, sameValue, setTotal, tableChoice, type DropItem } from "./unitprops";
 
@@ -217,9 +217,9 @@ export function dropsEditor(host: DropsUiHost, entries: readonly Placed[]): HTML
           itemView(host, it.id),
           h("input.drops-chance-input", { type: "number", min: 0, max: 100, step: 1, value: String(it.chance), "data-prop": `chance-${k}-${j}`, title: "Chance in percent",
             onchange: (ev: Event) => {
-              const input = ev.target as HTMLInputElement, v = Number(input.value);
-              if (input.value.trim() !== "" && Number.isFinite(v)) withSets((x) => { x[k][j] = { ...x[k][j], chance: v }; });
-              else input.value = String(it.chance);
+              const input = ev.target as HTMLInputElement, t = dropChance(input.value);
+              if ("refused" in t) { host.warn(`Not changed: ${t.refused}`); input.value = String(it.chance); }
+              else if (t.value !== it.chance) withSets((x) => { x[k][j] = { ...x[k][j], chance: t.value }; });
             } }), h("span.muted", {}, "%"),
           bar(it.share),
           h("button.icon-button", { title: "Remove the item", "data-prop": `remove-item-${k}-${j}`, onclick: () => withSets((x) => { x[k].splice(j, 1); }) }, "×"))),

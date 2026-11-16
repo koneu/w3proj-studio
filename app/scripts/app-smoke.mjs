@@ -12955,6 +12955,131 @@ async function staleEditors(page, found) {
   }
 }
 
+/** Types `text` into the field `expr` finds and fires its change, as a user leaving the box does. */
+const typeInto = (page, expr, text) => page.evaluate(`(() => { const i = ${expr}; if (!i) return null; i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+
+/** The AI Editor refuses numbers a .wai can't hold (u32 fields; app/src/builtin/ai-editor/numbers.ts): Initial Delay typed
+ *  as 1.5 or -1 is refused with why, the box shows the value kept, the AI isn't changed; a whole number is taken
+ *  (control, one change). */
+async function aiNumbersRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`AI Editor numbers: ${what}`);
+  const k = await heightKit(page, "AiRefuse");
+  const wai = join(k.root, "..", "Refuse Raider.wai");
+  rmSync(wai, { force: true });
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(async () => { window.__refuseSave = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+  try {
+    const field = `[...document.querySelectorAll("input.ai-num")].filter((e) => !e.disabled)[0]`;
+    await until("the AI Editor", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b && !!${field}; })()`), 20000);
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
+    const was = await page.evaluate(`${field}.value`);
+    const dirtyWas = await dirty();
+    for (const bad of ["1.5", "-1", "4294967296"]) {
+      await k.clearToasts();
+      await typeInto(page, field, bad);
+      await settled(page);
+      const said = await k.toasts();
+      const now = await page.evaluate(`${field}.value`);
+      if (!/Initial Delay must be a whole number from 0 to 4294967295/.test(said)) fail(`Initial Delay typed as ${bad} said "${said}"`);
+      if (now !== was) fail(`Initial Delay typed as ${bad} shows ${now}, not the kept ${was}`);
+      if (await dirty() !== dirtyWas) fail(`Initial Delay typed as ${bad} changed the AI`);
+    }
+    const good = was === "7" ? "8" : "7";
+    await typeInto(page, field, good);
+    await settled(page);
+    if (await page.evaluate(`${field}.value`) !== good || !(await dirty())) fail(`a whole number ${good} wasn't taken (control)`);
+  } finally {
+    await page.evaluate(`(() => { if (window.__refuseSave) w3.window.pickSaveFile = window.__refuseSave; delete window.__refuseSave; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`AI Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The Lighting Editor refuses numbers a lighting model's float can't hold (app/src/builtin/lighting-editor/numbers.ts): a
+ *  value typed as 1e39 or an hour past the day is refused with why, the box shows the value kept, the model isn't
+ *  changed; 0.31 is taken (control, one change). */
+async function lightNumbersRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`Lighting Editor numbers: ${what}`);
+  const k = await heightKit(page, "LightRefuse");
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`(() => { window.__refuseQuick = w3.window.quickPick; w3.window.quickPick = async (items) => items[0]; w3.commands.execute("w3.lighting.show"); })()`);
+  try {
+    await until("the Lighting view's Customize button", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".lighting-section button")].find((x) => x.textContent === "Customize…"); b?.click(); return !!b; })()`), 20000);
+    await until("the Lighting Editor", () => page.evaluate(`!!document.querySelector("input.lighting-num")`), 30000);
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
+    const field = `document.querySelector("input.lighting-num")`;
+    const dirtyWas = await dirty();
+    const was = await page.evaluate(`${field}.value`);
+    for (const bad of ["1e39", "-1e39", "abc"]) {
+      await k.clearToasts();
+      await typeInto(page, field, bad);
+      await settled(page);
+      const said = await k.toasts();
+      if (!/must be a number from -3\.4e38 to 3\.4e38/.test(said)) fail(`a value typed as ${bad} said "${said}"`);
+      if (await page.evaluate(`${field}.value`) !== was) fail(`a value typed as ${bad} shows ${await page.evaluate(`${field}.value`)}, not the kept ${was}`);
+      if (await dirty() !== dirtyWas) fail(`a value typed as ${bad} changed the model`);
+    }
+    // An hour past the day (the key times of the first day track).
+    const hour = `[...document.querySelectorAll("input.lighting-num")].find((e) => e.step === "0.25")`;
+    if (await page.evaluate(`!!${hour}`)) {
+      const hourWas = await page.evaluate(`${hour}.value`);
+      await k.clearToasts();
+      await typeInto(page, hour, "25");
+      await settled(page);
+      if (!/Hour must be a number from 0 to 24/.test(await k.toasts()) || await page.evaluate(`${hour}.value`) !== hourWas || await dirty() !== dirtyWas) fail("an hour of 25 wasn't refused with the box and the model kept");
+    }
+    await typeInto(page, field, was === "0.31" ? "0.32" : "0.31");
+    await settled(page);
+    if (!(await dirty())) fail("0.31 wasn't taken (control)");
+  } finally {
+    await page.evaluate(`(() => { if (window.__refuseQuick) w3.window.quickPick = window.__refuseQuick; delete window.__refuseQuick; })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+  } catch (e) { found.push(`Lighting Editor numbers: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
+/** The drops editor refuses a chance that isn't a whole percentage from 0 to 100 (dropChance in dropsview.ts): 33.5 and 101
+ *  typed into a set's item are refused with why, the box shows the kept chance, the units file stays as it was; 40 is taken
+ *  (control). */
+async function dropChancesRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`drops chances: ${what}`);
+  const k = await heightKit(page, "DropRefuse");
+  await k.tool("place_objects", { objects: [{ id: "nftt", x: 0, y: 0, player: 25, drops: [{ level: 2, kind: "charged" }] }], ignoreRoom: true });
+  await k.save();
+  await k.tab("Select");
+  await k.look(0, 0, { id: "nftt", x: 0, y: 0 });
+  await until("the drops block", () => page.evaluate(`!!document.querySelector(".terrain-drops")`), 20000);
+  await k.hands.click(".terrain-drops [data-prop=\"edit-drops\"]");
+  const chance = `document.querySelector('.drops-tab [data-prop="chance-0-0"]')`;
+  await until("the chance box", () => page.evaluate(`!!${chance}`), 20000);
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
+  const was = await page.evaluate(`${chance}.value`);
+  if (was !== "100" || await dirty()) fail(`the chance starts as ${was} (dirty ${await dirty()})`);
+  const unitsBefore = JSON.stringify(k.units());
+  for (const bad of ["33.5", "101", "-1"]) {
+    await k.clearToasts();
+    await typeInto(page, chance, bad);
+    await settled(page);
+    const said = await k.toasts();
+    if (!/Not changed: A chance must be a whole number from 0 to 100/.test(said)) fail(`a chance typed as ${bad} said "${said}"`);
+    if (await page.evaluate(`${chance}.value`) !== was) fail(`a chance typed as ${bad} shows ${await page.evaluate(`${chance}.value`)}, not the kept ${was}`);
+    if (await dirty()) fail(`a chance typed as ${bad} changed the terrain`);
+  }
+  await k.save();
+  if (JSON.stringify(k.units()) !== unitsBefore) fail("the refused chances changed the units file");
+  await typeInto(page, chance, "40");
+  await settled(page);
+  if (!(await dirty())) fail("a chance of 40 wasn't taken (control)");
+  await k.save();
+  if (k.units().find((u) => u.id === "nftt")?.itemSets?.[0]?.[0]?.chance !== 40) fail(`the saved chance is ${JSON.stringify(k.units().find((u) => u.id === "nftt")?.itemSets)}`);
+  } catch (e) { found.push(`drops chances: ${e.message}`); } finally { await restoreWindow(page); }
+}
+
 /** The Trigger Editor's lines selected together: Shift/Ctrl-click, Select All and Clear (Ctrl+A, Escape), then Delete, Cut,
  *  Copy and Paste (Ctrl+X/C/V) and Toggle Function Enabled (Ctrl+E) acting on all of them as one undo step each; a paste
  *  into a map without the variables the lines use creates them (type, array, initial value) with the lines, in the same
@@ -14854,6 +14979,7 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         addPathReady,
+        aiNumbersRefused,
         areaLevels,
         areaReplaceCt0,
         artModeReload,
@@ -14872,6 +14998,7 @@ async function run() {
         doodadRulesEdit,
         doodadSnapOnLoad,
         drawCalls,
+        dropChancesRefused,
         editDuringSave,
         editorExtras,
         editorTabRaces: (p, f) => editorTabRaces(p, f, project),
@@ -14895,6 +15022,7 @@ async function run() {
         itemTablesAccess,
         keybindings,
         keyChords,
+        lightNumbersRefused,
         mapInfoColorTools,
         mapInfoUndoKept,
         mapSizeUi,
@@ -15262,6 +15390,12 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "soundEditorKeys", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
   await leftOpen(page, "typedFieldSave", found);
+  await aiNumbersRefused(page, found);
+  await leftOpen(page, "aiNumbersRefused", found);
+  await lightNumbersRefused(page, found);
+  await leftOpen(page, "lightNumbersRefused", found);
+  await dropChancesRefused(page, found);
+  await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));
   await leftOpen(page, "turtleCliffSave", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));

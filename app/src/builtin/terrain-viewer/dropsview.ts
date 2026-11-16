@@ -4,6 +4,7 @@
 // and the edits that go over several objects at once (the same drops for all, a set added to each, drops copied).
 // The changes themselves are unitprops.ts's: checked first, all or none.
 
+import { typedBetween } from "../../lib/formats/numbers";
 import { campGroups } from "./clusters";
 import type { Placed } from "./objects";
 import { dropsOf, randomItemLabel, setTotal, type DropItem, type Drops } from "./unitprops";
@@ -237,4 +238,10 @@ export function bulkDrops(entries: readonly Placed[], edit: BulkDrops): { error:
       return { mode: "custom", sets: [...(d.mode === "custom" ? d.sets : []), structuredClone(edit.set)] };
     }),
   };
+}
+
+/** A chance typed for a dropped item: a whole percentage from 0 to 100 (stored as a u32), else why it is refused; the
+ *  drops stay as they were (user decision 2026-11-15: refuse, never round or clamp). */
+export function dropChance(typed: string): { value: number } | { refused: string } {
+  return typedBetween("u32", typed, "A chance", { min: 0, max: 100 });
 }

@@ -8,6 +8,7 @@
 // over the day and the direction; it writes the text as the World Editor does (lib/model/dnclight).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { lightNumber } from "./numbers";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, writeLightMdl, type Light, type LightModel, type Prop, type Track } from "../../lib/model/dnclight";
 import { TILESETS } from "../../lib/terrain/tilesets";
@@ -193,13 +194,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.append(root);
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
 
-        const num = (get: () => number, set: (v: number) => void, step = "0.05") => {
-          const input = h("input.form-input.form-num.lighting-num", { type: "number", step, value: String(Number(get().toPrecision(6))) });
+        /** A number the model's file stores as a 32-bit float (or, with `limits`, within them): a typed value it can't hold is
+         *  refused with why, the box shows the value kept, and the model stays as it was. */
+        const num = (label: string, get: () => number, set: (v: number) => void, step = "0.05", limits: { min?: number; max?: number } = {}) => {
+          const shown = () => String(Number(get().toPrecision(6)));
+          const input = h("input.form-input.form-num.lighting-num", { type: "number", step, value: shown() });
           input.addEventListener("change", () => {
-            const v = Number(input.value);
-            if (input.value === "" || !Number.isFinite(v)) { input.classList.add("invalid"); return; }
-            input.classList.remove("invalid");
-            set(v);
+            const t = lightNumber(input.value, label, limits);
+            if ("refused" in t) { void w3.window.showError(t.refused); input.value = shown(); return; }
+            set(t.value);
             changed();
           });
           return input;
@@ -213,7 +216,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const trackEditor = (t: Track, width: number, value: (k: { value: number[] }) => Node, dayTime: boolean, redraw: () => void) => {
           const body = h("tbody", {}, ...t.keys.map((k, i) => h("tr", {},
             h("td", {}, dayTime
-              ? num(() => toHour(k.time), (v) => { k.time = toTime(Math.min(24, Math.max(0, v))); t.keys.sort((a, b) => a.time - b.time); redraw(); }, "0.25")
+              ? num("Hour", () => toHour(k.time), (v) => { k.time = toTime(v); t.keys.sort((a, b) => a.time - b.time); redraw(); }, "0.25", { min: 0, max: 24 })
               : h("span.muted", {}, String(k.time))),
             h("td", {}, value(k)),
             h("td", {}, t.keys.length > 1 ? h("button.icon-button", { title: "Remove this key", onclick: () => { t.keys.splice(i, 1); changed(); redraw(); } }, "×") : null))));
@@ -247,8 +250,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** A number: fixed, or keys over the day. */
         const numberProp = (p: Prop, redraw: () => void) => ("track" in p
-          ? trackEditor(p.track, 1, (k) => num(() => k.value[0], (v) => { k.value = [v]; }), true, redraw)
-          : num(() => p.value[0], (v) => { p.value = [v]; }));
+          ? trackEditor(p.track, 1, (k) => num("Value", () => k.value[0], (v) => { k.value = [v]; }), true, redraw)
+          : num("Value", () => p.value[0], (v) => { p.value = [v]; }));
 
         const lightForm = (l: Light, redraw: () => void) => h("section.form-section", {},
           h("h3", {}, `${l.name} (${["omnidirectional", "directional", "ambient"][l.type] ?? "light"})`),
@@ -256,12 +259,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           row("Colour", colorProp(l.color, redraw)),
           row("Ambient intensity", numberProp(l.ambIntensity, redraw)),
           row("Ambient colour", colorProp(l.ambColor, redraw)),
-          row("Shadow intensity", num(() => l.shadowIntensity, (v) => { l.shadowIntensity = v; })),
+          row("Shadow intensity", num("Shadow intensity", () => l.shadowIntensity, (v) => { l.shadowIntensity = v; })),
           l.rotation ? row("Direction", h("div", {},
             h("small.muted", {}, "Rotation of the light as a quaternion (x, y, z, w) per key."),
             h("table.form-table.lighting-keys", {}, h("tbody", {}, ...l.rotation.keys.map((k) => h("tr", {},
               h("td.muted", {}, `${Number(toHour(k.time).toFixed(2))} h`),
-              ...[0, 1, 2, 3].map((c) => h("td", {}, num(() => k.value[c], (v) => { k.value[c] = v; }, "0.01"))))))))) : null,
+              ...[0, 1, 2, 3].map((c) => h("td", {}, num(`Rotation ${"xyzw"[c]}`, () => k.value[c], (v) => { k.value[c] = v; }, "0.01"))))))))) : null,
         );
 
         const render = () => {

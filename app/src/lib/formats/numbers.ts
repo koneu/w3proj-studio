@@ -1,7 +1,7 @@
 // A number typed into a field of a map file: what the field's type can hold, and the word when it can't. A value
 // past it is refused (user decision 2026-11-15: refuse, never overflow, wrap or clamp), so nothing changes.
 
-import { float32Text, storableFloat32 } from "./float32";
+import { FLOAT32_MAX, float32Text, storableFloat32 } from "./float32";
 
 /** The stored types of the map files' number fields. */
 export type StoredNumber = "u8" | "i32" | "u32" | "f32";
@@ -30,4 +30,20 @@ export function typedNumber(kind: StoredNumber, typed: string, label: string): {
   const v = Number(typed.trim());
   if (typed.trim() === "" || !storable(kind, v)) return { refused: storableText(kind, label) };
   return { value: v };
+}
+
+/** Like `typedNumber`, and the value must lie within the editor's own limits `min`..`max` too (a handicap of 50 to 100):
+ *  a value outside them is refused as well, never pulled back in. */
+export function typedBetween(kind: StoredNumber, typed: string, label: string, limits: { min?: number; max?: number } = {}): { value: number } | { refused: string } {
+  const t = typedNumber(kind, typed, label);
+  const { min, max } = limits;
+  if (min === undefined && max === undefined) return t;
+  if ("refused" in t || (min !== undefined && t.value < min) || (max !== undefined && t.value > max)) {
+    // One word for every way out: the range the value must lie in is the editor's, within the type's.
+    const [lo, hi] = kind === "f32" ? [-FLOAT32_MAX, FLOAT32_MAX] : RANGE[kind];
+    const from = Math.max(min ?? lo, lo), to = Math.min(max ?? hi, hi);
+    const show = (n: number) => (Math.abs(n) === FLOAT32_MAX ? (n < 0 ? "-3.4e38" : "3.4e38") : String(n));
+    return { refused: `${label} must be ${kind === "f32" ? "a number" : "a whole number"} from ${show(from)} to ${show(to)}.` };
+  }
+  return t;
 }

@@ -12,6 +12,7 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
+import { aiNumber } from "./numbers";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { StackSave } from "../../lib/undo";
@@ -370,13 +371,23 @@ class AiView {
   private field(label: string, ...control: (HTMLElement | string | null)[]) {
     return h("div.ai-field", {}, h("label", {}, label), h("div", {}, ...control));
   }
-  private num(value: number, set: (v: number) => void, opts: { min?: number; max?: number; width?: string } = {}) {
+  /** A number field of the .wai (all u32): a value the file can't hold, or outside `min`..`max`, is refused with why and the
+   *  box shows the value kept; it is never rounded or clamped. */
+  private num(label: string, value: number, set: (v: number) => void, opts: { min?: number; max?: number; width?: string } = {}) {
     return this.watchTyping(h("input.ai-num", {
       type: "number", value: String(value), min: opts.min, max: opts.max, disabled: !this.editable,
       onchange: (e: Event) => {
-        const v = Math.round(Number((e.target as HTMLInputElement).value));
-        if (!Number.isFinite(v) || v === value) return;
-        this.change(() => set(Math.max(opts.min ?? -Infinity, Math.min(opts.max ?? Infinity, v))));
+        const input = e.target as HTMLInputElement;
+        const t = aiNumber(input.value, label, opts);
+        if ("refused" in t) {
+          void this.w3.window.showError(t.refused);
+          input.value = String(value);
+          this.typing = false;
+          this.showDirty();
+          return;
+        }
+        if (t.value === value) return;
+        this.change(() => set(t.value));
       },
     }));
   }
@@ -602,7 +613,7 @@ class AiView {
       h("h3", {}, "Heroes Used"),
       ...[0, 1, 2].map((i) => this.field(`Hero ${i + 1}`, this.objectButton(ai.heroes[i], `Hero ${i + 1}`, ["w3u"], (id) => { ai.heroes[i] = id; }, true))),
       h("h3", {}, "Training Order"),
-      h("div.ai-orders", {}, ...HERO_ORDERS.map((o, i) => this.field(`Heroes ${o}`, this.num(ai.heroChances[i], (v) => { ai.heroChances[i] = v; }, { min: 0, max: 100 }), " %"))),
+      h("div.ai-orders", {}, ...HERO_ORDERS.map((o, i) => this.field(`Heroes ${o}`, this.num(`Heroes ${o}`, ai.heroChances[i], (v) => { ai.heroChances[i] = v; }, { min: 0, max: 100 }), " %"))),
       h("p.muted", {}, `Chances add up to ${ai.heroChances.reduce((a, b) => a + b, 0)} %.`),
       h("h3", {}, "Skill Selection"),
       h("div.ai-tabs.ai-subtabs", {}, ...[0, 1, 2].map((i) => h(`button${i === this.hero ? ".active" : ""}`, { onclick: () => { this.hero = i; this.render(); } },
@@ -699,7 +710,7 @@ class AiView {
         town(b),
         this.field("Workers", this.select(mode, [["all", "All"], ["na", "All Not Attacking"], ["fixed", "Fixed Value"]], (v) => {
           b.workers = v === "all" ? ALL : v === "na" ? -2 >>> 0 : 5;
-        }), mode === "fixed" ? this.num(b.workers, (v) => { b.workers = v; }, { min: 0, max: 100 }) : null),
+        }), mode === "fixed" ? this.num("Workers", b.workers, (v) => { b.workers = v; }, { min: 0, max: 100 }) : null),
         this.condEditor(b));
     }
     const t = this.ai.targets[s.i];
@@ -712,8 +723,8 @@ class AiView {
         else delete t.creep;
       })),
       t.target === CREEPS && t.creep ? h("div", {},
-        this.field("Minimum Strength", this.num(t.creep.min, (v) => { t.creep!.min = v; }, { min: 0 })),
-        this.field("Maximum Strength", this.num(t.creep.max, (v) => { t.creep!.max = v; }, { min: 0 })),
+        this.field("Minimum Strength", this.num("Minimum Strength", t.creep.min, (v) => { t.creep!.min = v; }, { min: 0 })),
+        this.field("Maximum Strength", this.num("Maximum Strength", t.creep.max, (v) => { t.creep!.max = v; }, { min: 0 })),
         this.field("", this.check("Allow Flyers", t.creep.allowFlyers !== 0, (on) => { t.creep!.allowFlyers = on ? 1 : 0; }))) : null,
       this.condEditor(t));
   }
@@ -745,8 +756,8 @@ class AiView {
 
     const waves = h("div.ai-section", {},
       h("h3", {}, "Attack Waves"),
-      this.field("Initial Delay", this.num(ai.initialDelay, (v) => { ai.initialDelay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the first wave attacks")),
-      this.field("Repeat Waves", this.num(ai.repeatWaves, (v) => { ai.repeatWaves = v; }, { min: 0 }), h("span.muted", {}, " waves repeated after the last one")),
+      this.field("Initial Delay", this.num("Initial Delay", ai.initialDelay, (v) => { ai.initialDelay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the first wave attacks")),
+      this.field("Repeat Waves", this.num("Repeat Waves", ai.repeatWaves, (v) => { ai.repeatWaves = v; }, { min: 0 }), h("span.muted", {}, " waves repeated after the last one")),
       this.field("Minimum Forces", this.select(ai.minForces, [[FIRST_HERO_ONLY, "First Hero Only"], ...groupChoices], (v) => { ai.minForces = v; })),
       h("div.ai-list.ai-scroll", {}, h("table.ai-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Attack Group"), h("th", {}, "Delay"))),
@@ -759,7 +770,7 @@ class AiView {
         ["Move Down", () => this.move(ai.waves, this.wave, 1, (j) => { this.wave = j; }), this.wave < 0 || this.wave >= ai.waves.length - 1]),
       ai.waves[this.wave] ? h("div.ai-detail", {},
         this.field("Attack Group", this.select(ai.waves[this.wave].group, groupChoices, (v) => { ai.waves[this.wave].group = v; })),
-        this.field("Delay", this.num(ai.waves[this.wave].delay, (v) => { ai.waves[this.wave].delay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the next wave"))) : null);
+        this.field("Delay", this.num("Delay", ai.waves[this.wave].delay, (v) => { ai.waves[this.wave].delay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the next wave"))) : null);
     return h("div.ai-split.ai-attack", {}, h("div.ai-lists", {}, groups), h("div.ai-lists", {}, waves));
   }
   private unitDetail() {
@@ -778,8 +789,8 @@ class AiView {
         else if (v === "minAll") { u.quantity = n; u.max = ALL; }
         else { u.quantity = n; u.max = n + 1; }
       }),
-      mode !== "all" ? this.num(u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
-      mode === "range" ? h("span", {}, " to ", this.num(u.max, (v) => { u.max = Math.max(v, u.quantity); }, { min: 0 })) : null),
+      mode !== "all" ? this.num("Quantity", u.quantity, (v) => { u.quantity = v; if (mode === "fixed" || (mode === "range" && u.max < v)) u.max = v; }, { min: 0 }) : null,
+      mode === "range" ? h("span", {}, " to ", this.num("Maximum quantity", u.max, (v) => { u.max = Math.max(v, u.quantity); }, { min: 0 })) : null),
       this.condEditor(u));
   }
 
@@ -791,7 +802,7 @@ class AiView {
     const withCurrent = (list: [number, string][], v: number) => (list.some(([x]) => x === v) ? list : [...list, [v, String(v)] as [number, string]]);
     return h("div.ai-page.ai-scroll", {},
       h("p.muted", {}, "Settings for the World Editor's test game (stored with the AI; running a test game isn't supported here)."),
-      this.field("Game Speed", this.num(ai.gameSpeed, (v) => { ai.gameSpeed = v; }, { min: 0 }), h("span.muted", {}, " × regular game speed")),
+      this.field("Game Speed", this.num("Game Speed", ai.gameSpeed, (v) => { ai.gameSpeed = v; }, { min: 0 }), h("span.muted", {}, " × regular game speed")),
       this.field("Game Options", h("div", {},
         this.check("Disable Fog of War", (ai.gameOptions & 1) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 1 : ai.gameOptions & ~1; }, "Option bit 1"),
         this.check("Disable Victory/Defeat Conditions", (ai.gameOptions & 2) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 2 : ai.gameOptions & ~2; }, "Option bit 2"))),
@@ -801,11 +812,11 @@ class AiView {
         h("thead", {}, h("tr", {}, ...["Slot", "Team", "Race", "Color", "Handicap", "AI", "AI Difficulty", "AI Script"].map((x) => h("th", {}, x)))),
         h("tbody", {}, ...ai.players.map((p) => h("tr", {},
           h("td", {}, String(p.index + 1)),
-          h("td", {}, this.num(p.team, (v) => { p.team = v; }, { min: 0 })),
+          h("td", {}, this.num("Team", p.team, (v) => { p.team = v; }, { min: 0 })),
           h("td", {}, this.select(p.race, withCurrent(races, p.race), (v) => { p.race = v; })),
-          h("td", {}, this.num(p.color, (v) => { p.color = v; }, { min: 0 })),
-          h("td", {}, this.num(p.handicap, (v) => { p.handicap = v; }, { min: 50, max: 100 })),
-          h("td", { title: "Control and AI type as stored" }, this.num(p.aiType, (v) => { p.aiType = v; }, { min: 0 })),
+          h("td", {}, this.num("Color", p.color, (v) => { p.color = v; }, { min: 0 })),
+          h("td", {}, this.num("Handicap", p.handicap, (v) => { p.handicap = v; }, { min: 50, max: 100 })),
+          h("td", { title: "Control and AI type as stored" }, this.num("AI type", p.aiType, (v) => { p.aiType = v; }, { min: 0 })),
           h("td", {}, this.select(p.difficulty, withCurrent(diffs, p.difficulty), (v) => { p.difficulty = v; })),
           h("td", {}, this.text(p.script, (v) => { p.script = v; })))))) : h("p.muted", {}, "No players configured."));
   }
