@@ -46,7 +46,7 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
-import { hasPathSize, snapSize, type PathSize } from "./doodadgrid";
+import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
@@ -4427,8 +4427,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             type: (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
               // A destructable whose type has no pathing texture isn't turned to its fixed rotation by the World Editor
-              // (placed: any angle, as a doodad; moved: it stays; doodad-turn-we spec): none, once the texture is read (ready).
-              const fixedRot = skin?.kind === "w3b" && doodadCells.get(id) === null ? null : skin?.fixedRot ?? null;
+              // (placed: any angle, as a doodad; moved: it stays; doodad-turn-we spec): none, and none while the texture is unread (a path that skipped ready).
+              const fixedRot = skin ? presetFixedRot(skin.kind, skin.fixedRot, doodadCells.get(id)) : null;
               return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot, ...(skin.moveType !== undefined ? { moveType: skin.moveType } : {}) } : null;
             },
             ready: async (id) => { if (isDoodadType(id)) await loadDoodadCells(id).catch(() => { /* its type stays as it is */ }); },
