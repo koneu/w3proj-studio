@@ -27,15 +27,15 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repo = resolve(here, "..", "..");
-export const weDir = () => resolve(process.env.W3PROJ_WE_DIR ?? join(mainCheckout(repo), "target", "we"));
+export const weDir = () => resolve(process.env.W3PROJ_WE_DIR || join(mainCheckout(repo), "target", "we"));
 export const farmDir = () => join(weDir(), "install");
 export const prefixDir = () => join(weDir(), "prefix");
 export const shimPath = () => join(weDir(), "we-rofs.so");
@@ -48,8 +48,36 @@ function* walk(dir, base = dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) yield* walk(p, base);
-    else if (e.isFile()) yield relative(base, p).split("\\").join("/");
+    // On POSIX a backslash is a file-name character (Wine prefixes have such names): the relative path stays as is.
+    else if (e.isFile()) yield sep === "\\" ? relative(base, p).split("\\").join("/") : relative(base, p);
   }
+}
+
+/** The path with symlinks resolved as far as it exists (the rest is appended as written). */
+function realish(p) {
+  const rest = [];
+  let cur = resolve(p);
+  for (;;) {
+    try { return join(realpathSync(cur), ...rest.reverse()); } catch { /* not there (yet) */ }
+    const up = dirname(cur);
+    if (up === cur) return resolve(p);
+    rest.push(basename(cur));
+    cur = up;
+  }
+}
+
+/**
+ * The farm's folder, once it is safe to build in and delete from: strictly inside this repository or the main
+ * checkout (W3PROJ_WE_DIR="" or a stray value must never point `--clean` at the cwd or a home folder), and neither
+ * holding the game folder nor inside it (walking the game would then walk the farm).
+ */
+export function guardedWeDir(game) {
+  const dir = realish(weDir());
+  const inside = (d, r) => d !== r && d.startsWith(r.endsWith(sep) ? r : r + sep);
+  if (![repo, mainCheckout(repo)].some((r) => inside(dir, realish(r)))) throw new Error(`W3PROJ_WE_DIR ${dir} isn't inside the repository (${repo}) or the main checkout: refusing to build or delete there`);
+  const g = realish(game);
+  if (dir === g || inside(dir, g) || inside(g, dir)) throw new Error(`W3PROJ_WE_DIR ${dir} and the game folder ${g} contain one another: refusing`);
+  return weDir();
 }
 
 export function gameDir(opt) {
@@ -86,48 +114,122 @@ function buildShim() {
   const src = join(here, "we-rofs.c"), out = shimPath();
   if (existsSync(out) && statSync(out).mtimeMs >= statSync(src).mtimeMs) return false;
   mkdirSync(dirname(out), { recursive: true });
-  execFileSync("cc", ["-shared", "-fPIC", "-O2", "-o", `${out}.tmp`, src, "-ldl"], { stdio: ["ignore", "inherit", "inherit"] });
-  renameSync(`${out}.tmp`, out);
+  // A name of its own per process: two setups at once must not write the same file.
+  const tmp = `${out}.tmp-${process.pid}`;
+  try {
+    execFileSync("cc", ["-shared", "-fPIC", "-O2", "-o", tmp, src, "-ldl"], { stdio: ["ignore", "inherit", "inherit"] });
+    renameSync(tmp, out);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
   return true;
 }
 
-function place(game, rel) {
-  const src = join(game, rel), dst = join(farmDir(), rel);
+function place(game, rel, farm = farmDir()) {
+  const src = join(game, rel), dst = join(farm, rel);
   mkdirSync(dirname(dst), { recursive: true });
   if (isCopied(rel)) {
     copyFileSync(src, dst);
     return statSync(src).size;
   }
-  try { linkSync(src, dst); } catch (e) { throw new Error(`can't hardlink ${rel} (${e.code}): the farm (${farmDir()}) must be on the install's file system`); }
+  try { linkSync(src, dst); } catch (e) { throw new Error(`can't hardlink ${rel} (${e.code}): the farm (${farm}) must be on the install's file system`); }
   return 0;
 }
 
-/** Sets up the farm, the prefix folder and the shim. The farm is made again only for another game build. */
-export function setup(game) {
-  const why = missing(game);
-  if (why) throw new Error(why);
+/**
+ * Whether the farm's file for `rel` is as it should be, stat only: a hardlink is the install's own file (same device
+ * and inode: a replaced install file leaves a stale link behind); a copy exists, isn't empty when the original isn't,
+ * and a CASC index has the original's size (the editor changes shmem and ecache legitimately, so those only have to exist).
+ */
+function intact(game, rel, farm) {
+  let f;
+  try { f = lstatSync(join(farm, rel), { bigint: true }); } catch { return false; }
+  const o = statSync(join(game, rel), { bigint: true });
+  if (!isCopied(rel)) return f.dev === o.dev && f.ino === o.ino;
+  if (f.size === 0n && o.size !== 0n) return false;
+  return !/\.idx$/.test(rel) || f.size === o.size;
+}
+
+/** The run that holds the World Editor lock on this farm, if it isn't this process (its farm must stay as it is). */
+function busyHolder() {
+  const o = lockOwner(join(lockPath(), "owner.json"));
+  return o && o.pid !== process.pid && alive(o.pid) && o.farm && resolve(o.farm) === weDir() ? o : null;
+}
+
+/**
+ * Sets up the farm, the prefix folder and the shim. The farm is made again only for another game build; for the same
+ * build every file is checked by stat and a missing, stale or damaged one is placed again.
+ *
+ * For we-drive: take the World Editor lock (takeLock) BEFORE calling this, so no other run is using the farm while
+ * it is checked. Meanwhile setup() refuses to replace a farm whose lock another live process holds (it then only
+ * places files that are missing), builds a new farm in a folder of its own and moves it into place with a rename, so
+ * two setups at once can't leave a half-built farm: the one that loses the rename uses the winner's.
+ */
+export function setup(game, { farmOnly = false } = {}) {
+  // farmOnly (tests): just the farm, without the tools and the shim a run needs.
+  if (!farmOnly) {
+    const why = missing(game);
+    if (why) throw new Error(why);
+  }
+  guardedWeDir(game);
   const build = readFileSync(join(game, ".build.info"), "utf8");
-  const shim = buildShim();
+  const shim = farmOnly ? false : buildShim();
   mkdirSync(prefixDir(), { recursive: true });
-  if (existsSync(stampPath()) && readFileSync(stampPath(), "utf8") === build && existsSync(farmDir())) {
-    // Same build: only files that went missing are placed again (copies the editor changed stay as it left them).
+  const farm = farmDir();
+  const sameBuild = () => existsSync(stampPath()) && readFileSync(stampPath(), "utf8") === build && existsSync(farm);
+  if (sameBuild()) {
+    const busy = busyHolder();
     let fixed = 0;
-    for (const rel of walk(game)) if (!existsSync(join(farmDir(), rel))) { place(game, rel); fixed++; }
+    for (const rel of walk(game)) {
+      if (intact(game, rel, farm)) continue;
+      // A running editor has the files open: only what is missing is placed then, nothing is replaced.
+      if (busy && existsSync(join(farm, rel))) continue;
+      rmSync(join(farm, rel), { force: true });
+      place(game, rel);
+      fixed++;
+    }
     return { dir: weDir(), reused: true, fixed, shimBuilt: shim };
   }
-  rmSync(farmDir(), { recursive: true, force: true });
-  rmSync(stampPath(), { force: true });
+  const busy = busyHolder();
+  if (busy && existsSync(farm)) throw new Error(`the farm ${farm} is in use by process ${busy.pid} of ${busy.repo}: not replacing it`);
+  const fresh = `${farm}.new-${process.pid}`;
+  rmSync(fresh, { recursive: true, force: true });
   let linked = 0, copied = 0, bytes = 0;
-  for (const rel of walk(game)) {
-    const n = place(game, rel);
-    if (isCopied(rel)) { copied++; bytes += n; } else linked++;
+  try {
+    for (const rel of walk(game)) {
+      const n = place(game, rel, fresh);
+      if (isCopied(rel)) { copied++; bytes += n; } else linked++;
+    }
+    const old = `${farm}.old-${process.pid}`;
+    if (existsSync(farm)) {
+      rmSync(stampPath(), { force: true });
+      try { renameSync(farm, old); } catch { /* another setup moved it first */ }
+    }
+    try {
+      renameSync(fresh, farm);
+    } catch (e) {
+      if (!existsSync(farm)) throw e;
+      return { dir: weDir(), reused: true, fixed: 0, shimBuilt: shim }; // another setup was first: its farm stands
+    } finally {
+      rmSync(old, { recursive: true, force: true });
+    }
+    writeFileSync(stampPath(), build);
+  } finally {
+    rmSync(fresh, { recursive: true, force: true });
   }
-  writeFileSync(stampPath(), build);
   return { dir: weDir(), reused: false, linked, copied, copiedMB: Math.round(bytes / 1e5) / 10, shimBuilt: shim };
 }
 
-export function clean() {
-  for (const p of [farmDir(), prefixDir(), shimPath(), stampPath()]) rmSync(p, { recursive: true, force: true });
+/** Removes the farm, the prefix, the shim and the stamp; nothing else, and only inside a folder `guardedWeDir` accepts. */
+export function clean(game) {
+  const dir = guardedWeDir(game);
+  const busy = busyHolder();
+  if (busy) throw new Error(`the farm ${dir} is in use by process ${busy.pid} of ${busy.repo}: not removing it`);
+  const allowed = new Set(["install", "prefix", "we-rofs.so", "build.info"]);
+  for (const p of [farmDir(), prefixDir(), shimPath(), stampPath()]) {
+    if (dirname(p) !== dir || !allowed.has(basename(p))) throw new Error(`refusing to remove ${p}`);
+    rmSync(p, { recursive: true, force: true });
+  }
 }
 
 // ---- the lock: one World Editor in the prefix at a time ---------------------------------------------------
@@ -201,12 +303,12 @@ const SMALL = 64 * 1024 * 1024;
 
 /** Every file under the roots: size, mtime, ctime, inode, and the sha256 of files under 64 MB. */
 export function snapshot(roots) {
-  const files = {};
+  const files = {}, skipped = [];
   for (const root of roots) {
     for (const rel of walk(root)) {
       const p = join(root, rel);
       let st;
-      try { st = lstatSync(p, { bigint: true }); } catch { continue; }
+      try { st = lstatSync(p, { bigint: true }); } catch (err) { skipped.push({ path: p, code: err.code }); continue; }
       const e = { size: Number(st.size), mtime: String(st.mtimeNs), ctime: String(st.ctimeNs), ino: String(st.ino) };
       if (st.size < SMALL) {
         try { e.sha256 = createHash("sha256").update(readFileSync(p)).digest("hex"); } catch (err) { e.sha256 = `unreadable: ${err.code}`; }
@@ -214,7 +316,7 @@ export function snapshot(roots) {
       files[p] = e;
     }
   }
-  return { taken: new Date().toISOString(), roots, files };
+  return { taken: new Date().toISOString(), roots, files, skipped };
 }
 
 /**
@@ -233,8 +335,10 @@ export function compare(a, b, guarded = []) {
   for (const p of Object.keys(b.files)) if (!a.files[p]) came.push(p);
   const isGuarded = (p) => guarded.some((g) => p === g || p.startsWith(`${g}/`));
   const all = [...changed, ...gone, ...came];
+  // A file the snapshot couldn't stat is a hole in the proof: guarded ones fail it.
+  const skipped = [...(a.skipped ?? []), ...(b.skipped ?? [])].map((s) => s.path);
   const guardedFiles = Object.keys(a.files).filter(isGuarded).length;
-  return { files: Object.keys(a.files).length, guarded, guardedFiles, guardedChanged: all.filter(isGuarded), elsewhereChanged: all.filter((p) => !isGuarded(p)) };
+  return { files: Object.keys(a.files).length, guarded, guardedFiles, guardedChanged: all.filter(isGuarded), skippedGuarded: skipped.filter(isGuarded), skippedElsewhere: skipped.filter((p) => !isGuarded(p)), elsewhereChanged: all.filter((p) => !isGuarded(p)) };
 }
 
 /** The paths of the user's that must stay as they are: the install, and the editor's preferences in their prefix. */
@@ -247,7 +351,7 @@ function main(argv) {
   const at = (flag) => argv.indexOf(flag);
   const game = gameDir(at("--game") >= 0 ? argv[at("--game") + 1] : undefined);
   if (at("--clean") >= 0) {
-    clean();
+    clean(game);
     console.log(JSON.stringify({ removed: weDir() }));
     return 0;
   }
@@ -266,7 +370,7 @@ function main(argv) {
     if (!a || !b) throw new Error("--compare wants two snapshot files");
     const r = compare(JSON.parse(readFileSync(a, "utf8")), JSON.parse(readFileSync(b, "utf8")), guardedPaths(game));
     console.log(JSON.stringify(r, null, 1));
-    return r.guardedChanged.length ? 1 : 0;
+    return r.guardedChanged.length || r.skippedGuarded.length ? 1 : 0;
   }
   console.log(JSON.stringify(setup(game)));
   return 0;
