@@ -77,7 +77,7 @@ export interface StartSurroundings {
 
 /**
  * Whether every start location stands where the World Editor plainly takes it as valid: inside the map, with nothing
- * placed (doodad, building, item, another start; a unit type without pathing, such as a creep, doesn't count: the
+ * placed (doodad with pathing, building, item, another start; a unit type without pathing, such as a creep, doesn't count: the
  * game's melee maps have them as close as 12) within CLEAR_AROUND_START, and the ground there all on the start's cliff
  * level, without ramps, water, blight, boundary or a tile the game's Terrain.slk doesn't call buildable. False for
  * anything less, including a map without starts: then Studio can't tell, which is not the same as invalid.
@@ -148,16 +148,18 @@ export interface MeleeFacts {
   around?: StartSurroundings | null;
 }
 
-/** The doodads of war3map.doo.json; null for anything that isn't one (a raw file, unreadable, malformed). */
-function doodadSpots(text: string | null, t: Terrain | null): DoodadSpot[] | null {
+/** The doodads of war3map.doo.json that have pathing (`unpathed`: the types the game's tables give none, such as
+ *  flowers: they don't block a start); null for anything that isn't one (a raw file, unreadable, malformed). */
+function doodadSpots(text: string | null, t: Terrain | null, unpathed: ReadonlySet<string> = new Set()): DoodadSpot[] | null {
   if (text === null || !t) return null;
   let doc: { doodads?: unknown; specials?: unknown };
   try { doc = JSON.parse(text) as typeof doc; } catch { return null; }
   if (!doc || !Array.isArray(doc.doodads)) return null;
   const out: DoodadSpot[] = [];
-  for (const d of doc.doodads as { position?: unknown }[]) {
+  for (const d of doc.doodads as { id?: unknown; position?: unknown }[]) {
     const p = d?.position;
     if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
+    if (typeof d.id === "string" && unpathed.has(d.id)) continue;
     out.push({ x: p[0], y: p[1], reach: 0 });
   }
   if (doc.specials !== undefined && !Array.isArray(doc.specials)) return null;
@@ -197,15 +199,22 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
     facts.defaultTriggers = !!file && isDefaultTriggers(file);
   } catch { facts.defaultTriggers = false; }
   if (!facts.defaultTriggers) return facts;
-  const dooPath = find("map/war3map.doo.json");
-  const doodads = doodadSpots(dooPath ? await ws.readText(dooPath).catch(() => null) : null, ground);
   /** A game table's rows that have `key`; empty when it can't be read. */
   const table = async (path: string, key: string) => {
     const text = ws.gameText ? await ws.gameText(path).catch(() => null) : null;
-    return text === null ? [] : parseSlk(text).filter((r) => r[key]);
+    return typeof text !== "string" ? [] : parseSlk(text).filter((r) => r[key]);
   };
   const tiles = await table("TerrainArt\\Terrain.slk", "tileID"), units = await table("Units\\UnitData.slk", "unitID");
   const none = (tex: string | undefined) => tex === undefined || tex === "" || tex === "_" || tex === "-" || tex.toLowerCase() === "none";
+  // Doodads and destructables without a pathing texture (flowers, mushrooms, lily pads) don't block a start. A type the
+  // tables don't have (or that can't be read) counts as blocking. The map's own changes to them (war3map.w3d / w3b)
+  // never get here: their file alone leaves the flag off (customData).
+  const unpathedDoodads = new Set([
+    ...(await table("Doodads\\Doodads.slk", "doodID")).filter((r) => none(r.pathTex)).map((r) => r.doodID),
+    ...(await table("Units\\DestructableData.slk", "DestructableID")).filter((r) => none(r.pathTex)).map((r) => r.DestructableID),
+  ]);
+  const dooPath = find("map/war3map.doo.json");
+  const doodads = doodadSpots(dooPath ? await ws.readText(dooPath).catch(() => null) : null, ground, unpathedDoodads);
   facts.around = doodads && tiles.length && units.length ? {
     doodads,
     buildable: new Set(tiles.filter((r) => r.buildable !== "0").map((r) => r.tileID)),

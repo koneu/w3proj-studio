@@ -204,6 +204,26 @@ test("the facts for putting the flag back come from the project; unreadable ones
   assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), []);
 });
 
+test("doodads and destructables without a pathing texture (flowers) near a start don't block the flag", async () => {
+  // Doodads.slk: a flower (no pathing) and a rock (pathing); DestructableData.slk: a cage (empty) and a tree (pathing).
+  const DOODADS = 'ID;PWXL;N;E\nC;Y1;X1;K"doodID"\nC;X2;K"pathTex"\nC;Y2;X1;K"APms"\nC;X2;K"none"\nC;Y3;X1;K"LOrk"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
+  const DESTS = 'ID;PWXL;N;E\nC;Y1;X1;K"DestructableID"\nC;X2;K"pathTex"\nC;Y2;X1;K"YTc1"\nC;X2;K""\nC;Y3;X1;K"LTlt"\nC;X2;K"PathTextures\\4x4Default.tga"\nE\n';
+  const game: Record<string, string> = { ...GAME, "Doodads\\Doodads.slk": DOODADS, "Units\\DestructableData.slk": DESTS };
+  const near = (id: string) => ({ id, position: [MID + 150, MID, 0] });
+  const flags = async (doodads: object[], tables = game) => (await savedMelee({
+    ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads, specials: [] }) }),
+    gameText: async (p: string) => { if (!(p in tables)) throw new Error(p); return tables[p]; },
+  }, { flags: OFF }, [startMid])).flags;
+  assert.equal(await flags([near("APms")]), MELEE, "a flower 150 away");
+  assert.equal(await flags([near("YTc1")]), MELEE, "a destructable with an empty pathing texture");
+  assert.equal(await flags([near("APms"), near("YTc1")]), MELEE, "both");
+  assert.equal(await flags([near("LOrk")]), OFF, "control: a rock with pathing");
+  assert.equal(await flags([near("LTlt")]), OFF, "control: a tree with pathing");
+  assert.equal(await flags([near("Xzzz")]), OFF, "a type the tables don't have counts");
+  assert.equal(await flags([near("APms")], GAME), OFF, "without Doodads.slk the flower counts");
+  assert.equal(await flags([near("APms"), near("LOrk")]), OFF, "a flower doesn't hide a rock");
+});
+
 test("with the custom tilesets flag 0 the start's ground is buildable by the tile drawn, the tileset's own list", async () => {
   // Terrain.slk's Lordaeron tiles are Ldrt (buildable), Lrok (not). The file lists them the other way round: with
   // the flag 0 slot 0 is drawn as Ldrt, the tileset's first, whatever the file says (w3e.ts drawnGroundTiles).
