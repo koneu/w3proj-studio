@@ -1,0 +1,114 @@
+[
+  {
+    "name": "doodad-water-z-open",
+    "description": "Floating doodads (Doodads.slk floats 1) on load: doodad-water-z.w3x (make-doodad-water-z.mjs) opened and saved, no edit. The editor works out every non-fixed doodad's height again on save (all stored at 37.5: lily pads -128 where the corners have no water flag, -89.6 on wet corners, 0 where the water is under the ground, the level-3 patch 0, by column -59.6/-29.6/0.4; ZPsh on its ground), writes life 255 for 100 and puts ZWsw's scale 1 at its least, 1.5; Studio's plain save keeps what the file had (known, 2026-11-16). Run before doodad-water-z-nudge (that one switches Num Lock on).",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-water-z.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "sleep": 500
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-water-z-nudge",
+    "description": "Floating doodads after Select All and Numpad 6 (all moved 64 by the tree's step): doodad-water-z.w3x (make-doodad-water-z.mjs). A floating doodad stands on the water level of the corner nearest to it (halves round up) when that corner has the water flag and its level above its ground with the cliff level; else on the ground (lib/terrain/w3e.ts floatingLevelAt). Before the fix Studio left 13 of them on the ground (2026-11-16); the fixed lily pad (flags 6) moved with Reset Fixed Object Heights on gets flags 2 and the water level -89.6. No bounds clamp: the east-edge pair (3955, 4006 to 4019, 4070) moved and floats.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-water-z.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--key",
+          "Num_Lock"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--key",
+          "ctrl+a"
+        ],
+        [
+          "--sleep",
+          "700"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--sleep",
+          "700"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  }
+]
