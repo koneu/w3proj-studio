@@ -4,8 +4,8 @@
 // this gathers what they need beyond war3map.w3i and the placed units.
 //
 // The World Editor's save also puts the flag back on a map that meets its rules. Studio does that only when it can
-// tell every one of them (meleeSetBlockers): its reasons it can't decide reliably (custom triggers beyond the plain
-// default, start locations in invalid positions beyond the plain case) leave the flag as it is.
+// tell every one of them (meleeSetBlockers): what it can't decide (custom triggers beyond the plain default, start
+// locations whose surroundings it can't read: startsPlainlyValid) leaves the flag as it is.
 
 import type { W3Api } from "../../extensions/api";
 import { readIni } from "../formats/iniedit";
@@ -13,7 +13,9 @@ import { parseSlk } from "../formats/text";
 import { hasCustomTriggers, isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
-import { drawnGroundTiles, mapEdgeTiles, parseW3e, waterSurfaceAt, type Terrain } from "./w3e";
+import { decodeImage, type Mip } from "../image/index.ts";
+import { generatePathing, NO_BUILD, NO_WALK, type PathingStamp, type TileRule } from "./pathing";
+import { mapEdgeTiles, parseW3e, parseWaterOffsets, waterSurfaceAt, type Terrain } from "./w3e";
 import { ownGroundTiles } from "./tilesets";
 import { readTerrainBytes, terrainPath } from "./w3etext";
 
@@ -66,16 +68,23 @@ export async function customDataState(ws: MeleeFiles, files: readonly string[]):
   return unknown ? null : false;
 }
 
-/** How far around a start location Studio looks before it calls its position plainly valid. The World Editor's save
- *  found starts invalid with trees about 200 away, a tavern 250 away (we-drive 2026-11-09) and close to cliffs; the
- *  ladder maps' nearest trees are 547 to 692 from a start and their gold mines 700 to 850 (meleecheck.ts). */
-export const CLEAR_AROUND_START = 512;
-/** A special doodad (cave, collapsed cliff) is placed by its tile's corner and reaches up to this much further. */
-const SPECIAL_REACH = 256;
+/** Half the side, in pathing cells (32), of the square the World Editor's save fits on each start location (a town
+ *  hall's 16 × 16): a start is in an invalid position when a cell of that square isn't buildable (the ground's pathing
+ *  with doodads and destructables stamped in), or when it overlaps another start's square. The square stands on the
+ *  cell grid, its centre the start rounded to the nearest 32. Measured with we-drive saves of flat 64 × 64 maps
+ *  (2026-11-16, tests/we-compare/melee-valid-we.json): a tree (snapped to 64) 256 from the start along an axis or at
+ *  (256, 256) made it invalid, 320 or (320, 256) not; Lrok, a cliff or shallow water whose unbuildable cells began 192
+ *  or 128 from it invalid, 320 not; another start 488 away invalid, 496, 504, 512 and (512, 480) not. Not reasons:
+ *  blight next to it, a tavern or goblin merchant standing on it, an item 64 away. */
+export const START_SQUARE = 8;
+/** A gold mine whose centre is nearer to a start location than this makes it invalid (we-drive 2026-11-16: 749 and
+ *  (528, 528) were, 750 and (530.5, 530.5) not). Haunted and entangled mines count alike (not measured). */
+export const MINE_CLEARANCE = 750;
+const MINES = new Set(["ngol", "ugol", "egol"]);
 
 /** Whether a start location stands under water: one of the World Editor's "start locations in invalid positions"
- *  (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11). Its other invalid positions (trees
- *  about 200 away, a tavern at 250) Studio can't tell (see meleeBlockers). */
+ *  (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11). The others (startsPlainlyValid) need
+ *  the game's pathing textures, so a save that takes the flag off doesn't look at them. */
 export function startsUnderWater(t: Terrain, placed: readonly PlacedLike[]): boolean {
   return placed.some((p) => p.id === "sloc" && Array.isArray(p.position) && p.position.length >= 2
     && Number.isFinite(p.position[0]) && Number.isFinite(p.position[1]) && waterSurfaceAt(t, p.position[0], p.position[1]) !== null);
@@ -100,65 +109,74 @@ export function startsPastPlayable(t: Terrain, placed: readonly PlacedLike[]): b
 /** Under water or past the playable map: the start-location reasons Studio can tell. */
 export const startsInvalidPlaces = (t: Terrain, placed: readonly PlacedLike[]) => startsUnderWater(t, placed) || startsPastPlayable(t, placed);
 
-/** A doodad's place: `reach` how far it may stand from it. */
-export interface DoodadSpot { x: number; y: number; reach: number }
-
-/** What stands around the start locations, besides the placed units and the ground. */
+/** What stands around the start locations, besides the placed units. */
 export interface StartSurroundings {
-  doodads: readonly DoodadSpot[];
-  /** Ground tiles the game's Terrain.slk calls buildable. */
-  buildable: ReadonlySet<string>;
-  /** The terrain's tileset's own ground tiles (tilesets.ts ownGroundTiles): with the w3e's "custom tilesets" flag 0 a
-   *  corner's tile is the one drawn by that list (w3e.ts drawnGroundTiles), not the file's. Absent: the file's. */
-  ownTiles?: readonly string[];
-  /** Unit types the game's UnitData.slk gives no pathing texture (creeps, critters): they don't block a building. */
-  unpathed: ReadonlySet<string>;
+  /** The ground's pathing with every doodad and destructable that has a pathing texture stamped in (startPathing). */
+  pathing: Uint8Array;
+  /** Where doodads stand whose pathing can't be told (a type the game's tables don't have, a texture that can't be
+   *  read: the tables name PathTextures\16x12Default.tga, which the game doesn't have): a start within UNKNOWN_REACH
+   *  of one isn't plainly valid. */
+  unknown?: readonly { x: number; y: number }[];
+}
+
+/** How far (along each axis) a doodad of unknown pathing can be from a start and still touch its square: the square's
+ *  half side and half of the largest pathing texture (the game's go up to 24 × 24 cells), 32 cells. */
+export const UNKNOWN_REACH = (START_SQUARE + 16) * 32;
+
+/** What makes a pathing cell unfit for the start's square: not buildable, or (not measured alone, so counted) not
+ *  walkable. Blight isn't (we-drive 2026-11-16: blight from 192 away kept the flag). */
+const NOT_FOR_A_HALL = NO_BUILD | NO_WALK;
+
+/**
+ * The pathing the World Editor's save tests the start locations' squares against: the ground's (pathing.ts
+ * generatePathing, with the tiles past the playable map blocked by the terrain's map-edge marks) with `stamps` ored in.
+ * Unlike war3map.wpm the stamps include destructables (trees count) and doodads whatever their flags. In the layout of
+ * war3map.wpm (16 bytes of header, then a byte per 32 × 32 cell from the bottom left).
+ */
+export function startPathing(t: Terrain, tileRules: Map<string, TileRule>, stamps: PathingStamp[] = [], opts: { ownTiles?: readonly string[]; waterOffset?: number } = {}): Uint8Array {
+  const wpm = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules, stamps, ownTiles: opts.ownTiles, waterOffset: opts.waterOffset });
+  const edge = mapEdgeTiles(t), tilesX = t.width - 1, w = tilesX * 4, h = (t.height - 1) * 4, cells = wpm.subarray(16);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (edge[(y >> 2) * tilesX + (x >> 2)]) cells[y * w + x] |= NO_BUILD | NO_WALK;
+  return wpm;
 }
 
 /**
- * Whether every start location stands where the World Editor plainly takes it as valid: inside the map, with nothing
- * placed (doodad with pathing, building, item, another start; a unit type without pathing, such as a creep, doesn't count: the
- * game's melee maps have them as close as 12) within CLEAR_AROUND_START, and the ground there all on the start's cliff
- * level, without ramps, water, blight, boundary or a tile the game's Terrain.slk doesn't call buildable. False for
- * anything less, including a map without starts: then Studio can't tell, which is not the same as invalid.
+ * Whether every start location stands where the World Editor's save takes it as valid (START_SQUARE, MINE_CLEARANCE):
+ * its square on the map, every cell of it fit for a town hall in `around.pathing`, no other start's square overlapping
+ * it, and no gold mine nearer than MINE_CLEARANCE. Other units (buildings, creeps) and items don't count. False for
+ * anything less, including a map without starts or a placed object without a position: then Studio can't tell, which
+ * is not the same as invalid.
  */
 export function startsPlainlyValid(t: Terrain, placed: readonly PlacedLike[], around: StartSurroundings): boolean {
-  const { doodads, buildable, unpathed } = around;
   const pos = (p: PlacedLike) => (Array.isArray(p.position) && p.position.length >= 2 && Number.isFinite(p.position[0]) && Number.isFinite(p.position[1]) ? p.position : null);
   const starts = placed.filter((p) => p.id === "sloc");
   if (!starts.length || placed.some((p) => !pos(p))) return false;
-  const R = CLEAR_AROUND_START;
-  const tiles = drawnGroundTiles(t, around.ownTiles);
-  const blocking = placed.filter((p) => !unpathed.has(p.id));
+  const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
+  const cells = around.pathing.subarray(16);
+  if (cells.length !== w * h) return false;
+  const cellOf = (p: PlacedLike) => [Math.round((pos(p)![0] - t.offsetX) / 32), Math.round((pos(p)![1] - t.offsetY) / 32)];
+  const mines = placed.filter((p) => MINES.has(p.id));
+  const S = START_SQUARE;
   return starts.every((s) => {
-    const [sx, sy] = pos(s)!;
-    if (blocking.some((p) => p !== s && Math.hypot(pos(p)![0] - sx, pos(p)![1] - sy) <= R)) return false;
-    if (doodads.some((d) => Math.hypot(d.x - sx, d.y - sy) <= R + d.reach)) return false;
-    const fx = (sx - t.offsetX) / 128, fy = (sy - t.offsetY) / 128;
-    if (!(fx >= 0 && fy >= 0 && fx <= t.width - 1 && fy <= t.height - 1)) return false;
-    const level = t.corners[Math.round(fy) * t.width + Math.round(fx)]?.layer;
-    const span = Math.ceil(R / 128) + 1;
-    for (let y = Math.floor(fy) - span; y <= Math.ceil(fy) + span; y++) {
-      for (let x = Math.floor(fx) - span; x <= Math.ceil(fx) + span; x++) {
-        if (Math.hypot(x - fx, y - fy) * 128 > R + 128) continue;
-        // Close to the map's edge: not plainly valid.
-        if (x < 0 || y < 0 || x >= t.width || y >= t.height) return false;
-        const c = t.corners[y * t.width + x];
-        // Water counts where its surface is above the ground: the game's maps flag dry corners too.
-        if (!c || c.layer !== level || c.ramp || (c.hasWater && c.water > c.height) || c.blight || c.boundary || !buildable.has(tiles[c.texture])) return false;
-      }
-    }
+    const [cx, cy] = cellOf(s), [sx, sy] = pos(s)!;
+    if (starts.some((o) => o !== s && Math.max(Math.abs(cellOf(o)[0] - cx), Math.abs(cellOf(o)[1] - cy)) < 2 * S)) return false;
+    if (mines.some((m) => Math.hypot(pos(m)![0] - sx, pos(m)![1] - sy) < MINE_CLEARANCE)) return false;
+    if (around.unknown?.some((d) => Math.max(Math.abs(d.x - sx), Math.abs(d.y - sy)) < UNKNOWN_REACH)) return false;
+    if (cx - S < 0 || cy - S < 0 || cx + S > w || cy + S > h) return false;
+    for (let y = cy - S; y < cy + S; y++) for (let x = cx - S; x < cx + S; x++) if (cells[y * w + x] & NOT_FOR_A_HALL) return false;
     return true;
   });
 }
 
-/** What of a project the melee rules read. `gameText`: the game's files (Terrain.slk, UnitData.slk: which tiles are buildable, which units block);
- *  without it the flag is never put back. */
+/** What of a project the melee rules read. `gameText`: the game's tables (Terrain.slk, Water.slk, Doodads.slk,
+ *  DestructableData.slk); `gameBytes`: its files (the doodads' pathing textures). Without them the flag is never put
+ *  back. */
 export interface MeleeFiles {
   files(): readonly { path: string }[];
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
   gameText?(path: string): Promise<string>;
+  gameBytes?(path: string): Promise<Uint8Array>;
 }
 
 /** The project and the game of the app, as the melee rules read them. */
@@ -168,6 +186,7 @@ export function meleeFiles(w3: Pick<W3Api, "workspace" | "game">): MeleeFiles {
     readText: (p) => w3.workspace.readText(p),
     readBytes: (p) => w3.workspace.readBytes(p),
     gameText: (p) => w3.game.readText(p),
+    gameBytes: (p) => w3.game.read(p),
   };
 }
 
@@ -187,30 +206,44 @@ export interface MeleeFacts {
   customTriggers?: boolean;
   /** A file of custom object data or game interface changes something (customDataState); null: not known. */
   customData?: boolean | null;
-  /** What stands around the start locations: the doodads, which tiles are buildable and which units have no pathing. */
+  /** What stands around the start locations: the pathing their squares are tested against. */
   around?: StartSurroundings | null;
 }
 
-/** The doodads of war3map.doo.json that have pathing (`unpathed`: the types the game's tables give none, such as
- *  flowers: they don't block a start); null for anything that isn't one (a raw file, unreadable, malformed). */
-function doodadSpots(text: string | null, t: Terrain | null, unpathed: ReadonlySet<string> = new Set()): DoodadSpot[] | null {
-  if (text === null || !t) return null;
+const noTexture = (tex: string | undefined) => tex === undefined || tex === "" || tex === "_" || tex === "-" || tex.toLowerCase() === "none";
+
+/**
+ * The pathing stamps of war3map.doo.json's doodads, destructables and special doodads (caves, collapsed cliffs), as
+ * buildPathingMap places them, and where doodads stand whose pathing can't be told (a type the game's tables, `pathTex`:
+ * id → its pathing texture, "" for none, don't have; a texture that can't be read). Null for what leaves the whole file
+ * unknown: not a doodad file (raw, unreadable, malformed), a doodad without a position, a special doodad of unknown
+ * pathing.
+ */
+async function doodadStamps(text: string | null, t: Terrain, pathTex: ReadonlyMap<string, string>, texture: (path: string) => Promise<Mip | null>): Promise<{ stamps: PathingStamp[]; unknown: { x: number; y: number }[] } | null> {
+  if (text === null) return null;
   let doc: { doodads?: unknown; specials?: unknown };
   try { doc = JSON.parse(text) as typeof doc; } catch { return null; }
-  if (!doc || !Array.isArray(doc.doodads)) return null;
-  const out: DoodadSpot[] = [];
-  for (const d of doc.doodads as { id?: unknown; position?: unknown }[]) {
-    const p = d?.position;
+  if (!doc || !Array.isArray(doc.doodads) || (doc.specials !== undefined && !Array.isArray(doc.specials))) return null;
+  const out: PathingStamp[] = [], unknown: { x: number; y: number }[] = [];
+  for (const d of doc.doodads as { id?: unknown; position?: unknown; angle?: unknown }[]) {
+    const p = d?.position, tex = typeof d?.id === "string" ? pathTex.get(d.id) : undefined;
     if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
-    if (typeof d.id === "string" && unpathed.has(d.id)) continue;
-    out.push({ x: p[0], y: p[1], reach: 0 });
+    if (tex === "") continue;
+    const image = tex === undefined ? null : await texture(tex);
+    if (!image) { unknown.push({ x: p[0], y: p[1] }); continue; }
+    out.push({ x: p[0], y: p[1], angle: Number.isFinite(d.angle) ? (d.angle as number) : 0, width: image.width, height: image.height, rgba: image.rgba });
   }
-  if (doc.specials !== undefined && !Array.isArray(doc.specials)) return null;
-  for (const s of (doc.specials ?? []) as { x?: unknown; y?: unknown }[]) {
-    if (!Number.isFinite(s?.x) || !Number.isFinite(s?.y)) return null;
-    out.push({ x: t.offsetX + (s.x as number) * 128, y: t.offsetY + (s.y as number) * 128, reach: SPECIAL_REACH });
+  for (const s of (doc.specials ?? []) as { id?: unknown; x?: unknown; y?: unknown }[]) {
+    const tex = typeof s?.id === "string" ? pathTex.get(s.id) : undefined;
+    if (!Number.isFinite(s?.x) || !Number.isFinite(s?.y) || tex === undefined) return null;
+    if (tex === "") continue;
+    const image = await texture(tex);
+    if (!image) return null;
+    // Placed by tile: the texture's bottom left on that tile's, unturned (buildPathingMap).
+    out.push({ x: t.offsetX + (s.x as number) * 128 + image.width * 16, y: t.offsetY + (s.y as number) * 128 + image.height * 16,
+      angle: -Math.PI / 2, width: image.width, height: image.height, rgba: image.rgba, cliffDoodad: true });
   }
-  return out;
+  return { stamps: out, unknown };
 }
 
 /**
@@ -249,23 +282,33 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
     const text = ws.gameText ? await ws.gameText(path).catch(() => null) : null;
     return typeof text !== "string" ? [] : parseSlk(text).filter((r) => r[key]);
   };
-  const tiles = await table("TerrainArt\\Terrain.slk", "tileID"), units = await table("Units\\UnitData.slk", "unitID");
-  const none = (tex: string | undefined) => tex === undefined || tex === "" || tex === "_" || tex === "-" || tex.toLowerCase() === "none";
+  const tiles = await table("TerrainArt\\Terrain.slk", "tileID");
   // Doodads and destructables without a pathing texture (flowers, mushrooms, lily pads) don't block a start. A type the
-  // tables don't have (or that can't be read) counts as blocking. The map's own changes to them (war3map.w3d / w3b)
-  // never get here: their file alone leaves the flag off (customData).
-  const unpathedDoodads = new Set([
-    ...(await table("Doodads\\Doodads.slk", "doodID")).filter((r) => none(r.pathTex)).map((r) => r.doodID),
-    ...(await table("Units\\DestructableData.slk", "DestructableID")).filter((r) => none(r.pathTex)).map((r) => r.DestructableID),
-  ]);
+  // tables don't have (or that can't be read) can't be told. The map's own changes to them (war3map.w3d / w3b) never
+  // get here: their file alone leaves the flag off (customData).
+  const pathTex = new Map<string, string>();
+  for (const r of await table("Doodads\\Doodads.slk", "doodID")) pathTex.set(r.doodID, noTexture(r.pathTex) ? "" : r.pathTex);
+  for (const r of await table("Units\\DestructableData.slk", "DestructableID")) pathTex.set(r.DestructableID, noTexture(r.pathTex) ? "" : r.pathTex);
+  const textures = new Map<string, Promise<Mip | null>>();
+  const texture = (path: string) => {
+    // The tables write some paths with doubled backslashes.
+    const p = path.replace(/\\+/g, "\\");
+    let m = textures.get(p.toLowerCase());
+    if (!m) {
+      m = ws.gameBytes ? ws.gameBytes(p).then((b) => decodeImage(b, p).mip(0)).catch(() => null) : Promise.resolve(null);
+      textures.set(p.toLowerCase(), m);
+    }
+    return m;
+  };
   const dooPath = find("map/war3map.doo.json");
-  const doodads = doodadSpots(dooPath ? await ws.readText(dooPath).catch(() => null) : null, ground, unpathedDoodads);
-  facts.around = doodads && tiles.length && units.length ? {
-    doodads,
-    buildable: new Set(tiles.filter((r) => r.buildable !== "0").map((r) => r.tileID)),
-    ownTiles: ownGroundTiles(tiles, ground.tileset),
-    unpathed: new Set(units.filter((r) => none(r.pathTex)).map((r) => r.unitID)),
-  } : null;
+  const doodads = tiles.length ? await doodadStamps(dooPath ? await ws.readText(dooPath).catch(() => null) : null, ground, pathTex, texture) : null;
+  if (!doodads) { facts.around = null; return facts; }
+  const rules = new Map(tiles.map((r) => [r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" }]));
+  const water = parseWaterOffsets(await table("TerrainArt\\Water.slk", "waterID"));
+  facts.around = {
+    pathing: startPathing(ground, rules, doodads.stamps, { ownTiles: ownGroundTiles(tiles, ground.tileset), waterOffset: water.get(ground.tileset) }),
+    unknown: doodads.unknown,
+  };
   return facts;
 }
 

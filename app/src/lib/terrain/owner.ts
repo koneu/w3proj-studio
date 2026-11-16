@@ -51,9 +51,9 @@ export function hasCustomConstants(misc: string): boolean {
  * Custom gameplay constants count when the caller tells (`customConstants`, see hasCustomConstants).
  * Its other reasons aren't here: custom object data or interface, triggers other than the default
  * Melee Initialization (renaming it, dropping an action or disabling it counted; its description and the custom script
- * header didn't), and start locations "in invalid positions" (trees about 200 from a start made it one; a start 250 from
- * a tavern also took the flag off). That one counts only when the caller tells (`startsInvalid`): a start under water is
- * one (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11), the rest Studio can't tell.
+ * header didn't), and start locations "in invalid positions" (meleesave.ts startsPlainlyValid: a town hall's square on
+ * each start buildable, apart from the other starts' squares, no gold mine within 750). That one counts only when the
+ * caller tells (`startsInvalid`): a start under water or past the playable map; the rest only puts the flag back on.
  */
 export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: string })[], startsInvalid = false): string[] {
   const out: string[] = [];
