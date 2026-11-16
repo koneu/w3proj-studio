@@ -751,3 +751,18 @@ fn a_pack_right_after_a_terrain_or_doodad_edit_refuses_the_old_derived_files() {
         assert!(out.exists());
     }
 }
+
+/// A project folder given to verify used to print "0 ok" and exit 0 (it searches folders for maps
+/// and a project holds none). It has to fail with a message that says what to do; the packed map
+/// of the same project (the control) still passes.
+#[test]
+fn verify_refuses_a_project_folder() {
+    let dir = workdir("verify_project_folder");
+    let map = dir.join("mini.w3x");
+    pack(&fixture(), &map);
+    ok(&["verify", s(&map), "--game", "none"]);
+    let o = w3proj(&["verify", s(&fixture()), "--game", "none"]);
+    let out = text(&o);
+    assert!(!o.status.success(), "{out}");
+    assert!(out.contains("project folder") && !out.contains("0 ok"), "{out}");
+}
