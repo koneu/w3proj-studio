@@ -486,7 +486,7 @@ async function mcpGuides(page, found) {
   try {
   const fail = (what) => found.push(`MCP guides: ${what}`);
   const folder = (await page.evaluate(`w3.backend.invoke("app_paths")`)).user_guides;
-  const topics = ["smoke dropped shown", "smoke dropped focus"];
+  const topics = ["smoke dropped shown", "smoke dropped focus", "smoke dropped idle"];
   const files = topics.map((t) => join(folder, `${t}.md`));
   const listed = () => page.evaluate(`[...document.querySelectorAll(".ext-desc")].map((d) => d.textContent).filter((t) => / yours$/.test(t))`);
   const write = (file, topic) => { mkdirSync(folder, { recursive: true }); writeFileSync(file, `# ${topic}\n\nA guide written by another program.\n`); };
@@ -509,6 +509,10 @@ async function mcpGuides(page, found) {
     await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
     await until("the second dropped guide in the panel", async () => (await listed()).includes(`${topics[1]}: yours`), 5000)
       .catch(async () => fail(`the window coming back doesn't list the guide dropped into the folder: ${JSON.stringify(await listed())}`));
+    // Written while the panel is showing and nothing else happens (no focus, no view switch): found by its own look.
+    write(files[2], topics[2]);
+    await until("the third dropped guide in the panel", async () => (await listed()).includes(`${topics[2]}: yours`), 12000)
+      .catch(async () => fail(`a guide dropped into the folder while the panel stays shown isn't listed without any event: ${JSON.stringify(await listed())}`));
   } finally {
     for (const f of files) rmSync(f, { force: true });
     await page.evaluate(`window.dispatchEvent(new Event("focus"))`).catch(() => {});
