@@ -332,6 +332,42 @@ test("minimapBase: in HD and DE the ground and cliff colours are the Reforged _D
   assert.deepEqual(await colours("sd"), [[44, 108, 27], [145, 104, 60], [96, 124, 66]]);
 });
 
+test("minimapBase: under custom-tilesets 0 the slots show the tileset's own tiles, as the World Editor's minimap", async () => {
+  // we-compare custom-tilesets-0 (2026-11-16): the editor's saved minimap of a reversed list with the flag 0 has the
+  // tileset's order (Dirt west), with the flag 1 the file's (Grass west).
+  const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
+  const tables: Record<string, string> = {
+    "TerrainArt\\Terrain.slk": slk([["tileID", "dir", "file"], ["Hdrt", "TerrainArt\\Test", "Test_Dirt"], ["Hgrs", "TerrainArt\\Test", "Test_Grass"], ["Xgrs", "TerrainArt\\Test", "Test_Other"]]),
+    "TerrainArt\\CliffTypes.slk": slk([["cliffID", "texDir", "texFile"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height", "mmAlpha", "mmRed", "mmGreen", "mmBlue"]]),
+    "Doodads\\Doodads.slk": slk([["doodID"]]),
+    "Units\\DestructableData.slk": slk([["DestructableID"]]),
+  };
+  const files = new Map<string, Uint8Array>([["TerrainArt\\Test\\Test_Dirt.blp", tgaOf([145, 104, 60])], ["TerrainArt\\Test\\Test_Grass.blp", tgaOf([44, 108, 27])],
+    ["TerrainArt\\Test\\Test_Other.blp", tgaOf([1, 2, 3])]]);
+  const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? "sd" : undefined) },
+    game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
+  const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
+  // One row of points, west to east, point i painted with slot i.
+  const map = (raw: number, groundTiles: string[]) => ({
+    width: groundTiles.length, height: 1, offsetX: 0, offsetY: 0, tileset: "H", groundTiles, cliffTiles: [], customTilesetsRaw: raw,
+    corners: groundTiles.map((_, i) => ({ texture: i, layer: 2, height: 0, water: 0, hasWater: false })),
+  }) as unknown as Terrain;
+  const westToEast = async (t: Terrain) => {
+    const b = await minimapBase(w3, t, [], read);
+    const g = groundColors(t, b.tileColor, b.cliffColor, null, b.drawnTiles);
+    return t.groundTiles.map((_, i) => [...g.slice(i * 3, i * 3 + 3)]);
+  };
+  const dirt = [145, 104, 60], grass = [44, 108, 27];
+  const reversed = map(0, ["Hgrs", "Hdrt"]);
+  assert.deepEqual(await westToEast(reversed), [dirt, grass], "flag 0: the tileset's own order");
+  assert.deepEqual(reversed.groundTiles, ["Hgrs", "Hdrt"], "the file's list stays as it is");
+  assert.deepEqual(await westToEast(map(1, ["Hgrs", "Hdrt"])), [grass, dirt], "control: flag 1, the file's order");
+  // A slot past the tileset's two shows its first tile; Xgrs, another tileset's, isn't the tileset's own.
+  assert.deepEqual(await westToEast(map(0, ["Xgrs", "Hgrs", "Hdrt"])), [dirt, grass, dirt]);
+  assert.deepEqual(await westToEast(map(1, ["Xgrs", "Hgrs", "Hdrt"])), [[1, 2, 3], grass, dirt], "control: flag 1");
+});
+
 test("minimapBase: a pathing texture is read once for its cells and its size, however many doodads have it", async () => {
   const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
   const doodRow = ["Y", "1", "1", "9", "8", "7"];

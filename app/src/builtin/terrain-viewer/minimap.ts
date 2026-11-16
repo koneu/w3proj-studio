@@ -43,6 +43,9 @@ export interface MinimapInput {
   margins: [number, number, number, number];
   /** Colour of a ground tile type: its texture's smallest mip level. */
   tileColor: (tileId: string) => Rgb;
+  /** The ground tile each slot of the terrain's list is drawn with (w3e.ts drawnGroundTiles: the tileset's own list
+   *  under "custom tilesets" 0, as the World Editor's minimap shows it); left out, the terrain's own list. */
+  drawnTiles?: readonly string[];
   /** Colour of a cliff type (CliffTypes.slk id): its texture's smallest mip level; null when it isn't known. Left
    *  out or null, cliffs show their ground's colour. */
   cliffColor?: (cliffId: string) => Rgb | null;
@@ -131,9 +134,11 @@ export function minimapFrame(t: Pick<Terrain, "width" | "height" | "offsetX" | "
 
 /** The flat colour every tile point gives the tile to its north-east (RGB per point, rows from the south): its ground
  *  texture's, or next to a cliff (the layers of the points around it differ) its cliff type's, where it has one. A
- *  blighted point not coloured by a cliff takes `blight` when given (Export Minimap's Include Blight). */
+ *  blighted point not coloured by a cliff takes `blight` when given (Export Minimap's Include Blight). `drawn`: the
+ *  tile each ground slot is drawn with (MinimapInput.drawnTiles), by default the terrain's list. */
 export function groundColors(t: Pick<Terrain, "width" | "height" | "corners" | "groundTiles" | "cliffTiles">,
-  tileColor: (tileId: string) => Rgb, cliffColor?: (cliffId: string) => Rgb | null, blight?: Rgb | null): Float32Array {
+  tileColor: (tileId: string) => Rgb, cliffColor?: (cliffId: string) => Rgb | null, blight?: Rgb | null,
+  drawn: readonly string[] = t.groundTiles): Float32Array {
   const { width, height, corners } = t;
   const out = new Float32Array(width * height * 3);
   const layer = (x: number, y: number) => corners[Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))].layer;
@@ -144,7 +149,7 @@ export function groundColors(t: Pick<Terrain, "width" | "height" | "corners" | "
       for (let j = -1; j <= 1 && !nearCliff; j++) for (let i = -1; i <= 1; i++) if (layer(x + i, y + j) !== c.layer) { nearCliff = true; break; }
       const cliff = nearCliff ? t.cliffTiles?.[c.cliffTexture] : undefined;
       const color = cliff !== undefined ? cliffColor?.(cliff) : null;
-      out.set(color ?? (blight && c.blight ? blight : tileColor(t.groundTiles[c.texture])), (y * width + x) * 3);
+      out.set(color ?? (blight && c.blight ? blight : tileColor(drawn[c.texture])), (y * width + x) * 3);
     }
   }
   return out;
@@ -177,7 +182,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const img = new Float32Array(N * N * 3);
   /** Where the ground is drawn (the grain goes there, not on the black around it or on dots and squares). */
   const grain = new Uint8Array(N * N);
-  const ground = showGround ? groundColors(t, tileColor, input.cliffColor, input.show?.blight ? input.blightColor : null) : null;
+  const ground = showGround ? groundColors(t, tileColor, input.cliffColor, input.show?.blight ? input.blightColor : null, input.drawnTiles) : null;
   /** Where pixel (px, py) samples the map, in tiles from the drawn area's bottom-left: the pixel's bottom-left corner
    *  (the World Editor's tile edges fall half a pixel right of and above a centre-sampled picture's). */
   const sample = (px: number, py: number): [number, number] => [(px - left) / frame.scale[0], (top + boxH - 1 - py) / frame.scale[1]];

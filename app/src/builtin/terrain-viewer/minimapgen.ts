@@ -14,7 +14,8 @@ import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { textureCandidates } from "../../lib/model/texpath";
 import { maxPlayers } from "../../lib/terrain/startlocations";
 import { ModeCache } from "../../lib/modecache";
-import type { Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, type Terrain } from "../../lib/terrain/w3e";
+import { ownGroundTiles } from "../../lib/terrain/tilesets";
 import { applyTilesetWater } from "./wateroffset";
 
 /** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
@@ -161,9 +162,13 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     }
     return null;
   })()) : Promise.resolve(null));
-  const tileRows = new Map(parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk")).map((r) => [r.tileID, r]));
+  const terrainSlk = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"));
+  const tileRows = new Map(terrainSlk.map((r) => [r.tileID, r]));
+  // Under "custom tilesets" 0 the slots show the tileset's own tiles, in the World Editor's saved minimap as in its view
+  // (we-compare custom-tilesets-0: its minimap of a reversed list has the tileset's order).
+  const drawnTiles = drawnGroundTiles(terrain, ownGroundTiles(terrainSlk, terrain.tileset));
   const colors = new Map<string, Rgb>();
-  for (const id of terrain.groundTiles) {
+  for (const id of new Set(drawnTiles)) {
     const row = tileRows.get(id);
     colors.set(id, await textureColor(id, row ? `${row.dir}\\${row.file}.blp` : null) ?? [128, 128, 128]);
   }
@@ -214,7 +219,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, pathMask });
 
   return {
-    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor,
+    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor, drawnTiles,
     tileColor: (id) => colors.get(id) ?? [128, 128, 128],
     cliffColor: (id) => cliffColors.get(id) ?? null,
   };

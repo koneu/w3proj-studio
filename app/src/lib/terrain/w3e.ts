@@ -90,7 +90,9 @@ export const WATER_LEVEL_MAX = 0x3fff;
 /** The ground tile each slot of the file's list is drawn with. With the "custom tilesets" flag 0 the World Editor
  *  ignores the file's list and takes the tileset's own one (`own`, Terrain.slk's order) by slot: a slot past its end is
  *  drawn with its first tile (we-drive 2026-11-16, Summer, lists in another order, of 3, 6 and 9 tiles). With the flag
- *  set, or the tileset's list unknown, it is the file's list. Only drawing follows this: the file keeps its own list. */
+ *  set, or the tileset's list unknown, it is the file's list. Only drawing follows this (the terrain view and the
+ *  minimap, the saved one too: we-compare custom-tilesets-0): the file keeps its own list, and cliff type numbers
+ *  don't follow it (the editor's follow the w3e's cliff list there, ct0-cliff-grass-rev6c-0). */
 export function drawnGroundTiles(t: Pick<Terrain, "groundTiles" | "customTilesetsRaw">, own: readonly string[] | undefined): string[] {
   if (t.customTilesetsRaw !== 0 || !own?.length) return [...t.groundTiles];
   return t.groundTiles.map((_, i) => own[i] ?? own[0]);
