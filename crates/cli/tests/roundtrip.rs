@@ -793,3 +793,42 @@ fn a_wts_write_cut_short_by_the_file_system_leaves_the_old_file_whole() {
     let now = fs::read_to_string(&path).unwrap();
     assert!(now.len() > 12_000 && now.contains("long text long text"), "the retry didn't write the whole file ({} bytes)", now.len());
 }
+
+/// A pack gives the user players the ally priorities the World Editor's save works out, unless the
+/// map has "Modify ally priorities" on (w3proj `allies`, the app's `applyAllyPriorities`).
+#[test]
+fn a_pack_works_out_stale_ally_priorities_unless_the_map_keeps_its_own() {
+    let dir = workdir("ally-priorities");
+    let first = dir.join("first.w3x");
+    // (The fixture's own masks already match: pack_unpack_pack_changes_nothing has its war3map.w3i come back as it is.)
+    pack(&fixture(), &first);
+    let project = dir.join("project");
+    unpack(&first, &project);
+    let info = project.join("map/war3map.w3i.json");
+    let original: serde_json::Value = serde_json::from_str(&fs::read_to_string(&info).unwrap()).unwrap();
+    let back = |flags: u64, name: &str| -> serde_json::Value {
+        let mut v = original.clone();
+        v["flags"] = flags.into();
+        v["players"][0]["allyLow"] = 2.into();
+        v["players"][0]["enemyHigh"] = 2.into();
+        let mut second = v["players"][0].clone();
+        second["id"] = 1.into();
+        second["start"] = serde_json::json!([0.0, 1280.0]);
+        second["allyHigh"] = 0.into();
+        v["players"].as_array_mut().unwrap().push(second);
+        fs::write(&info, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let (map, out) = (dir.join(format!("{name}.w3x")), dir.join(name));
+        pack(&project, &map);
+        unpack(&map, &out);
+        serde_json::from_str(&fs::read_to_string(out.join("map/war3map.w3i.json")).unwrap()).unwrap()
+    };
+    let flags = original["flags"].as_u64().unwrap();
+    assert_eq!(flags & 2, 0, "the fixture has Modify ally priorities off");
+    let worked = back(flags, "worked");
+    let masks = |v: &serde_json::Value, i: usize| ["allyLow", "allyHigh", "enemyLow", "enemyHigh"].map(|k| v["players"][i][k].as_u64().unwrap());
+    assert_eq!(masks(&worked, 0), [0, 2, 0, 0], "player 1 gets player 2 as High, the stale Low and enemy masks go");
+    assert_eq!(masks(&worked, 1), [0, 1, 0, 0]);
+    let own = back(flags | 2, "own");
+    assert_eq!(masks(&own, 0), [2, 0, 0, 2], "Modify ally priorities: the map's own masks");
+    assert_eq!(masks(&own, 1), [2, 0, 0, 2]);
+}
