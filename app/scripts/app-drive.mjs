@@ -49,7 +49,9 @@
 //   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value:
 //                       an expression's, else the last statement's, or what statements `return` (with or without
 //                       a top-level `await`)
-//   --key CHORD         press a chord into the page, to whatever has the focus: "Ctrl+Shift+Z", "Shift+F2", "Delete",
+//   --click SEL[@TEXT]  a mouse click (moved, pressed, released) on the centre of the first element matching a CSS
+//                       selector, with that text if given ("button@Color…"); fails if something else covers it
+//   --key CHORD        press a chord into the page, to whatever has the focus: "Ctrl+Shift+Z", "Shift+F2", "Delete",
 //                       "Numpad7", "Ctrl+Plus" (cdp.mjs parseChord); over WebDriver on Linux, so WebKitGTK's own key
 //                       events come out (where it says key "Unidentified", see lib/keys.ts)
 //
@@ -70,7 +72,7 @@ import { buildApp, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 import { parseLook, resolveLook, studioCamera, studioLighting } from "./we-camera.mjs";
 
-const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key"]);
+const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key", "--click"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 function parseArgs(argv) {
@@ -311,6 +313,11 @@ async function main() {
           out({ step, command: arg, error: r });
         } else if (step === "--eval") {
           out({ step, value: await page.evaluate(evalSource(arg)) });
+        } else if (step === "--click") {
+          const at = arg.indexOf("@");
+          await new Hands(page).click(at < 0 ? arg : arg.slice(0, at), at < 0 ? null : arg.slice(at + 1));
+          await sleep(200);
+          out({ step, click: arg });
         } else if (step === "--key") {
           await new Hands(page).chord(arg);
           await sleep(200);
