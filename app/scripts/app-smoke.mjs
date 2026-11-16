@@ -3925,7 +3925,9 @@ async function groundTextureReload(page, found) {
     const apart = (x) => mapPicture(page).then((y) => pixelsApart(page, x, y));
     if (!(await soon(async () => (await apart(plain)) > 2000, 20000))) return fail("a ground texture imported under map/ isn't drawn");
     const withA = await mapPicture(page);
-    await new Promise((r) => setTimeout(r, 1100));
+    // The picture's own noise (the same scene drawn again), which a change has to exceed.
+    await new Promise((r) => setTimeout(r, 1500));
+    const noise = await pixelsApart(page, withA, await mapPicture(page));
     writeFileSync(file, b);
     await focus();
     if (!(await soon(async () => (await apart(withA)) > 2000, 20000))) fail("the view still draws the old ground texture after the file was overwritten outside");
@@ -3958,14 +3960,18 @@ async function importedBlightWaterReload(page, found) {
     const row = slk.stdout.trim().split(/\r?\n/)[1]?.split("\t");
     if (!row?.[1] || !(Number(row[2]) > 1)) return fail(`no water frames for tileset ${tileset}: ${slk.stdout}${slk.stderr}`);
     const water = row[1];
-    const frame = water ? `${water}00.blp` : null;
-    const targets = [paths.blight, ...(frame ? [frame] : [])];
+    // Every frame of the water animation, as the view reads them (<file>00.blp .. <file>NN.blp).
+    const frames = Array.from({ length: Number(row[2]) }, (_, i) => `${water}${String(i).padStart(2, "0")}.blp`);
+    const targets = [paths.blight, ...frames];
     const read = (p) => page.evaluate(`w3.game.read(${JSON.stringify(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
     const list = await page.evaluate(`w3.game.list()`);
     const other = list.find((p) => /TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i.test(p));
     if (!other) return fail("no texture to overwrite with");
     const [a, b] = [await read(other), await read(paths.blight)];
     if (a.equals(b)) return fail("the texture to write is the blight texture itself (control)");
+    // A lake in view, so the picture can say whether the water frames were read again.
+    await k.tool("set_water", { mode: "lake", left: -768, bottom: -768, right: 768, top: 768 });
+    await k.look(0, 0);
     await page.evaluate(`(() => { const read = w3.workspace.readBytes.bind(w3.workspace); window.__reads = []; w3.workspace.readBytes = (p, ...r) => { window.__reads.push(String(p).split(String.fromCharCode(92)).join("/").toLowerCase()); return read(p, ...r); }; })()`);
     for (const t of targets) { const f = join(k.root, "map", ...t.split("\\")); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, a); }
     const focus = async () => { await page.evaluate(`window.dispatchEvent(new Event("focus"))`); await settled(page); };
@@ -3973,14 +3979,22 @@ async function importedBlightWaterReload(page, found) {
     const reads = () => page.evaluate(`window.__reads.splice(0)`);
     // The first save of the files: the reads that follow include the ones the view makes of them.
     const names = targets.map((t) => t.replace(/\\/g, "/").toLowerCase());
-    await reads();
-    await new Promise((r) => setTimeout(r, 1100));
+    // Every frame holds the same texture, so the animation can't change the picture between the two.
+    const firstSeen = new Set();
+    await soon(async () => { for (const r of await reads()) for (const n of names) if (r.endsWith(n)) firstSeen.add(n); return firstSeen.size === names.length; }, 15000);
+    const withA = await mapPicture(page);
+    // The picture's own noise (the same scene drawn again), which a change has to exceed.
+    await new Promise((r) => setTimeout(r, 1500));
+    const noise = await pixelsApart(page, withA, await mapPicture(page));
     for (const t of targets) writeFileSync(join(k.root, "map", ...t.split("\\")), b);
     await focus();
     // The reload follows the focus after its debounce: collect the reads until every file was read again.
     const seen = new Set();
     await soon(async () => { for (const r of await reads()) for (const n of names) if (r.endsWith(n)) seen.add(n); return seen.size === names.length; }, 15000);
     for (const n of names) if (!seen.has(n)) fail(`${n} wasn't read again after it was overwritten outside`);
+    // The picture follows: the lake is drawn from the other texture now.
+    const apart = async () => pixelsApart(page, withA, await mapPicture(page));
+    if (!(await soon(async () => (await apart()) > noise * 2 + 500, 15000))) fail(`the lake looks the same after all its water frames were overwritten outside (${await apart()} pixels apart, noise ${noise})`);
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
@@ -5291,6 +5305,42 @@ async function resizeRefusedShadows(page, found) {
     sizes(96, 64, "after the refused save after the resize");
   } finally {
     await page.evaluate(`(() => { const k = window.__refusedKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__refusedKept; delete window.__refusedWarned; })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
+/** The shadow update a save makes says how many doodads it left out when only some models can't be read ("N doodads left
+ *  out, their models couldn't be read"; none at all unreadable is the refusal resizeRefusedShadows checks). The control:
+ *  the same save without the doodad whose model isn't there says nothing of the kind, and the stored file is written. */
+async function shadowLeftOut(page, found) {
+  const fail = (what) => found.push(`shadow left out: ${what}`);
+  await page.evaluate(`(() => { window.__leftKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; window.__leftWarned = []; w3.window.confirm = async () => true; w3.window.showWarning = async (m) => { window.__leftWarned.push(String(m)); return "Apply"; }; })()`);
+  try {
+    const tool = mcpTool(page);
+    const folder = join(work, "shadow-left-out");
+    rmSync(folder, { recursive: true, force: true });
+    mkdirSync(folder, { recursive: true });
+    await tool("new_map", { name: "ShadowLeftOut", width: 64, height: 64, folder });
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    const save = async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
+    const warned = () => page.evaluate(`window.__leftWarned.splice(0)`);
+    // Two doodads that bake a shadow, one with a model that is there.
+    const good = JSON.parse(await tool("create_object", { kind: "doodads", base: "LOrb" })).id;
+    const bad = JSON.parse(await tool("create_object", { kind: "doodads", base: "LOrb" })).id;
+    await tool("place_objects", { objects: [{ id: good, x: -256, y: 0 }] });
+    await tool("sculpt_terrain", { mode: "raise", amount: 256, left: -1024, bottom: -256, right: -768, top: 256 });
+    await save();
+    const control = (await warned()).filter((m) => /left out|left as it is/.test(m));
+    if (control.length) return fail(`the save without an unreadable model warned: ${JSON.stringify(control)}`);
+    await tool("set_object_fields", { kind: "doodads", id: bad, changes: [{ field: "dfil", value: "NoSuchShadowModel.mdl" }] });
+    await tool("place_objects", { objects: [{ id: bad, x: 256, y: 0 }, { id: bad, x: 512, y: 0 }] });
+    await tool("sculpt_terrain", { mode: "raise", amount: 256, left: 768, bottom: -256, right: 1024, top: 256 });
+    await save();
+    const said = await warned();
+    if (!said.some((m) => /2 doodads left out, their models couldn't be read/.test(m))) fail(`no "2 doodads left out" warning: ${JSON.stringify(said)}`);
+    if (said.some((m) => /left as it is/.test(m))) fail(`the update was refused, not partial (the good model couldn't be read?): ${JSON.stringify(said)}`);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__leftKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__leftKept; delete window.__leftWarned; })()`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }
@@ -14620,6 +14670,7 @@ async function run() {
         resizeUndo,
         scriptGuard,
         scriptQuestionsOnSwitch,
+        shadowLeftOut,
         shadowTextureOrder,
         shouldHaves,
         soundEditorKeys,
@@ -14879,6 +14930,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeLimits", found);
   await resizeRefusedShadows(page, found).catch((e) => found.push(`resize refused shadows: ${e.message}`));
   await leftOpen(page, "resizeRefusedShadows", found);
+  await shadowLeftOut(page, found).catch((e) => found.push(`shadow left out: ${e.message}`));
+  await leftOpen(page, "shadowLeftOut", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety", found);
   await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
