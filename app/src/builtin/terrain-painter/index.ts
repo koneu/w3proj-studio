@@ -356,7 +356,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const shown = cliffType === "default" ? ed.defaultCliffType() : cliffType;
     cliffSelect.replaceChildren(
       h("option", { value: "-1", selected: shown < 0, title: "The cliff type of the ground tile under the cliff, where it has one" }, "Match the ground"),
-      ...grounds.map((g, i) => h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff`)));
+      ...grounds.flatMap((g, i) => (g ? [h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff`)] : [])));
   };
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
   const strengthWrap = h("label.terrain-tool-opt", { title: "How far the ground goes up or down at the brush's centre, while the button is held" }, "Strength ",

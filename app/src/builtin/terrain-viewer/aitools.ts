@@ -136,10 +136,10 @@ class Touched {
   touch(_t: Terrain, i: number) { this.corners.add(i); }
 }
 
-/** What a corner's cliff type number means: the map's ground tiles that have a cliff version,
- *  in order (see cliffList). */
+/** What a corner's cliff type number means: the ground tile of each entry of the w3e's cliff list (see cliffList),
+ *  "" for one the game doesn't define. */
 function cliffGrounds(t: Terrain, kinds: readonly CliffKind[]) {
-  return t.groundTiles.filter((g) => kinds.some((k) => k.groundTile === g));
+  return t.cliffTiles.map((id) => kinds.find((k) => k.cliffID === id)?.groundTile ?? "");
 }
 
 /** Cliffs next to changed corners take the type of their ground, as after a brush stroke. All the
@@ -149,9 +149,9 @@ export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly Cl
   for (const i of changed) log.corners.add(i);
   let fixed: number | undefined;
   if (cliffTile !== undefined) {
-    if (kinds.some((k) => k.groundTile === cliffTile)) { groundSlot(t, cliffTile, kinds); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
+    if (kinds.some((k) => k.groundTile === cliffTile)) { cliffSlot(t, cliffTile, kinds); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
     fixed = grounds.indexOf(cliffTile);
-    if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
+    if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.filter((g) => g).join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
   }
   matchCliffTypes(t, changed, grounds, log, fixed);
   return [...log.corners];
@@ -200,7 +200,7 @@ export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string,
   const inside = cornersIn(t, area, shape);
   if (!inside.length) throw new Error("That area has no ground in the map.");
   if (!kinds.some((k) => k.groundTile === tile)) throw new Error(`"${tile}" has no cliff. list_ground_tiles marks the tiles that have one.`);
-  groundSlot(t, tile, kinds);
+  cliffSlot(t, tile, kinds);
   const grounds = cliffGrounds(t, kinds), log = new Touched();
   matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, grounds.indexOf(tile));
   return [...log.corners];
@@ -364,6 +364,14 @@ export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]
   const cliff = kinds.find((k) => k.groundTile === tile);
   if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
   return t.groundTiles.length - 1;
+}
+
+/** groundSlot for a tile whose cliff is wanted: its cliff type is added to the w3e's cliff list also when the tile was
+ *  in the ground list already without it (cliff type numbers follow that list, see cliffList). */
+function cliffSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]) {
+  groundSlot(t, tile, kinds);
+  const cliff = kinds.find((k) => k.groundTile === tile);
+  if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
 }
 
 /** Paints corners with a tile. `edge` (0 to 1) is how much of the outside thins out, so the

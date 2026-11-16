@@ -232,7 +232,8 @@ export interface TerrainEditorHandle {
    *  ground; `cliffs` re-plans cliff and ramp models. */
   /** Puts a finished stroke on the undo stack. False when it was refused (Enforce Water Height Limits): the ground is as it was. */
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean;
-  /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
+  /** The ground tile of each cliff type number a corner can have, by the w3e's cliff list ("" for a cliff type the game
+   *  doesn't define; empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];
   /** The cliff type number the World Editor's cliff palette starts on, for new cliffs and water (-1: none known). */
   defaultCliffType(): number;

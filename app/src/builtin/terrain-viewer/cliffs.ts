@@ -38,8 +38,8 @@ export interface CliffType {
  *  texture (texFile …_Cliff1). Seen: Grass Cliff on Lordaeron Summer, with the w3e's cliff list either way round
  *  (we-compare water-brush-swapped, 2026-11-13; the status bar says "Grass Cliff" on a new map), and CAgr on Ashenvale
  *  (tests/fixtures/water-brush/ash-shallow.w3e). -1 when the map has no such cliff. */
-export function weDefaultCliffType(list: readonly CliffType[]): number {
-  return list.findIndex((c) => /_cliff1$/i.test(c.texFile));
+export function weDefaultCliffType(list: CliffList): number {
+  return list.findIndex((c) => !!c && /_cliff1$/i.test(c.texFile));
 }
 
 /** A cliff model and the tiles (y × (width-1) + x) it covers. */
@@ -53,13 +53,16 @@ export interface CliffPlan {
   hiddenTiles: number[];
 }
 
-/** The cliff types a corner's cliff texture index refers to. The list stored
- *  in the w3e is ignored by the game: it is every ground tile of the map, in
- *  order, that has a cliff version. */
-export function cliffList(t: Terrain, types: Map<string, CliffType>): CliffType[] {
-  const byGround = new Map([...types.values()].map((c) => [c.groundTile, c]));
-  return t.groundTiles.map((g) => byGround.get(g)).filter((c): c is CliffType => !!c);
+/** The cliff types a corner's cliff texture index refers to: the w3e's own cliff list, in its order, whatever the
+ *  ground list says and with custom-tilesets 0 or 1 (we-compare ct0-cliff-*: the World Editor's Grass Cliff is 1
+ *  under the cliff list CLdi CLgr and 0 under CLgr CLdi, with the ground list either way round). An entry the game
+ *  doesn't define (CLno) keeps its place, as undefined, so the numbers after it stay. */
+export function cliffList(t: Pick<Terrain, "cliffTiles">, types: ReadonlyMap<string, CliffType>): CliffList {
+  return t.cliffTiles.map((id) => types.get(id));
 }
+
+/** cliffList's result: by cliff type number, undefined for an entry the game doesn't define. */
+export type CliffList = readonly (CliffType | undefined)[];
 
 /** `exists` tells whether a game path is present (to pick a variation that has a file). `hidden`: tiles (y ×
  *  (width-1) + x) another model stands for (special doodads): no cliff or ramp model there, and they are listed as

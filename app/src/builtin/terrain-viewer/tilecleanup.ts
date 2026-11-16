@@ -1,7 +1,7 @@
 // The map's ground tile list: what uses each tile, and changing the list with the corners following
 // (Tiles…: order, remove, clean up). A tile is in use where corners are painted with it, and also where a
-// cliff is drawn with its cliff type: cliff types follow the ground tile list (see cliffList), so a tile
-// no corner shows can still be what a cliff is made of.
+// cliff is drawn with its cliff type: a cliff type (the w3e's cliff list, see cliffList) belongs to a ground tile, so
+// a tile no corner shows can still be what a cliff is made of.
 
 import { customTilesFlag } from "../../lib/terrain/tilesets";
 import type { Terrain } from "../../lib/terrain/w3e";
@@ -16,16 +16,16 @@ export interface TileUse { ground: number[]; cliffs: number[] }
 export function tileUse(t: Terrain, types: ReadonlyMap<string, CliffType>): TileUse {
   const ground = t.groundTiles.map(() => 0), cliffs = t.groundTiles.map(() => 0);
   for (const c of t.corners) if (c.texture < ground.length) ground[c.texture]++;
-  const list = cliffList(t, types as Map<string, CliffType>);
+  const list = cliffList(t, types);
   if (!list.length) return { ground, cliffs };
-  const owner = list.map((type) => t.groundTiles.indexOf(type.groundTile));
+  const owner = list.map((type) => (type ? t.groundTiles.indexOf(type.groundTile) : undefined));
   const at = (x: number, y: number) => t.corners[y * t.width + x];
   for (let y = 0; y < t.height - 1; y++) {
     for (let x = 0; x < t.width - 1; x++) {
       const bl = at(x, y), cs = [bl, at(x, y + 1), at(x + 1, y + 1), at(x + 1, y)];
       if (cs.every((c) => c.layer === bl.layer) || cs.every((c) => c.ramp)) continue;
       const i = owner[bl.cliffTexture] ?? owner[0];
-      if (i >= 0) cliffs[i]++;
+      if (i !== undefined && i >= 0) cliffs[i]++;
     }
   }
   return { ground, cliffs };
@@ -73,15 +73,20 @@ export function planRemoval(tiles: readonly string[], remove: readonly number[],
 /** Gives the terrain a new ground tile list: `map` takes each old index to its new one. Corners are repainted,
  *  cliff types follow (a type that stays keeps its cliffs; a removed one's cliffs take the cliff type of the tile
  *  that replaced its ground tile, else that of the corner's ground, else the first), the stored cliff list is the
- *  derived order then entries no tile uses, and the custom tiles flag follows the list (`own`: the tileset's own
+ *  new ground list's cliff types in its order then the old entries whose ground tile wasn't removed, and the custom tiles flag follows the list (`own`: the tileset's own
  *  list, see customTilesFlag). */
 export function applyTileList(t: Terrain, tiles: readonly string[], map: (oldIndex: number) => number, types: ReadonlyMap<string, CliffType>, own: readonly string[] | undefined): void {
-  const all = types as Map<string, CliffType>;
   const beforeGround = [...t.groundTiles], beforeCliffs = [...t.cliffTiles];
-  const oldCliffs = cliffList(t, all);
+  const oldCliffs = cliffList(t, types);
   t.groundTiles = [...tiles];
-  const newCliffs = cliffList(t, all);
-  const cliffOf = (tile: string | undefined) => newCliffs.findIndex((c) => c.groundTile === tile);
+  // The stored list: the cliff types of the new ground list in its order, then the old entries that don't belong to a
+  // removed tile (types the game doesn't define, and those whose ground wasn't in the list).
+  const byGround = new Map([...types.values()].map((c) => [c.groundTile, c.cliffID]));
+  const derived = tiles.flatMap((g) => { const id = byGround.get(g); return id ? [id] : []; });
+  const removed = new Set(beforeGround.filter((g) => !tiles.includes(g)));
+  t.cliffTiles = [...derived, ...beforeCliffs.filter((id) => !derived.includes(id) && !removed.has(types.get(id)?.groundTile ?? ""))];
+  const newCliffs = cliffList(t, types);
+  const cliffOf = (tile: string | undefined) => newCliffs.findIndex((c) => !!c && c.groundTile === tile);
   for (const c of t.corners) {
     c.texture = map(c.texture);
     if (c.cliffTexture < 15 && oldCliffs.length) {
@@ -91,8 +96,6 @@ export function applyTileList(t: Terrain, tiles: readonly string[], map: (oldInd
       c.cliffTexture = same >= 0 ? same : replaced >= 0 ? replaced : Math.max(0, cliffOf(tiles[c.texture]));
     }
   }
-  const derived = newCliffs.map((c) => c.cliffID);
-  t.cliffTiles = [...derived, ...beforeCliffs.filter((id) => !derived.includes(id) && !oldCliffs.some((c) => c.cliffID === id))];
   t.customTilesetsRaw = customTilesFlag(t.groundTiles, own);
   t.customTilesets = t.customTilesetsRaw !== 0;
 }

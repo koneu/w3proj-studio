@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hdSlots } from "../../lib/model/renderer";
-import { cliffList, cliffRetexture, weDefaultCliffType, type CliffType } from "./cliffs";
+import { cliffList, cliffRetexture, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 
 const CITY = { texDir: "TerrainArt\\CityScape", texFile: "City_Cliff1" };
 
@@ -37,10 +37,48 @@ test("new cliffs and water start on the cliff type the World Editor's palette st
     ({ cliffID, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: `TerrainArt\\${dir}`, texFile, groundTile });
   const types = new Map([row("CLdi", "LordaeronSummer", "Lords_Cliff0", "Ldrt"), row("CLgr", "LordaeronSummer", "Lords_Cliff1", "Lgrs"),
     row("CAgr", "Ashenvale", "Ashen_Cliff1", "Agrs"), row("CAdi", "Ashenvale", "Ashen_Cliff0", "Adrt")].map((c) => [c.cliffID, c]));
-  const terrain = (groundTiles: string[]) => ({ groundTiles }) as Parameters<typeof cliffList>[0];
-  // Lordaeron Summer: Grass Cliff, the second by the ground tiles (we-compare water-brush-*, 2026-11-13).
-  assert.equal(weDefaultCliffType(cliffList(terrain(["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"]), types)), 1);
+  const terrain = (cliffTiles: string[]) => ({ cliffTiles });
+  // Lordaeron Summer: Grass Cliff, the second in the cliff list (we-compare water-brush-*, 2026-11-13).
+  assert.equal(weDefaultCliffType(cliffList(terrain(["CLdi", "CLgr"]), types)), 1);
   // Ashenvale: CAgr, the first here (tests/fixtures/water-brush/ash-shallow.w3e).
-  assert.equal(weDefaultCliffType(cliffList(terrain(["Agrs", "Adrt"]), types)), 0);
-  assert.equal(weDefaultCliffType(cliffList(terrain(["Ldro"]), types)), -1, "no cliff on the map's tiles");
+  assert.equal(weDefaultCliffType(cliffList(terrain(["CAgr", "CAdi"]), types)), 0);
+  assert.equal(weDefaultCliffType(cliffList(terrain([]), types)), -1, "no cliff types on the map");
+  assert.equal(weDefaultCliffType(cliffList(terrain(["CLno", "CLgr"]), types)), 1, "after a type the game doesn't define");
+});
+
+const LORDAERON = new Map([["CLdi", "Ldrt", "Lords_Cliff0"], ["CLgr", "Lgrs", "Lords_Cliff1"]].map(([cliffID, groundTile, texFile]) =>
+  [cliffID, { cliffID, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: "TerrainArt\\LordaeronSummer", texFile, groundTile } as CliffType]));
+const ids = (list: ReturnType<typeof cliffList>) => list.map((c) => c?.cliffID);
+
+test("cliff type numbers follow the w3e's cliff list, with custom-tilesets 0 and 1, whatever the ground list's order", () => {
+  // tests/fixtures/we-specs/make-custom-tilesets.mjs: rev6 has the tileset's own ground list reversed (Lgrs before
+  // Ldrt), rev6c also the cliff list the other way round. The World Editor's Grass Cliff is 1 under CLdi CLgr and 0
+  // under CLgr CLdi with either flag (we-compare ct0-cliff-grass-rev6-0/-1, -rev6c-0/-1, 2026-11-16).
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  for (const customTilesetsRaw of [0, 1]) {
+    const rev6 = { groundTiles: [...own].reverse(), cliffTiles: ["CLdi", "CLgr"], customTilesetsRaw };
+    assert.deepEqual(ids(cliffList(rev6, LORDAERON)), ["CLdi", "CLgr"], `rev6, flag ${customTilesetsRaw}: not the ground list's CLgr CLdi`);
+    const rev6c = { ...rev6, cliffTiles: ["CLgr", "CLdi"] };
+    assert.deepEqual(ids(cliffList(rev6c, LORDAERON)), ["CLgr", "CLdi"], `rev6c, flag ${customTilesetsRaw}`);
+  }
+  // A flag-1 file with the usual lists: the same numbers as the ground list gave before.
+  const usual = { groundTiles: own, cliffTiles: ["CLdi", "CLgr"], customTilesetsRaw: 1 };
+  assert.deepEqual(ids(cliffList(usual, LORDAERON)), ["CLdi", "CLgr"]);
+});
+
+test("a cliff type the game doesn't define keeps its place in the list", () => {
+  assert.deepEqual(ids(cliffList({ cliffTiles: ["CLno", "CLgr"] }, LORDAERON)), [undefined, "CLgr"]);
+  assert.deepEqual(ids(cliffList({ cliffTiles: ["CLdi", "CLgr", "CLno"] }, LORDAERON)), ["CLdi", "CLgr", undefined]);
+});
+
+test("cliff models take their type from the cliff list's numbers", () => {
+  // One tile with a raised corner, cliff type 0: CLgr's texture when the cliff list starts with CLgr, though the
+  // ground list has Ldrt (CLdi's) first.
+  const c = (layer: number) => ({ height: 0, water: 0, texture: 0, variation: 0, cliffVariation: 0, cliffTexture: 0, layer,
+    ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0 });
+  const t = { version: 11, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt", "Lgrs"], cliffTiles: ["CLgr", "CLdi"],
+    width: 2, height: 2, offsetX: 0, offsetY: 0, corners: [c(2), c(2), c(3), c(2)], trailer: new Uint8Array(0) };
+  const textures = (t2: typeof t) => planCliffs(t2, LORDAERON, () => true).requests.map((r) => r.replaceable?.[11]);
+  assert.deepEqual(textures(t), ["TerrainArt\\LordaeronSummer\\Lords_Cliff1.blp"]);
+  assert.deepEqual(textures({ ...t, cliffTiles: ["CLdi", "CLgr"] }), ["TerrainArt\\LordaeronSummer\\Lords_Cliff0.blp"], "control: the other order");
 });

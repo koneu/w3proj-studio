@@ -3,7 +3,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { cliffRetexture, type CliffType } from "./cliffs";
+import { cliffRetexture, type CliffList, type CliffType } from "./cliffs";
 import type { Placed, PlacedTextures, Skin } from "./objects";
 import { loadPathingData, type SpecialDoodad } from "./pathmap";
 
@@ -68,7 +68,7 @@ export function specialCliffTiles(t: Terrain, rects: readonly TileRect[]): Set<n
  *  the cliff texture of the ground they're on, as a cliff model's do. Like a cliff model it's the type of the
  *  bottom-left corner of its tile (planCliffs), here the tile under the model's origin; `list` is cliffList's.
  *  Undefined when the map has no cliff types. */
-export function specialCliffType(t: Terrain, list: readonly CliffType[], x: number, y: number): CliffType | undefined {
+export function specialCliffType(t: Terrain, list: CliffList, x: number, y: number): CliffType | undefined {
   const cx = Math.min(t.width - 1, Math.max(0, Math.floor((x - t.offsetX) / 128)));
   const cy = Math.min(t.height - 1, Math.max(0, Math.floor((y - t.offsetY) / 128)));
   return list[t.corners[cy * t.width + cx]?.cliffTexture ?? 0] ?? list[0];

@@ -121,6 +121,33 @@ test("a type that stays keeps its cliffs when tiles before it go", () => {
   assert.deepEqual(tileUse(t, TYPES).cliffs, [4, 0]);
 });
 
+test("cliff types go by the w3e's cliff list, also when it isn't in the ground list's order", () => {
+  const t = flat();
+  t.cliffTiles = ["CLro", "CLno", "CLdi", "CLgr"];
+  mesa(t, 0);
+  assert.deepEqual(tileUse(t, TYPES).cliffs, [0, 0, 4, 0], "type 0 is CLro, Lrok's");
+  const u = flat();
+  u.cliffTiles = ["CLro", "CLno", "CLdi", "CLgr"];
+  mesa(u, 1);
+  assert.deepEqual(tileUse(u, TYPES).cliffs, [0, 0, 4, 0], "CLno, which the game doesn't define, is drawn as the first type (CLro)");
+  // Lgrd goes: the stored list takes the ground list's order, CLno stays at the end, the mesa stays CLro.
+  const plan = planRemoval(t.groundTiles, [3], new Map(), tileUse(t, TYPES));
+  applyTileList(t, plan.tiles, plan.map, TYPES, undefined);
+  assert.deepEqual(t.cliffTiles, ["CLdi", "CLgr", "CLro", "CLno"]);
+  assert.equal(corner(t, 3, 3).cliffTexture, 2);
+  assert.deepEqual(tileUse(t, TYPES).cliffs, [0, 0, 4]);
+});
+
+test("a cliff type whose ground tile isn't in the list stays in the cliff list with its cliffs", () => {
+  const t = flat(["Ldrt", "Lgrd"]);
+  for (const c of t.corners) c.texture = 0;
+  t.cliffTiles = ["CLdi", "CLro"];
+  mesa(t, 1);
+  applyTileList(t, ["Lgrd", "Ldrt"], (i) => 1 - i, TYPES, undefined);
+  assert.deepEqual(t.cliffTiles, ["CLdi", "CLro"]);
+  assert.equal(corner(t, 3, 3).cliffTexture, 1, "still CLro");
+});
+
 test("the custom tiles flag follows the list: the tileset's own list is 0, another 1", () => {
   const own = ["Ldrt", "Lgrs", "Lrok"];
   const t = flat([...own, "Lgrd"]);

@@ -3537,7 +3537,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               commit(changeArea(terrain, a, (c) => { if (c.texture !== was || was === number) return false; c.texture = number; return true; }));
             }),
             ...(usedCliffs.length && cliffGrounds.length ? [replaceRow("Cliff type", usedCliffs.map((n) => [String(n), label(cliffGrounds[n])[1]] as [string, string]),
-              cliffGrounds.map((g, n) => [String(n), label(g)[1]] as [string, string]), (from, to) => {
+              cliffGrounds.flatMap((g, n) => (g ? [[String(n), label(g)[1]] as [string, string]] : [])), (from, to) => {
                 const was = Number(from), number = Number(to);
                 commit(changeArea(terrain, a, (c) => { if (cliffOf(c) !== was || was === number) return false; c.cliffTexture = number; return true; }));
               })] : []),
@@ -4566,7 +4566,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
           },
           pushEdit: (e) => pushEdit(e),
-          cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
+          cliffGroundTiles: () => (cliffData ? cliffList(terrain, cliffData.types).map((c) => c?.groundTile ?? "") : []),
           defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map())),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
@@ -4815,7 +4815,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             if (kind === "cliffs") {
               const use = handle.groundTileUse();
-              const from = handle.cliffGroundTiles().map((g) => ({ id: g, label: `${tileLabel(g)} cliff`, count: use?.cliffs[terrain.groundTiles.indexOf(g)] ?? 0 }));
+              const from = handle.cliffGroundTiles().filter((g) => g).map((g) => ({ id: g, label: `${tileLabel(g)} cliff`, count: use?.cliffs[terrain.groundTiles.indexOf(g)] ?? 0 }));
               return { from, to: from, selected: 0 };
             }
             const { list, fits } = replacePool(kind);

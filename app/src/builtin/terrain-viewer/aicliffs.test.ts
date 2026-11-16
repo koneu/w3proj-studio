@@ -96,11 +96,29 @@ test("a tile without a cliff is refused, and says how to find one", () => {
   assert.throws(() => setCliffType(flat(), { left: 9000, bottom: 9000, right: 9500, top: 9500 }, "box", "Ldrt", kinds), /no ground in the map/);
 });
 
-test("the numbers count only tiles with a cliff of their own", () => {
+test("the numbers follow the w3e's cliff list, not the ground list", () => {
   const t = flat();
   t.groundTiles = ["Lxxx", "Lgrs"];
+  t.cliffTiles = ["CLgr"];
   setCliffs(t, block, "box", { level: 3 }, kinds);
-  assert.equal(corner(t, 8, 12).cliffTexture, 0, "Lgrs is the first with a cliff, so cliff type 0");
+  assert.equal(corner(t, 8, 12).cliffTexture, 0, "CLgr is the list's first");
+  // The World Editor's numbers (we-compare ct0-cliff-grass-rev6-1): Lgrs's cliff is CLgr's place in the cliff list.
+  const u = flat();
+  u.groundTiles = ["Lgrs", "Ldrt"];
+  u.cliffTiles = ["CLdi", "CLgr"];
+  for (const c of u.corners) c.texture = 0;
+  setCliffs(u, block, "box", { level: 3 }, kinds);
+  assert.equal(corner(u, 8, 12).cliffTexture, 1, "CLgr is second in the cliff list, though Lgrs is first in the ground list");
+});
+
+test("a cliff type asked for whose tile is in the ground list but its cliff not in the cliff list is added to that list", () => {
+  const t = flat();
+  t.cliffTiles = ["CLdi"];
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  setCliffType(t, block, "box", "Lrok", kinds);
+  assert.deepEqual(t.cliffTiles, ["CLdi", "CLro"]);
+  assert.deepEqual(t.groundTiles, ["Ldrt", "Lgrs", "Lrok"], "the ground list stays");
+  assert.equal(corner(t, 8, 12).cliffTexture, 1);
 });
 
 test("painting next to a cliff changes the cliff too, and says so", () => {
