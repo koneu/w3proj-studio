@@ -4195,6 +4195,102 @@ async function areaLevels(page, found) {
     await restoreWindow(page);
   }
 }
+/** Replacing ground under the w3e's custom tilesets flag 0 with a file list other than the tileset's own (2 of its
+ *  6 tiles, from its second: slot 0 is drawn as its first). The Area panel names the area's tile as drawn and replaces it
+ *  with one past the file's list; Replace Cliff Type counts the cliffs of a type whose tile the file's list lacks; and a
+ *  Replace that changes nothing adds no tile: the panel's Replace from a stale panel (its tile no longer in the area)
+ *  and Replace Tiles of a tile no corner shows with one of another tileset. */
+async function areaReplaceCt0(page, found) {
+  try {
+    await areaReplaceCt0Steps(page, found);
+  } finally {
+    await restoreWindow(page);
+  }
+}
+async function areaReplaceCt0Steps(page, found) {
+  const fail = (what) => found.push(`area replace (custom tilesets 0): ${what}`);
+  const k = await heightKit(page, "AreaReplaceCt0");
+  await k.save();
+  const TXT = "map/war3map.w3e.txt", file = join(k.root, "map", "war3map.w3e.txt");
+  const text = () => readFileSync(file, "utf8");
+  const headLine = (name) => new RegExp(`^${name} (.*)$`, "m").exec(text())?.[1] ?? null;
+  const own = (headLine("ground") ?? "").split(" ").filter(Boolean);
+  if (headLine("custom-tilesets") !== "0" || own.length < 6 || !/^\[texture\] all 0$/m.test(text())) {
+    return fail(`a new map has the tileset's own list, the flag 0 and every corner on slot 0 (control): ${headLine("custom-tilesets")}, ${own.join(" ")}`);
+  }
+  // The file's list: 2 of the own tiles from the second on; the flag stays 0, so slot 0 is drawn as own[0].
+  await page.evaluate(`w3.editors.closeAll()`);
+  writeFileSync(file, text().replace(/^ground .*$/m, `ground ${own.slice(1, 3).join(" ")}`));
+  await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 20000);
+  const listed = () => page.evaluate(`Number(/^Ground textures \\((\\d+)\\)/.exec([...document.querySelectorAll("h4")].map((e) => e.textContent).find((t) => t.startsWith("Ground textures")) ?? "")?.[1] ?? -1)`);
+  await until("the file's 2 tiles listed", async () => (await listed()) === 2, 20000).catch(async () => fail(`the side panel lists ${await listed()} ground tiles, not the file's 2 (control)`));
+  const replacer = `(await w3.services.get("w3.terrain")).replaceTypes.get(${JSON.stringify(TXT)})`;
+
+  // An area block a cliff level up: its cliffs are of the map's first cliff type (Lordaeron's dirt, Ldrt's), a tile the
+  // file's ground list hasn't got. Replace Cliff Type counts them by cliff type, not through the ground list.
+  await k.tab("Select");
+  await k.hands.click(".chip", "Area");
+  await k.look(0, 0);
+  const c = await k.hands.where(".model-stage canvas");
+  await k.hands.drag({ x: c.x - 40, y: c.y - 30 }, { x: c.x + 40, y: c.y + 30 });
+  const groundRow = `[...document.querySelectorAll(".terrain-selection .terrain-sel-area")].find((d) => d.querySelector(".terrain-sel-sub")?.textContent === "Ground tile")`;
+  await until("the area panel", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row in the area panel after the drag"));
+  const levelUp = `[...document.querySelectorAll(".terrain-selection button")].find((b) => b.textContent === "Level +1")`;
+  await page.evaluate(`${levelUp}.click()`);
+  await settled(page);
+  const cliffCounts = await page.evaluate(`(async () => (await ${replacer}.choices("cliffs")).from.map((f) => f.id + "=" + f.count))()`);
+  const firstCliff = cliffCounts[0] ?? "";
+  if (!firstCliff.startsWith(`${own[0]}=`) || !(Number(firstCliff.split("=")[1]) > 0)) fail(`Replace Cliff Type counts no cliffs of ${own[0]}'s type for a raised block: ${cliffCounts.join(", ")}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+
+  // The panel names the area's tile as drawn (own[0]) and replaces it with own[4], past the file's 2 (the list grows
+  // with the own tiles up to it): one undo step.
+  await until("the panel again", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row after the undo"));
+  const fromOptions = await page.evaluate(`[...${groundRow}.querySelectorAll("select")[0].options].map((o) => o.value)`);
+  if (JSON.stringify(fromOptions) !== JSON.stringify([own[0]])) fail(`the area's tile is offered as ${JSON.stringify(fromOptions)}, not as drawn (${own[0]})`);
+  const before = text();
+  const pick = (from, to) => `(() => { const r = ${groundRow}, [f, t] = r.querySelectorAll("select"); f.value = ${JSON.stringify(from)}; t.value = ${JSON.stringify(to)}; return f.value === ${JSON.stringify(from)} && t.value === ${JSON.stringify(to)}; })()`;
+  if (!(await page.evaluate(pick(own[0], own[4])))) return fail(`the panel can't choose ${own[0]} → ${own[4]}`);
+  await page.evaluate(`[...${groundRow}.querySelectorAll("button")].find((b) => b.textContent === "Replace").click()`);
+  await k.save();
+  const tex = /^\[texture\]\n((?:[^[\n][^\n]*\n?)*)/m.exec(text())?.[1] ?? "";
+  const digits = new Set([...tex.replace(/\s/g, "")]);
+  if (headLine("custom-tilesets") !== "0" || headLine("ground") !== own.join(" ")) fail(`after the panel's Replace the file says custom-tilesets ${headLine("custom-tilesets")}, ground ${headLine("ground")} (the own list whole, flag 0)`);
+  if (digits.size !== 2 || !digits.has("0") || !digits.has("4")) fail(`after replacing ${own[0]} with ${own[4]} in the area the corners' slots are ${[...digits].join(",") || text().match(/^\[texture\].*$/m)?.[0]} (want 0 outside, 4 inside)`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (!/^\[texture\] all 0$/m.test(text())) fail("one undo of the panel's Replace didn't put every corner back on slot 0");
+  if (text().replace(/^ground .*$/m, "") !== before.replace(/^ground .*$/m, "")) fail("one undo of the panel's Replace left more than the ground list changed");
+
+  // A stale panel (its tile replaced on the whole map meanwhile): its Replace finds nothing and adds no tile.
+  await until("the panel again", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row after the second undo"));
+  const n0 = await listed();
+  const stale = await page.evaluate(`(async () => {
+    const r = ${groundRow}, [f, t] = r.querySelectorAll("select"), go = [...r.querySelectorAll("button")].find((b) => b.textContent === "Replace");
+    const whole = await w3.commands.execute("w3.terrain.replaceTiles", { from: ${JSON.stringify(own[0])}, to: ${JSON.stringify(own[1])} }).then((n) => n, (e) => String(e));
+    f.value = ${JSON.stringify(own[0])}; t.value = ${JSON.stringify(own[5])};
+    if (f.value !== ${JSON.stringify(own[0])} || t.value !== ${JSON.stringify(own[5])}) return "the stale panel can't choose its tiles";
+    go.click();
+    return whole;
+  })()`);
+  await settled(page);
+  if (typeof stale !== "number" || stale <= 0) fail(`the whole-map Replace Tiles before the stale panel's: ${stale}`);
+  if ((await listed()) !== n0) fail(`a stale panel's Replace that changed nothing grew the ground list from ${n0} to ${await listed()}`);
+
+  // Replace Tiles of a tile no slot is drawn as (own[5], past the list of 5; offered, the own list whole) with another
+  // tileset's: nothing, and no tile added (nor the flag set).
+  const n1 = await listed();
+  if (n1 !== 5) fail(`the list has ${n1} tiles before Replace Tiles of ${own[5]}, not 5 (control)`);
+  const none = await k.run("w3.terrain.replaceTiles", { from: own[5], to: "Wsnw" });
+  await settled(page);
+  if (none) fail(`Replace Tiles ${own[5]} → Wsnw: ${none}`);
+  if ((await listed()) !== n1) fail(`Replace Tiles of a tile no corner shows grew the ground list from ${n1} to ${await listed()}`);
+  await k.save();
+  if (headLine("custom-tilesets") !== "0" || /\bWsnw\b/.test(headLine("ground") ?? "")) fail(`Replace Tiles that replaced nothing left custom-tilesets ${headLine("custom-tilesets")}, ground ${headLine("ground")}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
 /** In Objects mode a drag with A held is a box select of objects, as the World Editor's (we-drive, verify round 3,
  *  2026-11-13: a box over two trees with A held selected both, Delete removed both); Studio's A once did an area of
  *  ground there, and Delete then removed nothing. Leaves the Select tab in Objects mode, the trees gone and saved. */
@@ -14568,6 +14664,7 @@ async function run() {
       const onlyChecks = {
         addPathReady,
         areaLevels,
+        areaReplaceCt0,
         artModeReload,
         atmosphereTools,
         byHand,
@@ -14856,6 +14953,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "wholeMapGround", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
   await leftOpen(page, "areaLevels", found);
+  await areaReplaceCt0(page, found).catch((e) => found.push(`area replace (custom tilesets 0): ${e.message}`));
+  await leftOpen(page, "areaReplaceCt0", found);
   await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
   await leftOpen(page, "cameraEditing", found);
   await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));

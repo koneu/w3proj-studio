@@ -203,3 +203,19 @@ test("the facts for putting the flag back come from the project; unreadable ones
   await savedMelee(on, { flags: MELEE }, units);
   assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), []);
 });
+
+test("with the custom tilesets flag 0 the start's ground is buildable by the tile drawn, the tileset's own list", async () => {
+  // Terrain.slk's Lordaeron tiles are Ldrt (buildable), Lrok (not). The file lists them the other way round: with
+  // the flag 0 slot 0 is drawn as Ldrt, the tileset's first, whatever the file says (w3e.ts drawnGroundTiles).
+  const saved = async (custom: number) => {
+    const t = flat();
+    t.groundTiles = ["Lrok", "Ldrt"];
+    t.customTilesetsRaw = custom;
+    t.customTilesets = custom !== 0;
+    const ws = { ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) }),
+      gameText: async (p: string) => GAME[p] };
+    return (await savedMelee(ws, { flags: OFF }, [startMid])).flags;
+  };
+  assert.equal(await saved(0), MELEE, "drawn as Ldrt: buildable");
+  assert.equal(await saved(1), OFF, "control: with the flag set the file's Lrok, not buildable");
+});
