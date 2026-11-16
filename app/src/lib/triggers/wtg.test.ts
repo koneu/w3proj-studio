@@ -47,6 +47,21 @@ test("Reforged trigger file: what's written reads back the same, and again byte 
   assert.deepEqual(writeWtg(back), bytes);
 });
 
+test("a number a field of war3map.wtg can't hold is refused on write, not wrapped; the edges are written", () => {
+  const set = (f: (t: TriggerFile) => void) => { const t = reforged(); f(t); return t; };
+  for (const bad of [2 ** 32, -1, 1.5, Number.NaN]) {
+    const t = set((x) => { x.variables[0].arraySize = bad; });
+    const before = JSON.stringify(t);
+    assert.throws(() => writeWtg(t), /doesn't fit an unsigned 32-bit field/, String(bad));
+    assert.equal(JSON.stringify(t), before, "the file given stays as it was");
+  }
+  for (const bad of [2 ** 31, -(2 ** 31) - 1]) {
+    assert.throws(() => writeWtg(set((x) => { x.variables[0].parent = bad; })), /doesn't fit a signed 32-bit field/, String(bad));
+  }
+  const edges = set((x) => { x.variables[0].arraySize = 0xffffffff; x.variables[0].parent = -(2 ** 31); });
+  assert.deepEqual(parseWtg(writeWtg(edges), data), edges);
+});
+
 test("the Reforged layout: magic, marker, version", () => {
   const b = writeWtg(reforged()), dv = new DataView(b.buffer, b.byteOffset);
   assert.equal(new TextDecoder().decode(b.subarray(0, 4)), "WTG!");

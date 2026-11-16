@@ -121,8 +121,15 @@ class Writer {
   private parts: Uint8Array[] = [];
   private len = 0;
   private push(p: Uint8Array) { this.parts.push(p); this.len += p.length; }
-  u32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, v >>> 0, true); this.push(p); return this; }
-  i32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setInt32(0, v, true); this.push(p); return this; }
+  // A number its field can't hold is refused, never wrapped (nothing is written: the caller gets the error).
+  u32(v: number) {
+    if (!Number.isInteger(v) || v < 0 || v > 0xffffffff) throw new Error(`${v} doesn't fit an unsigned 32-bit field of the trigger file`);
+    const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, v, true); this.push(p); return this;
+  }
+  i32(v: number) {
+    if (!Number.isInteger(v) || v < -0x80000000 || v > 0x7fffffff) throw new Error(`${v} doesn't fit a signed 32-bit field of the trigger file`);
+    const p = new Uint8Array(4); new DataView(p.buffer).setInt32(0, v, true); this.push(p); return this;
+  }
   str(s: string) { this.push(encodeLossless(s)); this.push(new Uint8Array(1)); return this; }
   bytes(b: Uint8Array) { this.push(b); return this; }
   done() { const out = new Uint8Array(this.len); let o = 0; for (const p of this.parts) { out.set(p, o); o += p.length; } return out; }

@@ -18,7 +18,7 @@ import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { mapStrings, projectWithFiles, requireProject } from "../../lib/formats/mapdoc";
-import { addScriptTrigger, addVariable, exportedTriggers, mapFileName, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, variableArgs, exportedTriggers, mapFileName, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
 import { convertToCustom, triggerCustomText } from "../../lib/script/triggers";
@@ -165,7 +165,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (typeof name !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) throw new Error("name must be letters, digits and _, starting with a letter.");
       const types = (await triggerData(w3)).types;
       if (typeof type !== "string" || !types.has(type)) throw new Error(`"${String(type)}" isn't a trigger type. Some are: integer, real, boolean, string, unit, group, location, timer, hashtable, effect.`);
-      await editTriggers(`Add variable ${name}`, (file) => addVariable(file, { name, type, isArray: array === true, arraySize: typeof size === "number" ? size : 1, initialValue: typeof initialValue === "string" ? initialValue : "" }));
+      // A size or number the file or the script can't hold is refused before anything changes.
+      const args = variableArgs(types.get(type)?.base ?? type, type, size, initialValue);
+      await editTriggers(`Add variable ${name}`, (file) => addVariable(file, { name, type, isArray: array === true, ...args }));
       return `Added the variable; scripts call it udg_${name}.`;
     }),
     w3.mcp.registerTool("remove_trigger_variable", async ({ name }) => {

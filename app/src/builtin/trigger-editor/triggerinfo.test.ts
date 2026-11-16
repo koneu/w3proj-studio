@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
 import { textTriggers, type Eca, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
-import { addScriptTrigger, addVariable, exportedTriggers, findTrigger, mapFileName, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, exportedTriggers, findTrigger, mapFileName, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList, variableArgs } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
 const ctx = { data: { find: () => undefined, categories: new Map() } as unknown as TriggerData } as DisplayContext;
@@ -144,6 +144,17 @@ test("variables: names are unique; Reforged lists them in a category and counts 
   assert.deepEqual([r.variables[0].id, r.variables[0].parent, r.variables[0].initialized], [6 << 24, 2 << 24, true]);
   assert.equal(r.items[1].type, 64);
   assert.equal(r.counts[6].count, 1);
+});
+
+test("add_trigger_variable refuses a size or initial value the file or script can't hold, before anything changes; the edges are taken", () => {
+  for (const size of [0, 32769, 1.5, -1, 1e10, "4"]) assert.throws(() => variableArgs("integer", "integer", size, ""), /size must be a whole number from 1 to 32768/, String(size));
+  for (const [base, init] of [["integer", "2147483648"], ["integer", "1.5"], ["integer", "many"], ["real", "1e39"], ["real", "far"]]) {
+    assert.throws(() => variableArgs(base, base, undefined, init), /initialValue: /, `${base} ${init}`);
+  }
+  assert.deepEqual(variableArgs("integer", "integer", 32768, "-2147483648"), { arraySize: 32768, initialValue: "-2147483648" });
+  assert.deepEqual(variableArgs("integer", "integer", 1, "2147483647"), { arraySize: 1, initialValue: "2147483647" });
+  assert.deepEqual(variableArgs("real", "real", undefined, "2"), { arraySize: 1, initialValue: "2.00" }, "as the Variables table writes a real");
+  assert.deepEqual(variableArgs("unit", "unit", undefined, undefined), { arraySize: 1, initialValue: "" });
 });
 
 test("a trigger in script gives its text", () => {

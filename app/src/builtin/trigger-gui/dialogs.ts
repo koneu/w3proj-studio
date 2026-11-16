@@ -6,6 +6,7 @@ import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/s
 import { withColorTools } from "../../extensions/colortools";
 import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
+import { literalProblem } from "../../lib/triggers/literals";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { focusAfterClick, h } from "../../workbench/dom";
@@ -125,13 +126,14 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       categoryName: categoryName(ed), preview: (f) => functionPreview(ed, f),
     }) });
     if (takesValue(data, type)) tabs.push({ label: "Value", build: () => {
-      // Numbers must be numbers (whole for integers) within the function's limits (_Limits).
+      // Numbers must be numbers the script can hold (literals.ts: a 32-bit integer, a 32-bit float) within the
+      // function's limits (_Limits).
       const base = data.types.get(type)?.base ?? type;
       const problem = (v: string): string | null => {
         if (base !== "integer" && base !== "real") return null;
+        const bad = literalProblem(base, v);
+        if (bad) return bad;
         const n = Number(v.trim());
-        if (v.trim() === "" || !Number.isFinite(n)) return `Enter a number.`;
-        if (base === "integer" && !Number.isInteger(n)) return "Enter a whole number.";
         const [min, max] = limits ?? [null, null];
         if (min !== null && n < min) return `The lowest value is ${min}.`;
         if (max !== null && n > max) return `The highest value is ${max}.`;

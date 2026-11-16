@@ -2,6 +2,7 @@
 
 import { branchLabels, ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { ident as triggerIdent } from "../../lib/script/jass";
+import { typedInitialValue } from "../../lib/triggers/literals";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import { allocItemId, textTriggers, TYPE_INDEX, type CustomTextFile, type Eca, type TriggerFile, type TriggerItem, type Variable } from "../../lib/triggers/wtg";
 
@@ -70,6 +71,24 @@ export function removeTrigger(file: TriggerFile, scripts: CustomTextFile, t: Tri
 }
 
 /** A global variable. Reforged files also list it as an item of a category. */
+/** The largest array the Variables table takes (and add_trigger_variable). */
+export const ARRAY_SIZE_MAX = 32768;
+
+/** add_trigger_variable's array size and initial value as a variable of `type` (base type `base`) holds them; one it
+ *  can't hold (a size that isn't 1 to 32768, a number the script can't take) is refused with an error. */
+export function variableArgs(base: string, type: string, size: unknown, initialValue: unknown): { arraySize: number; initialValue: string } {
+  if (size !== undefined && !(typeof size === "number" && Number.isInteger(size) && size >= 1 && size <= ARRAY_SIZE_MAX)) {
+    throw new Error(`size must be a whole number from 1 to ${ARRAY_SIZE_MAX}.`);
+  }
+  let init = typeof initialValue === "string" ? initialValue : "";
+  if ((base === "integer" || base === "real") && init.trim() !== "") {
+    const r = typedInitialValue(base, type, init);
+    if ("refused" in r) throw new Error(`initialValue: ${r.refused}`);
+    init = r.value ?? "";
+  }
+  return { arraySize: typeof size === "number" ? size : 1, initialValue: init };
+}
+
 export function addVariable(file: TriggerFile, v: Pick<Variable, "name" | "type" | "isArray" | "arraySize" | "initialValue">) {
   if (file.variables.some((x) => x.name.toLowerCase() === v.name.toLowerCase())) throw new Error(`There's already a variable "${v.name}".`);
   const made: Variable = { ...v, unknown: 1, initialized: v.initialValue !== "", id: file.variables.length, parent: -1 };

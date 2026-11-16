@@ -5,6 +5,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import type { TriggerEditorHandle } from "../../extensions/services";
+import { typedInitialValue } from "../../lib/triggers/literals";
 import type { TriggerData } from "../../lib/triggers/triggerdata";
 import type { Item, Param, TriggerFile, Variable } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -235,11 +236,11 @@ function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable):
   const del = h("button.trig-var-del", { title: "Delete variable", onclick: () => void deleteVariable(w3, host, v) }, "✕");
   return h("tr", {},
     h("td", {}, name), h("td", {}, type), h("td", {}, h("label.trig-var-array", {}, isArray, size)),
-    h("td", {}, initialValue(host, data, v, current)), h("td", {}, del));
+    h("td", {}, initialValue(w3, host, data, v, current)), h("td", {}, del));
 }
 
 /** Presets of the type to pick from, a typed value for numbers, text and object codes, else nothing. */
-function initialValue(host: VariableHost, data: TriggerData, v: Variable, current: () => Variable): HTMLElement {
+function initialValue(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable, current: () => Variable): HTMLElement {
   const ed = host.handle;
   const set = (value: string | null) => ed.edit(`Initial value of ${v.name}`, () => {
     const t = current();
@@ -258,18 +259,15 @@ function initialValue(host: VariableHost, data: TriggerData, v: Variable, curren
   }
   const typed = TYPED.includes(base) || /code$/.test(v.type);
   if (!typed) return h("span.muted", {}, "default");
+  // A value the variable can't hold (literals.ts) is refused with a word, and the box shows the value kept.
   const input = h("input.trig-var-value", { type: "text", value: v.initialized ? v.initialValue : "", placeholder: "default", onchange: () => {
-    const raw = input.value.trim();
-    if (raw === "" && base !== "string") { set(null); return; }
-    if (base === "integer" && !/^-?\d+$/.test(raw)) { input.value = v.initialValue; return; }
-    if (base === "real") {
-      const n = Number(raw);
-      if (!Number.isFinite(n)) { input.value = v.initialValue; return; }
-      set(n.toFixed(2));
+    const r = typedInitialValue(base, v.type, input.value);
+    if ("refused" in r) {
+      void w3.window.showError(`Initial value of ${v.name}: ${r.refused}`);
+      input.value = v.initialized ? v.initialValue : "";
       return;
     }
-    if (/code$/.test(v.type) && !/^.{4}$/.test(raw)) { input.value = v.initialValue; return; }
-    set(base === "string" && input.value === "" ? null : base === "string" ? input.value : raw);
+    set(r.value);
   } });
   return input;
 }
