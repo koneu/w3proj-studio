@@ -13,6 +13,7 @@
 //   node scripts/app-smoke.mjs --no-build runs what was built last
 //   W3_APP_BIN=<app> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>   runs a prebuilt app (verify-build.mjs)
 //   node scripts/app-smoke.mjs --break    breaks a file on purpose: this run has to fail
+//   node scripts/app-smoke.mjs --only=placerAndCampaign --break-autocycle   Auto Cycle Random Groups stays off: that check alone fails
 //   node scripts/app-smoke.mjs --part=1/2 the project checks and the first half of the full run's checks
 //   node scripts/app-smoke.mjs --part=2/2 the second half (with --no-build while part 1 builds: they run side by side)
 //   --verbose shows what each editor put on screen
@@ -984,6 +985,7 @@ async function tileCleanup(page, found) {
 async function heightKit(page, name) {
   const tool = mcpTool(page), hands = new Hands(page);
   const folder = join(work, "heights", name);
+  rmSync(folder, { recursive: true, force: true }); // a killed run left it, and new_map refuses an existing folder
   mkdirSync(folder, { recursive: true });
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   await tool("new_map", { name, width: 64, height: 64, folder });
@@ -4544,6 +4546,7 @@ async function restoreWindow(page) {
 
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
 let checkEnded = Date.now();
+const SCRIPT_QUESTION_CHECKS = new Set(["moduleFunctions", "graphicsModes", "drawCalls", "contextLoss"]);
 async function leftOpen(page, check, found) {
   // How long each check took, so the gate's log shows where the run's minutes go.
   const now = Date.now();
@@ -4552,6 +4555,8 @@ async function leftOpen(page, check, found) {
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
   for (const text of left) {
     console.log(`  left open after ${check}: ${text}`);
+    // Known: these checks write their own war3map.j, so the script question ("isn't the script Studio wrote last") stays open.
+    if (SCRIPT_QUESTION_CHECKS.has(check) && /script/i.test(text)) continue;
     found.push(`${check} left a question open: ${text}`);
   }
   // A check that replaced a w3.window function (confirm, inputBox...) and didn't put it back would answer the next
@@ -10924,7 +10929,8 @@ async function placerAndCampaign(page, found) {
     const held = await lineNow();
     await sleep(12000);
     if (await lineNow() !== held) fail(`with Auto Cycle Random Groups off the drawn line changed from ${held} to ${await lineNow()}`);
-    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", true)`);
+    // --break-autocycle leaves it off here, so this check alone has to fail.
+    await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", ${!process.argv.includes("--break-autocycle")})`);
     const started = Date.now();
     await soon(async () => await lineNow() !== held, 40000);
     const now = await lineNow();
