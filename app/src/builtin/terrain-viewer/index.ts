@@ -5889,7 +5889,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Copies: the picture is of the moment it was asked for, whatever is edited while it is drawn.
           const doodads = [...(dooFile?.list ?? [])], units = [...(unitsFile?.list ?? [])];
           return {
-            base: await minimapBase(w3, terrain, doodads, rf),
+            base: await minimapBase(w3, terrain, doodads, rf, { noDeLayer: true }),
             terrain, units,
             pathing: () => handle.pathing({ filtered: true }),
             // The Region Editor's, unsaved edits included, as the Regions layer draws them.

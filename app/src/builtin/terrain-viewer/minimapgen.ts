@@ -7,6 +7,7 @@ import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseMdx } from "../../lib/model/mdx";
 import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type PathMask, type Rgb } from "./minimap";
+import { importedPath, modeNames } from "../../lib/imports";
 import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./objects";
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
@@ -204,8 +205,14 @@ export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[
 
 /** What every minimap picture is made of: the camera margins, the ground tiles' and the water's colours, and the
  *  doodads and destructables shown on the minimap. */
+/** Whether a resolved game path (`War3.w3mod:_de.w3mod:…`) lies in the 3.0 art layer. */
+export const inDeLayer = (stored: string | null) => stored !== null && /:_de\.w3mod:/i.test(stored);
+
+/** `noDeLayer`: Export Minimap in HD, where the World Editor draws a grey dot for a doodad whose model is stored only under
+ *  `_DE.w3mod` (EOcr, LCpa, LRsr, UO*, YO*; we-compare 2026-11-17), while the terrain view does show such models (the game's
+ *  layer fallback). A model the map imports itself is still read. */
 export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>): Promise<Omit<MinimapInput, "params">> {
+  readFile: (path: string) => Promise<Uint8Array>, opts: { noDeLayer?: boolean } = {}): Promise<Omit<MinimapInput, "params">> {
   await applyTilesetWater(w3, terrain);
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
@@ -255,11 +262,19 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   ]);
   const bases = new Map([...await pathOverrides(w3, "war3map.w3d", "dptx"), ...await pathOverrides(w3, "war3map.w3b", "bptx")]);
   let skins: Promise<Map<string, Skin>> | null = null;
+  /** `readFile`, but a game file that only the 3.0 art layer has (HD falls back to it) isn't found, unless the map imports it. */
+  const readWithoutDe = async (path: string) => {
+    if (graphicsMode(w3) === "hd" && !modeNames(path.replace(/\//g, "\\"), "hd").some((n) => importedPath(w3, n))) {
+      const stored = await w3.game.resolve(path).catch(() => null);
+      if (inDeLayer(stored)) throw new Error(`${path} is only in the 3.0 art layer`);
+    }
+    return readFile(path);
+  };
   const colorOf = memo((key: string) => (async () => {
     skins ??= loadSkins(w3);
     const mean = key.startsWith("mean:"), type = key.slice(mean ? 5 : 6);
     const skin = (await skins).get(type);
-    return skin ? modelTextureColor(skin, readFile, mean) : null;
+    return skin ? modelTextureColor(skin, opts.noDeLayer ? readWithoutDe : readFile, mean) : null;
   })().catch(() => null));
   const modelColor = (type: string, mean: boolean) => colorOf(`${mean ? "mean" : "first"}:${type}`);
   // A pathing texture is read and decoded once, for its cells and its size alike (null: unreadable).

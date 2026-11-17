@@ -48,7 +48,11 @@
 //               bytes), text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
 //               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may;
 //               "expectLines": { "we": [regex, ...], "studio": [regex, ...] } (text-set) the same for lines: each pattern
-//               has to match a line only that side's save has, and every line only one side has a pattern of its side.
+//               has to match a line only that side's save has, and every line only one side has a pattern of its side;
+//               "expectCorners": [{ "box": [x0, y0, x1, y1], "fields": ["texture"], "we": 1, "studio": 0, "delta": 512,
+//               "corners": [min, max] }, ...] (w3e) for a difference whose corners change from run to run or cover the
+//               whole map: every differing field must be claimed by a rule (the first whose box, fields and values fit;
+//               no box is the whole map; we / studio / delta optional), each rule's count of corners in its range.
 //               A "differs" without expectPaths passes on any difference, also a World Editor step that missed: refused,
 //               on a JSON kind (name the paths) and on text, text-set, text-exact, bytes and wpm alike (compare the file
 //               as a JSON kind, as text-set with expectLines, or narrow it with "lines" and expect a match); only the entries and textEntries of

@@ -161,7 +161,7 @@
   },
   {
     "name": "boundary-flags-wpm",
-    "description": "Boundary with other flags on the blank map (2026-11-14, branch boundary-we): size 3 at tile 28.4,30.4 (562,469) then Remove Boundary (1552,175) size 1 there: the floor corner 28,30 comes off and its tile is 0x40 again; Blight (1552,111) size 3 at 36.4,31.4 (970,428) then Boundary size 1 there (corner 36,31); then Shallow water (1473,310) picked while Boundary is still the chosen tile, size 2, one click at 36.3,26.3 (996,664): the editor applies both, water round the nearest corner 36,26 and Boundary round the floor corner, the same 5 corners (Studio: Boundary then Shallow, both size 2, at that point). A tile whose lower-left corner is painted is 0xce whatever else it is: a cliff (0xca without), or under water (0x08 without: a fully watered tile measured so on an earlier round); blighted it keeps the blight bit, 0xee (tile 36,31). The Boundary flags (18 corners) and the water match; DIFFERS in war3map.w3e only by the editor's Blight brush, not Boundary: it also turns 36 corners round the size-3 blight (tiles 33-40 x 28-35, an irregular set) to the map's second ground tile, Ldro, where Studio's Blight sets only the flag",
+    "description": "Boundary with other flags on the blank map (2026-11-14, branch boundary-we): size 3 at tile 28.4,30.4 (562,469) then Remove Boundary (1552,175) size 1 there: the floor corner 28,30 comes off and its tile is 0x40 again; Blight (1552,111) size 3 at 36.4,31.4 (970,428) then Boundary size 1 there (corner 36,31); then Shallow water (1473,310) picked while Boundary is still the chosen tile, size 2, one click at 36.3,26.3 (996,664): the editor applies both, water round the nearest corner 36,26 and Boundary round the floor corner, the same 5 corners (Studio: Boundary then Shallow, both size 2, at that point). A tile whose lower-left corner is painted is 0xce whatever else it is: a cliff (0xca without), or under water (0x08 without: a fully watered tile measured so on an earlier round); blighted it keeps the blight bit, 0xee (tile 36,31). The Boundary flags (18 corners) and the water match; DIFFERS in war3map.w3e only by the editor's Blight brush, not Boundary: it also turns 36 corners round the size-3 blight (tiles 33-40 x 28-35, an irregular set) to the map's second ground tile, Ldro, where Studio's Blight sets only the flag. expectCorners (2026-11-17, branch fix-we-stable: 31 and 34 corners in 33,28 to 40,35 and 32,27 to 40,34 in two runs, 36 to 39 before): only the texture, 1 (Ldro) against 0, of 20 to 50 corners inside 31,26 to 41,36 (the runs' boxes and a corner more round them)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
     },
@@ -192,7 +192,10 @@
     },
     "compare": [
       { "file": "war3map.wpm", "as": "wpm" },
-      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+      {
+        "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+        "expectCorners": [{ "box": [31, 26, 41, 36], "fields": ["texture"], "we": 1, "studio": 0, "corners": [20, 50] }]
+      }
     ],
     "limit": 40
   }

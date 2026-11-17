@@ -413,3 +413,14 @@ test("HillsbradCreek against its own war3mapMap.blp: water, the rocks without a 
   t.diagnostic(`cliffs without the rocks: ${bare.text}`);
   assert.ok(bare.ours[0] - bare.editor[0] > 6 && bare.ours[1] - bare.editor[1] > 6, `cliffs without the rocks: ${bare.text}`);
 });
+
+import { inDeLayer } from "./minimapgen";
+
+// Export Minimap in HD (we-compare 2026-11-17): the editor draws a grey dot for a doodad whose model only the 3.0 art layer has.
+test("a game path resolved into the _DE layer is told from the base game's and HD's", () => {
+  assert.equal(inDeLayer("War3.w3mod:_de.w3mod:Doodads/Terrain/EOcr/EOcr.mdx"), true);
+  assert.equal(inDeLayer("war3.w3mod:_DE.w3mod:_tilesets/l.w3mod:Doodads/x.mdx"), true);
+  assert.equal(inDeLayer("War3.w3mod:_hd.w3mod:Doodads/x.mdx"), false);
+  assert.equal(inDeLayer("War3.w3mod:Doodads/x.mdx"), false);
+  assert.equal(inDeLayer(null), false);
+});
