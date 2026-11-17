@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { toClassicMdx } from "../../lib/model/classic";
-import type { Model } from "../../lib/model/mdx";
+import { encodeBlp1Jpeg } from "../../lib/image/encode";
+import { parseMdx, type Model } from "../../lib/model/mdx";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { loadSkins, withObjectArt, type Placed } from "./objects";
 import { doodadTypes, predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
@@ -65,6 +66,32 @@ test("doodads the skin table says cast no shadow (shadow=0, as corn) stay out of
   assert.deepEqual(asked, [], "corn's model isn't even read");
   assert.deepEqual(await predict("D000"), rock, "corn whose object data turns its shadow on casts");
   assert.equal(shadowed(await predict("D001")), 0, "a rock whose object data turns it off doesn't");
+});
+
+test("an alpha-tested geoset whose texture is clear casts nothing in HD and whole in Classic, as the editor's calculation", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOcl]\nfile=Doodads\\ClearPillar\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const w3 = { settings: { get: () => "hd" }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const terrain = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  // The tower with an alpha-tested (filter mode 1) material on a texture whose alpha is 0 everywhere.
+  const model = parseMdx(towerModel(1));
+  model.textures = [{ replaceableId: 0, path: "Doodads\\Clear.blp", flags: 0 }];
+  const tower = toClassicMdx(model, (i) => model.textures[i].path);
+  const clear = encodeBlp1Jpeg(8, 8, new Uint8Array(8 * 8 * 4), 85, { alpha: true });
+  const read = async (p: string) => {
+    if (/ClearPillar\.mdx$/i.test(p)) return tower;
+    if (/Clear\.blp$/i.test(p)) return clear;
+    throw new Error(`no ${p}`);
+  };
+  const at: Placed = { id: "LOcl", variation: 0, position: [terrain.offsetX + 16 * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [1, 1, 1] };
+  const ground = terrainShadows(terrain);
+  const shadowed = (m: Uint8Array) => m.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0);
+  const predict = (mode: string) => predictShadows(terrain, [at], skins, () => undefined, read, undefined, undefined, () => mode);
+  assert.equal(shadowed(await predict("hd")), 0, "HD: the alpha test leaves nothing of the clear texture");
+  assert.ok(shadowed(await predict("sd")) > 10, "Classic: the editor casts the geoset whole");
 });
 
 test("a model's casting triangles are kept per graphics mode: another mode reads its own model of the same path", async () => {

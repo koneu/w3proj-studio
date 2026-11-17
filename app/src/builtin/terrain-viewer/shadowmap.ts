@@ -44,7 +44,10 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
   return meshes.get(artMode, path.toLowerCase(), async () => {
     const model = parseMdx(await readFile(path));
     const maps = new Map<string, AlphaMap | null>();
-    for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
+    // Classic art: the editor casts alpha-tested geosets whole, their textures' holes included (we-drive, branch
+    // we-shadow-3, SD: LRrk's ten variations and eight turns, 984 cells; whole quads 983 of them and 5 more, with the
+    // alpha test 659 and 3 more).
+    if (artMode() !== "sd") for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
     return shadowMesh(model, (p) => maps.get(p) ?? null) ?? NO_FACES;
   }).catch(() => { failed.add(key); return null; });
 }
