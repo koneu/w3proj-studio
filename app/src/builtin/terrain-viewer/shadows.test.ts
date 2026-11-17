@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { newTerrain, type NewMapOptions } from "./newmap";
-import { cliffCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, terrainShadows, SHADOW_WALK_STEPS } from "./shadows";
+import { rampSides } from "../../lib/terrain/cliffs";
+import { cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, terrainShadows } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
 function flat(): Terrain {
@@ -27,7 +28,7 @@ test("a 128 high bank one tile wide: the editor's shadow starts a cell down the 
   assert.deepEqual(colOf(shd, 40, 60, 75), [65, 66, 67, 68]);
 });
 
-test("a single corner raised 512: the editor's shadow cell by cell, cut off after 16 steps toward the sun", () => {
+test("a single corner raised 512: the editor's shadow cell by cell", () => {
   const t = flat();
   setGroundHeight(corner(t, 40, 28), 512);
   const shd = terrainShadows(t);
@@ -48,12 +49,61 @@ test("a single corner raised 512: the editor's shadow cell by cell, cut off afte
     return out.join(",");
   };
   for (let y = 100; y <= 140; y++) assert.equal(runs(y), editor[y] ?? "", `row ${y}`);
-  // The gap at (175, 127) is the 17th step: the walk stops at SHADOW_WALK_STEPS.
-  assert.equal(SHADOW_WALK_STEPS, 16);
+  // The gap at (175, 127) is 17 steps off the corner, whose highest cell (448) is lower than the sun's 17 × 80/3 there.
   assert.equal(shd.reduce((n, v) => n + (v ? 1 : 0), 0), Object.values(editor).join(",").split(",").reduce((n, r) => {
     const [a, b] = r.split("-").map(Number);
     return n + (b === undefined ? 1 : b - a + 1);
   }, 0), "nothing else on the map is shaded");
+});
+
+// make-shadow-probes.mjs shadow-slopes.w3x (we-drive --save-shadows, branch we-shadow-4, 2026-11-17, HD).
+
+test("the walk rises 80/3 a step: a plane falling 26.63 a step away from the sun is lit, one falling 26.69 dark", () => {
+  assert.ok(Math.abs(shadowStepRise(DEFAULT_SUN) - 80 / 3) < 1e-9);
+  // Planes facing north, 0 on their north edge (corner row 6), 5 tiles wide: a walk toward the sun (south-west) climbs
+  // a / 4 a step on them. The editor's shaded cells per row inside each, rows 8 to 24.
+  const editor: Record<number, number[]> = {
+    106.25: Array(17).fill(0),
+    106.5: Array(17).fill(0),
+    106.75: [0, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 0],
+    107: [0, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 0],
+  };
+  for (const [a, rowsWe] of Object.entries(editor)) {
+    const t = flat();
+    for (let y = 2; y <= 6; y++) for (let x = 13; x <= 18; x++) setGroundHeight(corner(t, x, y), Number(a) * (6 - y));
+    const shd = terrainShadows(t);
+    const rows = Array.from({ length: 17 }, (_, i) => rowOf(shd, 8 + i, 52, 71).length);
+    assert.deepEqual(rows, rowsWe, `a = ${a}`);
+  }
+});
+
+test("the walk goes on as far as the map: a corner raised 1536 casts 50 cells", () => {
+  const t = flat();
+  setGroundHeight(corner(t, 6, 22), 1536);
+  const shd = terrainShadows(t);
+  // The editor's shadow ends at (73, 138), 49 steps off the corner's cells (a walk of 16 stopped at row 104).
+  const top = (y: number) => rowOf(shd, y, 0, 255);
+  assert.deepEqual([top(138), top(137), top(136), top(135)], [[73], [72, 74], [71, 73], [70, 72]]);
+  assert.deepEqual(top(139), []);
+});
+
+test("ramp sides: the ramp model named from the top-left corner on, read a quarter turn round", () => {
+  const t = flat();
+  // A plateau one level up (corners 24..38 x 30..40) with a ramp down its south face, three corners wide (columns 30
+  // to 32: rows 30 high, 29 and 28 low), as shadow-slopes.w3x.
+  for (let y = 30; y <= 40; y++) for (let x = 24; x <= 38; x++) setLayer(corner(t, x, y), 3);
+  for (let y = 28; y <= 30; y++) for (let x = 30; x <= 32; x++) corner(t, x, y).ramp = true;
+  const sides = rampSides(t);
+  const west = sides.find((s) => s.x === 29 && s.y === 28);
+  assert.ok(west, `the ramp's west side: ${JSON.stringify(sides.map((s) => [s.x, s.y, s.w, s.h]))}`);
+  // Drawn as CliffTransABHL (bottom-left, top-left, top-right, bottom-right); the shadows read BHLA.
+  assert.equal(shadowRampName(west.outer, west.base), "BHLA");
+  // Read a quarter turn round: the side's point (x, y) at the model's (-y, x). A model whose height is its own -x (so
+  // the side's y) gives each row of cells its y, in both tiles of a 1 x 2 side.
+  const positions = [-256, 0, 256, 0, 0, 0, 0, 256, 0, -256, 256, 256];
+  const faces = [0, 1, 2, 0, 2, 3];
+  assert.deepEqual([...rampCellHeights(positions, faces, 0, 0).filter((_, i) => i % 4 === 0)], [16, 48, 80, 112]);
+  assert.deepEqual([...rampCellHeights(positions, faces, 0, 1).filter((_, i) => i % 4 === 0)], [144, 176, 208, 240]);
 });
 
 test("ground cells are read over the tile's two triangles, split from the top-left to the bottom-right corner", () => {

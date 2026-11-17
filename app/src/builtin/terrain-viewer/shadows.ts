@@ -105,12 +105,35 @@ export function shadowCliffName(t: Terrain, tileX: number, tileY: number): strin
  *  point, read a quarter turn round. `positions`/`faces`: the model's triangles in its own space (the tile one tile to
  *  the -x side of its origin, as cliff models are). */
 export function cliffCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>): Float32Array {
+  return blockCellHeights(positions, faces, 0, 0);
+}
+
+/** The name the shadow calculation gives a ramp side's model (lib/terrain/cliffs.ts rampSides; `outer`: its outer
+ *  corners bottom-left, top-left, top-right, bottom-right, `base` their lowest layer): as for cliffs (shadowCliffName),
+ *  the corners read from the top-left, A/B/C for cliff corners and L/H/X for ramp corners 0/1/2 layers over the base,
+ *  where the drawn model's name starts at the bottom-left (cliffs.ts planCliffs). The model is read a quarter turn round
+ *  (rampCellHeights). we-drive (branch we-shadow-4, 2026-11-17; make-shadow-probes.mjs shadow-slopes: a ramp down each
+ *  face of a plateau, LastRefuge without doodads): 42 and 114 cells off with the side tiles' cliff models, 28 and 113
+ *  with them as ground, 20 and 103 with the drawn ramp model, 11 and 87 so (4 of the 11 aren't the ramps'). */
+export function shadowRampName(outer: readonly { layer: number; ramp: boolean }[], base: number): string {
+  return [outer[1], outer[2], outer[3], outer[0]].map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base] ?? "?").join("");
+}
+
+/** shadowRampName's model's heights at the 16 cell centres of one tile of its ramp side (CliffCells), over the side's
+ *  base layer: the side's point (x, y) (units from its bottom-left corner) at the model's (-y, x), the quarter turn of
+ *  cliffCellHeights. `tileX`, `tileY`: the tile's place in the side (0 or 1). */
+export function rampCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>, tileX: number, tileY: number): Float32Array {
+  return blockCellHeights(positions, faces, tileX, tileY);
+}
+
+/** The highest surface of a model over the 16 cell centres of the tile (tileX, tileY) of a block of tiles, read a quarter
+ *  turn round: the block's point (x, y) at the model's (-y, x). */
+function blockCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>, tileX: number, tileY: number): Float32Array {
   const out = new Float32Array(16).fill(NaN);
   for (let j = 0; j < 4; j++) {
     for (let i = 0; i < 4; i++) {
-      const u = (i + 0.5) / 4, v = (j + 0.5) / 4;
-      // The tile's (u, v) at the model's (1 - v, u); the model's x runs from -128 to 0.
-      const px = (1 - v) * 128 - 128, py = u * 128;
+      // For one tile: its (u, v) at the model's (1 - v, u); the model's x runs from -128 to 0.
+      const px = -(tileY * 128 + (j + 0.5) * 32), py = tileX * 128 + (i + 0.5) * 32;
       let best = NaN;
       for (let f = 0; f + 2 < faces.length; f += 3) {
         const a = faces[f] * 3, b = faces[f + 1] * 3, c = faces[f + 2] * 3;
@@ -129,13 +152,10 @@ export function cliffCellHeights(positions: ArrayLike<number>, faces: ArrayLike<
   return out;
 }
 
-/** How many cells the walk toward the sun looks at: the editor leaves the cells 17 steps off a 512 high corner lit. */
-export const SHADOW_WALK_STEPS = 16;
-
-/** Terrain shadows (the World Editor's rule, see shadowCellHeights): from each cell, a walk of SHADOW_WALK_STEPS cells
- *  toward the sun, one cell diagonal a step at the default sun; the cell is dark when a cell on the way stands higher
- *  than the cell itself plus the sun's rise over the distance. `cliffs`: the cliff tiles' heights (without them the
- *  cliffs are read as ground between their corners). */
+/** Terrain shadows (the World Editor's rule, see shadowCellHeights): from each cell, a walk toward the sun as far as the
+ *  map goes, one cell diagonal a step at the default sun; the cell is dark when a cell on the way stands as high as the
+ *  cell itself plus the sun's rise over the distance (shadowStepRise) or higher. `cliffs`: the cliff tiles' heights
+ *  (without them the cliffs are read as ground between their corners). */
 export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN, cliffs?: CliffCells): Uint8Array {
   const { out, rows, row } = terrainShadowRows(t, s, shadowCellHeights(t, cliffs));
   for (let cy = 0; cy < rows; cy++) row(cy);
@@ -157,19 +177,35 @@ export async function terrainShadowsInSteps(t: Terrain, s: Sun = DEFAULT_SUN, pa
   return out;
 }
 
+/** How much the sun rises over one step of the walk (a cell's diagonal, 32√2 units). The editor's walk rises 80/3 a step
+ *  at its 30° sun, a little more than tan 30° gives (26.13): its sun is about 30.5° high. we-drive (branch we-shadow-4,
+ *  2026-11-17): the cells of real maps whose steepest rise toward the sun (the most any cell on the walk stands over
+ *  them, by its step) lies between 26.13 and 26.6 are lit in the editor, those above 26.7 dark (TurtleRock, LastRefuge
+ *  and HillsbradCreek without doodads: 534, 330, 857 cells off with tan 30°, 25, 115, 307 with 80/3); the probe map's
+ *  cells at exactly 80/3 (a 128 bank read three cells off) are dark. Other elevations scale with their tangent. */
+export function shadowStepRise(s: Sun): number {
+  return (80 / 3) * (Math.tan((s.elevation * Math.PI) / 180) / Math.tan(Math.PI / 6));
+}
+
 function terrainShadowRows(t: Terrain, s: Sun, heights: Float32Array): { out: Uint8Array; rows: number; row: (cy: number) => void } {
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(w * h);
-  // A step: toward the sun, as long as a cell's diagonal (so one cell diagonal at 225°), its rise by the elevation.
-  const az = (s.azimuth * Math.PI) / 180, len = 32 * Math.SQRT2;
-  const sx = Math.cos(az) * Math.SQRT2, sy = Math.sin(az) * Math.SQRT2, rise = len * Math.tan((s.elevation * Math.PI) / 180);
+  // A step: toward the sun, as long as a cell's diagonal (so one cell diagonal at 225°).
+  const az = (s.azimuth * Math.PI) / 180;
+  const sx = Math.cos(az) * Math.SQRT2, sy = Math.sin(az) * Math.SQRT2, rise = shadowStepRise(s);
+  // The walk has no length of its own (HillsbradCreek's shadows reach 28 cells: 307 cells off after 16, 75 after 28 and
+  // on); it ends where the sun's ray is over the map's highest cell.
+  let top = -Infinity;
+  for (const v of heights) if (v > top) top = v;
   const row = (cy: number) => {
     for (let cx = 0; cx < w; cx++) {
       const h0 = heights[cy * w + cx];
-      for (let k = 1; k <= SHADOW_WALK_STEPS; k++) {
+      for (let k = 1; h0 + rise * k - 1e-3 <= top; k++) {
         const x = Math.round(cx + sx * k), y = Math.round(cy + sy * k);
         if (x < 0 || y < 0 || x >= w || y >= h) break;
-        if (heights[y * w + x] > h0 + rise * k) { out[cy * w + cx] = 0xff; break; }
+        // Dark at the rise and over it (the probe's cells exactly 80/3 a step up are dark); the margin keeps an exact
+        // rise from coming out lit by the floats' last bit.
+        if (heights[y * w + x] - h0 >= rise * k - 1e-3) { out[cy * w + cx] = 0xff; break; }
       }
     }
   };
