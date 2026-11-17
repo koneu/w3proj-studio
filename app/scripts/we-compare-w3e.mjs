@@ -142,8 +142,9 @@ export function minimapView(image, block = 16) {
 /** war3mapUnits.doo as the codecs' JSON, reduced to how its objects are numbered, for runs that place a different number
  *  of objects at random spots (a scatter fill against the editor's pastes): whether every editor id is its own, whether
  *  they run 0, 1, 2, … in file order, and the kinds of object there (id, and a random object's type, group and position),
- *  not how many of each nor where. */
-export function unitIds(json) {
+ *  not how many of each nor where. `minCount` (a spec's "minCount"): also whether the file holds at least that many
+ *  objects, so a paste or fill that placed nothing on one side differs (both sides' numbers may differ above it). */
+export function unitIds(json, minCount = null) {
   const units = json.units ?? [];
   const ids = units.map((u) => u.editorId);
   const kind = (u) => (!/^[uib]DNR$/.test(u.id) ? u.id
@@ -152,7 +153,20 @@ export function unitIds(json) {
     editorIdsUnique: new Set(ids).size === ids.length,
     editorIdsInOrder: ids.every((n, i) => n === i),
     kinds: [...new Set(units.map(kind))].sort(),
+    ...(minCount ? { [`atLeast${minCount}Objects`]: units.length >= minCount } : {}),
   };
+}
+
+/** war3map.wpm ("MP3W", version, width, height, a flag byte per cell, rows from the bottom) as { version, size,
+ *  cells: { "x,y": flags } } for diffJson, so a spec can name the cells that differ ("cells.12,40") in expectPaths
+ *  instead of the plain `wpm` kind's "something differs". Throws on a file that isn't a whole pathing map. */
+export function wpmCells(buf) {
+  if (buf.length < 16 || buf.toString("latin1", 0, 4) !== "MP3W") throw new Error("not a wpm file (missing MP3W header)");
+  const version = buf.readUInt32LE(4), w = buf.readUInt32LE(8), h = buf.readUInt32LE(12);
+  if (buf.length !== 16 + w * h) throw new Error(`a wpm of ${w}x${h} cells has ${buf.length - 16} bytes of cells`);
+  const cells = {};
+  for (let i = 0; i < w * h; i++) cells[`${i % w},${Math.floor(i / w)}`] = buf[16 + i];
+  return { version, size: [w, h], cells };
 }
 
 /** Per kind of "w3e…" compare: the parsed form of one save. */

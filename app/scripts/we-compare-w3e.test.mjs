@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
-import { compareFile, parseSpecFile, readDiffersAllowlist } from "./we-compare-core.mjs";
+import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView, wpmCells } from "./we-compare-w3e.mjs";
+import { compareFile, parseSpec, parseSpecFile, readDiffersAllowlist } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
 function w3e(w, h, corner) {
@@ -88,6 +88,42 @@ test("unitIds: editor ids unique and in order, and the kinds of object, whatever
   assert.equal(dup.editorIdsInOrder, false);
   assert.equal(unitIds({ units: [sloc, group(2), group(1)] }).editorIdsInOrder, false, "control: out of order");
   assert.deepEqual(unitIds({ units: [sloc, { ...group(1), randomType: 0 }] }).kinds, ["sloc", "uDNR random type 0"], "control: by level isn't a group");
+});
+
+test("wpmCells: the cells by x,y, so expectPaths names the ones that differ and any other fails", () => {
+  const wpm = (w, h, set = {}) => {
+    const b = Buffer.alloc(16 + w * h);
+    b.write("MP3W", 0, "latin1");
+    b.writeUInt32LE(0, 4); b.writeUInt32LE(w, 8); b.writeUInt32LE(h, 12);
+    for (const [k, v] of Object.entries(set)) { const [x, y] = k.split(",").map(Number); b[16 + y * w + x] = v; }
+    return b;
+  };
+  assert.deepEqual(wpmCells(wpm(2, 1, { "1,0": 8 })), { version: 0, size: [2, 1], cells: { "0,0": 0, "1,0": 8 } });
+  const we = { json: wpmCells(wpm(4, 4, { "1,2": 0x0a })) };
+  const exact = compareFile("war3map.wpm", "wpm-cells", we, { json: wpmCells(wpm(4, 4)) }, 10, 0, [], ["cells.1,2"]);
+  assert.equal(exact.status, "DIFFERS");
+  assert.deepEqual([exact.expectMissing, exact.unexpected.count], [[], 0]);
+  const more = compareFile("war3map.wpm", "wpm-cells", we, { json: wpmCells(wpm(4, 4, { "3,3": 2 })) }, 10, 0, [], ["cells.1,2"]);
+  assert.deepEqual(more.unexpected.paths, ["cells.3,3"], "a cell outside the named ones");
+  assert.match(parseSpec({ name: "s", input: { map: "m.w3x" }, compare: [{ file: "war3map.wpm", as: "wpm-cells", expect: "differs", expectPaths: ["cells.1,2"] }] }, "/s").compare[0].as, /wpm-cells/);
+  assert.throws(() => wpmCells(wpm(4, 4).subarray(0, 20)), /bytes of cells/);
+  assert.throws(() => wpmCells(Buffer.from("nope")), /not a wpm/);
+});
+
+test("unitIds with minCount: a save with fewer objects than that differs, any number above it doesn't", () => {
+  const sloc = { id: "sloc", randomType: 0, editorId: 0, position: [0, 0, 0] };
+  const group = (editorId) => ({ id: "uDNR", randomType: 1, randomGroup: 0, randomPosition: 0, editorId, position: [0, 0, 0] });
+  const five = unitIds({ units: [sloc, group(1), group(2), group(3), group(4)] }, 5);
+  assert.equal(five.atLeast5Objects, true);
+  assert.deepEqual(unitIds({ units: [sloc, group(1), group(2), group(3), group(4), group(5)] }, 5), five, "more than the minimum is the same");
+  // A paste that never happened: the same ids and kinds, too few objects.
+  const two = unitIds({ units: [sloc, group(1)] }, 5);
+  assert.equal(compareFile("war3mapUnits.doo", "unit-ids", { json: five }, { json: two }).status, "DIFFERS");
+  assert.equal(compareFile("war3mapUnits.doo", "unit-ids", { json: unitIds({ units: [sloc, group(1), group(2), group(3), group(4)] }) }, { json: unitIds({ units: [sloc, group(1)] }) }).status, "MATCH", "control: without minCount the counts don't count");
+  const spec = (c) => parseSpec({ name: "s", input: { map: "m.w3x" }, compare: [c] }, "/s").compare[0];
+  assert.equal(spec({ file: "war3mapUnits.doo", as: "unit-ids", minCount: 5 }).minCount, 5);
+  assert.throws(() => spec({ file: "war3mapUnits.doo", as: "parsed", minCount: 5 }), /minCount goes with "as": "unit-ids"/);
+  assert.throws(() => spec({ file: "war3mapUnits.doo", as: "unit-ids", minCount: 0 }), /minCount is a whole number/);
 });
 
 test("the spec files in tests/we-compare/ that use these kinds parse", () => {
