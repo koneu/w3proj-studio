@@ -15,6 +15,12 @@ const lists = (o: EditObject): EditMod[][] => (o.sets ? o.sets.map((s) => s.mods
 /** The setting "Allow negative real values" (the World Editor's preference): unreal fields take values below 0. */
 export const NEGATIVE_REALS_SETTING = "objectEditor.allowNegativeReals";
 
+/** Whether a typed `text` is a negative number for an unreal field while negative reals are off: the World Editor's
+ *  Modify Selected Field makes it 0 (Cast Range 350, typed -7, shows 0.000, as does a typed -2 over 0). */
+export function clampsToZero(valueType: string, text: string, allowNegative: boolean): boolean {
+  return valueType === "unreal" && text.trim() !== "" && Number(text) < 0 && !allowNegative;
+}
+
 /** Why `n` can't be a value of a field of `valueType`, or null if it can: an unreal below 0 unless negative
  *  reals are allowed (the World Editor's preference). */
 export function negativeRefused(valueType: string, n: number, allowNegative: boolean): string | null {

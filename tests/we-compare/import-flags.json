@@ -1,0 +1,10 @@
+[
+  {
+    "name": "import-flags",
+    "description": "test.md war3map.imp flags (branch we-misc-2): flat.w3x with a text file under every flags value 0..31 on a plain path, and 13, 17, 21, 24, 25, 29 again below _HD.w3mod\\ (make-import-modes.mjs, import-flags): the editor opens and saves it. It keeps every flags value that lacks bit 2 as stored (13, 17, 21, 24, 25, 29 included, below _HD.w3mod\\ too) and writes an entry with bit 2 (2, 3, 6, 7, 10, ...) as a blank entry (path empty, flags: bits 1 and 2 off, bit 1 on where bit 4 was: 2 and 3 become 0, 6 and 7 become 5, 10 and 11 become 8, 14 and 15 become 13, and so on); Studio keeps those entries as they are (no game map uses bit 2).",
+    "input": { "map": "${REPO}/target/import-modes/import-flags.w3x" },
+    "we": { "mode": "hd", "steps": [] },
+    "studio": { "steps": [{ "sleep": 500 }] },
+    "compare": [{ "file": "war3map.imp", "as": "parsed", "expect": "differs", "expectPaths": ["files[].flags", "files[].path"] }]
+  }
+]
