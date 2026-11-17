@@ -18,7 +18,6 @@ import { ModeCache } from "../../lib/modecache";
 import { drawnGroundTiles, type Terrain } from "../../lib/terrain/w3e";
 import { ownGroundTiles } from "../../lib/terrain/tilesets";
 import { applyTilesetWater } from "./wateroffset";
-import { readImport } from "./projectfiles";
 
 /** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
  *  are shared; the modes have their own). */
