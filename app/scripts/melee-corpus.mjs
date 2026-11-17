@@ -1,7 +1,8 @@
 // Checks Studio's Melee-flag rule on save against the game's own maps: each map's war3map.w3i Melee flag is cleared and
 // savedMelee (src/lib/terrain/meleesave.ts, what a save runs) decides whether it goes back on. The World Editor's save
 // puts it back on a map that meets its rules, so a map stored with the flag on should get it back, one stored without
-// it should not.
+// it should not. It also counts the maps whose flag 0x4000 (Requires The Frozen Throne data) a save leaves as stored
+// (printed, not part of the baseline).
 //
 //   node scripts/melee-corpus.mjs [--filter TEXT] [--save FILE] [--baseline FILE] [--list] [--why]
 //
@@ -42,10 +43,10 @@ mkdirSync(cache, { recursive: true });
 const { build } = await import("esbuild");
 const bundle = join(cache, `melee-${process.pid}.mjs`);
 await build({
-  stdin: { contents: `export { meleeSetBlockers, readMeleeFacts, savedMelee } from "./src/lib/terrain/meleesave"; export { MELEE_MAP } from "./src/lib/terrain/owner";`, resolveDir: app, loader: "ts" },
+  stdin: { contents: `export { meleeSetBlockers, readMeleeFacts, savedMelee } from "./src/lib/terrain/meleesave"; export { MELEE_MAP } from "./src/lib/terrain/owner"; export { REQUIRES_TFT } from "./src/lib/terrain/tftflag";`, resolveDir: app, loader: "ts" },
   bundle: true, format: "esm", platform: "node", outfile: bundle, logLevel: "warning",
 });
-const { meleeSetBlockers, readMeleeFacts, savedMelee, MELEE_MAP } = await import(pathToFileURL(bundle).href);
+const { meleeSetBlockers, readMeleeFacts, savedMelee, MELEE_MAP, REQUIRES_TFT } = await import(pathToFileURL(bundle).href);
 rmSync(bundle, { force: true });
 
 // The game's tables, read once.
@@ -99,8 +100,11 @@ for (const line of listed) {
   const studio = (r.flags & MELEE_MAP) !== 0;
   const why = showWhy && melee !== studio ? meleeSetBlockers(cleared, placed, await readMeleeFacts(ws, undefined, true)) : [];
   // The other direction: a map stored melee must keep its flag through a save.
-  const kept = !melee || (((await savedMelee(ws, info, placed)).flags & MELEE_MAP) !== 0);
-  results.push({ name, melee, studio, why, kept });
+  const asSaved = await savedMelee(ws, info, placed);
+  const kept = !melee || ((asSaved.flags & MELEE_MAP) !== 0);
+  // Flag 0x4000 (Requires The Frozen Throne data, tftflag.ts) as stored and as Studio's save leaves it.
+  const tft = { stored: (Number(info.flags) & REQUIRES_TFT) !== 0, studio: (asSaved.flags & REQUIRES_TFT) !== 0 };
+  results.push({ name, melee, studio, why, kept, tft });
 }
 results.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -115,6 +119,9 @@ const droppedOn = meleeMaps.filter((r) => !r.kept);
 for (const r of droppedOn) console.log(`${r.name}: stored melee, a save would take the flag OFF`);
 console.log(`melee maps: a save keeps the flag on ${meleeMaps.length - droppedOn.length} of ${meleeMaps.length} (should be all)`);
 console.log(`other maps: Studio sets it on ${other.filter((r) => r.studio).length} of ${other.length} (should be 0)`);
+const tftMiss = done.filter((r) => r.tft.stored !== r.tft.studio);
+for (const r of tftMiss) if (listAll || showWhy) console.log(`${r.name}: flag 0x4000 stored ${r.tft.stored ? "on" : "off"}, Studio's save ${r.tft.studio ? "sets" : "clears"} it`);
+console.log(`flag 0x4000 (Requires The Frozen Throne data): Studio's save agrees on ${done.length - tftMiss.length} of ${done.length} maps (stored on ${done.filter((r) => r.tft.stored).length})`);
 
 const now = Object.fromEntries(done.map((r) => [r.name, { melee: r.melee, studio: r.studio }]));
 if (saveTo) { writeFileSync(saveTo, JSON.stringify({ maps: now }, null, 1) + "\n"); console.log(`saved ${saveTo}`); }

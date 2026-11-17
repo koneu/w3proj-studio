@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtgJson } from "../triggers/wtg";
 import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
-import type { PathingStamp } from "./pathing";
+import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** Rows from the north, a char per corner: `w` ground at -100 under water at 50, `.` dry ground at 0. */
@@ -81,7 +81,7 @@ test("the facts come from the project; missing and unreadable files set nothing"
   // The file's name as the project has it (case differs on disk).
   assert.equal((await readMeleeFacts(files({ "map/War3MapMisc.txt": "[Misc]\nA=1\n" }))).customConstants, true);
   const none = await readMeleeFacts(files({}));
-  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false });
+  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false, triggersKnown: true });
   // A melee map with custom triggers loses its flag (the World Editor's save does: melee-flag-we); without them, or
   // with a trigger file nobody can read, it keeps it.
   const two = defaultTriggerFile("x");
@@ -92,7 +92,8 @@ test("the facts come from the project; missing and unreadable files set nothing"
   assert.equal(await keptWith({ "map/war3map.wtg.json": new Error("EACCES") }), MELEE, "triggers unreadable");
   assert.equal(await keptWith({}), MELEE, "no trigger file");
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
-  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false }, "unreadable: not known, so the flag stays");
+  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, triggersKnown: true }, "unreadable: not known, so the flag stays");
+  assert.equal((await readMeleeFacts(files({ "map/war3map.wtg.json": new Error("EACCES") }))).triggersKnown, undefined, "triggers unreadable: not known");
   // The ground being saved wins over the project's.
   const given = await readMeleeFacts(files({ "map/war3map.w3e": new Uint8Array([1]) }), t);
   assert.equal(given.terrain, t);
@@ -258,10 +259,51 @@ test("the facts for putting the flag back come from the project; unreadable ones
   assert.equal((await savedMelee(project(), { flags: OFF }, [...units, creep])).flags, MELEE, "a creep close by");
   assert.equal((await savedMelee(project(), { flags: OFF }, [...units, tavern])).flags, MELEE, "a tavern close by: buildings don't count");
   assert.equal((await savedMelee(project(), { flags: OFF }, [...units, { ...creep, id: "ngol", position: [MID + 700, MID, 0] }])).flags, OFF, "a gold mine 700 away");
-  // A map that is melee reads only what taking it off needs: the ground and the triggers.
+  // A map that is melee reads what taking it off needs: the ground, the triggers and what stands round the starts.
   const on = project();
   await savedMelee(on, { flags: MELEE }, units);
-  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json"]);
+  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json", "map/war3map.doo.json"]);
+  // Custom triggers take it off anyway: the doodads aren't read.
+  const custom = project({ "map/war3map.wtg.json": writeWtgJson(renamed) });
+  await savedMelee(custom, { flags: MELEE }, units);
+  assert.deepEqual(custom.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json"]);
+});
+
+test("a melee map loses the flag when a start is surely in an invalid position, and keeps it where Studio can't tell", async () => {
+  // we-drive 2026-11-17 (tests/we-compare/melee-valid-we.json melee-valid-melee-tree-256): the tree of tree-256 on a
+  // map that is melee: the World Editor's save takes Melee off.
+  const kept = (facts: Partial<MeleeFacts>, more: object[] = []) => meleeAfterSave({ flags: MELEE }, [startMid, ...more] as never[], { ...clean(), ...facts });
+  const at = (t: Terrain, stamps: PathingStamp[] = [], unknown: { x: number; y: number }[] = []) => ({ terrain: t, around: around(t, stamps, unknown) });
+  const INVALID = { flags: OFF, reasons: ["Start locations are in invalid positions"] };
+  assert.deepEqual(kept({}), { flags: MELEE, reasons: [] }, "control: nothing near");
+  assert.deepEqual(kept(at(flat(), [tree(MID + 256, MID)])), INVALID, "a tree 256 away");
+  assert.deepEqual(kept(at(flat(), [tree(MID + 320, MID)])), { flags: MELEE, reasons: [] }, "control: a tree 320 away");
+  assert.deepEqual(kept({}, [{ id: "ngol", player: 27, position: [MID + 749, MID, 0] }]), INVALID, "a gold mine 749 away");
+  assert.deepEqual(kept({}, [{ ...start(MID + 488, MID), player: 1 }]), INVALID, "another start 488 away");
+  assert.deepEqual(kept(at(flat(17, (c, x) => { if (x >= 10) c.texture = 1; }))), INVALID, "Lrok from corner 10");
+  assert.deepEqual(kept(at(flat(9))), INVALID, "the square past the map's edge");
+  // Surely invalid wins over what can't be told elsewhere.
+  assert.deepEqual(kept(at(flat(), [tree(MID + 256, MID)], [{ x: MID + 100, y: MID }]), [{ id: "ngol", player: 27 }]), INVALID, "a tree 256 away beside unknowns");
+  // Not known: kept.
+  assert.equal(kept(at(flat(), [], [{ x: MID + 100, y: MID }])).flags, MELEE, "a doodad of unknown pathing on the square");
+  assert.equal(kept({ around: null }).flags, MELEE, "the surroundings unreadable");
+  assert.equal(kept({ around: undefined }).flags, MELEE, "the surroundings not read");
+  assert.equal(kept({ around: { pathing: new Uint8Array(16) } }).flags, MELEE, "a pathing map of another size");
+  const walk = around(flat());
+  walk.pathing[16 + (MID / 32) * 64 + MID / 32 + 2] = NO_WALK;
+  assert.equal(kept({ around: walk }).flags, MELEE, "a cell only unwalkable (not measured alone)");
+  assert.equal(meleeAfterSave({ flags: OFF }, [startMid], { ...clean(), around: walk }).flags, OFF, "nor put back on");
+  // From the project, as a save reads it.
+  const project = (doodads: object[]) => ({
+    ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.doo.json": JSON.stringify({ doodads, specials: [] }) }),
+    gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; },
+    gameBytes,
+  });
+  const saved = async (doodads: object[], ws: MeleeFiles = project(doodads)) => savedMelee(ws, { flags: MELEE }, [startMid]);
+  assert.deepEqual(await saved([{ id: "LTlt", position: [MID + 256, MID, 0] }]), INVALID, "a tree 256 away in war3map.doo.json");
+  assert.equal((await saved([{ id: "LTlt", position: [MID + 320, MID, 0] }])).flags, MELEE, "control: 320 away");
+  assert.equal((await saved([], { ...project([{ id: "LTlt", position: [MID + 256, MID, 0] }]), gameText: undefined })).flags, MELEE, "without the game's tables: kept");
+  assert.equal((await saved([], { ...project([{ id: "LTlt", position: [MID + 256, MID, 0] }]), gameBytes: undefined })).flags, MELEE, "pathing texture unreadable: kept");
 });
 
 test("doodads and destructables without a pathing texture (flowers) near a start don't block the flag", async () => {
@@ -335,4 +377,19 @@ test("custom object data and interface files count only when they change somethi
   assert.equal(await putBack({ "map/war3map.w3u.json": new Error("EACCES") }), OFF, "unreadable file: not put back");
   assert.equal((await kept({ "map/war3map.w3u.json": new Error("EACCES") })).flags, MELEE, "unreadable file: not taken off");
   assert.equal(await putBack({ "map/war3map.w3u": new Uint8Array(5) }), OFF, "a short raw file");
+});
+
+test("a save sets flag 0x4000 for a placed tavern and clears it without one (tftflag.ts)", async () => {
+  // we-drive 2026-11-17, tests/we-compare/tft-flag-we.json tft-tavern, tft-clear.
+  const units = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"version"\nC;Y2;X1;K"ntav"\nC;X2;K1\nC;Y3;X1;K"nfrp"\nC;X2;K0\nE\n';
+  const items = 'ID;PWXL;N;E\nC;Y1;X1;K"itemID"\nC;X2;K"version"\nC;Y2;X1;K"ratc"\nC;X2;K0\nE\n';
+  const tables: Record<string, string> = { ...GAME, "Units\\UnitData.slk": units, "Units\\ItemData.slk": items };
+  const ws = { ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) }),
+    gameText: async (p: string) => { if (!(p in tables)) throw new Error(p); return tables[p]; }, gameBytes };
+  const TFT = 0x4000;
+  const tavern = { id: "ntav", player: 27, position: [MID + 2000, MID, 0] }, frog = { ...tavern, id: "nfrp" };
+  const M = MELEE & ~TFT;
+  assert.equal((await savedMelee(ws, { flags: M }, [startMid, tavern])).flags, M | TFT, "a tavern sets it");
+  assert.equal((await savedMelee(ws, { flags: M | TFT }, [startMid, frog])).flags, M, "a frog of version 0 clears it");
+  assert.equal((await savedMelee(ws, { flags: M }, [startMid, frog])).flags, M, "control: a frog leaves it off");
 });
