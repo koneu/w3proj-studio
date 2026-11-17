@@ -10,7 +10,7 @@
 // (`updateShadows`), so everything the World Editor computed is kept.
 
 import type { Model } from "../../lib/model/mdx";
-import type { Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, rampLift, type Terrain } from "../../lib/terrain/w3e";
 
 /** Direction toward the sun: azimuth (degrees, counter-clockwise from +x)
  *  and elevation above the horizon. */
@@ -33,18 +33,109 @@ function groundAt(t: Terrain, wx: number, wy: number): number {
   return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
 }
 
-/** Terrain shadows: a cell is dark when the ray from its centre toward the
- *  sun passes under the ground. */
-export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN): Uint8Array {
-  const { out, rows, row } = terrainShadowRows(t, s);
+/** The terrain's heights as the World Editor's Calculate Shadows reads them: one per 32×32 cell (the shd grid), at the
+ *  cell's centre. Ground tiles: the corners' heights (layers and ramps included) over the tile's two triangles, split
+ *  from the top-left to the bottom-right corner. Cliff tiles: `cliffs`' heights for the tile, over the tile's lowest
+ *  layer and the ground's own height there; a tile it has none for is taken as ground.
+ *  we-drive (branch we-shadow-3, 2026-11-17; make-shadow-probes.mjs shadow-terrain, plateau.w3x; SD and HD alike):
+ *  single raised corners of 128, 256 and 512, ridges, banks of 64 and 128 and cliffs of one and two levels, 2618
+ *  shadowed cells, all but one as the editor's with these heights and terrainShadows' walk. */
+export function shadowCellHeights(t: Terrain, cliffs?: CliffCells): Float32Array {
+  const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
+  const out = new Float32Array(w * h);
+  const corner = (x: number, y: number) => t.corners[y * t.width + x];
+  const lift = (x: number, y: number) => (corner(x, y).ramp ? rampLift(t, x, y) : 0);
+  for (let ty = 0; ty < t.height - 1; ty++) {
+    for (let tx = 0; tx < t.width - 1; tx++) {
+      const bl = corner(tx, ty), br = corner(tx + 1, ty), tl = corner(tx, ty + 1), tr = corner(tx + 1, ty + 1);
+      const isCliff = !(bl.layer === br.layer && bl.layer === tl.layer && bl.layer === tr.layer) && !(bl.ramp && br.ramp && tl.ramp && tr.ramp);
+      const cells = isCliff ? cliffs?.(tx, ty) ?? null : null;
+      const h00 = bl.height + lift(tx, ty), h10 = br.height + lift(tx + 1, ty), h01 = tl.height + lift(tx, ty + 1), h11 = tr.height + lift(tx + 1, ty + 1);
+      const base = (Math.min(bl.layer, br.layer, tl.layer, tr.layer) - 2) * 128;
+      const g00 = groundHeight(bl), g10 = groundHeight(br), g01 = groundHeight(tl), g11 = groundHeight(tr);
+      for (let j = 0; j < 4; j++) {
+        for (let i = 0; i < 4; i++) {
+          const u = (i + 0.5) / 4, v = (j + 0.5) / 4;
+          const cliff = cells ? cells[j * 4 + i] : NaN;
+          out[(ty * 4 + j) * w + tx * 4 + i] = Number.isNaN(cliff)
+            ? splitTile(h00, h10, h01, h11, u, v)
+            : base + cliff + splitTile(g00, g10, g01, g11, u, v);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** A height inside a tile from its corners (bottom-left, bottom-right, top-left, top-right), over its two triangles
+ *  split from the top-left to the bottom-right corner. */
+function splitTile(h00: number, h10: number, h01: number, h11: number, u: number, v: number): number {
+  return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
+}
+
+/** A cliff tile's heights for shadowCellHeights: the 16 cell centres (row by row from the south, `v * 4 + u`), in the
+ *  model's z over the tile's lowest layer; NaN where none is known; null: none for the tile. */
+export type CliffCells = (tileX: number, tileY: number) => Float32Array | null;
+
+/** The model the World Editor's shadow calculation reads for a cliff tile, and how: it names it after the corners read
+ *  from the top-left (top-left, top-right, bottom-right, bottom-left; A/B/C as for drawing, cliffs.ts planCliffs), not
+ *  from the bottom-left as the drawn model is, and reads that model a quarter turn round, the tile's (u, v) at the
+ *  model's (1 - v, u) (cliffCellHeights). The shape is near the drawn one's, the details are the other model's: the
+ *  one-level cliff's shadow reaches a cell further in one row of four along an east face. we-drive (branch
+ *  we-shadow-3): of the eight name orders against the eight turns only this pair matches the editor; the drawn model as
+ *  it is left 129 of the cliff cells wrong. Returns the letters of the name. */
+export function shadowCliffName(t: Terrain, tileX: number, tileY: number): string {
+  const c = (x: number, y: number) => t.corners[y * t.width + x];
+  const order = [c(tileX, tileY + 1), c(tileX + 1, tileY + 1), c(tileX + 1, tileY), c(tileX, tileY)];
+  const base = Math.min(...order.map((k) => k.layer));
+  return order.map((k) => String.fromCharCode(65 + k.layer - base)).join("");
+}
+
+/** shadowCliffName's model's heights at a tile's 16 cell centres (CliffCells): the highest of its triangles over each
+ *  point, read a quarter turn round. `positions`/`faces`: the model's triangles in its own space (the tile one tile to
+ *  the -x side of its origin, as cliff models are). */
+export function cliffCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>): Float32Array {
+  const out = new Float32Array(16).fill(NaN);
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      const u = (i + 0.5) / 4, v = (j + 0.5) / 4;
+      // The tile's (u, v) at the model's (1 - v, u); the model's x runs from -128 to 0.
+      const px = (1 - v) * 128 - 128, py = u * 128;
+      let best = NaN;
+      for (let f = 0; f + 2 < faces.length; f += 3) {
+        const a = faces[f] * 3, b = faces[f + 1] * 3, c = faces[f + 2] * 3;
+        const ax = positions[a], ay = positions[a + 1], bx = positions[b], by = positions[b + 1], cx = positions[c], cy = positions[c + 1];
+        const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        if (Math.abs(area) < 1e-9) continue;
+        const w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) / area;
+        const w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / area;
+        if (w0 < -1e-6 || w1 < -1e-6 || 1 - w0 - w1 < -1e-6) continue;
+        const z = w0 * positions[a + 2] + w1 * positions[b + 2] + (1 - w0 - w1) * positions[c + 2];
+        if (!(z <= best)) best = z;
+      }
+      out[j * 4 + i] = best;
+    }
+  }
+  return out;
+}
+
+/** How many cells the walk toward the sun looks at: the editor leaves the cells 17 steps off a 512 high corner lit. */
+export const SHADOW_WALK_STEPS = 16;
+
+/** Terrain shadows (the World Editor's rule, see shadowCellHeights): from each cell, a walk of SHADOW_WALK_STEPS cells
+ *  toward the sun, one cell diagonal a step at the default sun; the cell is dark when a cell on the way stands higher
+ *  than the cell itself plus the sun's rise over the distance. `cliffs`: the cliff tiles' heights (without them the
+ *  cliffs are read as ground between their corners). */
+export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN, cliffs?: CliffCells): Uint8Array {
+  const { out, rows, row } = terrainShadowRows(t, s, shadowCellHeights(t, cliffs));
   for (let cy = 0; cy < rows; cy++) row(cy);
   return out;
 }
 
 /** terrainShadows a few rows at a time, for the terrain view (a big map takes a second or two): `pause` is awaited
  *  every few milliseconds of work, and stops the work (rejecting) when it returns false. */
-export async function terrainShadowsInSteps(t: Terrain, s: Sun = DEFAULT_SUN, pause: () => Promise<boolean>): Promise<Uint8Array> {
-  const { out, rows, row } = terrainShadowRows(t, s);
+export async function terrainShadowsInSteps(t: Terrain, s: Sun = DEFAULT_SUN, pause: () => Promise<boolean>, cliffs?: CliffCells): Promise<Uint8Array> {
+  const { out, rows, row } = terrainShadowRows(t, s, shadowCellHeights(t, cliffs));
   let since = performance.now();
   for (let cy = 0; cy < rows; cy++) {
     row(cy);
@@ -56,22 +147,19 @@ export async function terrainShadowsInSteps(t: Terrain, s: Sun = DEFAULT_SUN, pa
   return out;
 }
 
-function terrainShadowRows(t: Terrain, s: Sun): { out: Uint8Array; rows: number; row: (cy: number) => void } {
-  const sun = sunVector(s);
+function terrainShadowRows(t: Terrain, s: Sun, heights: Float32Array): { out: Uint8Array; rows: number; row: (cy: number) => void } {
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(w * h);
-  const len = Math.hypot(sun[0], sun[1]), dx = sun[0] / len, dy = sun[1] / len, rise = sun[2] / len;
-  const maxX = t.offsetX + (t.width - 1) * 128, maxY = t.offsetY + (t.height - 1) * 128;
-  let top = -Infinity;
-  for (const c of t.corners) top = Math.max(top, c.height);
+  // A step: toward the sun, as long as a cell's diagonal (so one cell diagonal at 225°), its rise by the elevation.
+  const az = (s.azimuth * Math.PI) / 180, len = 32 * Math.SQRT2;
+  const sx = Math.cos(az) * Math.SQRT2, sy = Math.sin(az) * Math.SQRT2, rise = len * Math.tan((s.elevation * Math.PI) / 180);
   const row = (cy: number) => {
     for (let cx = 0; cx < w; cx++) {
-      const wx = t.offsetX + cx * 32 + 16, wy = t.offsetY + cy * 32 + 16;
-      const h0 = groundAt(t, wx, wy);
-      for (let d = 16; ; d += 16) {
-        const z = h0 + 1 + rise * d, px = wx + dx * d, py = wy + dy * d;
-        if (z > top || px < t.offsetX || py < t.offsetY || px >= maxX || py >= maxY) break;
-        if (groundAt(t, px, py) > z) { out[cy * w + cx] = 0xff; break; }
+      const h0 = heights[cy * w + cx];
+      for (let k = 1; k <= SHADOW_WALK_STEPS; k++) {
+        const x = Math.round(cx + sx * k), y = Math.round(cy + sy * k);
+        if (x < 0 || y < 0 || x >= w || y >= h) break;
+        if (heights[y * w + x] > h0 + rise * k) { out[cy * w + cx] = 0xff; break; }
       }
     }
   };
