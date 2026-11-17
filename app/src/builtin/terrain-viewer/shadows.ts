@@ -57,9 +57,10 @@ export function shadowCellHeights(t: Terrain, cliffs?: CliffCells): Float32Array
         for (let i = 0; i < 4; i++) {
           const u = (i + 0.5) / 4, v = (j + 0.5) / 4;
           const cliff = cells ? cells[j * 4 + i] : NaN;
+          // A cliff model's ground under it: bilinear (real maps: 330 cells off against 367 over the two triangles).
           out[(ty * 4 + j) * w + tx * 4 + i] = Number.isNaN(cliff)
             ? splitTile(h00, h10, h01, h11, u, v)
-            : base + cliff + splitTile(g00, g10, g01, g11, u, v);
+            : base + cliff + ((g00 * (1 - u) + g10 * u) * (1 - v) + (g01 * (1 - u) + g11 * u) * v);
         }
       }
     }
@@ -76,6 +77,15 @@ function splitTile(h00: number, h10: number, h01: number, h11: number, u: number
 /** A cliff tile's heights for shadowCellHeights: the 16 cell centres (row by row from the south, `v * 4 + u`), in the
  *  model's z over the tile's lowest layer; NaN where none is known; null: none for the tile. */
 export type CliffCells = (tileX: number, tileY: number) => Float32Array | null;
+
+/** The variation of shadowCliffName's model a tile takes: its own, counted round the name's `count` variations when
+ *  the name has fewer (the drawn model instead falls back to the highest one there is). Real maps (we-drive, branch
+ *  we-shadow-3, LastRefuge, TurtleRock and HillsbradCreek without doodads, variations 0 to 2 against names of 1 to 3):
+ *  674, 840 and 1646 cells off with the fallback, 367, 576 and 1009 this way (dev's ray: 2950, 4222, 7405); whether a
+ *  variation of 3 or more on a name of two goes round to 1 or to 0 isn't told apart there. */
+export function shadowCliffVariation(variation: number, count: number): number {
+  return count > 0 ? variation % count : 0;
+}
 
 /** The model the World Editor's shadow calculation reads for a cliff tile, and how: it names it after the corners read
  *  from the top-left (top-left, top-right, bottom-right, bottom-left; A/B/C as for drawing, cliffs.ts planCliffs), not

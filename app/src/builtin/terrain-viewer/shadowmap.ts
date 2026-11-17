@@ -8,7 +8,7 @@ import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
-import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
+import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "../../lib/terrain/w3e";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
@@ -57,13 +57,16 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
 const cliffHeights = new ModeCache<Float32Array | null>();
 const cliffDirs = new ModeCache<Map<string, string>>();
 
+/** The most variations a cliff model name is looked for with (the game's have 1 to 3; the w3e keeps 0 to 15). */
+const MAX_CLIFF_VARIATIONS = 16;
+
 /** Forgets the cliff heights read (with clearShadowMeshes). */
 function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); }
 
 /** The cliff tiles' heights for the terrain's shadows: per tile, the model shadowCliffName names in its cliff type's
- *  folder (CliffTypes.slk `cliffModelDir`; the bottom-left corner's type, the tile's variation or the highest one below
- *  it that can be read, as drawing does). Undefined when the cliff types can't be read; a tile whose model can't be
- *  read is taken as ground (shadowCellHeights). */
+ *  folder (CliffTypes.slk `cliffModelDir`; the bottom-left corner's type and variation, a variation the name doesn't
+ *  have counted round its variations: shadowCliffVariation). Undefined when the cliff types can't be read; a tile whose
+ *  model can't be read is taken as ground (shadowCellHeights). */
 async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string): Promise<CliffCells | undefined> {
   const tw = t.width - 1, tiles: number[] = [];
   for (let ty = 0; ty < t.height - 1; ty++) {
@@ -96,16 +99,26 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
       return faces.length ? cliffCellHeights(positions, faces) : null;
     } catch { return null; }
   });
+  /** How many variations a name has (0, 1, … read until one is missing). */
+  const counts = new Map<string, number>();
+  const variations = async (stem: string) => {
+    let n = counts.get(stem);
+    if (n === undefined) {
+      n = 0;
+      while (n < MAX_CLIFF_VARIATIONS && await heights(`${stem}${n}.mdx`)) n++;
+      counts.set(stem, n);
+    }
+    return n;
+  };
   const byTile = new Map<number, Float32Array>();
   for (const i of tiles) {
     const tx = i % tw, ty = (i - tx) / tw, bl = t.corners[ty * t.width + tx];
     const dir = list[bl.cliffTexture] ?? list[0];
     if (!dir) continue;
     const stem = `Doodads\\Terrain\\${dir}\\${dir}${shadowCliffName(t, tx, ty)}`;
-    for (let v = bl.cliffVariation; v >= 0; v--) {
-      const found = await heights(`${stem}${v}.mdx`);
-      if (found) { byTile.set(i, found); break; }
-    }
+    const n = await variations(stem);
+    const found = n ? await heights(`${stem}${shadowCliffVariation(bl.cliffVariation, n)}.mdx`) : null;
+    if (found) byTile.set(i, found);
   }
   return (tx, ty) => byTile.get(ty * tw + tx) ?? null;
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { newTerrain, type NewMapOptions } from "./newmap";
-import { cliffCellHeights, shadowCellHeights, shadowCliffName, terrainShadows, SHADOW_WALK_STEPS } from "./shadows";
+import { cliffCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, terrainShadows, SHADOW_WALK_STEPS } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
 function flat(): Terrain {
@@ -93,4 +93,12 @@ test("cliff tiles: the model named from the top-left corner on, read a quarter t
   // Its unknown cell (1, 1) and the tile without a model: ground between its corners (136 in the west, 8 in the east).
   assert.equal(h[81 * 256 + 81], 136 - 128 * 0.375);
   assert.deepEqual([80, 81, 82, 83].map((x) => shadowCellHeights(t)[82 * 256 + x]), [120, 88, 56, 24]);
+  // The ground under a cliff model is bilinear (where the ground tiles are split in two): the top-right corner 64 up
+  // gives the cell (7/8, 7/8) 64 × 49/64.
+  setGroundHeight(corner(t, 21, 21), 8 + 64);
+  assert.equal(shadowCellHeights(t, (x, y) => (x === 20 && y === 20 ? plate : null))[83 * 256 + 83], 108 + 49);
+});
+
+test("a variation the shadow's cliff model doesn't have is counted round its variations", () => {
+  assert.deepEqual([[0, 2], [1, 2], [2, 2], [2, 3], [3, 2], [1, 1], [5, 0]].map(([v, n]) => shadowCliffVariation(v, n)), [0, 1, 0, 2, 1, 0, 0]);
 });
