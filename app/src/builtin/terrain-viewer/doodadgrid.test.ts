@@ -56,6 +56,9 @@ test("the quarter turns round as the World Editor's single precision does", () =
   assert.deepEqual([0, 44.9, 45, 134.9, 135, 224.9, 225, 314.9, 315, 315.1, 359].map(q), [0, 0, 1, 1, 2, 2, 3, 3, 3, 0, 0]);
   assert.equal(quarterTurn(-Math.PI / 2), 3);
   assert.equal(quarterTurn(Math.fround(5 * Math.PI)), 2);
+  // The turns above 2 pi come off first, in single precision (fence-exact: 405 and 765 go to 0, 675 to 270, -45 to 0).
+  assert.deepEqual([-405, -315, -45, 405, 675, 765].map(q), [0, 1, 0, 0, 3, 0]);
+  assert.equal(quarterTurn(NaN), 0);
 });
 
 test("a square texture keeps the angle, no texture keeps everything", () => {

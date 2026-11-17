@@ -1,0 +1,44 @@
+[
+  {
+    "name": "fence-exact",
+    "description": "Rounding edges of a rectangle pathing texture's quarter turn (make-fence.mjs exact: NOfl 8x2, NOal Fence45 and VOal Fence135 at every multiple of 45 degrees from -405 to 765 as single precision, NOfl every quarter degree within 2 degrees of 45, 135, 225 and 315). The doodads and the pathing map each saves",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/fence-exact.w3x"
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed"
+      }
+    ],
+    "limit": 100,
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ]
+    }
+  }
+]
