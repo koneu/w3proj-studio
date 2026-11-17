@@ -85,7 +85,7 @@ function weStep(step, where, vars = {}) {
   if (!Array.isArray(tokens) || !tokens.length || tokens.some((t) => typeof t !== "string") || tokens.length > 2 || !tokens[0].startsWith("--")) {
     throw new Error(`${where}: a World Editor step is "--step value" or ["--step", "value"], got ${JSON.stringify(step)}`);
   }
-  if (["--map", "--start", "--save", "--close", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--look"].includes(tokens[0])) {
+  if (["--map", "--start", "--save", "--save-shadows", "--close", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--look"].includes(tokens[0])) {
     throw new Error(`${where}: ${tokens[0]} is done by we-compare itself (the map, the wait for it, the save and the close)`);
   }
   return tokens[0] === "--type" && tokens.length === 2 ? [tokens[0], expandText(tokens[1], vars)] : tokens;
@@ -146,9 +146,10 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (we.mode !== undefined && !["sd", "hd", "de"].includes(we.mode)) throw new Error(`${where}: we.mode is sd, hd or de`);
   if (we.from !== undefined && !["input", "studio"].includes(we.from)) throw new Error(`${where}: we.from is input (the spec's map) or studio (the map Studio saved: does the editor open and re-save it unchanged?)`);
   if (we.saveAccept !== undefined && !(Array.isArray(we.saveAccept) && we.saveAccept.every((t) => typeof t === "string" && t && !t.includes(",")))) throw new Error(`${where}: we.saveAccept is a list of dialog titles`);
-  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "steps", "freshEditor", "expectCrash", "prefs"].includes(k));
+  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "save", "steps", "freshEditor", "expectCrash", "prefs"].includes(k));
   if (unknownWe.length) throw new Error(`${where}: unknown we.${unknownWe.join(", we.")}`);
   for (const k of ["freshEditor", "expectCrash"]) if (we[k] !== undefined && typeof we[k] !== "boolean") throw new Error(`${where}: we.${k} is true or false`);
+  if (we.save !== undefined && !["plain", "shadows"].includes(we.save)) throw new Error(`${where}: we.save is plain (Ctrl+S) or shadows (File > Calculate Shadows and Save Map)`);
   const prefs = parsePrefs(we.prefs, `${where}: we.prefs`);
   const studio = raw.studio ?? {};
   if (!isObject(studio)) throw new Error(`${where}: "studio" is an object`);
@@ -196,7 +197,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     input: parsedInput,
     we: {
       mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))),
-      freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs,
+      save: we.save ?? "plain", freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs,
     },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
@@ -691,7 +692,7 @@ export function weOutcome(n, outs) {
       state[i].stopped = true;
       state[i].close = "crashed";
     } else if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
-    else if (o.step === "--save") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
+    else if (o.step === "--save" || o.step === "--save-shadows") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
     else if (o.step === "--wait-ready" && o.ready === false && o.layout) { layout ??= o.layout; state[i].failure ??= o.layout; }
     else if (o.step === "--wait-ready" && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
     else if (o.step === "--close" && o.closed && !o.crashed && state[i].saved) state[i].close ??= "clean";
@@ -730,7 +731,7 @@ export function crashExpectation(expectCrash, close, error, warning) {
 export function weDriveSteps(specs, { restart = false, mapOf, saveOf }) {
   const args = [];
   specs.forEach((s, i) => {
-    args.push("--map", mapOf(s), "--wait-ready", ...s.we.steps.flat(), "--save", saveOf(s));
+    args.push("--map", mapOf(s), "--wait-ready", ...s.we.steps.flat(), s.we.save === "shadows" ? "--save-shadows" : "--save", saveOf(s));
     const next = specs[i + 1];
     if (restart || !next || s.we.expectCrash || next.we.freshEditor) args.push("--close");
   });

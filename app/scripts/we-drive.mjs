@@ -95,6 +95,8 @@
 //   --sleep MS          wait (the windows read every second meanwhile: a crash dialog stops the run when it comes)
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
+//   --save-shadows FILE as --save, through File > Calculate Shadows and Save Map instead of Ctrl+S (a plain save keeps
+//                       the stored war3map.shd byte for byte); the melee notice wants --save-accept Warning
 //   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
 //                       Area Only); the TGA it writes is copied to FILE. Another dialog is reported, not answered
 //   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it; printable
@@ -196,7 +198,10 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+/** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
+const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
+
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
  *  "Layout"). */
@@ -409,7 +414,7 @@ export function parseArgs(argv) {
   if (looks.length && !steps.some(([s]) => s === "--map")) throw new Error("--look needs --map (its cameras go into the map)");
   const firstOpen = steps.findIndex(([s]) => s === "--open"), firstStart = steps.findIndex(([s]) => s === "--map" || s === "--start");
   if (firstOpen >= 0 && (firstStart < 0 || firstStart > firstOpen)) throw new Error("--open needs --map or --start before it (it opens the map in the running editor)");
-  const firstSave = steps.findIndex(([s]) => s === "--save"), firstMap = steps.findIndex(([s]) => s === "--map");
+  const firstSave = steps.findIndex(([s]) => s === "--save" || s === "--save-shadows"), firstMap = steps.findIndex(([s]) => s === "--map");
   if (firstSave >= 0 && (firstMap < 0 || firstMap > firstSave)) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
   return { opts, steps, looks };
 }
@@ -1227,12 +1232,17 @@ export class Session {
    * named "Just another Warcraft III map") is answered with Return. Done when the map's copy has changed, no dialog is
    * open and the file stood still for 2 s; another dialog is reported with a picture of the screen, not answered.
    */
-  async save(dest) {
+  async save(dest, { shadows = false } = {}) {
     if (!this.copy) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
     const { main } = this.mainOrThrow();
     const stamp = () => { try { const s = statSync(this.copy); return `${s.mtimeMs}:${s.size}`; } catch { return null; } };
     const before = stamp();
-    this.x("key", "--window", main.id, "ctrl+s");
+    if (shadows) {
+      // --save-shadows: File menu, Calculate Shadows and Save Map (positions of TESTING.md, branch we-terrain-2).
+      this.act("click", SAVE_SHADOWS_CLICKS[0]);
+      await this.wait(600);
+      this.act("click", SAVE_SHADOWS_CLICKS[1]);
+    } else this.x("key", "--window", main.id, "ctrl+s");
     // waitedFor: the windows the save waited out (the "Progress" window, an untitled one), for the step's line.
     const deadline = this.now() + this.opts.timeout * 1000, answered = [], asked = new Map(), waitedFor = new Set();
     let last = before, stillSince = 0, idleSince = this.now();
@@ -1708,8 +1718,8 @@ async function main() {
         } else if (step === "--sleep") {
           await s.sleepWatching(Number(arg));
           out({ step });
-        } else if (step === "--save") {
-          const r = await s.save(arg);
+        } else if (step === "--save" || step === "--save-shadows") {
+          const r = await s.save(arg, { shadows: step === "--save-shadows" });
           out({ step, ...r });
           if (!r.saved) { failed = true; break; }
         } else if (step === "--close") {
