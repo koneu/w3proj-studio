@@ -899,6 +899,41 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   editor draws a cliff hollow exactly there, so the position fits; Studio's model shows as a hard-edged flat grass
   square with tan rock on it (lowprio-bugs). Not compared: facing and height of other types. The editor's picture is
   dark on its left half there (outside the camera bounds), Studio's isn't.
+- **Specials, Classic conversions, portal, bounds line, variable values** (branch we-misc-3, 2026-11-17, we-drive
+  `--mode hd` (its default) and `sd` against app-drive with `--set game.graphicsMode='"sd"'` (Studio's default is HD);
+  `--camera we:` and `--look` with the same x,y,distance; pic-compare):
+  (1) *Variable initial values* (`tests/we-compare/var-initial-values.json`, Studio's `add_trigger_variable` into a
+  new map, the editor opens and saves it): real 1.5, 2.345, -0.1, 7 (the editor's script and wtg: 1.50, 2.35, -0.10,
+  7.00), integer 0x1F, 0xff, 42, -5, unitcode hfoo (`'hfoo'` in the script), string: war3map.wtg and the `udg_` lines
+  MATCH. (An integer variable can't hold `'hfoo'`: Studio refuses it, only the object-code types take 4 letters.)
+  (2) *Specials* (input `tests/fixtures/we-specs/make-specials-look.mjs`: plateau.w3x with 25 specials, flat-ground
+  rows of YCd1-4, YCl2, YCc1-4, LCc0, LCc2, YCg1, YCp2, YCu2, YCr2 and caves and collapses on all four faces of the
+  two-layer plateau; looks 0,-2560 / 0,-1792 / 0,1536 / 0,-128 at 2600): the editor draws every one, the city types
+  YCd/YCc too (on a Lordaeron Summer map). Same places and shapes as Studio's. Left: (a) on **flat ground** (corner
+  cliff texture 15, the "none" of the w3e) the editor's cliff part is a flat quad with an unresolved texture, **white
+  (255, 255, 255) in SD and blue (40, 66, 78) in HD**, tile-aligned at the footprint's edge; Studio's tile of the first cliff type is
+  tan like the ground and shows nothing; (b) the dark inside of a cave or collapse is the editor's black all through
+  the hollow, Studio's shows a ground-coloured polygon (AutumnLeaves' LCc0 at (5632,-1152), HD: the same, so not the
+  plateau's doing; back faces were not the cause: switching culling off for the models changed only a small piece);
+  (c) **fixed**: on a plateau's face the editor gives the special the cliff type of the tile it is placed by
+  (`sp.x, sp.y`, the footprint's bottom left), Studio took the tile under the model's middle, often off the cliff, so
+  its tops were tan where the editor's are green (`specialTileCliffType`; region 0,0,1184,640 of the plateau view
+  mean absolute difference 21.1 to 15.9; plain ground alone is 7.7, the camera fit's offset). The camera fit
+  moves a real map's picture by about 30 px at 1300 away (AutumnLeaves), so only shapes can be told there.
+  (3) *Classic conversions* (`openpoints/example-maps/14c_GraphicsModes_Classic_and_HD.w3x`, SD, look 0,1800,3600): the
+  editor draws all eight Studio-converted models (Iron Gate, Capital Tower, Palace Walls, Pillars, Wall Endcap) with
+  the same shapes and textures as Studio, so the game's not drawing them (user.md 14c) isn't the model data the
+  editor reads; the tower is 11 darker in mean colour in Studio (lighting; a native Classic model was not compared).
+  (4) *Map 16's outer columns* (`16_Particles_Doodads.w3x`, HD, looks -2000,1600 and 2000,1600 at 3000, -2000,2400
+  at 900): ShimmeringPortal's disc has the editor's hue (r:g:b 0.83:0.57:1 against 0.87:0.62:1) and is 12 darker; its
+  rim is pinker in Studio (b/r 1.13 against the editor's 1.37, bluish white); the centre glow is a moving shape in
+  both (magenta flower in the editor, a white slit in Studio at that moment). The Ruin Fountain is 125 px across in
+  the editor and 80 in Studio at the same camera (the other doodads' sizes and places match): not looked into. Rising
+  Water is more opaque and bluer in the editor.
+  (5) *Camera bounds line* (`camera-bounds.w3m`, SD unlit, look 2816,0,1500 and 2816,2816,1500): the editor draws a
+  one-pixel line of exactly (128, 128, 255) at the bound, Studio's was (150, 200, 255) drawn over two pixels at half
+  strength: the colour is now the editor's (`CAMERA_BOUNDS_RGB`); the line is still antialiased over two pixels.
+  The line is on by default in Studio's terrain view and off in the editor's.
 - **Border shade** (branch border-shade-models, 2026-11-13; copies of empty_map_on_newest_world_editor.w3m made with
   app-drive's MCP tools and packed with the CLI: a tree, a hay cart, a footman, claws of attack, a start location and a
   YCl2 three tiles inside (x -2944) and three tiles past the west edge (x -3712), a raised plateau and a lake across the
