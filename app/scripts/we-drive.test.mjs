@@ -141,6 +141,14 @@ test("parseArgs: --clipboard takes the file the clipboard's text goes into", () 
   assert.throws(() => parseArgs(["--start", "--clipboard"]), /--clipboard needs a value/);
 });
 
+test("parseArgs: --keyboard names an X layout (de, us, de(nodeadkeys)) and nothing else", () => {
+  assert.equal(parseArgs(["--start"]).opts.keyboard, undefined);
+  assert.equal(parseArgs(["--keyboard", "de", "--start"]).opts.keyboard, "de");
+  assert.equal(parseArgs(["--keyboard", "de(nodeadkeys)", "--start"]).opts.keyboard, "de(nodeadkeys)");
+  assert.throws(() => parseArgs(["--keyboard", "de; touch x", "--start"]), /X layout name/);
+  assert.throws(() => parseArgs(["--keyboard", "-print", "--start"]), /X layout name/);
+});
+
 test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
   assert.equal(parseArgs(["--start"]).opts.screen, undefined);
   assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
