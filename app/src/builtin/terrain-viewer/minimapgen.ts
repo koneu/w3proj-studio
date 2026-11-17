@@ -72,6 +72,7 @@ export async function shownTextureMean(model: { textures: readonly { replaceable
   colorOf: (tex: { replaceableId: number; path: string }) => Promise<Rgb | null>): Promise<Rgb | null> {
   const shown = [...new Set(model.geosets.flatMap((g) => model.materials[g.materialId]?.layers.map((l) => l.textureIds[0]) ?? []))];
   const colors: Rgb[] = [];
+  if (process.env.MM_DEBUG) console.error("MMDEBUG tex", JSON.stringify(model.textures), JSON.stringify(shown));
   for (const id of shown) {
     const tex = model.textures[id];
     if (!tex) continue;
@@ -131,6 +132,9 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
   /** `mean`: the colour of a dot (modelTextureColor), not of a shape drawn from its pathing texture's cells. */
   modelColor: (type: string, mean: boolean) => Promise<Rgb | null>;
   footprint: (pathTex: string) => Promise<number>;
+  /** The texture's width and height in cells when it is known (a dot reaches the tiles by them, see dotReach);
+   *  left out, `footprint` squared. */
+  cells?: (pathTex: string) => Promise<[number, number] | null>;
   /** The cells of a pathing texture, drawn as they are; null (or left out): a dot of its `footprint` size. */
   pathMask?: (pathTex: string) => Promise<PathMask | null>;
 }): Promise<MinimapObject[]> {
@@ -149,12 +153,16 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     const mask = file ? await tables.pathMask?.(file) : null;
     // Gates, walls and rock spires are drawn as their texture's cells; a texture that is one full square (trees,
     // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
-    const shape = !!mask && !(mask.width === mask.height && mask.cells.every((c) => c));
+    // A texture that is one full rectangle is a dot of tiles (dotReach, turned by the angle); one with gaps is its cells.
+    const shape = !!mask && !mask.cells.every((c) => c);
     const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape);
+    if (process.env.MM_DEBUG) console.error("MMDEBUG", d.id, type, rgb, shape, mask?.width, mask?.height, file);
     if (!rgb) continue;
     if (shape) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask: mask!, angle: d.angle }); continue; }
     const size = file ? await tables.footprint(file) : 1;
-    objects.push({ x: d.position[0], y: d.position[1], rgb, size });
+    // No pathing texture (a palisade): the one tile it stands in.
+    const cells = file ? await tables.cells?.(file) ?? undefined : [0, 0] as [number, number];
+    objects.push({ x: d.position[0], y: d.position[1], rgb, size: file ? size : 0, ...(cells ? { cells } : {}), angle: d.angle });
   }
   return objects;
 }
@@ -245,6 +253,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     const image = await pathImage(path);
     return image ? Math.sqrt(image.width * image.height) / CELLS_PER_TILE : 1;
   };
+  const cells = async (path: string): Promise<[number, number] | null> => { const image = await pathImage(path); return image ? [image.width, image.height] : null; };
   const pathMask = memo((path: string) => (async () => {
     const image = await pathImage(path);
     if (!image) return null;
@@ -252,7 +261,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     for (let i = 0; i < cells.length; i++) cells[i] = image.rgba[i * 4] | image.rgba[i * 4 + 1] | image.rgba[i * 4 + 2] ? 1 : 0;
     return { width: image.width, height: image.height, cells };
   })().catch(() => null));
-  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, pathMask });
+  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, cells, pathMask });
 
   return {
     terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor, drawnTiles,
