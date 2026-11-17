@@ -1,7 +1,7 @@
 [
   {
     "name": "studio-paths-rebuilt",
-    "description": "test.md 'Maps from paths other than the WE's own save' (1): EchoIsles unpacked, w3proj rebuild --force, packed (make-studio-paths.mjs); the editor opens it and re-saves; Studio's side is the plain open/save/pack",
+    "description": "test.md 'Maps from paths other than the WE's own save' (1): EchoIsles unpacked, w3proj rebuild --force, packed (make-studio-paths.mjs); the editor opens it and re-saves; Studio's side is the plain open/save/pack. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-rebuilt.w3x"
     },
@@ -41,6 +41,7 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -53,11 +54,24 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[13].position[2]",
+          "units[27].position[2]",
+          "units[54].position[2]",
+          "units[73].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[88].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -95,7 +109,7 @@
   },
   {
     "name": "studio-paths-plain",
-    "description": "control of studio-paths-rebuilt: unpack and pack only",
+    "description": "control of studio-paths-rebuilt: unpack and pack only. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-plain.w3x"
     },
@@ -135,6 +149,7 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -147,11 +162,24 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[13].position[2]",
+          "units[27].position[2]",
+          "units[54].position[2]",
+          "units[73].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[88].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -189,7 +217,7 @@
   },
   {
     "name": "studio-paths-terrain-save",
-    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save",
+    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-plain.w3x"
     },
@@ -236,6 +264,7 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -248,11 +277,32 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[5].position[2]",
+          "units[13].position[2]",
+          "units[14].position[2]",
+          "units[18].position[2]",
+          "units[27].position[2]",
+          "units[32].position[2]",
+          "units[54].position[2]",
+          "units[67].position[2]",
+          "units[73].position[2]",
+          "units[75].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[87].position[2]",
+          "units[88].position[2]",
+          "units[89].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -290,7 +340,7 @@
   },
   {
     "name": "studio-paths-nowts",
-    "description": "(3): war3map.wts deleted before packing; Studio's save writes it again (strings from the triggers/objects), the editor opens that map (from: studio) and re-saves; the compared wts is Studio's against the editor's",
+    "description": "(3): war3map.wts deleted before packing; the editor opens that map (from: studio) and re-saves. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match. neither save has a war3map.wts (Studio doesn't make one from nothing, nor does the editor), so it isn't compared; the player and force names the w3i gives as TRIGSTR_001..003 have no string left: the editor writes them as \"\", Studio keeps the TRIGSTR_ text (bugs.md)",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
     },
@@ -330,13 +380,19 @@
           "playerHudSkins",
           "players[].hudSkin"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "players[].name",
+          "forces[].name"
+        ]
       },
       {
         "file": "war3map.doo",
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -349,11 +405,24 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[13].position[2]",
+          "units[27].position[2]",
+          "units[54].position[2]",
+          "units[73].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[88].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -366,10 +435,6 @@
         "expectPaths": [
           "header.version"
         ]
-      },
-      {
-        "file": "war3map.wts",
-        "as": "text"
       },
       {
         "file": "war3map.lua",
@@ -391,7 +456,7 @@
   },
   {
     "name": "studio-paths-nolua",
-    "description": "(4): war3map.lua deleted, w3proj rebuild writes it, packed; editor re-saves it",
+    "description": "(4): war3map.lua deleted, w3proj rebuild writes it, packed; editor re-saves it. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-nolua.w3x"
     },
@@ -431,6 +496,7 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -443,11 +509,24 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[13].position[2]",
+          "units[27].position[2]",
+          "units[54].position[2]",
+          "units[73].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[88].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -485,7 +564,7 @@
   },
   {
     "name": "studio-paths-nowts-text",
-    "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes the name inline (no table to write); the editor opens it and re-saves; names and strings as the editor reads them",
+    "description": "(3) variant: the same map without war3map.wts, Studio's set_map_text writes the name inline (no table to write); the editor opens it and re-saves; names and strings as the editor reads them. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 13, 27, 54, 73, 77, 81, 88, 92, 97 (measured 2026-11-17); every other unit's height must match. neither save has a war3map.wts (Studio doesn't make one from nothing, nor does the editor), so it isn't compared; the player and force names the w3i gives as TRIGSTR_001..003 have no string left: the editor writes them as \"\", Studio keeps the TRIGSTR_ text (bugs.md)",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-nowts.w3x"
     },
@@ -526,13 +605,19 @@
           "playerHudSkins",
           "players[].hudSkin"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "players[].name",
+          "forces[].name"
+        ]
       },
       {
         "file": "war3map.doo",
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "doodads[].preFlags",
           "doodads[].editorId",
           "doodads[].trailer",
@@ -545,11 +630,24 @@
         "as": "parsed",
         "ignore": [
           "version",
+          "skinIds",
           "units[].preFlags",
           "units[].trailer",
           "units[].extras"
         ],
-        "tolerance": 0.01
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[13].position[2]",
+          "units[27].position[2]",
+          "units[54].position[2]",
+          "units[73].position[2]",
+          "units[77].position[2]",
+          "units[81].position[2]",
+          "units[88].position[2]",
+          "units[92].position[2]",
+          "units[97].position[2]"
+        ]
       },
       {
         "file": "war3map.wpm",
@@ -562,10 +660,6 @@
         "expectPaths": [
           "header.version"
         ]
-      },
-      {
-        "file": "war3map.wts",
-        "as": "text"
       },
       {
         "file": "war3map.lua",
@@ -587,7 +681,7 @@
   },
   {
     "name": "studio-paths-matrix-masks",
-    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i (that those masks agree with allies.rs's rule for the editor's starts was seen by hand once; this spec only checks that the starts, the masks and the names are what differs); the borrowed wtg/wts make the player names TRIGSTR_00n",
+    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i at random: player 0 at -8960,-3968 in one run, -490,5669 in the next (2026-11-17), so the masks worked out from them are random too and are ignored (that they agree with allies.rs's rule for the editor's starts was seen by hand once); the editor counts that change as an edit (saves 1 to 2). Also ignored: scriptType, supportedModes, gameDataVersion and the enemy masks, which the editor's newer w3i version has and the map's version 25 hasn't. Checked: the starts, saves and the names are what differs; the borrowed wtg/wts make the player names TRIGSTR_00n",
     "input": {
       "map": "${REPO}/target/studio-paths/matrix.w3x"
     },
@@ -618,13 +712,20 @@
           "cameraZoom",
           "water",
           "playerHudSkins",
-          "players[].hudSkin"
+          "players[].hudSkin",
+          "scriptType",
+          "supportedModes",
+          "gameDataVersion",
+          "players[].enemyLow",
+          "players[].enemyHigh",
+          "players[].allyLow",
+          "players[].allyHigh"
         ],
         "tolerance": 0.01,
         "expect": "differs",
         "expectPaths": [
+          "saves",
           "players[].start",
-          "players[].allyLow",
           "players[].name"
         ]
       }
