@@ -5225,7 +5225,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const key = corners ? corners.join(";") : "";
           if (key === boundsKey && !(again && corners)) return;
           boundsKey = key;
-          renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners) }] : []);
+          renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners), crisp: true }] : []);
           redraw();
         };
         /** Draws what `shown` says, after the choice or game view changed. */

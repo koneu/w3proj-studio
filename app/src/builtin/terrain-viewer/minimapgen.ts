@@ -17,6 +17,7 @@ import { ModeCache } from "../../lib/modecache";
 import { drawnGroundTiles, type Terrain } from "../../lib/terrain/w3e";
 import { ownGroundTiles } from "../../lib/terrain/tilesets";
 import { applyTilesetWater } from "./wateroffset";
+import { readImport } from "./projectfiles";
 
 /** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
  *  are shared; the modes have their own). */
@@ -182,6 +183,17 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
   return objects;
 }
 
+/** `readFile` that doesn't find what the game stores only below `_DE.w3mod`: the editor's HD minimap draws the grey 183
+ *  dot for a doodad whose model is stored only there (EOcr, LCpa, LRsr, UO*, YO*; we-drive 2026-11-17), where the
+ *  model view in HD does fall back to that layer. A map's own import of the file still counts. */
+export function withoutDeLayer(w3: W3Api, readFile: (path: string) => Promise<Uint8Array>): (path: string) => Promise<Uint8Array> {
+  return async (path) => {
+    const at = await w3.game.resolve(path).catch(() => null);
+    if (at && /_de\.w3mod/i.test(at)) return readImport(w3, path);
+    return readFile(path);
+  };
+}
+
 /** The graphics mode set (game.graphicsMode), which the game's files are read in. */
 export const graphicsMode = (w3: W3Api) => w3.settings.get<string>("game.graphicsMode") ?? "hd";
 
@@ -259,7 +271,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     skins ??= loadSkins(w3);
     const mean = key.startsWith("mean:"), type = key.slice(mean ? 5 : 6);
     const skin = (await skins).get(type);
-    return skin ? modelTextureColor(skin, readFile, mean) : null;
+    return skin ? modelTextureColor(skin, graphicsMode(w3) === "hd" ? withoutDeLayer(w3, readFile) : readFile, mean) : null;
   })().catch(() => null));
   const modelColor = (type: string, mean: boolean) => colorOf(`${mean ? "mean" : "first"}:${type}`);
   // A pathing texture is read and decoded once, for its cells and its size alike (null: unreadable).
