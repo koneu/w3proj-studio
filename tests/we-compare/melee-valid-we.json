@@ -173,6 +173,6 @@
     "input": { "map": "${REPO}/target/melee-valid/melee-valid-melee-tree-256.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
     "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
-    "compare": [{ "file": "war3map.w3i", "expect": "differs" }]
+    "compare": [{ "file": "war3map.w3i", "expect": "differs", "expectPaths": ["flags"] }]
   }
 ]

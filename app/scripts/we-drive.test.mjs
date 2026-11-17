@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as drive from "./we-drive.mjs";
+import { weOutcome } from "./we-compare-core.mjs";
 import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -621,6 +622,26 @@ test("Session: --expect-layout fails waitReady on a main window or palette of an
   r.s.opts.expectLayout = false;
   r.windows = [{ ...mainWin("a.w3m"), rect: [0, 0, 1200, 700] }];
   assert.equal((await r.s.waitReady()).ready, true);
+});
+
+test("--expect-layout: the real waitReady line of a wrong layout fails every spec in we-compare's outcome, a right one doesn't", async (t) => {
+  const r = rig(t);
+  r.s.opts.expectLayout = true;
+  await r.s.start(r.maps["a.w3m"]);
+  // The line main() prints for --wait-ready ({ step, ...result }), read back the way we-compare reads it.
+  const line = async () => JSON.parse(JSON.stringify({ step: "--wait-ready", ...(await r.s.waitReady()) }));
+  r.windows = [{ ...mainWin("a.w3m"), rect: [0, 0, 1200, 700] }];
+  const bad = await line();
+  assert.equal(bad.ready, false);
+  const out = weOutcome(2, [{ step: "--map" }, bad]);
+  assert.equal(out.errors.length, 2);
+  for (const e of out.errors) assert.match(e, /^World Editor: the editor's main window is at 0,0 1200x700/);
+  assert.deepEqual(out.rerun, []);
+  // Control: the measured layout gives no error from the ready line.
+  r.windows = [mainWin("a.w3m")];
+  const good = await line();
+  assert.equal(good.ready, true);
+  assert.deepEqual(weOutcome(1, [{ step: "--map" }, good]).errors, ["World Editor: no save (the run stopped before it)"]);
 });
 
 test("Session: --pref keys are written into the preferences before each start, after we-drive's own", async (t) => {
