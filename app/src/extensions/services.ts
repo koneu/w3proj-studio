@@ -237,6 +237,18 @@ export interface TerrainEditorHandle {
   cliffGroundTiles(): string[];
   /** The cliff type number the World Editor's cliff palette starts on, for new cliffs and water (-1: none known). */
   defaultCliffType(): number;
+  /** Every cliff type the game defines (CliffTypes.slk) and the ground tile it belongs to; empty until read. */
+  gameCliffTypes(): { id: string; groundTile: string }[];
+  /** Per entry of the w3e's cliff list: corners naming it, and cliff tiles drawn with it. Null until the game's cliff
+   *  types are read. */
+  cliffTypeUse(): { corners: number[]; tiles: number[] } | null;
+  /** Adds one of the game's cliff types to the end of the cliff list (at most 15 entries, the numbers a corner can
+   *  name); one undo step. Its number; throws with the reason when refused (nothing changes then). */
+  addCliffType(id: string): number;
+  /** Takes entry `index` out of the cliff list; one undo step. An entry in use needs `replacement` (another entry's
+   *  number), which its corners get; the entries after it move up and their corners follow. The removed id; throws
+   *  with the reason when refused (nothing changes then). */
+  removeCliffType(index: number, replacement?: number): string;
   /** The game's tilesets with their own ground tiles (the tile list New Map gives them). */
   tilesets(): Promise<{ id: string; name: string; tiles: string[] }[]>;
   /** Changes the terrain's tileset (water, lighting, blight follow); one undo step. */

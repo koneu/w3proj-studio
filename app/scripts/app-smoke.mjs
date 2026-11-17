@@ -10379,7 +10379,8 @@ async function turtleCliffSave(page, found) {
     const TXT = "map/war3map.w3e.txt";
     const read = () => w3eSections(readFileSync(ground, "utf8"));
     const first = read();
-    const OPTIONS = "-1=Match the ground, 0=Dirt cliff, 1=Grass cliff, 3=Dirt cliff, 4=Grass cliff, 5=Snow cliff, 6=Grass cliff, 7=Desert cliff, 8=Grass cliff, 9=Dirt cliff, 10=Snow cliff, 11=Grass cliff, 12=Dirt cliff, 13=Grass cliff, 14=Dirt cliff, 15=Dirt cliff, 16=Square Tiles cliff";
+    // Entries 15 (CYdi) and 16 (CYsq) aren't offered: a corner's cliff type is 0 to 14, 15 is reserved and 16 doesn't fit.
+    const OPTIONS = "-1=Match the ground, 0=Dirt cliff (CLdi), 1=Grass cliff (CLgr), 3=Dirt cliff (CFdi), 4=Grass cliff (CFgr), 5=Snow cliff (CWsn), 6=Grass cliff (CWgr), 7=Desert cliff (CBde), 8=Grass cliff (CBgr), 9=Dirt cliff (CNdi), 10=Snow cliff (CNsn), 11=Grass cliff (CAgr), 12=Dirt cliff (CAdi), 13=Grass cliff (CCgr), 14=Dirt cliff (CCdi)";
     const LIST = ["CLdi", "CLgr", "CLno", "CFdi", "CFgr", "CWsn"];
     if (!first.head.includes(`cliffs ${LIST.join(" ")} CWgr CBde CBgr CNdi CNsn CAgr CAdi CCgr CCdi CYdi CYsq`) || first.head.some((l) => l === "custom-tilesets 1")) {
       return fail(`the map's cliff list isn't the one the check knows (control): ${first.head.join(" | ")}`);
@@ -10487,6 +10488,75 @@ async function turtleCliffSave(page, found) {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     // The map's Lua script isn't one its triggers make: the save leaves it and asks, and the answer here is none.
     await page.evaluate(`document.querySelectorAll(".toast[data-asks] .toast-close").forEach((b) => b.click())`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Cliffs… (the cliff tools' list of the map's cliff types): on a new map (CLdi CLgr) CAdi is added from the game's
+ *  list, a Cliff +1 by mouse with it chosen writes number 2 on the corners, removing it while in use asks for another
+ *  entry and its corners get that one's number, one undo brings list and corners back, and a removal refused (in use,
+ *  no replacement) leaves no change and no undo step. Read from the saved war3map.w3e.txt each time. */
+async function cliffTypeList(page, found) {
+  const fail = (what) => found.push(`cliff type list: ${what}`);
+  const k = await terrainMap(page, "CliffList");
+  const hands = new Hands(page);
+  try {
+    const read = () => w3eSections(readFileSync(k.w3e, "utf8"));
+    const cliffsLine = () => read().head.find((l) => l.startsWith("cliffs ")) ?? "";
+    const typed = (n) => read()["cliff-texture"].filter((v) => parseInt(v, 36) === n).length;
+    if (cliffsLine() !== "cliffs CLdi CLgr") return fail(`a new Lordaeron map's cliff list should be CLdi CLgr (control): ${cliffsLine()}`);
+    await k.tab("Terrain");
+    await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
+    const button = (text) => `[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === ${lit(text)})`;
+    await until("Cliffs…", () => page.evaluate(`!!${button("Cliffs…")} && !${button("Cliffs…")}.closest("[hidden]")`), 10000);
+    await page.evaluate(`${button("Cliffs…")}.click()`);
+    const addSel = `[...document.querySelectorAll(".terrain-cliffmgr select")].find((s) => s.options[0]?.textContent.startsWith("Add cliff type"))`;
+    await until("the cliff list", () => page.evaluate(`!!${addSel}`), 20000);
+    const addLabel = await page.evaluate(`${addSel}.options[0].textContent`);
+    if (addLabel !== "Add cliff type… (2/15)") fail(`the add box says "${addLabel}"`);
+    await page.evaluate(`(() => { const s = ${addSel}; s.value = "CAdi"; s.dispatchEvent(new Event("change")); })()`);
+    await k.save();
+    if (cliffsLine() !== "cliffs CLdi CLgr CAdi") return fail(`after adding CAdi the saved list is "${cliffsLine()}"`);
+    // The cliff type box offers it as number 2.
+    const cliffSel = `[...document.querySelectorAll("label.terrain-tool-opt")].find((l) => l.textContent.startsWith("Cliff type"))?.querySelector("select")`;
+    await until("CAdi in the cliff type box", () => page.evaluate(`!!${cliffSel} && [...${cliffSel}.options].some((o) => o.value === "2" && o.textContent.endsWith("(CAdi)"))`), 10000)
+      .catch(async () => fail(`the cliff type box has no 2 = CAdi: ${await page.evaluate(`[...(${cliffSel}?.options ?? [])].map((o) => o.value + "=" + o.textContent).join(", ")`)}`));
+    await page.evaluate(`(() => { const s = ${cliffSel}; s.value = "2"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    if (typed(2) !== 0) return fail("corners hold 2 before any cliff is made (control)");
+    const canvas = await hands.where(".terrain-view canvas, canvas");
+    await hands.mouse("mouseMoved", canvas.x, canvas.y);
+    await hands.mouse("mousePressed", canvas.x, canvas.y, 1);
+    await hands.mouse("mouseReleased", canvas.x, canvas.y);
+    await until("the stroke", () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`), 10000).catch(() => fail("Cliff +1 by mouse left the terrain unchanged"));
+    await k.save();
+    const onTwo = typed(2);
+    if (!onTwo) return fail(`Cliff +1 with CAdi chosen wrote no corner with number 2: ${[...new Set(read()["cliff-texture"])].join(",")}`);
+    const withCliff = readFileSync(k.w3e, "utf8");
+
+    // Refused: CAdi is in use, with no replacement given. Nothing changes, no undo step.
+    const err = await page.evaluate(`(() => { try { window.__smokeEd.removeCliffType(2); return null; } catch (e) { return String(e.message ?? e); } })()`);
+    if (!err || !/CAdi is in use/.test(err)) fail(`removing CAdi in use without a replacement wasn't refused: ${err}`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused removal left the terrain unsaved");
+
+    // Removed by hand: the ✕ asks which entry its corners get; CLgr (1).
+    await page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .terrain-tilemgr-row")].find((r) => r.textContent.includes("(CAdi)")).querySelector("button").click()`);
+    await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-cliffmgr-replace")`), 5000);
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-cliffmgr-replace"); s.value = "1"; s.dispatchEvent(new Event("change")); })()`);
+    const onOne = typed(1);
+    await page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .removing button")].find((b) => b.textContent === "Remove").click()`);
+    await k.save();
+    if (cliffsLine() !== "cliffs CLdi CLgr") fail(`after removing CAdi the list is "${cliffsLine()}"`);
+    if (typed(2) !== 0 || typed(1) !== onOne + onTwo) fail(`CAdi's ${onTwo} corners didn't go to CLgr: ${typed(2)} on 2, ${typed(1)} on 1 (was ${onOne})`);
+    // The choice followed its entry out: the box no longer offers 2.
+    if (await page.evaluate(`[...${cliffSel}.options].some((o) => o.value === "2")`)) fail("the cliff type box still offers 2 after CAdi went");
+
+    // One undo: list and corners as before the removal.
+    await k.undo();
+    await k.save();
+    if (readFileSync(k.w3e, "utf8") !== withCliff) fail(`one undo didn't bring CAdi and its corners back: ${cliffsLine()}, ${typed(2)} corners on 2`);
+  } finally {
+    await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === "Cliffs…" && b.classList.contains("active"))?.click()`).catch(() => {});
+    await k.done();
     await restoreWindow(page);
   }
 }
@@ -15353,6 +15423,7 @@ async function run() {
         chapterObjects,
         classicRefusal,
         cliCheck,
+        cliffTypeList,
         configSafety,
         contextLoss,
         dataSafety,
@@ -15767,6 +15838,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));
   await leftOpen(page, "turtleCliffSave", found);
+  await cliffTypeList(page, found).catch((e) => found.push(`cliff type list: ${e.message}`));
+  await leftOpen(page, "cliffTypeList", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));
   await leftOpen(page, "editDuringSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
