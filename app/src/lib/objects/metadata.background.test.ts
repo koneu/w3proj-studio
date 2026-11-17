@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "./metadata";
+import { waitUntil } from "../testhelpers/testutil";
 
 test("a background load reads in the background until someone waits on the same kind: then what's still running is asked again as waited on", async () => {
   const asked: { path: string; background: boolean }[] = [];
@@ -19,11 +20,11 @@ test("a background load reads in the background until someone waits on the same 
     },
   } as unknown as W3Api;
   const loading = loadKind(w3, "w3t", { background: true });
-  await new Promise((r) => setTimeout(r, 10));
+  await waitUntil(() => asked.length >= 4, "the background reads to be asked");
   assert.ok(asked.length >= 4 && asked.every((a) => a.background), `all background: ${JSON.stringify(asked)}`);
   // One lands before anyone waits: it isn't asked again.
   pending.find((p) => p.path === "Units\\ItemData.slk")!.go();
-  await new Promise((r) => setTimeout(r, 0));
+  await new Promise<void>((r) => setImmediate(r));
   const before = asked.length;
   const waited = loadKind(w3, "w3t");
   const again = asked.slice(before);

@@ -6,16 +6,13 @@ import { applyLayer, retypeCliffs, Stroke, cornerBrush, layerTarget } from "./to
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { setGroundHeight, waterLevelAt, WATER_OFFSET, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
+import { fixturePath } from "../../lib/testhelpers/testutil";
 
 /** A file of tests/fixtures/water-brush: the w3e of Ashenvale's 12a_RoC_Orc04Interlude_v0_control.w3m as it was, and
  *  as the World Editor saved it after one Shallow (and one Deep) brush click on corner 50,24, found from where the
  *  tests run (app/ or the repository). */
 function load(name: string): Terrain {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "water-brush", name);
-    if (existsSync(p)) return parseW3e(new Uint8Array(readFileSync(p)));
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/water-brush/${name} not found`);
-  }
+  return parseW3e(new Uint8Array(readFileSync(fixturePath("water-brush", name))));
 }
 const X = 50, Y = 24;
 const at = (t: Terrain, x: number, y: number) => t.corners[y * t.width + x];
@@ -32,6 +29,7 @@ function expected(name: string, before: Terrain): Terrain {
 for (const [mode, file] of [["shallow", "ash-shallow.w3e"], ["deep", "ash-deep.w3e"]] as const) {
   test(`the ${mode} brush on one corner levels the ground two corners round it, as the World Editor`, () => {
     const t = load("ash-before.w3e"), want = expected(file, load("ash-before.w3e")), original = load("ash-before.w3e");
+    assert.notDeepEqual(look(original), look(want), "control: the map before the click isn't already the answer");
     const c = at(t, X, Y);
     const layer = c.layer - (mode === "deep" ? 2 : 1);
     const stroke = new Stroke(mode);

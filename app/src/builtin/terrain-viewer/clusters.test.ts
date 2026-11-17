@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { campGroups, SAME_CAMP } from "./clusters";
+import { fixturePath } from "../../lib/testhelpers/testutil";
 
 type P = [number, number];
 const at = (p: P) => p;
@@ -30,7 +31,7 @@ test("a creep joins by its distance to the camp's first creep, not transitively"
 test("camp icons as the World Editor shows them: diagonals, chains in every order, edge of 832", async () => {
   const { readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const dir = join(process.cwd(), "..", "tests", "fixtures", "we-specs"); // the tests run in app/
+  const dir = fixturePath("we-specs");
   const measured = JSON.parse(readFileSync(join(dir, "camps-icons-we.json"), "utf8"));
   let checked = 0;
   for (const m of ["c", "d", "e", "f"]) {

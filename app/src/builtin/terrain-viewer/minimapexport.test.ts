@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
@@ -12,6 +11,7 @@ import { renderMinimap, type MinimapInput, type Rgb } from "./minimap";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, pathingOverlay, type ExportOptions, type ExportSource } from "./minimapexport";
 import { minimapObjects } from "./minimapgen";
 import type { Placed } from "./objects";
+import { fixturePath } from "../../lib/testhelpers/testutil";
 
 /** 17×17 corners, all one tile, no water; the playable area is the inner 8×8 tiles (margins 4). */
 function source(opts: { units?: Placed[]; regions?: Awaited<ReturnType<ExportSource["regions"]>> } = {}): ExportSource & { asked: string[] } {
@@ -177,14 +177,8 @@ test("a chosen .PNG name stays; cancelling writes nothing and draws nothing; a b
   assert.equal(c.picked.length, 0);
 });
 
-/** A file of tests/fixtures/minimap-we, found from where the tests run (app/ or the repository). */
-function fixture(name: string): Uint8Array {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "minimap-we", name);
-    if (existsSync(p)) return new Uint8Array(readFileSync(p));
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/minimap-we/${name} not found`);
-  }
-}
+/** A file of tests/fixtures/minimap-we. */
+const fixture = (name: string): Uint8Array => new Uint8Array(readFileSync(fixturePath("minimap-we", name)));
 
 // cliff.w3m (smoketest_maps): Lordaeron dirt with a grass patch and a raised plateau of grass cliffs. The colours are
 // the smallest mip levels of Lords_Dirt, Lords_Grass and Lords_Cliff1 (Classic, the game's 2.0 files), which is what

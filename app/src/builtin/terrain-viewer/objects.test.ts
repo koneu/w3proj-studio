@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
+import { waitUntil } from "../../lib/testhelpers/testutil";
 import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
@@ -30,7 +31,7 @@ test("the skin tables are asked for at once, and the later table still wins whic
     }) },
   } as unknown as W3Api;
   const loading = loadSkins(w3);
-  await new Promise((r) => setTimeout(r, 10));
+  await waitUntil(() => Object.keys(files).every((path) => asked.includes(path)), "every table to be asked for");
   for (const path of Object.keys(files)) assert.ok(asked.includes(path), `${path} is asked for before any read landed (asked: ${asked.join(", ")})`);
   for (const p of [...pending].reverse()) p.go();
   const skins = await loading;
@@ -348,7 +349,7 @@ test("the skins are parsed once per install and graphics mode, and come out alik
   assert.equal(skinParses.count - before, 1, "the tables didn't change: parsed once");
   assert.ok(second.has("LTlt"), "each caller gets its own map");
   assert.deepEqual(second, await loadSkins(w3));
-  assert.throws(() => { (second.get("hfoo") as Skin).file = "x"; }, "the shared entries can't be changed");
+  assert.throws(() => { (second.get("hfoo") as Skin).file = "x"; }, TypeError, "the shared entries can't be changed");
 
   settings["game.graphicsMode"] = "sd";
   assert.equal((await loadSkins(w3)).get("hfoo")?.file, "Units\\Human\\Footman\\FootmanSD", "another mode, the mode's own keys");

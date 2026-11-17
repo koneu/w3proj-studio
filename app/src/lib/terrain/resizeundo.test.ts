@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { beginResize, changedFiles, isNotFound, recordBytes, resizeCandidates, resizeHistory, ResizeHistory, resizeLoss, restoreFiles, settleWithin, warnsAboutUnsaved, workspaceIO, type FileIO, type Files } from "./resizeundo";
 import type { Terrain } from "./w3e";
 
@@ -186,7 +186,7 @@ test("what a resize loses is named: tiles of ground and the objects it removes",
 test("undo and redo run one at a time: two started together neither lose a step nor take the same one twice", async () => {
   const { m, history } = resized();
   // Slow reads: the second call would run in the middle of the first one without the lock.
-  const slow: FileIO = { ...m.io, read: async (p) => { await new Promise((r) => setTimeout(r, 5)); return m.io.read(p); } };
+  const slow: FileIO = { ...m.io, read: async (p) => { await new Promise<void>((r) => setImmediate(r)); return m.io.read(p); } };
   const a = undo(history, slow, "P", never);
   const b = undo(history, slow, "P", never);
   const [x, y] = await Promise.all([a, b]);
@@ -260,7 +260,14 @@ test("redo also checks its step after the question, and the lock is let go after
 test("work due before a resize that never ends fails with a message instead of holding it for ever", async () => {
   await settleWithin(async () => {}, 1000);
   await settleWithin(async () => { throw new Error("a rebuild's own failure is shown by the rebuild"); }, 1000);
-  await assert.rejects(() => settleWithin(() => new Promise(() => {}), 20), /still being rebuilt after 0 s\. Nothing was changed/);
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const stuck = assert.rejects(() => settleWithin(() => new Promise(() => {}), 20000), /still being rebuilt after 20 s\. Nothing was changed/);
+    mock.timers.tick(20000);
+    await stuck;
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("the quiet Ctrl+Z path stays silent about the editor's own unsaved changes only", () => {

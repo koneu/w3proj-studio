@@ -1,17 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { repoPath } from "../../lib/testhelpers/testutil";
 
-/** A file of the repository, found from where the tests run (app/ or the repository). */
-function repoFile(...parts: string[]): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, ...parts);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error(`${parts.join("/")} not found`);
-  }
-}
+const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
 const mini = JSON.parse(repoFile("tests", "fixtures", "mini-map", "map", "war3map.w3i.json"));
 /** The mini map's map info, with the 3.0 parts it lacks (crest race, camera zoom, terrain fog, water) as a v39 file has them. */
 const fixture = () => {

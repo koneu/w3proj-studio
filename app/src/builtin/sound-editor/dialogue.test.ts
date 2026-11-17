@@ -11,7 +11,7 @@ import { StringTable, WtsCutError } from "../../lib/formats/wts";
 import { stringRefsInMap } from "../../lib/formats/mapdoc";
 import type { W3Api } from "../../extensions/api";
 
-const WTS = "﻿STRING 1\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 7\r\n// Units: H000 (Hero), Name (Name)\r\n{\r\nJaina\r\n}\r\n\r\n"
+const WTS = "\uFEFFSTRING 1\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 7\r\n// Units: H000 (Hero), Name (Name)\r\n{\r\nJaina\r\n}\r\n\r\n"
   + "STRING 8\r\n{\r\nWe must hurry.\r\nThe dead are coming.\r\n}\r\n\r\n";
 
 const spoken = (over: Partial<Sound> = {}): Sound => ({ ...newSound("gg_snd_Line", "Sound\\Dialogue\\Line.flac", {}), unknown2: 0, speakerUnitType: "Hjai", ...over });
@@ -126,7 +126,7 @@ test("a map without war3map.wts: the first text makes the file", () => {
   setDialogueString(s, "speaker", "Thrall", strings, [s], []);
   assert.deepEqual([s.speakerNameKey, s.dialogueTextKey], [1, 2]);
   const out = strings.merge(null)!;
-  assert.equal(out, "﻿STRING 1\r\n{\r\nThrall\r\n}\r\n\r\nSTRING 2\r\n{\r\n\r\n}\r\n\r\n");
+  assert.equal(out, "\uFEFFSTRING 1\r\n{\r\nThrall\r\n}\r\n\r\nSTRING 2\r\n{\r\n\r\n}\r\n\r\n");
 });
 
 test("a war3map.wts that was there and is gone now isn't made anew", () => {

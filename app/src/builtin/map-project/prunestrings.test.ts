@@ -3,16 +3,17 @@
 // can't be read, and the same without the edit log.
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { dropUnusedStrings } from "./prunestrings";
 import { StringTable } from "../../lib/formats/wts";
 import { PRUNED_STRINGS_FILE, parsePrunedStrings } from "../../lib/formats/prunedstrings";
 import type { W3Api } from "../../extensions/api";
+import { fixturePath } from "../../lib/testhelpers/testutil";
 
 const block = (n: number, text: string) => `STRING ${n}\r\n{\r\n${text}\r\n}\r\n\r\n`;
-const WTS = "﻿" + [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => block(n, `text ${n}`)).join("");
+const WTS = "\uFEFF" + [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => block(n, `text ${n}`)).join("");
 
 /** A project whose files refer to strings 1 (map info), 2 (object data), 4 (custom script), 5 (region name), 6 and 7
  *  (a sound's dialogue keys), 8 (a raw trigger file); 3 and 9 are unused. */
@@ -167,14 +168,7 @@ test("undo after a pack: a dropped string that is referred to again comes back o
   assert.deepEqual([...parsePrunedStrings(files[PRUNED_STRINGS_FILE])], [[3, "text 3"], [9, "text 9"]]);
 });
 
-/** tests/fixtures/wts-prune, found from where the tests run (app/ or the repository). */
-function twinFixture(): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "wts-prune");
-    if (existsSync(p)) return p;
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-prune not found");
-  }
-}
+const twinFixture = (): string => fixturePath("wts-prune");
 
 test("the fixture the CLI's Rust prunes too (crates/w3proj/tests/wts_prune.rs): the same table", async () => {
   const root = twinFixture();

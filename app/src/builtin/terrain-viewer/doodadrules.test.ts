@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { doodadFixes, savedFlags, savedLife, savedScale, type RuledDoodad, type ScaleRule } from "./doodadrules";
 import { inArea } from "../../lib/terrain/area";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
-/** tests/fixtures/doodad-grid-we/<name>, found from where the tests run (app/ or the repository). */
-function fixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "doodad-grid-we", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/doodad-grid-we/${name} not found`);
-  }
-}
+/** tests/fixtures/doodad-grid-we/<name>. */
+const fixture = (name: string): string => readFixture("doodad-grid-we", name);
 
 const lines = fixture("saverules-cases.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
 const triple = (s: string) => s.split(",").map(Number) as [number, number, number];

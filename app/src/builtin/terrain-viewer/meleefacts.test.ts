@@ -3,23 +3,16 @@
 // there but can't be read.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { NO_WALK } from "../../lib/terrain/pathing";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 import { ladderLook, pathReport, projectWalkSource, walkGrid, type WalkSource } from "./meleefacts";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
-/** The mini map's map/ folder, found from where the tests run (app/ or the repository). */
-function fixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "mini-map", "map", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/mini-map not found");
-  }
-}
+/** The mini map's map/ folder file `name`. */
+const fixture = (name: string): string => readFixture("mini-map", "map", name);
 const terrainText = fixture("war3map.w3e.txt");
 
 /** The mini map's ground (5 × 3 corners: 4 × 2 tiles, 16 × 8 pathing cells) with these cells of pathing and blockers. */

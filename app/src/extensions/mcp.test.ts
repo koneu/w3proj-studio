@@ -134,5 +134,7 @@ test("requests from the bridge always get an answer", async () => {
 test("paths stay in the project", () => {
   assert.equal(projectPath("map\\war3map.j"), "map/war3map.j");
   assert.equal(projectPath("./w3proj.toml"), "w3proj.toml");
-  for (const bad of ["", "../secret", "map/../../secret", "C:\\Windows\\win.ini", "/etc/passwd", "map\\..\\..\\x"]) assert.throws(() => projectPath(bad), bad);
+  for (const bad of ["", "../secret", "map/../../secret", "C:\\Windows\\win.ini", "/etc/passwd", "map\\..\\..\\x"]) assert.throws(() => projectPath(bad), /isn't a path inside the project/, bad);
+  // Doubled and dot segments stay inside: they are kept as written, never turned into a way out.
+  for (const odd of ["map//x", "map/./x"]) assert.ok(projectPath(odd).startsWith("map/") && !projectPath(odd).split("/").includes(".."), odd);
 });

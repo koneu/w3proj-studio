@@ -86,7 +86,7 @@ test("two runs asked for at once run one after the other", async () => {
   f.io.invoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
     if (cmd !== "tool_run") return invoke<T>(cmd, args);
     most = Math.max(most, ++running);
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise<void>((r) => setImmediate(r));
     running--;
     return invoke<T>(cmd, args);
   };

@@ -5,20 +5,13 @@
 // rather than leaving the campaign's objects out.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { activate } from "./index";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
-/** The mini map's map/ folder, found from where the tests run (app/ or the repository). */
-function fixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "mini-map", "map", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/mini-map not found");
-  }
-}
+/** The mini map's map/ folder file `name`. */
+const fixture = (name: string): string => readFixture("mini-map", "map", name);
 const CHAPTER = "/camp/maps/Chapter.w3x";
 
 const objects = (custom: object[], original: object[] = []) => JSON.stringify({ format: "w3proj.objects/1", version: 3, original, custom });

@@ -97,7 +97,7 @@ test("a project opened while the deletion question waits gets nothing written in
 
 test("a World Editor save of a project switched away from during its question isn't synced into the new one", async () => {
   const app = fakeApp();
-  await new Promise((r) => setTimeout(r, 0)); // the listener is registered
+  await new Promise<void>((r) => setImmediate(r)); // the listener is registered
   const listener = app.listeners.get("w3://map-saved")!;
   // Control: answered with the project still open, the save is synced into it.
   await listener({ map: MAP, root: ONE });
