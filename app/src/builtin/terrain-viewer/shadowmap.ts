@@ -8,8 +8,9 @@ import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
-import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
+import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "../../lib/terrain/w3e";
+import { rampSides } from "../../lib/terrain/cliffs";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
 
@@ -55,17 +56,33 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
 /** Cliff models' heights for the shadows (shadows.ts cliffCellHeights) by graphics mode and model path; null when the
  *  model can't be read. CliffTypes.slk's model folders by mode, the same way. */
 const cliffHeights = new ModeCache<Float32Array | null>();
-const cliffDirs = new ModeCache<Map<string, string>>();
+const cliffDirs = new ModeCache<Map<string, { cliff: string; ramp: string }>>();
+/** Ramp models' triangles for the shadows (rampCellHeights reads them per tile) by mode and path; null: unreadable. */
+const rampMeshes = new ModeCache<{ positions: number[]; faces: number[] } | null>();
+
+/** A model's most detailed triangles, in its own space. */
+function modelTriangles(model: ReturnType<typeof parseMdx>): { positions: number[]; faces: number[] } {
+  const positions: number[] = [], faces: number[] = [];
+  for (const g of model.geosets) {
+    if (g.lod > 0) continue;
+    const base = positions.length / 3;
+    positions.push(...g.positions);
+    for (const f of g.faces) faces.push(base + f);
+  }
+  return { positions, faces };
+}
 
 /** The most variations a cliff model name is looked for with (the game's have 1 to 3; the w3e keeps 0 to 15). */
 const MAX_CLIFF_VARIATIONS = 16;
 
 /** Forgets the cliff heights read (with clearShadowMeshes). */
-function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); }
+function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); rampMeshes.clear(); }
 
 /** The cliff tiles' heights for the terrain's shadows: per tile, the model shadowCliffName names in its cliff type's
  *  folder (CliffTypes.slk `cliffModelDir`; the bottom-left corner's type and variation, a variation the name doesn't
- *  have counted round its variations: shadowCliffVariation). Undefined when the cliff types can't be read; a tile whose
+ *  have counted round its variations: shadowCliffVariation; we-drive, branch we-shadow-4: variation 3 on BAAB and BBAA,
+ *  which have two, reads variation 1, make-shadow-probes.mjs shadow-cliffvar: 0 cells off, 383 with variation 0); a
+ *  ramp side's tiles from its ramp model (shadowRampName). Undefined when the cliff types can't be read; a tile whose
  *  model can't be read is taken as ground (shadowCellHeights). */
 async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string): Promise<CliffCells | undefined> {
   const tw = t.width - 1, tiles: number[] = [];
@@ -80,7 +97,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   if (!tiles.length) return undefined;
   const dirs = await cliffDirs.get(artMode, "CliffTypes", async () => {
     const rows = parseSlk(new TextDecoder().decode(await readFile("TerrainArt\\CliffTypes.slk")));
-    return new Map(rows.filter((r) => r.cliffID && r.cliffModelDir).map((r) => [r.cliffID, r.cliffModelDir]));
+    return new Map(rows.filter((r) => r.cliffID && r.cliffModelDir).map((r) => [r.cliffID, { cliff: r.cliffModelDir, ramp: r.rampModelDir ?? "" }]));
   }).catch(() => null);
   if (!dirs) return undefined;
   const list = t.cliffTiles.map((id) => dirs.get(id));
@@ -88,17 +105,33 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
   // again on every prediction otherwise): before and after of a save agree on it. clearShadowMeshes forgets it.
   const heights = (path: string) => cliffHeights.get(artMode, path.toLowerCase(), async () => {
     try {
-      const model = parseMdx(await readFile(path));
-      const positions: number[] = [], faces: number[] = [];
-      for (const g of model.geosets) {
-        if (g.lod > 0) continue;
-        const base = positions.length / 3;
-        positions.push(...g.positions);
-        for (const f of g.faces) faces.push(base + f);
-      }
+      const { positions, faces } = modelTriangles(parseMdx(await readFile(path)));
       return faces.length ? cliffCellHeights(positions, faces) : null;
     } catch { return null; }
   });
+  const byTile = new Map<number, Float32Array>();
+  // Ramp sides (the tiles where a ramp meets the cliff beside it, in twos): from the ramp model shadowRampName names in
+  // the cliff type's ramp folder (its bottom-left corner's type, as drawn; variation 0), where it can be read; the
+  // others, and the side's flat tile, as any other tile.
+  for (const side of rampSides(t)) {
+    const dir = (list[side.outer[0].cliffTexture] ?? list[0])?.ramp;
+    if (!dir) continue;
+    const path = `Doodads\\Terrain\\${dir}\\${dir}${shadowRampName(side.outer, side.base)}0.mdx`;
+    const mesh = await rampMeshes.get(artMode, path.toLowerCase(), async () => {
+      try {
+        const m = modelTriangles(parseMdx(await readFile(path)));
+        return m.faces.length ? m : null;
+      } catch { return null; }
+    });
+    if (!mesh) continue;
+    for (const i of side.tiles) {
+      const tx = i % tw, ty = (i - tx) / tw;
+      const cs = [t.corners[ty * t.width + tx], t.corners[ty * t.width + tx + 1], t.corners[(ty + 1) * t.width + tx], t.corners[(ty + 1) * t.width + tx + 1]];
+      // Over the side's base, where shadowCellHeights adds the tile's own lowest layer.
+      const lift = (side.base - Math.min(...cs.map((c) => c.layer))) * 128;
+      byTile.set(i, rampCellHeights(mesh.positions, mesh.faces, tx - side.x, ty - side.y).map((z) => z + lift));
+    }
+  }
   /** How many variations a name has (0, 1, … read until one is missing). */
   const counts = new Map<string, number>();
   const variations = async (stem: string) => {
@@ -110,10 +143,10 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
     }
     return n;
   };
-  const byTile = new Map<number, Float32Array>();
   for (const i of tiles) {
+    if (byTile.has(i)) continue;
     const tx = i % tw, ty = (i - tx) / tw, bl = t.corners[ty * t.width + tx];
-    const dir = list[bl.cliffTexture] ?? list[0];
+    const dir = (list[bl.cliffTexture] ?? list[0])?.cliff;
     if (!dir) continue;
     const stem = `Doodads\\Terrain\\${dir}\\${dir}${shadowCliffName(t, tx, ty)}`;
     const n = await variations(stem);
@@ -158,6 +191,8 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause, cliffs) : terrainShadows(terrain, sun, cliffs);
   let since = performance.now();
   const failed = stats?.failed ?? new Set<string>();
+  // The doodads' shadows end on the ground the terrain's are read from (castShadow).
+  const heights = doodads.length ? shadowCellHeights(terrain, cliffs) : undefined;
   for (const d of doodads) {
     if (pause && performance.now() - since > 8) {
       if (!(await pause())) throw new Error("superseded");
@@ -170,7 +205,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     const mesh = await modelMesh(path, readFile, artMode, failed);
     // Only a model that couldn't be read is unreadable; one read with nothing to cast is used (as nothing).
     if (stats) { stats.wanted++; if (mesh === null) stats.unreadable++; }
-    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
+    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun, heights);
   }
   return out;
 }
