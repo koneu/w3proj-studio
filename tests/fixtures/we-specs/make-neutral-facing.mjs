@@ -13,12 +13,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { modeArgs, requireValid } from "../../gen-args.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
+const args = modeArgs();
+requireValid(args.length === 0 || (args.length === 1 && ["neg"].includes(args[0])), "usage: make-neutral-facing.mjs <w3proj cli> <game folder> [neg]");
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!game) { console.error("usage: make-neutral-facing.mjs <w3proj cli> <game folder> [neg]"); process.exit(2); }
-const neg = process.argv[4] === "neg";
+const neg = args[0] === "neg";
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);

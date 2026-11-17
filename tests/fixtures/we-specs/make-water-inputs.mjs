@@ -7,7 +7,7 @@
 // - slope-edge.w3x: slope.w3x with corner columns 34 and up one cliff level higher (3, the rest 2), the cliff corners
 //   (columns 33 and 34) typed 0 (Dirt Cliff): a cliff edge running north-south two corners east of the middle.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 if (!game) { console.error("usage: make-water-inputs.mjs <w3proj cli> <game folder>"); process.exit(2); }
+const slope = join(here, "slope.w3x");
+if (!existsSync(slope)) { console.error("slope.w3x is missing: run make-slope.mjs first (same arguments)"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);

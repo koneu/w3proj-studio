@@ -1,4 +1,4 @@
-// Makes minimap-dots.w3x and minimap-dots-zoom.w3x from flat.w3x (Lordaeron Summer, ground Lgrs everywhere), for reading how
+// Makes minimap-dots.w3x, minimap-dots-zoom.w3x and minimap-dots-more.w3x from flat.w3x (Lordaeron Summer, ground Lgrs everywhere), for reading how
 // the World Editor's minimap draws a doodad whose pathing texture is one full square:
 //
 //   node tests/fixtures/we-specs/make-minimap-dots.mjs <w3proj cli> <game folder>
@@ -45,6 +45,7 @@ for (const [name, m] of Object.entries(MAPS)) {
     // The corners' map-edge bits as flat.w3x has them (row 0, the north edge, 0; then the margin rows 1; a margin of 1s
     // at each side of the rows between, the last column 0), for this margin.
     const bits = lines.findIndex((l) => l.startsWith("[water-bits]"));
+    if (bits < 0) throw new Error("no [water-bits] section in the w3e text");
     const rows = Array.from({ length: N }, (_, r) => {
       if (m.margin === 0 || r === 0) return "0".repeat(N);
       if (r <= m.margin || r > N - 1 - m.margin) return "1".repeat(N - 1) + "0";
@@ -52,6 +53,7 @@ for (const [name, m] of Object.entries(MAPS)) {
     });
     lines.splice(bits + 1, N, ...rows);
     const at = lines.findIndex((l) => l.startsWith("[texture]"));
+    if (at < 0) throw new Error("no [texture] section in the w3e text");
     lines.splice(at, 1, "[texture]", ...Array.from({ length: N }, () => "4".repeat(N)));
     writeFileSync(file, lines.join("\n"));
     const w3i = join(dir, "map", "war3map.w3i.json");

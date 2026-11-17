@@ -1,7 +1,7 @@
 // Makes doodad-snap-custom.w3x for the Snap Doodads on Load spec (tests/we-compare/doodad-snap-custom.json) from
 // flat.w3x (the World Editor's own new 64x64 Lordaeron Summer map):
 //
-//   node tests/fixtures/we-specs/make-doodad-snap.mjs <w3proj cli> <game folder> [more|tex|col]
+//   node tests/fixtures/we-specs/make-doodad-snap.mjs <w3proj cli> <game folder> [more|tex|col|grid|turn|alpha|misc]
 //
 // Custom doodad types D000..D006 (war3map.w3d, based on the hay cart LOch) and custom destructables B000..B003 (war3map.w3b,
 // based on the tree LTlt) whose pathing texture the map's object data names (dptx / bptx), one of each placed off its
@@ -12,28 +12,31 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { modeArgs, requireValid } from "../../gen-args.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
+const args = modeArgs();
+requireValid(args.length === 0 || (args.length === 1 && ["more", "tex", "col", "grid", "turn", "alpha", "misc"].includes(args[0])), "usage: make-doodad-snap.mjs <w3proj cli> <game folder> [more | tex | col | grid | turn | alpha | misc]");
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 // "more" as the third argument makes doodad-snap-custom-more.w3x: other textures and fixed rotations (below)
-const more = process.argv[4] === "more";
+const more = args[0] === "more";
 // "tex": doodad-snap-custom-tex.w3x: doodads whose pathing texture is a file of the map's own (Custom/own-*.tga), square
 // with different patterns of blocked cells (TEXTURES), to see which square textures the editor turns to a quarter
 // "grid": doodad-snap-grid.w3x: all-magenta pictures of many widths and heights, each type at 16 offsets and two angles
-const grid = process.argv[4] === "grid";
+const grid = args[0] === "grid";
 const SIZES = [[1, 1], [1, 2], [2, 1], [1, 3], [3, 1], [1, 4], [4, 1], [1, 8], [8, 1], [3, 3], [2, 3], [3, 2], [2, 4], [4, 2], [4, 4]];
 // "turn": doodad-turn.w3x: a few doodads and destructables standing on their grids at a quarter turn, for the turn keys and nudges
-const turn = process.argv[4] === "turn";
+const turn = args[0] === "turn";
 // "alpha": doodad-snap-custom-alpha.w3x: 32-bit pictures of one colour whose alpha varies (and one of two colours, all
 // opaque, as the control), to see whether the editor's mixed-picture rule looks at the alpha
-const alpha = process.argv[4] === "alpha";
+const alpha = args[0] === "alpha";
 // "misc": doodad-snap-custom-misc.w3x: a pathing texture the map names but doesn't have (Custom\own-missing4.tga), and
 // doodads with flags 0 and 1 (not 2) on 2x2 and 4x4 textures
-const misc = process.argv[4] === "misc";
-const tex4 = process.argv[4] === "tex" || process.argv[4] === "col" || grid || turn || alpha;
-const colours = process.argv[4] === "col";
-if (!game) { console.error("usage: make-doodad-snap.mjs <w3proj cli> <game folder>"); process.exit(2); }
+const misc = args[0] === "misc";
+const tex4 = args[0] === "tex" || args[0] === "col" || grid || turn || alpha;
+const colours = args[0] === "col";
+if (!game) { console.error("usage: make-doodad-snap.mjs <w3proj cli> <game folder> [more | tex | col | grid | turn | alpha | misc]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
