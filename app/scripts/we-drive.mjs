@@ -16,6 +16,8 @@
 //                       editor sizes its main window by the display, the terrain view following it, which gives
 //                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
+//   --keyboard LAYOUT   the display's keyboard layout (setxkbmap, e.g. de) before the editor starts. --key names keysyms,
+//                       so under de the key named z is the physical key US keyboards call Y
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
 //   --save-accept T1,T2  titles of dialogs --save answers with Return besides "Reminder" (e.g. "Warning": the notice that the
 //                       map is no longer a melee map); another dialog still stops the save
@@ -353,6 +355,11 @@ export function parseArgs(argv) {
       const m = /^(\d+)x(\d+)$/.exec(value());
       if (!m) throw new Error("--screen wants WxH");
       opts.screen = [Number(m[1]), Number(m[2])];
+    }
+    else if (a === "--keyboard") {
+      const layout = value();
+      if (!/^[a-z]{2,8}(\([a-z0-9_]+\))?$/.test(layout)) throw new Error("--keyboard wants an X layout name like de or us");
+      opts.keyboard = layout;
     }
     else if (a === "--keep-prefs") opts.keepPrefs = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
@@ -791,6 +798,12 @@ export class Session {
       xvfb.on("exit", (code) => { clearTimeout(t); fail(new Error(`Xvfb exited (${code})`)); });
     });
     this.display = `:${n}`;
+    // Another keyboard layout, before the editor starts (Wine reads it then): `--key` names keysyms, so with "de" the
+    // key named z is the one US keyboards call Y.
+    if (this.opts.keyboard) {
+      const r = spawnSync("setxkbmap", ["-display", this.display, this.opts.keyboard], { encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`setxkbmap ${this.opts.keyboard} failed: ${r.stderr || r.error?.message || r.status}`);
+    }
   }
 
   /** The folders the editor's processes may write (everything else of the machine is mounted read-only): the farm

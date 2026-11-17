@@ -6,7 +6,7 @@ import { MAP_INFO_SERVICE, TERRAIN_SERVICE, type MapInfoService, type TerrainEdi
 import { MAP_EXTRA_PATH, readMapExtra } from "../../lib/formats/mapextra";
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
-import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strokepath";
+import { HEIGHT_TICK, strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
 import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
@@ -44,7 +44,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
   ["Terrain", [
     ["raise", "Raise", "Raise the ground: a step per click, as the World Editor's (6.4 a Size at the centre), and more while the pointer moves; holding still adds nothing"], ["lower", "Lower", "Lower the ground: a step per click, as the World Editor's, and more while the pointer moves"],
     ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps: a step per click, and more while the pointer moves"],
-    ["noise", "Noise", "Roughen the ground: every corner under the brush goes up or down at random, while the button is held"],
+    ["noise", "Noise", "Roughen the ground: every corner under the brush goes up or down by up to 64 at random, once per click or step of the drag"],
   ]],
 ];
 
@@ -68,14 +68,14 @@ const tileNames = (w3: W3Api) => (catalog ??= w3.game.readText("TerrainArt\\Terr
 
 function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const terrain = ed.terrain;
-  let tool: Tool = "paint", size = 2, strength = 16, paintTex = 0, square = false;
+  let tool: Tool = "paint", size = 2, paintTex = 0, square = false;
   /** Tile type chosen for painting (may not be in the map yet). */
   let paintTile = terrain.groundTiles[0] ?? "";
   /** `px`: where on the page the pointer was at the last dab (clientX, clientY). */
-  /** `target`: Plateau's stored ground word. `stepped`: a Raise, Lower or Smooth stroke's last stamp (ground point,
+  /** `target`: Plateau's stored ground word. `stepped`: a Raise, Lower, Smooth or Noise stroke's last stamp (ground point,
    *  page pixel) and the pointer's newest place since (steppedTick). */
   let stroke: {
-    s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; height?: HeightStroke; px?: [number, number];
+    s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; px?: [number, number];
     stepped?: { at: [number, number]; px: [number, number]; next?: { g: [number, number]; px: [number, number] } };
   } | null = null;
 
@@ -107,7 +107,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
    *  unknown counts as on, the side on which Increase refuses rather than wraps round (strokeLayer). */
   const enforceLimits = () => (root !== null ? mapInfo?.liveEnforceTerrainLimits(root) : null) ?? savedLimits ?? true;
   /** One brush application at a ground point; true if it changed something. */
-  const stamp = (x: number, y: number, amount = strength): boolean => {
+  const stamp = (x: number, y: number): boolean => {
     if (!stroke) return false;
     const brush = brushOf(tool, terrain, x, y, size, square);
     return tool === "paint"
@@ -118,7 +118,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ? paintBoundary(terrain, brush, tool === "boundary", stroke.s)
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s, enforceWater())
-      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : amount, stroke.s);
+      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : 0, stroke.s);
   };
   /** The brush at a ground point, and along the way from the last one. */
   const applyAt = (p: [number, number, number]) => {
@@ -130,18 +130,11 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     stroke.last = performance.now();
     if (did) ed.terrainChanged(isLayerTool(tool));
   };
-  /** Noise goes by time, not by mouse events: what a moment adds is shared out along the way the mouse went, so a
-   *  quick drag is lower but has no gaps, and holding still goes on. Raise, Lower and Smooth stamp as the World
-   *  Editor's do (steppedTick): once at the press, then at each tick the pointer has moved on since the last stamp. */
+  /** Raise, Lower, Smooth and Noise stamp as the World Editor's do (steppedTick): once at the press, then at each tick
+   *  the pointer has moved on since the last stamp. */
   let holding: ReturnType<typeof setInterval> | undefined;
-  const heightTick = () => {
-    if (stroke?.stepped) { steppedTick(); return; }
-    if (!stroke?.height) return;
-    let did = false;
-    for (const { x, y, amount } of stroke.height.tick(performance.now(), strength)) did = stamp(x, y, amount) || did;
-    if (did) ed.terrainChanged();
-  };
-  /** A Raise, Lower or Smooth stroke's tick: one stamp at the pointer's newest place, if it has moved to another pixel
+  const heightTick = () => steppedTick();
+  /** A Raise, Lower, Smooth or Noise stroke's tick: one stamp at the pointer's newest place, if it has moved to another pixel
    *  and at least STEP_MOVE world units from the last stamp; nothing for the places between, as the World Editor's
    *  (it stamps only where the pointer is at its own ticks: a pointer held still for 3 s added nothing to the press's
    *  stamp, a drag of 20 steps of 1, 5, 10 and 15 px added 5, 15, 18 and 16 stamps to it; we-drive, 2026-11-15, branch
@@ -159,13 +152,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   };
   const startHeight = (g: [number, number, number], px: [number, number]) => {
     if (!stroke) return;
-    if (tool === "noise") {
-      stroke.height = new HeightStroke([g[0], g[1]], performance.now() - HEIGHT_TICK, size * BRUSH_SPACING);
-    } else {
-      stroke.stepped = { at: [g[0], g[1]], px };
-      if (stamp(g[0], g[1])) ed.terrainChanged();
-    }
-    heightTick();
+    stroke.stepped = { at: [g[0], g[1]], px };
+    if (stamp(g[0], g[1])) ed.terrainChanged();
     holding = setInterval(heightTick, HEIGHT_TICK);
   };
   /** The palette's cliff type as a number, or undefined for the ground tile's. */
@@ -363,8 +351,6 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ...grounds.flatMap((g, i) => (g ? [h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff`)] : [])));
   };
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
-  const strengthWrap = h("label.terrain-tool-opt", { title: "How far the ground goes up or down at the brush's centre, while the button is held" }, "Strength ",
-    h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
   /** While the button is held on the Ramp tool: the drag builds on. What the press had to say, if nothing built. */
   let rampDrag = false, rampProblem: string | null = null;
   const setTool = (t: Tool) => {
@@ -372,7 +358,6 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
     texWrap.hidden = t !== "paint";
     if (t !== "paint") { tilePanel.hidden = true; tilesButton.classList.remove("active"); }
-    strengthWrap.hidden = t !== "noise";
     cliffWrap.hidden = !isLayerTool(t) || t === "dry";
     if (!cliffWrap.hidden) void fillCliffTypes();
     ed.setBrush(null);
@@ -393,7 +378,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("label.terrain-tool-opt", { title: "Brush shape (not for Raise, Lower and ramps: they stay round, as the World Editor's)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    strengthWrap, cliffWrap, texWrap),
+    cliffWrap, texWrap),
     tilePanel,
   );
   setTool("paint");
@@ -451,7 +436,6 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const px: [number, number] = [p.event.clientX, p.event.clientY];
       const still = !!stroke?.px && stroke.px[0] === px[0] && stroke.px[1] === px[1];
       if (p.down && stroke?.stepped && p.ground) stroke.stepped.next = { g: [p.ground[0], p.ground[1]], px };
-      else if (p.down && stroke?.height && p.ground) stroke.height.moveTo([p.ground[0], p.ground[1]]);
       else if (p.down && stroke && p.ground && !still && performance.now() - stroke.last > HEIGHT_TICK) { stroke.px = px; applyAt(p.ground); }
     },
     pointerUp() {

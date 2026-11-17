@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, heightSpread, minimapView, noiseView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile, readDiffersAllowlist } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
@@ -67,6 +67,18 @@ test("heightSpread: the set of offsets from the base, so two random runs of one 
   assert.deepEqual(heightSpread(run([25, -26, 0, 0, 25])), heightSpread(run([-26, 0, 25])), "the order and the counts don't matter");
   assert.notDeepEqual(heightSpread(run([-26, 0, 25])), heightSpread(run([-52, -26, 0, 25])), "control: another setting");
   assert.deepEqual(heightSpread(run([100, 126]), 100), { count: 2, min: 0, max: 26, values: [0, 26] });
+});
+
+test("noiseView: on the lattice of one stamp, its span and how many corners changed; a second stamp and an off-lattice offset show", () => {
+  const stamp = (offsets) => w3e(9, 7, (x, y) => [offsets[(x + 9 * y) % offsets.length], 0, 0, 0, 2]);
+  assert.deepEqual(noiseView(stamp([0, 25, -26, 256, -256, 0, 102])), { lattice: true, beyondOneStamp: false, span: 9, changed: 45 });
+  assert.equal(noiseView(stamp([0, 25, 0])).changed, 21, "every third corner changes");
+  assert.equal(noiseView(stamp([0])).span, 0, "nothing changed");
+  assert.equal(noiseView(stamp([0, 30])).lattice, false, "control: 30 is no step of 25.6");
+  assert.equal(noiseView(stamp([0, 25 + 26])).beyondOneStamp, false, "51 is a step");
+  assert.equal(noiseView(stamp([0, 300])).beyondOneStamp, true, "control: past 256");
+  assert.equal(noiseView(stamp([0, 25, 51])).lattice, true);
+  assert.deepEqual(w3eView("w3e-noise", stamp([0, 25])), noiseView(stamp([0, 25])));
 });
 
 test("unitHeights keeps id, x, y and z, in file order, and drops the rest of a unit", () => {

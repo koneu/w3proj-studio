@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decode, HD_REFLECT_DEPTH, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, HD_WAVE_LIGHT, HD_WAVE_RED, HD_WAVES,
-  hdReflectScale, hdShallowAt, hdSky, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
+  hdReflectScale, hdShallowAt, hdSky, hdSkyTint, HD_SKY_TINT, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
@@ -124,6 +124,20 @@ test("HD water reflects a sky that is brighter in the west: the editor's water l
   const west = hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]));
   const east = hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.east, ROWS[800]));
   assert.ok(west[0] - east[0] > 20, `west ${west.map(Math.round)} against east ${east.map(Math.round)}`);
+});
+
+test("Outland's deep water reflects a dark red sky: the editor's 23, 10, 11 where Lordaeron's sky gave 62, 63, 59", () => {
+  // View Entire Map of the eight-band map over Outland (we-drive, HD, 2026-11-17): bands 96 to 800 deep in the editor
+  // 23, 10, 11 / 22, 12, 14 / 23, 11, 12; the model without the tint at that view gave 62, 63, 59 (Studio's picture).
+  assert.deepEqual(hdSkyTint("L"), [1, 1, 1]);
+  assert.deepEqual(hdSkyTint("o"), [...HD_SKY_TINT.O], "a lower case tileset letter too");
+  const view = [0.3, 0.55, -0.78];
+  const plain = hdWaterPixel([0, 0, 0], 800, deep("O"), view);
+  const dark = hdWaterPixel([0, 0, 0], 800, deep("O"), view, undefined, undefined, 0, hdSkyTint("O"));
+  assert.ok(plain.every((v) => v > 20), `control: Lordaeron's sky over Outland's black water is bright: ${plain.map(Math.round)}`);
+  assert.ok(dark[0] > dark[1] && dark[0] > dark[2], `dark and red: ${dark.map(Math.round)}`);
+  assert.ok(dark.every((v, i) => v < plain[i] * 0.7), `darker than the plain sky in every channel: ${dark.map(Math.round)} against ${plain.map(Math.round)}`);
+  assert.deepEqual(hdWaterPixel([0, 0, 0], 800, deep("L"), view, undefined, undefined, 0, hdSkyTint("L")), hdWaterPixel([0, 0, 0], 800, deep("L"), view), "the other tilesets are untouched");
 });
 
 test("the reflection follows the view: the editor's opening camera turned to the four sides over 200 deep water", () => {

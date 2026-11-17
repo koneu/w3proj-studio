@@ -55,6 +55,19 @@ export const HD_SKY: readonly (readonly number[])[] = [
 ];
 export const HD_SKY_LOWEST = 0.54;
 
+/**
+ * Per tileset, what HD_SKY is multiplied by (linear light, per channel): the water's environment map isn't the same
+ * sky everywhere. Every tileset of the editor's list but Outland showed Lordaeron's within 3 levels (we-drive, HD,
+ * 2026-11-17, branch we-terrain-2: eight bands of depth over all eighteen tilesets, View Entire Map; the black-based
+ * Felwood, Dungeon and Underground too, 49, 56, 56 against 49, 56, 56 at the first band); Outland's deep water showed
+ * 23, 10, 11 (96 to 800 deep) where Lordaeron's sky gave 62, 63, 59: a dark red sky. Measured at that one view, held
+ * for every direction.
+ */
+export const HD_SKY_TINT: Record<string, readonly [number, number, number]> = { O: [0.18, 0.06, 0.075] };
+
+/** HD_SKY_TINT of a tileset (1, 1, 1 for the others). */
+export const hdSkyTint = (tileset: string): [number, number, number] => [...(HD_SKY_TINT[tileset.toUpperCase()] ?? [1, 1, 1])] as [number, number, number];
+
 /** The map's HD water settings that the picture depends on (war3map.w3i's `water`: 0–100 each); the defaults a new
  *  map has (10, 100) when the file has none. */
 export interface HdWaterSettings { reflectivity: number; environment: number; waves: number }
@@ -186,9 +199,9 @@ export const encode = (l: number): number => { const c = Math.min(1, Math.max(0,
  * `deep` (sRGB 0–1, hdWaterColor), seen along the view `view` (from the eye to the point; any length), with the map's
  * water settings; `shallow` the tileset's shallow colour where it has one (sRGB 0–1, hdWaterShallow; else the deep colour
  * all the way); `lean` where a wave is (the normal map's green away from its mean, both layers added: HD_WAVE_LIGHT;
- * 0 for flat water). What the water shader draws, without its shadows, edge and fog.
+ * 0 for flat water); `skyTint` the tileset's (hdSkyTint). What the water shader draws, without its shadows, edge and fog.
  */
-export function hdWaterPixel(bed: readonly number[], depth: number, deep: readonly number[], view: readonly number[], settings: HdReflectSettings & { waves?: number } = HD_WATER_DEFAULTS, shallow: readonly number[] = deep, lean = 0): [number, number, number] {
+export function hdWaterPixel(bed: readonly number[], depth: number, deep: readonly number[], view: readonly number[], settings: HdReflectSettings & { waves?: number } = HD_WATER_DEFAULTS, shallow: readonly number[] = deep, lean = 0, skyTint: readonly number[] = [1, 1, 1]): [number, number, number] {
   const { through, own, reflect } = hdWaterAt(depth);
   const [k, dim] = hdReflectScale(settings);
   const sky = hdSky([view[0], view[1], -view[2]]);
@@ -197,7 +210,7 @@ export function hdWaterPixel(bed: readonly number[], depth: number, deep: readon
   return [0, 1, 2].map((i) => {
     const colour = decode(deep[i] * 255) + (decode(shallow[i] * 255) - decode(deep[i] * 255)) * share;
     const under = through * decode(bed[i]) + own * colour;
-    return encode(under + reflect * (k * (sky[i] + wave[i] * lean) - dim * under));
+    return encode(under + reflect * (k * (sky[i] + wave[i] * lean) * skyTint[i] - dim * under));
   }) as [number, number, number];
 }
 

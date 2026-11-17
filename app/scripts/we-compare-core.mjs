@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 
-const KINDS = ["auto", "parsed", "text", "text-exact", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
+const KINDS = ["auto", "parsed", "text", "text-exact", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
 /** The kinds compared as JSON (diffJson): only these take "tolerance", "ignore" and "expectPaths". */
-export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
+export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
 /** Folder names inside the work folder that are we-compare's own: a spec can't be named so (any case: Windows). */
 export const RESERVED_NAMES = ["studio-app", "we-drive", "report.json", "we-compare.lock"];
@@ -576,7 +576,7 @@ export function loadSide(r, file, kind, decodeImage, lines) {
     if (r.unpackedAs(file) !== "json") throw new Error(`${file} is in the map but the unpack made no JSON of it (${r.unpackedAs(file) ?? "not unpacked"})`);
     return r.json(file);
   };
-  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(file)) };
+  if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-noise" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(file)) };
   if (kind === "unit-heights") return { json: unitHeights(json()) };
   if (kind === "doodad-places") return { json: doodadPlaces(json()) };
   if (kind === "unit-ids") return { json: unitIds(json()) };

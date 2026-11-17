@@ -3,7 +3,7 @@
 
 import { cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { liftToFloor, waterBasin } from "../../lib/terrain/waterrim";
-import { groundHeight, rampLift, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { rampLift, randomVariation, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
 
@@ -131,12 +131,12 @@ export function cornerBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, 
   return { x: snap(x, t.offsetX), y: snap(y, t.offsetY), radius: Math.max(0, Math.round(size) - 1), square };
 }
 
-/** The height brushes that leave the rim out (Plateau and Smooth take it: discCorners). */
-const OPEN_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower", "noise"]);
+/** The height brushes that leave the rim out (Plateau, Smooth and Noise take it: discCorners). */
+const OPEN_TOOLS: ReadonlySet<string> = new Set<HeightTool>(["raise", "lower"]);
 const BOUNDARY_TOOLS: ReadonlySet<string> = new Set(["boundary", "unboundary"]);
 
 /** The brush a painter tool puts down for a pointer at (x, y) and the toolbar's Size (not Ramp's, which goes by the
- *  cliff): the World Editor's corner brush (cornerBrush). Raise and Lower (and Noise) leave its rim out: the World
+ *  cliff): the World Editor's corner brush (cornerBrush). Raise and Lower leave its rim out: the World
  *  Editor's Raise (we-drive, one click each on flat ground, 2026-11-13, verify3-we-diffs) changed 1, 1, 9, 45, 145
  *  corners at sizes 1, 2, 3, 5, 8, the corners strictly inside radius size − 1 round the nearest corner (size 1: that
  *  corner), fading to nothing at the rim. Plateau and Smooth, cliffs, water and the ground textures (Blight and
@@ -287,6 +287,24 @@ function discCorners(t: Terrain, b: Brush): number[] {
 /** Whether a tool's brush takes the Square shape: the World Editor's Raise and Lower raised a disc with it (raiseLower). */
 export const takesShape = (tool: string) => tool !== "raise" && tool !== "lower" && tool !== "ramp";
 
+/** The most steps one Noise stamp moves a corner up or down, each of 25.6 stored units (RAISE_PER_SIZE). */
+export const NOISE_STEPS = 10;
+
+/** One Noise stamp, as the World Editor's: every corner within radius size − 1 of the brush's corner, the rim included
+ *  (sizes 3, 5, 8: bboxes 5, 9, 15 corners wide), moves by a whole number of steps from −10 to 10 of 25.6 stored units
+ *  (each corner its own, all the same likelihood: −256 to 256 stored, rounded down: −26, −52 … 25, 51 …), whatever
+ *  the size, with no falloff towards the rim. A press makes one stamp and a drag one per step of the pointer; a button
+ *  held still adds nothing (we-compare height-noise, flat.w3x, 2026-11-17: 47, 13 and 140 corners of 49, 13, 149
+ *  changed by sizes 5, 3 and 8; a held button 45 of 49; a drag of 100 px 74 corners up to ±1400). */
+function noise(t: Terrain, b: Brush, stroke: Stroke, random: () => number): boolean {
+  let changed = false;
+  for (const i of discCorners(t, b)) {
+    const step = Math.floor(random() * (2 * NOISE_STEPS + 1)) - NOISE_STEPS;
+    changed = setRaw(t, i, Math.floor(t.corners[i].rawHeight + step * RAISE_PER_SIZE), stroke) || changed;
+  }
+  return changed;
+}
+
 /** Sets a corner's stored ground word, recording it for undo; whether it changed. */
 function setRaw(t: Terrain, i: number, raw: number, stroke: Stroke): boolean {
   const c = t.corners[i];
@@ -331,21 +349,13 @@ function smooth(t: Terrain, b: Brush, stroke: Stroke): boolean {
   return changed;
 }
 
-/** One application of a height brush. `amount` is the most a corner moves up or down (noise: each corner by its own
- *  random share, from `random`), the stored ground word to level to (plateau), or ignored (raise and lower:
- *  raiseLower; smooth). Returns whether anything changed. */
+/** One application of a height brush. `amount` is the stored ground word to level to (plateau), or ignored (raise and
+ *  lower: raiseLower; smooth; noise, which takes its steps from `random`). Returns whether anything changed. */
 export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke, random: () => number = Math.random): boolean {
   if (tool === "raise" || tool === "lower") return raiseLower(t, b, tool === "raise", stroke);
   if (tool === "plateau") return plateau(t, b, amount, stroke);
   if (tool === "smooth") return smooth(t, b, stroke);
-  const cs = cornersIn(t, b);
-  if (!cs.length) return false;
-  for (const { i, w } of cs) {
-    const c = t.corners[i];
-    stroke.touch(t, i);
-    setGroundHeight(c, groundHeight(c) + (random() * 2 - 1) * amount * w);
-  }
-  return true;
+  return noise(t, b, stroke, random);
 }
 
 /** One application of a cliff or water brush: corners under the brush move

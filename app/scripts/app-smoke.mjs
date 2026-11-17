@@ -6921,9 +6921,10 @@ async function byHand(page, found) {
   await save();
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
-  // Noise: held on the ground it roughens it while the button is down, and the whole stroke is one undo step.
+  // Noise: a drag roughens the ground (a stamp at the press and one per step of the pointer, as the World Editor's), and the
+  // whole stroke is one undo step. It has no Strength slider: a stamp's size is the editor's fixed one.
   await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
-  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].find((l) => l.textContent.startsWith("Strength"))?.hidden !== false`)) fail("Noise has no Strength slider");
+  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].some((l) => l.textContent.startsWith("Strength"))`)) fail("Noise still has a Strength slider");
   await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
   await save();
   const noisy = hash(ground);
