@@ -10,7 +10,7 @@ import { EditorView, hoverTooltip, keymap, showPanel, type Panel } from "@codemi
 import type { CodeSymbol, CompletionItem, CompletionRequest } from "../../extensions/services";
 import { codeSpot, paramOf } from "../../lib/jass/callsite";
 import { luaDottedAt, luaMemberBase, luaMembers, luaSpot } from "../../lib/lua/symbols";
-import { h } from "../../workbench/dom";
+import { focusAfterClick, h } from "../../workbench/dom";
 
 const COMPLETION_TYPE: Record<string, string> = {
   function: "function", native: "function", global: "variable", constant: "constant", local: "variable", param: "variable", type: "type", keyword: "keyword",
@@ -77,7 +77,7 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
   const outline = (view: EditorView): Panel => {
     const select = h("select.cm-outline", { title: "Declarations in this text", onchange: () => {
       const at = Number(select.value);
-      if (Number.isFinite(at) && select.value !== "") { view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); view.focus(); }
+      if (Number.isFinite(at) && select.value !== "") { view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); focusAfterClick(view.contentDOM); }
       select.value = "";
     } }) as HTMLSelectElement;
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -204,7 +204,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
               onclick: () => {
                 search.value = tokenize(search.value).filter((t) => t !== f.token).join(" ");
                 render();
-                search.focus();
+                focusAfterClick(search);
               },
             }, "×"))),
         addButton,
@@ -228,7 +228,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
               else { sel.clear(); sel.add(value); }
               active = 0;
               render();
-              search.focus();
+              focusAfterClick(search);
             },
           }, value ?? "All", value !== null ? h("small", {}, String(counts.get(value) ?? 0)) : null);
         return h("div.picker-facet", {}, h("span.picker-facet-label", {}, f.label), chip(null), ...all.map(chip));
