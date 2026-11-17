@@ -300,7 +300,7 @@ export function whyNoRoom(t: Terrain, p: Pathing, standing: { id: string; positi
   const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : undefined);
   const q = [at(tx, ty), at(tx + 1, ty), at(tx, ty + 1), at(tx + 1, ty + 1)].filter((c): c is NonNullable<typeof c> => !!c);
   if (new Set(q.map((c) => c.layer)).size > 1) return "a cliff runs through there";
-  if (q.some((c) => c.hasWater && c.water > c.height)) return "there's water there";
+  if (q.some((c) => c.hasWater && c.water > c.height)) return "there's water there (ignoreRoom places it anyway)";
   const cell = p.cells[Math.floor((y - t.offsetY) / 32) * p.width + Math.floor((x - t.offsetX) / 32)] ?? 0;
   if (cell & CELL_NO_WALK) return "the ground there can't be walked or built on, so it's the tile, or an object's pathing";
   if (cell & CELL_NO_BUILD) return "the ground there can't be built on, so it's the tile, or water close by";
