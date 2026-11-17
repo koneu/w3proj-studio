@@ -113,7 +113,7 @@
     "input": {"map":"${REPO}/tests/fixtures/we-specs/flat.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1537,282"],["--click","1409,367"],["--click","1520,569"],["--click","748,500"],["--sleep","500"],["--click","1537,282"],["--click","1409,367"],["--click","1456,569"],["--click","748,500"],["--sleep","500"],["--sleep","1000"]]},
     "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","+2:"],["size",8],["click",748,500],["tool","+2:"],["size",3],["click",748,500]]},{"sleep":1000}]},
-    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs","expectPaths":["corners.32,26.layer","corners.31,27.layer","corners.32,27.layer","corners.33,27.layer","corners.30,28.layer","corners.31,28.layer","corners.32,28.layer","corners.33,28.layer","corners.34,28.layer","corners.31,29.layer","corners.32,29.layer","corners.33,29.layer","corners.32,30.layer"]}],
     "limit": 40
   }
 ]

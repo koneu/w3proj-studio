@@ -706,6 +706,9 @@ export function runOutcome(results, { strictIgnore = false } = {}) {
   return { ok, code, unexpected };
 }
 
+/** The we-drive steps that wait for the map to be shown (each reports ready: false with a layout or a timeout). */
+const READY_STEPS = new Set(["--wait-ready", "--compare-ready", "--compare-ready-unlit"]);
+
 /**
  * What one we-drive process did for its `n` specs, from its JSON output lines (`outs`, parsed): per spec `error` (null
  * when its save was made) and `rerun`, the indices of the specs that never ran because the process stopped at an earlier
@@ -729,8 +732,8 @@ export function weOutcome(n, outs) {
       state[i].close = "crashed";
     } else if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
     else if (o.step === "--save" || o.step === "--save-shadows") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
-    else if (o.step === "--wait-ready" && o.ready === false && o.layout) { layout ??= o.layout; state[i].failure ??= o.layout; }
-    else if (o.step === "--wait-ready" && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
+    else if (READY_STEPS.has(o.step) && o.ready === false && o.layout) { layout ??= o.layout; state[i].failure ??= o.layout; }
+    else if (READY_STEPS.has(o.step) && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
     else if (o.step === "--close" && o.closed && !o.crashed && state[i].saved) state[i].close ??= "clean";
   }
   // Where the process stopped: a failure, a spec without its save, or a crash on close after a save.

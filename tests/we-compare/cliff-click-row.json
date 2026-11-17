@@ -5,7 +5,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,624"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--move", "300,450"], ["--click", "300,450"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["shape", "round"], ["size", 3], ["click", 300, 450]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["corners.22,28.cliffType", "corners.23,28.cliffType", "corners.21,29.cliffType", "corners.23,29.layer", "corners.20,30.cliffType", "corners.22,30.layer", "corners.24,30.layer", "corners.21,31.layer", "corners.26,31.cliffType", "corners.21,32.layer", "corners.26,32.cliffType", "corners.20,33.cliffType", "corners.22,33.layer", "corners.24,33.layer", "corners.26,33.cliffType", "corners.21,34.cliffType", "corners.23,34.layer", "corners.22,35.cliffType", "corners.23,35.cliffType"] }],
     "limit": 40
   },
   {
@@ -14,7 +14,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x" },
     "we": { "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1392,624"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--move", "345,450"], ["--click", "345,450"], ["--sleep", "1500"]] },
     "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["shape", "round"], ["size", 3], ["click", 345, 450]] }, { "sleep": 1000 }] },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["corners.23,28.cliffType", "corners.22,29.cliffType", "corners.24,29.layer", "corners.21,30.cliffType", "corners.23,30.layer", "corners.26,30.cliffType", "corners.27,30.cliffType", "corners.22,31.layer", "corners.22,32.layer", "corners.21,33.cliffType", "corners.23,33.layer", "corners.26,33.cliffType", "corners.27,33.cliffType", "corners.22,34.cliffType", "corners.24,34.layer", "corners.23,35.cliffType"] }],
     "limit": 40
   }
 ]
