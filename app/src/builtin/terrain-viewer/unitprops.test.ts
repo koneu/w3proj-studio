@@ -107,6 +107,8 @@ test("the Active box: switched on is a level-0 entry with autocast 1, switched o
   assert.match(checkChange(bare as unknown as Placed, PRIEST, { field: "active", id: "Ahea", on: true }) ?? "", /no abilities/);
   // Several objects: only of one type.
   assert.ok(!commonFields([{ entry: unit("hmpr"), facts: PRIEST }, { entry: unit("hmpr", { id: "h000" }), facts: PRIEST }]).includes("active"));
+  // The control: two of the same type do share it.
+  assert.ok(commonFields([{ entry: unit("hmpr"), facts: PRIEST }, { entry: unit("hmpr"), facts: PRIEST }]).includes("active"));
 });
 
 test("a change leaves every other value as stored, defaults included", () => {
@@ -127,19 +129,26 @@ test("a change leaves every other value as stored, defaults included", () => {
 test("values outside the World Editor's ranges are refused", () => {
   const u = unit("Hpal"), f = PALADIN;
   const ok = (c: Parameters<typeof checkChange>[2]) => checkChange(u, f, c) === null;
+  const refused = (c: Parameters<typeof checkChange>[2], re: RegExp, w?: Placed, wf?: TypeFacts) => assert.match(checkChange(w ?? u, wf ?? f, c) ?? "", re, JSON.stringify(c));
   assert.ok(ok({ field: "hp", value: -1 }) && ok({ field: "hp", value: 1 }) && ok({ field: "hp", value: 100 }));
-  assert.ok(!ok({ field: "hp", value: 0 }) && !ok({ field: "hp", value: 101 }) && !ok({ field: "hp", value: 50.5 }));
-  assert.ok(ok({ field: "mana", value: 1 }) && ok({ field: "mana", value: -1 }) && !ok({ field: "mana", value: -2 }));
+  for (const value of [0, 101, 50.5]) refused({ field: "hp", value }, /Hit points go from 1 to 100/);
+  assert.ok(ok({ field: "mana", value: 1 }) && ok({ field: "mana", value: -1 }));
+  refused({ field: "mana", value: -2 }, /Mana is a whole number from 1 to/);
   // 0 is saved as the default, as the World Editor saves it: not offered.
   assert.match(checkChange(u, f, { field: "mana", value: 0 }) ?? "", /from 1/);
   assert.ok(ok({ field: "acquire", value: -1 }) && ok({ field: "acquire", value: -2 }) && ok({ field: "acquire", value: 750.5 }));
-  assert.ok(!ok({ field: "acquire", value: 0 }) && !ok({ field: "acquire", value: -3 }) && !ok({ field: "acquire", value: 5001 }));
-  assert.ok(ok({ field: "level", value: 10 }) && !ok({ field: "level", value: 11 }) && !ok({ field: "level", value: 0 }));
+  for (const value of [0, -3, 5001]) refused({ field: "acquire", value }, /acquisition range is a distance above 0/);
+  assert.ok(ok({ field: "level", value: 10 }));
+  for (const value of [11, 0]) refused({ field: "level", value }, /level goes from 1 to 10/);
   assert.match(checkChange(u, f, { field: "color", value: 3 }) ?? "", /allows a custom team colour/);
   const wg = unit("nwgt"), wf = facts({ waygate: true, customColor: true });
-  assert.ok([-1, 0, 23].every((value) => checkChange(wg, wf, { field: "color", value }) === null) && checkChange(wg, wf, { field: "color", value: 24 }));
-  assert.ok(ok({ field: "attributes", value: null }) && ok({ field: "attributes", value: [1, 1, 1] }) && !ok({ field: "attributes", value: [0, 5, 5] }));
-  assert.ok(ok({ field: "slot", slot: 5, id: "ratf" }) && !ok({ field: "slot", slot: 6, id: "ratf" }) && !ok({ field: "slot", slot: 0, id: "rat" }));
+  assert.ok([-1, 0, 23].every((value) => checkChange(wg, wf, { field: "color", value }) === null));
+  refused({ field: "color", value: 24 }, /player colour goes from 0 to 23/, wg, wf);
+  assert.ok(ok({ field: "attributes", value: null }) && ok({ field: "attributes", value: [1, 1, 1] }));
+  refused({ field: "attributes", value: [0, 5, 5] }, /Attributes are whole numbers from 1 to/);
+  assert.ok(ok({ field: "slot", slot: 5, id: "ratf" }));
+  refused({ field: "slot", slot: 6, id: "ratf" }, /inventory slot/);
+  refused({ field: "slot", slot: 0, id: "rat" }, /item id has four characters/);
   assert.match(checkChange(unit("hfoo"), facts(), { field: "level", value: 3 }) ?? "", /Only heroes/);
   assert.match(checkChange(unit("hfoo"), facts(), { field: "waygate", value: 2 }) ?? "", /Only waygates/);
   const gate = facts({ waygate: true });
@@ -470,11 +479,12 @@ test("the item browser's random item group holds the same ids as the random cont
 
 test("a table, region or random group number past its 32-bit field, below 0 or not whole is refused, also with the map's lists unreadable", () => {
   // No lists in the context: war3map.w3i or war3map.w3r couldn't be read, so no number is checked against them.
-  const bad = [-2, 1.5, 0x80000000, NaN, Infinity];
+  const bad = [-2, -1, 1.5, 0x80000000, NaN, Infinity];
   for (const table of bad) assert.match(checkChange(unit("hfoo"), facts(), { field: "drops", value: { mode: "table", table } }) ?? "", /item table's number is a whole number from 0/, `table ${table}`);
   assert.equal(checkChange(unit("hfoo"), facts(), { field: "drops", value: { mode: "table", table: 0x7fffffff } }), null);
+  assert.equal(checkChange(unit("hfoo"), facts(), { field: "drops", value: { mode: "table", table: 0 } }), null, "0 is the first table");
   const gate = facts({ waygate: true });
-  for (const value of bad) assert.match(checkChange(unit("nwgt"), gate, { field: "waygate", value }) ?? "", /region's number is a whole number from 0/, `waygate ${value}`);
+  for (const value of bad.filter((v) => v !== -1)) assert.match(checkChange(unit("nwgt"), gate, { field: "waygate", value }) ?? "", /region's number is a whole number from 0/, `waygate ${value}`);
   assert.equal(checkChange(unit("nwgt"), gate, { field: "waygate", value: -1 }), null, "-1: no destination");
   const r = unit("uDNR"), f = facts({ attacks: false });
   for (const n of bad) {
