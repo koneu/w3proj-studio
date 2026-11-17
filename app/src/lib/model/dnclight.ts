@@ -69,12 +69,17 @@ const NODE_TRACKS: [string, "translation" | "rotation" | "scaling", number][] = 
 class Reader {
   dv: DataView;
   constructor(public b: Uint8Array, public p = 0) { this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength); }
-  u32() { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
-  i32() { const v = this.dv.getInt32(this.p, true); this.p += 4; return v; }
-  f32() { const v = this.dv.getFloat32(this.p, true); this.p += 4; return v; }
+  /** Refuses a read past the end, as a cut-off file, before the DataView would. */
+  need(n: number) {
+    if (this.p + n > this.b.length) throw new Error(`truncated: ${n} bytes wanted at ${this.p}, the file ends at ${this.b.length}`);
+  }
+  u32() { this.need(4); const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
+  i32() { this.need(4); const v = this.dv.getInt32(this.p, true); this.p += 4; return v; }
+  f32() { this.need(4); const v = this.dv.getFloat32(this.p, true); this.p += 4; return v; }
   floats(n: number) { return Array.from({ length: n }, () => this.f32()); }
   tag() { const s = String.fromCharCode(...this.b.subarray(this.p, this.p + 4)); return s; }
   str(n: number) {
+    this.need(n);
     const s = this.b.subarray(this.p, this.p + n);
     this.p += n;
     const end = s.indexOf(0);
