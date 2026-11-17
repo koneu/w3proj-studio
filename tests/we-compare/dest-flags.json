@@ -1,0 +1,49 @@
+[
+  {
+    "name": "dest-flags",
+    "description": "Destructable flags in war3map.doo after the editor's save: dest-tint-unref.w3x (make-dest-tint.mjs --types=LTlt,LTe1,YT04 --unref: no trigger names any destructable) given flags 0 (and 1, 2, 3, 4, 6 on seven LTlt). The editor writes 2 on every one its script doesn't create (6 where it was 4, fixed height), the script has no CreateAllDestructables; with a trigger naming them (dest-tint) it writes 0 (4 for fixed height) and creates them, whatever flags the input had (2, 3 and 6 included). So flag 2 is the editor's mark 'the game places it from the doo' and follows 'referenced or drops', it isn't input (Studio's script leaves out a destructable with flag 2 even when a trigger names it: bugs.md). Studio keeps what it is given.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/dest-tint-unref.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "expect": "differs",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras",
+          "doodads[].position",
+          "doodads[].angle",
+          "doodads[].scale",
+          "doodads[].life",
+          "doodads[].variation"
+        ],
+        "expectPaths": [
+          "doodads[].flags"
+        ]
+      }
+    ],
+    "limit": 40
+  }
+]

@@ -237,10 +237,12 @@ export function rowMoves(row: ImportRow, to: string, pathOf: (e: ImportEntry) =>
 
 /** The map's own names for an archive path in a graphics mode, in the order the game reads them: Classic ("sd") only the
  *  plain path; Reforged ("hd") the `_HD.w3mod\` version, then the plain one; 3.0 ("de") the `_DE.w3mod\` version, then
- *  the `_HD.w3mod\` one, then the plain one (the game's own 3.0 layer falls back to its Reforged art, then Classic). */
+ *  the plain one, not the `_HD.w3mod\` one (the World Editor in 3.0 graphics shows the missing-model cube for a model
+ *  the map holds only below `_HD.w3mod\`, and the plain file for one it holds plain and as `_HD.w3mod\`; we-compare
+ *  import-modes-units; the game's own files fall back from its 3.0 layer to Reforged, a map's don't). */
 export function modeNames(archive: string, mode: string | undefined): string[] {
   const plain = classicPathOf(archive);
-  return mode === "sd" || mode === "classic" ? [plain] : mode === "de" ? [dePathOf(plain), reforgedPathOf(plain), plain] : [reforgedPathOf(plain), plain];
+  return mode === "sd" || mode === "classic" ? [plain] : mode === "de" ? [dePathOf(plain), plain] : [reforgedPathOf(plain), plain];
 }
 
 /** The graphics mode a preview reads the map's files in: its preference ("classic"; "reforged", "hd"; "de"), else the

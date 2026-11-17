@@ -177,6 +177,21 @@ test("diffTextSet ignores the order of lines but not their number or content", (
   assert.equal(parseSpec({ name: "n", input: { map: "m.w3x" }, compare: [{ file: "war3map.lua", as: "text-set" }] }, "/x").compare[0].as, "text-set");
 });
 
+test("compare `lines`: only the lines matching the expression are compared (text and text-set); refused elsewhere", () => {
+  const reader = (text) => ({ has: () => true, listed: () => true, text: () => text, unpackedAs: () => "text" });
+  const entry = (lines) => ({ file: "f", as: "text-set", expect: "match", tolerance: 0, ignore: [], ...(lines ? { lines } : {}) });
+  const we = reader("keep 1\nnoise a\nkeep 2\r\n"), studio = reader("noise b\nkeep 2\nkeep 1\n");
+  assert.equal(core.compareEntry(entry("^keep"), we, studio).status, "MATCH");
+  // the control: without `lines` the same two texts DIFFER
+  assert.equal(core.compareEntry(entry(), we, studio).status, "DIFFERS");
+  assert.equal(core.compareEntry(entry("^keep"), we, reader("keep 1\nkeep 3\n")).status, "DIFFERS");
+  const spec = (c) => () => parseSpec({ name: "n", input: { map: "m.w3x" }, compare: [c] }, "/x");
+  assert.deepEqual(parseSpec({ name: "n", input: { map: "m.w3x" }, compare: [{ file: "f", as: "text", lines: "^keep" }] }, "/x").compare[0].lines, "^keep");
+  assert.throws(spec({ file: "f", as: "parsed", lines: "^keep" }), /lines goes with/);
+  assert.throws(spec({ file: "f", as: "text", lines: "(" }), /not a regular expression/);
+  assert.throws(spec({ file: "f", as: "text", lines: "" }), /regular expression/);
+});
+
 test("compareFile: a file missing from one save or both is MISSING, never DIFFERS; formatReport shows it", () => {
   const one = compareFile("f", "bytes", null, { bytes: Buffer.alloc(1) });
   assert.equal(one.status, "MISSING");

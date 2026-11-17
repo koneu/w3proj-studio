@@ -893,7 +893,7 @@ class ImportView {
             : [h("button.imp-remove", { onclick: () => this.remove([row]) }, "Remove")])] : [])),
       adds.length ? h("div.imp-actions", {}, ...adds.map((add) => h("button.imp-add-version", {
         title: add.side === "reforged" ? `A file for Reforged, stored as ${add.path}: Reforged reads it instead of the plain one`
-          : add.side === "de" ? `A file for 3.0, stored as ${add.path}: 3.0 reads it before the Reforged and the plain one`
+          : add.side === "de" ? `A file for 3.0, stored as ${add.path}: 3.0 reads it before the plain one`
           : `A file for Classic, stored as ${add.path}: Classic reads it, the other graphics modes keep their own version`,
         onclick: () => void this.addVersion(row, add.side) }, `Add ${SIDE_NAME[add.side]} Version…`))) : null,
       file ? this.preview(e.path, file, SIDES.find((s) => row[s] === e)!) : null);

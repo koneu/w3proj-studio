@@ -1,7 +1,14 @@
 // war3map.doo — doodads and destructables placed on the map.
 // Versions 7 (Reign of Chaos), 8 (The Frozen Throne to Reforged), 12 and 13 (3.0). The 3.0 additions were worked out
-// against the game's own 3.0 campaign maps (all round-trip byte-exact); their
-// meaning is not known yet, so they keep neutral names.
+// against the game's own 3.0 campaign maps (all round-trip byte-exact) and keep their neutral names; their meaning
+// came later from World Editor saves (build 7003, we-compare format-fields and format-doodad-props, 2026-11-17):
+// v13's `trailer` is the placement id, then Roll and Pitch of the Doodad Properties dialog in radians (15 and 30
+// degrees typed there gave 0.2618 and 0.5236); `extras` are the doodad's lights, its Lights tab, one block per light:
+// 0 (not in the dialog), Casts Shadows (0/1), Color (ARGB), Intensity, Shadow Start, Shadow End, then Quadratic,
+// Linear Falloff and Damping as the dialog's value times 0.0001, 0.01 and 0.000001 (3, 2, 1 typed gave 0.0003, 0.02,
+// 0.000001). A doodad whose model has a light gets one from the editor's save if it had none (the lamp post LOlp:
+// white, intensity 11, the rest 0 but Quadratic 5 and Damping 10). `preFlags` 0 and 7 come back from a save as they
+// were; the dialog has nothing for them. Flag 8 is the dialog's "Use model axes (instead of world)" for the scale.
 {
   "name": "doodads",
   "description": "Placed doodads and destructables: type, position, rotation, scale, life, item drops",
@@ -21,8 +28,8 @@
       { "name": "angle", "type": "f32", "doc": "radians" },
       { "name": "scale", "type": "f32", "count": 3 },
       { "name": "skinId", "type": "id", "if": "version >= 12 || (version == 8 && skinIds)" },
-      { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples" },
-      { "name": "flags", "type": "u8", "doc": "bit 0 outside the playable map, bit 1 visible, bit 2 fixed z" },
+      { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples; kept by the World Editor, not in its dialog" },
+      { "name": "flags", "type": "u8", "doc": "bit 0 outside the playable map, bit 1 visible, bit 2 fixed z, bit 3 scale along the model's axes" },
       { "name": "life", "type": "u8", "doc": "percent" },
       { "name": "itemTable", "type": "i32", "if": "version >= 8", "doc": "map item table index, -1 none" },
       { "name": "itemSets", "type": "list", "count": "u32", "if": "version >= 8", "item":
@@ -31,8 +38,8 @@
           { "name": "chance", "type": "u32" }
         ] } },
       { "name": "editorId", "type": "u32" },
-      { "name": "trailer", "type": "u32", "count": "2 + (version >= 13)", "if": "version >= 12", "doc": "3.0; v13: first is a sequential placement id" },
-      { "name": "extras", "type": "list", "count": "u32", "if": "version >= 12", "doc": "3.0; blocks of nine dwords, meaning unknown", "item": { "type": "u32", "count": 9 } }
+      { "name": "trailer", "type": "u32", "count": "2 + (version >= 13)", "if": "version >= 12", "doc": "3.0; v13: the placement id, Roll, Pitch (f32 radians); v12: zero in all samples" },
+      { "name": "extras", "type": "list", "count": "u32", "if": "version >= 12", "doc": "3.0; the doodad's lights, nine dwords each (see the top)", "item": { "type": "u32", "count": 9 } }
     ] },
     { "name": "specialVersion", "type": "u32" },
     { "name": "specials", "type": "struct", "count": "u32", "doc": "terrain doodads (cliffs, ramps)", "fields": [

@@ -174,9 +174,9 @@ const MODULE_RECLOSE_MS = 3000;
 /** How long a module window may stay after the closes before the main window is taken as raised over it. */
 const MODULE_STUCK_MS = 9000;
 const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager", "Asset Manager"]);
-/** Whether a window is one of those modules. The Campaign Editor's title names its campaign ("Campaign Editor -
- *  [Untitled]" when it reopens with none), so it goes by the start of the title. */
-export const isReopenedModule = (title) => REOPENED_MODULES.has(title) || /^Campaign Editor\b/.test(title ?? "");
+/** Whether a window is one of those modules. The Campaign Editor's and the AI Editor's title name their file ("Campaign
+ *  Editor - [Untitled]", "AI Editor - [Untitled]" when it reopens with none), so it goes by the start of the title. */
+export const isReopenedModule = (title) => REOPENED_MODULES.has(title) || /^(Campaign|AI) Editor\b/.test(title ?? "");
 // The tool palette (at 1356,30 in the display): the first row of the camera layer's list, the rows' height, and
 // View Selected Camera, from the palette's corner (TESTING.md, "Applying a camera object").
 const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, y: 89 } };

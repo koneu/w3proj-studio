@@ -18,7 +18,7 @@ test("the art set of a map file, and which graphics mode reads which of the map'
   assert.equal(artSetOf("a.mdx"), "");
   const plain = new Set([""]), hd = new Set(["_hd"]), de = new Set(["_de"]), teen = new Set(["_teen"]);
   for (const layer of [null, "_hd", "_de"]) assert.ok(mapModeHas(plain, layer), `the plain copy in ${layer}`);
-  assert.deepEqual([null, "_hd", "_de"].map((l) => mapModeHas(hd, l)), [false, true, true], "a Reforged version: both Reforged modes");
+  assert.deepEqual([null, "_hd", "_de"].map((l) => mapModeHas(hd, l)), [false, true, false], "a Reforged version: Reforged HD only, 3.0 never reads it (World Editor, import-modes-units)");
   assert.deepEqual([null, "_hd", "_de"].map((l) => mapModeHas(de, l)), [false, false, true]);
   assert.deepEqual([null, "_hd", "_de"].map((l) => mapModeHas(teen, l)), [false, false, false]);
   assert.equal(mapModeHas(undefined, null), false);

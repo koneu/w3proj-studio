@@ -42,6 +42,7 @@
 //               A "parsed" file of the World Editor's save that doesn't come back the same from the codecs (w3proj
 //               verify) is ERROR: the codecs' JSON of both sides would hide what they lose.
 //               "tolerance", "ignore" and "expectPaths" are refused on text, bytes and wpm (they'd do nothing there).
+//               "lines": "regex" (text and text-set only) compares only the lines of each save that match it.
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
 //               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
 //               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],

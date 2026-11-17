@@ -44,9 +44,10 @@ const CONTROLLERS = ["", "USER", "COMPUTER", "NEUTRAL", "RESCUABLE"];
 /** A player's "fixed start" field: bit 1, the race can be chosen in the lobby (map-info/priorities.ts RACE_SELECTABLE). */
 const RACE_SELECTABLE = 2;
 const MELEE = 4, FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40, TERRAIN_FOG = 0x2000, WATER_TINT = 0x10000;
-/** RACE_PREF_* by its bit value (HUD skins are stored that way). Anything else is RANDOM: World
- *  Editor 3.0.1 gives its own new maps 32759 and writes that. */
-const RACE_PREFS: Record<number, string> = { 1: "HUMAN", 2: "ORC", 4: "UNDEAD", 8: "NIGHTELF", 16: "DEMON", 32: "RANDOM", 64: "USER_SELECTABLE" };
+/** RACE_PREF_* by its bit value (HUD skins are stored that way, common.j's ConvertRacePref values). Anything else is
+ *  RANDOM, Demon (16) too: the World Editor's script for the values 0, 1, 2, 4, 8, 16, 32, 64, 128 and 32759, the HUD
+ *  skin it gives its own new maps (we-compare format-hud, build 7003). */
+const RACE_PREFS: Record<number, string> = { 1: "HUMAN", 2: "ORC", 4: "NIGHTELF", 8: "UNDEAD", 64: "USER_SELECTABLE", 128: "FORSAKEN" };
 /** Force flags and the alliance they set between the force's members. */
 const ALLIANCE: [number, string, string][] = [
   [0x1, "Allied", "SetPlayerAllianceStateAllyBJ"],

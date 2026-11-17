@@ -1,0 +1,50 @@
+[
+  {
+    "name": "injected-script",
+    "description": "test.md 'A JASS map with injected functions (W3Champions-style)': injected-script.w3x (make-injected-script.mjs: flat.w3x whose war3map.j has an added global, two functions and an ExecuteFunc call in main). The editor opens and saves it: it regenerates the script from the triggers and the injected code is gone (the lines 'WE only' are the editor's regenerated lines). Studio, after a unit is placed and the project saved, keeps the file as it is (its guard asks 'Replace the script / Show Difference / Keep it'), so the injected code stays: the two differ, expected.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/injected-script.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "units",
+            "objects": [
+              { "id": "hfoo", "x": 0, "y": -256 }
+            ],
+            "ignoreRoom": true
+          }
+        },
+        {
+          "sleep": 2000
+        },
+        {
+          "mcp": "rebuild_map"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text",
+        "expect": "differs"
+      }
+    ],
+    "limit": 40
+  }
+]

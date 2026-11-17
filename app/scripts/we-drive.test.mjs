@@ -74,10 +74,11 @@ test("questionDialogs: the loading windows (untitled, \"Progress\") aren't quest
 });
 
 test("isReopenedModule: the modules the editor opens again, the Campaign Editor by the start of its title", () => {
-  for (const t of ["Trigger Editor", "Object Editor", "Campaign Editor", "Campaign Editor - [Untitled]", "Campaign Editor - [Z:/c/a.w3n]"]) {
+  for (const t of ["Trigger Editor", "Object Editor", "Campaign Editor", "Campaign Editor - [Untitled]", "Campaign Editor - [Z:/c/a.w3n]", "AI Editor", "AI Editor - [Untitled]", "AI Editor - [zork.wai]"]) {
     assert.equal(isReopenedModule(t), true, t);
   }
-  for (const t of ["", "Warning", "Progress", "Warcraft III World Editor", "Trigger Editor - x", "Campaign Editors", undefined]) {
+  // (control: before the fix the AI Editor's titled window, as the editor restores it, wasn't taken for a module and stalled --wait-ready)
+  for (const t of ["", "Warning", "Progress", "Warcraft III World Editor", "Trigger Editor - x", "Campaign Editors", "AI Editors", undefined]) {
     assert.equal(isReopenedModule(t), false, String(t));
   }
 });

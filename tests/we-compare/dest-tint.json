@@ -1,0 +1,46 @@
+[
+  {
+    "name": "dest-tint",
+    "description": "test.md 'Destructable tint at editor 7000+': dest-tint.w3x (make-dest-tint.mjs: one destructable of each of the game's 344 types, LTlt with variations 1-6, flags 0, 1, 4 and lives 0-99; a text trigger names them all) opened and saved by the editor (build 24371, editor 7003); the SetDestructableVertexColor lines of its script against Studio's (w3.script.generate), as a set. The editor puts every game type at 255, 255, 255; tints come from the map's object data only (war3map.w3b and war3mapSkin.w3b): an original's change, a custom type's own fields (LTe3 with bvcg 40 gives 255, 40, 255; B002 on LTe3 with bvcb 7 gives 255, 255, 7, not 255, 40, 7). Placement lines (position, angle, scale) are left out: the editor snaps them on opening.",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/dest-tint.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            true
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "sleep": 2000
+        },
+        {
+          "command": "w3.script.generate"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text-set",
+        "lines": "SetDestructableVertexColor"
+      }
+    ],
+    "limit": 40
+  }
+]
