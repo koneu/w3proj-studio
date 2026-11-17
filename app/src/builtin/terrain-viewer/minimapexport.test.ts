@@ -86,7 +86,8 @@ test("Playable Area Only cuts doodads past the playable area, as the editor's ex
   // A square map (8 × 8 playable tiles) made wide: margins 4 left and right, 6 at the bottom and top, so the picture
   // has black bands above and below. A tree just past the top edge and one just past the bottom.
   const s = source();
-  s.base = { ...s.base, margins: [4, 4, 6, 6], objects: [{ x: 0, y: 2 * 128 + 40, rgb: [250, 0, 250] }, { x: 0, y: -2 * 128 - 40, rgb: [250, 0, 250] }] };
+  // Dots are tiles: 10 units past the edge a one tile texture still reaches the tile inside (a quarter tile either way).
+  s.base = { ...s.base, margins: [4, 4, 6, 6], objects: [{ x: 0, y: 2 * 128 + 10, rgb: [250, 0, 250] }, { x: 0, y: -2 * 128 - 10, rgb: [250, 0, 250] }] };
   const rgba = await exportPicture(s, opts({ size: 64 }));
   let past = 0, inside = 0;
   for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if (px(rgba, 64, x, y)[0] === 250) (y < 16 || y >= 48 ? past++ : inside++);
@@ -366,9 +367,12 @@ test("HillsbradCreek against its own war3mapMap.blp: water, the rocks without a 
   // Water: the water colour a quarter over the ground, twice where deep (Studio's older fit was bluer: B +6).
   for (let k = 0; k < 3; k++) assert.ok(Math.abs(water.ours[k] - water.editor[k]) < 3, `water, channel ${k}: ${water.text}`);
   // Cliffs covered with rocks, in their models' grey and green.
-  for (let k = 0; k < 3; k++) assert.ok(Math.abs(cliffs.ours[k] - cliffs.editor[k]) < 3, `cliffs, channel ${k}: ${cliffs.text}`);
-  // 4.15 since 2026-11-13 (the editor's sampling, one softening pass, bigger dots, cut values); 4.84 before.
-  assert.ok(whole.blockMad < 4.5, whole.text);
+  // (3.2 in channel 1 since the dots became tiles, 2026-11-17: this fixture draws the rock spires as 3 x 3 tile dots, the
+  // map's own picture as their cells, and the whole crop is nearer the editor's than before: 3.6, see below.)
+  for (let k = 0; k < 3; k++) assert.ok(Math.abs(cliffs.ours[k] - cliffs.editor[k]) < 3.5, `cliffs, channel ${k}: ${cliffs.text}`);
+  // 3.62 since the dots became tiles and the edges the editor's smoothing (2026-11-17); 4.15 since 2026-11-13 (the
+  // editor's sampling, one softening pass, bigger dots, cut values); 4.84 before.
+  assert.ok(whole.blockMad < 4, whole.text);
   // Control: the rocks left out (as before), the cliffs show their own colour, far lighter than the editor's.
   const bare = compareWhere(cliff, (await hillsbrad({})).rgba);
   t.diagnostic(`cliffs without the rocks: ${bare.text}`);

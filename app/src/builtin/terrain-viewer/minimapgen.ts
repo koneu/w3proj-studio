@@ -45,6 +45,9 @@ export function hdFirst(path: string, mode: string): string[] {
 
 /** Pathing cells along a tile's side (a pathing texture has one pixel per cell). */
 const CELLS_PER_TILE = 4;
+/** The dot of a doodad with no pathing texture and no model colour (the palisade LSpl): the editor's inner pixels there
+ *  average 181.5 on all three channels, its grain taking about 1.5 off a colour. */
+const NO_MODEL_RGB: Rgb = [183, 183, 183];
 
 /** `make` once per key: the same promise for every later call. */
 function memo<T>(make: (key: string) => Promise<T>): (key: string) => Promise<T> {
@@ -72,7 +75,6 @@ export async function shownTextureMean(model: { textures: readonly { replaceable
   colorOf: (tex: { replaceableId: number; path: string }) => Promise<Rgb | null>): Promise<Rgb | null> {
   const shown = [...new Set(model.geosets.flatMap((g) => model.materials[g.materialId]?.layers.map((l) => l.textureIds[0]) ?? []))];
   const colors: Rgb[] = [];
-  if (process.env.MM_DEBUG) console.error("MMDEBUG tex", JSON.stringify(model.textures), JSON.stringify(shown));
   for (const id of shown) {
     const tex = model.textures[id];
     if (!tex) continue;
@@ -155,14 +157,15 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
     // A texture that is one full rectangle is a dot of tiles (dotReach, turned by the angle); one with gaps is its cells.
     const shape = !!mask && !mask.cells.every((c) => c);
-    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape);
-    if (process.env.MM_DEBUG) console.error("MMDEBUG", d.id, type, rgb, shape, mask?.width, mask?.height, file);
+    // The palisade (no pathing texture, no model colour to read): a grey dot, as the editor draws it (we-drive 2026-11-17).
+    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape) ?? (file ? null : NO_MODEL_RGB);
     if (!rgb) continue;
     if (shape) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask: mask!, angle: d.angle }); continue; }
     const size = file ? await tables.footprint(file) : 1;
     // No pathing texture (a palisade): the one tile it stands in.
+    // (The doodad's scale makes no difference: tried on HillsbradCreek, TurtleRock and SnowareBay, 0.8 to 1.2.)
     const cells = file ? await tables.cells?.(file) ?? undefined : [0, 0] as [number, number];
-    objects.push({ x: d.position[0], y: d.position[1], rgb, size: file ? size : 0, ...(cells ? { cells } : {}), angle: d.angle });
+    objects.push({ x: d.position[0], y: d.position[1], rgb, size: file ? size : 0, ...(cells ? { cells } : {}), ...(d.angle !== undefined ? { angle: d.angle } : {}) });
   }
   return objects;
 }
