@@ -1,0 +1,29 @@
+[
+  {
+    "name": "import-modes-list",
+    "description": "test.md import lists (branch we-import-checks): flat.w3x with 13 imports of every kind of path (make-import-modes.mjs: plain, _HD.w3mod\\, _hd.w3mod\\, _DE.w3mod\\, _Teen.w3mod\\, _teen.w3mod\\, _HD.w3mod\\_Teen.w3mod\\, _locales\\enus.w3mod\\, a plain import and an _HD twin of a game path, a text file); the editor opens and saves it and keeps every entry with its flags (its Asset Manager lists them: Mode HD for _HD.w3mod\\, DE for _DE.w3mod\\, SD for the lower-case spellings and _locales, Teen Yes only for the game's spelling _Teen.w3mod\\; TESTING.md); Studio saves it as it is",
+    "input": { "map": "${REPO}/target/import-modes/import-modes-list.w3x" },
+    "we": { "mode": "hd", "steps": [] },
+    "studio": { "steps": [{ "sleep": 500 }] },
+    "compare": [{ "file": "war3map.imp", "as": "parsed" }]
+  },
+  {
+    "name": "import-modes-import",
+    "description": "test.md import lists (branch we-import-checks): a model imported into flat.w3x by the editor's Asset Manager (F12, File > Import File Ctrl+I: no question, the file lands at war3mapImported\\<name>, Mode SD, however the folder it came from is named) and by Studio's Import Manager (w3.imports.add): the same entry and flags in the saved list",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
+    "we": {
+      "mode": "hd",
+      "steps": [
+        ["--sleep", "1500"], ["--key", "F12"], ["--sleep", "3000"], ["--key", "ctrl+i"], ["--sleep", "1500"],
+        ["--type", "${REPO_WE}\\target\\import-modes\\Rabbit.mdx"], ["--key", "Return"], ["--sleep", "2000"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); w3.window.pickFiles = async () => ['${REPO}/target/import-modes/Rabbit.mdx']; await w3.commands.execute('w3.imports.open'); let b = null; for (let i = 0; i < 100 && !b; i++) { b = [...document.querySelectorAll('.imp-editor:not([hidden]) button')].find((x) => x.textContent === 'Import files…'); if (!b) await wait(100); } if (!b) throw new Error('no Import files button'); b.click(); for (let i = 0; i < 100; i++) { if (w3.workspace.files().some((f) => /war3mapImported\\/Rabbit\\.mdx$/i.test(f.path.replace(/\\\\/g, '/')))) break; await wait(100); } await wait(1000);" },
+        { "eval": "await w3.editors.saveAll(); await new Promise((r) => setTimeout(r, 1000));" }
+      ]
+    },
+    "compare": [{ "file": "war3map.imp", "as": "parsed" }]
+  }
+]

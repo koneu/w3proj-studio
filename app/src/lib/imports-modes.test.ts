@@ -79,8 +79,10 @@ test("Change path moves both versions of a row; a Classic entry alone goes where
 
 test("the map's own files per graphics mode: Reforged reads the _HD.w3mod\\ version first, Classic never", () => {
   assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "hd"), ["_HD.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"]);
-  // 3.0: its own _DE.w3mod\ version, then the Reforged one, then the plain file (from any version's spelling).
-  const deOrder = ["_DE.w3mod\\war3mapImported\\Hero.mdx", "_HD.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"];
+  // 3.0: its own _DE.w3mod\ version, then the plain file, never the Reforged one (from any version's spelling; the
+  // World Editor in 3.0 graphics shows a unit whose model the map holds only below _HD.w3mod\ as the missing-model cube,
+  // spec import-modes-units).
+  const deOrder = ["_DE.w3mod\\war3mapImported\\Hero.mdx", "war3mapImported\\Hero.mdx"];
   assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "de"), deOrder);
   assert.deepEqual(modeNames("_de.w3mod/war3mapImported/Hero.mdx", "de"), deOrder);
   assert.deepEqual(modeNames("war3mapImported\\Hero.mdx", "sd"), ["war3mapImported\\Hero.mdx"]);
@@ -95,7 +97,7 @@ test("the map's own files per graphics mode: Reforged reads the _HD.w3mod\\ vers
   // A texture's names (its .blp and the .dds the game reads instead): every Reforged version before any plain file.
   assert.deepEqual(ownNames(["a.blp", "a.dds"], "hd"), ["_HD.w3mod\\a.blp", "_HD.w3mod\\a.dds", "a.blp", "a.dds"]);
   assert.deepEqual(ownNames(["a.blp", "a.dds"], "sd"), ["a.blp", "a.dds"]);
-  assert.deepEqual(ownNames(["a.blp", "a.dds"], "de"), ["_DE.w3mod\\a.blp", "_DE.w3mod\\a.dds", "_HD.w3mod\\a.blp", "_HD.w3mod\\a.dds", "a.blp", "a.dds"]);
+  assert.deepEqual(ownNames(["a.blp", "a.dds"], "de"), ["_DE.w3mod\\a.blp", "_DE.w3mod\\a.dds", "a.blp", "a.dds"]);
 });
 
 test("the map's file of a graphics mode is found under its name on disk; Classic never reads the Reforged one", async () => {
@@ -109,7 +111,8 @@ test("the map's file of a graphics mode is found under its name on disk; Classic
   assert.equal(importedPathFor(w3, "war3mapImported\\Night.mdx", "sd"), undefined, "a Reforged version alone is nothing in Classic");
   assert.deepEqual(await readImportedFor(w3, "war3mapImported\\Hero.mdx", "de"), new Uint8Array([1]));
   assert.equal(await readImportedFor(w3, "war3mapImported\\Night.mdx", "sd"), null);
-  assert.deepEqual(read, ["map/_hd.w3mod/war3mapimported/hero.mdx"]);
+  // 3.0 read the plain file (it has no 3.0 version here), not the _hd.w3mod one.
+  assert.deepEqual(read, ["map/war3mapImported/hero.mdx"]);
 });
 
 const H = "war3mapImported\\Hero.mdx";
@@ -142,8 +145,9 @@ test("3.0 versions: _DE.w3mod\\ path, flags, a row of three, the files of the mo
   const files = ["map/war3mapImported/Hero.mdx", "map/_HD.w3mod/war3mapImported/Hero.mdx", "map/_DE.w3mod/war3mapImported/Hero.mdx"].map((path) => ({ path, size: 1, modified: 0 }));
   const w3 = (list: typeof files) => ({ workspace: { files: () => list } }) as unknown as W3Api;
   assert.deepEqual(["sd", "hd", "de"].map((m) => importedPathFor(w3(files), H, m)), [files[0].path, files[1].path, files[2].path]);
-  // Without the 3.0 file 3.0 reads the Reforged one; without that, the plain one; Reforged never reads the 3.0 one.
-  assert.equal(importedPathFor(w3(files.slice(0, 2)), H, "de"), files[1].path);
+  // Without the 3.0 file 3.0 reads the plain one, never the Reforged one; Reforged never reads the 3.0 one.
+  assert.equal(importedPathFor(w3(files.slice(0, 2)), H, "de"), files[0].path);
+  assert.equal(importedPathFor(w3([files[1]]), H, "de"), undefined);
   assert.equal(importedPathFor(w3([files[0], files[2]]), H, "de"), files[2].path);
   assert.equal(importedPathFor(w3([files[0]]), H, "de"), files[0].path);
   assert.equal(importedPathFor(w3([files[2]]), H, "hd"), undefined);
