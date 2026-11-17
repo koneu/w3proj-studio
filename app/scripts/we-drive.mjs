@@ -83,7 +83,7 @@
 //   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
 //                       With game view on the items above it are greyed: their marks then read as unchecked
 //   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
-//   --sleep MS          wait
+//   --sleep MS          wait (the windows read every second meanwhile: a crash dialog stops the run when it comes)
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
 //   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
@@ -92,11 +92,14 @@
 //   --close             quit without saving: closes the main window and answers "don't save" questions
 //                       (a crash-report dialog is never answered: the editor is killed, "crashed": true, nothing sent)
 //
-// Whatever happens, the editor (wineserver -k for its prefix) and the Xvfb display are stopped at the end.
+// Whatever happens, the editor (wineserver -k for its prefix) and the Xvfb display are stopped at the end (an uncaught
+// error and a closed stdout included). Killed past that (SIGKILL), bwrap's --die-with-parent takes Proton along, and
+// the next run's start kills the prefix's leftover wineserver first.
 //
 // Isolation (fixed, not options): the editor runs from the farm of we-setup.mjs (shared by all worktrees, one run at a
-// time by its lock), in that folder's Wine prefix, inside bubblewrap with the user's Steam prefix (the real install
-// included) and every hardlink of the farm mounted read-only. It shows nothing on the user's screen (a display of its
+// time by its lock), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
+// farm, its prefix, the work folder, the runtime dir and /tmp (writableDirs), and the user's Steam prefix (the real
+// install included) and every hardlink of the farm read-only within those. It shows nothing on the user's screen (a display of its
 // own, 1600x1000), renders through lavapipe (the NVIDIA driver can't present into Xvfb), and plays no sound: Wine's
 // audio drivers are off, PulseAudio and PipeWire are pointed at nothing, and their sockets and /dev/snd are hidden.
 // Before each start the editor's preferences in that prefix get no first-start questions, no interface sounds, the
@@ -108,8 +111,9 @@
 //   node scripts/we-drive.mjs --map m.w3x --compare-ready --look center --shot c.png --look 1000,-500 --shot d.png --close
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
 import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
@@ -120,8 +124,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
 const HELPER = join(here, "we-x11.py");
 const SIZE = [1600, 1000];
-/** Mesa's software Vulkan: the NVIDIA driver can't present into Xvfb. */
-const LAVAPIPE = "/usr/share/vulkan/icd.d/lvp_icd.json";
+/** Where the Vulkan loader looks for drivers' manifests. */
+const ICD_DIRS = ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The layout of the main window, measured in the 1600x1000 display (the editor opens it at 4,30, 1352x937):
@@ -424,6 +428,45 @@ export function protonFor(game) {
   return { tool, steamRoot, appId: basename(compat) };
 }
 
+/**
+ * Mesa's software Vulkan (lavapipe; the NVIDIA driver can't present into Xvfb): every lvp_icd*.json manifest in the
+ * loader's folders, as distributions name it "lvp_icd.json" (Ubuntu) or per architecture ("lvp_icd.x86_64.json",
+ * Debian 12, Fedora). All of them go to the loader, which takes the one of the editor's architecture. [] when none.
+ */
+export function lavapipeIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
+  const found = [];
+  for (const d of dirs) {
+    let names;
+    try { names = list(d); } catch { continue; }
+    for (const n of [...names].sort()) if (/^lvp_icd.*\.json$/.test(n)) found.push(posix.join(d, n));
+  }
+  return found;
+}
+
+/** Whether util-linux's setpriv is there (it is on every usual distribution). */
+const hasSetpriv = () => spawnSync("setpriv", ["--version"], { stdio: "ignore" }).status === 0;
+
+/**
+ * How Xvfb is started: through `setpriv --pdeathsig KILL`, which execs it in the same process (the pid we-drive
+ * keeps is Xvfb's) with the kernel's death signal set, so a we-drive killed past its cleanup (SIGKILL) doesn't leave
+ * the display behind. Without setpriv, plainly.
+ */
+export function xvfbCommand(args, setpriv = hasSetpriv()) {
+  return setpriv ? ["setpriv", ["--pdeathsig", "KILL", "--", "Xvfb", ...args]] : ["Xvfb", args];
+}
+
+/** The sandbox's $XDG_CACHE_HOME: in the farm's prefix folder (writable there, shared by the runs like the prefix). */
+export const sandboxCache = () => join(prefixDir(), "cache");
+
+/** The Proton build's wineserver: `files/bin` (newer builds) or `dist/bin` (older ones, as protonFor accepts), or null. */
+export function wineserverPath(tool, exists = existsSync) {
+  for (const sub of ["files", "dist"]) {
+    const p = posix.join(tool, sub, "bin", "wineserver");
+    if (exists(p)) return p;
+  }
+  return null;
+}
+
 /** A Linux path as the Windows program sees it. */
 /** The folder the editor's Open list shows: the prefix's Documents/Warcraft III/Maps. */
 export const openMapsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "steamuser", "Documents", "Warcraft III", "Maps");
@@ -578,6 +621,69 @@ export function classify(windows) {
 const EXIT_WAIT_MS = 20000;
 /** A save that wrote nothing while no dialog was open for this long has failed (a refused or no-op save). */
 const SAVE_IDLE_MS = 90000;
+/** How long the locale's `reg` may take (a new prefix's first Wine start included; it took under 30 s). */
+const LOCALE_MS = 120000;
+/** --close types "n" into a dialog again only this long after the last time, and at most this often. */
+const CLOSE_RETYPE_MS = 5000;
+const CLOSE_TYPES = 3;
+/** A saved file that stood still this long and still isn't a whole MPQ is reported, not copied. */
+const SAVE_NOT_MPQ_MS = 10000;
+/** How many dialog pictures of earlier runs stay in the work folder (pruneArtefacts). */
+const KEEP_DIALOG_SHOTS = 20;
+
+/**
+ * Whether `buf` (a file's first bytes; `size` the whole file's) holds a whole MPQ archive as far as its header tells:
+ * the header "MPQ\x1A" at a multiple of 512 (a map has its 512-byte HM3W header first), and the hash and block
+ * tables it names inside the file. A file the editor is still writing fails this. (A sanity check of the save, not a
+ * parser: the CLI and the app read the archive.)
+ */
+export function isWholeMpq(buf, size) {
+  for (let off = 0; off + 32 <= buf.length; off += 512) {
+    if (buf.readUInt32LE(off) !== 0x1a51504d) continue;
+    const headerSize = buf.readUInt32LE(off + 4);
+    if (headerSize < 32) return false;
+    const hashPos = buf.readUInt32LE(off + 16), blockPos = buf.readUInt32LE(off + 20);
+    const hashCount = buf.readUInt32LE(off + 24), blockCount = buf.readUInt32LE(off + 28);
+    const room = size - off;
+    return hashCount > 0 && hashPos + hashCount * 16 <= room && blockPos + blockCount * 16 <= room;
+  }
+  return false;
+}
+
+/** isWholeMpq of a file on disk (its first 1 MB read). */
+export function fileIsWholeMpq(file) {
+  let fd;
+  try {
+    fd = openSync(file, "r");
+    const size = statSync(file).size;
+    const buf = Buffer.alloc(Math.min(size, 1 << 20));
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return isWholeMpq(buf.subarray(0, n), size);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Clears what earlier runs left in the work folder: the exported minimaps' TGAs (copied to their destination
+ * already) and all but the newest `keep` dialog pictures (the latest stay as evidence of a failed run, e.g. an earlier
+ * mode of the same we-compare). Only we-drive's own file names; nothing else in the folder is touched.
+ */
+export function pruneArtefacts(work, keep = KEEP_DIALOG_SHOTS) {
+  let names;
+  try { names = readdirSync(work); } catch { return []; }
+  const removed = [];
+  const rm = (n) => { try { rmSync(join(work, n), { force: true }); removed.push(n); } catch { /* left */ } };
+  for (const n of names) if (/^minimap-\d+\.tga$/.test(n)) rm(n);
+  const shots = names.filter((n) => /^dialog-[a-z]+-\d+\.png$/.test(n))
+    .map((n) => { try { return { n, t: statSync(join(work, n)).mtimeMs }; } catch { return null; } })
+    .filter(Boolean)
+    .sort((a, b) => b.t - a.t || b.n.localeCompare(a.n));
+  for (const { n } of shots.slice(keep)) rm(n);
+  return removed;
+}
 
 /**
  * One run's editor and display. `deps` replaces the outside world in the tests: `proton` (else protonFor), `x11`
@@ -628,7 +734,8 @@ export class Session {
 
   async startDisplay() {
     const size = this.opts.screen ?? SIZE;
-    const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${size[0]}x${size[1]}x24`, "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+    const [cmd, args] = xvfbCommand(["-displayfd", "3", "-screen", "0", `${size[0]}x${size[1]}x24`, "-nolisten", "tcp"]);
+    const xvfb = spawn(cmd, args, { stdio: ["ignore", "ignore", "ignore", "pipe"] });
     this.xvfb = xvfb;
     xvfb.on("exit", () => { this.xvfbExited = true; });
     const n = await new Promise((ok, fail) => {
@@ -649,17 +756,32 @@ export class Session {
     }
   }
 
+  /** The folders the editor's processes may write (everything else of the machine is mounted read-only): the farm
+   *  (its copied CASC indices, shmem and ecache; its hardlinks are mounted read-only again after it), the farm's Wine
+   *  prefix, the run's work folder (the map copies the editor saves over, the minimap it exports), the runtime dir
+   *  (sockets) and /tmp (wineserver's socket in /tmp/.wine-<uid>, the X server's socket). */
+  writableDirs() {
+    const run = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
+    return [...new Set([farmDir(), prefixDir(), resolve(this.opts.work), run, "/tmp"])].filter((p) => existsSync(p));
+  }
+
   /** The environment and the sandbox the editor's processes run in. */
   sandboxed(program, args) {
     const user = userCompatData(this.game);
     const run = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
     const ro = [user, ...linkedFiles()];
     const fdArgs = Buffer.from(ro.flatMap((p) => ["--ro-bind", p, p]).map((s) => `${s}\0`).join(""));
-    const bw = ["--bind", "/", "/", "--dev-bind", "/dev", "/dev", "--proc", "/proc",
+    // The whole machine read-only (Wine's Z: drive is /), then only what the editor must write.
+    const bw = ["--ro-bind", "/", "/"];
+    for (const p of this.writableDirs()) bw.push("--bind", p, p);
+    bw.push("--dev-bind", "/dev", "/dev", "--proc", "/proc",
       // No sound: no ALSA devices, no PulseAudio or PipeWire sockets.
       "--tmpfs", "/dev/snd",
       // No network: nothing of this machine (a crash report included) can leave it. The editor works offline.
-      "--unshare-net"];
+      "--unshare-net",
+      // When we-drive dies (SIGKILL, OOM) its Proton goes with it; the editor's Wine processes that outlive it are
+      // killed by the next run's `wineserver -k` (start()). Not --unshare-pid: the crash check reads /proc/<pid>.
+      "--die-with-parent");
     for (const p of ["pulse"]) if (existsSync(join(run, p))) bw.push("--tmpfs", join(run, p));
     for (const p of ["pipewire-0", "pipewire-0-manager"]) if (existsSync(join(run, p))) bw.push("--ro-bind", "/dev/null", join(run, p));
     bw.push("--args", "3", join(this.proton.tool, "proton"), "run", program, ...args);
@@ -675,8 +797,8 @@ export class Session {
       STEAM_COMPAT_CLIENT_INSTALL_PATH: this.proton.steamRoot,
       SteamAppId: this.proton.appId,
       SteamGameId: this.proton.appId,
-      VK_ICD_FILENAMES: LAVAPIPE,
-      VK_DRIVER_FILES: LAVAPIPE,
+      VK_ICD_FILENAMES: lavapipeIcds().join(":"),
+      VK_DRIVER_FILES: lavapipeIcds().join(":"),
       WINEDEBUG: "-all",
       // English system dialogs whatever the user's language, so their buttons' keys are known ("n" is No).
       LANG: "en_US.UTF-8",
@@ -685,28 +807,51 @@ export class Session {
       PULSE_SERVER: "unix:/nonexistent",
       PIPEWIRE_RUNTIME_DIR: "/nonexistent",
       LD_PRELOAD: shimPath(),
+      // The home folder is read-only in the sandbox: caches go into the farm's prefix folder. Proton-GE's protonfixes
+      // dies at start when it can't append to its log in $XDG_CACHE_HOME/protonfixes (seen 2026-11-17); Mesa's shader
+      // and fontconfig's caches go there too.
+      XDG_CACHE_HOME: sandboxCache(),
     });
     return { bw, env, fdArgs };
   }
 
   spawnWine(program, args) {
     mkdirSync(this.opts.work, { recursive: true });
+    mkdirSync(sandboxCache(), { recursive: true });
     const { bw, env, fdArgs } = this.sandboxed(program, args);
-    const out = openSync(this.log, "a");
+    // One log per run: the first program of the session starts it afresh, the later ones (the editor after the
+    // locale's reg, another map's editor) add to it.
+    const out = openSync(this.log, this.logStarted ? "a" : "w");
+    this.logStarted = true;
     const child = spawn("bwrap", bw, { cwd: join(farmDir(), "_retail_", "x86_64"), env, stdio: ["ignore", out, out, "pipe"], detached: true });
     closeSync(out);
+    // A spawn that fails (no bwrap, EAGAIN) is an "error" event: without a listener it would end we-drive on the spot,
+    // past its cleanup. Marked on the child; the callers' waits see it as an exit.
+    child.on("error", (e) => { child.spawnError = e; child.exited = true; });
+    child.stdio[3].on("error", () => { /* bwrap gone before reading its arguments: its exit or error says why */ });
     child.stdio[3].end(fdArgs);
     return child;
   }
 
   /** Runs the prefix's wineserver with `args` ("-k" kills its processes, "-w" waits until they're gone), at most
-   *  `ms`; a failure (no wineserver, the time up) is tolerated: what's left is reported by tests/wineservers.mjs. */
+   *  `ms`; a failure (the time up) is tolerated: what's left is reported by tests/wineservers.mjs. A Proton build
+   *  without a wineserver is refused before the run starts (main). */
   wineserver(args, ms = 60000) {
+    const bin = wineserverPath(this.proton.tool);
+    if (!bin) return { error: new Error(`no wineserver in ${this.proton.tool}`) };
     try {
-      return spawnSync(join(this.proton.tool, "files", "bin", "wineserver"), args, { env: { ...process.env, WINEPREFIX: join(prefixDir(), "pfx") }, stdio: "ignore", timeout: ms });
+      return spawnSync(bin, args, { env: { ...process.env, WINEPREFIX: join(prefixDir(), "pfx") }, stdio: "ignore", timeout: ms });
     } catch (e) {
       return { error: e };
     }
+  }
+
+  /** Kills a program of the prefix that doesn't finish (the locale's reg): the prefix's processes, its process
+   *  group, and waits (bounded) until they're gone. */
+  killPrefix(child) {
+    this.wineserver(["-k"], EXIT_WAIT_MS);
+    if (child?.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ }
+    this.wineserver(["-w"], EXIT_WAIT_MS);
   }
 
   /** The install's text locale in the prefix's registry, where the launcher would put it (else the editor
@@ -725,7 +870,15 @@ export class Session {
     };
     if (has()) return;
     const child = this.spawnWine("reg", ["add", "HKCU\\Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3", "/v", "LOCALE", "/t", "REG_SZ", "/d", locale, "/f"]);
-    const code = await new Promise((ok) => child.on("exit", ok));
+    let code = null;
+    child.on("exit", (c) => { code = c; child.exited = true; });
+    child.on("error", (e) => { child.spawnError = e; child.exited = true; });
+    // Bounded: it runs under the machine-wide lock, and a Wine that hangs (a stale wineserver) must not hold it forever.
+    if (!(await waitExit(child, LOCALE_MS, this.clock))) {
+      this.killPrefix(child);
+      throw new Error(`couldn't set the editor's locale in the prefix: reg didn't finish within ${LOCALE_MS / 1000} s (killed; see ${this.log})`);
+    }
+    if (child.spawnError) throw new Error(`couldn't set the editor's locale in the prefix: ${child.spawnError.message}`);
     this.wineserver(["-w"], EXIT_WAIT_MS);
     if (code !== 0 || !has()) throw new Error(`couldn't set the editor's locale in the prefix (reg exited ${code}; see ${this.log})`);
   }
@@ -756,6 +909,10 @@ export class Session {
         throw new Error(`the editor before didn't exit within ${EXIT_WAIT_MS / 1000} s of its close (see ${this.log})`);
       }
     }
+    // A wineserver of the prefix still running now is a stale one (we-drive holds the machine-wide lock): a run before
+    // that was killed past its cleanup (SIGKILL, OOM). The next Wine program would join it.
+    this.wineserver(["-k"], EXIT_WAIT_MS);
+    this.wineserver(["-w"], EXIT_WAIT_MS);
     // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
     this.editor = null;
     this.editorExited = false;
@@ -783,10 +940,14 @@ export class Session {
     this.editor = child;
     // Only this child's own exit counts: an editor before it may report its exit late (after this start), and must
     // not mark this one as exited.
-    child.on("exit", () => {
+    const gone = () => {
       child.exited = true;
       if (this.editor === child) this.editorExited = true;
-    });
+    };
+    child.on("exit", gone);
+    // A spawn that failed never exits: its error ends the editor the same way (the steps then say it exited).
+    child.on("error", gone);
+    if (child.spawnError) gone();
   }
 
   /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
@@ -796,6 +957,24 @@ export class Session {
     const crash = crashDialogs(all, programOfPid);
     if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
     return classify(all);
+  }
+
+  /** A pointer action (click, drag, move) of a step: the window list is read first, so a crash dialog that came up
+   *  since the last step is found (and the editor killed) before anything could click into it. */
+  act(cmd, ...args) {
+    this.windows();
+    return this.x(cmd, ...args);
+  }
+
+  /** --sleep: waits `ms`, reading the window list every second meanwhile once an editor was started, so a crash
+   *  dialog is handled when it comes (EditorCrashed) rather than at the next step. */
+  async sleepWatching(ms) {
+    for (const end = this.now() + ms; ;) {
+      const left = end - this.now();
+      if (left <= 0) return;
+      await this.wait(Math.min(1000, left));
+      if (this.editor) this.windows();
+    }
   }
 
   /** The crash dialog was seen: a picture of the screen (read from the X server, nothing sent to the dialog), then the
@@ -999,7 +1178,8 @@ export class Session {
     const stamp = () => { try { const s = statSync(this.copy); return `${s.mtimeMs}:${s.size}`; } catch { return null; } };
     const before = stamp();
     this.x("key", "--window", main.id, "ctrl+s");
-    const deadline = this.now() + this.opts.timeout * 1000, answered = [], asked = new Map();
+    // waitedFor: the windows the save waited out (the "Progress" window, an untitled one), for the step's line.
+    const deadline = this.now() + this.opts.timeout * 1000, answered = [], asked = new Map(), waitedFor = new Set();
     let last = before, stillSince = 0, idleSince = this.now();
     while (this.now() < deadline) {
       await this.wait(500);
@@ -1021,20 +1201,27 @@ export class Session {
       }
       const stuck = questions.filter((d) => !asked.has(d.id) || this.now() - asked.get(d.id) > 10000);
       if (stuck.length) return { saved: false, dialogs: stuck.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("save") };
-      // Any window besides the main one and the run's modules (a question being answered, the loading window, an
-      // untitled one) means the editor is still at it.
-      if (dialogs.some((d) => !isReopenedModule(d.title))) idleSince = this.now();
       const now = stamp();
       if (now !== last) { last = now; stillSince = 0; idleSince = this.now(); continue; }
+      // Any window besides the main one and the run's modules (a question being answered, the "Progress" window, an
+      // untitled one) means the editor is still at it: the file standing still meanwhile doesn't make it done.
+      const busy = dialogs.filter((d) => !isReopenedModule(d.title));
+      for (const d of busy) waitedFor.add(d.title || "(untitled)");
+      if (busy.length) { idleSince = this.now(); stillSince = 0; continue; }
       if (now === before && this.now() - idleSince > SAVE_IDLE_MS) {
         return { saved: false, error: `the editor wrote nothing in ${SAVE_IDLE_MS / 1000} s without a dialog open (a refused or no-op save)`, answered, screen: this.dialogShot("save") };
       }
       if (now !== before && now !== null) {
         stillSince ||= this.now();
         if (this.now() - stillSince >= 2000) {
+          // A file that stands still but isn't a whole archive yet is waited for a while, then reported.
+          if (!fileIsWholeMpq(this.copy)) {
+            if (this.now() - stillSince < SAVE_NOT_MPQ_MS) continue;
+            return { saved: false, error: `what the editor wrote stood still for ${SAVE_NOT_MPQ_MS / 1000} s and isn't a whole MPQ archive`, answered, screen: this.dialogShot("save") };
+          }
           mkdirSync(dirname(resolve(dest)), { recursive: true });
           copyFileSync(this.copy, resolve(dest));
-          return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered };
+          return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered, waitedFor: [...waitedFor] };
         }
       }
     }
@@ -1086,7 +1273,10 @@ export class Session {
         if (this.now() - stillSince >= 2000) {
           mkdirSync(dirname(resolve(dest)), { recursive: true });
           copyFileSync(file, resolve(dest));
-          return { exported: true, file: resolve(dest), bytes: statSync(file).size };
+          const bytes = statSync(file).size;
+          // The work folder's TGA was only the editor's place to write: it doesn't pile up over runs.
+          rmSync(file, { force: true });
+          return { exported: true, file: resolve(dest), bytes };
         }
       }
     }
@@ -1143,7 +1333,12 @@ export class Session {
       const menu = await this.openViewMenu();
       this.x("click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
       clicks++;
-      await this.wait(this.opts.mode !== "sd" ? 3000 : 1000);
+      // Until the view has drawn the change: two pictures of it a frame apart the same (about 2 frames a second in
+      // HD, 14 in SD), at most 10 s; then the menu is read again.
+      const { main } = this.mainOrThrow();
+      const hd = this.opts.mode !== "sd";
+      await this.wait(300);
+      this.x("settle", "--rect", this.viewRect(main).join(","), "--interval", hd ? 1000 : 200, "--timeout", 10000);
       on = await state();
     }
     return { item: spec.item, state: on ? "on" : "off", clicks };
@@ -1222,6 +1417,9 @@ export class Session {
     const { main } = this.windows();
     if (main) this.x("close", main.id);
     const deadline = this.now() + Math.min(this.opts.timeout, 120) * 1000;
+    // The dialogs "n" was typed into, per window: again only after 5 s (a key that didn't take), at most 3 times; one
+    // that stays then is left alone up to the deadline, not typed into every half second.
+    const typed = new Map();
     while (this.now() < deadline) {
       await this.wait(500);
       const w = this.windows();
@@ -1239,8 +1437,11 @@ export class Session {
         const action = closeAction(d, w.main);
         if (action === "crash") this.crashed([{ title: d.title, class: d.class, program: programOfPid(d) }]);
         if (action === "no") {
+          const t = typed.get(d.id);
+          if (t && (t.count >= CLOSE_TYPES || this.now() - t.at < CLOSE_RETYPE_MS)) continue;
           this.x("key", "--window", d.id, "n");
-          answered.push(d.title || "(untitled)");
+          typed.set(d.id, { at: this.now(), count: (t?.count ?? 0) + 1 });
+          if (!t) answered.push(d.title || "(untitled)");
         } else {
           return { closed: false, dialogs: [{ title: d.title, rect: d.rect }], screen: this.dialogShot("close") };
         }
@@ -1277,9 +1478,12 @@ async function main() {
   const out = (o) => console.log(JSON.stringify(o));
   const game = gameDir(opts.game ?? undefined);
   let why = missing(game);
-  if (!why && !existsSync(LAVAPIPE)) why = `no lavapipe Vulkan driver (${LAVAPIPE}; Debian/Ubuntu: mesa-vulkan-drivers)`;
+  if (!why && !lavapipeIcds().length) why = `no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
   if (!why) {
-    try { protonFor(game); } catch (e) { why = e.message; }
+    try {
+      const { tool } = protonFor(game);
+      if (!wineserverPath(tool)) why = `the Proton build ${tool} has no wineserver (files/bin or dist/bin)`;
+    } catch (e) { why = e.message; }
   }
   if (why) {
     out({ skipped: why });
@@ -1299,6 +1503,17 @@ async function main() {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
   process.on("SIGHUP", onSignal);
+  // An error nothing caught (a stream's, a timer's) or a closed stdout (EPIPE: the reader went) would end the process
+  // past the finally below: the editor, its wineserver and Xvfb would stay, the lock with them.
+  const onFatal = (e) => {
+    try { console.error(`we-drive: ${e?.message ?? e}`); } catch { /* stderr gone too */ }
+    stopAll();
+    process.exit(1);
+  };
+  process.on("uncaughtException", onFatal);
+  process.on("unhandledRejection", onFatal);
+  process.stdout.on("error", onFatal);
+  pruneArtefacts(opts.work);
   let failed = false, lookIndex = 0, mapsStarted = 0;
   try {
     setup(game);
@@ -1387,16 +1602,16 @@ async function main() {
           if (!r.exported) { failed = true; break; }
         } else if (step === "--click" || step === "--double-click") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error(`${step} wants X,Y`);
-          s.x("click", arg, ...(step === "--double-click" ? ["--double"] : []));
+          s.act("click", arg, ...(step === "--double-click" ? ["--double"] : []));
           await s.wait(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {
-          s.x("drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []));
+          s.act("drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []));
           await s.wait(300);
           out({ step, from: arg.from, to: arg.to, ms: arg.ms, ...(arg.mod ? { mod: arg.mod } : {}), ...(arg.button ? { button: arg.button } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--move") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
-          s.x("move", arg);
+          s.act("move", arg);
           out({ step, at: arg });
         } else if (step === "--wheel") {
           // Mouse wheel over the terrain view (its middle, or N@X,Y at a position of the display): positive zooms in
@@ -1428,7 +1643,7 @@ async function main() {
           const { main } = s.mainOrThrow();
           out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
         } else if (step === "--sleep") {
-          await s.wait(Number(arg));
+          await s.sleepWatching(Number(arg));
           out({ step });
         } else if (step === "--save") {
           const r = await s.save(arg);

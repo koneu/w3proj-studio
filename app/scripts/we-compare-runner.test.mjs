@@ -6,8 +6,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import * as core from "./we-compare-core.mjs";
 import * as w3e from "./we-compare-w3e.mjs";
 import * as run from "./we-compare.mjs";
@@ -46,7 +46,8 @@ function w3eFile(w, h, ground = 0) {
   return Buffer.concat([head, body]);
 }
 
-const entry = (c) => parseSpec({ ...good(), compare: [c] }, "/s").compare[0];
+// "any": these tests are about the comparison, not about the rule that a "differs" names its paths.
+const entry = (c) => parseSpec({ ...good(), compare: [c] }, "/s", {}, "spec", { differsWithoutPaths: "any" }).compare[0];
 
 // ---------------------------------------------------------------- 1: lost and unreadable files
 
@@ -272,7 +273,7 @@ test("after a World Editor failure the specs behind it are run again, not left w
   assert.deepEqual(rerun, [1, 2]);
   // Control: all saved, nothing to run again.
   const all = core.weOutcome(2, [{ step: "--map" }, { step: "--save", saved: true }, { step: "--map" }, { step: "--save", saved: true }]);
-  assert.deepEqual(all, { errors: [null, null], rerun: [] });
+  assert.deepEqual(all, { errors: [null, null], rerun: [], warnings: [null, null] });
   // A spec saved after the failed one isn't run again; one that stopped without a save before any failure is named.
   const mid = core.weOutcome(3, [{ step: "--map" }, { step: "--save", saved: false, dialogs: ["x"] }, { step: "--map" }, { step: "--save", saved: true }]);
   assert.match(mid.errors[0], /the save didn't finish/);
@@ -283,4 +284,175 @@ test("after a World Editor failure the specs behind it are run again, not left w
 test("--limit takes a positive whole number", () => {
   assert.equal(run.parseArgs(["--limit", "5", "a.json"]).limit, 5);
   for (const v of ["abc", "0", "-2", "1.5"]) assert.throws(() => run.parseArgs(["--limit", v]), /--limit is a positive whole number/, v);
+});
+
+// ---------------------------------------------------------------- 12: review round of 2026-11-17
+
+test("expect differs on a JSON kind needs expectPaths, unless the spec and file are on the allowlist", () => {
+  const spec = (c) => ({ ...good(), compare: [c] });
+  const differs = { file: "war3map.w3e", as: "w3e", expect: "differs" };
+  assert.throws(() => parseSpec(spec(differs), "/s"), /expects "differs" without "expectPaths"/);
+  // "auto" on a file that may be the codecs' JSON counts too; on a script (text) or a pathing map it can't take paths.
+  assert.throws(() => parseSpec(spec({ file: "war3map.w3i", expect: "differs" }), "/s"), /without "expectPaths"/);
+  for (const c of [{ file: "war3map.j", expect: "differs" }, { file: "war3map.wpm", expect: "differs" }, { file: "war3map.lua", as: "text", expect: "differs" }]) {
+    assert.ok(parseSpec(spec(c), "/s"), `control: ${c.file} can't name paths`);
+  }
+  // Controls: with its paths, or listed as "name file", it parses; another spec of the list's file does not.
+  assert.ok(parseSpec(spec({ ...differs, expectPaths: ["corners[]"] }), "/s"));
+  assert.ok(parseSpec(spec(differs), "/s", {}, "spec", { differsWithoutPaths: new Set(["ramp war3map.w3e"]) }));
+  assert.throws(() => parseSpec(spec(differs), "/s", {}, "spec", { differsWithoutPaths: new Set(["ramp war3map.wpm", "other war3map.w3e"]) }), /without "expectPaths"/);
+});
+
+test("the allowlist of differs without paths only shrinks: every entry exists and still needs it", () => {
+  const root = repoPath("tests", "we-compare");
+  const allowed = core.readDiffersAllowlist(resolve(root, "..", ".."));
+  // Lower this as entries get their paths; never raise it (a new "differs" names its paths).
+  assert.ok(allowed.size <= 35, `the list grew to ${allowed.size}`);
+  const needed = new Set();
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".json") && p !== core.differsAllowlistPath(resolve(root, "..", ".."))) {
+        const raw = JSON.parse(readFileSync(p, "utf8"));
+        for (const s of Array.isArray(raw) ? raw : [raw]) for (const c of s.compare) if (typeof c === "object" && c.expect === "differs" && !c.expectPaths && core.takesPaths(c.as ?? "auto", c.file)) needed.add(`${s.name} ${c.file}`);
+      }
+    }
+  };
+  walk(root);
+  assert.ok(needed.size > 0, "found the specs");
+  for (const e of allowed) assert.ok(needed.has(e), `${e} is on the allowlist but no spec needs it (gone, or it has its expectPaths now): take it out`);
+  for (const e of needed) assert.ok(allowed.has(e), `${e} expects differs without expectPaths and isn't on the allowlist`);
+});
+
+test("text-exact keeps line endings: CRLF against LF differs, which text doesn't see; it reads the map's bytes", () => {
+  const crlf = "a\r\nb\r\n", lf = "a\nb\n";
+  assert.equal(compareFile("war3map.j", "text", { text: crlf }, { text: lf }).status, "MATCH", "text: line endings normalised");
+  const exact = compareFile("war3map.j", "text-exact", { text: crlf }, { text: lf });
+  assert.equal(exact.status, "DIFFERS");
+  assert.match(exact.diffs[0].text, /\\r/);
+  assert.equal(compareFile("war3map.j", "text-exact", { text: crlf }, { text: crlf }).status, "MATCH", "control");
+  // A trailing line break is a line of its own.
+  assert.equal(compareFile("war3map.j", "text-exact", { text: "a\r\n" }, { text: "a\r\n\r\n" }).status, "DIFFERS");
+  // The map's own bytes, not the unpack's text (which may be normalised); a file only the unpack has is its text.
+  const r = { ...fakeReader({ "war3map.j": { text: lf, bytes: Buffer.from(crlf) } }) };
+  assert.equal(core.loadSide(r, "war3map.j", "text-exact").text, crlf);
+  assert.equal(core.loadSide(r, "war3map.j", "text").text, lf, "control: text reads the unpacked text");
+  const wct = { ...fakeReader({ "war3map.wct.txt": { text: crlf } }), listed: () => false };
+  assert.equal(core.loadSide(wct, "war3map.wct.txt", "text-exact").text, crlf);
+  // The header specs pin their line endings with it.
+  const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "script-inputs-e.json"), "utf8"), "script-inputs-e.json", { REPO: "/r", MAIN: "/m" });
+  for (const n of ["header-newlines", "header-newlines-lua", "header-spaces", "header-spaces-lua", "header-tab-lines"]) {
+    assert.ok(specs.find((s) => s.name === n).compare.every((c) => c.as === "text-exact"), n);
+  }
+});
+
+test("a crash while closing after the spec's save is a warning, the save kept; before the save it is a failure", () => {
+  const crash = { step: "--close", closed: true, crashed: true, message: "the World Editor crashed; report dismissed without sending" };
+  const saved = core.weOutcome(1, [{ step: "--map" }, { step: "--wait-ready", ready: true }, { step: "--save", saved: true }, crash]);
+  assert.deepEqual(saved.errors, [null]);
+  assert.match(saved.warnings[0], /crashed while closing, after the save/);
+  assert.match(formatReport({ name: "s", files: [], error: null, warnings: saved.warnings }), /warning: World Editor: the World Editor crashed while closing/);
+  // Control: a crash before the save (no save line) fails the spec.
+  const unsaved = core.weOutcome(1, [{ step: "--map" }, { step: "--key", crashed: true, error: "the World Editor crashed" }]);
+  assert.match(unsaved.errors[0], /crashed/);
+  // --restart-per-map: the process stopped at the crash, so the specs after it run again (not "no save").
+  const per = core.weOutcome(3, [{ step: "--map" }, { step: "--save", saved: true }, crash]);
+  assert.deepEqual(per.errors, [null, null, null]);
+  assert.deepEqual(per.rerun, [1, 2]);
+  // A close that didn't close is still a failure.
+  const stuck = core.weOutcome(1, [{ step: "--map" }, { step: "--save", saved: true }, { step: "--close", closed: false, crashed: true, error: "still running" }]);
+  assert.match(stuck.errors[0], /still running/);
+});
+
+test("Studio's state is put back after a spec: the settings it changes, stubbed w3.window functions, its window globals", () => {
+  const spec = parseSpec({ ...good(), input: { new: { name: "N", width: 32, height: 32 }, steps: [{ setting: ["script.generateOnSave", false] }] }, studio: { settings: { "mcp.writeTools": true }, steps: [{ setting: ["terrain.resetFixedHeights", false] }, { setting: ["mcp.writeTools", true] }] } }, "/s");
+  assert.deepEqual(core.settingKeys(spec),["mcp.writeTools", "script.generateOnSave", "terrain.resetFixedHeights"]);
+  // The page's side, on fakes: the runner's own stub (confirm) is the baseline; the spec's are undone.
+  const original = { showWarning() {}, confirm() {} };
+  const w3 = { window: { ...original } };
+  const runnerConfirm = async () => true;
+  w3.window.confirm = runnerConfirm;
+  const win = { __compareGroup: 1, __driveEd: null };
+  run.isolateSnapshot(win, w3);
+  w3.window.showWarning = async () => undefined;
+  w3.window.pickFile = async () => "x";
+  delete w3.window.showInfo;
+  win.__prefs = () => {};
+  win.__asked = [];
+  win.__driveEd = { ed: 1 };
+  const back = run.isolateRestore(win, w3);
+  assert.equal(w3.window.showWarning, original.showWarning);
+  assert.equal(w3.window.confirm, runnerConfirm, "the runner's own stub stays");
+  assert.ok(!("pickFile" in w3.window));
+  assert.deepEqual(Object.keys(win).sort(), ["__compareGroup", "__driveEd"]);
+  assert.deepEqual(back.sort(), ["w3.window.pickFile", "w3.window.showWarning", "window.__asked", "window.__prefs"]);
+  // Control: a spec that changes nothing gets nothing put back.
+  run.isolateSnapshot(win, w3);
+  assert.deepEqual(run.isolateRestore(win, w3), []);
+});
+
+test("a missing input map is that spec's error, naming the generator that makes it", () => {
+  const repoDir = resolve(repoPath("tests"), "..");
+  assert.match(run.missingInput(join(repoDir, "target", "melee-valid", "melee-valid-tree-256.w3x"), repoDir), /no input map at .*make-melee-valid\.mjs/);
+  assert.match(run.missingInput(join(repoDir, "target", "studio-paths", "echo-plain.w3x"), repoDir), /make-studio-paths\.mjs/);
+  // Control: a map outside target/ has no generator to name.
+  const plain = run.missingInput(join(repoDir, "tests", "nothing.w3x"), repoDir);
+  assert.match(plain, /^no input map at /);
+  assert.doesNotMatch(plain, /made by/);
+});
+
+test("saving for the pack: an editor left unsaved or a failed terrain rebuild stops the spec", async () => {
+  const fake = ({ dirtyAfter = [], settle = async () => {} } = {}) => {
+    const tabs = [{ path: "map/a.txt", dirty: true }, { path: "map/b.txt", dirty: false }];
+    const w3 = { editors: { saveAll: async () => { for (const t of tabs) t.dirty = dirtyAfter.includes(t.path); return 1; } }, commands: { execute: async (id) => { assert.equal(id, "w3.terrain.settle"); return settle(); } } };
+    return [w3, { editors: { tabs } }];
+  };
+  await run.saveForPack(...fake());
+  await assert.rejects(run.saveForPack(...fake({ dirtyAfter: ["map/a.txt"] })), /unsaved changes in map\/a\.txt/);
+  await assert.rejects(run.saveForPack(...fake({ settle: async () => { throw new Error("derive failed"); } })), /derived files weren't written: derive failed/);
+});
+
+test("parsed compares: a World Editor save the codecs don't give back is ERROR for that file", () => {
+  assert.deepEqual(core.verifyOutcome("ok   /w/we.w3x — 17 files, 9 via codecs\n"), {});
+  assert.deepEqual(core.verifyOutcome("FAIL /w/we.w3x — mismatched: war3map.w3i, war3map.doo\n"), { mismatched: ["war3map.w3i", "war3map.doo"] });
+  assert.deepEqual(core.verifyOutcome("FAIL /w/we.w3x — bad header\n"), { error: "bad header" });
+  const files = [
+    { file: "war3map.w3i", kind: "parsed", status: "MATCH", count: 0, diffs: [] },
+    { file: "war3map.w3e", kind: "w3e", status: "MATCH", count: 0, diffs: [] },
+    { file: "war3map.doo", kind: "parsed", status: "MATCH", count: 0, diffs: [] },
+  ];
+  const r = core.applyRoundtrip(files, { mismatched: ["war3map.w3i", "war3map.w3e"] });
+  assert.equal(r[0].status, "ERROR");
+  assert.match(r[0].diffs[0].text, /doesn't come back the same/);
+  assert.equal(r[1].status, "MATCH", "not a parsed compare");
+  assert.equal(r[2].status, "MATCH", "control: a file that round-trips");
+  assert.equal(core.runOutcome([{ name: "s", files: r, error: null }]).code, 2);
+  assert.ok(core.applyRoundtrip(files, { error: "x" }).filter((f) => f.kind === "parsed").every((f) => f.status === "ERROR"));
+  assert.deepEqual(core.applyRoundtrip(files, {}), files, "control: nothing to say");
+});
+
+test("the work folder's lock: a lock without a pid yet is live for a grace; a lock taken while taking over a stale one is put back", async () => {
+  const work = scratchDir("we-compare-lock2-");
+  const file = join(work, "we-compare.lock");
+  try {
+    // Between another run's create and its write: empty and fresh, so not stale.
+    writeFileSync(file, "");
+    assert.throws(() => run.lockWork(work), /has no pid yet/);
+    // Control: an empty lock older than the grace is a run that died between the two: taken over.
+    const old = (Date.now() - 60000) / 1000;
+    utimesSync(file, old, old);
+    run.lockWork(work)();
+    // A stale lock of an ended process, and another run that takes the lock just before the rename: its lock stays.
+    const child = spawn(process.execPath, ["-e", ""]);
+    await new Promise((ok) => child.on("close", ok));
+    writeFileSync(file, String(child.pid));
+    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"]);
+    try {
+      const steal = () => { rmSync(file); writeFileSync(file, String(other.pid)); };
+      assert.throws(() => run.lockWork(work, process.pid, { beforeRename: steal }), new RegExp(`another we-compare \\(pid ${other.pid}\\) uses`));
+      assert.equal(readFileSync(file, "utf8"), String(other.pid), "the other run's lock is where it was");
+      assert.deepEqual(readdirSync(work).filter((n) => n.includes("stale")), [], "nothing left behind");
+    } finally { other.kill(); }
+  } finally { rmSync(work, { recursive: true, force: true }); }
 });

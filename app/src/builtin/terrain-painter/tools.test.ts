@@ -257,6 +257,17 @@ test("Plateau levels the whole disc to the stroke's start, rim included; Smooth 
   }
 });
 
+test("raise and lower don't read the amount: any amount gives the same ground", () => {
+  // applyHeight's amount is for plateau only (tools.ts applyHeight); raiseLower takes none, and Noise draws its steps.
+  for (const tool of ["raise", "lower"] as const) {
+    const a = flatMap(), b = flatMap();
+    applyHeight(a, brushOf(tool, a, 0, 0, 3), tool, 0, new Stroke(tool));
+    applyHeight(b, brushOf(tool, b, 0, 0, 3), tool, 9999, new Stroke(tool));
+    assert.deepEqual(heightGrid(a), heightGrid(b), tool);
+    assert.notDeepEqual(heightGrid(a), heightGrid(flatMap()), `${tool} moved something`);
+  }
+});
+
 test("a chosen cliff type wins over the ground", () => {
   const t = flatMap();
   const s = new Stroke("cliffUp");
@@ -477,16 +488,16 @@ test("Level on flat ground moves nothing but types the World Editor's stencil ro
   // 5 and 8 (the shapes in cliffTypeStencil).
   const plus = ["...111...", "...111...", ".1111111.", ".1111111.", ".1111111.", "...111...", "...111..."].join("\n");
   for (const [size, count] of [[1, 9], [2, 15], [3, 33], [5, 74], [8, 196]]) {
-    const t = flatMap(), layers = t.corners.map((c) => c.layer);
+    const tt = flatMap(), before = tt.corners.map((c) => c.layer);
     const s = new Stroke("cliffLevel");
-    assert.equal(applyLayer(t, brushOf("cliffLevel", t, centre(t).x, centre(t).y, size), "cliffLevel", { layer: 2 }, s), false, "no corner moves");
-    assert.equal(retypeCliffs(t, s, CLIFF_GROUND, 1), true);
-    assert.deepEqual(t.corners.map((c) => c.layer), layers);
-    assert.equal(t.corners.filter((c) => c.cliffTexture === 1).length, count, `size ${size}`);
-    if (size === 3) assert.equal(cliffTypes(t).split("\n").slice(1, 8).join("\n"), plus);
-    if (size === 1) assert.equal(cliffTypes(t).split("\n").slice(2, 7).map((r) => r.slice(3, 6)).join(","), "...,111,111,111,...");
-    if (size === 2) assert.equal(cliffTypes(t).split("\n").slice(2, 7).join(","), ".........,..11111..,..11111..,..11111..,.........");
-    assert.equal(s.finish(t), true, "the typing alone is an undo step");
+    assert.equal(applyLayer(tt, brushOf("cliffLevel", tt, centre(tt).x, centre(tt).y, size), "cliffLevel", { layer: 2 }, s), false, "no corner moves");
+    assert.equal(retypeCliffs(tt, s, CLIFF_GROUND, 1), true);
+    assert.deepEqual(tt.corners.map((c) => c.layer), before);
+    assert.equal(tt.corners.filter((c) => c.cliffTexture === 1).length, count, `size ${size}`);
+    if (size === 3) assert.equal(cliffTypes(tt).split("\n").slice(1, 8).join("\n"), plus);
+    if (size === 1) assert.equal(cliffTypes(tt).split("\n").slice(2, 7).map((r) => r.slice(3, 6)).join(","), "...,111,111,111,...");
+    if (size === 2) assert.equal(cliffTypes(tt).split("\n").slice(2, 7).join(","), ".........,..11111..,..11111..,..11111..,.........");
+    assert.equal(s.finish(tt), true, "the typing alone is an undo step");
   }
   const water = new Stroke("shallow"), t = flatMap();
   applyLayer(t, brushOf("shallow", t, centre(t).x, centre(t).y, 1), "shallow", { layer: 1, waterLevel: 0x2000 }, water);

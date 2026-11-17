@@ -45,9 +45,17 @@ test("HD water's tables: none of the water at 0, all of it from 200 deep, linear
   });
   const half = hdWaterAt(18);
   assert.ok(Math.abs(half.through - (HD_WATER_THROUGH[2] + HD_WATER_THROUGH[3]) / 2) < 1e-9, "18 is halfway between 12 and 24");
-  // The shader holds the same tables.
-  for (const t of [HD_WATER_DEPTHS, HD_WATER_THROUGH, HD_WATER_OWN, HD_REFLECT_DEPTH]) assert.ok(HD_WATER_GLSL.includes(t.map((v) => (Number.isInteger(v) ? v.toFixed(1) : String(v))).join(", ")), `the GLSL has ${t}`);
+  // The shader holds the same tables, in the same places: the depths, then hdWaterAt's through, own, reflect in that order.
+  assert.deepEqual(glslTables(/const float HD_DEPTHS\[8\] = (float\[8\]\([^)]*\))/), [[...HD_WATER_DEPTHS]]);
+  assert.deepEqual(glslTables(/return vec3\((.*)\);\s*\}\s*float hdShallowAt/s), [[...HD_WATER_THROUGH], [...HD_WATER_OWN], [...HD_REFLECT_DEPTH]]);
 });
+
+/** The `float[n](…)` tables inside the part of the shader a pattern's first group matches, as numbers. */
+function glslTables(pattern: RegExp): number[][] {
+  const part = pattern.exec(HD_WATER_GLSL)?.[1];
+  assert.ok(part, `the GLSL has ${pattern}`);
+  return [...part.matchAll(/float\[\d+\]\(([^)]*)\)/g)].map((m) => m[1].split(",").map(Number));
+}
 
 test("the w3i's water settings: its reflectivity and environment map reflectivity, a new map's 10 and 100 otherwise", () => {
   assert.deepEqual(hdWaterSettings({ reflectivity: 20, environmentMapReflectivity: 50, maxOpacity: 100 }), { reflectivity: 20, environment: 50, waves: 100 });
@@ -91,7 +99,7 @@ test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: 
   assert.ok(Math.abs(hdShallowAt(200)) < 1e-9 && hdShallowAt(5000) === 0);
   assert.equal(hdShallowAt(0), 1);
   assert.ok(Math.abs(hdShallowAt(38.4) - HD_SHALLOW_SHARE[4]) < 1e-9);
-  assert.ok(HD_WATER_GLSL.includes(HD_SHALLOW_SHARE.map((v) => (Number.isInteger(v) ? v.toFixed(1) : String(v))).join(", ")));
+  assert.deepEqual(glslTables(/(float hdShallowAt\(float d\) \{[^}]*\})/), [[...HD_SHALLOW_SHARE]]);
   // A tileset without a shallow colour of its own keeps its deep colour at every depth, and so does a tinted map.
   assert.deepEqual(hdWaterShallow("L", false), hdWaterColor("L", false));
   assert.deepEqual(hdWaterShallow("z", false).map((v) => Math.round(v * 255)), [...HD_SHALLOW.Z], "the tileset's letter in any case");
@@ -189,7 +197,8 @@ test("HD water's waves add to the reflection and take from it alike: the mean co
   const still = { ...HD_WATER_DEFAULTS, reflectivity: 0 };
   assert.deepEqual(pixel(spread, still), pixel(0, still), "reflectivity 0: no waves either");
   const shallowUp = pixel(spread, HD_WATER_DEFAULTS, 4), shallowFlat = pixel(0, HD_WATER_DEFAULTS, 4);
-  assert.ok(decode(shallowUp[1]) - decode(shallowFlat[1]) < 0.1 * (decode(up[1]) - decode(flat[1])) + 1e-9, "4 deep: a tenth of deep water's");
+  const shallowWave = decode(shallowUp[1]) - decode(shallowFlat[1]), deepWave = decode(up[1]) - decode(flat[1]);
+  assert.ok(shallowWave > 0 && shallowWave < 0.1 * deepWave + 1e-9, `4 deep: a tenth of deep water's at most, and some (${shallowWave} against ${deepWave})`);
 });
 
 test("a wave's lean: the normal map's green alone seen straight down, its red too the more level the view", () => {
@@ -203,9 +212,10 @@ test("a wave's lean: the normal map's green alone seen straight down, its red to
   // Red and green spread 0.67 to 1 and don't go together: the mix's spread is the green's.
   const mixSpread = Math.hypot(1 / norm, (share * 0.67) / norm);
   assert.ok(Math.abs(mixSpread - 1) < 1e-9);
-  // The shader holds the same numbers.
-  assert.ok(HD_WATER_GLSL.includes(`float share = ${HD_WAVE_RED} * length(view.xy);`));
-  assert.ok(HD_WATER_GLSL.includes(String(0.67 ** 2)));
+  // The shader holds the same numbers: read the red's factor and the spread's square out of the lean function.
+  const lean = /float hdWaveLean\([^)]*\) \{([^}]*)\}/.exec(HD_WATER_GLSL)?.[1] ?? "";
+  assert.equal(Number(/float share = ([\d.]+) \* length\(view\.xy\)/.exec(lean)?.[1]), HD_WAVE_RED);
+  assert.ok(Math.abs(Number(/share \* share \* ([\d.e-]+)\)/.exec(lean)?.[1]) - 0.67 ** 2) < 1e-12, lean);
 });
 
 test("the waves' two layers drift against each other, north-east and south-west, and come round again", () => {

@@ -45,7 +45,7 @@ test("minimapFrame: a unit drawn at a world point is at its pixel, and the pixel
   assert.ok(f.toPixel(0, 500)[1] < f.toPixel(0, -500)[1]);
 });
 
-test("war3mapMap.blp's picture: what the map's minimap was before the export options came", () => {
+test("war3mapMap.blp's picture: a change detector for the whole render (the real oracles are minimapexport.test.ts and the we-compare specs)", () => {
   // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them. Taken
   // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11), and when the water did
   // (2026-11-12: its minimap colour at mmAlpha, twice where deep), and when the drawn area, the sampling, one softening
@@ -247,22 +247,43 @@ test("textureOrder: a model's colour comes from the texture its geosets' materia
   assert.deepEqual(textureOrder({ textures: [{}, {}, {}], geosets: [{ materialId: 0 }, { materialId: 3 }], materials: [{ layers: [{ textureIds: [2] }, { textureIds: [2] }] }] }), [2, 0, 1], "once each; a missing material counts for none");
 });
 
-test("shownTextureMean: the textures the materials show once each, a team colour texture black, as the editor's dot colours", async () => {
-  // we-drive 2026-11-17 (dots-more): a goblin shipyard ruin (textures: its own 93,70,49, team colour, a second 104,80,57) is
-  // 63,46,32 in the editor, two thirds of the first; a granary (123,101,74 and 66,49,38) the mean 90,70,53.
+test("shownTextureMean: the mean of the colours of the textures the materials show once each, a team colour texture counting black", async () => {
+  // The rule is from we-drive 2026-11-17 (dots-more): the editor's dot of a goblin shipyard ruin (its own texture, team
+  // colour, a second one) is 63,46,32, a granary's (two textures) 90,70,53. The colours below are made up, NOT those
+  // maps' texture colours (the means differ from the editor's numbers), so this checks the rule, not the editor's values.
   const colors: Record<string, Rgb> = { own: [93, 70, 49], second: [104, 80, 57], a: [123, 101, 74], b: [66, 49, 38] };
   const color = async (tex: { path: string }) => colors[tex.path] ?? null;
   const textures = [{ replaceableId: 0, path: "own" }, { replaceableId: 1, path: "" }, { replaceableId: 0, path: "second" }, { replaceableId: 0, path: "particle" }];
   const ruin = { textures, geosets: [{ materialId: 2 }, { materialId: 0 }, { materialId: 1 }],
     materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }, { textureIds: [2] }] }] };
-  assert.deepEqual((await shownTextureMean(ruin, color))!.map(Math.round), [66, 50, 35]);
+  const near = (got: Rgb | null, want: number[]) => { assert.ok(got, "a colour"); got.forEach((v, k) => assert.ok(Math.abs(v - want[k]) < 1e-9, `${got} vs ${want}`)); };
+  // The geosets show the team colour (black), the second texture and the own one: a third of each.
+  near(await shownTextureMean(ruin, color), [(93 + 104) / 3, (70 + 80) / 3, (49 + 57) / 3]);
   const granary = { textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "b" }], geosets: [{ materialId: 0 }, { materialId: 1 }, { materialId: 2 }],
     materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }] }, { layers: [{ textureIds: [1] }] }] };
-  assert.deepEqual((await shownTextureMean(granary, color))!.map(Math.round), [95, 75, 56]);
+  near(await shownTextureMean(granary, color), [(123 + 66) / 2, (101 + 49) / 2, (74 + 38) / 2]);
   // Control: a texture that can't be read is left out, not black; nothing readable, or only the team colour: null.
   assert.deepEqual((await shownTextureMean({ ...granary, textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "gone" }] }, color))!.map(Math.round), [123, 101, 74]);
   assert.equal(await shownTextureMean({ textures: [{ replaceableId: 1, path: "" }], geosets: [{ materialId: 0 }], materials: [{ layers: [{ textureIds: [0] }] }] }, color), null);
   assert.equal(await shownTextureMean({ ...granary, geosets: [] }, color), null);
+});
+
+test("minimapObjects: a model's colour is asked for as a mean for a dot and as the first texture's for a drawn shape", async () => {
+  const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", MMRed: "0", MMGreen: "0", MMBlue: "0", pathTex });
+  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["bare", row("_")]]);
+  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
+  const asked: string[] = [];
+  await minimapObjects(["gate", "tree", "bare"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
+    { rows, bases: new Map(), modelColor: async (type, mean) => { asked.push(`${type}:${mean}`); return [1, 2, 3]; }, footprint: async () => 1, pathMask: async (p) => masks[p] ?? null });
+  assert.deepEqual(asked, ["gate:false", "tree:true", "bare:true"]);
+});
+
+test("modelTextureColor: with `mean` a model whose geosets show no texture still gives its first texture's colour", async () => {
+  const files = new Map<string, Uint8Array>([["Doodads\\Rock\\Rock0.mdx", mdxOfTextures([[0, "Textures\\RockWall.blp"]])], ["Textures\\RockWall.blp", tgaOf([87, 88, 82])]]);
+  const read = async (p: string) => { const f = files.get(p); if (!f) throw new Error(`no ${p}`); return f; };
+  const skin = { file: "Doodads\\Rock\\Rock", numVar: 10, texId: -1, texFile: "" };
+  assert.deepEqual(await modelTextureColor(skin, read, true), [87, 88, 82]);
+  assert.deepEqual(await modelTextureColor(skin, read, false), [87, 88, 82]);
 });
 
 test("minimapObjects: a destructable placed dead (life 0) isn't drawn, as on the editor's minimap", async () => {
@@ -342,17 +363,23 @@ test("minimapBase: in HD and DE the ground and cliff colours are the Reforged _D
     // No Reforged dirt: the classic one stands in.
     ["TerrainArt\\Test\\Test_Dirt.blp", tgaOf([145, 104, 60])],
   ]);
-  const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
+  // The read stub only records and rejects (the code under test catches a failed read, so assert.fail in it would be lost).
+  let reads: string[] = [];
+  const read = async (p: string) => { reads.push(p); const f = files.get(p); if (!f) throw new Error(`no ${p}`); return f; };
   const t = { ...flat(2, 2), tileset: "H", groundTiles: ["Hgrs", "Hdrt"], cliffTiles: ["CHgr"] } as unknown as Terrain;
   const colours = async (mode: string) => {
+    reads = [];
     const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? mode : undefined) },
       game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
-    const b = await minimapBase(w3, t, [], async (p) => (p.includes("_Diffuse") && mode === "sd" ? assert.fail(`SD read ${p}`) : read(p)));
+    const b = await minimapBase(w3, t, [], read);
     return [b.tileColor("Hgrs"), b.tileColor("Hdrt"), b.cliffColor?.("CHgr")];
   };
   assert.deepEqual(await colours("hd"), [[23, 119, 16], [145, 104, 60], [80, 90, 70]]);
+  assert.ok(reads.some((p) => p.includes("Test_Grass_Diffuse")), `HD reads the _Diffuse: ${reads}`);
   assert.deepEqual(await colours("de"), [[23, 119, 16], [145, 104, 60], [80, 90, 70]]);
   assert.deepEqual(await colours("sd"), [[44, 108, 27], [145, 104, 60], [96, 124, 66]]);
+  assert.deepEqual(reads.filter((p) => p.includes("_Diffuse")), [], "SD never reads a _Diffuse texture");
+  assert.ok(reads.length >= 3, `SD read the classic ones: ${reads}`);
 });
 
 test("minimapBase: under custom-tilesets 0 the slots show the tileset's own tiles, as the World Editor's minimap", async () => {
@@ -370,7 +397,7 @@ test("minimapBase: under custom-tilesets 0 the slots show the tileset's own tile
     ["TerrainArt\\Test\\Test_Other.blp", tgaOf([1, 2, 3])]]);
   const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? "sd" : undefined) },
     game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
-  const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
+  const read = async (p: string) => { const f = files.get(p); if (!f) throw new Error(`no ${p}`); return f; };
   // One row of points, west to east, point i painted with slot i.
   const map = (raw: number, groundTiles: string[]) => ({
     width: groundTiles.length, height: 1, offsetX: 0, offsetY: 0, tileset: "H", groundTiles, cliffTiles: [], customTilesetsRaw: raw,
@@ -413,7 +440,13 @@ test("minimapBase: a pathing texture is read once for its cells and its size, ho
     ["TerrainArt\\Test\\Test_Path.blp", tgaOf([50, 60, 70])], ["PathTextures\\Square.tga", pathTga(4, 4)], ["PathTextures\\Strip.tga", pathTga(8, 2)],
   ]);
   const reads = new Map<string, number>();
-  const read = async (p: string) => { reads.set(p, (reads.get(p) ?? 0) + 1); return files.get(p) ?? assert.fail(`no ${p}`); };
+  const unexpected: string[] = [];
+  const read = async (p: string) => {
+    reads.set(p, (reads.get(p) ?? 0) + 1);
+    const f = files.get(p);
+    if (!f) { unexpected.push(p); throw new Error(`no ${p}`); }
+    return f;
+  };
   const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? "sd" : undefined) },
     game: { readText: async (p: string) => tables[p] ?? assert.fail(`no ${p}`) }, workspace: { files: () => [] } } as unknown as W3Api;
   const t = { ...flat(2, 2), tileset: "Y", groundTiles: ["Ypth"], cliffTiles: [] } as unknown as Terrain;
@@ -423,6 +456,7 @@ test("minimapBase: a pathing texture is read once for its cells and its size, ho
   assert.deepEqual(b.objects.map((o) => ("mask" in o && o.mask ? `mask ${o.mask.width}x${o.mask.height}` : `size ${(o as { size?: number }).size}`)),
     ["size 1", "size 1", "mask 8x2", "size 1", "mask 8x2"]);
   assert.deepEqual([reads.get("PathTextures\\Square.tga"), reads.get("PathTextures\\Strip.tga")], [1, 1]);
+  assert.deepEqual(unexpected, [], "no other file was asked for");
 });
 
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {
@@ -432,10 +466,12 @@ test("viewOutline: the view's corners on the ground, and far along a ray over th
   const down = (px: number, py: number) => ({ origin: [100, 200, 1000] as V, dir: norm([(px / 400 * 2 - 1) * 2, 1 - py / 200 * 2, -1]) });
   const pts = viewOutline(down, 400, 200, 0, 1e5);
   const want = [[-1900, 1200], [2100, 1200], [2100, -800], [-1900, -800]];
+  assert.equal(pts.length, 4);
   pts.forEach((p, i) => assert.ok(Math.hypot(p[0] - want[i][0], p[1] - want[i][1]) < 1e-6, `${i}: ${p}`));
   // Looking level: the top corners look over the horizon and go to the far distance; the bottom ones meet the ground.
   const level = (px: number, py: number) => ({ origin: [0, 0, 100] as V, dir: norm([px / 400 * 2 - 1, 1, (1 - py / 200 * 2) * 0.5]) });
   const far = viewOutline(level, 400, 200, 0, 5000);
+  assert.equal(far.length, 4);
   assert.ok(Math.abs(Math.hypot(far[0][0], far[0][1]) - 5000 * Math.hypot(1, 1) / Math.hypot(1, 1, 0.5)) < 1e-6);
   assert.ok(far[2][1] > 0 && far[2][1] < 5000, "a bottom corner meets the ground in front");
 });
