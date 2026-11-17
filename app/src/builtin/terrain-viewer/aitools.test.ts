@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
-import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
+import { beyondPlayable, distanceToLine, isKeptClear, parseArea, playableArea } from "../../lib/terrain/area";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 /** Repeatable numbers in 0..1. */
@@ -125,6 +124,7 @@ test("the map's boundary stays as it is", () => {
   t.corners[8 * 17 + 8].boundary = true;
   sculptCorners(t, hill, "ellipse", "raise", 100);
   assert.equal(at(t, 8, 8), 0);
+  assert.ok(at(t, 7, 8) > 0, "control: its neighbour is raised");
 });
 
 test("a seed repeats a painted patch, tile variations included", () => {
@@ -148,8 +148,10 @@ test("painting a patch: its middle is solid and its edge frays", () => {
 
 test("a tile not in the map's list gets a slot, while there's room", () => {
   const t = field();
+  const own = [t.customTilesets, t.customTilesetsRaw];
   assert.equal(groundSlot(t, "Agrs"), 1);
-  assert.notEqual(t.customTilesetsRaw, 1, "a tile it has changes nothing");
+  assert.deepEqual(t.groundTiles, ["Adrt", "Agrs"], "a tile it has changes nothing");
+  assert.deepEqual([t.customTilesets, t.customTilesetsRaw], own);
   assert.equal(groundSlot(t, "Lgrs"), 2);
   assert.deepEqual([t.customTilesets, t.customTilesetsRaw], [true, 1]);
   t.groundTiles = Array.from({ length: 16 }, (_, i) => `T${i}`);
@@ -274,7 +276,7 @@ test("a path paints along its line, frays at its sides and ends, and leaves the 
   assert.ok(changed.includes(8 * 17 + 8));
   assert.ok(changed.length > 8 && changed.length < 40);
   const hard = field();
-  assert.ok(paintPath(hard, [[256, 1024], [1792, 1024]], 256, 1, 0, false, seeded()).length >= changed.length);
+  assert.ok(paintPath(hard, [[256, 1024], [1792, 1024]], 256, 1, 0, false, seeded()).length > changed.length, "fraying leaves out some of what a hard edge paints");
 });
 
 test("a thin path stays in one piece, whatever the fraying does", () => {
@@ -327,6 +329,13 @@ test("a tileset change swaps the tileset's own tiles, slot by slot, and keeps ot
   const got = swapTiles(["Ldrt", "Lgrs", "Vcbp", "Lrok"], ["Ldrt", "Lrok", "Lgrs", "Lgrd"], ["Fdrt", "Frok", "Fgrs", "Fgrd"]);
   assert.deepEqual(got.tiles, ["Fdrt", "Frok", "Vcbp", "Fgrs"]);
   assert.deepEqual(got.kept, ["Vcbp"]);
+});
+
+test("a tile that stays doesn't get a second slot when a tileset changes", () => {
+  const { tiles, kept } = swapTiles(["Ldrt", "Lgrs", "Alvd", "Lrok"], ["Ldrt", "Lgrs", "Lrok"], ["Alvd", "Adrt", "Agrs", "Arok"]);
+  assert.deepEqual(kept, ["Alvd"]);
+  assert.equal(new Set(tiles).size, tiles.length, tiles.join());
+  assert.equal(tiles[2], "Alvd", "it stays in its slot");
 });
 
 test("a tileset with fewer tiles repeats its last, so no slot is lost", () => {
@@ -508,32 +517,42 @@ test("a selection is offered what it can become", () => {
 });
 
 test("a replace's snapshot restores the whole entry: life, scale and flags come back exactly", () => {
-  const kinds: Record<string, string> = { LTbr: "w3b", LOch: "w3d" };
+  const kinds: Record<string, string> = { LTbr: "w3d", LTcr: "w3b" };
   const kindOf = (id: string) => kinds[id];
   const list: { id: string; skinId?: string; position: number[]; life?: number; scale?: number[]; flags?: number; extra?: number }[] = [
-    { id: "LTbr", skinId: "LTbr", position: [1, 2, 3], life: 100, scale: [1, 1, 1], flags: 2 },
-    { id: "LOch", skinId: "LOch", position: [4, 5, 6], life: 255, scale: [2, 2, 2] },
+    { id: "LTbr", skinId: "LTbr", position: [1, 2, 3], life: 255, scale: [1, 1, 1], flags: 2 },
+    { id: "LTcr", skinId: "LTcr", position: [4, 5, 6], life: 100, scale: [2, 2, 2] },
   ];
   const start = structuredClone(list);
   const before = list.map(entryLook);
-  replacePlaced(list, { LTbr: "LOch", LOch: "LTbr" }, null, () => 1, kindOf);
+  replacePlaced(list, { LTbr: "LTcr", LTcr: "LTbr" }, null, () => 1, kindOf);
   list[0].scale = [3, 3, 3]; list[0].flags = 7; list[1].extra = 1;
   assert.notDeepEqual(list, start);
   list.forEach((e, i) => restoreEntry(e, before[i]));
   assert.deepEqual(list, start);
   // Control: restoring only id, skinId and variation (the old undo) leaves the life changed.
   const old = structuredClone(start);
-  replacePlaced(old, { LTbr: "LOch" }, null, () => 1, kindOf);
+  replacePlaced(old, { LTbr: "LTcr" }, null, () => 1, kindOf);
   old[0].id = "LTbr"; old[0].skinId = "LTbr";
   assert.notEqual(old[0].life, start[0].life);
 });
 
 test("replace_objects sets the life of the new kind: 100 as destructable, 255 as doodad", () => {
-  const types: Record<string, { numVar: number; kind: string }> = { LTbr: { numVar: 1, kind: "w3b" }, LOch: { numVar: 1, kind: "w3d" } };
+  const types: Record<string, { numVar: number; kind: string }> = { LTbr: { numVar: 1, kind: "w3d" }, LTcr: { numVar: 1, kind: "w3b" } };
   const look = (id: string) => types[id];
-  const list = [{ id: "LTbr", skinId: "LTbr", position: [0, 0, 0], life: 100 }];
-  assert.equal(replaceByType(list, { LTbr: "LOch" }, null, look), 1);
-  assert.equal(list[0].life, 255);
-  assert.equal(replaceByType(list, { LOch: "LTbr" }, null, look), 1);
+  const list = [{ id: "LTbr", skinId: "LTbr", position: [0, 0, 0], life: 255 }];
+  assert.equal(replaceByType(list, { LTbr: "LTcr" }, null, look), 1);
   assert.equal(list[0].life, 100);
+  assert.equal(replaceByType(list, { LTcr: "LTbr" }, null, look), 1);
+  assert.equal(list[0].life, 255);
+});
+
+test("a replace keeps the variation within what the new type has, and a type with none or an unknown one gives variation 0", () => {
+  const types: Record<string, { numVar: number }> = { Few: { numVar: 2 }, Many: { numVar: 9 }, None: { numVar: 0 } };
+  const entry = (id: string) => ({ id, position: [0, 0, 0], variation: 5 });
+  const run = (to: string) => { const e = [entry("Many")]; replaceByType(e, { Many: to }, null, (id) => types[id]); return e[0].variation; };
+  assert.equal(run("Few"), 1, "clamped to the last one");
+  assert.equal(run("Many"), 5, "control: a type with enough keeps it");
+  assert.equal(run("None"), 0, "no variations: 0, not -1");
+  assert.equal(run("Unknown"), 0, "a type the lookup doesn't know counts as one variation");
 });

@@ -113,6 +113,7 @@ const FACINGS: [string, PathSize | null, number | null, number, string][] = [
 const f32hex = (v: number) => { const b = Buffer.alloc(4); b.writeFloatLE(v); return b.toString("hex"); };
 
 test("every measured facing is what the World Editor saved: a destructable's fixed rotation, else whole turns (28 cases)", () => {
+  assert.equal(FACINGS.length, 28);
   const wrong: string[] = [];
   for (const [id, size, fixed, deg, saved] of FACINGS) {
     const got = doodadOnGrid(0, 0, stored(deg), size, fixed).angle;
@@ -248,7 +249,11 @@ test("a type whose map-named pathing texture is missing stays where it stands (m
     { id: "B300", position: [-1486.5, 221.25, 0], angle: Math.fround(0.4) },
   ] as unknown as Placed[];
   const found = (id: string) => snapSize(id === "D300" || id === "B300" ? { image: standIn, fellBackTo: "PathTextures\\4x2Default.tga" } : { image: null });
-  assert.deepEqual(doodadSnaps(list, found, (id) => (id === "B300" ? 270 : null)), []);
+  const fixedRot = (id: string) => (id === "B300" ? 270 : null);
+  assert.deepEqual(doodadSnaps(list, found, fixedRot), []);
+  // Control: the same two with their texture found are moved or turned.
+  const withTexture = () => snapSize({ image: standIn });
+  assert.deepEqual(doodadSnaps(list, withTexture, fixedRot).map((s) => s.entry.id), ["D300", "B300"]);
 });
 
 test("a destructable's fixed rotation holds only with a pathing texture (measured: bptx _ keeps 0.4 and 2.9)", () => {
