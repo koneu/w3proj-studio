@@ -10863,7 +10863,11 @@ async function moveTextsToTable(page, found) {
     const cliDir = join(work, "move-texts-cli");
     rmSync(cliDir, { recursive: true, force: true });
     spawnSync(cli, ["unpack", map, cliDir, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
-    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) { console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (no game?)"); return; }
+    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) {
+      if (game) fail("the CLI couldn't unpack cliff.w3m's triggers although W3PROJ_GAME is set (the trigger part didn't run)");
+      else console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (needs W3PROJ_GAME)");
+      return;
+    }
     const wtgPath = "map/war3map.wtg.json", wctPath = "map/war3map.wct.txt";
     const wtgBefore = readFileSync(join(cliDir, "map", "war3map.wtg.json"), "utf8"), wctBefore = readFileSync(join(cliDir, "map", "war3map.wct.txt"), "utf8");
     const call = (name, params = []) => ({ type: 2, value: name, call: { kind: 3, name, hasParams: true, params, trailer: 0 } });
@@ -11096,6 +11100,7 @@ async function objectPreview(page, found, root) {
 async function objectFilePicker(page, found, root) {
   const fail = (what) => found.push(`object file picker: ${what}`);
   const hands = new Hands(page);
+  try {
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
   await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hbar")`);
@@ -11127,6 +11132,12 @@ async function objectFilePicker(page, found, root) {
   await hands.key("Escape", "Escape", 27);
   if (await page.evaluate(`!!document.querySelector(".picker-browse")`)) fail("Escape after a row click left the picker open");
   if ((await value()) !== after) fail("Escape changed the field");
+  } finally {
+    // An open picker or the changed (dirty) Shadow Texture must not outlive a failure.
+    await hands.key("Escape", "Escape", 27).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
 }
 
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
@@ -11381,6 +11392,8 @@ async function drawCalls(page, found) {
   await page.evaluate(`(() => {
     if (window.__drawCount) return;
     const P = WebGL2RenderingContext.prototype, c = window.__drawCount = { frames: 0, current: null, last: null };
+    const origs = window.__drawCountOrig = {};
+    for (const n of ["clear", "drawElements", "drawElementsInstanced", "uniformMatrix4fv"]) origs[n] = P[n];
     const ours = (gl) => !!gl.canvas.closest?.(".model-stage");
     const wrap = (name, count) => { const f = P[name]; P[name] = function (...a) { if (ours(this) && c.current) count(c.current, a); return f.apply(this, a); }; };
     const clear = P.clear;
@@ -11419,6 +11432,8 @@ async function drawCalls(page, found) {
   if (b.worldUploads !== a.worldUploads) fail(`${placed} objects more uploaded ${b.worldUploads - a.worldUploads} more matrices (${a.worldUploads}, then ${b.worldUploads})`);
   if (away.instances >= b.instances / 4) fail(`looking away from the objects still drew ${away.instances} of ${b.instances} instances`);
   } finally {
+    // The counting wrappers on WebGL2RenderingContext.prototype come off again.
+    await page.evaluate(`(() => { const o = window.__drawCountOrig; if (o) for (const n of Object.keys(o)) WebGL2RenderingContext.prototype[n] = o[n]; delete window.__drawCountOrig; delete window.__drawCount; })()`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -11434,6 +11449,9 @@ async function contextLoss(page, found) {
     await contextLossChecks(page, found);
   } finally {
     await page.evaluate(`if (window.__clKept) { w3.window.notify = window.__clKept; delete window.__clKept; }`).catch(() => {});
+    // A throw between loseContext and restoreContext leaves the canvas lost: bring it back, then close the editors.
+    await page.evaluate(`(() => { try { const c = window.__lostCanvas; if (c?.getContext("webgl2")?.isContextLost()) window.__loseExt?.restoreContext(); } catch {} })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
   } finally {
     await restoreWindow(page);
@@ -11495,6 +11513,12 @@ async function contextLossChecks(page, found) {
   const beforeLoss = await held();
   // The control: the snapshot sees a paint, so "unchanged while lost" below can fail.
   if (beforeLoss === unpainted) return fail("the terrain snapshot didn't change with the paint (control)");
+  // The control for the Ctrl+Z below: on a live view, the same key does take the paint back (then Ctrl+Y puts it back).
+  await page.evaluate(`(${canvasNow}).focus()`);
+  await hands.key("z", "KeyZ", 90, 2);
+  if (!(await soon(async () => (await held()) !== beforeLoss, 5000))) fail("Ctrl+Z on the live terrain view didn't take the paint back (control for the lost view's Ctrl+Z)");
+  await hands.key("y", "KeyY", 89, 2);
+  if (!(await soon(async () => (await held()) === beforeLoss, 5000))) fail("Ctrl+Y on the live terrain view didn't bring the paint back (control)");
   await glCall("loseContext");
   await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
   // A frame asked for before the loss has had its turn: what is counted from here on is drawing on the lost context.
@@ -11567,7 +11591,8 @@ async function contextLossChecks(page, found) {
 async function shadowTextureOrder(page, found) {
   const fail = (what) => found.push(`shadow texture order: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   try {
     const root = join(work, "shadow-texture-order");
     rmSync(root, { recursive: true, force: true });
@@ -11592,7 +11617,7 @@ async function shadowTextureOrder(page, found) {
     // The control: the banner's alpha texture was read (as .dds), or the check proves nothing.
     if ((await page.evaluate(`w3Workbench.game.backendReads`)) === readsBefore) fail("Calculate Shadows read nothing from the game (control)");
   } finally {
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11602,7 +11627,8 @@ async function shadowTextureOrder(page, found) {
 async function modelViewerTextures(page, found) {
   const fail = (what) => found.push(`model viewer textures: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   try {
     await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
     const model = `game:${["Units", "Human", "Footman", "Footman.mdx"].join(String.fromCharCode(92))}`;
@@ -11617,7 +11643,7 @@ async function modelViewerTextures(page, found) {
       fail(`${missing} textures not found: ${names.join(" | ")}`);
     }
   } finally {
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11645,7 +11671,8 @@ const foundReads = (page, re) => page.evaluate(`window.__texLog.filter(([p, ok])
 async function terrainModelTexture(page, found) {
   const fail = (what) => found.push(`terrain model texture: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   const dir = join(work, "terrain-model-texture");
   rmSync(dir, { recursive: true, force: true });
   cpSync(FIXTURE, dir, { recursive: true });
@@ -11664,7 +11691,7 @@ async function terrainModelTexture(page, found) {
     if (tifs) fail(`${tifs} .tif names were found in the game (it stores none)`);
   } finally {
     await unwatchGameReads(page);
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11785,7 +11812,9 @@ async function shouldHaves(page, found) {
 
   // Tiles: the ground changes, one undo takes it back.
   const ground = hash(join(k.root, "map", "war3map.w3e.txt"));
-  const tiles = await page.evaluate(`(async () => { void w3.commands.execute("w3.terrain.replaceTiles"); await new Promise((r) => setTimeout(r, 800));
+  const tiles = await page.evaluate(`(async () => { void w3.commands.execute("w3.terrain.replaceTiles");
+    // The dialog is up once it has its From options (up to 10 s on a busy machine).
+    for (let i = 0; i < 100 && !document.querySelector(".replace-dialog .replace-from option"); i++) await new Promise((r) => setTimeout(r, 100));
     const d = document.querySelector(".replace-dialog"); const v = d ? [...d.querySelectorAll(".replace-from option")].map((o) => [o.value, o.textContent.includes(" · ")]) : []; document.querySelector(".replace-overlay")?.remove(); return v; })()`);
   // From a tile the ground has (its count shows), to another.
   const used = tiles.find(([, n]) => n)?.[0], other = tiles.find(([id]) => id !== used)?.[0];
@@ -11890,7 +11919,7 @@ async function shouldHaves(page, found) {
       if (on.off.join() !== "false,false,false" || on.note) fail(`with a model typed the loading texts are ${lit(on)}`);
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
     }
-  }
+  } else fail(`the map's loading screen number is ${k.read("war3map.w3i.json").loadingScreen.number}, not the default (-1): the greyed-texts check didn't run`);
   await page.evaluate(`w3.editors.closeAll()`);
 
   // edit_text_file (MCP) on war3map.wts: a "}" inside a text, a " }" line too, is refused with the reason; a "{" is fine.
@@ -12315,7 +12344,8 @@ async function chapterObjects(page, found) {
     await until("the object browser", () => page.evaluate(`!!document.querySelector(".picker-campaign")`), 20000)
       .catch(() => fail("the object browser has no campaign object"));
     await page.evaluate(`(() => { const e = [...document.querySelectorAll(".picker-campaign")].map((b) => b.parentElement).find((r) => r?.textContent.includes("c001")); e?.click(); })()`);
-    const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")]);
+    const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")])
+      .finally(() => page.evaluate(`delete window.__pick`).catch(() => {}));
     if (picked !== "c001") fail(`choosing the campaign object in the browser gave ${lit(picked)}`);
 
     // ---- the MCP object tools in the chapter: the campaign's objects listed, changed only in the campaign ----
@@ -12333,9 +12363,9 @@ async function chapterObjects(page, found) {
       const said = await tool("delete_object", { kind: "units", id: made }).catch((e) => e.message);
       if (!/custom script of Uses It/.test(said)) fail(`delete_object of an object a script names said: ${said}`);
       if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== campaignBefore) fail("the MCP tools in the chapter changed war3campaign.w3u");
-      await tool("undo_last_edit").catch(() => {});
-      await tool("undo_last_edit").catch(() => {});
-      await tool("undo_last_edit").catch(() => {});
+      for (let i = 0; i < 3; i++) await tool("undo_last_edit").catch((e) => fail(`undo_last_edit (${i + 1} of 3) in the chapter: ${e.message}`));
+      const left = JSON.parse(await tool("list_objects", { kind: "units" }).catch(() => JSON.stringify({ error: "list_objects failed" })));
+      if (left.error || left.items?.some((o) => o.id === made)) fail(`after the three undos the chapter still lists the object made for the test: ${lit(left.error ?? made)}`);
     }
 
     // ---- the chapter's Object Editor ----
@@ -12355,6 +12385,7 @@ async function chapterObjects(page, found) {
     if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
     if (view.colour !== "24") fail(`the campaign object's team colour shows ${lit(view.colour)}`);
     // Delete with the campaign object shown: nothing is removed, nothing changes.
+    if (!(await page.evaluate(`!!document.querySelector(".obj-list")`))) fail("the Object Editor has no .obj-list to send Delete to (the check below would pass for nothing)");
     await page.evaluate(`document.querySelector(".obj-list")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }))`);
     // Delete must change nothing: time for a change that must not happen, nothing to wait for.
     await sleep(300);
@@ -13152,8 +13183,8 @@ async function staleEditors(page, found) {
     await page.evaluate(`(() => { w3Workbench.editors.memory = { load: () => ({ tabs: [{ path: ${lit(wai)}, editor: "w3.aiEditor" }], active: ${lit(wai)} }), store: () => {} }; void w3Workbench.editors.restore(); })()`);
     const tabText = `(w3Workbench.editors.tabs.find((t) => t.path === ${lit(wai)})?.el.innerText ?? "")`;
     await until("the missing AI file's tab", () => page.evaluate(`${tabText}.includes("Could not open")`), 20000).catch(() => fail("the tab of a missing AI file didn't say it couldn't open it (the check needs that)"));
-    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); await new Promise((r) => setTimeout(r, 1500)); })()`);
-    if (await page.evaluate(`${tabText}.includes("Could not open")`)) fail("after New AI wrote the file its tab still says it couldn't open it");
+    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+    await until("the tab to stop saying it couldn't open", () => page.evaluate(`!${tabText}.includes("Could not open")`), 10000).catch(() => fail("after New AI wrote the file its tab still says it couldn't open it"));
     const addErr = await k.run("w3.ai.addToMap");
     if (addErr) fail(`Add To Map after New AI: ${addErr}`);
   } finally {
@@ -13331,7 +13362,7 @@ async function lightNumbersRefused(page, found) {
       await typeInto(page, hour, "25");
       await settled(page);
       if (!/Hour must be a number from 0 to 24/.test(await k.toasts()) || await page.evaluate(`${hour}.value`) !== hourWas || await dirty() !== dirtyWas) fail("an hour of 25 wasn't refused with the box and the model kept");
-    }
+    } else fail("the lighting panel has no Hour box (step 0.25): the hour-25 refusal wasn't checked");
     await typeInto(page, field, was === "0.31" ? "0.32" : "0.31");
     await settled(page);
     if (!(await dirty())) fail("0.31 wasn't taken (control)");
@@ -13920,11 +13951,14 @@ async function objectManagerLive(page, found) {
     {
       await k.tool("place_objects", { objects: [{ id: "hkni", x: 768, y: 0 }], ignoreRoom: true });
       await k.save();
+      const knightAt768 = (units) => units.some((u) => u.id === "hkni" && u.position?.[0] === 768);
+      if (!knightAt768(k.units())) fail("the knight at 768 wasn't saved before Delete Object (terrain editor closed)");
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
       const del = await run("w3.terrain.deletePlaced", 768, 0, { id: "hkni" });
       if (del.e) fail(`Delete Object (placed unit) with the terrain editor closed: ${del.e}`);
-      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.x === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
+      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.id === "hkni" && u.position?.[0] === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
       await k.save();
+      if (knightAt768(k.units())) fail("Delete Object (placed unit) with the terrain editor closed: the saved units still hold the knight at 768");
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     }
 
@@ -13961,7 +13995,7 @@ async function objectManagerLive(page, found) {
 
     // ---- A custom unit: Rename Object in the Object Manager's menu, deleted in the Object Editor, undone; closed unsaved.
     await answer("Om Live Renamed");
-    if (await omHas(`${unit} ←`, "Om Live Unit")) {
+    if (await rows(`${unit} ←`, "Om Live Unit", true, "the Object Manager doesn't list the saved custom unit (its rename block can't run)")) {
       const why = await contextMenuItem(page, ".om-row", "Om Live Unit", "Rename Object");
       if (why) fail(`Rename Object (custom unit): ${why}`);
       if (!(await soon(() => page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)))) fail("Rename Object (custom unit) left the Object Editor without the change");
@@ -13977,7 +14011,7 @@ async function objectManagerLive(page, found) {
 
     // ---- A trigger and a variable: Rename Object in the menu, deleted in the Trigger Editor, undone; closed unsaved. ----
     await answer("Om Live Moved");
-    if (await omHas("Om Live Trigger", "Om Live Trigger")) {
+    if (await rows("Om Live Trigger", "Om Live Trigger", true, "the Object Manager doesn't list the saved trigger (its rename block can't run)")) {
       const why = await contextMenuItem(page, ".om-row", "Om Live Trigger", "Rename Object");
       if (why) fail(`Rename Object (trigger): ${why}`);
       await rows("Om Live", "Om Live Moved", true, "after Rename Object (trigger, unsaved) the Object Manager doesn't show the new name");
@@ -14128,7 +14162,7 @@ async function editorExtras(page, found) {
     t.ecas = [{ kind: 0, name: "TriggerRegisterTimerEventSingle", enabled: true, params: [{ type: 3, value: "2.00" }], children: [] }, { kind: 2, name: "DoNothing", enabled: true, params: [], children: [] }];
     await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(wtg, null, 2))})`);
     await run("w3.triggers.reveal", "Copy Me");
-    await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).catch(() => fail("the trigger editor doesn't show Copy Me's two lines"));
+    if (!(await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).then(() => true, () => { fail("the trigger editor doesn't show Copy Me's two lines"); return false; }))) return;
     const lines = await page.evaluate(`[...document.querySelectorAll(".trig-eca > span")].map((s) => s.textContent)`);
     const wanted = `Copy Me\n    Events\n        ${lines[0]}\n    Conditions\n    Actions\n        ${lines[1]}\n`;
     await step("Copy As Text of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Text"));
@@ -14210,7 +14244,7 @@ async function editorExtras(page, found) {
     await answer("pickFile", replacement);
     const clicked = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
     if (!clicked) fail("the Import Manager shows no Replace button for a selected file");
-    await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${lit(readFileSync(onDisk, "utf8"))}`));
+    await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${existsSync(onDisk) ? lit(readFileSync(onDisk, "utf8")) : "nothing (it's gone)"}`));
     if (readFileSync(impFile, "utf8") !== impBefore) fail("Replace File changed the import list");
     // The copy goes once the file holds the new content (replace.ts removes it last): given a moment, not checked in
     // the same instant the content showed.
@@ -14251,9 +14285,9 @@ async function editorExtras(page, found) {
     const changedBefore = statSync(onDisk).ctimeMs;
     const bothRan = async () => {
       await page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.redo"]) void w3.commands.execute(c); })()`);
-      await soon(() => statSync(onDisk).ctimeMs !== changedBefore && holds("new words\n") && !existsSync(`${onDisk}.replacing`), 15000);
+      return soon(() => statSync(onDisk).ctimeMs !== changedBefore && holds("new words\n") && !existsSync(`${onDisk}.replacing`), 15000);
     };
-    if (!(await impStep(bothRan, "new words\n"))) {
+    if (!(await impStep(async () => { if (!(await bothRan())) fail("undo and redo pressed at once: the file wasn't written afresh with the new words in time"); }, "new words\n"))) {
       fail(`undo and redo pressed at once left ${lit(readFileSync(onDisk, "utf8"))}, not the new words`);
     }
     // Then one undo: the history has the one step in its place (none done twice or skipped).
@@ -14647,6 +14681,12 @@ async function objectManagerSkin(page, found) {
     const main = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Om Main Unit" })).id;
     await k.save();
     await page.evaluate(`w3.commands.execute("w3.objectManager.refresh")`);
+    await until("Om Main Unit listed", () => page.evaluate(`(async () => {
+      await w3.views.show("objectManager");
+      const s = document.querySelector(".om-search");
+      if (s && s.value !== "Om Main") { s.value = "Om Main"; s.dispatchEvent(new Event("input")); }
+      return [...document.querySelectorAll(".om-row .tree-label")].some((l) => l.textContent === "Om Main Unit");
+    })()`), 10000).catch(() => fail("control: the Object Manager doesn't list the saved Om Main Unit (the rows aren't there to judge)"));
     if (await until("the rows", async () => !(await listed()), 10000).then(() => false, () => true)) fail("control: the Skin-only unit is listed before its file exists");
     const skin = { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "h0sk", mods: [
       { field: "unam", type: "string", value: "Om Skin Only Unit" }, { field: "uabi", type: "string", value: main }] }] };
@@ -15912,7 +15952,7 @@ async function startGoldPalette(page, found) {
       await k.tab("Select");
       await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
       await k.run("w3.terrain.selectInPalette");
-      if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`);
+      if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`), null;
       await k.look(x, y);
       const n = footmen().length;
       await hands.click(".model-stage canvas");
