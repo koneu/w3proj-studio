@@ -1,12 +1,14 @@
 [
   {
+    "limit": 40,
     "name": "unit-heights-reset-on",
-    "description": "test.md 'Reset Fixed Object Heights: does it cover units?': no. Units with a height of their own in the file (footmen at 0 and 500 on a plateau of 256, one at 500 on flat ground, a gryphon at 0 on the plateau; fixtures/we-specs/make-unit-heights.mjs), the switch on as it starts: the editor saves each at the ground (256, 256, 0, 256); Studio's open and save does the same (savedUnitZ)",
+    "description": "test.md 'Reset Fixed Object Heights: does it cover units?': no. Units with a height of their own in the file (footmen at 0 and 500 on a plateau of 256, one at 500 on flat ground, a gryphon at 0 on the plateau; fixtures/we-specs/make-unit-heights.mjs), the switch on (the editor: its preference Reset Fixed Z When Moving Objects=true written before its start, we.prefs; Studio: terrain.resetFixedHeights true): the editor saves each at the ground (256, 256, 0, 256); Studio's open and save does the same (savedUnitZ)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-heights.w3x" },
-    "we": { "saveAccept": ["Warning"], "steps": [] },
+    "we": { "prefs": { "Misc": { "Reset Fixed Z When Moving Objects": "true" } }, "saveAccept": ["Warning"], "steps": [] },
     "studio": {
       "steps": [
         { "setting": ["script.generateOnSave", false] },
+        { "setting": ["terrain.resetFixedHeights", true] },
         { "terrain": true },
         { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
         { "sleep": 2000 }
@@ -15,10 +17,11 @@
     "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights" }]
   },
   {
+    "limit": 40,
     "name": "unit-heights-reset-off",
-    "description": "the same with the Reset Fixed Object Heights switch off (the editor: Ctrl+Shift+H, seen in its Advanced menu in round 3; Studio: terrain.resetFixedHeights false): the units are saved at the ground either way",
+    "description": "the same with the Reset Fixed Object Heights switch off (the editor: Reset Fixed Z When Moving Objects=false written before its start, we.prefs, the switch Ctrl+Shift+H toggles in its Advanced menu; Studio: terrain.resetFixedHeights false): the units are saved at the ground either way, so this pair shows the switch plays no part in opening and saving units (it acts when objects are moved, which neither spec does)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-heights.w3x" },
-    "we": { "saveAccept": ["Warning"], "steps": [["--key", "ctrl+shift+h"], ["--sleep", "500"]] },
+    "we": { "prefs": { "Misc": { "Reset Fixed Z When Moving Objects": "false" } }, "saveAccept": ["Warning"], "steps": [] },
     "studio": {
       "steps": [
         { "setting": ["script.generateOnSave", false] },

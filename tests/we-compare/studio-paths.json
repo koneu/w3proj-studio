@@ -65,8 +65,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -74,8 +77,18 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
@@ -146,8 +159,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -155,8 +171,18 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
@@ -181,7 +207,7 @@
           "terrain": true
         },
         {
-          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); await w3.editors.saveAll();"
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const xs = () => (s.placedObjects()?.doodads ?? []).map((d) => d.position[0]); const before = xs(); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); const after = xs(); const moved = after.filter((x, i) => x > before[i]).length; if (!moved || after.length !== before.length) throw new Error(`Numpad6 moved ${moved} of ${before.length} doodads (now ${after.length})`); await w3.editors.saveAll();"
         },
         {
           "sleep": 2000
@@ -234,8 +260,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -243,8 +272,18 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
@@ -322,8 +361,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -331,8 +373,18 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
@@ -403,8 +455,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -412,8 +467,18 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
@@ -492,8 +557,11 @@
       },
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e",
+        "expect": "differs",
+        "expectPaths": [
+          "header.version"
+        ]
       },
       {
         "file": "war3map.wts",
@@ -501,15 +569,25 @@
       },
       {
         "file": "war3map.lua",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "we": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemExWithFilter\\(",
+            "^\\s*SetPlayerRaceSkin\\(Player\\(\\d+\\), RACE_PREF_USER_SELECTABLE\\)$",
+            "^\\s*SetHDWaterParamsEx\\("
+          ],
+          "studio": [
+            "^\\s*RandomDistAddItem\\(ChooseRandomItemEx\\("
+          ]
+        }
       }
     ],
     "limit": 12
   },
   {
     "name": "studio-paths-matrix-masks",
-    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them (which agree with allies.rs's rule for those starts) into the w3i; the borrowed wtg/wts make the player names TRIGSTR_00n",
+    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i (that those masks agree with allies.rs's rule for the editor's starts was seen by hand once; this spec only checks that the starts, the masks and the names are what differs); the borrowed wtg/wts make the player names TRIGSTR_00n",
     "input": {
       "map": "${REPO}/target/studio-paths/matrix.w3x"
     },

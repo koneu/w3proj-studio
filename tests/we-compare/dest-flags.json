@@ -1,7 +1,7 @@
 [
   {
     "name": "dest-flags",
-    "description": "Destructable flags in war3map.doo after the editor's save: dest-tint-unref.w3x (make-dest-tint.mjs --types=LTlt,LTe1,YT04 --unref: no trigger names any destructable) given flags 0 (and 1, 2, 3, 4, 6 on seven LTlt). The editor writes 2 on every one its script doesn't create (6 where it was 4, fixed height), the script has no CreateAllDestructables; with a trigger naming them (dest-tint) it writes 0 (4 for fixed height) and creates them, whatever flags the input had (2, 3 and 6 included). So flag 2 is the editor's mark 'the game places it from the doo' and follows 'referenced or drops', it isn't input (Studio's script leaves out a destructable with flag 2 even when a trigger names it: bugs.md). Studio keeps what it is given.",
+    "description": "Destructable flags in war3map.doo after the editor's save: dest-tint-unref.w3x (make-dest-tint.mjs --types=LTlt,LTe1,YT04 --unref: no trigger names any destructable) given flags 0 (and 1, 2, 3, 4, 6 on seven LTlt). The editor writes 2 on every one its script doesn't create (6 where it was 4, fixed height), the script has no CreateAllDestructables; with a trigger naming them (dest-tint) it writes 0 (4 for fixed height) and creates them, whatever flags the input had (2, 3 and 6 included). So flag 2 is the editor's mark 'the game places it from the doo' and follows 'referenced or drops', it isn't input (Studio's script leaves out a destructable with flag 2 even when a trigger names it: bugs.md). Studio keeps what it is given. expectPaths names every destructable whose input flags aren't already 2 or 6 (the input's 26: flags 0 on 0-9 and 15-25, 1 on 10, 3 on 12, 4 on 13), so each one's flags must differ and the two given 2 (11) and 6 (14) must not.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/dest-tint-unref.w3x"
     },
@@ -40,7 +40,30 @@
           "doodads[].variation"
         ],
         "expectPaths": [
-          "doodads[].flags"
+          "doodads[0].flags",
+          "doodads[1].flags",
+          "doodads[2].flags",
+          "doodads[3].flags",
+          "doodads[4].flags",
+          "doodads[5].flags",
+          "doodads[6].flags",
+          "doodads[7].flags",
+          "doodads[8].flags",
+          "doodads[9].flags",
+          "doodads[10].flags",
+          "doodads[12].flags",
+          "doodads[13].flags",
+          "doodads[15].flags",
+          "doodads[16].flags",
+          "doodads[17].flags",
+          "doodads[18].flags",
+          "doodads[19].flags",
+          "doodads[20].flags",
+          "doodads[21].flags",
+          "doodads[22].flags",
+          "doodads[23].flags",
+          "doodads[24].flags",
+          "doodads[25].flags"
         ]
       }
     ],
