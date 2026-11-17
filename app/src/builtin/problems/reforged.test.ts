@@ -18,7 +18,7 @@ test("a build machine's texture path is found where the game stores it", async (
   const got = await readLayered(textureCandidates(raw), "de", read);
   assert.equal(got.name, "Doodads/Terrain/CityBridgeExtraLarge0/StoneBridgeWide_Diffuse.dds");
   // Control: the path read verbatim, as the bug did, finds nothing.
-  await assert.rejects(readLayered([raw], "de", read));
+  await assert.rejects(readLayered([raw], "de", read), /not found: War3\.w3mod/);
 });
 
 test("the chosen set wins, the other one and Classic follow", async () => {

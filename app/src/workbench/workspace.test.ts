@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 // The backend is the Tauri IPC: a stand-in with one file list per project that answers what workspace.ts asks.
 type F = { path: string; size: number; modified: number };
-const A = "C:\\Users\\Konstantin\\a", B = "C:\\Users\\Konstantin\\b";
+const A = "C:\\Users\\Tester\\a", B = "C:\\Users\\Tester\\b";
 const backend = new Map<string, F[]>();
 const calls = { projectFiles: 0 };
 let gate: Promise<void> | null = null;
@@ -37,6 +37,8 @@ const reset = () => {
   calls.projectFiles = 0;
   gate = null;
 };
+/** Lets every pending promise step of the stand-in backend run (it has no timers), so "it would have happened by now" is a fact, not a wait. */
+const settle = async () => { for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r)); };
 const g = globalThis as unknown as Record<string, unknown>;
 g.window = globalThis;
 g.__TAURI_INTERNALS__ = {
@@ -64,7 +66,7 @@ g.__TAURI_INTERNALS__ = {
         }
         return null;
       }
-      case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/konsta~1/i, "Konstantin");
+      case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/tester~1/i, "Tester");
       case "fs_write_text": {
         if (gate) await gate;
         const stamp = land(String(args.path), String(args.text).length);
@@ -103,7 +105,7 @@ test("a new file written into the project is listed at once, alone, and isn't an
   let changed = 0;
   ws.onDidChange.on(() => changed++);
   await ws.writeText("map/Scripts/x.ai", "// ai");
-  await new Promise((r) => setTimeout(r, 5)); // a refresh started by the write would be done by now
+  await settle(); // a refresh started by the write would be done by now
   assert.ok(ws.files().some((f) => f.path === "map/Scripts/x.ai"), "listed");
   assert.equal(calls.projectFiles, reads, "the project isn't walked again");
   assert.equal(changed, 1, "the Explorer is told");
@@ -118,7 +120,7 @@ test("a write doesn't hide what someone else changed meanwhile", async () => {
   await ws.open(A);
   backend.get(A)!.push({ path: "by-git.txt", size: 5, modified: 3 });
   await ws.writeText("map/Scripts/x.ai", "// ai");
-  await new Promise((r) => setTimeout(r, 5)); // a refresh started by the write would be done by now
+  await settle(); // a refresh started by the write would be done by now
   assert.deepEqual([...(await ws.externalChanges())], ["by-git.txt"]);
 });
 
@@ -151,7 +153,7 @@ test("a write that ends after a project switch leaves the new project alone", as
 
 test("recent projects: another spelling of the opened root isn't listed twice", async () => {
   reset();
-  const { ws, saved } = make(["C:\\Users\\KONSTA~1\\a", B, "c:\\users\\konsta~1\\b"]);
+  const { ws, saved } = make(["C:\\Users\\TESTER~1\\a", B, "c:\\users\\tester~1\\b"]);
   await ws.open(A);
   await ws.recentsTidied();
   assert.deepEqual(saved.recentProjects, [A, B]);
@@ -188,7 +190,7 @@ test("a file written while externalChanges reads stays listed and isn't reported
   await ws.open(A);
   const release = holdReads();
   const checking = ws.externalChanges();
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   await ws.writeText("map/Scripts/x.ai", "// ai"); // the read began before this file existed
   release();
   const changed = await checking;
@@ -203,7 +205,7 @@ test("a file written while refresh reads stays listed, and isn't reported later"
   await ws.open(A);
   const release = holdReads();
   const refreshing = ws.refresh();
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   await ws.writeText("map/Scripts/x.ai", "// ai");
   release();
   await refreshing;
@@ -218,7 +220,7 @@ test("a write during the read doesn't hide someone else's change from the same r
   backend.get(A)!.push({ path: "by-git.txt", size: 5, modified: 3 });
   const release = holdReads();
   const checking = ws.externalChanges();
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   await ws.writeText("map/Scripts/x.ai", "// ai");
   release();
   assert.deepEqual([...(await checking)], ["by-git.txt"]);
@@ -230,13 +232,13 @@ test("right after an open the project is there before its file list: filesReady 
   await ws.open(B);
   const release = holdReads();
   const opening = ws.open(A);
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   assert.equal(ws.project()?.root, A, "the project is there");
   assert.equal(ws.filesComplete(), false);
   assert.deepEqual(ws.files(), [], "not B's files under A");
   let ready = false;
   const waiting = ws.filesReady().then(() => { ready = true; });
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   assert.equal(ready, false, "waits while the list is read");
   release();
   await waiting;
@@ -251,7 +253,7 @@ test("filesReady: a switch while the list is read waits for the new project's; a
   const { ws } = make();
   const release = holdReads();
   const first = ws.open(A);
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   const waiting = ws.filesReady();
   const second = ws.open(B);
   release();
@@ -262,7 +264,7 @@ test("filesReady: a switch while the list is read waits for the new project's; a
   assert.deepEqual(ws.files().map((f) => f.path), ["other.txt"], "A's late list doesn't land on B");
   failFiles = true;
   try {
-    await assert.rejects(ws.open(A));
+    await assert.rejects(ws.open(A), /can't be read/);
     assert.equal(ws.filesComplete(), false);
     await assert.rejects(ws.filesReady(), /file list couldn't be read/);
   } finally {
@@ -278,11 +280,11 @@ test("externalChanges while the first list after an open is read: it waits for i
   backend.get(A)!.push({ path: "map/war3map.w3i", size: 9, modified: 9 });
   const release = holdReads();
   const opening = ws.open(A);
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   let fired = 0;
   ws.onDidChange.on(() => fired++);
   const check = ws.externalChanges();
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   release();
   assert.deepEqual([...(await check)], [], "the files the open is reading are no outside changes");
   await opening;
@@ -298,7 +300,7 @@ test("externalChanges after an open whose list couldn't be read: no \"before\", 
   const { ws } = make();
   failFiles = true;
   try {
-    await assert.rejects(ws.open(A));
+    await assert.rejects(ws.open(A), /can't be read/);
   } finally {
     failFiles = false;
   }
@@ -372,9 +374,7 @@ test("opening a project doesn't wait for the recent list's paths to be resolved"
   const { ws, saved } = make([B, OFFLINE]);
   let release!: () => void;
   normalizeGate = new Promise<void>((r) => { release = r; });
-  const started = Date.now();
-  await ws.open(A);
-  assert.ok(Date.now() - started < 1000, "the open didn't wait for the disk");
+  await ws.open(A); // resolved while normalizeGate is still pending: it didn't wait for the disk
   assert.deepEqual(saved.recentProjects, [A, B, OFFLINE], "listed as saved at once");
   normalizeGate = null;
   release();
@@ -412,7 +412,7 @@ test("our own write of an existing file isn't reported, and the next check is qu
 
 test("a stale tidy of the recent list (open A, B, A) writes nothing", async () => {
   reset();
-  const SHORT_A = "C:\\Users\\KONSTA~1\\a", X = "//x/y/z";
+  const SHORT_A = "C:\\Users\\TESTER~1\\a", X = "//x/y/z";
   const { ws, saved } = make([SHORT_A, X]);
   let release!: () => void;
   normalizeGate = new Promise<void>((r) => { release = r; });
@@ -423,7 +423,7 @@ test("a stale tidy of the recent list (open A, B, A) writes nothing", async () =
   await ws.recentsTidied();
   assert.deepEqual(saved.recentProjects, [A, B, X]);
   release(); // the first tidy ends now, with a list from before B was opened
-  await new Promise((r) => setTimeout(r, 30));
+  await settle();
   assert.deepEqual(saved.recentProjects, [A, B, X]);
 });
 
@@ -432,10 +432,10 @@ test("a failing save of the tidied recent list is no unhandled rejection", async
   const seen: unknown[] = [];
   const on = (e: unknown) => seen.push(e);
   process.on("unhandledRejection", on);
-  const { ws } = make(["C:\\Users\\KONSTA~1\\a"], 1); // the open's own save works, the tidy's fails
+  const { ws } = make(["C:\\Users\\TESTER~1\\a"], 1); // the open's own save works, the tidy's fails
   await ws.open(A);
   await ws.recentsTidied();
-  await new Promise((r) => setTimeout(r, 20));
+  await settle();
   process.off("unhandledRejection", on);
   assert.deepEqual(seen, []);
 });
@@ -469,7 +469,7 @@ test("overlapping writes to one file: the one that started last keeps the last w
   let release!: () => void;
   holds.set("A", new Promise<void>((r) => { release = r; }));
   const first = ws.writeText("war3map.j", "A"); // lands first, answers last
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   await ws.writeText("war3map.j", "BB"); // lands last
   release();
   await first;
@@ -485,7 +485,7 @@ test("a write under way counts as ours", async () => {
   let release!: () => void;
   holds.set("AAAA", new Promise<void>((r) => { release = r; }));
   const writing = ws.writeText("war3map.j", "AAAA");
-  await new Promise((r) => setTimeout(r, 5));
+  await settle();
   assert.equal((await ws.externalChanges()).size, 0, "the file already has the new contents, the answer isn't here yet");
   release();
   await writing;
