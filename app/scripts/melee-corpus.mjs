@@ -15,8 +15,7 @@
 // changed. Needs the release CLI (`cargo build --release`, or W3PROJ_BIN) and the installed game (W3PROJ_GAME,
 // .game-path). A development tool, like wpm-compare.mjs.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -36,7 +35,9 @@ const game = gamePath();
 const run = (argv, opts = {}) => execFileSync(cli, argv, { maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"], ...opts });
 const gameCat = (p) => run(["game", "--install", game, "cat", p.replace(/\\/g, "/")]);
 
-const cache = join(tmpdir(), "w3proj-melee-corpus");
+// In the repository's target/ (git-ignored), not the OS temp folder; keyed by the CLI's build time, so a new CLI unpacks again.
+const cliStamp = Math.floor(statSync(cli).mtimeMs);
+const cache = join(app, "..", "target", "w3proj-melee-corpus");
 mkdirSync(cache, { recursive: true });
 const { build } = await import("esbuild");
 const bundle = join(cache, `melee-${process.pid}.mjs`);
@@ -65,7 +66,7 @@ const results = [];
 for (const line of listed) {
   const stored = line.replace(/^[^:]*:/, "");
   const name = stored.replace(/^Maps\/FrozenThrone\//i, "");
-  const dir = join(cache, stored.replace(/[^\w.()-]/g, "_"));
+  const dir = join(cache, `${stored.replace(/[^\w.()-]/g, "_")}-${cliStamp}`);
   if (!existsSync(join(dir, ".unpacked"))) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });

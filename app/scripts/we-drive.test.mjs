@@ -3,8 +3,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -155,7 +156,7 @@ test("parseArgs: --save takes the file to copy the saved map to, and needs a map
 });
 
 test("addCamerasToMap: the looks' cameras go first in war3map.w3c.json, a missing file is made, an unreadable one refused", () => {
-  const dir = mkdtempSync(join(tmpdir(), "we-look-"));
+  const dir = scratchDir("we-look-");
   try {
     const copy = join(dir, "m.w3x"), project = join(dir, "p");
     writeFileSync(copy, "map");
@@ -229,7 +230,7 @@ test("compare fails only on changes under the guarded paths", () => {
 });
 
 test("the lock: a second run waits and gives up; a lock whose process is gone is taken over", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "we-lock-"));
+  const dir = scratchDir("we-lock-");
   const lock = join(dir, "machine.lock");
   const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
   process.env.W3PROJ_WE_LOCK = lock;
@@ -465,7 +466,7 @@ const dialogWin = (id, title, rect = [500, 400, 300, 120]) => ({ id, title, clas
  * editor processes in `children`; `onWineserver(args)` runs inside a wineserver call (as a real exit would happen).
  */
 function rig(t, { timeout = 300 } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "we-session-"));
+  const dir = scratchDir("we-session-");
   const saved = process.env.W3PROJ_WE_DIR;
   process.env.W3PROJ_WE_DIR = join(dir, "we");
   t.after(() => {

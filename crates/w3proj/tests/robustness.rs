@@ -95,15 +95,43 @@ fn registry() -> Registry {
     codecs
 }
 
-fn tmp(name: &str) -> PathBuf {
+/// How many tests hold the folder; the last one to let go removes it.
+static TMP_USERS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+
+fn tmp_dir() -> PathBuf {
     // The gate runs the debug and the release build of these tests at once: one folder each run.
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("robustness-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    dir.join(name)
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("robustness-{}", std::process::id()))
+}
+
+/// Keeps the scratch folder alive for one test; dropped (also on a failed assert), the last one removes it.
+struct TmpGuard;
+
+impl TmpGuard {
+    fn new() -> TmpGuard {
+        let mut users = TMP_USERS.lock().unwrap_or_else(|e| e.into_inner());
+        *users += 1;
+        fs::create_dir_all(tmp_dir()).unwrap();
+        TmpGuard
+    }
+}
+
+impl Drop for TmpGuard {
+    fn drop(&mut self) {
+        let mut users = TMP_USERS.lock().unwrap_or_else(|e| e.into_inner());
+        *users -= 1;
+        if *users == 0 {
+            fs::remove_dir_all(tmp_dir()).ok();
+        }
+    }
+}
+
+fn tmp(name: &str) -> PathBuf {
+    tmp_dir().join(name)
 }
 
 /// The fixture as a map. Tests run in parallel: each passes its own name.
 fn map_bytes(name: &str) -> Vec<u8> {
+    let _guard = TmpGuard::new();
     let out = tmp(name);
     w3proj::pack(&fixture(), Some(&out), &registry()).unwrap();
     fs::read(out).unwrap()
@@ -408,6 +436,7 @@ fn decompression_survives_damaged_sectors() {
 
 #[test]
 fn verify_never_reports_a_silent_change() {
+    let _guard = TmpGuard::new();
     let bytes = map_bytes("verify.w3x");
     let codecs = registry();
     let runs = par_seeds("verify", seeds(rounds()), |chunk| {
