@@ -1,7 +1,7 @@
 [
  {
   "name": "edge-single-diagonal",
-  "description": "A diagonal nudge (KP_9) at the east edge, each object selected alone: after the KP_6 presses that bring it to the edge, KP_9 presses (tree 3, LPcr 10, footman 5, farm 3): does the free axis still move? No: the step is refused whole. First spec of the file: it switches Num Lock on (the editor keeps it for the next maps), so run the file together.",
+  "description": "A diagonal nudge (KP_9) at the east edge, each object selected alone: after the KP_6 presses that bring it to the edge, KP_9 presses (tree 3, LPcr 10, footman 5, farm 3): does the free axis still move? No: the step is refused whole. Num Lock is set on (--numlock on) by each spec of the file, so either runs alone.",
   "input": {
    "map": "${REPO}/tests/fixtures/we-compare/edge-last-step.w3m"
   },
@@ -40,8 +40,8 @@
      "d"
     ],
     [
-     "--key",
-     "Num_Lock"
+     "--numlock",
+     "on"
     ],
     [
      "--key",
@@ -1013,6 +1013,10 @@
     "Warning"
    ],
    "steps": [
+    [
+     "--numlock",
+     "on"
+    ],
     [
      "--key",
      "m"
