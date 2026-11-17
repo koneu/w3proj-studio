@@ -195,3 +195,27 @@ test("a geoset that claims more vertices than the file holds is refused before a
   u32(16); tag("VRTX"); u32(0x15555555); u32(0);
   assert.throws(() => parseMdx(new Uint8Array(parts)), /GEOS: geoset VRTX: \d+ bytes needed/);
 });
+
+test("the container: nothing, a wrong magic and every cut of a model are refused with an Error or read with a warning", () => {
+  assert.throws(() => parseMdx(new Uint8Array(0)), /not an MDX model|short|end|need|read/i, "an empty file");
+  assert.throws(() => parseMdx(new Uint8Array([0x4d, 0x44])), Error, "two bytes");
+  assert.throws(() => parseMdx(new TextEncoder().encode("MDLY\0\0\0\0")), /not an MDX model/, "a wrong magic");
+  assert.throws(() => parseMdx(new TextEncoder().encode("mdlx")), /not an MDX model|short|end|need|read/i, "the magic in lower case");
+  // Just the magic is a model with nothing in it.
+  assert.equal(parseMdx(new TextEncoder().encode("MDLX")).geosets.length, 0);
+  for (const [what, whole] of [["two textures", model(["a.blp", "b.blp"])], ["a Reforged layer", reforgedLayer(true)]] as const) {
+    assert.ok(parseMdx(whole).warnings.length === 0, `${what}: the whole model reads clean (control)`);
+    let refused = 0, warned = 0;
+    for (let n = 0; n < whole.length; n++) {
+      try {
+        const m = parseMdx(whole.subarray(0, n));
+        if (m.warnings.length) warned++;
+      } catch (e) {
+        // A refusal is the parser's own Error: a TypeError or RangeError would be an unchecked read.
+        assert.ok(e instanceof Error && e.constructor === Error, `${what}, ${n} of ${whole.length} bytes: ${e instanceof Error ? `${e.name}: ${e.message}` : e}`);
+        refused++;
+      }
+    }
+    assert.ok(refused > 0, `${what}: a cut file is refused at least sometimes (control)`);
+  }
+});

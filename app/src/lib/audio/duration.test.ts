@@ -62,3 +62,14 @@ test("bytes that aren't an mp3 have no length", () => {
   assert.equal(soundDurationMs(new Uint8Array(500)), null);
   assert.equal(soundDurationMs(id3v1()), null);
 });
+
+test("an ID3v2 tag that claims more bytes than the file has, an empty array and a lone header have no length, without throwing", () => {
+  const huge = id3(1014);
+  assert.equal(soundDurationMs(huge.subarray(0, 100)), null, "a tag cut short, with no frame after it");
+  const claims = concat(id3(5000).subarray(0, 10), frames(3));
+  assert.equal(soundDurationMs(claims), null, "a tag whose size runs past the end of the file");
+  assert.equal(soundDurationMs(new Uint8Array(0)), null, "an empty array");
+  assert.equal(soundDurationMs(id3(0)), null, "a header alone");
+  assert.equal(soundDurationMs(id3(0).subarray(0, 9)), null, "a header cut short");
+  assert.equal(soundDurationMs(frame()), ms(2), "control: one frame by itself is read (a frame longer than its frames)");
+});

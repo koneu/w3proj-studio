@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
+import { waitUntil } from "../testhelpers/testutil";
 import { englishWords, loadKind } from "./metadata";
 
 test("the object data asks for its game files at once, and merges them in order whichever lands first", async () => {
@@ -19,7 +20,8 @@ test("the object data asks for its game files at once, and merges them in order 
     },
   } as unknown as W3Api;
   const loading = loadKind(w3, "w3q");
-  await new Promise((r) => setTimeout(r, 10));
+  // Every read is asked for at once: wait until all of them are pending, not for a guessed pause.
+  await waitUntil(() => pending.length >= Object.keys(files).length + 4, "the reads to be asked for");
   const asked = pending.map((p) => p.path);
   // Strings, edit data, the three profile files, the kind's table and its metadata: none waited for another.
   for (const path of [...Object.keys(files), "UI\\WorldEditStrings.txt", "UI/WorldEditData.txt", "Units\\UpgradeData.slk", "Units\\UpgradeMetaData.slk"]) {
@@ -33,8 +35,9 @@ test("the object data asks for its game files at once, and merges them in order 
 });
 
 test("a unit's English names come from its tables, on any install", () => {
-  const words = englishWords([{ unitID: "hfoo", "comment(s)": "Footman" }, { unitUIID: "hfoo", name: "footman", file: "units\human\Footman\Footman" }]);
+  const words = englishWords([{ unitID: "hfoo", "comment(s)": "Footman" }, { unitUIID: "hfoo", name: "footman", file: "units\\human\\Footman\\Footman" }]);
   assert.equal(words, "footman", "the same word twice is one word");
+  assert.ok(!/units|human/.test(words), "the file path is no words");
 });
 
 test("names run together split at capitals", () => {

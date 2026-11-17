@@ -28,6 +28,7 @@ import { parseMdx, renameTextures } from "./model/mdx";
 import { parseW3e } from "./terrain/w3e";
 import { parseTriggerData } from "./triggers/triggerdata";
 import { parseWct, parseWctText, parseWtg, writeWtg } from "./triggers/wtg";
+import { waitUntil } from "./testhelpers/testutil";
 
 /**
  * A single file may use this much processor time; past it the worker is killed and the file
@@ -383,7 +384,13 @@ function work(start: number) {
     const seed = seeds[Math.floor(c / ROUNDS)], round = c % ROUNDS;
     try {
       TARGETS[seed.target](bytesOf(seed, round));
-    } catch { /* refusing a damaged file is right */ }
+    } catch (e) {
+      // Refusing a damaged file is right, with the parser's own error. A TypeError, RangeError or ReferenceError is
+      // the parser's bug (an unchecked length, a missing field), not a refusal: the parent counts it as a failure.
+      if (e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError) {
+        writeLine(writeSync, 1, `bad ${c} ${e.name}: ${e.message.split("\n")[0].slice(0, 200)}`);
+      }
+    }
   }
   Atomics.store(cell, 0, -1);
 }
@@ -391,7 +398,7 @@ function work(start: number) {
 interface Failure { seed: string; round: number; what: string }
 
 /** One child from case `start` on: null if it got through them all, or where and how it stopped. */
-function runFrom(start: number): Promise<{ at: number; what: string } | null> {
+function runFrom(start: number, bad: Failure[], seeds: Seed[]): Promise<{ at: number; what: string } | null> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [`--max-old-space-size=${HEAP_MB}`, fileURLToPath(import.meta.url)], {
       env: { ...process.env, W3_HOSTILE_START: String(start), NODE_TEST_CONTEXT: undefined },
@@ -410,7 +417,10 @@ function runFrom(start: number): Promise<{ at: number; what: string } | null> {
       tail = lines.pop()!;
       for (const line of lines) {
         const [word, value] = line.split(" ");
-        if (word === "done") finished = true;
+        if (word === "bad") {
+          const c = Number(value), s = seeds[Math.floor(c / ROUNDS)];
+          if (s) bad.push({ seed: `${s.target}: ${s.name}`, round: c % ROUNDS, what: line.split(" ").slice(2).join(" ") });
+        } else if (word === "done") finished = true;
         else if (word === "cpu") {
           if (since !== null && Number(value) - since > LIMIT_MS) kill(`over ${LIMIT_MS} ms of processor time`);
         } else if (word === "ready") {
@@ -439,14 +449,27 @@ function runFrom(start: number): Promise<{ at: number; what: string } | null> {
 
 /** Runs all cases; after a child dies, the next one starts behind the case that did it. */
 async function run(seeds: Seed[]): Promise<Failure[]> {
-  const failures: Failure[] = [], total = seeds.length * ROUNDS;
+  const failures: Failure[] = [], total = seeds.length * ROUNDS, bad: Failure[] = [];
   for (let start = 0; start < total;) {
-    const end = await runFrom(start);
+    const end = await runFrom(start, bad, seeds);
     if (!end) break;
     const s = seeds[Math.floor(end.at / ROUNDS)];
     failures.push({ seed: `${s.target}: ${s.name}`, round: end.at % ROUNDS, what: end.what });
     if (failures.length >= MAX_FAILURES) break;
     start = end.at + 1;
+  }
+  // Errors that are no refusals (TypeError and the like): a failure each; the first few say which.
+  if (bad.length) {
+    const kinds = new Map<string, number>();
+    for (const b of bad) kinds.set(b.what.split(":")[0], (kinds.get(b.what.split(":")[0]) ?? 0) + 1);
+    const targets = new Map<string, number>();
+    for (const b of bad) targets.set(b.seed.split(":")[0], (targets.get(b.seed.split(":")[0]) ?? 0) + 1);
+    console.error(`${bad.length} cases threw a non-parser error: ${[...kinds].map(([k, n]) => `${k} x${n}`).join(", ")}; by target: ${[...targets].map(([k, n]) => `${k} x${n}`).join(", ")}`);
+    // A TypeError or ReferenceError is a bug in the parser. A RangeError (the DataView's "Offset is outside the bounds",
+    // an unchecked length) is how several readers still refuse a truncated file; counted above, a failure with
+    // W3_HOSTILE_STRICT=1 until those readers check their lengths.
+    const strict = process.env.W3_HOSTILE_STRICT === "1";
+    failures.push(...bad.filter((b) => strict || !b.what.startsWith("RangeError")).slice(0, MAX_FAILURES));
   }
   return failures;
 }
@@ -482,7 +505,9 @@ if (process.env.W3_HOSTILE_FLOOD) {
     child.stderr.setEncoding("utf8").on("data", (c: string) => { err = (err + c).slice(-ERR_TAIL); });
     child.stdout.setEncoding("utf8").on("data", (c: string) => { for (const ch of c) if (ch === "\n") lines++; });
     child.stdout.pause();
-    await new Promise((done) => setTimeout(done, 1500));
+    // Until the paused stream's buffer is full: from then on the child's writes have nowhere to go but the pipe.
+    await waitUntil(() => child.stdout.readableLength >= child.stdout.readableHighWaterMark, "the child's reports to fill the paused stream", 30000);
+    await new Promise((done) => setTimeout(done, 100));
     child.stdout.resume();
     const code = await closed;
     assert.deepEqual({ code, lines, err }, { code: 0, lines: FLOOD_LINES, err: "" });

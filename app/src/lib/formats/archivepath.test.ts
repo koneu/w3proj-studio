@@ -1,9 +1,8 @@
 // toArchiveName's shortcut for paths without escapes must give what the full decoding gives.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { readFixture } from "../testhelpers/testutil";
 import { toArchiveName, toProjectPath } from "./archivepath";
 
 /** Characters that are invisible or easy to lose in the source, built from their codes. */
@@ -26,13 +25,9 @@ test("a component that starts with a byte-order mark keeps it, with and without 
   assert.equal(toArchiveName(`a/b${BOM}.mdx`), slow(`a/b${BOM}.mdx`));
 });
 
-/** tests/fixtures/archive-names.json, found from where the tests run (app/ or the repository). */
+/** tests/fixtures/archive-names.json. */
 function archiveNames(): { roundTrip: { path: string; archive: string }[]; toArchive: { path: string; archive: string }[] } {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "archive-names.json");
-    if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8"));
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/archive-names.json not found");
-  }
+  return JSON.parse(readFixture("archive-names.json"));
 }
 
 test("the names the Rust side packs and unpacks (shared fixture) are the app's too", () => {
