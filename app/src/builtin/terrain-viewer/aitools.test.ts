@@ -198,6 +198,26 @@ test("custom tilesets 0: the paint tools' slot is the one drawn as the tile (the
   assert.equal(groundSlot(set, "Ldrt", [], own), 5);
 });
 
+test("the AI cliff tool takes a third cliff type, and refuses one a corner can't name", () => {
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  const kinds = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CAdi", groundTile: "Adrt" },
+    ...Array.from({ length: 14 }, (_, i) => ({ cliffID: `C${String(i).padStart(3, "0")}`, groundTile: `G${String(i).padStart(3, "0")}` }))];
+  const cliffy = (cliffTiles: string[]) => {
+    const t = field();
+    Object.assign(t, { tileset: "L", groundTiles: [...own], cliffTiles, customTilesetsRaw: 0, customTilesets: false });
+    for (const c of t.corners.slice(0, 17 * 4)) c.layer = 3;
+    return t;
+  };
+  const three = cliffy(["CLdi", "CLgr"]);
+  const changed = setCliffType(three, hill, "box", "Adrt", kinds, own);
+  assert.deepEqual(three.cliffTiles, ["CLdi", "CLgr", "CAdi"]);
+  assert.ok(changed.length && changed.every((i) => three.corners[i].cliffTexture === 2), "the corners got number 2");
+  // A full list (15) can't take CAdi; a list where Adrt's cliff is the 16th can't paint it.
+  const fifteen = kinds.slice(3, 17).map((k) => k.cliffID);
+  assert.throws(() => setCliffType(cliffy(["CLdi", ...fifteen]), hill, "box", "Adrt", kinds, own), /cliff list is full \(15 entries/);
+  assert.throws(() => setCliffType(cliffy(["CLdi", ...fifteen, "CAdi"]), hill, "box", "Adrt", kinds, own), /entry 15 of the map's cliff list/);
+});
+
 test("objects near the change follow the ground, except doodads with a fixed height", () => {
   const t = field();
   const changed = sculptCorners(t, hill, "ellipse", "raise", 100);

@@ -162,6 +162,23 @@ test("a cliff type whose ground tile isn't in the list stays in the cliff list w
   assert.equal(corner(t, 3, 3).cliffTexture, 1, "still CLro");
 });
 
+test("a ground list change that would grow the cliff list past 15 is refused with nothing changed; one that long already stays", () => {
+  const many = new Map([...TYPES, ...Array.from({ length: 15 }, (_, i) => [`C${String(i).padStart(3, "0")}`, `G${String(i).padStart(3, "0")}`] as const)
+    .map(([id, g]) => [id, { ...TYPES.get("CLdi")!, cliffID: id, groundTile: g }] as const)]);
+  const fifteen = Array.from({ length: 15 }, (_, i) => `C${String(i).padStart(3, "0")}`);
+  const t = flat(["Ldrt", "Lgrd"]);
+  t.cliffTiles = [...fifteen];
+  // Ldrt's CLdi would be a 16th entry.
+  assert.throws(() => applyTileList(t, ["Lgrd", "Ldrt"], (i) => 1 - i, many, undefined), /cliff list 16 long/);
+  assert.deepEqual([t.groundTiles, t.cliffTiles], [["Ldrt", "Lgrd"], fifteen], "nothing changed");
+  // Control: a list of 16 already (CLdi in it) can be reordered.
+  const u = flat(["Ldrt", "Lgrd"]);
+  u.cliffTiles = [...fifteen, "CLdi"];
+  applyTileList(u, ["Lgrd", "Ldrt"], (i) => 1 - i, many, undefined);
+  assert.equal(u.cliffTiles.length, 16);
+  assert.deepEqual(u.groundTiles, ["Lgrd", "Ldrt"]);
+});
+
 test("Remove Tile as the World Editor's Modify Tileset does it (we-drive 2026-11-17, plateau.w3x with a stripe of each of the six tiles)", () => {
   // Lordaeron Summer's own six tiles, cliff types CLdi (Ldrt) and CLgr (Lgrs), a mesa of CLgr cliffs. Per removed tile: the
   // replacement the editor happened to give its corners (it picks a random one), the stripes' new tiles, the ground and

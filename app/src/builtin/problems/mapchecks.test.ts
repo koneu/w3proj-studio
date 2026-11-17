@@ -100,13 +100,13 @@ test("missing Map Properties art opens Map Properties at its section", async () 
 test("terrain tiles: a cliff type the game lacks is an error when a corner uses it, a warning when none does", async () => {
   const SLK = (id: string, rows: string[]) => `ID;P\nC;X1;Y1;K"${id}"\n${rows.map((r, i) => `C;Y${i + 2};X1;K"${r}"`).join("\n")}\nE\n`;
   const corner = (cliffTexture: number) => ({ height: 0, water: 0, texture: 0, variation: 0, cliffVariation: 0, cliffTexture, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0, rawWater: 0, texExtra: 0 });
-  const files = async (cliffTexture: number) => {
+  const files = async (cliffTexture: number, cliffTiles = ["CLdi", "CLno"]) => {
     const { writeW3e } = await import("../../lib/terrain/w3e");
-    const bytes = writeW3e({ version: 11, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt"], cliffTiles: ["CLdi", "CLno"], width: 1, height: 1, offsetX: 0, offsetY: 0, corners: [corner(cliffTexture)], trailer: new Uint8Array(0) });
+    const bytes = writeW3e({ version: 11, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt"], cliffTiles, width: 1, height: 1, offsetX: 0, offsetY: 0, corners: [corner(cliffTexture)], trailer: new Uint8Array(0) });
     const w3 = app({}) as unknown as { workspace: Record<string, unknown>; game: Record<string, unknown> };
     w3.workspace.files = () => [{ path: "map/war3map.w3e", size: 1, modified: 1 }];
     w3.workspace.readBytes = async () => bytes;
-    w3.game.readText = async (p: string) => (p.includes("Terrain.slk") ? SLK("tileID", ["Ldrt"]) : SLK("cliffID", ["CLdi"]));
+    w3.game.readText = async (p: string) => (p.includes("Terrain.slk") ? SLK("tileID", ["Ldrt"]) : SLK("cliffID", ["CLdi", "CLgr", "CAdi"]));
     const scope = new RunScope(w3 as unknown as W3Api);
     return mapChecks(w3 as unknown as W3Api, () => scope).find((c) => c.id === "terrainTiles")!.run();
   };
@@ -114,4 +114,9 @@ test("terrain tiles: a cliff type the game lacks is an error when a corner uses 
   assert.deepEqual(unused.map((p) => p.severity), ["warning"]);
   assert.match(unused[0].message, /Cliff type CLno isn't one of the game's/);
   assert.deepEqual(used.map((p) => p.severity), ["error"], "control: the same list with a corner using CLno");
+  // A list of three or more: the game's own third (example map 29) is fine on a corner, an unknown fourth is
+  // judged by its own number.
+  assert.deepEqual(await files(2, ["CLdi", "CLgr", "CAdi"]), []);
+  assert.deepEqual((await files(2, ["CLdi", "CLgr", "CAdi", "CLno"])).map((p) => p.severity), ["warning"]);
+  assert.deepEqual((await files(3, ["CLdi", "CLgr", "CAdi", "CLno"])).map((p) => p.severity), ["error"]);
 });

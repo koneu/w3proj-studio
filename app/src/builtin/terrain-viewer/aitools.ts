@@ -4,7 +4,7 @@
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
-import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
+import { matchCliffTypes, MAX_CLIFF_TYPES, toggleRamp } from "../../lib/terrain/cliffs";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundLimitText } from "./limits";
 import { variationText } from "./values";
@@ -153,6 +153,7 @@ export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly Cl
     if (kinds.some((k) => k.groundTile === cliffTile)) { cliffSlot(t, cliffTile, kinds, own); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
     fixed = grounds.indexOf(cliffTile);
     if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.filter((g) => g).join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
+    if (fixed >= MAX_CLIFF_TYPES) throw new Error(`"${cliffTile}"'s cliff is entry ${fixed} of the map's cliff list, but a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}). Use the cliff of one of: ${grounds.slice(0, MAX_CLIFF_TYPES).filter((g) => g).join(", ")}.`);
   }
   matchCliffTypes(t, changed, grounds, log, fixed);
   return [...log.corners];
@@ -202,8 +203,9 @@ export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string,
   if (!inside.length) throw new Error("That area has no ground in the map.");
   if (!kinds.some((k) => k.groundTile === tile)) throw new Error(`"${tile}" has no cliff. list_ground_tiles marks the tiles that have one.`);
   cliffSlot(t, tile, kinds, own);
-  const grounds = cliffGrounds(t, kinds), log = new Touched();
-  matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, grounds.indexOf(tile));
+  const grounds = cliffGrounds(t, kinds), log = new Touched(), type = grounds.indexOf(tile);
+  if (type >= MAX_CLIFF_TYPES) throw new Error(`"${tile}"'s cliff is entry ${type} of the map's cliff list, but a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}). Use the cliff of one of: ${grounds.slice(0, MAX_CLIFF_TYPES).filter((g) => g).join(", ")}.`);
+  matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, type);
   return [...log.corners];
 }
 
@@ -365,8 +367,9 @@ export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]
   // The list no longer matches the tileset's own: the game goes by this flag.
   t.customTilesets = true;
   t.customTilesetsRaw = 1;
+  // Its cliff type joins while the cliff list has room; a full list keeps its cliffs (cliffSlot refuses where one is wanted).
   const cliff = kinds.find((k) => k.groundTile === tile);
-  if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
+  if (cliff && !t.cliffTiles.includes(cliff.cliffID) && t.cliffTiles.length < MAX_CLIFF_TYPES) t.cliffTiles.push(cliff.cliffID);
   return t.groundTiles.length - 1;
 }
 
@@ -375,7 +378,10 @@ export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[]
 function cliffSlot(t: Terrain, tile: string, kinds: readonly CliffKind[], own?: readonly string[]) {
   groundSlot(t, tile, kinds, own);
   const cliff = kinds.find((k) => k.groundTile === tile);
-  if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
+  if (cliff && !t.cliffTiles.includes(cliff.cliffID)) {
+    if (t.cliffTiles.length >= MAX_CLIFF_TYPES) throw new Error(`The map's cliff list is full (${t.cliffTiles.length} entries, a corner can name ${MAX_CLIFF_TYPES}): ${cliff.cliffID}, ${tile}'s cliff, can't join it. Use the cliff of one of: ${cliffGrounds(t, kinds).slice(0, MAX_CLIFF_TYPES).filter((g) => g).join(", ")}.`);
+    t.cliffTiles.push(cliff.cliffID);
+  }
 }
 
 /** Paints corners with a tile. `edge` (0 to 1) is how much of the outside thins out, so the

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rampClick, rampSides, slopeBand, toggleRamp, widestRun } from "./cliffs";
+import { matchCliffTypes, rampClick, rampSides, slopeBand, toggleRamp, widestRun } from "./cliffs";
 import type { Corner, Terrain } from "./w3e";
 
 /** Rows from the north, a digit per corner: its cliff level. */
@@ -346,4 +346,22 @@ test("a click on a ramp still takes it off", () => {
   assert.ok(t.corners.some((c) => c.ramp));
   toggleRamp(t, 3 * 128, 2.5 * 128, 2, log, true);
   assert.equal(t.corners.some((c) => c.ramp), false);
+});
+
+test("cliff types follow a list longer than two; a number past 14 isn't written (15 is reserved, 16 doesn't fit)", () => {
+  const typed = (fixed: number | undefined, cliffGround: string[]) => {
+    // One cliff tile: all four corners take its type.
+    const t = land(["33", "22"]);
+    t.groundTiles = ["Ldrt", "Ydrt"];
+    for (const c of t.corners) Object.assign(c, { texture: 1, cliffTexture: 15 });
+    matchCliffTypes(t, t.corners.map((_, i) => i), cliffGround, log, fixed);
+    return t.corners.map((c) => c.cliffTexture);
+  };
+  const list = ["Ldrt", "Lgrs", "Adrt"];
+  assert.ok(typed(2, list).every((n) => n === 2), "the chosen third type");
+  // TurtleRock's list has 17 entries: CYdi (Ydrt) at 15, CYsq at 16.
+  const long = [...Array.from({ length: 15 }, (_, i) => `X${String(i).padStart(3, "0")}`), "Ydrt", "Ysqd"];
+  assert.ok(typed(undefined, long).every((n) => n === 15), "Match the ground with its cliff at 15 leaves the corners");
+  assert.ok(typed(16, long).every((n) => n === 15), "a chosen 16 is left out too");
+  assert.ok(typed(undefined, [...long.slice(0, 14), "Ydrt"]).every((n) => n === 14), "control: at 14 it is written");
 });
