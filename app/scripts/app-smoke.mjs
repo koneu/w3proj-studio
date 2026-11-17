@@ -588,7 +588,7 @@ async function atmosphereTools(page, found) {
   await tool("save_project");
   const w3i0 = read("war3map.w3i.json"), edits = () => tool("list_edits").then((t) => JSON.parse(t).length);
   const n0 = await edits();
-  const sky = await tool("set_sky", { lightEnvironment: "A", fogStyle: "Exponential 1", fogEnd: 7000, fogColor: "#ff0000", waterTint: [0, 255, 0], overSky: 1 }).catch((e) => fail(`set_sky: ${e.message}`));
+  const sky = await tool("set_sky", { lightEnvironment: "A", fogStyle: "Exponential 1", fogEnd: 7000, fogColor: "#ff0000", waterTint: [0, 255, 0], overSky: 1 }).catch((e) => { fail(`set_sky: ${e.message}`); return undefined; });
   if (sky === undefined) return;
   if (!/light environment/.test(sky) || !/terrain fog: off/.test(sky)) fail(`the reply doesn't list the changes: ${sky}`);
   if (await edits() !== n0 + 1) fail("set_sky wasn't one edit");
@@ -659,7 +659,7 @@ async function atmosphereTools(page, found) {
   if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
-  if (read("war3map.w3i.json").weather !== "0x00000000" || !existsSync(join(root, "map", "war3map.w3r.json")) === false && read("war3map.w3r.json").regions.length) fail("the undos didn't bring back the map as it was");
+  if (read("war3map.w3i.json").weather !== "0x00000000" || (existsSync(join(root, "map", "war3map.w3r.json")) ? read("war3map.w3r.json").regions.length > 0 : true)) fail("the undos didn't bring back the map as it was");
   } finally {
     await restoreWindow(page);
   }
@@ -732,8 +732,8 @@ async function waterPathing(page, found) {
   if (await tab()) fail(`the rebuild after an edit with the terrain tab closed opened ${await tab()}`);
 
   // A commit straight after a tool's edit takes the rebuilt pathing map with it: nothing of the project is left uncommitted.
-  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8" });
-  git("init", "-q");
+  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(root) } });
+  if (git("init", "-q").status !== 0) return fail("git init failed in the project folder");
   git("add", "-A");
   git("commit", "-q", "-m", "base");
   await page.evaluate(`(() => { w3.window.inputBox = async () => "lake"; })()`);
@@ -1084,7 +1084,7 @@ async function heightKit(page, name) {
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
     },
     /** The Advanced switches go back to what they were, for the next check. */
-    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds", "terrain.resetFixedHeights"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${lit(key)}, undefined, ${lit(layer)})`)))),
+    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds", "terrain.resetFixedHeights", "terrain.units.groundOnSave", "terrain.doodads.snapOnLoad"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${lit(key)}, undefined, ${lit(layer)})`)))),
   };
   return kit;
 }
@@ -1093,9 +1093,10 @@ async function heightKit(page, name) {
  *  twice at the same kind of spot, first with the setting on and then off. The two pastes differ only by the setting,
  *  which is what shows it made the difference. The toolbar box and the command are the same setting. */
 async function heightsPreserve(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (preserve): ${what}`);
-  const k = await heightKit(page, "Preserve");
+  k = await heightKit(page, "Preserve");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }], ignoreRoom: true });
   await k.save();
   const ground = k.doodads()[0].position[2];
@@ -1158,8 +1159,8 @@ async function heightsPreserve(page, found) {
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1168,9 +1169,10 @@ async function heightsPreserve(page, found) {
  *  same isn't read again) counts its doodads as free and lands them at the pointer, not on the 64 grid: copied and
  *  pasted at an off-grid spot, the doodad must land as one copied after its size was read. */
 async function pasteWaitsForSizes(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`paste waits for sizes: ${what}`);
-  const k = await heightKit(page, "PasteSizes");
+  k = await heightKit(page, "PasteSizes");
   await k.tool("place_objects", { objects: [{ id: "LTbr", x: 0, y: 0 }], ignoreRoom: true });
   await k.save();
   const home = k.doodads()[0].position;
@@ -1200,8 +1202,8 @@ async function pasteWaitsForSizes(page, found) {
   await settled(page);
   const early = await pasteOnce(640);
   if (early.length !== 1 || early[0].position[0] !== normal[0].position[0] + 640 || early[0].position[1] !== normal[0].position[1]) fail(`a paste copied before the size was read landed at ${lit(early.map((d) => d.position))}, not at x ${normal[0].position[0] + 640}, y ${normal[0].position[1]}`);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1212,9 +1214,10 @@ async function pasteWaitsForSizes(page, found) {
  *  cycle's clock is performance.now, which the page gets an offset on: a jump of it instead of twenty seconds' wait. */
 async function verify3Steps(page, found) {
   const fail = (what) => found.push(`verify 3 steps: ${what}`);
-  const k = await heightKit(page, "Verify3");
-  const { hands } = k;
+  let k;
   try {
+  k = await heightKit(page, "Verify3");
+  const { hands } = k;
   // ---- mcp.ignoreUndoSteps: begin_edit's description and project_info follow it, and it goes back -----------------------
   const rpc = async (method, params) => JSON.parse(await page.evaluate(`w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }))})`));
   const beginEdit = async () => (await rpc("tools/list", {})).result?.tools?.find((t) => t.name === "begin_edit")?.description ?? "";
@@ -1321,7 +1324,7 @@ async function verify3Steps(page, found) {
   await k.save();
   await k.verify(fail);
   } finally {
-    await k.reset().catch(() => {});
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1402,9 +1405,10 @@ const sleepTicks = (page) => sleep(1100);
  *  key Y (the mean height, no dialog), a start location's nudge (64), and a unit stored 500 over the ground saved on it
  *  (setting Units on the Ground on Save; off, it stays). */
 async function heightsUniform(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (uniform): ${what}`);
-  const k = await heightKit(page, "Uniform");
+  k = await heightKit(page, "Uniform");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }, { id: "LTlt", x: 0, y: 512 }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 0, player: 1 }], ignoreRoom: true });
   await k.save();
@@ -1551,8 +1555,8 @@ async function heightsUniform(page, found) {
   const onBy = await unitsGround(true);
   if (Math.abs(onBy) > 0.01) fail(`with Units on the Ground on Save on (the default), the footman stored 500 over the ground was saved ${onBy} over it`);
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1718,6 +1722,8 @@ async function terrainSelectCameras(page, found) {
   }, 20000).catch(async (e) => fail(`${e.message} (the selection: ${lit(await page.evaluate(at))} "${await page.evaluate(name)}")`));
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.animate", undefined)`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2062,7 +2068,7 @@ async function viewModes(page, found) {
       await setMode("hd");
       await ringsBecome("Light Ranges back in HD shows rings again", (n) => n > 0);
     } finally {
-      await setMode(mode ?? "hd");
+      await setMode(mode);
       if ((await state())?.lightRanges) await k.hands.click(".model-toggle", "Light ranges");
     }
   }
@@ -2072,6 +2078,9 @@ async function viewModes(page, found) {
   await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.animate", undefined)`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2377,12 +2386,12 @@ async function unitProperties(page, found) {
   }
   if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== unitsBefore) fail("a refused set_object_properties changed war3mapUnits.doo");
   await k.verify(fail);
-  await page.evaluate(`window.__propsGroup?.dispose(); delete window.__propsGroup; delete window.__propsEd;`);
-  await page.evaluate(`w3.editors.closeAll()`);
-  // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
-  // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
-  await page.evaluate(`w3Workbench.game.reload()`);
   } finally {
+    await page.evaluate(`window.__propsGroup?.dispose(); delete window.__propsGroup; delete window.__propsEd;`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
+    // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
+    await page.evaluate(`w3Workbench.game.reload()`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2539,7 +2548,7 @@ async function techtreeRandomLevels(page, found) {
     // At 900 px (#app narrowed) the row's name label wraps or is cut with an ellipsis and a tooltip: never silently clipped by the pane.
     await page.evaluate(`document.getElementById("app").style.width = "900px"`);
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      await page.evaluate(`new Promise((r) => { const t = setTimeout(r, 1000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })`);
       const m = await page.evaluate(`(() => { const row = document.querySelector(${lit(`${cell(0)} .techtree-object`)}), l = row.querySelector(".techtree-name");
         let p = row.parentElement; while (p && !/(auto|scroll|hidden)/.test(getComputedStyle(p).overflowX)) p = p.parentElement;
         const lr = l.getBoundingClientRect(), pr = (p ?? document.documentElement).getBoundingClientRect();
@@ -2654,7 +2663,7 @@ async function mapInfoColorTools(page, found) {
   for (const width of ["", "900px"]) try {
     await page.evaluate(`document.getElementById("app").style.width = ${lit(width)}`);
     await page.evaluate(`${field}.focus()`);
-    await new Promise((r) => setTimeout(r, 300));
+    await page.evaluate(`new Promise((r) => { const t = setTimeout(r, 1000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })`);
     const w = await page.evaluate(`(() => { const f = ${field}, r = f.closest(".color-tools"), b = (e) => e.getBoundingClientRect().width, bar = r.querySelector(".color-tools-bar"), pv = r.querySelector(".color-tools-preview");
       return { field: b(f), bar: b(bar), barShown: getComputedStyle(bar).display !== "none", preview: pv.hidden ? 0 : b(pv), scroll: r.scrollWidth - r.clientWidth }; })()`);
     if (!w.barShown) fail("the colour toolbar isn't shown while the name box has focus");
@@ -2709,6 +2718,9 @@ async function objectListSuffix(page, found) {
     await until("the standard ability's row", async () => (await rowText("ANfb")) !== null, 30000);
     const std = await rowText("ANfb");
     if (!/ - \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
+    // Control: a text that matches nothing takes the row away, so the row seen next is the filter's doing.
+    await search("zzz no such object");
+    if (!(await soon(async () => (await rowText("ANfb")) === null))) fail("the search box doesn't filter the list (control)");
     await search("neutral hostile");
     if (!(await soon(async () => (await rowText("ANfb")) !== null))) fail("the filter doesn't find the suffix");
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
@@ -2908,6 +2920,7 @@ async function itemTablesAccess(page, found) {
   await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
   await panel();
   const oldLayout = !("itemTable" in footman());
+  if (!oldLayout) console.log("  item tables: a new map already has the newer unit layout, the older-layout assertions are skipped");
   if (oldLayout) {
     if ((await options("drops-mode")).includes("table")) fail("a unit file without item tables offers \"Map item table\"");
     if (!(await shown("drops-hint")) || !/Reign of Chaos/.test(await page.evaluate(`document.querySelector(${lit(at("drops-hint"))})?.textContent ?? ""`))) fail("the older layout doesn't say why only own sets are offered");
@@ -3071,6 +3084,7 @@ async function itemDrops(page, found) {
   const ogre = (x) => k.units().find((u) => u.id === "nogr" && u.position[0] === x);
   // The game's names in the install's language: the forest troll (trapper) and Claws of Attack.
   const trollName = await gameName(page, "nftt"), clawsName = await gameName(page, "ratf");
+  if (!trollName || !clawsName) return fail(`the game data has no names for nftt / ratf (${lit([trollName, clawsName])}); the name checks below would be vacuous`);
   const T = (sel) => `.drops-tab ${sel}`;
   const text = (sel) => page.evaluate(`document.querySelector(${lit(sel)})?.textContent ?? null`);
   const has = (sel) => page.evaluate(`!!document.querySelector(${lit(sel)})`);
@@ -3195,7 +3209,7 @@ async function itemDrops(page, found) {
   await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
   await redrawn();
   const before = unitsHash();
-  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
+  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; window.__pickRestore = () => { s.pick = pick; }; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
   await page.evaluate(`window.__picked`);
   await k.hands.click(T("[data-prop=\"add-set-each\"]"));
   await redrawn();
@@ -3348,7 +3362,7 @@ async function flyingHeights(page, found) {
           .catch(async () => fail(`with the water hidden, the water's depth picture is ${lit(await depth())}`));
         await page.evaluate(`${water}.click()`);
       }
-    }
+    } else console.log("  fly heights: graphicsMode is sd, the HD water depth section is skipped");
   } finally {
     await page.evaluate(`window.__flyGroup?.dispose(); window.__flyGroup = null; window.__flyEd = null;`);
   }
@@ -3451,7 +3465,7 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
     await borderFromInfo(page, k, offset, boundary, fail, toggle);
   } finally {
     await boundary(true);
-    await page.evaluate(`w3.settings.set("terrain.animate", ${lit(animate ?? true)})`);
+    await page.evaluate(`w3.settings.set("terrain.animate", ${lit(animate)})`);
     await k.reset();
   }
 }
@@ -3482,7 +3496,7 @@ async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
     const before = await keeps();
     if (before < 0.95) fail(`border from the w3i: tile 8, inside the playable map, is shaded (keeps ${before.toFixed(3)} of its colour)`);
     const marks = await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
-    await writeInfo(`${lit({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
     let wide = 1;
     await until("tile 8 shaded once the w3i's west margin is 10", async () => (wide = await keeps()) < 0.3, 20000)
       .catch(() => fail(`border from the w3i: with the w3i's west margin at 10, tile 8 keeps ${wide.toFixed(3)} of its colour, not shaded as the editor's`));
@@ -3492,7 +3506,7 @@ async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
     await until("tile 8 lit again before the layer", async () => (await keeps()) > 0.95, 20000);
     await toggle("pathing");
     const drawn = await settledMapPicture(page);
-    await writeInfo(`${lit({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
     // (The shade ratio isn't read with a layer on: the layer lies over it.)
     await until("the picture changed with the margin", async () => (await pixelsApart(page, drawn, await mapPicture(page))) > 150, 20000);
     const stale = await settledMapPicture(page);
@@ -3684,7 +3698,7 @@ async function artModeReload(page, found) {
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("still unsaved after Save and Reopen");
   } finally {
     await page.evaluate(`window.__artGroup?.dispose(); window.__artGroup = null; window.__artEds = null;`);
-    await setMode(original ?? "hd");
+    await setMode(original);
   }
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
@@ -3700,8 +3714,8 @@ async function importArtReload(page, found) {
   const k = await heightKit(page, "ImportArtReload");
   const MODEL = "map/war3mapimported/artreload.mdx";
   const file = join(k.root, "map", "war3mapimported", "artreload.mdx");
-  const game = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
-  const footman = await game("Units\\Human\\Footman\\Footman.mdx"), other = await game("Units\\Human\\Peasant\\Peasant.mdx");
+  const readGame = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  const footman = await readGame("Units\\Human\\Footman\\Footman.mdx"), other = await readGame("Units\\Human\\Peasant\\Peasant.mdx");
   mkdirSync(dirname(file), { recursive: true });
   await page.evaluate(`window.__artReloadGroup?.dispose()`);
   try {
@@ -3960,7 +3974,7 @@ async function groundTextureReload(page, found) {
   try {
   const fail = (what) => found.push(`ground texture reload: ${what}`);
   const k = await heightKit(page, "GroundTexReload");
-  const game = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  const readGame = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
   try {
     // The first tile's texture path is on its row in the side list (the title, once loaded).
     const loaded = () => page.evaluate(`[...document.querySelectorAll(".model-row")].map((r) => r.title).find((t) => /\\.blp$/i.test(t)) ?? null`);
@@ -3970,7 +3984,7 @@ async function groundTextureReload(page, found) {
     const find = (re) => list.find((p) => re.test(p));
     const aName = find(/TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i), bName = find(/TerrainArt[\\/][^\\/]*[\\/]Lords_Dirt\.(blp|dds)$/i);
     if (!aName || !bName) return fail(`no two other ground textures in the game data (${aName}, ${bName})`);
-    const [a, b] = [await game(aName), await game(bName)];
+    const [a, b] = [await readGame(aName), await readGame(bName)];
     if (a.equals(b)) return fail("the two textures are the same file (control)");
     const file = join(k.root, "map", ...tile.split("\\"));
     mkdirSync(dirname(file), { recursive: true });
@@ -4009,8 +4023,8 @@ async function importedBlightWaterReload(page, found) {
     const ini = await page.evaluate(`w3.game.readText(${lit("UI\\WorldEditData.txt")})`);
     const sets = ini.slice(ini.indexOf("[TileSets]"));
     const blight = sets.split(/\r?\n/).map((l) => l.split("=")).find((x) => x[0].trim().toLowerCase() === tileset.toLowerCase())?.[1]?.split(",")[1]?.trim();
-    const paths = { blight: blight ? blight + ".blp" : null, water: true };
-    if (!paths.blight || !paths.water) return fail(`no blight or water row for tileset ${tileset}: ${lit(paths)}`);
+    const paths = { blight: blight ? blight + ".blp" : null };
+    if (!paths.blight) return fail(`no blight or water row for tileset ${tileset}: ${lit(paths)}`);
     // The water frames' texture file, as the view reads it (Water.slk's texFile column, then <file>00.blp).
     const slk = spawnSync(cli, ["game", ...installArgs, "slk", "TerrainArt/Water.slk", tileset + "Sha", "--col", "waterID,texFile,numTex"], { encoding: "utf8" });
     const row = slk.stdout.trim().split(/\r?\n/)[1]?.split("\t");
@@ -4559,9 +4573,10 @@ async function wholeMapGround(page, found) {
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
 async function heightsLimits(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (limits): ${what}`);
-  const k = await heightKit(page, "Limits");
+  k = await heightKit(page, "Limits");
   const { hands } = k;
   // On by default, as in the World Editor; the toggles below start from off.
   if ((await k.setting("terrain.enforceCameraBounds")) === false || (await k.box("Enforce camera bounds")) !== true) fail("Enforce Camera Bounds isn't on by default");
@@ -4846,8 +4861,8 @@ async function heightsLimits(page, found) {
   await hands.key("Escape", "Escape", 27);
   await k.tab("Select");
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await page.evaluate(`w3.settings.set("terrain.doodads.snapOnLoad", undefined)`).catch(() => {});
     await restoreWindow(page);
   }
@@ -4969,6 +4984,8 @@ async function gameName(page, id) {
  *  dialogs, and call this in a `finally`). */
 async function restoreWindow(page) {
   await page.evaluate(`(() => { for (const [name, fn] of Object.entries(window.__w3WindowOrig ?? {})) w3.window[name] = fn; })()`).catch(() => {});
+  // gateWrites' replacement of workspace.writeText goes too, so a later check writes through the real one.
+  await page.evaluate(`(() => { const space = w3Workbench.workspace; if (space.__write) { space.writeText = space.__write; delete space.__write; } window.__gates = {}; window.__pickRestore?.(); delete window.__pickRestore; })()`).catch(() => {});
 }
 
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
@@ -5512,8 +5529,9 @@ async function tilesetUnreadable(page, found) {
     const w3iPath = join(map, "war3map.w3i.json");
     if (!existsSync(w3iPath)) return fail("the new map has no war3map.w3i.json (control)");
     const good = readFileSync(w3iPath);
-    const info = await tool("terrain_info");
-    const current = (info.tileset ?? info.structuredContent?.tileset);
+    const tilesetNow = async () => JSON.parse(await tool("terrain_info")).tileset;
+    const current = await tilesetNow();
+    if (typeof current !== "string") return fail(`terrain_info gave no tileset (control): ${current}`);
     const other = ["L", "A"].find((t) => t !== current) ?? "A";
     // Kept raw, with bytes the codec can't decode (the checkpoint taken before a change doesn't read it).
     const rawPath = join(map, "war3map.w3i");
@@ -5524,7 +5542,7 @@ async function tilesetUnreadable(page, found) {
     const err = await tool("set_tileset", { tileset: other }).then(() => null, (e) => String(e.message ?? e));
     if (!err || !/war3map\.w3i can't be read/.test(err)) fail(`the tileset change by the tool wasn't refused as unreadable: ${err}`);
     await settled(page);
-    const inEditor = (await tool("terrain_info")).tileset ?? (await tool("terrain_info")).structuredContent?.tileset;
+    const inEditor = await tilesetNow();
     if (inEditor !== current) fail(`the refused change left the editor's tileset at ${inEditor}, not ${current}`);
     const after = snapshot(map);
     const moved = [...new Set([...bad.keys(), ...after.keys()])].filter((k) => bad.get(k) !== after.get(k));
@@ -5746,6 +5764,7 @@ async function dataSafety(page, found) {
     chmodSync(locked, 0o000);
     let lookable = true;
     try { readdirSync(locked); } catch { lookable = false; }
+    if (lookable) console.log("  data safety: part 2 skipped (a mode-0 folder can still be looked into, as root)");
     if (!lookable) {
       const r = await page.evaluate(`w3.backend.invoke("fs_exists", { path: ${lit(join(locked, "war3campaign.w3f"))} }).then((v) => ({ v }), (e) => ({ e: String(e) }))`);
       if (!/can't be checked/.test(r.e ?? "")) fail(`fs_exists in a folder that can't be looked into answered ${lit(r)}`);
@@ -5883,7 +5902,7 @@ async function unreadableChapter(page, found) {
     if (!folders.includes("maps/Chapter 1.w3x/map")) fail(`folders: ${lit(folders)}`);
   } finally {
     for (const p of locks) { try { chmodSync(p, 0o755); } catch { /* gone */ } }
-    await page.evaluate(`(() => { if (window.__chWarn) w3Workbench.notifications.show = window.__chWarn; window.__chWarn = null; })()`).catch(() => {});
+    await page.evaluate(`(() => { if (window.__chWarn) w3Workbench.notifications.show = window.__chWarn; window.__chWarn = null; w3.editors.closeAll(); w3.workspace.close(); })()`).catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -5899,6 +5918,7 @@ async function workbenchState(page, found) {
   const fail = (what) => found.push(`workbench state: ${what}`);
   const k = await heightKit(page, "WorkbenchState");
   const original = await k.setting("game.graphicsMode");
+  const userMode = await page.evaluate(`w3.settings.inspect("game.graphicsMode").user ?? null`);
   const J = "map/war3map.j";
   const tabOf = (p) => `w3Workbench.editors.tabs.find((t) => t.path === ${lit(p)})`;
   const storeKey = `(() => { const r = w3.workspace.project().root.replace(/[\\\\/]+$/, ""); return "w3.openEditors:" + (/^[A-Za-z]:/.test(r) ? r.toLowerCase() : r); })()`;
@@ -5995,7 +6015,7 @@ async function workbenchState(page, found) {
     if ((await page.evaluate(`w3.editors.activePath()`)) !== model) fail("the model viewer isn't the active tab after the reopen");
   } finally {
     await page.evaluate(`window.__wsModel = window.__wsText = null`);
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${userMode === null ? "undefined" : lit(userMode)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
   } finally {
@@ -6300,6 +6320,7 @@ async function gridDefault(page, found) {
     await until("the reopened terrain view", () => page.evaluate(`w3.editors.activePath() === ${lit(TXT)}`), 30000);
     await settled(page);
   };
+  const userGrid = await page.evaluate(`w3.settings.inspect("terrain.grid.default").user ?? null`);
   try {
     await reopen();
     if ((await grid()) !== "large") fail(`a fresh view starts with the grid ${await grid()}, not large`);
@@ -6310,7 +6331,7 @@ async function gridDefault(page, found) {
       if ((await grid()) !== g) fail(`with the setting at ${g} a fresh view has the grid ${await grid()}`);
     }
   } finally {
-    await page.evaluate(`w3.settings.set("terrain.grid.default", "large", "user")`);
+    await page.evaluate(`w3.settings.set("terrain.grid.default", ${userGrid === null ? "undefined" : lit(userGrid)}, "user")`);
     await restoreWindow(page);
   }
 }
@@ -6359,11 +6380,16 @@ async function toggleGroups(page, found) {
         await until(`${label} ${step}`, async () => (await box(label)).checked === to, 5000).catch(() => fail(`${cmd} didn't take the ${label} box ${step}`));
       }
     }
-    for (const [cmd, what] of [["cycleSky", "Sky"], ["nextTimeOfDay", "Time of day"], ["cycleTerrainDisplay", "Terrain"], ["cycleGrid", "Grid"]]) {
+    // Each cycle changes something: the state (terrain, grid) or the setting (sky, hour) differs afterwards.
+    const cycled = async () => ({ view: await state(), sky: await page.evaluate(`w3.settings.get("terrain.sky")`), hour: await page.evaluate(`w3.settings.get("terrain.lighting.hour", 12)`) });
+    for (const [cmd, what, differs] of [["cycleSky", "Sky", (a, b) => a.sky !== b.sky], ["nextTimeOfDay", "Time of day", (a, b) => a.hour !== b.hour], ["cycleTerrainDisplay", "Terrain", (a, b) => a.view.terrain !== b.view.terrain], ["cycleGrid", "Grid", (a, b) => a.view.grid !== b.view.grid]]) {
+      const was = await cycled();
       const err = await run(`w3.terrain.${cmd}`);
-      if (err) fail(`${cmd} (${what}): ${err}`);
+      if (err) { fail(`${cmd} (${what}): ${err}`); continue; }
+      await until(`${what} changed`, async () => differs(was, await cycled()), 5000).catch(() => fail(`${cmd} (${what}) changed nothing`));
     }
     await page.evaluate(`w3.settings.set("terrain.lighting.hour", undefined, "user")`);
+    await page.evaluate(`w3.settings.set("terrain.sky", undefined, "user")`);
     for (let i = 0; i < 4; i++) await run("w3.terrain.cycleTerrainDisplay");
     for (let i = 0; i < 4; i++) await run("w3.terrain.cycleGrid");
     // Effects and Cliffs have a tooltip of their own.
@@ -6582,10 +6608,14 @@ async function viewCommands(page, fail, shots, size) {
   }
   const infoText = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
   const info = JSON.parse(infoText);
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...info, water: { ...(info.water ?? {}), reflectivity: 0 } }, null, 2))})`);
-  await sleep(1500);
-  const [westFlat, eastFlat] = await reflecting("water-no-reflection");
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(infoText)})`);
+  let westFlat, eastFlat;
+  try {
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...info, water: { ...(info.water ?? {}), reflectivity: 0 } }, null, 2))})`);
+    await sleep(1500);
+    [westFlat, eastFlat] = await reflecting("water-no-reflection");
+  } finally {
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(infoText)})`);
+  }
   await sleep(1500);
   if (Math.abs(westFlat[0] - eastFlat[0]) > 4 || westFlat[0] > 8 || [westFlat, eastFlat].some((c) => Math.abs(c[1] - 48) > 8 || Math.abs(c[2] - 69) > 8)) {
     bad(`with the map's reflectivity 0 the deep water isn't the editor's flat 0, 48, 69: ${round(westFlat)} in the west, ${round(eastFlat)} in the east`);
@@ -6632,10 +6662,14 @@ async function viewCommands(page, fail, shots, size) {
   const waved = await colourSpread(page, await waterShot("water-waves"), waveBox);
   const waveInfoText = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
   const waveInfo = JSON.parse(waveInfoText);
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...waveInfo, water: { ...(waveInfo.water ?? {}), wavesNormalMapStrength: 0 } }, null, 2))})`);
-  await sleep(1500);
-  const still = await colourSpread(page, await waterShot("water-no-waves"), waveBox);
-  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(waveInfoText)})`);
+  let still;
+  try {
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(JSON.stringify({ ...waveInfo, water: { ...(waveInfo.water ?? {}), wavesNormalMapStrength: 0 } }, null, 2))})`);
+    await sleep(1500);
+    still = await colourSpread(page, await waterShot("water-no-waves"), waveBox);
+  } finally {
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${lit(waveInfoText)})`);
+  }
   await sleep(1500);
   const places = (c) => c.map((v) => v.toFixed(1)).join(",");
   if (waved.spread < 2 || waved.spread > 7) bad(`HD water's waves aren't the editor's strength: green ${waved.spread.toFixed(2)} levels apart (colour ${places(waved.mean)})`);
@@ -6737,6 +6771,7 @@ async function viewCommands(page, fail, shots, size) {
     const gl = WebGL2RenderingContext.prototype, live = (window.__live = { buffers: new Set(), arrays: new Set() });
     for (const [make, free, key] of [["createBuffer", "deleteBuffer", "buffers"], ["createVertexArray", "deleteVertexArray", "arrays"]]) {
       const m = gl[make], f = gl[free];
+      (window.__liveOrig ??= []).push([make, m], [free, f]);
       gl[make] = function (...a) { (live[key + "Made"] = (live[key + "Made"] || 0) + 1); const o = m.apply(this, a); if (o) live[key].add(o); return o; };
       gl[free] = function (...a) { live[key].delete(a[0]); return f.apply(this, a); };
     }
@@ -6763,6 +6798,9 @@ async function viewCommands(page, fail, shots, size) {
   const warm = await count();
   await edits(3, [-40, 40, 120]);
   const grown = await count();
+  // Put the real methods back and drop the tracking sets.
+  await page.evaluate(`(() => { for (const [k, fn] of window.__liveOrig ?? []) WebGL2RenderingContext.prototype[k] = fn; delete window.__liveOrig; delete window.__live; })()`);
+  if (!(warm.buffers > 0 && warm.arrays > 0)) bad(`the GPU counter saw no live buffers (${warm.buffers}) or vertex arrays (${warm.arrays}) (control)`);
   if (grown.buffers > warm.buffers || grown.arrays > warm.arrays) bad(`three strokes and three deleted and restored objects left ${grown.buffers - warm.buffers} more GPU buffers and ${grown.arrays - warm.arrays} more vertex arrays in use`);
   for (const id of ["w3.terrain.toggleHeightMap", "w3.terrain.toggleSmallGrid", "w3.terrain.toggleCameraObjects", "w3.terrain.toggleNavalPathing"]) await run(id);
   // Every stroke is one step, and the nudges were undone: undoing the strokes leaves the project as it was saved.
@@ -6797,7 +6835,7 @@ async function viewCommands(page, fail, shots, size) {
   await picture("palette");
   await openTab("Select");
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3c.json", ${lit(cameras)})`);
-  await page.evaluate(`w3.settings.set("terrain.animate", true)`);
+  await page.evaluate(`w3.settings.set("terrain.animate", undefined)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
 }
 
@@ -7191,6 +7229,7 @@ async function soundEditorKeys(page, found) {
   await expectShown("Ctrl+Down", "Delta,alpha,Charlie");
   await press("Ctrl+R");
   await expectShown("Ctrl+R", "alpha,Charlie,Delta");
+  await k.clearToasts();
   await press("Ctrl+PageUp");
   if (!/Sound volume \d+%/.test(await toasts())) fail("Ctrl+PageUp gave no sound volume message");
   await k.clearToasts();
@@ -7290,7 +7329,7 @@ async function typedFieldSave(page, found) {
       await page.evaluate(`window.__heldBuffs.release()`);
       await until("the object browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 30000)
         .catch(() => fail(`"+ New" right after opening the Object Editor didn't show the object browser once the game data was there`));
-      if (!loading) console.log("  typed field save: the buffs' game data was there already, so \"+ New\" right after opening proved nothing this time");
+      if (!loading) console.log("  typed field save: the buffs' game data was there already (an earlier check loaded it), so \"+ New\" right after opening proved nothing this run");
       await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     } finally {
       await page.evaluate(`(() => {
@@ -7301,6 +7340,7 @@ async function typedFieldSave(page, found) {
 
     // ---- The Object Editor: the Footman's hit points ----
     const w3u = "map/war3map.w3u.json";
+    const meleeStart = JSON.parse(readFileSync(join(root, "map/war3map.w3i.json"), "utf8")).flags & 4;
     await page.evaluate(`w3.editors.closeAll()`);
     if (!existsSync(join(root, w3u))) await page.evaluate(`w3.workspace.writeText(${lit(w3u)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
     await page.evaluate(`w3.editors.open(${lit(w3u)})`);
@@ -7370,6 +7410,8 @@ async function typedFieldSave(page, found) {
     const meleeFlag = () => k.read("war3map.w3i.json").flags & 4;
     // The Footman's hit points above are custom unit data, which the World Editor's save takes the Melee flag off for
     // ("Custom unit data has been specified"); Map Properties' save did (lib/terrain/meleesave.ts customDataState).
+    // (Control: the map was a melee map to begin with, or the wait below proves nothing.)
+    if (!meleeStart) fail("the map wasn't a melee map before the Footman's hit points were typed (control)");
     await until("the Melee flag off for the custom unit data", () => meleeFlag() === 0, 10000)
       .catch(() => fail("a melee map with custom unit data saved (the Footman's hit points) is still a melee map"));
     // For the gameplay constants' own proof the unit data goes and the flag comes back, by file: then they are the
@@ -7660,7 +7702,9 @@ async function editDuringSave(page, found) {
 async function testMapWithoutGame(page, found) {
   try {
   const hands = new Hands(page);
-  await page.evaluate(`w3.settings.set("game.path", "C:/no/such/Warcraft III.exe")`);
+  const gamePath = await page.evaluate(`w3.settings.inspect("game.path").user ?? null`);
+  const noExe = join(work, "no-game", "test-map", "Warcraft III.exe");
+  await page.evaluate(`w3.settings.set("game.path", ${lit(noExe)})`);
   const ways = {
     "the command": () => page.evaluate(`w3Workbench.run("w3.project.testMap")`),
     "the status bar": () => hands.click('.statusbar-item[data-id="w3.project.test"]'),
@@ -7680,12 +7724,13 @@ async function testMapWithoutGame(page, found) {
   const wrong = await page.evaluate(`w3.commands.execute("w3.project.testMap").then(() => null, (e) => String(e))`);
   if (!/testMap\.assetMode/.test(wrong ?? "")) found.push(`test map: a wrong asset mode gave ${lit(wrong)}`);
   await page.evaluate(`w3.settings.set("testMap.assetMode", undefined)`);
-  const invoke = (args) => page.evaluate(`w3.backend.invoke("game_test_map", { exe: "C:/no/such/Warcraft III.exe", map: "C:/no/map.w3x", args: ${lit(args)} }).then(() => null, (e) => String(e))`);
+  const invoke = (args) => page.evaluate(`w3.backend.invoke("game_test_map", { exe: ${lit(noExe)}, map: ${lit(join(work, "no-game", "test-map", "map.w3x"))}, args: ${lit(args)} }).then(() => null, (e) => String(e))`);
   const flag = await invoke(["-loadfile", "C:/other.w3x"]);
   if (!/isn't a Test Map option/.test(flag ?? "")) found.push(`test map: the backend let ${lit(flag)} through for -loadfile`);
   const good = await invoke(["-windowmode", "windowed", "-hd", "0", "-mapdiff", "2", "-testmapprofile", "WorldEdit", "-fixedseed", "1"]);
   if (/isn't a Test Map option/.test(good ?? "")) found.push(`test map: the backend refused the World Editor's own flags: ${good}`);
   } finally {
+    await page.evaluate(`w3.settings.set("game.path", ${gamePath === null ? "undefined" : lit(gamePath)}, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -7715,7 +7760,7 @@ async function addPathReady(page, found) {
     const wrong = trees.filter((d) => Math.fround(d.angle) !== want);
     if (wrong.length) fail(`${wrong.length} of ${trees.length} LTlt (fixed rotation 270) stored at ${lit(wrong.slice(0, 2).map((d) => d.angle))}, not ${want}`);
   } finally {
-    await page.evaluate(`(async () => { if (window.__addPathKept) w3.window.confirm = window.__addPathKept; delete window.__addPathKept; await w3.editors.closeAll(); })()`).catch(() => {});
+    await page.evaluate(`(async () => { if (window.__addPathKept) w3.window.confirm = window.__addPathKept; delete window.__addPathKept; w3.settings.set("script.generateOnSave", undefined); await w3.editors.closeAll(); })()`).catch(() => {});
   }
 }
 
@@ -7879,7 +7924,7 @@ async function doodadSnapOnLoad(page, found) {
     const broken = make("broken");
     writeFileSync(join(broken, "map", "war3map.w3d.json"), "{ not json");
     await open(broken);
-    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch(() => {});
+    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
     const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
     for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${lit(brokenLive[id])}, not the map's ${lit(brokenStored[id])}`);
     for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
@@ -8479,7 +8524,7 @@ async function derivedSaveQueue(page, found) {
       await page.evaluate(`(() => { const S = window.__derivedQueue, ws = w3Workbench.workspace; if (S) for (const m of ["readBytes", "writeBytes"]) if (S["orig_" + m]) ws[m] = S["orig_" + m]; delete window.__derivedQueue; })()`);
     }
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is still unsaved after the save");
-    if (!k.doodads().every((d) => d.id === "LOch")) fail(`the save didn't write the hay carts: ${k.doodads().map((d) => d.id).join()}`);
+    if (k.doodads().length !== 5 || !k.doodads().every((d) => d.id === "LOch")) fail(`the save didn't write the hay carts: ${k.doodads().map((d) => d.id).join()}`);
     const saved = { wpm: file("war3map.wpm"), blp: file("war3mapMap.blp") };
     if (same(saved.wpm, wpmStart)) fail("the pathing after the save is the barrels' (the rebuild's, written last)");
     // A clean rebuild of the saved files: the same bytes.
@@ -8527,7 +8572,7 @@ async function rebuildCli(page, found) {
       const o = doc[list].find((e) => e.id === id);
       if (!o) throw new Error(`no ${id} in ${file}`);
       o.position[0] += dx;
-      writeFileSync(join(root, "map", file), `${lit(doc, null, 2)}\n`);
+      writeFileSync(join(root, "map", file), `${JSON.stringify(doc, null, 2)}\n`);
     };
     move("war3map.doo.json", "doodads", "AOks", 384);
     move("war3mapUnits.doo.json", "units", "hfoo", -512);
@@ -9593,6 +9638,7 @@ async function graphicsModes(page, found) {
   await openProject(hd);
   list = await check();
   const gaps = list.filter((p) => /no model in Reforged \(HD\)/.test(p.message));
+  if (!gaps.length) fail(`HD only: no type reported without a Reforged model (control): ${list.map((p) => p.message).join(" | ").slice(0, 300)}`);
   for (const p of gaps) {
     const id = /\((\w{4})\)/.exec(p.message)?.[1];
     const err = await fix(`(${id})`, "Import");
@@ -9690,6 +9736,7 @@ async function graphicsModes(page, found) {
   if (await page.evaluate(`w3.workspace.files().some((f) => f.path.toLowerCase().includes("classic/capitalbridge"))`)) fail("a fix from another project wrote into this one");
 
   // ---- An editor that can't open a file offers to copy the message --------------------------
+  mkdirSync(join(hd, "map", "war3mapImported"), { recursive: true });
   writeFileSync(join(hd, "map", "war3mapImported", "broken.mdx"), "not a model");
   await openProject(hd);
   await page.evaluate(`w3.editors.open("map/war3mapImported/broken.mdx", "w3.modelViewer").catch(() => {})`);
@@ -9974,7 +10021,8 @@ async function keybindings(page, found) {
       await page.evaluate(`(() => { document.getElementById("smoke-under-toast")?.remove(); [...document.querySelectorAll(".toast")].forEach((t) => t.querySelector(".toast-actions button")?.click()); })()`);
     }
   } finally {
-    await writeFile(original ?? "[]\n").catch((e) => fail(`putting keybindings.json back: ${e.message}`));
+    // The file as it was: absent when it was absent.
+    await (original === null ? Promise.resolve().then(() => rmSync(file, { force: true })).then(() => page.evaluate(`w3Workbench.keybindings.load()`)) : writeFile(original)).catch((e) => fail(`putting keybindings.json back: ${e.message}`));
   }
   } finally {
     await restoreWindow(page);
@@ -10080,7 +10128,8 @@ async function gameReadsOnce(page, found) {
   if (!game) { fail("needs W3PROJ_GAME"); return; }
   // The minimap panel is off for the first opening: it keeps the colours of the tiles' textures it made before (in a cache
   // of its own that the page can't empty), so what it reads depends on the checks before; its reads are counted apart below.
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);  const root = join(work, "game-reads");
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+  const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
   // A tree, a goldmine (a ground mark) and a footman: models, textures and splats from the game.
@@ -10200,9 +10249,9 @@ async function gameReadsOnce(page, found) {
   await settled(page);
   const racedAsked = (await asked()) - askedRaced;
   if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
-  await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -10245,16 +10294,17 @@ async function mapPropertiesPriorities(page, fail, file) {
   await page.evaluate(`w3.editors.open(${lit(W3I)})`);
   await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
   await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`);
-  await until("the ally priorities", async () => (await cells()).length === 2, 10000).catch(() => {});
+  await until("the ally priorities", async () => (await cells()).length === 2, 10000).catch(() => fail("the ally priorities didn't appear"));
   const shown = await cells();
   if (JSON.stringify(shown) !== JSON.stringify([{ value: "high", disabled: true }, { value: "high", disabled: true }])) return fail(`Map Properties shows the worked-out priorities as ${lit(shown)}, not High and greyed`);
   const modify = `[...document.querySelectorAll(".map-info label.form-check")].find((l) => l.textContent.includes("Modify ally"))?.querySelector("input")`;
   await page.evaluate(`(() => { const b = ${modify}; b.checked = true; b.dispatchEvent(new Event("change")); })()`);
-  await until("the choices to open", async () => (await cells()).every((c) => !c.disabled), 5000).catch(() => {});
+  await until("the choices to open", async () => (await cells()).every((c) => !c.disabled), 5000).catch(() => fail("Modify didn't open the priority choices"));
   const open = await cells();
   if (JSON.stringify(open) !== JSON.stringify([{ value: "high", disabled: false }, { value: "high", disabled: false }])) return fail(`with Modify on the priorities are ${lit(open)}`);
   await page.evaluate(`(() => { const s = document.querySelector(".map-info table.map-priorities-ally select"); s.value = "low"; s.dispatchEvent(new Event("change")); })()`);
   await page.evaluate(`w3.editors.saveAll()`);
+  await settled(page);
   const saved = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
   if (!(saved.flags & 2) || saved.players[0].allyLow !== 2 || saved.players[0].allyHigh !== 0 || saved.players[1].allyHigh !== 1) {
     fail(`Map Properties saved Modify and a Low as ${lit([saved.flags & 2, saved.players.map((p) => [p.allyLow, p.allyHigh])])}`);
@@ -10780,7 +10830,8 @@ async function moveTextsToTable(page, found) {
     await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
     await settled(page);
     if (redo.e || redo.r?.moved !== 12) fail(`the command after its undo: ${redo.e ?? JSON.stringify(redo.r)}`);
-    for (const [f, h] of files1) if (snapshot(mapDir).get(f) !== h) fail(`the command after its undo wrote another ${f}`);
+    const filesRedo = snapshot(mapDir);
+    for (const [f, h] of files1) if (filesRedo.get(f) !== h) fail(`the command after its undo wrote another ${f}`);
 
     // Reopened, the texts come from the table.
     await page.evaluate(`w3.workspace.close()`);
@@ -10801,7 +10852,8 @@ async function moveTextsToTable(page, found) {
     const again = await run("w3.strings.moveToTable");
     await settled(page);
     if (again.e || again.r?.moved !== 0 || again.r?.dropped !== 0) fail(`the second run: ${again.e ?? JSON.stringify(again.r)}`);
-    for (const [f, h] of snapshot(mapDir)) if (files1.get(f) !== h) fail(`the second run changed ${f}`);
+    const filesSecond = snapshot(mapDir);
+    for (const f of new Set([...files1.keys(), ...filesSecond.keys()])) if (files1.get(f) !== filesSecond.get(f)) fail(`the second run changed ${f}`);
 
     // Triggers (lib/formats/movetexts, "Triggers"): a GUI trigger with literals, written in the codec's layout (the
     // command leaves a file laid out otherwise alone). Its StringExt texts move, after the strings there are; a string
@@ -10811,7 +10863,11 @@ async function moveTextsToTable(page, found) {
     const cliDir = join(work, "move-texts-cli");
     rmSync(cliDir, { recursive: true, force: true });
     spawnSync(cli, ["unpack", map, cliDir, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
-    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) { console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (no game?)"); return; }
+    if (!existsSync(join(cliDir, "map", "war3map.wtg.json"))) {
+      if (game) fail("the CLI couldn't unpack cliff.w3m's triggers although W3PROJ_GAME is set (the trigger part didn't run)");
+      else console.log("move texts to string table: the trigger part skipped, the CLI couldn't read cliff.w3m's triggers (needs W3PROJ_GAME)");
+      return;
+    }
     const wtgPath = "map/war3map.wtg.json", wctPath = "map/war3map.wct.txt";
     const wtgBefore = readFileSync(join(cliDir, "map", "war3map.wtg.json"), "utf8"), wctBefore = readFileSync(join(cliDir, "map", "war3map.wct.txt"), "utf8");
     const call = (name, params = []) => ({ type: 2, value: name, call: { kind: 3, name, hasParams: true, params, trailer: 0 } });
@@ -11044,6 +11100,7 @@ async function objectPreview(page, found, root) {
 async function objectFilePicker(page, found, root) {
   const fail = (what) => found.push(`object file picker: ${what}`);
   const hands = new Hands(page);
+  try {
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(root)}`));
   await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hbar")`);
@@ -11075,6 +11132,12 @@ async function objectFilePicker(page, found, root) {
   await hands.key("Escape", "Escape", 27);
   if (await page.evaluate(`!!document.querySelector(".picker-browse")`)) fail("Escape after a row click left the picker open");
   if ((await value()) !== after) fail("Escape changed the field");
+  } finally {
+    // An open picker or the changed (dirty) Shadow Texture must not outlive a failure.
+    await hands.key("Escape", "Escape", 27).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
 }
 
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
@@ -11329,6 +11392,8 @@ async function drawCalls(page, found) {
   await page.evaluate(`(() => {
     if (window.__drawCount) return;
     const P = WebGL2RenderingContext.prototype, c = window.__drawCount = { frames: 0, current: null, last: null };
+    const origs = window.__drawCountOrig = {};
+    for (const n of ["clear", "drawElements", "drawElementsInstanced", "uniformMatrix4fv"]) origs[n] = P[n];
     const ours = (gl) => !!gl.canvas.closest?.(".model-stage");
     const wrap = (name, count) => { const f = P[name]; P[name] = function (...a) { if (ours(this) && c.current) count(c.current, a); return f.apply(this, a); }; };
     const clear = P.clear;
@@ -11367,6 +11432,8 @@ async function drawCalls(page, found) {
   if (b.worldUploads !== a.worldUploads) fail(`${placed} objects more uploaded ${b.worldUploads - a.worldUploads} more matrices (${a.worldUploads}, then ${b.worldUploads})`);
   if (away.instances >= b.instances / 4) fail(`looking away from the objects still drew ${away.instances} of ${b.instances} instances`);
   } finally {
+    // The counting wrappers on WebGL2RenderingContext.prototype come off again.
+    await page.evaluate(`(() => { const o = window.__drawCountOrig; if (o) for (const n of Object.keys(o)) WebGL2RenderingContext.prototype[n] = o[n]; delete window.__drawCountOrig; delete window.__drawCount; })()`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -11382,6 +11449,9 @@ async function contextLoss(page, found) {
     await contextLossChecks(page, found);
   } finally {
     await page.evaluate(`if (window.__clKept) { w3.window.notify = window.__clKept; delete window.__clKept; }`).catch(() => {});
+    // A throw between loseContext and restoreContext leaves the canvas lost: bring it back, then close the editors.
+    await page.evaluate(`(() => { try { const c = window.__lostCanvas; if (c?.getContext("webgl2")?.isContextLost()) window.__loseExt?.restoreContext(); } catch {} })()`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
   } finally {
     await restoreWindow(page);
@@ -11443,6 +11513,12 @@ async function contextLossChecks(page, found) {
   const beforeLoss = await held();
   // The control: the snapshot sees a paint, so "unchanged while lost" below can fail.
   if (beforeLoss === unpainted) return fail("the terrain snapshot didn't change with the paint (control)");
+  // The control for the Ctrl+Z below: on a live view, the same key does take the paint back (then Ctrl+Y puts it back).
+  await page.evaluate(`(${canvasNow}).focus()`);
+  await hands.key("z", "KeyZ", 90, 2);
+  if (!(await soon(async () => (await held()) !== beforeLoss, 5000))) fail("Ctrl+Z on the live terrain view didn't take the paint back (control for the lost view's Ctrl+Z)");
+  await hands.key("y", "KeyY", 89, 2);
+  if (!(await soon(async () => (await held()) === beforeLoss, 5000))) fail("Ctrl+Y on the live terrain view didn't bring the paint back (control)");
   await glCall("loseContext");
   await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
   // A frame asked for before the loss has had its turn: what is counted from here on is drawing on the lost context.
@@ -11515,7 +11591,8 @@ async function contextLossChecks(page, found) {
 async function shadowTextureOrder(page, found) {
   const fail = (what) => found.push(`shadow texture order: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   try {
     const root = join(work, "shadow-texture-order");
     rmSync(root, { recursive: true, force: true });
@@ -11540,7 +11617,7 @@ async function shadowTextureOrder(page, found) {
     // The control: the banner's alpha texture was read (as .dds), or the check proves nothing.
     if ((await page.evaluate(`w3Workbench.game.backendReads`)) === readsBefore) fail("Calculate Shadows read nothing from the game (control)");
   } finally {
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11550,7 +11627,8 @@ async function shadowTextureOrder(page, found) {
 async function modelViewerTextures(page, found) {
   const fail = (what) => found.push(`model viewer textures: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   try {
     await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
     const model = `game:${["Units", "Human", "Footman", "Footman.mdx"].join(String.fromCharCode(92))}`;
@@ -11565,7 +11643,7 @@ async function modelViewerTextures(page, found) {
       fail(`${missing} textures not found: ${names.join(" | ")}`);
     }
   } finally {
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11593,7 +11671,8 @@ const foundReads = (page, re) => page.evaluate(`window.__texLog.filter(([p, ok])
 async function terrainModelTexture(page, found) {
   const fail = (what) => found.push(`terrain model texture: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
-  const original = await page.evaluate(`w3.settings.get("game.graphicsMode")`);
+  // What the user layer holds (undefined when unset), so the restore leaves an unset setting unset.
+  const original = (await page.evaluate(`w3.settings.inspect("game.graphicsMode").user`)) ?? undefined;
   const dir = join(work, "terrain-model-texture");
   rmSync(dir, { recursive: true, force: true });
   cpSync(FIXTURE, dir, { recursive: true });
@@ -11612,7 +11691,7 @@ async function terrainModelTexture(page, found) {
     if (tifs) fail(`${tifs} .tif names were found in the game (it stores none)`);
   } finally {
     await unwatchGameReads(page);
-    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original ?? "hd")})`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${lit(original)})`);
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -11733,7 +11812,9 @@ async function shouldHaves(page, found) {
 
   // Tiles: the ground changes, one undo takes it back.
   const ground = hash(join(k.root, "map", "war3map.w3e.txt"));
-  const tiles = await page.evaluate(`(async () => { void w3.commands.execute("w3.terrain.replaceTiles"); await new Promise((r) => setTimeout(r, 800));
+  const tiles = await page.evaluate(`(async () => { void w3.commands.execute("w3.terrain.replaceTiles");
+    // The dialog is up once it has its From options (up to 10 s on a busy machine).
+    for (let i = 0; i < 100 && !document.querySelector(".replace-dialog .replace-from option"); i++) await new Promise((r) => setTimeout(r, 100));
     const d = document.querySelector(".replace-dialog"); const v = d ? [...d.querySelectorAll(".replace-from option")].map((o) => [o.value, o.textContent.includes(" · ")]) : []; document.querySelector(".replace-overlay")?.remove(); return v; })()`);
   // From a tile the ground has (its count shows), to another.
   const used = tiles.find(([, n]) => n)?.[0], other = tiles.find(([id]) => id !== used)?.[0];
@@ -11838,7 +11919,7 @@ async function shouldHaves(page, found) {
       if (on.off.join() !== "false,false,false" || on.note) fail(`with a model typed the loading texts are ${lit(on)}`);
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
     }
-  }
+  } else fail(`the map's loading screen number is ${k.read("war3map.w3i.json").loadingScreen.number}, not the default (-1): the greyed-texts check didn't run`);
   await page.evaluate(`w3.editors.closeAll()`);
 
   // edit_text_file (MCP) on war3map.wts: a "}" inside a text, a " }" line too, is refused with the reason; a "{" is fine.
@@ -12263,7 +12344,8 @@ async function chapterObjects(page, found) {
     await until("the object browser", () => page.evaluate(`!!document.querySelector(".picker-campaign")`), 20000)
       .catch(() => fail("the object browser has no campaign object"));
     await page.evaluate(`(() => { const e = [...document.querySelectorAll(".picker-campaign")].map((b) => b.parentElement).find((r) => r?.textContent.includes("c001")); e?.click(); })()`);
-    const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")]);
+    const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")])
+      .finally(() => page.evaluate(`delete window.__pick`).catch(() => {}));
     if (picked !== "c001") fail(`choosing the campaign object in the browser gave ${lit(picked)}`);
 
     // ---- the MCP object tools in the chapter: the campaign's objects listed, changed only in the campaign ----
@@ -12281,9 +12363,9 @@ async function chapterObjects(page, found) {
       const said = await tool("delete_object", { kind: "units", id: made }).catch((e) => e.message);
       if (!/custom script of Uses It/.test(said)) fail(`delete_object of an object a script names said: ${said}`);
       if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== campaignBefore) fail("the MCP tools in the chapter changed war3campaign.w3u");
-      await tool("undo_last_edit").catch(() => {});
-      await tool("undo_last_edit").catch(() => {});
-      await tool("undo_last_edit").catch(() => {});
+      for (let i = 0; i < 3; i++) await tool("undo_last_edit").catch((e) => fail(`undo_last_edit (${i + 1} of 3) in the chapter: ${e.message}`));
+      const left = JSON.parse(await tool("list_objects", { kind: "units" }).catch(() => JSON.stringify({ error: "list_objects failed" })));
+      if (left.error || left.items?.some((o) => o.id === made)) fail(`after the three undos the chapter still lists the object made for the test: ${lit(left.error ?? made)}`);
     }
 
     // ---- the chapter's Object Editor ----
@@ -12303,6 +12385,7 @@ async function chapterObjects(page, found) {
     if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
     if (view.colour !== "24") fail(`the campaign object's team colour shows ${lit(view.colour)}`);
     // Delete with the campaign object shown: nothing is removed, nothing changes.
+    if (!(await page.evaluate(`!!document.querySelector(".obj-list")`))) fail("the Object Editor has no .obj-list to send Delete to (the check below would pass for nothing)");
     await page.evaluate(`document.querySelector(".obj-list")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }))`);
     // Delete must change nothing: time for a change that must not happen, nothing to wait for.
     await sleep(300);
@@ -13100,8 +13183,8 @@ async function staleEditors(page, found) {
     await page.evaluate(`(() => { w3Workbench.editors.memory = { load: () => ({ tabs: [{ path: ${lit(wai)}, editor: "w3.aiEditor" }], active: ${lit(wai)} }), store: () => {} }; void w3Workbench.editors.restore(); })()`);
     const tabText = `(w3Workbench.editors.tabs.find((t) => t.path === ${lit(wai)})?.el.innerText ?? "")`;
     await until("the missing AI file's tab", () => page.evaluate(`${tabText}.includes("Could not open")`), 20000).catch(() => fail("the tab of a missing AI file didn't say it couldn't open it (the check needs that)"));
-    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); await new Promise((r) => setTimeout(r, 1500)); })()`);
-    if (await page.evaluate(`${tabText}.includes("Could not open")`)) fail("after New AI wrote the file its tab still says it couldn't open it");
+    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${lit(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+    await until("the tab to stop saying it couldn't open", () => page.evaluate(`!${tabText}.includes("Could not open")`), 10000).catch(() => fail("after New AI wrote the file its tab still says it couldn't open it"));
     const addErr = await k.run("w3.ai.addToMap");
     if (addErr) fail(`Add To Map after New AI: ${addErr}`);
   } finally {
@@ -13279,7 +13362,7 @@ async function lightNumbersRefused(page, found) {
       await typeInto(page, hour, "25");
       await settled(page);
       if (!/Hour must be a number from 0 to 24/.test(await k.toasts()) || await page.evaluate(`${hour}.value`) !== hourWas || await dirty() !== dirtyWas) fail("an hour of 25 wasn't refused with the box and the model kept");
-    }
+    } else fail("the lighting panel has no Hour box (step 0.25): the hour-25 refusal wasn't checked");
     await typeInto(page, field, was === "0.31" ? "0.32" : "0.31");
     await settled(page);
     if (!(await dirty())) fail("0.31 wasn't taken (control)");
@@ -13868,11 +13951,14 @@ async function objectManagerLive(page, found) {
     {
       await k.tool("place_objects", { objects: [{ id: "hkni", x: 768, y: 0 }], ignoreRoom: true });
       await k.save();
+      const knightAt768 = (units) => units.some((u) => u.id === "hkni" && u.position?.[0] === 768);
+      if (!knightAt768(k.units())) fail("the knight at 768 wasn't saved before Delete Object (terrain editor closed)");
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
       const del = await run("w3.terrain.deletePlaced", 768, 0, { id: "hkni" });
       if (del.e) fail(`Delete Object (placed unit) with the terrain editor closed: ${del.e}`);
-      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.x === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
+      else if (!(await until("the knight gone", () => page.evaluate(`(async () => !((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.id === "hkni" && u.position?.[0] === 768))()`), 10000).then(() => true, () => false))) fail("Delete Object (placed unit) with the terrain editor closed left the knight");
       await k.save();
+      if (knightAt768(k.units())) fail("Delete Object (placed unit) with the terrain editor closed: the saved units still hold the knight at 768");
       await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     }
 
@@ -13909,7 +13995,7 @@ async function objectManagerLive(page, found) {
 
     // ---- A custom unit: Rename Object in the Object Manager's menu, deleted in the Object Editor, undone; closed unsaved.
     await answer("Om Live Renamed");
-    if (await omHas(`${unit} ←`, "Om Live Unit")) {
+    if (await rows(`${unit} ←`, "Om Live Unit", true, "the Object Manager doesn't list the saved custom unit (its rename block can't run)")) {
       const why = await contextMenuItem(page, ".om-row", "Om Live Unit", "Rename Object");
       if (why) fail(`Rename Object (custom unit): ${why}`);
       if (!(await soon(() => page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)))) fail("Rename Object (custom unit) left the Object Editor without the change");
@@ -13925,7 +14011,7 @@ async function objectManagerLive(page, found) {
 
     // ---- A trigger and a variable: Rename Object in the menu, deleted in the Trigger Editor, undone; closed unsaved. ----
     await answer("Om Live Moved");
-    if (await omHas("Om Live Trigger", "Om Live Trigger")) {
+    if (await rows("Om Live Trigger", "Om Live Trigger", true, "the Object Manager doesn't list the saved trigger (its rename block can't run)")) {
       const why = await contextMenuItem(page, ".om-row", "Om Live Trigger", "Rename Object");
       if (why) fail(`Rename Object (trigger): ${why}`);
       await rows("Om Live", "Om Live Moved", true, "after Rename Object (trigger, unsaved) the Object Manager doesn't show the new name");
@@ -14076,7 +14162,7 @@ async function editorExtras(page, found) {
     t.ecas = [{ kind: 0, name: "TriggerRegisterTimerEventSingle", enabled: true, params: [{ type: 3, value: "2.00" }], children: [] }, { kind: 2, name: "DoNothing", enabled: true, params: [], children: [] }];
     await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${lit(JSON.stringify(wtg, null, 2))})`);
     await run("w3.triggers.reveal", "Copy Me");
-    await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).catch(() => fail("the trigger editor doesn't show Copy Me's two lines"));
+    if (!(await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).then(() => true, () => { fail("the trigger editor doesn't show Copy Me's two lines"); return false; }))) return;
     const lines = await page.evaluate(`[...document.querySelectorAll(".trig-eca > span")].map((s) => s.textContent)`);
     const wanted = `Copy Me\n    Events\n        ${lines[0]}\n    Conditions\n    Actions\n        ${lines[1]}\n`;
     await step("Copy As Text of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Text"));
@@ -14158,7 +14244,7 @@ async function editorExtras(page, found) {
     await answer("pickFile", replacement);
     const clicked = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
     if (!clicked) fail("the Import Manager shows no Replace button for a selected file");
-    await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${lit(readFileSync(onDisk, "utf8"))}`));
+    await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${existsSync(onDisk) ? lit(readFileSync(onDisk, "utf8")) : "nothing (it's gone)"}`));
     if (readFileSync(impFile, "utf8") !== impBefore) fail("Replace File changed the import list");
     // The copy goes once the file holds the new content (replace.ts removes it last): given a moment, not checked in
     // the same instant the content showed.
@@ -14199,9 +14285,9 @@ async function editorExtras(page, found) {
     const changedBefore = statSync(onDisk).ctimeMs;
     const bothRan = async () => {
       await page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.redo"]) void w3.commands.execute(c); })()`);
-      await soon(() => statSync(onDisk).ctimeMs !== changedBefore && holds("new words\n") && !existsSync(`${onDisk}.replacing`), 15000);
+      return soon(() => statSync(onDisk).ctimeMs !== changedBefore && holds("new words\n") && !existsSync(`${onDisk}.replacing`), 15000);
     };
-    if (!(await impStep(bothRan, "new words\n"))) {
+    if (!(await impStep(async () => { if (!(await bothRan())) fail("undo and redo pressed at once: the file wasn't written afresh with the new words in time"); }, "new words\n"))) {
       fail(`undo and redo pressed at once left ${lit(readFileSync(onDisk, "utf8"))}, not the new words`);
     }
     // Then one undo: the history has the one step in its place (none done twice or skipped).
@@ -14595,6 +14681,12 @@ async function objectManagerSkin(page, found) {
     const main = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Om Main Unit" })).id;
     await k.save();
     await page.evaluate(`w3.commands.execute("w3.objectManager.refresh")`);
+    await until("Om Main Unit listed", () => page.evaluate(`(async () => {
+      await w3.views.show("objectManager");
+      const s = document.querySelector(".om-search");
+      if (s && s.value !== "Om Main") { s.value = "Om Main"; s.dispatchEvent(new Event("input")); }
+      return [...document.querySelectorAll(".om-row .tree-label")].some((l) => l.textContent === "Om Main Unit");
+    })()`), 10000).catch(() => fail("control: the Object Manager doesn't list the saved Om Main Unit (the rows aren't there to judge)"));
     if (await until("the rows", async () => !(await listed()), 10000).then(() => false, () => true)) fail("control: the Skin-only unit is listed before its file exists");
     const skin = { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "h0sk", mods: [
       { field: "unam", type: "string", value: "Om Skin Only Unit" }, { field: "uabi", type: "string", value: main }] }] };
@@ -15860,7 +15952,7 @@ async function startGoldPalette(page, found) {
       await k.tab("Select");
       await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
       await k.run("w3.terrain.selectInPalette");
-      if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`);
+      if (!(await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000))) return fail(`the Objects tab says "${await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`)}" after Select In Tool Palette`), null;
       await k.look(x, y);
       const n = footmen().length;
       await hands.click(".model-stage canvas");
