@@ -6921,9 +6921,10 @@ async function byHand(page, found) {
   await save();
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
-  // Noise: held on the ground it roughens it while the button is down, and the whole stroke is one undo step.
+  // Noise: a drag roughens the ground (a stamp at the press and one per step of the pointer, as the World Editor's), and the
+  // whole stroke is one undo step. It has no Strength slider: a stamp's size is the editor's fixed one.
   await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
-  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].find((l) => l.textContent.startsWith("Strength"))?.hidden !== false`)) fail("Noise has no Strength slider");
+  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].some((l) => l.textContent.startsWith("Strength"))`)) fail("Noise still has a Strength slider");
   await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
   await save();
   const noisy = hash(ground);
@@ -13533,7 +13534,7 @@ async function triggerMultiSelect(page, found) {
 
 /** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
  *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
- *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
+ *  lines); Allow negative real values (an unreal field refuses -5 from a tool and makes a typed one 0 until the setting is on); the
  *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step,
  *  Ctrl+Z and Ctrl+Y there, undo and redo pressed during a step's file write waiting for it); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
  *  region), Rename (a sound) and Play Sound, done by the owning editors, and a group's menu; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
@@ -14215,9 +14216,10 @@ async function editorExtras(page, found) {
     await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpr"; s.dispatchEvent(new Event("input")); })()`);
     await until("the field uhpr", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000).catch(() => fail("the field filter doesn't find uhpr alone"));
     const typeRegen = (v) => page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = ${lit(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")?.classList.contains("invalid") ?? null; })()`);
-    if ((await typeRegen("-2")) !== true) fail("typing -2 into an unreal field wasn't refused without the setting");
+    // Without the setting a typed -2 becomes 0, as the World Editor's Modify Selected Field makes it (we-misc-2).
+    if ((await typeRegen("-2")) !== false) fail("typing -2 into an unreal field was refused instead of made 0 without the setting");
     await k.save();
-    if (modOf("uhpr") !== undefined) fail(`a refused -2 reached the file: ${modOf("uhpr")}`);
+    if ((modOf("uhpr") ?? 0) !== 0) fail(`a typed -2 without the setting reached the file as ${modOf("uhpr")}, not 0`);
     await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", true)`);
     if ((await typeRegen("-2")) !== false) fail("typing -2 into an unreal field was refused with the setting on");
     await k.save();

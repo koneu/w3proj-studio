@@ -25,23 +25,45 @@ const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
 };
-const N = 65;
 /** The two maps: the margin in tiles on every side, the doodad types of the blocks, their origin, spacing and quarter of a pixel. */
 const MAPS = {
   "minimap-dots": { margin: 0, types: ["LRrk", "LSeb", "LSrg"], origin: (t) => [-4096 + 256 + t * 2688, -4096 + 2048], step: 640, quarter: 8 },
   "minimap-dots-zoom": { margin: 16, types: ["LRrk", "LSrg"], origin: (t) => [-1792 + t * 2048, -1536], step: 512, quarter: 4, stepY: 768 },
   // Other kinds: a tree (destructable LTlt, its own minimap colour, 4x4), a 12x12 doodad, 8x6 and 4x6 (not full squares),
   // one with no pathing texture, a 4x4 vineyard. Two columns by two rows each (quarters of a pixel), three blocks a row.
+  // A 128 x 128 map, no margin: 2 pixels a tile at 256 (a pixel is 64 units), the scale of real maps. Two rows of four blocks.
+  "minimap-dots-128": { size: 128, margin: 0, types: ["LRrk", "LSeb", "LSrg", "LZth", "LSgr", "LSst", "LSpl", "VSvb"], origin: (t) => [-7680 + (t % 4) * 3840, -7680 + Math.floor(t / 4) * 3840], step: 640, quarter: 16 },
+  // Sweeps: 4 types, each in two lines (the x offset grows by 4 units a doodad along the first, the y offset along the second),
+  // 30 doodads 4 tiles apart (128 tiles: 2 pixels a tile) or, 64 tiles, 16 doodads 4 tiles apart at 8 units (4 pixels a tile).
+  "minimap-dots-sweep": { size: 128, margin: 0, types: ["LRrk", "LSeb", "LSrg", "LZth"], sweep: { count: 30, tiles: 4, unit: 4, lineTiles: 14 } },
+  "minimap-dots-sweep64": { size: 64, margin: 0, types: ["LRrk", "LSeb", "LSrg", "LZth"], sweep: { count: 15, tiles: 4, unit: 8, lineTiles: 7 } },
+  // The offset from the tile corner in both axes at once: 8 x 8 doodads a type, 16 units (an eighth of a tile) more each way.
+  "minimap-dots-grid": { size: 128, margin: 0, types: ["LRrk", "LSeb", "LSrg"], grid: { n: 8, tiles: 4, unit: 16 } },
   "minimap-dots-more": { margin: 0, types: ["LTlt", "LZth", "LSgr", "LSst", "LSpl", "VSvb"], origin: (t) => [-3840 + (t % 3) * 2688, -3584 + Math.floor(t / 3) * 2688], step: 640, quarter: 8, cols: 2, rows: 2 },
 };
 
 for (const [name, m] of Object.entries(MAPS)) {
+  if (process.argv[4] && process.argv[4] !== name) continue; // optional 3rd argument: just this map
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
   try {
     const dir = join(scratch, "map");
     run("unpack", join(here, "flat.w3x"), dir, "--game", game);
+    const SIZE = m.size ?? 64, N = SIZE + 1, half = SIZE * 64;
     const file = join(dir, "map", "war3map.w3e.txt");
-    const lines = readFileSync(file, "utf8").split("\n");
+    let lines = readFileSync(file, "utf8").split("\n");
+    if (SIZE !== 64) {
+      // The other sections become "all" lines (a blank map, as flat.w3x is): rows of the old size would not fit.
+      const all = { height: "0", water: "0", variation: "0", "cliff-variation": "0", "cliff-texture": "f", layer: "2", flags: "0" };
+      const kept = [];
+      for (let i = 0; i < lines.length; i++) {
+        const tag = /^\[([a-z-]+)\]/.exec(lines[i])?.[1];
+        if (tag && tag in all) {
+          kept.push(`[${tag}] all ${all[tag]}`);
+          while (i + 1 < lines.length && lines[i + 1] !== "" && !lines[i + 1].startsWith("[")) i++;
+        } else kept.push(lines[i]);
+      }
+      lines = kept;
+    }
     // The corners' map-edge bits as flat.w3x has them (row 0, the north edge, 0; then the margin rows 1; a margin of 1s
     // at each side of the rows between, the last column 0), for this margin.
     const bits = lines.findIndex((l) => l.startsWith("[water-bits]"));
@@ -51,7 +73,11 @@ for (const [name, m] of Object.entries(MAPS)) {
       if (r <= m.margin || r > N - 1 - m.margin) return "1".repeat(N - 1) + "0";
       return Array.from({ length: N }, (_, c) => (c < m.margin || (c >= N - 1 - m.margin && c < N - 1) ? "1" : "0")).join("");
     });
-    lines.splice(bits + 1, N, ...rows);
+    lines.splice(bits + 1, 65, ...rows); // flat.w3x has 65 rows
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("corners ")) lines[i] = `corners ${N} ${N}`;
+      else if (lines[i].startsWith("offset ")) lines[i] = `offset ${-half} ${-half}`;
+    }
     const at = lines.findIndex((l) => l.startsWith("[texture]"));
     if (at < 0) throw new Error("no [texture] section in the w3e text");
     lines.splice(at, 1, "[texture]", ...Array.from({ length: N }, () => "4".repeat(N)));
@@ -60,23 +86,57 @@ for (const [name, m] of Object.entries(MAPS)) {
     const info = JSON.parse(readFileSync(w3i, "utf8"));
     const edge = m.margin * 128;
     info.cameraComplements = [m.margin, m.margin, m.margin, m.margin];
-    info.playableWidth = 64 - 2 * m.margin;
-    info.playableHeight = 64 - 2 * m.margin;
+    info.playableWidth = SIZE - 2 * m.margin;
+    info.playableHeight = SIZE - 2 * m.margin;
     // The camera bounds: the playable area, 4 tiles further in on three sides (flat.w3x: 4 tiles at left, right and top, none at the bottom).
-    info.cameraBounds = [-4096 + edge + 512, -4096 + edge, 4096 - edge - 512, 4096 - edge - 512, -4096 + edge + 512, 4096 - edge - 512, 4096 - edge - 512, -4096 + edge];
+    info.cameraBounds = [-half + edge + 512, -half + edge, half - edge - 512, half - edge - 512, -half + edge + 512, half - edge - 512, half - edge - 512, -half + edge];
+    if (SIZE !== 64) {
+      // The pathing map and the shadow map at the new size, all clear.
+      const wpm = Buffer.alloc(16 + SIZE * 4 * SIZE * 4, 0x40);
+      wpm.write("MP3W", 0, "latin1");
+      wpm.writeUInt32LE(0, 4);
+      wpm.writeUInt32LE(SIZE * 4, 8);
+      wpm.writeUInt32LE(SIZE * 4, 12);
+      writeFileSync(join(dir, "map", "war3map.wpm"), wpm);
+      writeFileSync(join(dir, "map", "war3map.shd"), Buffer.alloc(SIZE * 4 * SIZE * 4));
+    }
     writeFileSync(w3i, JSON.stringify(info, null, 2));
     const doo = join(dir, "map", "war3map.doo.json");
     const json = JSON.parse(readFileSync(doo, "utf8"));
-    let n = 0;
-    m.types.forEach((id, t) => {
-      const [ox, oy] = m.origin(t);
-      for (let j = 0; j < (m.rows ?? 4); j++) {
-        for (let i = 0; i < (m.cols ?? 4); i++) {
-          const x = ox + i * m.step + i * m.quarter, y = oy + j * (m.stepY ?? m.step) + j * m.quarter;
-          json.doodads.push({ id, variation: 0, position: [x, y, 0], angle: 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [n & 255, (n >> 8) & 255, 0], extras: [] });
-          n++;
+    /** Where each doodad goes: a grid of blocks per type, or (`sweep`) lines of doodads whose offset from a tile corner grows. */
+    const spots = [];
+    if (m.grid) {
+      // A block per type of n x n doodads `tiles` apart, the offset from a tile corner growing by `unit` units along both axes.
+      const g = m.grid;
+      m.types.forEach((id, t) => {
+        for (let j = 0; j < g.n; j++) {
+          for (let i = 0; i < g.n; i++) spots.push({ id, x: -half + (4 + t * g.n * g.tiles + i * g.tiles) * 128 + i * g.unit, y: -half + (6 + j * g.tiles) * 128 + j * g.unit });
+        }
+      });
+    } else if (m.sweep) {
+      // Line k of each type (x sweep: the x offset grows along the line, y sweep: the y offset), `count` doodads a line, `tiles`
+      // apart, offset `unit` units more each; lines `lineTiles` apart.
+      const s = m.sweep;
+      let line = 0;
+      for (const id of m.types) {
+        for (const axis of ["x", "y"]) {
+          for (let k = 0; k < s.count; k++) {
+            const off = k * s.unit;
+            spots.push({ id, x: -half + (4 + k * s.tiles) * 128 + (axis === "x" ? off : 0), y: -half + (6 + line * s.lineTiles) * 128 + (axis === "y" ? off : 0) });
+          }
+          line++;
         }
       }
+    } else {
+      m.types.forEach((id, t) => {
+        const [ox, oy] = m.origin(t);
+        for (let j = 0; j < (m.rows ?? 4); j++) {
+          for (let i = 0; i < (m.cols ?? 4); i++) spots.push({ id, x: ox + i * m.step + i * m.quarter, y: oy + j * (m.stepY ?? m.step) + j * m.quarter });
+        }
+      });
+    }
+    spots.forEach(({ id, x, y }, n) => {
+      json.doodads.push({ id, variation: 0, position: [x, y, 0], angle: 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [n & 255, (n >> 8) & 255, 0], extras: [] });
     });
     writeFileSync(doo, JSON.stringify(json, null, 2));
     run("pack", dir, "-o", join(here, `${name}.w3x`), "--force-stale");

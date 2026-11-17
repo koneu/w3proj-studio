@@ -83,7 +83,33 @@ export interface PathMask { width: number; height: number; cells: Uint8Array }
 
 /** `mask` (the object's pathing texture) is drawn as it is, turned by `angle` (radians, as placed: the textures
  *  are drawn for 270°); without it a dot of `size` tiles stands for the object. */
-export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number; mask?: PathMask; angle?: number }
+export interface MinimapObject {
+  x: number; y: number; rgb: Rgb;
+  /** The side of its pathing texture in tiles (1 when left out), a square one; `cells` (its width and height in
+   *  pathing cells, 4 a tile) wins. Its dot is the tiles it reaches, see `dotReach`. */
+  size?: number;
+  cells?: [number, number];
+  mask?: PathMask; angle?: number;
+}
+
+/** The tiles the dot of a doodad covers along one axis, from its centre `u` (in tiles from the map's corner) and its
+ *  pathing texture's `cells` across: every tile that [u - a, u + a] touches, a = (cells - 2) / 8 tiles (0 without a
+ *  pathing texture: the one tile it stands in). The World Editor's minimap, measured with 4x4, 6x6, 8x8 and 12x12
+ *  textures swept over a tile in steps of 4 units (we-drive 2026-11-17): a 4x4 rock reaches two tiles within a quarter
+ *  tile of a tile edge and one tile otherwise, an 8x8 one two or three, a 12x12 one three or four. */
+export function dotReach(u: number, cells: number): [number, number] {
+  const a = Math.max(0, (cells - 2) / 8);
+  return [Math.floor(u - a), Math.floor(u + a)];
+}
+
+/** The World Editor's smoothing of tile edges, as a curve on the share of the picture a colour has in the (bilinear)
+ *  mix of the four tiles around a pixel: a pixel with a third or less of a colour has none of it, with two thirds or
+ *  more all of it, between linear. Measured on its dots at 4 and 2 pixels a tile (a pixel on a tile's edge takes
+ *  7/8 of its own tile and 1/8 of the one across; one on its corner 0.17 of its own tile when only that is the colour,
+ *  0.87 when a neighbour has it too). */
+export function sharpShare(b: number): number {
+  return Math.min(1, Math.max(0, 0.5 + 3 * (b - 0.5)));
+}
 
 /** How big a preview icon is on a 256 pixel minimap. */
 export const ICON_SIZE = 16;
@@ -94,7 +120,9 @@ export interface MinimapParams {
   /** How far the grain scatters a pixel's brightness (0.1: ±10 %), 0 for flat colours. */
   groundNoise: number;
   /** Radius of the dot of an object with a 4×4 pathing texture (a tile), in tiles. */
+  /** Radius of a unit's square (a 4x4 doodad's dot is in whole tiles, see `dotReach`). */
   objectRadius: number;
+  /** 0: hard tile edges; else the World Editor's smoothing (`sharpShare`, once whatever the number). */
   blurPasses: number;
 }
 
@@ -190,6 +218,54 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
    *  World Editor's Playable Area Only cuts the trees past the playable area's edges. */
   const drawn = (px: number, py: number) => px >= left && py >= top && px < left + boxW && py < top + boxH;
 
+  // The doodads' dots: the tiles each reaches (dotReach), in its colour (the later one over the earlier).
+  const dotAt = new Int32Array(t.width * t.height).fill(-1);
+  const dotRgb: Rgb[] = [];
+  for (const o of input.objects) {
+    if (o.mask) continue;
+    let cx = o.cells?.[0] ?? (o.size ?? 1) * 4, cy = o.cells?.[1] ?? (o.size ?? 1) * 4;
+    // The textures are drawn for 270 degrees: nearer 0 or 180 the footprint is turned a quarter.
+    if (o.angle !== undefined && Math.abs(Math.cos(o.angle)) > Math.SQRT1_2) [cx, cy] = [cy, cx];
+    const [x0, x1] = dotReach((o.x - t.offsetX) / 128, cx), [y0, y1] = dotReach((o.y - t.offsetY) / 128, cy);
+    let id = dotRgb.findIndex((c) => c[0] === o.rgb[0] && c[1] === o.rgb[1] && c[2] === o.rgb[2]);
+    if (id < 0) id = dotRgb.push(o.rgb) - 1;
+    for (let y = Math.max(0, y0); y <= Math.min(t.height - 1, y1); y++) {
+      for (let x = Math.max(0, x0); x <= Math.min(t.width - 1, x1); x++) dotAt[y * t.width + x] = id;
+    }
+  }
+  const sharp = P.blurPasses > 0;
+  /** The colours (RGB triples in `buf` at the offsets `at[0..n)`) of the tiles a pixel mixes, weighted by `w`, as the
+   *  World Editor smooths tile edges: each colour's share of the weights goes through `sharpShare`, then they are mixed. */
+  const mixed = (out: number[], buf: Float32Array, at: number[], w: number[], n: number) => {
+    const same = (a: number, b: number) => buf[at[a]] === buf[at[b]] && buf[at[a] + 1] === buf[at[b] + 1] && buf[at[a] + 2] === buf[at[b] + 2];
+    let sum = 0, best = 0, bestShare = -1;
+    out[0] = out[1] = out[2] = 0;
+    for (let a = 0; a < n; a++) {
+      let dup = false;
+      for (let b = 0; b < a && !dup; b++) dup = same(a, b);
+      if (dup) continue;
+      let share = w[a];
+      for (let b = a + 1; b < n; b++) if (same(a, b)) share += w[b];
+      if (share > bestShare) { bestShare = share; best = a; }
+      const s = sharpShare(share);
+      sum += s;
+      for (let k = 0; k < 3; k++) out[k] += s * buf[at[a] + k];
+    }
+    // None had a third of the weights: the one with the most.
+    if (sum <= 1e-6) { for (let k = 0; k < 3; k++) out[k] = buf[at[best] + k]; return; }
+    for (let k = 0; k < 3; k++) out[k] /= sum;
+  };
+  const colour = [0, 0, 0];
+  const tileOffsets: number[] = [];
+  /** The tiles (their point's index) a pixel mixes and their weights: its own, and across each tile edge it is on, a
+   *  third of the weights as if it were an eighth of a tile from the edge, whatever the scale (measured at 4 and 2
+   *  pixels a tile: an edge pixel is 7/8 its own tile, a corner pixel's own tile alone 0.17). */
+  const tileList: number[] = [], tileWeights: number[] = [];
+  let tileCount = 0;
+  const tileOfX = (p: number) => Math.floor((p - left) / frame.scale[0] + ml), tileOfY = (p: number) => Math.floor((top + boxH - 1 - p) / frame.scale[1] + mb);
+  /** [offset in tiles, weight] along one axis: `lo`/`hi`: whether the pixel is on the tile's edge at that side. */
+  const axisTiles = (lo: boolean, hi: boolean): [number, number][] => (lo && hi ? [[0, 0.625], [-1, 0.1875], [1, 0.1875]] : lo ? [[0, 0.625], [-1, 0.375]] : hi ? [[0, 0.625], [1, 0.375]] : [[0, 1]]);
+
   for (let py = 0; py < N; py++) {
     for (let px = 0; px < N; px++) {
       // Tiles from the playable area's bottom-left.
@@ -200,10 +276,21 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       const q = [C(x0, y0), C(x0 + 1, y0), C(x0, y0 + 1), C(x0 + 1, y0 + 1)];
       const w = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v];
       const col = [0, 0, 0];
+      // The tile's south-west point colours the whole tile; smoothed, the tiles across the edges it is on count too.
+      tileCount = 0;
+      if (sharp) {
+        const tx = tileOfX(px), ty = tileOfY(py);
+        const xs = axisTiles(px > left && tileOfX(px - 1) !== tx, px < left + boxW - 1 && tileOfX(px + 1) !== tx);
+        // Rows count from the south: the row below the pixel is py + 1.
+        const ys = axisTiles(py < top + boxH - 1 && tileOfY(py + 1) !== ty, py > top && tileOfY(py - 1) !== ty);
+        for (const [dj, wy] of ys) for (const [di, wx] of xs) { tileList[tileCount] = clampY(ty + dj) * t.width + clampX(tx + di); tileWeights[tileCount++] = wx * wy; }
+      } else {
+        tileList[0] = clampY(y0) * t.width + clampX(x0); tileWeights[0] = 1; tileCount = 1;
+      }
       if (ground) {
-        // The tile's south-west point colours the whole tile.
-        const g = (clampY(y0) * t.width + clampX(x0)) * 3;
-        for (let k = 0; k < 3; k++) col[k] = ground[g + k] * P.groundBrightness;
+        for (let n = 0; n < tileCount; n++) tileOffsets[n] = tileList[n] * 3;
+        mixed(colour, ground, tileOffsets, tileWeights, tileCount);
+        for (let k = 0; k < 3; k++) col[k] = colour[k] * P.groundBrightness;
       }
       grain[py * N + px] = 1;
       let depth = 0;
@@ -217,6 +304,24 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
         if (cx >= 0 && cy >= 0 && cx < overlay.width && cy < overlay.height) {
           const o = (cy * overlay.width + cx) * 4, a = overlay.rgba[o + 3] / 255;
           for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - a) + overlay.rgba[o + k] * a;
+        }
+      }
+      if (dotRgb.length) {
+        // The dots over it, each colour by its share of the four tiles, as the ground's.
+        let total = 0;
+        const shares: number[] = [];
+        for (let n = 0; n < tileCount; n++) {
+          const id = dotAt[tileList[n]];
+          if (id < 0 || shares[id] !== undefined) continue;
+          let share = 0;
+          for (let m = n; m < tileCount; m++) if (dotAt[tileList[m]] === id) share += tileWeights[m];
+          shares[id] = sharp ? sharpShare(share) : 1;
+          total += shares[id];
+        }
+        if (total > 0) {
+          const scaleDown = total > 1 ? 1 / total : 1;
+          for (let k = 0; k < 3; k++) col[k] *= 1 - Math.min(1, total);
+          shares.forEach((s, id) => { for (let k = 0; k < 3; k++) col[k] += s * scaleDown * dotRgb[id][k]; });
         }
       }
       img.set(col, (py * N + px) * 3);
@@ -246,15 +351,6 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       }
       continue;
     }
-    const rad = P.objectRadius * scale * (o.size ?? 1);
-    for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
-      for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
-        // The pixel's sample point (its bottom-left corner, as the ground's).
-        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x - cx, y + 1 - cy) > rad || !drawn(x, y)) continue;
-        img.set(o.rgb, (y * N + x) * 3);
-        grain[y * N + x] = 0;
-      }
-    }
   }
   // Units: squares a little wider than the doodads' dots, at least a pixel.
   const half = Math.max(0.5, rad * 1.2);
@@ -263,29 +359,6 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     for (let y = Math.floor(cy - half); y < Math.ceil(cy + half); y++) {
       for (let x = Math.floor(cx - half); x < Math.ceil(cx + half); x++) {
         if (x >= 0 && y >= 0 && x < N && y < N && drawn(x, y)) { img.set(u.rgb, (y * N + x) * 3); grain[y * N + x] = 0; }
-      }
-    }
-  }
-
-  // Soften like the World Editor's render (3×3 tent filter), inside the drawn area: the editor's black bands keep a
-  // sharp edge.
-  for (let pass = 0; pass < P.blurPasses; pass++) {
-    const src = img.slice();
-    for (let y = top; y < top + boxH; y++) {
-      for (let x = left; x < left + boxW; x++) {
-        for (let k = 0; k < 3; k++) {
-          let sum = 0, weight = 0;
-          for (let j = -1; j <= 1; j++) {
-            for (let i = -1; i <= 1; i++) {
-              const xx = x + i, yy = y + j;
-              if (!drawn(xx, yy)) continue;
-              const wt = (i ? 1 : 2) * (j ? 1 : 2);
-              sum += src[(yy * N + xx) * 3 + k] * wt;
-              weight += wt;
-            }
-          }
-          img[(y * N + x) * 3 + k] = sum / weight;
-        }
       }
     }
   }

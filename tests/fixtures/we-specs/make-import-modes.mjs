@@ -68,6 +68,13 @@ export const MAPS = {
       ["war3mapImported\\readme.txt", 21, Buffer.from("hello\r\n")],
     ];
   },
+  // every flags value 0..31 on a plain path (the same text file), and 13, 17, 21, 24, 25, 29 again below _HD.w3mod\
+  "import-flags": () => {
+    const t = Buffer.from("flag\r\n");
+    const plain = Array.from({ length: 32 }, (_, f) => [`war3mapImported\\f${String(f).padStart(2, "0")}.txt`, f, t]);
+    const hd = [13, 17, 21, 24, 25, 29].map((f) => [`_HD.w3mod\\war3mapImported\\h${f}.txt`, f, t]);
+    return [...plain, ...hd];
+  },
   "import-modes-units": () => [
     ["_HD.w3mod\\war3mapImported\\hdonly.mdx", 13, HD_FOOTMAN()],
     ["Units\\Human\\Rifleman\\Rifleman.mdx", 21, RABBIT()],

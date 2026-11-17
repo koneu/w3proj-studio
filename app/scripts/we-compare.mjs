@@ -65,7 +65,8 @@
 //               "lines": "regex" (text and text-set only) compares only the lines of each save that match it; none
 //               matching in a save is ERROR (two empty texts would match). A text kind on a binary file (a NUL in
 //               it: a w3e or wpm the unpack left raw) is ERROR too: compare it as bytes, wpm or a JSON kind.
-//               More kinds (we-compare-w3e.mjs): wpm-cells (war3map.wpm as JSON, cells "x,y": expectPaths can name them), w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
+//               More kinds (we-compare-w3e.mjs): w3e-noise (one Noise click: on the step lattice, span, number changed),
+//               wpm-cells (war3map.wpm as JSON, cells "x,y": expectPaths can name them), w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
 //               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object; "minCount": N also whether each save holds N objects or more), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
 //               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],
 //               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.

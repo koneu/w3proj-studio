@@ -451,8 +451,11 @@ test("a save through codec_write (w3.backend.invoke) isn't reported on focus; a 
   reset();
   const { ws } = make();
   await ws.open(A);
+  const told: string[] = [];
+  ws.onDidSave.on((p) => told.push(p));
   const out = await backendInvoke<{ size: number }>(ws, "codec_write", { root: A, path: "war3map.j", text: "0123456789" });
   assert.equal(out.size, 10, "the caller still gets the backend's answer");
+  assert.deepEqual(told, ["war3map.j"], "onDidSave told, as a writeText would");
   assert.equal((await ws.externalChanges()).size, 0, "our own save");
   await backendInvoke(ws, "codec_write", { root: A, path: "map/new.doo", text: "abc" });
   assert.equal((await ws.externalChanges()).size, 0, "a new file made by it");

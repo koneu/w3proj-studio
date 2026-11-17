@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groundHeight, parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
-import { HEIGHT_TICK, heightPerPoint, HeightStroke } from "../../lib/terrain/strokepath";
 import { applyHeight, applyLayer, brushOf, brushReach, matchCliffTypes, paintBoundary, paintTexture, retypeCliffs, Stroke } from "./tools";
 import * as painterTools from "./tools";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
@@ -117,7 +116,7 @@ test("height brushes take the World Editor's corners: inside radius size − 1 r
       const t = flatMap(), { x, y } = centre(t);
       for (const tool of ["raise", "lower", "plateau", "smooth", "noise"] as const) {
         const b = brushOf(tool, t, x + dx, y + dy, size);
-        const open = tool !== "plateau" && tool !== "smooth";
+        const open = tool !== "plateau" && tool !== "smooth" && tool !== "noise";
         assert.deepEqual([b.x, b.y, b.radius, !!b.open], [x, y, size - 1, open], `${tool} size ${size} at +${dx},${dy}`);
       }
       applyHeight(t, brushOf("raise", t, x + dx, y + dy, size), "raise", 64, new Stroke("raise"));
@@ -258,57 +257,8 @@ test("Plateau levels the whole disc to the stroke's start, rim included; Smooth 
   }
 });
 
-/** A Noise drag (every corner pushed up: random 1) across the map at a speed, with the clock ticking `ms` apart while
- *  the mouse reports many times in between, as the painter runs it. `busy` makes every third tick late. */
-function drag(speedPerMs: number, ms: number, busy = false) {
-  const t = flatMap(), s = new Stroke("noise"), radius = 2, y = 0, from = -800, to = 800;
-  const brush = new HeightStroke([from, y], -HEIGHT_TICK, radius * 64);
-  let now = 0, at = from, n = 0;
-  const stamp = () => { for (const d of brush.tick(now, 16)) applyHeight(t, { x: d.x, y: d.y, radius }, "noise", d.amount, s, () => 1); };
-  stamp();
-  while (at < to) {
-    const step = busy && ++n % 3 === 0 ? ms * 3 : ms;
-    for (let m = 0; m < 5; m++) { at = Math.min(to, at + (speedPerMs * step) / 5); brush.moveTo([at, y]); }
-    now += step;
-    stamp();
-  }
-  return [...Array(9).keys()].map((i) => groundHeight(t.corners[16 * t.width + 12 + i]));
-}
-
-test("a quick drag is one even ridge, not bumps", () => {
-  const ridge = drag(8, 40);
-  assert.ok(Math.min(...ridge) > 0, ridge.join());
-  assert.ok(Math.max(...ridge) / Math.min(...ridge) < 1.2, ridge.join()); // measured 1.04: bumps made it far more
-});
-
-test("a busy app doesn't leave bumps on a quick drag", () => {
-  const ridge = drag(8, 40, true);
-  assert.ok(Math.min(...ridge) > 0, ridge.join());
-  assert.ok(Math.max(...ridge) / Math.min(...ridge) < 1.2, ridge.join()); // measured 1.10
-});
-
-test("standing still keeps adding at the same place", () => {
-  const brush = new HeightStroke([100, 100], 0, 128);
-  assert.deepEqual(brush.tick(HEIGHT_TICK, 16), [{ x: 100, y: 100, amount: 16 }]);
-  assert.deepEqual(brush.tick(HEIGHT_TICK * 2, 16), [{ x: 100, y: 100, amount: 16 }]);
-});
-
-test("a stamp only ever goes to the newest place, never back", () => {
-  const brush = new HeightStroke([0, 0], 0, 128);
-  brush.moveTo([50, 0]);
-  brush.moveTo([1000, 0]);
-  const stamps = brush.tick(HEIGHT_TICK, 16);
-  assert.equal(stamps[stamps.length - 1].x, 1000);
-  assert.deepEqual(brush.tick(HEIGHT_TICK * 2, 16).map((d) => d.x), [1000]);
-});
-
-test("a drag adds less the faster it goes, not more", () => {
-  const slow = Math.max(...drag(2, 40)), quick = Math.max(...drag(8, 40));
-  assert.ok(quick < slow, `${quick} ${slow}`);
-});
-
 test("raise and lower don't read the amount: any amount gives the same ground", () => {
-  // applyHeight's amount is for plateau and noise only (tools.ts applyHeight); raiseLower takes none.
+  // applyHeight's amount is for plateau only (tools.ts applyHeight); raiseLower takes none, and Noise draws its steps.
   for (const tool of ["raise", "lower"] as const) {
     const a = flatMap(), b = flatMap();
     applyHeight(a, brushOf(tool, a, 0, 0, 3), tool, 0, new Stroke(tool));
@@ -316,17 +266,6 @@ test("raise and lower don't read the amount: any amount gives the same ground", 
     assert.deepEqual(heightGrid(a), heightGrid(b), tool);
     assert.notDeepEqual(heightGrid(a), heightGrid(flatMap()), `${tool} moved something`);
   }
-});
-
-test("how often the mouse reports doesn't change the height", () => {
-  const often = drag(4, 20), seldom = drag(4, 80);
-  assert.ok(Math.abs(Math.max(...often) - Math.max(...seldom)) / Math.max(...often) < 0.08, `${often} ${seldom}`); // measured 3.6% (28 against 27), 2x margin
-});
-
-test("height goes by time, and a stall doesn't count in full", () => {
-  assert.equal(heightPerPoint(16, HEIGHT_TICK, 1), 16);
-  assert.equal(heightPerPoint(16, HEIGHT_TICK * 2, 2), 16);
-  assert.equal(heightPerPoint(16, 5000, 1), heightPerPoint(16, 200, 1));
 });
 
 test("a chosen cliff type wins over the ground", () => {
@@ -568,32 +507,62 @@ test("Level on flat ground moves nothing but types the World Editor's stencil ro
 /** The same numbers every run (seed printed in the test's name). */
 const seeded = mulberry32;
 
-test("Noise (seed 7) roughens the ground under the brush only, within the strength, the same every time", () => {
-  const brush = { ...centre(flatMap()), radius: 3 };
+test("Noise (seed 7) takes whole steps of 25.6 from -10 to 10 on the corners within radius size - 1, the rim too", () => {
+  // we-compare height-noise (2026-11-17): the editor's corners moved by -256, -231 ... -26, 25 ... 256 stored units.
+  const brush = { ...centre(flatMap()), radius: 4 };
   const run = () => {
     const t = flatMap(), s = new Stroke("noise"), random = seeded(7);
-    for (let k = 0; k < 4; k++) applyHeight(t, brush, "noise", 16, s, random);
+    applyHeight(t, brush, "noise", 16, s, random);
     return { t, s };
   };
   const { t, s } = run();
-  const heights = t.corners.map(groundHeight);
-  assert.deepEqual(run().t.corners.map(groundHeight), heights, "the same seed gives the same ground");
+  const raws = t.corners.map((c) => c.rawHeight - 0x2000);
+  assert.deepEqual(run().t.corners.map((c) => c.rawHeight - 0x2000), raws, "the same seed gives the same ground");
   const inside = new Set(s.corners());
-  const moved = heights.filter((h, i) => inside.has(i) && h !== 0);
-  assert.ok(moved.length > inside.size / 2, `${moved.length} of ${inside.size} corners moved`);
-  assert.ok(moved.some((h) => h > 0) && moved.some((h) => h < 0), "some go up and some down");
-  assert.ok(heights.every((h) => Math.abs(h) <= 4 * 16), "no corner moves more than the strength per stamp");
-  assert.ok(heights.every((h, i) => inside.has(i) || h === 0), "nothing outside the brush moves");
+  assert.ok(inside.size > 30 && inside.size <= 49, `${inside.size} corners of the 49 changed (one in 21 stays)`);
+  const steps = new Set([-256, -231, -205, -180, -154, -128, -103, -77, -52, -26, 25, 51, 76, 102, 128, 153, 179, 204, 230, 256]);
+  assert.ok(raws.every((v) => v === 0 || steps.has(v)), `only whole steps: ${[...new Set(raws)].join()}`);
+  assert.ok(raws.some((v) => v > 0) && raws.some((v) => v < 0), "some go up and some down");
+  assert.ok(t.corners.every((c, i) => inside.has(i) || c.rawHeight === 0x2000), "nothing outside the brush moves");
   assert.equal(s.finish(t), true);
   s.undo(t);
-  assert.ok(t.corners.every((c) => groundHeight(c) === 0), "undo takes the whole stroke back");
+  assert.ok(t.corners.every((c) => c.rawHeight === 0x2000), "undo takes the whole stroke back");
   s.redo(t);
-  assert.deepEqual(t.corners.map(groundHeight), heights);
+  assert.deepEqual(t.corners.map((c) => c.rawHeight - 0x2000), raws);
+});
+
+test("Noise spreads evenly over the 20 steps and reaches the rim, whatever the size", () => {
+  const counts = new Map<number, number>();
+  let rim = 0;
+  const random = seeded(11);
+  for (let k = 0; k < 200; k++) {
+    const t = flatMap(), s = new Stroke("noise");
+    applyHeight(t, { ...centre(t), radius: 7 }, "noise", 0, s, random);
+    t.corners.forEach((c, i) => {
+      const v = c.rawHeight - 0x2000;
+      if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+      if (v && Math.hypot((i % t.width) - 16, Math.floor(i / t.width) - 16) === 7) rim++;
+    });
+  }
+  assert.equal(counts.size, 20, "every nonzero step comes up");
+  const all = [...counts.values()];
+  assert.ok(Math.max(...all) / Math.min(...all) < 1.25, `uneven: ${all.join()}`);
+  assert.ok(rim > 0, "a corner on the rim moves");
+});
+
+test("Noise at sizes 3, 5 and 8 takes the 13, 49 and 149 corners within size - 1, as the editor's (47 and 140 changed at 5 and 8: one corner in 21 draws step 0)", () => {
+  for (const [size, n] of [[3, 13], [5, 49], [8, 149]] as const) {
+    const t = flatMap(), { x, y } = centre(t), s = new Stroke("noise");
+    // 0.99 draws step 10 for every corner: none stays.
+    applyHeight(t, brushOf("noise", t, x, y, size), "noise", 0, s, () => 0.99);
+    assert.equal(s.corners().length, n, `size ${size}`);
+    assert.ok(t.corners.every((c) => c.rawHeight === 0x2000 || c.rawHeight === 0x2000 + 256));
+  }
 });
 
 test("Noise keeps to the stored height range like the other height tools", () => {
   const t = flatMap(), s = new Stroke("noise");
-  for (let k = 0; k < 400; k++) applyHeight(t, { ...centre(t), radius: 1 }, "noise", 64, s, () => 1);
+  for (let k = 0; k < 400; k++) applyHeight(t, { ...centre(t), radius: 1 }, "noise", 64, s, () => 0.99);
   assert.equal(t.corners[16 * t.width + 16].rawHeight, 0x7fff, "pushed past the top, the centre stops at it");
   assert.ok(t.corners.every((c) => c.rawHeight >= -0x8000 && c.rawHeight <= 0x7fff));
   assert.deepEqual(writeW3e(parseW3e(writeW3e(t))), writeW3e(t));

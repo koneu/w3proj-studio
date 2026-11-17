@@ -72,6 +72,30 @@ export function heightSpread(buf, base = 0) {
   return { count: values.length, min: values[0], max: values.at(-1), values };
 }
 
+/** The offsets one Noise stamp can leave: whole steps of 25.6 stored units, rounded down, from -10 to 10 (not 0). */
+const NOISE_LATTICE = new Set(Array.from({ length: 21 }, (_, i) => Math.floor((i - 10) * 25.6)).filter((v) => v !== 0));
+
+/**
+ * What a Noise click did, without the randomness (every corner draws its own step): whether every changed corner is on
+ * the step lattice of one stamp (`lattice`), whether any went past one stamp's 256 (`beyondOneStamp`: a second stamp),
+ * the longer side of the box round the changed corners in corners (`span`: the four corners at the brush's ends all
+ * staying 0 has a chance of about two in a million), and how many corners changed (`changed`; compare with a
+ * tolerance: each corner stays 0 by chance one time in 21).
+ */
+export function noiseView(buf) {
+  const { corners } = readW3e(buf);
+  let n = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, lattice = true, beyond = false;
+  for (const [key, c] of Object.entries(corners)) {
+    if (c.ground === 0) continue;
+    const [x, y] = key.split(",").map(Number);
+    n++;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    if (!NOISE_LATTICE.has(c.ground)) lattice = false;
+    if (Math.abs(c.ground) > 256) beyond = true;
+  }
+  return { lattice, beyondOneStamp: beyond, span: n ? Math.max(maxX - minX, maxY - minY) + 1 : 0, changed: n };
+}
+
 /**
  * The ground and cliff variations without their randomness: per ground texture, how many corners wear it and which
  * variation values occur (sorted, distinct) with how many corners each (`ground`/`cliff` as value to count; `variationView` leaves the counts
@@ -173,6 +197,7 @@ export function wpmCells(buf) {
 export function w3eView(kind, buf) {
   if (kind === "w3e") return readW3e(buf);
   if (kind === "w3e-spread") return heightSpread(buf);
+  if (kind === "w3e-noise") return noiseView(buf);
   if (kind === "w3e-variation") return variationView(buf);
   throw new Error(`unknown w3e kind ${kind}`);
 }

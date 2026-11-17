@@ -162,6 +162,42 @@ test("a cliff type whose ground tile isn't in the list stays in the cliff list w
   assert.equal(corner(t, 3, 3).cliffTexture, 1, "still CLro");
 });
 
+test("Remove Tile as the World Editor's Modify Tileset does it (we-drive 2026-11-17, plateau.w3x with a stripe of each of the six tiles)", () => {
+  // Lordaeron Summer's own six tiles, cliff types CLdi (Ldrt) and CLgr (Lgrs), a mesa of CLgr cliffs. Per removed tile: the
+  // replacement the editor happened to give its corners (it picks a random one), the stripes' new tiles, the ground and
+  // cliff lists it saved, and the mesa's cliff type. The editor saved the custom tilesets flag as 1 in each.
+  const own = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  const types = new Map([type("CLdi", "Ldrt"), type("CLgr", "Lgrs")].map((c) => [c.cliffID, c]));
+  const cases: [number, number, number[], string, string, number][] = [
+    [0, 2, [1, 0, 1, 2, 3, 4], "Ldro Ldrg Lrok Lgrs Lgrd", "CLgr", 0],
+    [1, 2, [0, 1, 1, 2, 3, 4], "Ldrt Ldrg Lrok Lgrs Lgrd", "CLdi CLgr", 1],
+    [2, 5, [0, 1, 4, 2, 3, 4], "Ldrt Ldro Lrok Lgrs Lgrd", "CLdi CLgr", 1],
+    [3, 5, [0, 1, 2, 4, 3, 4], "Ldrt Ldro Ldrg Lgrs Lgrd", "CLdi CLgr", 1],
+    [4, 1, [0, 1, 2, 3, 1, 4], "Ldrt Ldro Ldrg Lrok Lgrd", "CLdi", 0],
+    [5, 4, [0, 1, 2, 3, 4, 4], "Ldrt Ldro Ldrg Lrok Lgrs", "CLdi CLgr", 1],
+  ];
+  for (const [removed, replacement, stripes, ground, cliffs, mesaType] of cases) {
+    const t = flat(own);
+    t.cliffTiles = ["CLdi", "CLgr"];
+    own.forEach((_, i) => { corner(t, i, 0).texture = i; });
+    mesa(t, 1);
+    const plan = planRemoval(t.groundTiles, [removed], new Map([[removed, own.indexOf(own[replacement])]]), tileUse(t, types));
+    applyTileList(t, plan.tiles, plan.map, types, undefined);
+    assert.deepEqual(own.map((_, i) => corner(t, i, 0).texture), stripes, `removed ${own[removed]}: the stripes' tiles`);
+    assert.equal(t.groundTiles.join(" "), ground, `removed ${own[removed]}: the ground list`);
+    assert.equal(t.cliffTiles.join(" "), cliffs, `removed ${own[removed]}: the cliff list`);
+    assert.equal(corner(t, 3, 3).cliffTexture, mesaType, `removed ${own[removed]}: the mesa's cliff type`);
+    assert.equal(t.customTilesetsRaw, 1);
+  }
+  // Control: another replacement (the editor's pick is random) gives the removed tile's stripe another tile.
+  const t = flat(own);
+  t.cliffTiles = ["CLdi", "CLgr"];
+  corner(t, 0, 0).texture = 0;
+  const plan = planRemoval(t.groundTiles, [0], new Map([[0, 3]]), tileUse(t, types));
+  applyTileList(t, plan.tiles, plan.map, types, undefined);
+  assert.equal(corner(t, 0, 0).texture, 2, "Lrok is the third of Ldro Ldrg Lrok Lgrs Lgrd");
+});
+
 test("the custom tiles flag follows the list: the tileset's own list is 0, another 1", () => {
   const own = ["Ldrt", "Lgrs", "Lrok"];
   const t = flat([...own, "Lgrd"]);

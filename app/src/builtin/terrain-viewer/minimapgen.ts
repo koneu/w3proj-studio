@@ -45,6 +45,9 @@ export function hdFirst(path: string, mode: string): string[] {
 
 /** Pathing cells along a tile's side (a pathing texture has one pixel per cell). */
 const CELLS_PER_TILE = 4;
+/** The dot of a doodad with no pathing texture and no model colour (the palisade LSpl): the editor's inner pixels there
+ *  average 181.5 on all three channels, its grain taking about 1.5 off a colour. */
+const NO_MODEL_RGB: Rgb = [183, 183, 183];
 
 /** `make` once per key: the same promise for every later call. */
 function memo<T>(make: (key: string) => Promise<T>): (key: string) => Promise<T> {
@@ -131,6 +134,9 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
   /** `mean`: the colour of a dot (modelTextureColor), not of a shape drawn from its pathing texture's cells. */
   modelColor: (type: string, mean: boolean) => Promise<Rgb | null>;
   footprint: (pathTex: string) => Promise<number>;
+  /** The texture's width and height in cells when it is known (a dot reaches the tiles by them, see dotReach);
+   *  left out, `footprint` squared. */
+  cells?: (pathTex: string) => Promise<[number, number] | null>;
   /** The cells of a pathing texture, drawn as they are; null (or left out): a dot of its `footprint` size. */
   pathMask?: (pathTex: string) => Promise<PathMask | null>;
 }): Promise<MinimapObject[]> {
@@ -149,12 +155,17 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     const mask = file ? await tables.pathMask?.(file) : null;
     // Gates, walls and rock spires are drawn as their texture's cells; a texture that is one full square (trees,
     // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
-    const shape = !!mask && !(mask.width === mask.height && mask.cells.every((c) => c));
-    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape);
+    // A texture that is one full rectangle is a dot of tiles (dotReach, turned by the angle); one with gaps is its cells.
+    const shape = !!mask && !mask.cells.every((c) => c);
+    // The palisade (no pathing texture, no model colour to read): a grey dot, as the editor draws it (we-drive 2026-11-17).
+    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape) ?? (file ? null : NO_MODEL_RGB);
     if (!rgb) continue;
     if (shape) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask: mask!, angle: d.angle }); continue; }
     const size = file ? await tables.footprint(file) : 1;
-    objects.push({ x: d.position[0], y: d.position[1], rgb, size });
+    // No pathing texture (a palisade): the one tile it stands in.
+    // (The doodad's scale makes no difference: tried on HillsbradCreek, TurtleRock and SnowareBay, 0.8 to 1.2.)
+    const cells = file ? await tables.cells?.(file) ?? undefined : [0, 0] as [number, number];
+    objects.push({ x: d.position[0], y: d.position[1], rgb, size: file ? size : 0, ...(cells ? { cells } : {}), ...(d.angle !== undefined ? { angle: d.angle } : {}) });
   }
   return objects;
 }
@@ -245,6 +256,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     const image = await pathImage(path);
     return image ? Math.sqrt(image.width * image.height) / CELLS_PER_TILE : 1;
   };
+  const cells = async (path: string): Promise<[number, number] | null> => { const image = await pathImage(path); return image ? [image.width, image.height] : null; };
   const pathMask = memo((path: string) => (async () => {
     const image = await pathImage(path);
     if (!image) return null;
@@ -252,7 +264,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     for (let i = 0; i < cells.length; i++) cells[i] = image.rgba[i * 4] | image.rgba[i * 4 + 1] | image.rgba[i * 4 + 2] ? 1 : 0;
     return { width: image.width, height: image.height, cells };
   })().catch(() => null));
-  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, pathMask });
+  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint, cells, pathMask });
 
   return {
     terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor, drawnTiles,
