@@ -12,6 +12,7 @@
 import { Hands, sleep } from "./cdp.mjs";
 import { cameraOf } from "./app-drive.mjs";
 import { checkUiActions, uiKey } from "./we-compare-core.mjs";
+import { lit } from "./jslit.mjs";
 
 /** The terrain view at the World Editor's view size, looking as the editor does for `spec`. */
 async function view(page, spec) {
@@ -24,7 +25,7 @@ async function view(page, spec) {
   const head = await page.evaluate(`(({ width, height, offsetX, offsetY }) => ({ width, height, offsetX, offsetY }))(window.__driveEd.terrain)`);
   const { x, y, ...v } = cameraOf(spec, head);
   await page.evaluate(`window.__driveEd.lookAt(${x}, ${y})`);
-  await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${JSON.stringify(v)} }); })()`);
+  await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${lit(v)} }); })()`);
   await sleep(600);
   await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
 }
@@ -40,13 +41,13 @@ export async function uiStep(page, actions) {
   for (const [kind, ...a] of actions) {
     if (kind === "view") await view(page, a[0]);
     else if (kind === "tab") {
-      await page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent.trim() === ${JSON.stringify(a[0])}); if (!b) throw new Error("no tab " + ${JSON.stringify(a[0])}); b.click(); })()`);
+      await page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent.trim() === ${lit(a[0])}); if (!b) throw new Error("no tab " + ${lit(a[0])}); b.click(); })()`);
       await settled();
     }
-    else if (kind === "tool") await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith(${JSON.stringify(a[0])})); if (!b) throw new Error("no tool button " + ${JSON.stringify(a[0])}); b.click(); })()`);
-    else if (kind === "texture") await page.evaluate(`(() => { const b = document.querySelector('.terrain-tex-thumb[title*=${JSON.stringify(a[0])}]'); if (!b) throw new Error("no tile " + ${JSON.stringify(a[0])}); b.click(); })()`);
-    else if (kind === "cliff") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Cliff type")); const o = s && [...s.options].find((o) => o.textContent.startsWith(${JSON.stringify(a[0])})); if (!o) throw new Error("no cliff type " + ${JSON.stringify(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-    else if (kind === "shape") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Shape")); const o = s && [...s.options].find((o) => o.value === ${JSON.stringify(a[0])}); if (!o) throw new Error("no brush shape " + ${JSON.stringify(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    else if (kind === "tool") await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith(${lit(a[0])})); if (!b) throw new Error("no tool button " + ${lit(a[0])}); b.click(); })()`);
+    else if (kind === "texture") await page.evaluate(`(() => { const b = document.querySelector('.terrain-tex-thumb[title*=${lit(a[0])}]'); if (!b) throw new Error("no tile " + ${lit(a[0])}); b.click(); })()`);
+    else if (kind === "cliff") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Cliff type")); const o = s && [...s.options].find((o) => o.textContent.startsWith(${lit(a[0])})); if (!o) throw new Error("no cliff type " + ${lit(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    else if (kind === "shape") await page.evaluate(`(() => { const s = [...document.querySelectorAll(".painter-options select")].find((s) => s.closest("label")?.textContent.startsWith("Shape")); const o = s && [...s.options].find((o) => o.value === ${lit(a[0])}); if (!o) throw new Error("no brush shape " + ${lit(a[0])}); s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     // The slider would clamp a size outside its range without a word: refused instead.
     else if (kind === "size") await page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); if (!i) throw new Error("no brush size slider"); const v = ${Number(a[0])}; if (v < Number(i.min) || v > Number(i.max)) throw new Error("brush size " + v + " is outside the slider's " + i.min + " to " + i.max); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     else if (kind === "click") {
@@ -71,7 +72,7 @@ export async function uiStep(page, actions) {
       // A key pressed on the terrain view's canvas: KeyboardEvent.key and .code as a real keyboard gives them
       // ("d" KeyD, "Numpad6" the key 6 with code Numpad6; a third element names the code itself: uiKey).
       const { key, code } = uiKey(a[0], a[1]);
-      await page.evaluate(`(async () => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${JSON.stringify(key)}, code: ${JSON.stringify(code)}, bubbles: true })); await new Promise((r) => setTimeout(r, 40)); })()`);
+      await page.evaluate(`(async () => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${lit(key)}, code: ${lit(code)}, bubbles: true })); await new Promise((r) => setTimeout(r, 40)); })()`);
       await sleep(200);
       await settled();
     } else if (kind === "drag") {

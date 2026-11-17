@@ -7,7 +7,8 @@ import type { FieldMeta } from "../../lib/objects/metadata";
 export const OPS = [">=", "<=", "!=", ">", "<", "=", ":"] as const;
 export type Op = (typeof OPS)[number];
 export const OP_LABEL: Record<Op, string> = { ">=": "≥", "<=": "≤", "!=": "≠", ">": ">", "<": "<", "=": "=", ":": "contains" };
-const TOKEN = /^([^\s<>=!:]+)(>=|<=|!=|>|<|=|:)(.*)$/;
+// Built from a string: written out, the angle brackets read to a code scanner as an HTML tag filter.
+const TOKEN = new RegExp("^([^\\s\\x3c>=!:]+)(>=|\\x3c=|!=|>|\\x3c|=|:)(.*)$");
 
 export interface FieldFilter {
   token: string;

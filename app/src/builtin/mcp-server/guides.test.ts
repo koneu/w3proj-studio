@@ -27,7 +27,7 @@ test("guides only name tools that exist", () => {
 test("sources and notes stay out of what the AI reads", () => {
   const g = parseGuide("<!--\nsummary: What it's for.\n\nSources: https://example.org\n-->\n\n# Title\n\nText <!-- inline --> here.\n");
   assert.equal(g.summary, "What it's for.");
-  assert.ok(g.text.startsWith("# Title") && !g.text.includes("example.org") && !g.text.includes("inline"));
+  assert.ok(g.text.startsWith("# Title") && !/example/.test(g.text) && !g.text.includes("inline"));
   for (const guide of Object.values(GUIDES)) assert.ok(!/<!--|https?:/.test(guide.text));
 });
 

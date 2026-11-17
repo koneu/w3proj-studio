@@ -1,6 +1,7 @@
 // Talking to a page over the Chrome DevTools Protocol, with Node's own WebSocket. Used by the
 // smoke tests, for headless Edge and for the app's WebView2 alike.
 
+import { lit } from "./jslit.mjs";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Waits for a check to come out true. One that throws counts as not yet: a file can be half
@@ -90,7 +91,7 @@ export class Hands {
   /** The centre of the first element matching a selector, and containing a text if given. */
   async where(selector, text = null) {
     const at = await this.page.evaluate(`(() => {
-      const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((x) => ${JSON.stringify(text)} === null || x.textContent.trim() === ${JSON.stringify(text)});
+      const e = [...document.querySelectorAll(${lit(selector)})].find((x) => ${lit(text)} === null || x.textContent.trim() === ${lit(text)});
       if (!e) return null;
       e.scrollIntoView({ block: "center" });
       const r = e.getBoundingClientRect();
@@ -111,7 +112,7 @@ export class Hands {
     for (let round = 0; round < 8; round++) {
       const at = await this.where(selector, text);
       const cover = await this.page.evaluate(`((x, y) => {
-        const want = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.trim() === ${JSON.stringify(text)});
+        const want = [...document.querySelectorAll(${lit(selector)})].find((e) => ${lit(text)} === null || e.textContent.trim() === ${lit(text)});
         const hit = document.elementFromPoint(x, y);
         // Nothing found there (off the window) is left to the click; so is the element's own part, or what holds it
         // when the element itself takes no pointer (an icon in a button).

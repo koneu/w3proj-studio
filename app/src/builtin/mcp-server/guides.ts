@@ -8,7 +8,12 @@ import terrain from "./guides/terrain.md?raw";
 
 export interface Guide { summary: string; text: string }
 
-const stripComments = (text: string) => text.replace(/<!--[\s\S]*?-->/g, "").trim();
+const stripComments = (text: string) => {
+  // Repeated, so a comment cut out can't leave the start of another one behind; a comment never closed is cut too.
+  let out = text;
+  for (let prev = ""; prev !== out;) { prev = out; out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, ""); }
+  return out.replace(/<!--/g, "").trim();
+};
 
 /** A guide as stored: `summary:` in a comment, which like all comments the AI never sees. */
 export function parseGuide(raw: string): Guide {
