@@ -681,7 +681,7 @@
   },
   {
     "name": "studio-paths-matrix-masks",
-    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i at random: player 0 at -8960,-3968 in one run, -490,5669 in the next (2026-11-17), so the masks worked out from them are random too and are ignored (that they agree with allies.rs's rule for the editor's starts was seen by hand once); the editor counts that change as an edit (saves 1 to 2). Also ignored: scriptType, supportedModes, gameDataVersion and the enemy masks, which the editor's newer w3i version has and the map's version 25 hasn't. Checked: the starts, saves and the names are what differs; the borrowed wtg/wts make the player names TRIGSTR_00n",
+    "description": "(5) MatrixPCDefense_v4.3 (all-zero ally masks in its w3i; the editor refuses it without a war3map.wtg, so make-studio-paths.mjs adds echo's): the editor's save against Studio's pack. Differs for the editor's own reasons, not the masks: the map has no placed units, so the editor places start locations of its own (player 0 at -8960,-3968; the w3i says -3400,6300) and writes them and the masks worked out from them into the w3i at random: player 0 at -8960,-3968 in one run, -490,5669 in the next (2026-11-17), so the masks worked out from them are random too and are ignored (that they agree with allies.rs's rule for the editor's starts was seen by hand once); the editor counts that change as an edit (saves 1 to 2). Also ignored: scriptType, supportedModes, gameDataVersion and the enemy masks, which the editor's newer w3i version has and the map's version 25 hasn't. Checked: the starts, saves and the names are what differs; the editor writes the player and force names (inline in Studio) as TRIGSTR_ strings of the borrowed wts",
     "input": {
       "map": "${REPO}/target/studio-paths/matrix.w3x"
     },
@@ -726,7 +726,8 @@
         "expectPaths": [
           "saves",
           "players[].start",
-          "players[].name"
+          "players[].name",
+          "forces[].name"
         ]
       }
     ],
