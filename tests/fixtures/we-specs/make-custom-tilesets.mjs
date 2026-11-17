@@ -15,12 +15,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { modeArgs, requireValid } from "../../gen-args.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-const only = process.argv.slice(4);
-if (!game) { console.error("usage: make-custom-tilesets.mjs <w3proj cli> <game folder>"); process.exit(2); }
+const only = modeArgs();
+if (!game) { console.error("usage: make-custom-tilesets.mjs <w3proj cli> <game folder> [name…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -31,6 +32,7 @@ const LISTS = {
   few3: ["Lgrs", "Lrok", "Ldrt"],
   rev6c: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"],
 };
+requireValid(only.every((n) => Object.hasOwn(LISTS, n)), `unknown list ${only.filter((n) => !Object.hasOwn(LISTS, n)).join(" ")}; usage: make-custom-tilesets.mjs <w3proj cli> <game folder> [${Object.keys(LISTS).join(" | ")}]…`);
 /** The cliff list of the lists that change it. */
 const CLIFFS = { rev6c: ["CLgr", "CLdi"] };
 for (const [name, tiles] of Object.entries(LISTS)) {
