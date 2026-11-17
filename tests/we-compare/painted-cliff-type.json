@@ -140,7 +140,7 @@
     "input": {"map":"${REPO}/tests/fixtures/we-specs/plateau.w3x"},
     "we": {"saveAccept":["Warning"],"steps":[["--key","t"],["--click","1505,112"],["--click","1473,282"],["--click","1409,367"],["--click","1456,569"],["--click","750,630"],["--sleep","500"],["--sleep","1000"]]},
     "studio": {"steps":[{"terrain":true},{"ui":[["tab","Terrain"],["view","we"],["tool","Paint:"],["texture","Lrok"],["size",3],["click",750,630],["tool","Level:"],["size",3],["click",750,630]]},{"sleep":1000}]},
-    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs"}],
+    "compare": [{"file":"war3map.w3e","as":"w3e","expect":"differs","expectPaths":["corners.29,28.cliffType","corners.35,28.cliffType","corners.30,29.cliffType","corners.34,29.cliffType","corners.31,30.cliffType","corners.32,30.cliffType","corners.33,30.cliffType"]}],
     "limit": 40
   }
 ]

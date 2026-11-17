@@ -24,7 +24,7 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["corners.30,25.cliffType", "corners.31,25.cliffType", "corners.32,25.cliffType", "corners.33,25.cliffType", "corners.34,25.cliffType"] }],
     "limit": 40
   },
   {
@@ -104,7 +104,7 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["corners.30,25.cliffType", "corners.31,25.cliffType", "corners.32,25.cliffType", "corners.33,25.cliffType", "corners.34,25.cliffType"] }],
     "limit": 40
   },
   {

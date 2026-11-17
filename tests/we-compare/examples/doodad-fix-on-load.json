@@ -10,6 +10,6 @@
       { "sleep": 2000 }
     ]
   },
-  "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs" }],
+  "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["doodads[13].scale", "doodads[29].scale", "doodads[45].scale", "doodads[61].scale", "doodads[109].scale", "doodads[125].scale"] }],
   "limit": 12
 }

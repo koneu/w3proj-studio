@@ -85,7 +85,8 @@
           "skinIds"
         ],
         "tolerance": 0.01,
-        "expect": "differs"
+        "expect": "differs",
+        "expectPaths": ["doodads[32].position[0]", "doodads[32].position[1]", "doodads[32].position[2]", "doodads[33].position[0]", "doodads[33].position[1]", "doodads[33].position[2]", "doodads[34].position[2]", "doodads[35].position[2]", "doodads[36].position[2]", "doodads[37].position[2]"]
       }
     ],
     "limit": 40
