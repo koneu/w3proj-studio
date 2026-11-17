@@ -297,6 +297,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
       title: "Locale string tables not in the import list",
       run: () => unlistedLocaleTexts(w3, scope()),
     },
+    {
+      id: "missingStrings",
+      title: "Strings the map refers to without a string table",
+      run: () => missingStrings(w3),
+    },
   ];
 }
 
@@ -478,6 +483,34 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
     });
   }
   return capped(out, "files not in the import list");
+}
+
+/** The files whose texts can be TRIGSTR_nnn references into war3map.wts (the map's info and its object data). */
+const STRING_USERS = ["war3map.w3i.json", ...["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"].flatMap((k) => [`war3map.${k}.json`, `war3mapSkin.${k}.json`])];
+
+/** A map without war3map.wts whose files still refer to its strings (TRIGSTR_nnn): the World Editor and the game show
+ *  those texts empty, and Studio can't write the table again, since the texts are gone. Fix: bring the file back (a
+ *  checkpoint or the packed map has it) or type the texts again. A file that can't be read is skipped. */
+export async function missingStrings(w3: W3Api): Promise<Problem[]> {
+  const names = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+  if (names.has("map/war3map.wts") || !names.has("map/war3map.w3i.json")) return [];
+  const refs = new Set<string>();
+  const where: string[] = [];
+  for (const f of STRING_USERS) {
+    if (!names.has(`map/${f}`.toLowerCase())) continue;
+    const text = await w3.workspace.readText(`map/${f}`).catch(() => null);
+    const found = text?.match(/TRIGSTR_\d+/g);
+    if (!found) continue;
+    for (const r of found) refs.add(r);
+    where.push(f.replace(/\.json$/, ""));
+  }
+  if (!refs.size) return [];
+  const sample = [...refs].slice(0, 3).join(", ");
+  return [{
+    severity: "warning",
+    message: `war3map.wts is missing but ${where.join(", ")} refer${where.length === 1 ? "s" : ""} to ${refs.size} string${refs.size === 1 ? "" : "s"} in it (${sample}${refs.size > 3 ? ", …" : ""}): the World Editor and the game show them empty. Restore war3map.wts from a checkpoint or the packed map, or type the texts again.`,
+    location: "war3map.wts",
+  }];
 }
 
 /** The `_Locales/x.w3mod/war3map.wts` string tables the import list doesn't name: the World Editor drops such a file

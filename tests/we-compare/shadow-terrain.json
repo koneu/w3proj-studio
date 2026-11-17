@@ -1,0 +1,50 @@
+[
+  {
+    "name": "shadow-terrain",
+    "description": "Calculate Shadows on ground and cliffs (branch we-shadow-3, 2026-11-17): shadow-terrain.w3x (fixtures/we-specs/make-shadow-probes.mjs: a 128 bank, cliffs one and two levels up, single corners raised 128, 256 and 512, two ridges, a 64 bank; no doodads). The editor: File > Calculate Shadows and Save Map. Studio: w3.terrain.calculateShadows. war3map.shd cell by cell: the editor's walk of 16 cells toward the sun over heights at the cell centres (shadows.ts shadowCellHeights, cliffs from the model the editor names from the top-left corner, a quarter turn round); the same in SD",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/shadow-terrain.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "shadow-plateau",
+    "description": "Calculate Shadows on plateau.w3x (fixtures/we-specs/make-plateau.mjs: a plateau one level up with long straight faces on all four sides): the one-level cliff's shadow reaches one cell further in one row of four along the east face, from the model the editor reads for a cliff tile (shadows.ts shadowCliffName); 367 cells, SD and HD alike",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
+  }
+]

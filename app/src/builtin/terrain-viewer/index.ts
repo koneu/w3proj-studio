@@ -44,7 +44,7 @@ import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy, roomShape, type RoomShape } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
-import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTiles, type Footprint, type TileRect } from "./specials";
+import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
@@ -2184,10 +2184,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  then (specialLooks): a cliff re-plan that changes those (the cliff types once known, a cliff type painted,
          *  a layer raised) draws the objects again. The cliff models leave the covered tiles to them. */
         let specialsPlaced: Placed[] = [], specialRects: TileRect[] = [], specialsLook = "";
+        /** Each drawn special's own tile, for the cliff type it takes (specialTileCliffType). */
+        const specialTileOf = new WeakMap<Placed, TileRect>();
         /** A special's textures: its cliff type's (specialTextures), unless its type names a texture of its own. */
         const specialLook = (p: Placed, skin: Skin | undefined) => {
           if (!cliffData || (skin && Object.keys(skinTextures(skin)).length)) return undefined;
-          const type = specialCliffType(terrain, cliffList(terrain, cliffData.types), p.position[0], p.position[1]);
+          const tile = specialTileOf.get(p);
+          const list = cliffList(terrain, cliffData.types);
+          const type = tile ? specialTileCliffType(terrain, list, tile) : specialCliffType(terrain, list, p.position[0], p.position[1]);
           return type ? specialTextures(type) : undefined;
         };
         const specialLooks = (placed: readonly Placed[], rects: readonly TileRect[]) =>
@@ -2485,6 +2489,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const specialPlaced = specialPlacements(specialList, skins, (id) => specialSizes.get(id) ?? undefined,
             { x: terrain.offsetX, y: terrain.offsetY }, (_x, _y, tiles) => specialBase(terrain, tiles));
           const rects = specialList.filter((sp) => skins.has(sp.id)).map((sp) => specialTiles(sp, specialSizes.get(sp.id) ?? undefined));
+          specialPlaced.forEach((p, i) => specialTileOf.set(p, rects[i]));
           const look = specialLooks(specialPlaced, rects);
           const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
