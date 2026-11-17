@@ -46,6 +46,7 @@ import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
+import type { FollowFlags } from "../../lib/script/destructables";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
@@ -288,6 +289,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       clearTimeout(rebuildTimer);
       await runRebuild();
     }),
+    // Not in the manifest: the Map Script extension, after making the script, has the project's open terrain editor set
+    // its destructables' flags (map-script followFlags). True when that editor holds war3map.doo (the file is its).
+    w3.commands.register("w3.terrain.followDestructableFlags", async (follow?: unknown) => {
+      if (typeof follow !== "function") return false;
+      const editor = ownEditor();
+      return editor ? editor.followFlags(follow as FollowFlags) : false;
+    }),
     // Not in the manifest (no palette entry): the app smoke calls it so a step reads the models again.
     w3.commands.register("w3.terrain.clearShadowCache", () => clearShadowMeshes()),
     // Part of the workbench's settled(): every open terrain editor's view at rest (objects, models, a frame drawn).
@@ -386,6 +394,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     derive: (before?: RebuildFrom) => Promise<void>;
     /** What Export Minimap draws, as the editor has it now (unsaved edits included). */
     minimapSource: () => Promise<ExportSource>;
+    /** Sets the flags `follow` names on its objects of war3map.doo (the map script's GAME_PLACED, map-script
+     *  followFlags); false when it holds no war3map.doo. */
+    followFlags: (follow: FollowFlags) => Promise<boolean>;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -5959,6 +5970,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
+          followFlags: async (follow) => {
+            await ready();
+            if (disposed || !dooFile || !editable) return false;
+            const f = dooFile;
+            const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
+            if (!changes.length) return true;
+            // Not an edit of the user's: no undo step. The file follows the script as the World Editor's save writes it.
+            for (const c of changes) (f.list[c.index] as Placed & { flags?: number }).flags = c.flags;
+            objectsTouched = true;
+            // Saved now unless there are unsaved edits, which the save of them shouldn't be taken for: their save writes
+            // the flags along (and runs this again).
+            if (!w3.editors.isDirty(doc.path)) {
+              doc.setDirty(true);
+              await w3.editors.save(doc.path);
+            }
+            return true;
+          },
         };
         // A read-only editor (a game map) never derives: it isn't the project's.
         if (editable) openedBy.set(doc.path, record);

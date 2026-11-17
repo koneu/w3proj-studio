@@ -4466,6 +4466,117 @@ async function areaLevelsSteps(page, found) {
   await k.hands.key("Escape", "Escape", 27);
 }
 
+/** The destructables' flag "placed by the game" (2) follows the map script, as the World Editor's save sets it (we-compare
+ *  dest-flags; map-script followFlags): a trigger that names a tree makes the script create it and clears its flag, the
+ *  other tree keeps 2; removing the trigger gives it back. With the terrain editor open and saved, it takes the flags on
+ *  its own objects: it stays clean, its undo history stays (an undo after it gives the edit back, and its save keeps the
+ *  followed flag rather than writing the old one), and the packed map verifies. */
+async function destructableFlags(page, found) {
+  try {
+  const fail = (what) => found.push(`destructable flags: ${what}`);
+  const k = await heightKit(page, "DestFlags");
+  const TXT = "map/war3map.w3e.txt";
+  const script = () => readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 512, y: 0 }], ignoreRoom: true });
+  await k.save();
+  const trees = () => k.doodads().filter((d) => d.id === "LTlt");
+  if (trees().length !== 2 || trees().some((d) => d.flags !== 2)) return fail(`the placed trees (control: two with flags 2): ${lit(trees().map((d) => d.flags))}`);
+  const named = trees().find((d) => d.position[0] === 0);
+  const global = `gg_dest_LTlt_${String(Array.isArray(named.trailer) && named.trailer.length === 3 ? named.trailer[0] : named.editorId).padStart(4, "0")}`;
+  if (/CreateAllDestructables/.test(script())) fail("the script creates a destructable nobody names (control)");
+  // An edit in the terrain editor, saved: its undo step is what must stay.
+  const err = await k.run("w3.terrain.adjustCliffLevels", 1);
+  if (err) return fail(`Adjust Cliff Levels: ${err}`);
+  await k.save();
+  const levels = () => /^\[layer\][^\n]*/m.exec(readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8"))?.[0];
+  const raised = levels();
+
+  await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
+  await settled(page);
+  await until("the script to create the named tree", () => script().includes(`set ${global} = BlzCreateDestructable`), 20000)
+    .catch(() => fail(`the script doesn't create ${global}: ${script().slice(script().indexOf("CreateAllDestructables") - 40, script().indexOf("CreateAllDestructables") + 200) || "no CreateAllDestructables"}`));
+  await until("the named tree's flag", () => trees().find((d) => d.position[0] === 0)?.flags === 0, 20000)
+    .catch(() => fail(`the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0 (the script creates it)`));
+  if (trees().find((d) => d.position[0] === 512)?.flags !== 2) fail(`the other tree's flags: ${trees().find((d) => d.position[0] === 512)?.flags}, not 2`);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("following the flags left the terrain editor with unsaved changes");
+  if (await page.evaluate(`w3.editors.activePath()`) !== TXT) fail("the terrain editor was closed or replaced");
+  // Its undo history stays: one undo takes the cliff levels back, and saving that keeps the followed flag.
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (levels() === raised) fail("an undo after the flags followed didn't take the cliff levels back (the undo history went)");
+  if (trees().find((d) => d.position[0] === 0)?.flags !== 0) fail(`the editor's save after the undo wrote the named tree's flags as ${trees().find((d) => d.position[0] === 0)?.flags} (the old ones)`);
+
+  // The trigger gone: the script leaves the tree to the game again, flags 2.
+  await k.tool("remove_trigger", { name: "Names Tree" });
+  await settled(page);
+  await until("the tree's flag back", () => trees().find((d) => d.position[0] === 0)?.flags === 2, 20000)
+    .catch(() => fail(`with the trigger gone the tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 2`));
+  if (script().includes(global)) fail(`with the trigger gone the script still has ${global}`);
+
+  // The terrain editor closed: the file itself follows.
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
+  await settled(page);
+  await until("the flag in the file", () => trees().find((d) => d.position[0] === 0)?.flags === 0, 20000)
+    .catch(() => fail(`with no terrain editor open the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0`));
+  await k.verify(fail);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Cliff levels past the top are refused, never wrapped round or cut (decided 2026-11-17): the Increase Two brush on
+ *  level 14 with Enforce Terrain Limits off (the World Editor wraps it to 0) says why and changes nothing, no undo step;
+ *  Adjust Cliff Levels past its range says why too (whole-map ground has the dialog's +12). */
+async function cliffTopRefused(page, found) {
+  try {
+  const fail = (what) => found.push(`cliff top refused: ${what}`);
+  const k = await heightKit(page, "CliffTop");
+  const TXT = "map/war3map.w3e.txt";
+  const file = () => readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  // A new map is on level 2: +10 then +2 take it to 14.
+  for (const by of [10, 2]) {
+    const err = await k.run("w3.terrain.adjustCliffLevels", by);
+    if (err) return fail(`Adjust Cliff Levels +${by}: ${err}`);
+  }
+  await k.save();
+  if (!/^\[layer\] all e$/m.test(file())) return fail(`the map at level 14 (control): ${/^\[layer\][^\n]*/m.exec(file())?.[0]}`);
+  const top = file();
+  await k.clearToasts();
+  const over = await k.run("w3.terrain.adjustCliffLevels", 1);
+  if (over) fail(`Adjust Cliff Levels +1 at the top threw: ${over}`);
+  await settled(page);
+  if (!/Not done: the map can't go up/.test(await k.toasts())) fail(`Adjust Cliff Levels +1 at the top didn't say why: "${await k.toasts()}"`);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the refused Adjust Cliff Levels left unsaved changes");
+
+  // Increase Two, size 1, a click in the middle (Enforce Terrain Limits is off on a new map).
+  await k.tab("Terrain");
+  await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith("+2:")); if (!b) throw new Error("no Increase Two button"); b.click(); })()`);
+  await page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); i.value = 1; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await k.clearToasts();
+  await k.clickMiddle();
+  await settled(page);
+  if (!/Not done: Increase would raise the ground from cliff level 14 to 16, past 15/.test(await k.toasts())) fail(`Increase Two on level 14 didn't say why: "${await k.toasts()}"`);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the refused Increase left unsaved changes");
+  await k.save();
+  if (file() !== top) fail(`the refused Increase changed the terrain: ${/^\[layer\][^\n]*/m.exec(file())?.[0]}`);
+  // Control: Increase One from 14 builds 15, the top a map stores.
+  await page.evaluate(`[...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith("+1:")).click()`);
+  await k.clickMiddle();
+  await settled(page);
+  if (!(await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`))) fail("Increase One from 14 changed nothing (control)");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
+  if (file() !== top) fail("one undo of Increase One didn't give the file back");
+  await k.focusMap();
+  await k.hands.key("Escape", "Escape", 27);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past level 0 stops every
  *  corner there (as the World Editor does), and undoing gives every file back byte for byte. */
@@ -4522,6 +4633,16 @@ async function wholeMapGround(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
   if (hashes() !== original) fail(`one undo of Adjust Cliff Levels didn't give the files back as they were: ${hashes()}`);
+
+  // Past the dialog's +10: refused with a word why, nothing changed (the World Editor cuts it to +10; decided 2026-11-17).
+  await k.clearToasts();
+  err = await k.run("w3.terrain.adjustCliffLevels", 12);
+  if (err) fail(`Adjust Cliff Levels +12 threw: ${err}`);
+  await settled(page);
+  if (!/Not done: the map goes up by at most \+10 .*not \+12/.test(await k.toasts())) fail(`Adjust Cliff Levels +12 wasn't refused with a word why: "${await k.toasts()}"`);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the refused +12 left unsaved changes");
+  await k.save();
+  if (hashes() !== original) fail(`the refused +12 changed the files: ${hashes()}`);
 
   // Past the bottom: every corner stops at level 0, as in the World Editor; one undo gives the files back. Then a
   // further shift down has nothing to move: a message, nothing to save.
@@ -15353,11 +15474,13 @@ async function run() {
         chapterObjects,
         classicRefusal,
         cliCheck,
+        cliffTopRefused,
         configSafety,
         contextLoss,
         dataSafety,
         derivedAfterDeletes,
         derivedSaveQueue,
+        destructableFlags,
         doodadRulesEdit,
         doodadSnapOnLoad,
         drawCalls,
@@ -15637,6 +15760,10 @@ async function firstHalf(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
+  await cliffTopRefused(page, found).catch((e) => found.push(`cliff top refused: ${e.message}`));
+  await leftOpen(page, "cliffTopRefused", found);
+  await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
+  await leftOpen(page, "destructableFlags", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
   await leftOpen(page, "areaLevels", found);
   await areaReplaceCt0(page, found).catch((e) => found.push(`area replace (custom tilesets 0): ${e.message}`));

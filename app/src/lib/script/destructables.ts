@@ -28,17 +28,54 @@ export interface DestructablesInput {
 
 /** Flag "fixed Z": the destructable keeps its height instead of following the ground. */
 const FIXED_Z = 0x4;
-/** Flag seen on v13 placements the script never creates (the game places them from war3map.doo). */
-const GAME_PLACED = 0x2;
+/** A destructable's flag "the game places it from war3map.doo": the World Editor's save sets it on every destructable
+ *  its script doesn't create and clears it on those it does (scriptCreates). It follows the script, it isn't input:
+ *  we-compare dest-flags (dest-tint-unref.w3x, given flags 0, 1, 2, 3, 4 and 6: no trigger naming them, the save wrote
+ *  2, or 6 where it was 4; named by a trigger, 0, or 4, and the script created them, whatever the flags were). Bit 0
+ *  (the playable-area flag, borderFlags) is another rule. On a plain doodad the same bit means "solid" (pathmap). */
+export const GAME_PLACED = 0x2;
 
 const deg = (rad: number) => fixed(Math.fround(Math.fround(rad) * Math.fround(180 / Math.PI)), 3);
 
+/** What decides whether the map script creates a placed destructable. */
+export type CreatesInput = Pick<DestructablesInput, "itemTables" | "globalName" | "referenced">;
+
+/** Whether CreateAllDestructables creates the destructable `d` (at `index` in war3map.doo): a trigger names it, or it
+ *  drops items. As the World Editor's, whatever its flags say. */
+export function scriptCreates(i: CreatesInput, d: DestructableJson, index: number): boolean {
+  return i.referenced.has(i.globalName(d)) || dropFunctionOf("Doodad", d, index, i.itemTables) !== undefined;
+}
+
+/** The flags the World Editor's save gives a placed object of war3map.doo: GAME_PLACED off where the script creates it
+ *  (`created`), on where it doesn't, the other bits as they are. A plain doodad (`destructable` false) keeps its flags. */
+export function followedFlags(flags: number, created: boolean, destructable: boolean): number {
+  if (!destructable) return flags;
+  return created ? flags & ~GAME_PLACED : flags | GAME_PLACED;
+}
+
+/** The objects of war3map.doo (`doodads`, in file order) whose flags the World Editor's save would set otherwise than
+ *  they are, with the flags it would set (followedFlags, scriptCreates). `destructable`: whether a type is a
+ *  destructable; an unknown type is left alone. */
+export function flagsToFollow(i: CreatesInput, doodads: readonly DestructableJson[], destructable: (id: string) => boolean): { index: number; flags: number }[] {
+  const out: { index: number; flags: number }[] = [];
+  doodads.forEach((d, index) => {
+    if (typeof d.flags !== "number") return;
+    const flags = followedFlags(d.flags, scriptCreates(i, d, index), destructable(d.id));
+    if (flags !== d.flags) out.push({ index, flags });
+  });
+  return out;
+}
+
+/** The flags the objects of a war3map.doo list should have, as flagsToFollow gives them for one script: what the Map
+ *  Script extension hands the open terrain editor (command w3.terrain.followDestructableFlags). */
+export type FollowFlags = (doodads: readonly DestructableJson[]) => { index: number; flags: number }[];
 
 /** The section body (without banner), or "" when no destructable is needed. */
 export function destructablesSection(i: DestructablesInput): string {
-  // By object id; ties keep the file order (not always the World Editor's).
+  // By object id; ties keep the file order (not always the World Editor's). Its flags don't decide (GAME_PLACED
+  // follows the script, set by the save: flagsToFollow).
   const placed = i.doodads.map((d, index) => ({ d, index }))
-    .filter(({ d, index }) => !(d.flags & GAME_PLACED) && (i.referenced.has(i.globalName(d)) || dropFunctionOf("Doodad", d, index, i.itemTables)))
+    .filter(({ d, index }) => scriptCreates(i, d, index))
     .sort((a, b) => (a.d.id < b.d.id ? -1 : a.d.id > b.d.id ? 1 : a.index - b.index));
   if (!placed.length) return "";
   const ev = i.editorVersion ?? 0, pitchRoll = ev >= 6117, color = ev >= 7000;

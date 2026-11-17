@@ -484,6 +484,13 @@ function destructableDrops(i: ScriptInput): string {
   return body ? banner("Destructible Item Tables") + body : "";
 }
 
+/** What decides which destructables the script of `i` creates (scriptCreates, flagsToFollow): the triggers' names
+ *  (only code that runs) and the map's item tables. Only `info`, `triggers` and `custom` of `i` are read. */
+export function destructableRule(i: Pick<ScriptInput, "info" | "triggers" | "custom">): { referenced: Set<string>; itemTables: Set<number>; globalName: (d: DestructableJson) => string } {
+  const whole = i as ScriptInput;
+  return { referenced: referencedGlobals(whole, true), itemTables: tableNumbers(whole), globalName: (d) => placedName(d as unknown as PlacedJson, "dest") };
+}
+
 function destructableObjects(i: ScriptInput): string {
   const body = destructablesSection({ itemTables: tableNumbers(i), doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
     referenced: referencedGlobals(i, true), editorVersion: i.info.editorVersion as number | undefined, tint: i.destructableTint });
