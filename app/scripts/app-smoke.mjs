@@ -12047,7 +12047,7 @@ async function placerAndCampaign(page, found) {
       // that word's Reveal button, so its promise isn't waited for).
       await soon(async () => /Packed \d+ files/.test(await k.toasts()), 30000);
       const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
-      for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
+      for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_000[0]", "BlzCreateItemWithSkin( itemID,"]) {
         if (!script.includes(line)) fail(`the packed script has no "${line}"`);
       }
       if (/'[ui]DNR'/.test(script)) fail("the packed script creates a random object by its placeholder id");
