@@ -465,11 +465,9 @@ async function run(seeds: Seed[]): Promise<Failure[]> {
     const targets = new Map<string, number>();
     for (const b of bad) targets.set(b.seed.split(":")[0], (targets.get(b.seed.split(":")[0]) ?? 0) + 1);
     console.error(`${bad.length} cases threw a non-parser error: ${[...kinds].map(([k, n]) => `${k} x${n}`).join(", ")}; by target: ${[...targets].map(([k, n]) => `${k} x${n}`).join(", ")}`);
-    // A TypeError or ReferenceError is a bug in the parser. A RangeError (the DataView's "Offset is outside the bounds",
-    // an unchecked length) is how several readers still refuse a truncated file; counted above, a failure with
-    // W3_HOSTILE_STRICT=1 until those readers check their lengths.
-    const strict = process.env.W3_HOSTILE_STRICT === "1";
-    failures.push(...bad.filter((b) => strict || !b.what.startsWith("RangeError")).slice(0, MAX_FAILURES));
+    // A TypeError, ReferenceError or RangeError (the DataView's "Offset is outside the bounds": an unchecked length) is
+    // a bug in the parser: a reader checks its lengths and refuses a cut-off file with its own error.
+    failures.push(...bad.slice(0, MAX_FAILURES));
   }
   return failures;
 }

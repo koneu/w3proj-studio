@@ -16,7 +16,11 @@ export function soundDurationMs(buf: Uint8Array): number | null {
     let byteRate = 0;
     for (let o = 12; o + 8 <= buf.length;) {
       const id = tag(o), size = dv.getUint32(o + 4, true);
-      if (id === "fmt ") byteRate = dv.getUint32(o + 16, true);
+      if (id === "fmt ") {
+        // A fmt chunk cut off before its byte rate: no length to tell.
+        if (o + 20 > buf.length) break;
+        byteRate = dv.getUint32(o + 16, true);
+      }
       else if (id === "data") return byteRate ? Math.floor((size * 1000) / byteRate) : null;
       o += 8 + size + (size & 1);
     }

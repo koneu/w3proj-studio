@@ -58,6 +58,20 @@ test("a Xing or Info header's frame count is the length, its own frame not count
   assert.equal(soundDurationMs(concat(noCount, frames(100))), ms(102));
 });
 
+test("a WAV whose fmt chunk is cut off before its byte rate has no length, without throwing", () => {
+  const b = new Uint8Array(30), d = new DataView(b.buffer);
+  b.set(new TextEncoder().encode("RIFF"), 0);
+  b.set(new TextEncoder().encode("WAVEfmt "), 8);
+  d.setUint32(16, 16, true);
+  assert.equal(soundDurationMs(b), null);
+  const whole = new Uint8Array(52), w = new DataView(whole.buffer);
+  whole.set(b.subarray(0, 20));
+  w.setUint32(28, 1000, true);
+  whole.set(new TextEncoder().encode("data"), 36);
+  w.setUint32(40, 500, true);
+  assert.equal(soundDurationMs(whole), 500, "control: the whole header gives its length");
+});
+
 test("bytes that aren't an mp3 have no length", () => {
   assert.equal(soundDurationMs(new Uint8Array(500)), null);
   assert.equal(soundDurationMs(id3v1()), null);
