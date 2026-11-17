@@ -18,7 +18,8 @@ import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env";
 import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
-import { generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { destructableRule, generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { flagsToFollow, type CreatesInput, type DestructableJson, type FollowFlags } from "../../lib/script/destructables";
 import { dayNightModels } from "../../lib/script/setup";
 import { ABILITY_FUNC_FILES, abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, customIdsOf, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
@@ -74,7 +75,15 @@ interface GameTables {
   /** The game's unit types that allow a custom team colour (lib/script/objects gameCustomColors). */
   customColors: Set<string>;
   worldEdit: Map<string, Map<string, string>>;
+  /** The game's destructable types (DestructableData.slk). */
+  destructables: Set<string>;
 }
+
+const DOO_JSON = "map/war3map.doo.json", DOO_RAW = "map/war3map.doo";
+
+/** What the destructables' flag GAME_PLACED follows (flagsToFollow): the made script's rule and which types are
+ *  destructables. */
+interface FlagRule { rule: CreatesInput; destructable: (id: string) => boolean }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const out = w3.output.channel("Map Script");
@@ -116,6 +125,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         unitColors: gameTeamColors(unitUI), customColors: gameCustomColors(unitUI),
         worldEdit: parseIni(await text("UI\\WorldEditData.txt")),
         soundLabels: parseSoundLabels(await Promise.all(SOUND_INFO.map((n) => text(`UI\\SoundInfo\\${n}.slk`)))),
+        destructables: new Set(parseSlk(await text("Units\\DestructableData.slk")).map((r) => r.DestructableID)),
       };
     })();
     tables.catch(() => { tables = null; });
@@ -162,7 +172,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
  *  script is what the data makes): nothing is written, not even the melee flag a save turns off. */
-  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
+  const generate = async (look = false, held?: { triggers: TriggerFile; custom: CustomTextFile | null }): Promise<{ path: string; text: string; vjass?: string; language?: string; flags?: FlagRule }> => {
     const root = w3.workspace.project()?.root;
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
@@ -243,10 +253,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       cameras: (await json<{ cameras: ScriptInput["cameras"] }>("map/war3map.w3c"))?.cameras,
       sounds, soundDuration, soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
     });
-    if (!language) return { path, text: script };
+    // The destructables' GAME_PLACED flag follows this script, as the World Editor's save sets it (followFlags).
+    const customDestructables = customIdsOf(objectFiles.w3b);
+    const flags: FlagRule = { rule: destructableRule({ info, triggers, custom }), destructable: (id) => g.destructables.has(id) || customDestructables.has(id) };
+    if (!language) return { path, text: script, flags };
     // The language's compiler gets the script as the World Editor hands it to JassHelper.
     const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
-    return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title };
+    return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title, flags };
   };
 
   /** Sound lengths in ms, by file and sound name: imported files (a chapter map's, else its campaign's, as the game
@@ -276,6 +289,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (ms !== null) measured.set(f, ms);
     }
     return (file, name) => measured.get(file) ?? old(file, name);
+  };
+
+  /** Sets GAME_PLACED on the destructables of war3map.doo as the World Editor's save does for the script made with
+   *  `f`: on where the script doesn't create one, off where it does (flagsToFollow). The open terrain editor of the
+   *  project takes it on its own objects, so its undo history stays (and saves them unless it has unsaved edits, whose
+   *  save takes them along); else the file is written, only if it changed and nobody wrote it meanwhile. A war3map.doo
+   *  that can't be read is left as it is (said in the output). False: another project is open now. */
+  const followFlags = async (f: FlagRule, root: string | undefined, reason: string): Promise<boolean> => {
+    const follow: FollowFlags = (doodads) => flagsToFollow(f.rule, doodads, f.destructable);
+    // The rule is this project's: another project's terrain editor must never take it.
+    if (!root || w3.workspace.project()?.root !== root) return false;
+    const held = await w3.commands.execute<boolean>("w3.terrain.followDestructableFlags", follow, root).catch(() => false);
+    if (w3.workspace.project()?.root !== root) return false;
+    if (held === true) return true;
+    /** The file's text and whether it's the JSON form; null when there is none. */
+    const read = async (): Promise<{ text: string; json: boolean } | null> => {
+      try { return { text: await w3.workspace.readText(DOO_JSON), json: true }; } catch (e) { if (!isNotFoundError(e)) throw e; }
+      try { await w3.workspace.readBytes(DOO_RAW); } catch (e) { if (isNotFoundError(e)) return null; throw e; }
+      return { text: await w3.backend.invoke<string>("codec_decode", { root, path: DOO_RAW }), json: false };
+    };
+    try {
+      const was = await read();
+      if (!was || w3.workspace.project()?.root !== root) return w3.workspace.project()?.root === root;
+      const doc = JSON.parse(was.text) as { doodads?: DestructableJson[] };
+      const changes = Array.isArray(doc.doodads) ? follow(doc.doodads) : [];
+      if (!changes.length) return true;
+      for (const c of changes) doc.doodads![c.index].flags = c.flags;
+      const text = JSON.stringify(doc);
+      const canonical = was.json ? await w3.backend.invoke<string>("codec_canonicalize", { root, path: DOO_JSON, text }) : text;
+      // Written meanwhile (a tool, an editor that opened): that write starts another run, which follows it.
+      const now = await read();
+      if (w3.workspace.project()?.root !== root) return false;
+      if (now?.text !== was.text || now.json !== was.json) { out.append(`${reason}: war3map.doo was written meanwhile, its destructables' flags are looked at again after that save`); return true; }
+      if (was.json) await w3.workspace.writeText(DOO_JSON, canonical);
+      else await w3.backend.invoke("codec_write", { root, path: DOO_RAW, text });
+      out.append(`${reason}: war3map.doo: ${changes.length} destructable${changes.length === 1 ? "'s" : "s'"} flag "placed by the game" set to follow the script (as the World Editor's save sets it)`);
+    } catch (e) {
+      out.append(`${reason}: war3map.doo: its destructables' flags weren't set to follow the script: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return w3.workspace.project()?.root === root;
   };
 
   let running: Promise<boolean> = Promise.resolve(true);
@@ -309,7 +362,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       try {
         const root = w3.workspace.project()?.root;
         if (onlyFor !== undefined && root !== onlyFor) { out.append(`${reason}: not written: another project is open now`); return false; }
-        const { path, text, vjass, language } = await generate();
+        const { path, text, vjass, language, flags } = await generate();
         const file = path.slice(4);
         // Generating can take a while: this script must not land in another project.
         if (w3.workspace.project()?.root !== root) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
@@ -326,6 +379,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const current = await readScript(path);
         const stamp = await w3.workspace.readText(STAMP).catch(() => null);
         const decision = scriptDecision(current, text, stamp, force);
+        // The script this map runs is this one (written now or already there): the destructables' flags follow it first,
+        // so the game places each one once, from war3map.doo or from the script. A kept script is left with them as they are.
+        if (decision.action !== "keep" && flags) {
+          if (!(await followFlags(flags, root, reason))) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
+        }
         if (decision.action === "same") {
           // The data makes this very script (a fresh import, a script put back): it's this app's from now on.
           if (stamp?.trim() !== scriptHash(text)) await w3.workspace.writeText(STAMP, `${scriptHash(text)}
@@ -556,6 +614,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       pending = null;
       if (path) await due(path);
       await running.catch(() => true);
+    }),
+    // Packing, once everything is saved and the script settled: the destructables' flags follow the script on disk again,
+    // when it is the one the map's data makes (an editor that held them with unsaved edits may have had those undone
+    // since, leaving the file behind the script). Nothing is written otherwise.
+    w3.commands.register("w3.script.followFlags", () => {
+      running = running.catch(() => true).then(async () => {
+        const root = w3.workspace.project()?.root;
+        if (!root) return true;
+        try {
+          const made = await generate(true);
+          if (made.vjass || !made.flags || w3.workspace.project()?.root !== root) return true;
+          const current = await readScript(made.path);
+          if (typeof current !== "string" || current !== made.text) return true;
+          await followFlags(made.flags, root, "packing");
+        } catch (e) {
+          out.append(`packing: the destructables' flags weren't looked at: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return true;
+      });
+      return running.then(() => {}, () => {});
     }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards. `force` (`w3proj rebuild --force`): also over a
     // script that isn't the one this app wrote last (said in the output, naming the file).
