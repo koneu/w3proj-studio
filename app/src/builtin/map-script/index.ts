@@ -153,8 +153,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: INFO_JSON, text: JSON.stringify(now) });
     if (w3.workspace.project()?.root !== root) return;
     await w3.workspace.writeText(INFO_JSON, canonical);
-    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: ${melee.flags & MELEE_MAP ? "a melee map again (it meets the World Editor's melee rules, whose save makes it one)"
-      : `not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`}`);
+    // Flag 0x4000 (Requires The Frozen Throne data) can change alone; only a changed Melee flag is told.
+    if ((melee.flags ^ flags) & MELEE_MAP) {
+      out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: ${melee.flags & MELEE_MAP ? "a melee map again (it meets the World Editor's melee rules, whose save makes it one)"
+        : `not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`}`);
+    }
   };
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's

@@ -169,10 +169,10 @@
   },
   {
     "name": "melee-valid-melee-tree-256",
-    "description": "The tree of tree-256 on a map that is melee: the editor's save takes Melee off (its 'invalid positions' warning). Studio's save takes it off only for starts under water or past the playable map (startsInvalidPlaces), so it keeps it: a known gap.",
+    "description": "The tree of tree-256 on a map that is melee: the editor's save takes Melee off (its 'invalid positions' warning), and Studio's too (meleesave.ts startsSurelyInvalid; branch fix-bugs-w3i, until then a known difference).",
     "input": { "map": "${REPO}/target/melee-valid/melee-valid-melee-tree-256.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
     "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
-    "compare": [{ "file": "war3map.w3i", "expect": "differs", "expectPaths": ["flags"] }]
+    "compare": ["war3map.w3i"]
   }
 ]

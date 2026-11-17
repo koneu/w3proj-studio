@@ -6192,7 +6192,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     let melee = false;
                     if (typeof info.flags === "number") {
                       const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
-                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; remelee = !after.reasons.length; melee = true; }
+                      if (after.flags !== info.flags) {
+                        // Flag 0x4000 (Requires The Frozen Throne data) can change alone: only a changed Melee bit is told.
+                        if ((after.flags ^ info.flags) & MELEE_MAP) { unmelee = after.reasons; remelee = !after.reasons.length; }
+                        info.flags = after.flags; melee = true;
+                      }
                     }
                     return changes.length > 0 || priorities || melee;
                   });
