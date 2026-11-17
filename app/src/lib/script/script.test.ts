@@ -33,6 +33,11 @@ KillUnit=0,unit
 `);
 
 const has = (text: string, line: string) => assert.ok(text.split(EOL).includes(line), `no line "${line}" in:\n${text}`);
+/** `a` comes before `b` in `s`; a missing one is a failure, not an index of -1. */
+const before = (s: string, a: string, b: string) => {
+  const i = s.indexOf(a), j = s.indexOf(b);
+  assert.ok(i >= 0 && j >= 0 && i < j, `"${a}" (${i}) before "${b}" (${j}) in:\n${s}`);
+};
 const hasNot = (text: string, part: string) => assert.ok(!text.includes(part), `"${part}" in:\n${text}`);
 /** The lines one after the other, whole lines. */
 const hasLines = (text: string, lines: string[]) => assert.ok(`${EOL}${text}${EOL}`.includes(`${EOL}${lines.join(EOL)}${EOL}`), `no lines\n${lines.join("\n")}\nin:\n${text}`);
@@ -50,6 +55,23 @@ test("reals round like C: exact ties go to the even digit", () => {
 test("reals are 32-bit: what a float holds is what's written", () => {
   assert.equal(fixed(0.1, 3), "0.100");
   assert.equal(fixed(1650.0000001, 1), "1650.0");
+  // Past what a float holds: 2^24 + 1 is 2^24, and 0.1 shows its float digits.
+  assert.equal(fixed(16777217, 0), "16777216");
+  assert.equal(fixed(0.1, 9), "0.100000001");
+});
+
+test("rounding edge cases: negative zero, non-finite numbers", () => {
+  // As C's printf("%.1f", -0.04): the sign stays.
+  assert.equal(fixed(-0.04, 1), "-0.0");
+  assert.equal(fixed(NaN, 1), "NaN");
+  assert.equal(fixed(Infinity, 1), "Infinity");
+});
+
+test("literal: integer codes, strings, others as written", () => {
+  assert.equal(literal(data, "unitcode", "hfoo"), "'hfoo'");
+  assert.equal(literal(data, "string", 'a"b'), str('a"b'));
+  assert.equal(literal(data, "integer", "42"), "42");
+  assert.equal(literal(data, "unitcode", "42"), "42", "not four characters: as written");
 });
 
 test("names become identifiers as the World Editor makes them", () => {
@@ -103,7 +125,10 @@ test("splitting a script gives back the sections it was made of", () => {
   const sections = generateSections(input());
   const script = [...sections.values()].join("");
   const again = splitSections(script);
-  for (const [k, v] of sections) if (v) assert.equal(again.get(k), v, k || "(header)");
+  let compared = 0;
+  for (const [k, v] of sections) if (v) { assert.equal(again.get(k), v, k || "(header)"); compared++; }
+  assert.equal(again.size, compared, "no section appears or goes missing");
+  assert.ok(compared > 3, `${compared} sections compared`);
 });
 
 test("the map's custom script header goes under a second banner after the objects, the first stays empty", () => {
@@ -132,16 +157,19 @@ test("banners read as the World Editor writes them", () => {
 
 test("sections come in the World Editor's order", () => {
   const script = generateScript(input({ triggers: wtg([trigger("T", [])]), regions: [{ name: "R", index: 0, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" }] }));
-  const at = (s: string) => script.indexOf(s);
-  assert.ok(at("Global Variables") < at("function CreateRegions"));
-  assert.ok(at("function CreateRegions") < at("function InitTrig_T"));
-  assert.ok(at("function InitTrig_T") < at("function InitCustomPlayerSlots"));
-  assert.ok(at("function InitCustomPlayerSlots") < at("function main"));
-  assert.ok(at("function main") < at("function config"));
+  before(script, "Global Variables", "function CreateRegions");
+  before(script, "function CreateRegions", "function InitTrig_T");
+  before(script, "function InitTrig_T", "function InitCustomPlayerSlots");
+  before(script, "function InitCustomPlayerSlots", "function main");
+  before(script, "function main", "function config");
 });
 
 test("main doesn't call what isn't there", () => {
   const script = generateScript(input());
+  // The control: with them on, main does call them.
+  const on = mainSection(setup({}, { sounds: true, cameras: true }));
+  has(on, "    call InitSounds(  )");
+  has(on, "    call CreateCameras(  )");
   for (const f of ["InitSounds", "CreateRegions", "CreateCameras", "InitUpgrades", "InitTechTree", "CreateAllDestructables", "CreateAllItems", "InitRandomGroups", "CreateAllUnits", "RunInitializationTriggers"]) hasNot(script, f);
 });
 
@@ -312,7 +340,6 @@ test("a type's team colour goes on placed units", () => {
   // The placement's own colour field is ignored unless it's a waygate.
   has(units([unit({ id: "ntav", color: 3 })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
   hasNot(units([unit()], { teamColor }), "SetUnitColor");
-  has(units([unit({ id: "ntav" })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
   // Colour 0 is a colour.
   has(units([unit({ id: "ntav" })], { teamColor: () => 0 }), "    call SetUnitColor( u, ConvertPlayerColor(0) )");
 });
@@ -401,22 +428,27 @@ test("waygates go to their region, if it still exists", () => {
   hasNot(units([unit({ id: "nwgt", waygate: 9 })], { regionName }), "Waygate");
 });
 
-test("units go to one function per player and kind, neutrals last", () => {
+test("units go to one function per player and kind, the neutrals between the players' buildings and units", () => {
   const s = units([unit({ player: 1 }), unit({ id: "hbar", player: 1, editorId: 2 }), unit({ player: 24, editorId: 3 }), unit({ player: 27, editorId: 4 })]);
   for (const f of ["CreateBuildingsForPlayer1", "CreateUnitsForPlayer1", "CreateNeutralHostile", "CreateNeutralPassive", "CreatePlayerBuildings", "CreatePlayerUnits", "CreateAllUnits"]) assert.ok(s.includes(`function ${f} takes`), f);
   has(s, "    local player p = Player(PLAYER_NEUTRAL_AGGRESSIVE)");
+  const all = s.slice(s.indexOf("function CreateAllUnits"));
+  // Neutral creatures aren't last: the players' buildings, the neutrals, then the players' units (as the output stands).
+  before(all, "CreatePlayerBuildings", "CreateNeutralHostile");
+  before(all, "CreateNeutralHostile", "CreateNeutralPassive");
+  before(all, "CreateNeutralPassive", "CreatePlayerUnits");
 });
 
 test("neutral buildings come first: hostile, then passive, then the players'", () => {
   const s = units([unit({ id: "hbar", player: 24 }), unit({ id: "hbar", player: 27, editorId: 2 }), unit({ id: "hbar", player: 0, editorId: 3 })]);
   const all = s.slice(s.indexOf("function CreateAllUnits"));
-  assert.ok(all.indexOf("CreateNeutralHostileBuildings") < all.indexOf("CreateNeutralPassiveBuildings"));
-  assert.ok(all.indexOf("CreateNeutralPassiveBuildings") < all.indexOf("CreatePlayerBuildings"));
+  before(all, "CreateNeutralHostileBuildings", "CreateNeutralPassiveBuildings");
+  before(all, "CreateNeutralPassiveBuildings", "CreatePlayerBuildings");
 });
 
 test("units are created in placement order", () => {
   const s = units([unit({ editorId: 5, position: [5, 0, 0] }), unit({ editorId: 2, position: [2, 0, 0] })]);
-  assert.ok(s.indexOf("'hfoo', 2.0") < s.indexOf("'hfoo', 5.0"));
+  before(s, "'hfoo', 2.0", "'hfoo', 5.0");
 });
 
 test("a placed random unit picks its type when the map starts", () => {
@@ -472,8 +504,8 @@ const items = (list: UnitJson[], editorVersion = 0) => itemsSection({ units: lis
 test("items are created by type, then in the file's order, not by number", () => {
   // As the World Editor's CreateAllItems in OrcX01_05: shwd 2 before shwd 1, as war3mapUnits.doo lists them.
   const s = items([unit({ id: "zzzz", editorId: 1 }), unit({ id: "ratc", editorId: 9 }), unit({ id: "ratc", editorId: 2, position: [7, 0, 0] })]);
-  assert.ok(s.indexOf("'ratc', 100.0") < s.indexOf("'ratc', 7.0"));
-  assert.ok(s.indexOf("'ratc', 7.0") < s.indexOf("'zzzz'"));
+  before(s, "'ratc', 100.0", "'ratc', 7.0");
+  before(s, "'ratc', 7.0", "'zzzz'");
   has(s, "    call BlzCreateItemWithSkin( 'zzzz', 100.0, 200.0, 'zzzz' )");
 });
 
@@ -837,13 +869,15 @@ test("main: camera bounds, tileset sound and the calls in their order", () => {
   assert.ok(s.includes("call SetCameraBounds( -1536.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), -1280.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM), 1536.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), 1280.0 - GetCameraMargin(CAMERA_MARGIN_TOP)"));
   has(s, '    call SetAmbientDaySound( "LordaeronSummerDay" )');
   has(s, '    call NewSoundEnvironment( "Default" )');
-  assert.ok(s.indexOf("CreateRegions") < s.indexOf("CreateAllUnits"));
-  assert.ok(s.indexOf("CreateAllUnits") < s.indexOf("InitBlizzard"));
-  assert.ok(s.indexOf("InitCustomTriggers") < s.indexOf("RunInitializationTriggers"));
+  before(s, "CreateRegions", "CreateAllUnits");
+  before(s, "CreateAllUnits", "InitBlizzard");
+  before(s, "InitCustomTriggers", "RunInitializationTriggers");
   // The random groups before anything placed, as World Editor 2.0 saved a map with all four (we-drive, 2026-11-09).
   const placing = mainSection(setup({}, { techs: true, destructables: true, items: true, randomGroups: true, units: true })).split(EOL).filter((l) => /^ {4}call (Init|Create)/.test(l));
   assert.deepEqual(placing.slice(0, 5), ["InitTechTree", "InitRandomGroups", "CreateAllDestructables", "CreateAllItems", "CreateAllUnits"].map((f) => `    call ${f}(  )`));
-  assert.equal(AMBIENCE.A, "Ashenvale");
+  has(mainSection(setup({ tileset: "A" })), '    call SetAmbientDaySound( "AshenvaleDay" )');
+  has(mainSection(setup({ tileset: "A" })), '    call SetAmbientNightSound( "AshenvaleNight" )');
+  assert.ok(Object.keys(AMBIENCE).every((k) => k.length === 1), "one letter per tileset");
   hasNot(mainSection(setup({ tileset: "?" })), "SetAmbientDaySound");
 });
 
@@ -1234,8 +1268,7 @@ test("an initially off trigger with Run on Map Initialization isn't run at the s
   const items = [trigger("On", [eca(0, "MapInitializationEvent")], { runOnInit: true }), trigger("Off", [eca(0, "MapInitializationEvent")], { initiallyOff: true, runOnInit: true, id: 1 })];
   for (const s of [jassScript(wtg(items)), luaScript(wtg(items))]) {
     assert.ok(/ConditionalTriggerExecute\( ?gg_trg_On ?\)/.test(s), s);
-    hasNot(s, "ConditionalTriggerExecute( gg_trg_Off )");
-    hasNot(s, "ConditionalTriggerExecute(gg_trg_Off)");
+    assert.doesNotMatch(s, /ConditionalTriggerExecute\(\s*gg_trg_Off\b/);
   }
 });
 

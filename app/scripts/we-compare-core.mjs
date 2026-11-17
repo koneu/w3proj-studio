@@ -1,10 +1,11 @@
 // The pure parts of we-compare.mjs: reading a spec, and comparing two versions of a file (the World Editor's save and
 // Studio's) field by field, cell by cell or byte by byte. No process is started here; we-compare.test.mjs tests it.
 
-import { dirname, isAbsolute, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 
-const KINDS = ["auto", "parsed", "text", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
+const KINDS = ["auto", "parsed", "text", "text-exact", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
 /** The kinds compared as JSON (diffJson): only these take "tolerance", "ignore" and "expectPaths". */
 export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
@@ -122,7 +123,7 @@ function studioStep(step, where, vars = {}) {
  *     "studio": { "settings": { "key": value }, "steps": [{ "mcp": "tool", "args": {…} }, { "eval": "…" }, …] },
  *     "compare": ["war3map.w3i", { "file": "war3map.wpm", "as": "wpm", "expect": "differs" }], "limit": 20 }
  */
-export function parseSpec(raw, specDir, vars = {}, label = "spec") {
+export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWithoutPaths = new Set() } = {}) {
   if (!isObject(raw)) throw new Error(`${label}: a spec is an object`);
   const name = raw.name;
   if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`${label}: "name" is needed (letters, digits, . _ -; it names the folder)`);
@@ -172,6 +173,12 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
     for (const opt of ["tolerance", "ignore", "expectPaths"]) {
       if (e[opt] !== undefined && kind !== "auto" && !JSON_KINDS.includes(kind)) throw new Error(`${where}: compare[${i}].${opt} has no effect on "as": "${kind}" (only on ${JSON_KINDS.join(", ")})`);
     }
+    // "differs" on a JSON kind without expectPaths passes on ANY difference, also when the World Editor's steps never
+    // applied: refused, except for the entries of tests/we-compare/differs-without-paths.json (written before the
+    // rule; that list only shrinks).
+    if (e.expect === "differs" && !e.expectPaths && takesPaths(kind, e.file) && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
+      throw new Error(`${where}: compare[${i}] (${e.file}) expects "differs" without "expectPaths": name the paths that must differ (any difference would pass, also a World Editor step that missed)`);
+    }
     return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.lines ? { lines: e.lines } : {}) };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
@@ -190,14 +197,77 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
 }
 
 /** A spec file's text: one spec or an array of them. Names must differ. */
-export function parseSpecFile(text, file, vars = {}) {
+export function parseSpecFile(text, file, vars = {}, options = {}) {
   let raw;
   try { raw = JSON.parse(text); } catch (e) { throw new Error(`${file}: not JSON: ${e.message}`); }
   const list = Array.isArray(raw) ? raw : [raw];
-  const specs = list.map((r, i) => parseSpec(r, dirname(file), vars, `${file}${Array.isArray(raw) ? `[${i}]` : ""}`));
+  const specs = list.map((r, i) => parseSpec(r, dirname(file), vars, `${file}${Array.isArray(raw) ? `[${i}]` : ""}`, options));
   const dup = duplicateName(specs);
   if (dup) throw new Error(`${file}: two specs are named ${dup}`);
   return specs;
+}
+
+/** Whether a compare entry of this kind can name expectPaths: the JSON kinds, and "auto" on a file auto doesn't take as
+ *  text or a pathing map (it is then the codecs' JSON or bytes; we-compare can't know which before the run). */
+export const takesPaths = (kind, file) => JSON_KINDS.includes(kind) || (kind === "auto" && autoKind(file, null) === "bytes");
+
+/** The file of the "differs" entries without expectPaths that are let through, under the checkout `repoDir`. */
+export const differsAllowlistPath = (repoDir) => join(repoDir, "tests", "we-compare", "differs-without-paths.json");
+/** The allowlist (its "entries", each "spec-name file") as a Set, for parseSpec's `differsWithoutPaths`. */
+export function readDiffersAllowlist(repoDir) {
+  const raw = JSON.parse(readFileSync(differsAllowlistPath(repoDir), "utf8"));
+  if (!Array.isArray(raw.entries) || !raw.entries.every((e) => typeof e === "string" && / /.test(e))) throw new Error(`${differsAllowlistPath(repoDir)}: "entries" is a list of "spec-name file"`);
+  return new Set(raw.entries);
+}
+
+/**
+ * The make-*.mjs generator (`gens`: [{ name, text }]) that writes the input map `map`, or null: only for a map under
+ * <repo>/target/. The generator names its output folder and the file, either literally or as a template
+ * (`melee-valid-${name}.w3x`): then the template's fixed prefix and suffix fit the file and the case name between them
+ * appears in the generator.
+ */
+export function generatorOf(map, repoDir, gens) {
+  const rel = relative(join(repoDir, "target"), map);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+  const folder = basename(dirname(map));
+  const file = basename(map);
+  const templated = (g) => [...g.matchAll(/([\w.-]*)\$\{[^}]+\}([\w.-]*)/g)].some(([, pre, post]) => {
+    if (!pre && !post) return false;
+    if (!file.startsWith(pre) || !file.endsWith(post) || file.length <= pre.length + post.length) return false;
+    return g.includes(file.slice(pre.length, file.length - post.length));
+  });
+  return gens.find((g) => g.text.includes(folder) && (g.text.includes(file) || templated(g.text)))?.name ?? null;
+}
+
+/** Every settings key a spec changes in Studio: its studio.settings and its "setting" steps (input and studio). */
+export function settingKeys(spec) {
+  const steps = [...(spec.input.steps ?? []), ...spec.studio.steps];
+  return [...new Set([...Object.keys(spec.studio.settings), ...steps.filter((s) => s.setting).map((s) => s.setting[0])])];
+}
+
+/**
+ * The files `w3proj verify` (unpack, pack in memory, compare) says don't come back the same, from its output:
+ * { mismatched: [names] } for "FAIL <map> — mismatched: a, b", { error } for another FAIL, {} for none.
+ */
+export function verifyOutcome(stdout) {
+  const fail = String(stdout).split("\n").find((l) => l.startsWith("FAIL "));
+  if (!fail) return {};
+  const m = /— mismatched: (.*)$/.exec(fail);
+  return m ? { mismatched: m[1].split(",").map((s) => s.trim()).filter(Boolean) } : { error: fail.replace(/^FAIL .*? — /, "").trim() };
+}
+
+/**
+ * The "parsed" results of a spec checked against the World Editor's save surviving the codecs: a file whose unpack and
+ * pack don't give its bytes back is compared through a codec that loses or changes something, so its MATCH can't be
+ * trusted: ERROR, naming it. `verify` is verifyOutcome's result; other results are returned as they are.
+ */
+export function applyRoundtrip(files, verify) {
+  if (!verify.mismatched && !verify.error) return files;
+  return files.map((f) => {
+    if (f.kind !== "parsed" || f.status === "ERROR" || f.status === "MISSING") return f;
+    const why = verify.error ? `the World Editor's save didn't go through unpack and pack: ${verify.error}` : verify.mismatched.some((n) => n.toLowerCase() === f.file.toLowerCase()) ? "the World Editor's save of this file doesn't come back the same from the codecs (w3proj verify): the parsed compare can't see what they lose" : null;
+    return why ? { ...f, status: "ERROR", count: 1, diffs: [{ text: why }, ...(f.diffs ?? [])] } : f;
+  });
 }
 
 /** The first name two specs share, any case (each names a folder, and Windows' folders don't tell case apart), or null. */
@@ -343,9 +413,11 @@ export function diffWpm(a, b, limit = 10) {
   return { equal: count === 0, count, cells, size: [ha.w, ha.h], diffs: diffs.slice(0, limit) };
 }
 
-/** Text by line: { equal, count (differing lines, the extra ones included), lines, diffs }. */
-export function diffText(a, b, limit = 10) {
-  const x = a.split(/\r?\n/), y = b.split(/\r?\n/);
+/** Text by line: { equal, count (differing lines, the extra ones included), lines, diffs }. `exact`: lines are split at
+ *  LF only, so a CR stays part of its line and CRLF against LF differs (text-exact: specs that pin line endings). */
+export function diffText(a, b, limit = 10, exact = false) {
+  const split = (t) => (exact ? t.split("\n") : t.split(/\r?\n/));
+  const x = split(a), y = split(b);
   const n = Math.max(x.length, y.length);
   const diffs = [];
   let count = 0;
@@ -396,6 +468,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
   // minimap's tolerance is for its block colours only: its size is compared exactly.
   if (JSON_KINDS.includes(kind)) r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tolerance : 0) : tolerance, ignore, expectPaths);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
+  else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true);
   else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit);
   else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
   else r = diffBytes(we.bytes, studio.bytes, limit);
@@ -428,6 +501,9 @@ export function loadSide(r, file, kind, decodeImage, lines) {
     const re = new RegExp(lines);
     return { text: r.text(file).split(/\r?\n/).filter((l) => re.test(l)).join("\n") };
   }
+  // The file's own bytes from the map (its line endings as saved) when the map holds it; a file only the unpack makes
+  // (war3map.wct.txt) is read as the unpack wrote it.
+  if (kind === "text-exact") return { text: r.listed(file) ? Buffer.from(r.bytes(file)).toString("utf8") : r.text(file) };
   return { bytes: r.bytes(file) };
 }
 
@@ -500,23 +576,29 @@ export function runOutcome(results, { strictIgnore = false } = {}) {
 export function weOutcome(n, outs) {
   // Which spec each line belongs to: the --map lines start one.
   let at = -1;
-  const state = Array.from({ length: n }, () => ({ saved: false, failure: null }));
+  const state = Array.from({ length: n }, () => ({ saved: false, failure: null, warning: null, stopped: false }));
   for (const o of outs) {
     if (o.step === "--map" && !o.error) { at = Math.min(at + 1, n - 1); continue; }
     const i = Math.max(at, 0);
-    if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
+    // A crash while closing the editor after the spec's save (the known one on close after Light Ranges): the saved
+    // file is whole (the save had finished), so it is a warning, not a failure; the process stopped there.
+    if (o.step === "--close" && o.crashed && o.closed && !o.error && state[i].saved && !state[i].failure) {
+      state[i].warning ??= `the World Editor crashed while closing, after the save (${o.message ?? "crashed"})`;
+      state[i].stopped = true;
+    } else if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
     else if (o.step === "--save") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
     else if (o.step === "--wait-ready" && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
   }
-  const firstBad = state.findIndex((s) => s.failure || !s.saved);
+  // Where the process stopped: a failure, a spec without its save, or a crash on close after a save.
+  const stopAt = state.findIndex((s) => s.failure || !s.saved || s.stopped);
   const rerun = [];
   const errors = state.map((s, i) => {
     if (s.failure) return `World Editor: ${s.failure}`;
     if (s.saved) return null;
-    if (i > firstBad) { rerun.push(i); return null; }
+    if (i > stopAt) { rerun.push(i); return null; }
     return "World Editor: no save (the run stopped before it)";
   });
-  return { errors, rerun };
+  return { errors, rerun, warnings: state.map((s) => (s.warning ? `World Editor: ${s.warning}` : null)) };
 }
 
 /** One spec's result as text: a line per file, then its first differences. */
@@ -525,6 +607,7 @@ export function formatReport(result, limit = 10, { strictIgnore = false } = {}) 
   const ok = !result.error && !result.notCompared && result.files.every((f) => asExpected(f, { strictIgnore }));
   const head = result.error ? `ERROR ${result.error}` : result.notCompared ? "NOT COMPARED (--no-we: Studio's side only, nothing was compared)" : ok ? "OK" : "UNEXPECTED";
   lines.push(`${result.name}: ${head}${result.description ? `  (${result.description})` : ""}`);
+  for (const w of result.warnings ?? []) lines.push(`  warning: ${w}`);
   for (const f of result.files) {
     let expected = "";
     if (f.expect === "differs") {
