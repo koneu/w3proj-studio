@@ -73,15 +73,15 @@ function geosetColours(anim: { color: [number, number, number]; colorTrack?: { i
   return colours.map((c) => c.slice(0, 3).map((v) => +v.toFixed(3)));
 }
 
-test("a geoset animation's static colour is red, green, blue, a colour track's keys blue, green, red (the World Editor's pictures)", () => {
+test("a geoset animation's static colour and a colour track's keys are blue, green, red (the World Editor's pictures)", () => {
   // World Editor, we-drive (tests/fixtures/we-specs/make-geoset-color.mjs): RuneArt's key (0, 0, 1) is red, GCracks'
-  // (1, 0.85, 0) cyan; ShimmeringPortal's static (0.467, 0, 0.992) stays violet (read blue first its glow went red).
+  // (1, 0.85, 0) cyan, AzsharaStatue's static (0.31, 0.78, 0.86) gold.
   const still = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
-  assert.deepEqual(geosetColours({ color: [0.467, 0, 0.992] }, [still]), [[0.467, 0, 0.992]]);
+  assert.deepEqual(geosetColours({ color: [0.31, 0.78, 0.86] }, [still]), [[0.86, 0.78, 0.31]]);
   const track = { interp: 0 as const, globalSeq: -1, times: new Uint32Array([0, 100]), values: new Float32Array([0, 0, 1, 0, 0.5, 1]), size: 3 };
-  // a sequence with no key of the track keeps the static colour as stored
+  // a sequence with no key of the track keeps the static colour
   const colours = geosetColours({ color: [0.25, 0.5, 0.75], colorTrack: track }, [{ frame: 0, seqStart: 0, seqEnd: 50, time: 0 }, { frame: 300, seqStart: 200, seqEnd: 250, time: 300 }]);
-  assert.deepEqual(colours, [[1, 0, 0], [0.25, 0.5, 0.75]]);
+  assert.deepEqual(colours, [[1, 0, 0], [0.75, 0.5, 0.25]]);
 });
 
 test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD shading", () => {

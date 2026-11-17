@@ -940,6 +940,42 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   one-pixel line of exactly (128, 128, 255) at the bound, Studio's was (150, 200, 255) drawn over two pixels at half
   strength: the colour is now the editor's (`CAMERA_BOUNDS_RGB`); the line is still antialiased over two pixels.
   The line is on by default in Studio's terrain view and off in the editor's.
+- **Picture parity 4** (branch we-look-4, 2026-11-17; we-drive and app-drive as in the bullet above, inputs
+  `make-specials-look.mjs`, `make-geoset-color.mjs`, `openpoints/example-maps/16_Particles_Doodads.w3x`):
+  (1) *Camera bounds line*: now one pixel wide, every pixel exactly (128, 128, 255): `crispline.ts` steps the projected line
+  pixel by pixel (Bresenham) and the renderer draws each pixel as a GL point of size 1 at its centre (the canvas is
+  multisampled, a GL line came out over two pixels at half strength); camera-bounds.w3m, SD unlit, `--camera we:2816,0,1500`:
+  844 pixels of exactly that colour in one column; at rotation 60 a one-pixel staircase of 1050. The editor's picture
+  has no line (off by default there); Studio keeps it on by default (a UX choice, nothing in the editor's view mode needs it).
+  (2) *Export Minimap in HD*: the editor draws the grey 183 dot for a doodad whose model is stored only below `_DE.w3mod`
+  (EOcr, LCpa, LRsr, UO*, YO*); Studio's minimap reads the game without that layer (`minimapgen.ts` `withoutDeLayer`, the
+  map's own import of the file still counts; the model view keeps the fallback). `mmsave-dots-models-hd` (new, same map as
+  the SD spec) MATCH, `-sd` still MATCH.
+  (3) *Geoset animation colours*: AzsharaStatue's geoset 2 (RedRock texture) holds only the static colour (0.31, 0.78, 0.86) and
+  the editor draws it **gold**: the static colour is stored blue, green, red like the colour track's keys (Studio read it red,
+  green, blue, grey stone); `renderer.ts` turns both now (`modeldraw.test.ts`; the statue is gold in Studio's picture).
+  This makes ShimmeringPortal's static glow colour (0.467, 0, 0.992) pink-red where it was violet, and the portal rim of map 16
+  was already pinker than the editor's: the rim's cause is not the static colour (the glow's alpha track, key times 3333
+  and 10333, lies outside its Stand 14967-15300).
+  **Left, with what was found**: (a) AzsharaStatue's pedestal is a teal hex column in the editor and a red-brown pyramid in Studio,
+  and ShroomsBlue is the 27-vertex cap (geoset 1) alone in the editor where Studio draws the 110-vertex mushroom (geoset 0)
+  and hides geoset 1. Both models' geoset alpha / colour tracks have **no key inside the Stand interval except one at its
+  first frame** (Azshara Stand 167-1167: g1 alpha keys 167 = 0, 1333 = 1, g0 colour 167, 1333, 2667 with the last (0.53, 0.6,
+  0.38); Shrooms stand 167-1167: g0 alpha keys 1833 = 1, 3233 = 0, g1 167 = 0, 1300 = 0, 2000 = 1, 6667 = 1). What the editor
+  draws is each track's **last key** (g1 shown, g0 hidden, the teal from Azshara's last colour key turned blue, green, red),
+  not the key at Stand's start that Studio takes. Not changed: as a general rule ("a track with no key after the sequence's
+  first frame holds its last key") it would also reach every model whose Stand begins on a key, and no second model was measured.
+  (b) Specials on flat ground: with replaceable 11 left unresolved on those (path empty: texture null, drawn white) the cave
+  and collapse walls turned white too, where the editor keeps their rock texture and only the flat quad at the footprint's
+  edge is white (SD) or blue (HD): the quad is not "texture 11 missing", so it was not changed (a tile of cliff texture 15 still
+  takes the first type); the HD cave interior is black in the editor's pictures where Studio shows its ground through the
+  hollow (HD CityCliffDoodadCave1: geoset 0 the cliff placeholders, opaque; geoset 1 the diffuse with blend, 285 triangles each,
+  the diffuse 2048 x 2048 with 20 % of its pixels alpha 0 and a mean colour of 40, 33, 27): not settled.
+  (c) Map 16 (HD, `--look` at 700): the editor's picture is about 1.4 times larger than Studio's at the same x, y, distance for
+  everything (grass blades, the fountain 520 px against 360 px across; at 3000 it was 125 against 80 for the fountain alone),
+  so the camera fit at short range is what differs, not the Ruins Fountain's scale (ZOfo, scale 1). Rising Water (IZrw,
+  `RisingWaterDoodad.mdx`: one blend layer with the 24 `ReplaceableTextures\Water\WaterNN` frames, alpha track key 3567 = 1
+  inside its Stand 3500-8500) is bluer and more opaque in the editor than Studio's green, light water; not looked into further.
 - **Border shade** (branch border-shade-models, 2026-11-13; copies of empty_map_on_newest_world_editor.w3m made with
   app-drive's MCP tools and packed with the CLI: a tree, a hay cart, a footman, claws of attack, a start location and a
   YCl2 three tiles inside (x -2944) and three tiles past the west edge (x -3712), a raised plateau and a lake across the
