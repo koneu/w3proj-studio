@@ -2,6 +2,8 @@
 // the farm's copy rule, the snapshot comparison and the lock. Running the editor itself is local only (TESTING.md).
 
 import test from "node:test";
+/** we-drive drives the editor through Proton and X11: these checks use its Linux-only paths (Z: drive names, process.getuid). */
+const LINUX_ONLY = process.platform !== "linux" && "we-drive runs on Linux only";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { encodePng } from "./pic-compare.mjs";
@@ -1003,7 +1005,7 @@ test("Session: openMap answers Save changes? with No, picks the copy's row, and 
   await assert.rejects(r.s.openMap(r.maps["b.w3m"]), /no "Open Document" list opened/);
 });
 
-test("Session: exportMinimap types a file in the work folder, copies the TGA it wrote, and removes its own", async (t) => {
+test("Session: exportMinimap types a file in the work folder, copies the TGA it wrote, and removes its own", { skip: LINUX_ONLY }, async (t) => {
   const r = rig(t);
   await r.s.start(r.maps["a.w3m"]);
   const exp = dialogWin(50, "Export Minimap", [500, 300, 300, 320]), saveAs = dialogWin(51, "Save As", [450, 250, 500, 400]);
@@ -1091,7 +1093,7 @@ test("wineserverPath: files/bin, else dist/bin (older Proton builds), else null"
   assert.equal(wineserverPath("/p", () => false), null);
 });
 
-test("Session: the sandbox mounts the machine read-only and only the farm, its prefix, the work folder, the runtime dir and /tmp writable", (t) => {
+test("Session: the sandbox mounts the machine read-only and only the farm, its prefix, the work folder, the runtime dir and /tmp writable", { skip: LINUX_ONLY }, (t) => {
   const r = rig(t);
   mkdirSync(join(r.dir, "work"), { recursive: true });
   mkdirSync(join(r.dir, "we", "install"), { recursive: true });

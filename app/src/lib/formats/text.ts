@@ -16,7 +16,16 @@ export function parseSlk(text: string): Record<string, string>[] {
       else if (part[0] === "Y") y = Number(part.slice(1));
     }
     if (line.startsWith("C;") && ki >= 0) {
-      const raw = line.slice(ki + 2);
+      let raw = line.slice(ki + 2);
+      // X and Y after the K field (`C;K"v";X1;Y2`): they end the line, and aren't part of the value.
+      const tail = /(?:;[XY]\d+)+$/.exec(raw);
+      if (tail) {
+        for (const part of tail[0].split(";")) {
+          if (part[0] === "X") x = Number(part.slice(1));
+          else if (part[0] === "Y") y = Number(part.slice(1));
+        }
+        raw = raw.slice(0, tail.index);
+      }
       const v = raw.startsWith('"') ? raw.slice(1, raw.endsWith('"') ? -1 : undefined) : raw;
       if (!cells.has(y)) cells.set(y, new Map());
       cells.get(y)!.set(x, v);
@@ -46,7 +55,7 @@ export const unquote = (v: string) => (v.length > 1 && v.startsWith('"') && v.en
 export function parseIniRaw(text: string, opts: { firstWins?: boolean } = {}): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
   let cur: Map<string, string> | null = null;
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     if (line.startsWith("[")) {
       const name = line.slice(1, line.indexOf("]"));
       cur = out.get(name) ?? new Map();

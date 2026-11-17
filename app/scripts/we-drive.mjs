@@ -121,6 +121,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
 import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
@@ -468,7 +469,7 @@ export function lavapipeIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
   for (const d of dirs) {
     let names;
     try { names = list(d); } catch { continue; }
-    for (const n of [...names].sort()) if (/^lvp_icd.*\.json$/.test(n)) found.push(join(d, n));
+    for (const n of [...names].sort()) if (/^lvp_icd.*\.json$/.test(n)) found.push(posix.join(d, n));
   }
   return found;
 }
@@ -491,7 +492,7 @@ export const sandboxCache = () => join(prefixDir(), "cache");
 /** The Proton build's wineserver: `files/bin` (newer builds) or `dist/bin` (older ones, as protonFor accepts), or null. */
 export function wineserverPath(tool, exists = existsSync) {
   for (const sub of ["files", "dist"]) {
-    const p = join(tool, sub, "bin", "wineserver");
+    const p = posix.join(tool, sub, "bin", "wineserver");
     if (exists(p)) return p;
   }
   return null;

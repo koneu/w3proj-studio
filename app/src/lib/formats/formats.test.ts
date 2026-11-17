@@ -31,7 +31,7 @@ test("SLK: a value may contain ';', and a file without a header row has no rows"
   assert.deepEqual(parseSlk(""), []);
 });
 
-test("SLK: the K field before X and Y still lands in its cell", { todo: "parseSlk reads the coordinates only up to ';K'" }, () => {
+test("SLK: the K field before X and Y still lands in its cell", () => {
   const rows = parseSlk(['ID;PWXL;N;E', 'C;K"name";X1;Y1', 'C;K"v";X1;Y2', "E"].join("\r\n"));
   assert.deepEqual(rows, [{ name: "v" }]);
 });
@@ -43,7 +43,7 @@ test("INI: a repeated key keeps its last value (its first with firstWins), and '
   assert.equal(parseIni(text).get("S")?.get("url"), "a=b=c");
 });
 
-test("INI: a byte order mark before the first section doesn't hide it", { todo: "parseIniRaw tests line.startsWith('[') on the raw first line" }, () => {
+test("INI: a byte order mark before the first section doesn't hide it", () => {
   assert.equal(parseIni("\uFEFF[S]\r\nk=1").get("S")?.get("k"), "1");
 });
 
