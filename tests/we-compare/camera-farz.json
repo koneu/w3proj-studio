@@ -1,7 +1,8 @@
 [
   {
+    "limit": 40,
     "name": "camera-farz-create",
-    "description": "A new camera's far and near clipping (branch camera-farz-we, 2026-11-15, SD): Create Camera takes the view's clipping, and View Selected Camera gives the view the camera's; the distance plays no part. The input's eight cameras look at 0, 0 from 500, 1000, 1650, 2000, 2500, 3000, 4000 and 5000, every second one with far 9000 / near 50 instead of 5000 / 100 (tests/fixtures/we-compare/make-camera-bounds-input.mjs with those looks, the clipping set in war3map.w3c.json and packed again). Viewed and made a camera each: Camera 009 to 016 have the viewed camera's far and near (Studio gave max(5000, distance + 3000) and near 100 before). Studio: Cameras tab, Go to camera, View, Create from view. Expected MATCH",
+    "description": "A new camera's far and near clipping (branch camera-farz-we, 2026-11-15, SD): Create Camera takes the view's clipping, and View Selected Camera gives the view the camera's; the distance plays no part. The input's eight cameras look at 0, 0 from 500, 1000, 1650, 2000, 2500, 3000, 4000 and 5000, every second one with far 9000 / near 50 instead of 5000 / 100 (made by `node tests/fixtures/we-compare/make-camera-bounds-input.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> camera-farz.w3m \"0,0,500;0,0,1000,9000,50;0,0,1650;0,0,2000,9000,50;0,0,2500;0,0,3000,9000,50;0,0,4000;0,0,5000,9000,50\"`: looks x,y,distance[,far,near]). Viewed and made a camera each: Camera 009 to 016 have the viewed camera's far and near (Studio gave max(5000, distance + 3000) and near 100 before). Studio: Cameras tab, Go to camera, View, Create from view. Expected MATCH",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/camera-farz.w3m"
     },
@@ -39,6 +40,7 @@
     ]
   },
   {
+    "limit": 40,
     "name": "camera-farz-free-view",
     "description": "The view's clipping when no camera was looked through, and how long a viewed camera's stays (2026-11-15, SD, the input of camera-farz-create). The editor: Create Camera from the opening view (0, 0 from 3000) gives far 50000, near 16 (also on 4v4_MountHyjal, 2026-11-15); six wheel notches out (x1.1 each: 5314.68) the same; after View Selected Camera of the second camera (far 9000, near 50) five notches out (1610.51) 9000 / 50; after viewing the second then the first 5000 / 100; after viewing the fourth (9000 / 50) and the Right key held 600 ms (target 85.3, 0) 9000 / 50; and Set Camera To Current View of the third camera after viewing the second gives it the second's distance and 9000 / 50. Studio: the same views set on the terrain view (the panning step by lookAt; its target X, which the held key's time sets, is left out), Create from view and Set from view. Expected MATCH",
     "input": {

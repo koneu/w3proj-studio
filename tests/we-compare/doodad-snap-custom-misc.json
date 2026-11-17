@@ -1,22 +1,7 @@
 [
   {
-    "name": "doodad-snap-custom-flags",
-    "description": "Snap Doodads on Load, the cases the other snap specs leave out (test.md), on doodad-snap-custom-misc.w3x (fixtures/we-specs/make-doodad-snap.mjs misc): custom doodads on 2x2Default and 4x4Default placed with flags 0 and 1 as well as 2, each off its grid at two angles: they snap as with flags 2 in both editors (2026-11-14, two runs). The missing texture's entries (doodads 0-5 and 18-19) are doodad-snap-custom-missing's",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-misc.w3x" },
-    "studio": {
-      "steps": [
-        { "setting": ["script.generateOnSave", false] },
-        { "terrain": true },
-        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
-        { "sleep": 2000 }
-      ]
-    },
-    "compare": [{ "file": "war3map.doo", "as": "parsed", "ignore": ["doodads[0]", "doodads[1]", "doodads[2]", "doodads[3]", "doodads[4]", "doodads[5]", "doodads[18]", "doodads[19]"] }],
-    "limit": 40
-  },
-  {
     "name": "doodad-snap-custom-missing",
-    "description": "the same map: a custom doodad (D300, flags 2, 0 and 1) and a custom destructable (B300) whose pathing texture the map names but doesn't have (Custom\\own-missing4.tga). The editor leaves them where they stand, angle and place (2026-11-14, two runs; doodads[0]: -1486.5, 521.25, angle 0.4; the destructables keep theirs, not their type's fixed rotation), and so does Studio (doodadgrid.ts snapSize: no snap size when the type's own texture stands in)",
+    "description": "Snap Doodads on Load, the cases the other snap specs leave out (test.md), on doodad-snap-custom-misc.w3x (fixtures/we-specs/make-doodad-snap.mjs misc). Doodads 0-5 and 18-19: a custom doodad (D300, flags 2, 0 and 1) and a custom destructable (B300) whose pathing texture the map names but doesn't have (Custom\\own-missing4.tga). The editor leaves them where they stand, angle and place (2026-11-14, two runs; doodads[0]: -1486.5, 521.25, angle 0.4; the destructables keep theirs, not their type's fixed rotation), and so does Studio (doodadgrid.ts snapSize: no snap size when the type's own texture stands in). The rest of the file: custom doodads on 2x2Default and 4x4Default placed with flags 0 and 1 as well as 2, each off its grid at two angles: they snap as with flags 2 in both editors (2026-11-14, two runs; it was the spec doodad-snap-custom-flags, a second World Editor run on the same input whose compare was a part of this one's)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/doodad-snap-custom-misc.w3x" },
     "studio": {
       "steps": [

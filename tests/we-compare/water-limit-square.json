@@ -51,13 +51,12 @@
   },
   {
     "name": "water-limit-off-deep",
-    "description": "Enforce Water Height Limits off (the editor: Advanced, ctrl+shift+w; it stays off in that editor, so this spec is the file's last; Studio: terrain.enforceWaterLimits false): Deep Water, round (1392,624), size 1 at the middle of low-ground-b.w3x (the menu's check mark seen gone after the key, we-drive 2026-11-14). The editor lifts the ground as with the limit on (corner 32,30 to -7168 stored, the cosine ring round it) and only leaves the dry corners round the water at the water word 8192 (2026-11-14, two runs); Studio the same since branch water-brush-we2 (before, it lifted nothing with the limit off and gave those corners 192)",
+    "description": "Enforce Water Height Limits off (the editor: its preference Enforce Water Limits=false written before its start, we.prefs, so this spec gets an editor of its own; Studio: terrain.enforceWaterLimits false): Deep Water, round (1392,624), size 1 at the middle of low-ground-b.w3x. The editor lifts the ground as with the limit on (corner 32,30 to -7168 stored, the cosine ring round it) and only leaves the dry corners round the water at the water word 8192 (2026-11-14, two runs); Studio the same since branch water-brush-we2 (before, it lifted nothing with the limit off and gave those corners 192)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
     "we": {
+      "prefs": { "Misc": { "Enforce Water Limits": "false" } },
       "saveAccept": ["Warning", "Error"],
       "steps": [
-        ["--key", "ctrl+shift+w"],
-        ["--sleep", "500"],
         ["--key", "t"],
         ["--click", "1392,569"],
         ["--click", "1441,310"],

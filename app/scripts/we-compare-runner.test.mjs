@@ -123,6 +123,44 @@ test("expectPaths in a spec: with expect differs only, on JSON kinds only; studi
   assert.ok(masks.expectPaths?.includes("players[].start"));
 });
 
+test("expectLines (text-set): each side's lines only it has must match its patterns, every pattern must be hit", () => {
+  const we = "a\nb\nc";
+  const expectLines = { studio: ["^call SetSoundDuration"], we: ["^old "] };
+  const c = entry({ file: "war3map.j", as: "text-set", expect: "differs", expectLines });
+  const side = (t) => fakeReader({ "war3map.j": { text: t } });
+  const exact = core.compareEntry(c, side(`${we}\nold x`), side(`c\nb\na\ncall SetSoundDuration(s, 1)`));
+  assert.equal(exact.status, "DIFFERS");
+  assert.equal(asExpected(exact), true);
+  // A line the pattern names, but on the other side: not the expected difference.
+  const swapped = core.compareEntry(c, side(`${we}\nold x\ncall SetSoundDuration(s, 1)`), side(we));
+  assert.equal(asExpected(swapped), false);
+  assert.equal(swapped.unexpected.count, 1);
+  assert.match(formatReport({ name: "s", files: [swapped] }), /outside expectLines: WE only: "call SetSoundDuration/);
+  assert.deepEqual(swapped.expectMissing, ["Studio /^call SetSoundDuration/"]);
+  // Another line differs too: unexpected.
+  const more = core.compareEntry(c, side(`${we}\nold x`), side(`${we}\ncall SetSoundDuration(s, 1)\nd`));
+  assert.equal(asExpected(more), false);
+  assert.deepEqual(more.unexpected.paths, ['Studio only: "d"']);
+  // A pattern no line hits (the World Editor's step missed): unexpected.
+  const less = core.compareEntry(c, side(we), side(`${we}\ncall SetSoundDuration(s, 1)`));
+  assert.equal(less.status, "DIFFERS");
+  assert.deepEqual(less.expectMissing, ["WE /^old /"]);
+  assert.equal(asExpected(less), false);
+  assert.match(formatReport({ name: "s", files: [less] }), /expected to differ but don't: WE \/\^old \//);
+  // Nothing differs: not the expected difference.
+  assert.equal(asExpected(core.compareEntry(c, side(we), side(we))), false);
+  // In a spec: with differs and text-set only; it names what differs, so no allowlist entry is needed.
+  const strict = (e) => parseSpec({ ...good(), compare: [e] }, "/s").compare[0];
+  assert.deepEqual(strict({ file: "war3map.j", as: "text-set", expect: "differs", expectLines }).expectLines, expectLines);
+  assert.throws(() => strict({ file: "war3map.j", as: "text-set", expect: "differs" }), /can't name what differs/, "control: without expectLines it is refused");
+  assert.throws(() => strict({ file: "war3map.j", as: "text", expect: "differs", expectLines }), /goes with "as": "text-set"/);
+  assert.throws(() => strict({ file: "war3map.j", as: "text-set", expectLines }), /goes with "expect": "differs"/);
+  assert.throws(() => strict({ file: "war3map.j", as: "text-set", expect: "differs", expectLines: { we: [] } }), /expectLines is/);
+  assert.throws(() => strict({ file: "war3map.j", as: "text-set", expect: "differs", expectLines: { both: ["x"] } }), /expectLines is/);
+  assert.throws(() => strict({ file: "war3map.j", as: "text-set", expect: "differs", expectLines: { we: ["("] } }), /not a regular expression/);
+  assert.equal(compareFile("war3map.j", "text", { text: "a" }, { text: "b" }, 10, 0, [], [], { we: ["a"] }).status, "ERROR");
+});
+
 // ---------------------------------------------------------------- 3: --no-we
 
 test("--no-we compares nothing: NOT COMPARED, not ok, exit 3", () => {
@@ -310,8 +348,8 @@ test("the allowlist of differs without paths only shrinks: every entry exists an
   const root = repoPath("tests", "we-compare");
   const { entries, textEntries } = core.readDiffersAllowlistSections(resolve(root, "..", ".."));
   // Lower these as entries get their paths (or a JSON kind, or "lines" and a match); never raise them.
-  assert.ok(entries.size <= 35, `the JSON kinds' list grew to ${entries.size}`);
-  assert.ok(textEntries.size <= 18, `the text kinds' list grew to ${textEntries.size}`);
+  assert.ok(entries.size <= 33, `the JSON kinds' list grew to ${entries.size}`);
+  assert.ok(textEntries.size <= 1, `the text kinds' list grew to ${textEntries.size}`);
   const needed = { json: new Set(), text: new Set() };
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
@@ -319,7 +357,7 @@ test("the allowlist of differs without paths only shrinks: every entry exists an
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith(".json") && p !== core.differsAllowlistPath(resolve(root, "..", ".."))) {
         const raw = JSON.parse(readFileSync(p, "utf8"));
-        for (const s of Array.isArray(raw) ? raw : [raw]) for (const c of s.compare) if (typeof c === "object" && c.expect === "differs" && !c.expectPaths) needed[core.takesPaths(c.as ?? "auto", c.file) ? "json" : "text"].add(`${s.name} ${c.file}`);
+        for (const s of Array.isArray(raw) ? raw : [raw]) for (const c of s.compare) if (typeof c === "object" && c.expect === "differs" && !c.expectPaths && !c.expectLines) needed[core.takesPaths(c.as ?? "auto", c.file) ? "json" : "text"].add(`${s.name} ${c.file}`);
       }
     }
   };

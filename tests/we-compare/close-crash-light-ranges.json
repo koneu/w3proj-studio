@@ -1,11 +1,15 @@
 {
   "name": "close-crash-light-ranges",
-  "description": "we-compare itself: the editor crashes when it is closed with View > Light Ranges on (HD) and a light on the map (a Ruins Brazier); the crash comes after the save, so the spec is OK with a warning, not failed. The terrain and pathing match",
+  "description": "we-compare itself: the editor crashes when it is closed with View > Light Ranges on (HD) and a light on the map (a Ruins Brazier); the crash comes after the save, and we.expectCrash makes it required: the spec fails when the editor closes without crashing (the light or the toggle didn't take). The terrain, the pathing and the placed brazier (war3map.doo) match",
   "input": {
     "new": { "name": "LightClose", "width": 64, "height": 64 },
     "steps": [{ "mcp": "place_objects", "args": { "kind": "doodads", "objects": [{ "id": "ZObz", "x": 0, "y": 0 }] } }]
   },
-  "we": { "mode": "hd", "steps": ["--key ctrl+shift+l", "--sleep 3000"] },
+  "we": { "mode": "hd", "expectCrash": true, "steps": ["--key ctrl+shift+l", "--sleep 3000"] },
   "studio": { "settings": { "mcp.writeTools": true } },
-  "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.wpm", "as": "wpm" }]
+  "compare": [
+    { "file": "war3map.w3e", "as": "w3e" },
+    { "file": "war3map.wpm", "as": "wpm" },
+    { "file": "war3map.doo", "as": "parsed", "ignore": ["version", "doodads[].preFlags", "doodads[].editorId", "doodads[].trailer", "doodads[].extras"] }
+  ]
 }

@@ -17,7 +17,7 @@
     "war3map.w3i",
     {
       "file": "war3map.w3e",
-      "as": "text"
+      "as": "w3e"
     }
   ],
   "limit": 30
