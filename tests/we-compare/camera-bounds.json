@@ -1,5 +1,6 @@
 [
   {
+    "limit": 40,
     "name": "camera-bounds-paste",
     "description": "Enforce Camera Bounds on (the editor's default, we-drive pins it): a footman (2432, 0) and a pathless doodad LPcr (2432, -512) copied and pasted past the right camera bound (2816), inside the playable part (3328): the World Editor places both (3070.8, 0 and 3072.2, -510.5, 2026-11-14); Studio refused the paste before. The two objects already past the bound (3136) stay through the save. Input: tests/fixtures/we-compare/make-camera-bounds-input.mjs; the view is its first camera (2816, 0 from 3000), the clicks at 847,404 and 858,578 are 3072, 0 and 3072, -512 there. Expected MATCH (positions within 4: the two picks differ by a unit or two)",
     "input": {
@@ -189,16 +190,23 @@
       {
         "file": "war3mapUnits.doo",
         "as": "parsed",
-        "tolerance": 4
+        "tolerance": {
+          "units[].position": 4,
+          "default": 0
+        }
       },
       {
         "file": "war3map.doo",
         "as": "parsed",
-        "tolerance": 4
+        "tolerance": {
+          "doodads[].position": 4,
+          "default": 0
+        }
       }
     ]
   },
   {
+    "limit": 40,
     "name": "camera-bounds-create",
     "description": "Enforce Camera Bounds on: what the switch does. Create Camera from the views of the input's cameras 2 to 7 (View Selected Camera first): the World Editor answers 'The current camera position is outside of the world camera bounds.' for the views whose target is past the camera bounds (3000, 0 inside the playable part; 0, 2900 with the eye inside; 2820, 0) and makes a camera for the others (2700, 0; 0, -3000 with the eye south of the map; 2700, 300 from 500): Camera 008 to 010. Studio's Cameras tab: Go to camera, View, Create from view, for the same six. The new cameras' far and near clipping are the viewed camera's (spec camera-farz). Expected MATCH",
     "input": {
@@ -449,6 +457,7 @@
     ]
   },
   {
+    "limit": 40,
     "name": "camera-bounds-create-off",
     "description": "Enforce Camera Bounds off (Advanced > Enforce Camera Bounds, switched back before the save): Create Camera from the same six views makes all six, Camera 008 to 013, also the three past the camera bounds. Studio: the setting terrain.enforceCameraBounds off, the same six. Expected MATCH",
     "input": {
@@ -734,6 +743,7 @@
     ]
   },
   {
+    "limit": 40,
     "name": "camera-bounds-typed",
     "description": "Enforce Camera Bounds on: a camera's typed target. The World Editor's Camera Properties (the camera's row, Return) puts a Target X typed past the camera bounds on the bound without a word: 3100 for the input's seventh camera (2700, 300 from 500) becomes 2816 (2026-11-14; with the switch off it stayed 3100). Studio's Cameras tab: Go to camera, 3100 typed into X. Expected MATCH",
     "input": {

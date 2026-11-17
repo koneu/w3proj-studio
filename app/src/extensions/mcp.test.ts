@@ -138,3 +138,24 @@ test("paths stay in the project", () => {
   // Doubled and dot segments stay inside: they are kept as written, never turned into a way out.
   for (const odd of ["map//x", "map/./x"]) assert.ok(projectPath(odd).startsWith("map/") && !projectPath(odd).split("/").includes(".."), odd);
 });
+
+test("an argument the tool's schema doesn't list is refused, naming what it takes; nothing runs", async () => {
+  const { t } = tools();
+  let ran = 0;
+  t.declare("x", "builtin", [
+    { name: "move", description: "Moves", inputSchema: { type: "object", properties: { id: { type: "string" }, x: { type: "number" } } } },
+    { name: "free", description: "Anything", inputSchema: { type: "object", properties: { id: {} }, additionalProperties: true } },
+    { name: "none", description: "No schema" },
+    { name: "empty", description: "No arguments", inputSchema: { type: "object", properties: {} } },
+  ]);
+  for (const n of ["move", "free", "none", "empty"]) t.registerTool(n, () => { ran++; return "ok"; });
+  const refused = await t.call("move", { id: "a", variation: 2 });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].type === "text" ? refused.content[0].text : "", /doesn't take the argument "variation", so nothing was done\. It takes: id, x\./);
+  assert.equal(ran, 0);
+  assert.equal((await t.call("move", { id: "a", x: 1 })).isError, undefined);
+  assert.equal((await t.call("free", { anything: 1 })).isError, undefined);
+  assert.equal((await t.call("none", { anything: 1 })).isError, undefined);
+  const e = await t.call("empty", { a: 1, b: 2 });
+  assert.match(e.content[0].type === "text" ? e.content[0].text : "", /the arguments "a", "b".*no arguments/);
+});

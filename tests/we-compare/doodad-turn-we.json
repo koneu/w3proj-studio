@@ -9,8 +9,8 @@
       "mode": "sd",
       "steps": [
         [
-          "--key",
-          "Num_Lock"
+          "--numlock",
+          "on"
         ],
         [
           "--key",

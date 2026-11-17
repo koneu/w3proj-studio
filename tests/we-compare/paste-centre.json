@@ -94,7 +94,7 @@
         {"eval": "await w3.editors.saveAll();"}
       ]
     },
-    "compare": [{"file": "war3map.doo", "as": "parsed", "tolerance": 8}],
+    "compare": [{"file": "war3map.doo", "as": "parsed", "tolerance": {"doodads[].position": 8, "default": 0}}],
     "limit": 40
   },
   {
@@ -167,7 +167,7 @@
         {"eval": "await w3.editors.saveAll();"}
       ]
     },
-    "compare": [{"file": "war3map.doo", "as": "parsed", "tolerance": 8}, {"file": "war3mapUnits.doo", "as": "parsed", "tolerance": 8}],
+    "compare": [{"file": "war3map.doo", "as": "parsed", "tolerance": {"doodads[].position": 8, "default": 0}}, {"file": "war3mapUnits.doo", "as": "parsed", "tolerance": {"units[].position": 8, "default": 0}}],
     "limit": 40
   }
 ]

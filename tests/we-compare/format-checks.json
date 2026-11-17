@@ -1,7 +1,7 @@
 [
   {
     "name": "format-fields",
-    "description": "test.md 'war3map.w3c v3: whether the u32 after the name' and 'war3map.w3e water-bits' (2026-11-17, SD): format-fields.w3x (tests/fixtures/we-specs/make-format-checks.mjs fields) opened and saved, no edits. Cameras Alpha..Delta with trailer 0, 1, 2, 7: the editor saves 0, 1, 1, 1 and its script has BlzCameraSetupSetCameraType 0, 1, 1, 1 (the camera type; Studio's file keeps 2 and 7, its script writes 1). Doodads with preFlags 0 and 7, roll and pitch floats, a placement id 100 and lights: the editor keeps them, and gives the lamp post without a light (doodads[6]) its model's one. Water bit 15 on 25 corners: the editor clears it (Studio keeps the word)",
+    "description": "test.md 'war3map.w3c v3: whether the u32 after the name' and 'war3map.w3e water-bits' (2026-11-17, SD): format-fields.w3x (tests/fixtures/we-specs/make-format-checks.mjs fields) opened and saved, no edits. Cameras Alpha..Delta with trailer 0, 1, 2, 7: the editor saves 0, 1, 1, 1 and its script has BlzCameraSetupSetCameraType 0, 1, 1, 1 (the camera type; Studio's file keeps 2 and 7, its script writes 1). Doodads with preFlags 0 and 7, roll and pitch floats, a placement id 100 and lights: the editor keeps them, and gives the lamp post without a light (doodads[6]) its model's one. Water bit 15 on 34 corners: alone (water-bits 2) on the 25 corners 30..34 x 20..24, with bit 14 (3) on the 9 corners 40..42 x 20..22: the editor clears it on all 34 (Studio keeps the word)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/format-fields.w3x" },
     "we": { "mode": "sd", "steps": [] },
     "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
@@ -48,7 +48,7 @@
   },
   {
     "name": "format-doodad-props",
-    "description": "test.md 'The 3.0 doo fields preFlags, trailer and extras' (2026-11-17, SD): format-doodad-props.w3x (make-format-checks.mjs props). The editor: the lamp post's Doodad Properties (d, a click on its pole, Return, its General tab: the dialog opens on the tab used last), Roll 15, Pitch 30, then its Lights tab, Light 1: Intensity 7, Shadow Start 20, Shadow End 40, Quadratic 3, Linear Falloff 2, Damping 1, OK. Studio writes the values those names stand for into war3map.doo.json: trailer [id, roll, pitch] in radians, the light [0, Casts Shadows, Color, Intensity, Shadow Start, Shadow End, Quadratic x 0.0001, Linear Falloff x 0.01, Damping x 0.000001] (the editor's float products: 3 x 0.0001 is 966609233, one below 0.0003's)",
+    "description": "test.md 'The 3.0 doo fields preFlags, trailer and extras' (2026-11-17, SD): format-doodad-props.w3x (make-format-checks.mjs props). The editor: the lamp post's Doodad Properties (d, a click on its pole, Return, its General tab: the dialog opens on the tab used last), Roll 15, Pitch 30, then its Lights tab, Light 1: Intensity 7, Shadow Start 20, Shadow End 40, Quadratic 3, Linear Falloff 2, Damping 1, OK. Studio's side is a codec round trip, not a Studio command (Studio has no Doodad Properties for roll, pitch or lights): its eval writes by hand the values those names stand for into war3map.doo.json, and the save packs them: trailer [id, roll, pitch] in radians, the light [0, Casts Shadows, Color, Intensity, Shadow Start, Shadow End, Quadratic x 0.0001, Linear Falloff x 0.01, Damping x 0.000001] (the editor's float products: 3 x 0.0001 is 966609233, one below 0.0003's)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/format-doodad-props.w3x" },
     "we": {
       "mode": "sd",

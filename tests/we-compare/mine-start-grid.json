@@ -32,8 +32,8 @@
         "2500"
       ],
       [
-        "--key",
-        "Num_Lock"
+        "--numlock",
+        "on"
       ],
       [
         "--key",

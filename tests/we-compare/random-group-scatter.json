@@ -1,6 +1,7 @@
 {
   "name": "random-group-scatter",
-  "description": "bugs.md 'A scatter fill of random-group units gives its units only one editorId per fill'. Input: the empty 64x64 map with a random group 'Three' (number 0, one unit position, lines footman, knight, rifleman), one placed unit of it at 0, 0 and a camera at 0, 0 from 2000 (tests/fixtures/we-compare/make-random-group-input.mjs). The editor has no scatter brush for units and no palette entry for a group (Neutral Hostile's palette has only a Random Unit by level): its way of placing several group units at once is a paste. WE: the unit at 0, 0 copied and pasted once, then both box-selected, copied and pasted (two more in one paste); its save numbers every new object on, 0..4 in file order, each uDNR with random type 1, group 0, position 0. Studio: the placer's Random... from group 0 position 0, Scatter on, one click (a fill of several units in one step). Compared: editor ids unique and in order, and the kinds of object (unit-ids), not their number or places. Expected MATCH (before the fix Studio's fill gave all its units one editor id)",
+  "limit": 40,
+  "description": "bugs.md 'A scatter fill of random-group units gives its units only one editorId per fill'. Input: the empty 64x64 map with a random group 'Three' (number 0, one unit position, lines footman, knight, rifleman), one placed unit of it at 0, 0 and a camera at 0, 0 from 2000 (tests/fixtures/we-compare/make-random-group-input.mjs). The editor has no scatter brush for units and no palette entry for a group (Neutral Hostile's palette has only a Random Unit by level): its way of placing several group units at once is a paste. WE: the unit at 0, 0 copied and pasted once, then both box-selected, copied and pasted (two more in one paste); its save numbers every new object on, 0..4 in file order, each uDNR with random type 1, group 0, position 0. Studio: the placer's Random... from group 0 position 0, Scatter on, one click (a fill of several units in one step). Compared: editor ids unique and in order, and the kinds of object (unit-ids), not their places, and each save holds at least 5 objects (minCount: the input's start location and group unit, and 3 more from the editor's two pastes; Studio's eval asks its fill for 3 or more), not their exact number. Expected MATCH (before the fix Studio's fill gave all its units one editor id)",
   "input": { "map": "${REPO}/tests/fixtures/we-compare/random-group.w3m" },
   "we": {
     "mode": "sd",
@@ -23,5 +24,5 @@
       { "eval": "const s = await w3.services.get('w3.terrain'); const n = (s.placedObjects()?.units ?? []).filter((u) => u.id === 'uDNR').length; if (n < 4) throw new Error('the scatter fill placed ' + (n - 1) + ' units');" }
     ]
   },
-  "compare": [{ "file": "war3mapUnits.doo", "as": "unit-ids" }]
+  "compare": [{ "file": "war3mapUnits.doo", "as": "unit-ids", "minCount": 5 }]
 }

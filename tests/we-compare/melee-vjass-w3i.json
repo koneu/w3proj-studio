@@ -1,5 +1,6 @@
 {
   "name": "melee-vjass-w3i",
+  "limit": 40,
   "description": "A melee map whose script is vJASS (the custom script header holds //! lines): the WE opens and saves it, Studio saves it after a harmless doodad edit; the w3i flags (melee 0x4) and the kept script header",
   "input": {
     "new": { "name": "MeleeVjass", "width": 64, "height": 64 },

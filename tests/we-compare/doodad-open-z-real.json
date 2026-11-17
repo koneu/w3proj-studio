@@ -79,7 +79,7 @@
           "doodads[].trailer",
           "doodads[].extras",
           "skinIds",
-          "doodads[2213].position"
+          "doodads[2213].position[2]"
         ],
         "tolerance": 0.01
       }
@@ -252,7 +252,7 @@
           "doodads[].trailer",
           "doodads[].extras",
           "skinIds",
-          "doodads[2213].position"
+          "doodads[2213].position[2]"
         ],
         "tolerance": 0.01
       }
