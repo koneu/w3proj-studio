@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { WHEEL_ZOOM } from "./wheelzoom";
-import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
@@ -235,6 +235,10 @@ test("edgeScroll: the pointer at a side of the view scrolls toward it, corners b
   // Outside the view (the pointer left it), or a view too small to have a middle: nothing.
   for (const [x, y] of [[-1, 300], [w, 300], [400, -1], [400, h], [NaN, 0]]) assert.equal(edgeScroll(x, y, w, h), null, `${x},${y}`);
   assert.equal(edgeScroll(0, 0, 10, 10), null);
+});
+
+test("camera bounds: the line is the editor's colour, one pixel of (128, 128, 255) there (we-misc-3, camera-bounds.w3m)", () => {
+  assert.deepEqual(CAMERA_BOUNDS_RGB, [128, 128, 255]);
 });
 
 test("camera bounds: the w3i's four corners in the order round, a line along them that can follow the ground", () => {

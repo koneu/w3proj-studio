@@ -74,6 +74,14 @@ export function specialCliffType(t: Terrain, list: CliffList, x: number, y: numb
   return list[t.corners[cy * t.width + cx]?.cliffTexture ?? 0] ?? list[0];
 }
 
+/** The cliff type a special doodad takes, by the tile it is placed by (the bottom left of its footprint), not the tile
+ *  under the model's origin in the middle of the footprint: on a plateau's face the World Editor gives a cave or collapse
+ *  the cliff texture of the face (a grass top on a grass cliff), where the middle of a footprint of 2 or more tiles is
+ *  often off the cliff and has no type (we-misc-3, specials-look, HD and SD). */
+export function specialTileCliffType(t: Terrain, list: CliffList, tile: Pick<TileRect, "x0" | "y0">): CliffType | undefined {
+  return specialCliffType(t, list, t.offsetX + tile.x0 * 128 + 64, t.offsetY + tile.y0 * 128 + 64);
+}
+
 /** The textures a special doodad of cliff type `type` is drawn with: the type's texture as replaceable 11 (without
  *  it the game's generic ReplaceableTextures\Cliff\Cliff0, a summer cliff with green grass and tan rock), and its HD
  *  set for the placeholders. */

@@ -1,0 +1,36 @@
+[
+  {
+    "name": "var-initial-values",
+    "description": "test.md add_trigger_variable: variables with real (two-decimal), 'hfoo' and 0x hex initial values, added by Studio's MCP tool into a new map; the editor opens and saves it; its war3map.wtg (variables) and the udg_ lines of its script against Studio's.",
+    "input": {
+      "new": { "name": "VarInit", "width": 64, "height": 64 },
+      "steps": [
+        { "mcp": "add_trigger_variable", "args": { "name": "r_a", "type": "real", "initialValue": "1.5" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "r_b", "type": "real", "initialValue": "2.345" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "r_c", "type": "real", "initialValue": "-0.1" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "r_d", "type": "real", "initialValue": "7" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "i_b", "type": "integer", "initialValue": "0x1F" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "i_c", "type": "integer", "initialValue": "0xff" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "i_d", "type": "integer", "initialValue": "42" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "i_e", "type": "integer", "initialValue": "-5" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "u_a", "type": "unitcode", "initialValue": "hfoo" } },
+        { "mcp": "add_trigger_variable", "args": { "name": "s_a", "type": "string", "initialValue": "hello" } },
+        { "mcp": "save_project" }
+      ]
+    },
+    "we": { "mode": "sd", "steps": [] },
+    "studio": {
+      "settings": { "mcp.writeTools": true },
+      "steps": [
+        { "setting": ["script.generateOnSave", true] },
+        { "sleep": 2000 },
+        { "command": "w3.script.generate" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      "war3map.wtg",
+      { "file": "war3map.j", "as": "text-set", "lines": "udg_" }
+    ]
+  }
+]

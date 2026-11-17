@@ -246,8 +246,9 @@ export function edgeScroll(x: number, y: number, width: number, height: number, 
 
 // ---- camera bounds -----------------------------------------------------------------------------
 
-/** The Camera Bounds line's colour (light blue, as the World Editor's: we-drive, HillsbradCreek's west edge). */
-export const CAMERA_BOUNDS_RGB: [number, number, number] = [150, 200, 255];
+/** The Camera Bounds line's colour: the editor's line is one pixel of (128, 128, 255) (we-misc-3, we-drive, the
+ *  camera-bounds map's east edge, SD unlit; it was (150, 200, 255), a light blue guessed on HillsbradCreek). */
+export const CAMERA_BOUNDS_RGB: [number, number, number] = [128, 128, 255];
 
 /** The corners of a map's camera bounds (war3map.w3i: lower left, upper right, upper left, lower right) in the order
  *  round, or null when they aren't all numbers. */

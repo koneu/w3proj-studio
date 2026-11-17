@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { heightAt, setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { planCliffs, type CliffType } from "./cliffs";
 import { modelPath, type Skin } from "./objects";
-import { SPECIAL_FACING, specialBase, specialCliffTiles, specialCliffType, specialPlacements, specialTextures, specialTiles } from "./specials";
+import { SPECIAL_FACING, specialBase, specialCliffTiles, specialCliffType, specialPlacements, specialTextures, specialTileCliffType, specialTiles } from "./specials";
 
 const skin = (file: string): Skin => ({
   kind: "w3d", file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1.2, randScale: false, fixedRot: null, uberSplat: "",
@@ -87,6 +87,18 @@ test("a special takes the cliff type of the bottom-left corner of the tile under
   t.corners[1 * t.width + 2].cliffTexture = 15;
   assert.equal(specialCliffType(t, TYPES, offset.x + 2.5 * 128, offset.y + 1.5 * 128)?.cliffID, "CFgr");
   assert.equal(specialCliffType(t, [], offset.x, offset.y), undefined);
+});
+
+test("a special takes the cliff type of the tile it is placed by, not of the tile its footprint's middle is in (we-misc-3)", () => {
+  const t = cliffMap();
+  // A footprint of 1 x 4 tiles at tile (2, 2): its middle is in tile row 4 (the second type), its own tile has the first.
+  const [p] = specialPlacements([{ id: "YCl2", x: 2, y: 2 }], skins, () => ({ width: 4, height: 16 }), offset, () => 0);
+  assert.equal(specialCliffType(t, TYPES, p.position[0], p.position[1])?.cliffID, "CFdi");
+  const [rect] = [specialTiles({ x: 2, y: 2 }, { width: 4, height: 16 })];
+  assert.equal(specialTileCliffType(t, TYPES, rect)?.cliffID, "CFgr");
+  // Control: placed by a tile in the rows of the second type it takes that one.
+  assert.equal(specialTileCliffType(t, TYPES, { x0: 2, y0: 4 })?.cliffID, "CFdi");
+  assert.equal(specialTileCliffType(t, [], rect), undefined);
 });
 
 test("a special's cliff part shows its cliff type's texture, classic and HD, not the game's generic Cliff0", () => {
