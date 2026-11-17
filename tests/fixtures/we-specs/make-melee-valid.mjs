@@ -1,10 +1,10 @@
-// Makes the inputs of the start-location melee specs (tests/we-compare/melee-valid-we.json) from flat.w3x (the World
+// Makes the inputs of the start-location melee specs (tests/we-compare/melee-valid-we.json, examples/start-under-water-w3i.json) from flat.w3x (the World
 // Editor's own new 64x64 Lordaeron Summer melee map: one start location at (0, -256), corner (32, 30), flags 0x9c14):
 //
 //   node tests/fixtures/we-specs/make-melee-valid.mjs <w3proj cli> <game folder> [--out DIR] [--case NAME=JSON]...
 //
 // Each case is flat.w3x with one thing near the start, written as melee-valid-<name>.w3x into <repo>/target/melee-valid/
-// (or DIR; not committed: 22 maps of 35 KB).
+// (or DIR; not committed: 24 maps of 35 KB).
 // Without --case it makes the CASES below; --case makes others (for measuring), the JSON as a CASES entry:
 //   off        true: the w3i's Melee flag cleared (0x9c10), to see whether the editor's save puts it back
 //   doodads    [[id, dx, dy]]: doodads or destructables at the start + (dx, dy)
@@ -42,7 +42,7 @@ for (let i = 2; i < argv.length; i++) {
 }
 
 /** The cases of tests/we-compare/melee-valid-we.json: the pairs either side of each threshold measured there. All
- *  with the flag cleared (the editor's save puts it back for a valid start) but the last. */
+ *  with the flag cleared (the editor's save puts it back for a valid start) but the last three. */
 const off = (c) => ({ off: true, ...c });
 export const CASES = {
   "tree-256": off({ doodads: [["LTlt", 256, 0]] }),
@@ -67,6 +67,10 @@ export const CASES = {
   "merchant-on-start": off({ units: [["ngme", 0, 0]] }),
   "item-64": off({ units: [["ratc", 64, 0, 27]] }),
   "melee-tree-256": { doodads: [["LTlt", 256, 0]] },
+  // tests/we-compare/examples/start-under-water-w3i.json: the start under deep (level 0) or shallow (level 1) water,
+  // Melee still on, as Studio's set_water lays it out (water level 0, wet flag); both saves must take Melee off.
+  "start-deep": { corners: [[30, 28, 34, 32, { layer: 0, flags: 4 }]] },
+  "start-shallow": { corners: [[30, 28, 34, 32, { layer: 1, flags: 4 }]] },
 };
 
 const run = (...args) => {

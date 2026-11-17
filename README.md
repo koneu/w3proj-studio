@@ -529,6 +529,19 @@ puts single reports of a check that stays on aside, and both apply together. The
 check for the project" button writes this; in a project without a `w3proj.toml` it creates a minimal one (`format = 1`
 and the `[checks]` section).
 
+### Version
+
+The app's version is written in several files (`Cargo.toml` for every crate, `Cargo.lock`, `app/package.json` and its lock,
+`app/src-tauri/tauri.conf.json`). One script sets them all, and `npm run check` (so the gate and CI) fails if they differ:
+
+```
+node scripts/set-version.mjs 0.4.0     # set it everywhere
+node scripts/set-version.mjs --check   # do all places agree? (changes nothing)
+node scripts/set-version.mjs           # print the current version
+```
+
+The built-in extensions keep their own versions (`app/src/builtin/*/extension.json`).
+
 ### Tests
 
 [TESTING.md](TESTING.md) has the test process. `node tests/gate.mjs` runs the checks for a commit.

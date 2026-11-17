@@ -1,6 +1,6 @@
 // Makes replace-doodad.w3m, the input map of tests/we-compare/replace-doodad-overlap.json, from the empty 64x64 map:
 //
-//   node tests/fixtures/we-compare/make-replace-doodad-input.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> <out.w3m>
+//   node tests/fixtures/we-compare/make-replace-doodad-input.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> <out.w3m> <game folder>
 //
 // Barrels (LTbs, 2x2 pathing texture) for Replace Doodads barrel -> crates (LTcr, 4x4), each in a cell of its own,
 // 512 apart, already on their grids: a barrel at (X + 32, Y + 32) becomes a crate at (X + 64, Y + 64) whose texture

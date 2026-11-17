@@ -1,22 +1,18 @@
 [
   {
     "name": "start-in-deep-water-w3i",
-    "description": "p6 item 3: a start location under deep water takes the melee flag off (w3i flags 0x9c14 to 0x9c10 in both)",
-    "input": {
-      "new": { "name": "MeleeDeep", "width": 64, "height": 64 },
-      "steps": [{ "mcp": "set_water", "args": { "mode": "deep", "left": -384, "bottom": -640, "right": 128, "top": 128 } }]
-    },
+    "description": "p6 item 3: a start location under deep water takes the melee flag off. Input melee-valid-start-deep.w3x (make-melee-valid.mjs: flat.w3x, corners 30..34 x 28..32 on level 0 and wet, as Studio's set_water deep lays them, the w3i still 0x9c14); both saves write 0x9c10 (2026-11-17). Until then the input was Studio's new map after set_water, which Studio's own save had already taken to 0x9c10, so the World Editor only kept it",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-deep.w3x" },
     "we": { "saveAccept": ["Warning"] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
     "compare": ["war3map.w3i"]
   },
   {
     "name": "start-in-shallow-water-w3i",
-    "description": "p6 item 3, shallow water",
-    "input": {
-      "new": { "name": "MeleeShallow", "width": 64, "height": 64 },
-      "steps": [{ "mcp": "set_water", "args": { "mode": "shallow", "left": -384, "bottom": -640, "right": 128, "top": 128 } }]
-    },
+    "description": "p6 item 3, shallow water: melee-valid-start-shallow.w3x, the same corners on level 1 (make-melee-valid.mjs); both saves write 0x9c10 (2026-11-17)",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-start-shallow.w3x" },
     "we": { "saveAccept": ["Warning"] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
     "compare": ["war3map.w3i"]
   }
 ]

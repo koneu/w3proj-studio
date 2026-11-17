@@ -1,41 +1,12 @@
 {
-  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" without naming expectPaths: any difference passes them, also a World Editor step that never applied. \"entries\": on a JSON kind (written before parseSpec refused that, 2026-11-17): give an entry its expectPaths from a real World Editor run, then take it out. \"textEntries\": on text, text-set, text-exact, bytes or wpm, which can't name paths (refused since 2026-11-17): compare the file as a JSON kind with expectPaths, or narrow it with lines to what must match, then take it out. Both only shrink (we-compare-runner.test.mjs fails on an entry that is no longer needed, and on a longer list).",
+  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" without naming expectPaths: any difference passes them, also a World Editor step that never applied. \"entries\": on a JSON kind (written before parseSpec refused that, 2026-11-17): give an entry its expectPaths from a real World Editor run, then take it out. \"textEntries\": on text, text-set, text-exact, bytes or wpm, which can't name paths (refused since 2026-11-17): compare the file as a JSON kind with expectPaths, or narrow it with lines to what must match, then take it out. Both only shrink (we-compare-runner.test.mjs fails on an entry that is no longer needed, and on a longer list). The entries left (2026-11-17, two World Editor runs each): boundary-flags-wpm (its Blight brush turns a random set of corners to the second ground tile), drag-stroke-quick and drag-stroke-raise (the editor's own ticks decide where a drag stamps), low-ground-d-open, water-floor-e-deep-3 and water-floor-e-shallow-3 (every corner of the map differs: 3200 to 4224 paths); each difference is an open point (bugs.md; the quick drag's gaps in onhold.md).",
   "entries": [
     "boundary-flags-wpm war3map.w3e",
-    "cliff-click-row-300 war3map.w3e",
-    "cliff-click-row-345 war3map.w3e",
-    "cliff-slope-up2-1-pick war3map.w3e",
-    "cliff-stack-up2-same war3map.w3e",
-    "cliff-type-down5-edge war3map.w3e",
-    "cliff-type-mixed-down1 war3map.w3e",
-    "cliff-type-mixed-down1-3 war3map.w3e",
-    "cliff-type-mixed-level-far war3map.w3e",
-    "cliff-type-mixed-level-rim war3map.w3e",
-    "cliff-type-mixed-plateau-down1-3 war3map.w3e",
-    "cliff-type-mixed-plateau-down2-5 war3map.w3e",
-    "cliff-type-mixed-plateau-down2-5-low war3map.w3e",
-    "cliff-type-up5-below war3map.w3e",
-    "doodad-fix-on-load war3map.doo",
-    "doodad-open-z-wide war3map.doo",
-    "doodad-pick-we war3map.doo",
     "drag-stroke-quick war3map.w3e",
     "drag-stroke-raise war3map.w3e",
-    "limits-off-cliff-cap war3map.w3e",
-    "limits-on-cliff-cap war3map.w3e",
     "low-ground-d-open war3map.w3e",
-    "melee-valid-melee-tree-256 war3map.w3i",
-    "painted-with-cliff-rock-level war3map.w3e",
-    "water-brush-edge-high war3map.w3e",
-    "water-brush-edge-high-deep war3map.w3e",
-    "water-brush-edge-high-far war3map.w3e",
-    "water-brush-edge-low war3map.w3e",
-    "water-brush-edge-low-deep war3map.w3e",
     "water-floor-e-deep-3 war3map.w3e",
-    "water-floor-e-shallow-3 war3map.w3e",
-    "water-plateau-on war3map.w3e",
-    "water-ramp-on war3map.w3e"
+    "water-floor-e-shallow-3 war3map.w3e"
   ],
-  "textEntries": [
-    "open-paths-forsaken-start war3map.wpm"
-  ]
+  "textEntries": []
 }

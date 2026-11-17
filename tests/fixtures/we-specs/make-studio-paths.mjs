@@ -10,7 +10,7 @@
 //   matrix.w3x        MatrixPCDefense_v4.3 (no war3map.wtg: the editor refuses it, "Trigger data missing or invalid") with
 //                     echo's war3map.wtg.json and war3map.wct.txt added, packed as is; its ally masks stay all zero
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
@@ -18,7 +18,9 @@ import { requireFresh } from "../../binfresh.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const main = mainCheckout();
-const cli = join(main, "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
+// This checkout's release CLI when it has one (a worktree's), else the main checkout's, as make-open-paths.mjs.
+const exe = process.platform === "win32" ? "w3proj.exe" : "w3proj";
+const cli = existsSync(join(repo, "target", "release", exe)) ? join(repo, "target", "release", exe) : join(main, "target", "release", exe);
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const src = join(main, "smoketest_maps", "blizzard", "(2)EchoIsles_S2_v2.2.w3x");
 // Built next to the result and swapped in at the end: a failed run leaves the previous maps in place.
