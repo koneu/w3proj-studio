@@ -43,7 +43,7 @@
   },
   {
     "name": "doodad-water-z-nudge",
-    "description": "Floating doodads after Select All and Numpad 6 (all moved 64 by the tree's step): doodad-water-z.w3x (make-doodad-water-z.mjs). A floating doodad stands on the water level of the corner nearest to it (halves round up) when that corner has the water flag and its level above its ground with the cliff level; else on the ground (lib/terrain/w3e.ts floatingLevelAt). Before the fix Studio left 13 of them on the ground (2026-11-16); the fixed lily pad (flags 6) moved with Reset Fixed Object Heights on gets flags 2 and the water level -89.6. No bounds clamp: the east-edge pair (3955, 4006 to 4019, 4070) moved and floats.",
+    "description": "Floating doodads after Select All and Numpad 6 (all moved 64 by the tree's step): doodad-water-z.w3x (make-doodad-water-z.mjs). A floating doodad stands on the water level of the corner nearest to it (halves round up) when that corner has the water flag and its level above its ground with the cliff level; else on the ground (lib/terrain/w3e.ts floatingLevelAt). Before the fix Studio left 13 of them on the ground (2026-11-16); Reset Fixed Object Heights on in both (the editor's Reset Fixed Z When Moving Objects, which we-drive otherwise pins off): the fixed lily pads 6 and 29 (flags 6, z 50 and 37.5) get flags 2 and their ground, -89.6 and 0 (doodad-water-z-nudge-keep: with it off). No bounds clamp: the east-edge pair (3955, 4006 to 4019, 4070) moved and floats.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/doodad-water-z.w3x"
     },
@@ -52,6 +52,11 @@
       "saveAccept": [
         "Warning"
       ],
+      "prefs": {
+        "Misc": {
+          "Reset Fixed Z When Moving Objects": "true"
+        }
+      },
       "steps": [
         [
           "--key",
@@ -89,6 +94,98 @@
     },
     "studio": {
       "steps": [
+        {
+          "setting": [
+            "terrain.resetFixedHeights",
+            true
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 1500)); await w3.commands.execute('w3.terrain.selectAll'); await new Promise((r) => setTimeout(r, 500)); const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: '6', code: 'Numpad6', bubbles: true })); await new Promise((r) => setTimeout(r, 800)); await w3.editors.saveAll();"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "doodad-water-z-nudge-keep",
+    "description": "doodad-water-z-nudge with Reset Fixed Object Heights off in both (the editor's Reset Fixed Z When Moving Objects=false, as we-drive pins it; Studio's terrain.resetFixedHeights false): the fixed lily pads 6 and 29 keep flags 6 and their heights 50 and 37.5 after Numpad 6; every other doodad as in doodad-water-z-nudge. Before branch fix-we-studio the nudge spec ran with the editor's switch pinned off and Studio's on (editor 50 / 37.5 with flags 6, Studio -89.6 / 0 with flags 2).",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/doodad-water-z.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "prefs": {
+        "Misc": {
+          "Reset Fixed Z When Moving Objects": "false"
+        }
+      },
+      "steps": [
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--numlock",
+          "on"
+        ],
+        [
+          "--key",
+          "Escape"
+        ],
+        [
+          "--key",
+          "d"
+        ],
+        [
+          "--key",
+          "ctrl+a"
+        ],
+        [
+          "--sleep",
+          "700"
+        ],
+        [
+          "--key",
+          "KP_6"
+        ],
+        [
+          "--sleep",
+          "700"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "terrain.resetFixedHeights",
+            false
+          ]
+        },
         {
           "terrain": true
         },
