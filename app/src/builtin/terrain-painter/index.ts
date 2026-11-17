@@ -417,7 +417,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           if (why) void w3.window.showWarning(why);
           return;
         }
-        stroke ={ s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
+        stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);
         else applyAt(g);
       };
