@@ -5,17 +5,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { scratchDir } from "../../tests/scratch.mjs";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 
 // npm test, the gate and the coverage run all start the runner in app/.
-const script = join(process.cwd(), "scripts", "fails-without.mjs");
+const script = repoPath("app", "scripts", "fails-without.mjs");
 
 /** A checkout whose `dev` has `base` as src.rs and whose work tree has `now`; runs fails-without on it with a check
  *  that passes while src.rs has FIXED. Gives the exit code and, per run of the check, what src.rs held. */
 function tryIt(base, now) {
-  const dir = mkdtempSync(join(tmpdir(), "fails-without-"));
+  const dir = scratchDir("fails-without-");
   try {
     const git = (...a) => {
       const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { cwd: dir, encoding: "utf8" });

@@ -22,7 +22,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./appctl.mjs";
 import { mainCheckout } from "../../tests/gamepath.mjs";
@@ -128,7 +128,7 @@ function sizeOf(path) {
 }
 
 /** True when `path` is strictly inside `parent`. */
-const inside = (parent, path) => { const r = relative(parent, path); return r !== "" && !r.startsWith("..") && !isAbsolute(r); };
+export const inside = (parent, path) => { const r = relative(parent, path); return r !== "" && r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 
 /**
  * Deletes the older builds: keeps the newest `keep` (keep 0 = everything), plus any build with a lock folder, with a

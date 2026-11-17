@@ -13,14 +13,24 @@ export function decodeMappings(mappings) {
     if (!group) return;
     for (const segment of group.split(",")) {
       const fields = [];
-      let value = 0, shift = 0;
+      // A value's digits are 5 bits each, the lowest first: summed as numbers, not shifted (a 32-bit shift wraps from
+      // the 7th digit on), and its lowest bit is the sign.
+      let value = 0, scale = 1;
       for (const c of segment) {
         const digit = B64_VALUE.get(c);
-        value |= (digit & 31) << shift;
-        if (digit & 32) { shift += 5; continue; }
-        fields.push(value & 1 ? -(value >> 1) : value >> 1);
-        value = shift = 0;
+        if (digit === undefined) throw new Error(`source map: ${JSON.stringify(c)} isn't a base64 digit`);
+        value += (digit & 31) * scale;
+        if (digit & 32) {
+          scale *= 32;
+          if (scale > 2 ** 50) throw new Error("source map: a value too long");
+          continue;
+        }
+        const half = Math.floor(value / 2);
+        fields.push(value % 2 === 1 ? 0 - half : half);
+        value = 0;
+        scale = 1;
       }
+      if (fields.length === 0) continue; // an empty segment (",,") holds no mapping
       genCol += fields[0];
       if (fields.length < 4) continue;
       source += fields[1];

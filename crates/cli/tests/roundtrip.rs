@@ -2,6 +2,8 @@
 //! (`tests/fixtures/mini-map`): nothing here needs the game or third-party maps, so it runs in CI.
 //! The promise under test is the project's core one: pack → unpack → pack changes nothing.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -450,7 +452,9 @@ fn a_chapter_that_cant_be_checked_stops_the_pack() {
     let o = w3proj(&["pack", s(&project), "-o", s(&out)]);
     fs::set_permissions(&chapter, fs::Permissions::from_mode(0o755)).unwrap();
     if checkable {
-        return; // as root every folder can be searched: nothing to show
+        // As root every folder can be searched: nothing to show here.
+        common::skip_or_fail("a folder without the search permission can still be searched (running as root?)");
+        return;
     }
     assert!(!o.status.success(), "packed without the chapter it couldn't check: {}", text(&o));
     assert!(text(&o).contains("can't be checked"), "{}", text(&o));
@@ -682,8 +686,7 @@ fn a_function_missing_from_trigger_data_leaves_the_file_raw_and_undamaged() {
     // The same data without DoFooThing, which the fixture's trigger uses.
     let data = dir.join("TriggerData.txt");
     let full = fs::read_to_string(trigger_data()).unwrap();
-    let cut: String = full.lines().filter(|l| !l.starts_with("DoFooThing")).map(|l| format!("{l}
-")).collect();
+    let cut: String = full.lines().filter(|l| !l.starts_with("DoFooThing")).map(|l| format!("{l}\n")).collect();
     assert_ne!(full.len(), cut.len(), "the control line wasn't there");
     fs::write(&data, cut).unwrap();
 

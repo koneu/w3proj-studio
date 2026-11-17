@@ -29,11 +29,28 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     out
 }
 
-fn mini_map(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("w3proj-check-{name}-{}", std::process::id()));
+/// A test project folder under the build's own scratch folder (not the OS temp folder); removed when it goes out of
+/// scope, also when the test fails.
+struct TestDir(PathBuf);
+
+impl std::ops::Deref for TestDir {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn mini_map(name: &str) -> TestDir {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("w3proj-check-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     copy_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map"), &dir);
-    dir
+    TestDir(dir)
 }
 
 fn check(project: &Path, args: &[&str]) -> (Option<i32>, Value) {
@@ -82,7 +99,6 @@ fn the_problems_checks_run_honour_the_ignore_file_and_write_nothing() {
     let (_, r) = check(&dir, &["--only=problems"]);
     assert_eq!(rows(&r, "unlistedImports").len(), 1, "{r}");
     assert!(r["ignoreError"].as_str().unwrap().contains("can't be used"), "{r}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -92,8 +108,7 @@ fn melee_is_left_out_of_a_map_without_the_melee_flag_and_path_needs_points() {
     let skipped: Vec<&str> = r["sections"].as_array().unwrap().iter().filter(|s| s["ran"] == false).map(|s| s["section"].as_str().unwrap()).collect();
     assert_eq!(skipped, ["melee", "path"], "{r}");
     assert!(rows(&r, "melee").is_empty());
-    let out = Command::new(env!("CARGO_BIN_EXE_w3proj")).arg("check").arg(&dir).arg("--only=path").output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_w3proj")).arg("check").arg(&*dir).arg("--only=path").output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--path"), "{}", String::from_utf8_lossy(&out.stderr));
-    let _ = std::fs::remove_dir_all(&dir);
 }
