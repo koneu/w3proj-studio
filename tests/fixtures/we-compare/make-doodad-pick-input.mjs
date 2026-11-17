@@ -109,7 +109,7 @@ export function buildSpec() {
     input: { map: "${REPO}/tests/fixtures/we-compare/doodad-pick.w3m" },
     we: { mode: "sd", steps: buildSteps() },
     studio: { settings: { "game.graphicsMode": "sd" }, steps: buildStudioSteps() },
-    compare: [{ file: "war3map.doo", as: "doodad-places", expect: "differs" }],
+    compare: [{ file: "war3map.doo", as: "doodad-places", expect: "differs", expectPaths: ["doodads[6].id", "doodads[6].x", "doodads[7].x", "doodads[7].y", "doodads[8].x", "doodads[8].y", "doodads[9].y", "doodads[10].x", "doodads[11].y", "doodads[12].x", "doodads[12].y", "doodads[13].y", "doodads[14].id", "doodads[14].x", "doodads[14].y", "doodads[15].y", "doodads[16].y", "doodads[19].x", "doodads[19].y", "doodads[20].y", "doodads[21].y", "doodads[22].x", "doodads[22].y", "doodads[23].x", "doodads[23].y", "doodads[24].y", "doodads[25].x", "doodads[26].x", "doodads[27].x", "doodads[28].x", "doodads[29].x", "doodads[30]", "doodads[31]"] }],
   };
 }
 

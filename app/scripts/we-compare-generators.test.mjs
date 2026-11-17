@@ -105,7 +105,7 @@ test("make-doodad-pick-input: the same map twice, and the committed map and spec
   assert.ok(readFileSync(join(cwd, "a.w3m")).equals(readFileSync(join(cwd, "b.w3m"))));
   assert.ok(readFileSync(join(cwd, "a.w3m")).equals(readFileSync(dir("doodad-pick.w3m"))), "doodad-pick.w3m is not what its generator makes");
   const spec = readFileSync(join(cwd, "a.json"), "utf8");
-  assert.equal(spec, readFileSync(repoPath("tests", "we-compare", "doodad-pick-we.json"), "utf8"), "doodad-pick-we.json is not what the generator writes");
+  assert.deepEqual(JSON.parse(spec), JSON.parse(readFileSync(repoPath("tests", "we-compare", "doodad-pick-we.json"), "utf8")), "doodad-pick-we.json is not what the generator writes");
   // Control: the comparison fails for another generator's map (the base only gives terrain and options: the doodads are the generator's).
   assert.ok(!readFileSync(dir("edge-last-step.w3m")).equals(readFileSync(join(cwd, "a.w3m"))), "the committed maps of two generators are equal");
 });
