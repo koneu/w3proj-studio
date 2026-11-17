@@ -5,7 +5,8 @@
 // Placed random objects of every kind the map script has a form for (war3mapUnits.doo, Player 1, 100 apart):
 //   iDNR items by level and class: classes 0..7 at level "ffffff" (any) and "030000" (level 3);
 //   uDNR units by level "ffffff" and "050000", and a bDNR building by level;
-//   one unit and one item from random group 2 (position 0 and 1), a unit from a custom list (randomType 2);
+//   a unit (position 0) and an item (position 2) from random group 2, a unit (position 0) from group 7, one from group 5
+//   (which doesn't exist), a unit from a custom list (randomType 2);
 // and two random groups (numbers 2 and 7, which don't start at 0) whose lines hold plain ids, random creeps
 // ("YYU3"), a random building ("YYB/") and random items ("YiI2", "YlI/").
 import { spawnSync } from "node:child_process";

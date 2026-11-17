@@ -4,7 +4,7 @@
 //   node tests/fixtures/we-specs/make-open-paths.mjs
 // (needs the smoketest_maps of the main checkout and a fresh release CLI, as make-studio-paths.mjs)
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
@@ -29,7 +29,9 @@ export const INPUTS = {
   "forsaken-07": join(forsaken, "Forsaken07.w3x"),
   "forsaken-interlude": join(forsaken, "Forsaken05Interlude.w3x"),
 };
-const out = join(repo, "target", "open-paths");
+// Built next to the result and swapped in at the end: a failed run leaves the previous maps in place.
+const final = join(repo, "target", "open-paths");
+const out = `${final}.new`;
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const env = { ...process.env, W3PROJ_GAME: chosenGamePath() };
@@ -45,4 +47,6 @@ for (const [name, inner] of Object.entries({ "forsaken-07-original": "Forsaken07
   if (r.status !== 0 || !r.stdout.length) throw new Error(`w3proj cat ${inner}: ${r.stderr}`);
   writeFileSync(join(out, `${name}.w3x`), r.stdout);
 }
-console.log(`made ${Object.keys(INPUTS).length} maps and 2 originals in ${out}`);
+rmSync(final, { recursive: true, force: true });
+renameSync(out, final);
+console.log(`made ${Object.keys(INPUTS).length} maps and 2 originals in ${final}`);

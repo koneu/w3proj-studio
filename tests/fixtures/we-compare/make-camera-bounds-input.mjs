@@ -10,6 +10,11 @@
 // the others are the views Create Camera is tried from: past the right bound (3000), inside (2700), the target inside
 // with the eye south of the map (0, -3000), the target past the top bound with the eye inside (0, 2900), just past the
 // right bound (2820), and a near one (2700, 300 from 500).
+//
+// The fifth argument is a list of looks x,y,distance (or x,y,distance,far,near with the camera's clipping) joined by ';'.
+// camera-farz.w3m (tests/we-compare/camera-farz.json) is made by
+//   node tests/fixtures/we-compare/make-camera-bounds-input.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> camera-farz.w3m \
+//     "0,0,500;0,0,1000,9000,50;0,0,1650;0,0,2000,9000,50;0,0,2500;0,0,3000,9000,50;0,0,4000;0,0,5000,9000,50"
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +54,12 @@ try {
   const head = terrainHead(readFileSync(join(map, "war3map.w3e.txt"), "utf8"));
   const camerasFile = join(map, "war3map.w3c.json");
   const cameras = JSON.parse(readFileSync(camerasFile, "utf8"));
-  writeFileSync(camerasFile, `${JSON.stringify(addLookCameras(cameras, LOOKS.map((l) => resolveLook(parseLook(l), head))), null, 2)}\n`);
+  // A look of five values is x,y,distance,far,near (the camera's clipping, else the editor's 5000 / 100); fewer are parseLook's.
+  const clip = LOOKS.map((l) => { const p = l.split(",").map((v) => v.trim()); return p.length === 5 ? { far: Number(p[3]), near: Number(p[4]) } : null; });
+  clip.forEach((c, i) => { if (c && !(c.far > 0 && c.near > 0)) throw new Error(`look "${LOOKS[i]}": far and near must be numbers above 0`); });
+  const made = addLookCameras(cameras, LOOKS.map((l, i) => resolveLook(parseLook(clip[i] ? l.split(",").slice(0, 3).join(",") : l), head)));
+  clip.forEach((c, i) => { if (c) { made.cameras[i].farZ = c.far; made.cameras[i].nearZ = c.near; } });
+  writeFileSync(camerasFile, `${JSON.stringify(made, null, 2)}\n`);
   run("pack", dir, "-o", out, "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });

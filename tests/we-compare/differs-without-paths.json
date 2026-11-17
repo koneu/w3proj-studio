@@ -1,5 +1,5 @@
 {
-  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" on a JSON kind without naming expectPaths: any difference passes them, also a World Editor step that never applied. Written before parseSpec refused that (2026-11-17); this list only shrinks: give an entry its expectPaths from a real World Editor run, then take it out (we-compare.test.mjs fails on an entry that is no longer needed, and on a longer list).",
+  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" without naming expectPaths: any difference passes them, also a World Editor step that never applied. \"entries\": on a JSON kind (written before parseSpec refused that, 2026-11-17): give an entry its expectPaths from a real World Editor run, then take it out. \"textEntries\": on text, text-set, text-exact, bytes or wpm, which can't name paths (refused since 2026-11-17): compare the file as a JSON kind with expectPaths, or narrow it with lines to what must match, then take it out. Both only shrink (we-compare-runner.test.mjs fails on an entry that is no longer needed, and on a longer list).",
   "entries": [
     "boundary-flags-wpm war3map.w3e",
     "cliff-click-row-300 war3map.w3e",
@@ -36,5 +36,25 @@
     "water-off-edge-high war3map.w3e",
     "water-plateau-on war3map.w3e",
     "water-ramp-on war3map.w3e"
+  ],
+  "textEntries": [
+    "injected-script war3map.j",
+    "open-paths-forsaken-start war3map.wpm",
+    "open-paths-gui-meelee-map-2 war3map.wpm",
+    "ramp-plateau-twice war3map.wpm",
+    "resize-top-grow war3map.w3e",
+    "sound-flags-we war3map.j",
+    "studio-paths-nolua war3map.lua",
+    "studio-paths-nolua war3map.w3e",
+    "studio-paths-nowts war3map.lua",
+    "studio-paths-nowts war3map.w3e",
+    "studio-paths-nowts-text war3map.lua",
+    "studio-paths-nowts-text war3map.w3e",
+    "studio-paths-plain war3map.lua",
+    "studio-paths-plain war3map.w3e",
+    "studio-paths-rebuilt war3map.lua",
+    "studio-paths-rebuilt war3map.w3e",
+    "studio-paths-terrain-save war3map.lua",
+    "studio-paths-terrain-save war3map.w3e"
   ]
 }

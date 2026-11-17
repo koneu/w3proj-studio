@@ -13,6 +13,7 @@ import { repoPath } from "../src/lib/testhelpers/testutil";
 import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import * as drive from "./we-drive.mjs";
 import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -412,10 +413,12 @@ test("editorPrefs pins the persisted toggles to the editor's defaults, unless ke
   const p = editorPrefs("hd", "fixed");
   assert.equal(p["Enforce Water Limits"], "true");
   assert.equal(p["Enforce Camera Boundaries"], "1");
-  const left = "[Misc]\nEnforce Water Limits=false\nEnforce Camera Boundaries=0\nhd=1\n";
+  const left = "[Misc]\nEnforce Water Limits=false\nEnforce Camera Boundaries=0\nReset Fixed Z When Moving Objects=true\nhd=1\n";
   const out = setPrefs(left, "Misc", p);
   assert.match(out, /Enforce Water Limits=true/);
   assert.match(out, /Enforce Camera Boundaries=1/);
+  // Ctrl+Shift+H's switch (unit-heights), left on by a run before: back to off.
+  assert.match(out, /^Reset Fixed Z When Moving Objects=false$/m);
   const kept = editorPrefs("hd", "fixed", true);
   for (const k of Object.keys(PINNED_PREFS)) assert.equal(k in kept, false, `${k} stays as it was with keep`);
   assert.equal(parseArgs(["--keep-prefs"]).opts.keepPrefs, true);
@@ -599,6 +602,62 @@ test("Session: stop() takes a zombie Xvfb as gone instead of waiting 5 s", (t) =
   r.s.stop();
   // Asked once, and stop() went on (it returned): a Xvfb taken for running would have waited out its 5 s first.
   assert.deepEqual(asked, [r.s.xvfb.pid]);
+});
+
+test("Session: --expect-layout fails waitReady on a main window or palette of another place or size, with one message", async (t) => {
+  const r = rig(t);
+  r.s.opts.expectLayout = true;
+  await r.s.start(r.maps["a.w3m"]);
+  const palette = (rect) => ({ id: 7, title: "Terrain Palette", class: "steam_app_1", rect, pid: 5, overrideRedirect: false });
+  r.windows = [{ ...mainWin("a.w3m"), rect: [0, 0, 1200, 700] }, palette([1356, 30, 240, 600])];
+  const wrong = await r.s.waitReady();
+  assert.equal(wrong.ready, false);
+  assert.match(wrong.layout, /main window is at 0,0 1200x700, not 4,30 1352x937/);
+  r.windows = [mainWin("a.w3m"), palette([1300, 30, 240, 600])];
+  assert.match((await r.s.waitReady()).layout, /tool palette is at 1300,30, not 1356,30/);
+  // Controls: the measured layout is ready; without the option another size is ready too (a --screen run).
+  r.windows = [mainWin("a.w3m"), palette([1356, 30, 240, 600])];
+  assert.equal((await r.s.waitReady()).ready, true);
+  r.s.opts.expectLayout = false;
+  r.windows = [{ ...mainWin("a.w3m"), rect: [0, 0, 1200, 700] }];
+  assert.equal((await r.s.waitReady()).ready, true);
+});
+
+test("Session: --pref keys are written into the preferences before each start, after we-drive's own", async (t) => {
+  const r = rig(t);
+  r.s.opts.prefs = [drive.parsePref("Misc/Enforce Water Limits=false"), drive.parsePref("Terrain Cursor/Color=3")];
+  await r.s.start(r.maps["a.w3m"]);
+  const file = join(r.pfx, "drive_c", "users", "steamuser", "Documents", "Warcraft III", "WorldEditPreferences.txt");
+  const text = readFileSync(file, "utf8");
+  assert.match(text, /^Enforce Water Limits=false$/m, "the --pref wins over the pinned default");
+  assert.doesNotMatch(text, /^Enforce Water Limits=true$/m);
+  assert.match(text, /\[Terrain Cursor\]\nColor=3/);
+  assert.match(text, /^Has Been Run=true$/m, "control: we-drive's own keys are still there");
+});
+
+test("we-drive options: --pref, --expect-layout and the --numlock step are checked before anything starts", () => {
+  const { opts, steps } = parseArgs(["--pref", "Misc/Enforce Water Limits=false", "--pref", "Misc/Undo Limit=0", "--expect-layout", "--start", "--numlock", "on", "--numlock", "status"]);
+  assert.deepEqual(opts.prefs, [{ section: "Misc", key: "Enforce Water Limits", value: "false" }, { section: "Misc", key: "Undo Limit", value: "0" }]);
+  assert.equal(opts.expectLayout, true);
+  assert.deepEqual(steps, [["--start", null], ["--numlock", "on"], ["--numlock", "status"]]);
+  assert.throws(() => parseArgs(["--start", "--numlock", "yes"]), /--numlock wants on, off or status/);
+  for (const bad of ["Misc", "Misc/=1", "Misc/Key", "/Key=1", "Mi[sc/K=1", "Misc/ Key=1"]) assert.throws(() => drive.parsePref(bad), /--pref wants Section\/Key=value/, bad);
+  assert.deepEqual(drive.parsePref("Misc/Key=a=b"), { section: "Misc", key: "Key", value: "a=b" }, "a value may hold =");
+  assert.throws(() => parseArgs(["--expect-layout", "--screen", "1200x700", "--start"]), /leave out --screen/);
+  assert.equal(parseArgs(["--expect-layout", "--screen", "1600x1000", "--start"]).opts.expectLayout, true, "control: the measured size");
+});
+
+test("withExtraPrefs sets each --pref in its section, a later one of the same key winning; layoutProblem reads the recorded layout", () => {
+  const text = drive.withExtraPrefs("[Misc]\nhd=1\n", [drive.parsePref("Misc/hd=0"), drive.parsePref("Misc/hd=2"), drive.parsePref("New/k=v")]);
+  assert.equal(text, "[Misc]\nhd=2\n\n[New]\nk=v\n");
+  assert.equal(drive.withExtraPrefs("[Misc]\nhd=1\n", []), "[Misc]\nhd=1\n");
+  // The layout of TESTING.md "Layout" (main window 4,30 1352x937, palette 1356,30) is fine; no palette is fine too.
+  const main = { title: "Warcraft III World Editor - [x]", rect: [4, 30, 1352, 937] };
+  assert.equal(drive.layoutProblem(main, [{ title: "Terrain Palette", rect: [1356, 30, 240, 600] }]), null);
+  assert.equal(drive.layoutProblem(main, []), null);
+  assert.match(drive.layoutProblem(null, []), /no main window/);
+  assert.match(drive.layoutProblem({ ...main, rect: [4, 30, 1352, 900] }, []), /1352x900/);
+  assert.deepEqual(drive.LAYOUT.main, [4, 30, 1352, 937]);
 });
 
 test("Session: waitReady wants this map's name in the title, not the map before's", async (t) => {

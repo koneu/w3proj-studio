@@ -11,10 +11,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gamePath } from "../../gamepath.mjs";
+import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = process.argv[2] ? resolve(process.argv[2]) : null;
 if (!cli) { console.error("usage: make-injected-script.mjs <w3proj cli>"); process.exit(2); }
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const run = (...a) => {
   const r = spawnSync(cli, a, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${a.join(" ")}: ${r.stderr}${r.stdout}`);

@@ -140,7 +140,7 @@ falls short, rather than copying their insides into a scratch file.
 | apply testers' verdicts to the open points | `node scripts/openpoints-close.mjs <verdicts-file> [--dry-run]` (repo root): lines `<id>: PASS \| FAIL \| DIFFERS \| NOT DONE — <text>`. PASS removes the item block; FAIL/DIFFERS add a one-line item to `bugs.md` "From verification" pointing at the old one; NOT DONE adds `(not done: reason, date)`, the second moves the item to `user.md` (game/Windows/user) or `onhold.md`. Unknown ids refuse the whole run; changed files are copied to `openpoints/.backup/<timestamp>/` first. Tested in `app/scripts/openpoints.test.mjs` |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
 | check the save's Melee-flag rule against the game's maps | `node scripts/melee-corpus.mjs [--filter TEXT] [--why] [--save F] [--baseline F]` (in `app/`): clears each game map's Melee flag and runs `savedMelee` (meleesave.ts); a map stored melee should get it back, others not. `--why` names the reasons for each miss, `--baseline` lists maps whose result changed (exit 1 if an agreement was lost) |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--clipboard FILE` (the editor's clipboard text, which Wine hands to X with LF line ends whatever the editor put in), `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--move X,Y`, `--wheel N[@X,Y]`, `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs` (see "Preferences"). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--clipboard FILE` (the editor's clipboard text, which Wine hands to X with LF line ends whatever the editor put in), `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--move X,Y`, `--wheel N[@X,Y]`, `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog; printable ASCII only), `--numlock on\|off\|status` (Num Lock as the X server holds it: pressed only when it differs), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs`, `--pref Section/Key=value` (see "Preferences"), `--expect-layout` (`--wait-ready` fails when the main window or tool palette isn't where spec clicks were measured). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 | run a built binary that may be older than its sources | `tests/binfresh.mjs` refuses a `w3proj` or app binary older than a tracked source it is built from (CLI: `crates/`, Cargo files; app: also `app/src-tauri`, `app/src`, `index.html`, the vite/TS configs, the npm packages), as we-compare and the `make-*.mjs` generators use them: rebuild, or pass `--allow-stale` (where the tool parses its own flags) / `W3_ALLOW_STALE=1`. mtimes are compared, so a fresh checkout refuses a binary built before it |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh` and
@@ -157,8 +157,8 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   right at 2816, playable part 3328, map 4096; scripts and saves in `target/evidence/we-drag-checks/` of the main
   checkout). A plain drag that starts on a selected object moves it (a doodad by `--key d`, a unit by `--key u`; the
   first click must hit the model: a footman's feet miss, 10 px higher hits); Alt+drag moves a unit's centre to the
-  pointer. The nudge is Edit > Nudge Selection: the number pad (`--key Num_Lock` once, then `--key KP_6`; without Num
-  Lock the keys arrive as arrows and do nothing), 64 a step for a tree, 8 for a doodad without pathing and a footman.
+  pointer. The nudge is Edit > Nudge Selection: the number pad (`--numlock on`, then `--key KP_6`; without Num
+  Lock the keys arrive as arrows and do nothing; a blind `--key Num_Lock` toggles whatever the spec before left, since the X server keeps the lock while an editor is connected), 64 a step for a tree, 8 for a doodad without pathing and a footman.
   Measured again in nudge-turn-we (target/evidence/nudge-turn-we): the nudge is 64 for a tree (LTlt) and a farm (hhou), 8
   for a doodad without pathing (LPcr) and a footman; the diagonals KP_7 9 1 3 move both axes the whole step (a tree:
   -64/+64, +64/+64, -64/-64, +64/-64); KP_Divide turns a selection 5 degrees left, KP_Multiply 5 right. Studio:
@@ -277,6 +277,11 @@ It never starts the game itself.
   terms. The user accepted them in their own install (which the farm is made from) and agreed on 2026-11-08 that
   we-drive presses Continue in its own prefix; `W3PROJ_WE_ACCEPT_TERMS=0` makes it report the dialog instead. The
   shared prefix keeps the answer, so this comes up once per new prefix.
+  Pinned before each start (else written as found, so a run depends on the last; `--keep-prefs` leaves them): `Enforce
+  Water Limits` (Ctrl+Shift+W), `Enforce Camera Boundaries`, `Reset Fixed Z When Moving Objects=false` (the switch
+  Ctrl+Shift+H toggles: seen 2026-11-17, false to true, kept by the next start when not pinned), the minimap's `Show
+  Creep Camps` (PINNED_PREFS). `--pref Section/Key=value`
+  (repeatable) writes any other key before each start, `--keep-prefs` or not; we-compare's `we.prefs` passes them.
 - Game view: V toggles it, and `--game-view` reads it from View > Lock to Game View Settings. The "Game View Settings"
   label the editor shows in the upper right of the view on the user's machine didn't appear in the hidden display.
   A fog map confirms the state: 02e (exponential fog, density 0.5) is the full map with game view off and nothing but
@@ -498,7 +503,7 @@ whose runs folder changed in the last 2 hours (a tester may be using it) and the
 it removed and the space freed. `--dry-run` prints that without deleting or building.
 
 `W3_APP_BIN` (or `--app`) makes `appctl.mjs`, app-drive, app-smoke and we-compare run that binary and build nothing.
-Settings (`W3PROJ_CONFIG_DIR`, default `<work>/config`) and the webview's storage (`XDG_DATA_HOME`/`XDG_CACHE_HOME`
+Settings (`<work>/config` for app-drive and we-compare, which make and remove it and never take `W3PROJ_CONFIG_DIR`; app-smoke's `W3PROJ_CONFIG_DIR`, default inside its folder) and the webview's storage (`XDG_DATA_HOME`/`XDG_CACHE_HOME`
 under the work folder, Linux) are per run, so testers sharing a binary share nothing. The identifier of the build is
 the same for all (`W3_SMOKE_ID` only names the build). Proven with two `app-drive` and two `app-smoke --only=byHand` runs
 at once on one binary. Costs (this machine, sccache warm): archive 0 s, `npm ci` 3 s, app build 142 s, CLI about 10 s more.
@@ -515,16 +520,30 @@ by restart, 47 s by open (an extra map costs about 9 s instead of 18 s; the star
 (the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
 entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect": "differs"` marks a known difference
 (not a failure); `"expectPaths": ["players[].start", …]` (JSON kinds) says which: every listed path must differ and no
-other may, else the file is UNEXPECTED. Without it any difference passes, so a `differs` on a kind that can take paths
-(the JSON kinds, `auto` on a non-text file) is refused unless `tests/we-compare/differs-without-paths.json` lists it
-("spec-name file": the entries written before the rule; the list only shrinks, `we-compare-runner.test.mjs` fails on a
-longer list or an entry no spec needs). A file missing from a save is MISSING and one that can't be read (a w3e cut short, a file that didn't unpack
+other may, else the file is UNEXPECTED. Without it any difference passes, so a `differs` without `expectPaths` is
+refused: on a JSON kind (name the paths) and on `text`, `text-set`, `text-exact`, `bytes` and `wpm` alike (compare the
+file as a JSON kind, or narrow it with `lines` and expect a match), unless `tests/we-compare/differs-without-paths.json`
+lists it ("spec-name file" in `entries` for the JSON kinds, `textEntries` for the others: written before the rule; both
+only shrink, `we-compare-runner.test.mjs` fails on a longer list or an entry no spec needs). `tolerance` is a number for
+every path or `{ "doodads[].z": 1, "camera": 4, "default": 0 }` (the longest matching pattern wins, `default` else 0),
+so a tolerance for one field doesn't hide another. A file missing from a save is MISSING and one that can't be read (a w3e cut short, a file that didn't unpack
 as JSON, a BLP that doesn't decode) is ERROR: neither is ever the expected difference. A `parsed` file of the World
 Editor's save that `w3proj verify` doesn't get back byte for byte is ERROR too (the codecs' JSON on both sides would
 hide what they lose). `text` normalises CRLF to LF; `text-exact` keeps line endings (the map's own bytes; the
 `header-*` specs use it). `tolerance`, `ignore` and
 `expectPaths` are refused on `text`, `bytes` and `wpm`; `lines` (a regular expression, `text` and `text-set` only) keeps only the
-matching lines of both saves; the minimap's tolerance is for its colours, not its size. An
+matching lines of both saves, and none matching in a save is ERROR (two empty texts would match); a text kind on a
+binary file (a NUL in it) is ERROR; the minimap's tolerance is for its colours, not its size. A file of the checkout
+that a `--type` text or an eval names (`${REPO}/target/import-modes/Rabbit.mdx`) must exist, else the spec is ERROR
+naming the `make-*.mjs` that writes it (both sides would import nothing and match).
+**Editor state between specs**: specs of one mode share one editor, so what a spec toggles stays for the next one
+(Ctrl+Shift+W, Ctrl+Shift+H, a palette pick, a tree's scroll). Set, don't toggle: `--numlock on` instead of
+`--key Num_Lock`; `"we": { "freshEditor": true }` closes the editor before the spec and starts a new one for it (its
+preferences written again); `"we": { "prefs": { "Misc": { "Key": "value" } } }` writes WorldEditPreferences.txt keys
+before each start of its editor (specs with other prefs get a we-drive process of their own). `"we": { "expectCrash":
+true }` closes the editor right after the spec's save and fails the spec when it doesn't crash there
+(close-crash-light-ranges). Every we-drive process runs with `--expect-layout`: an editor window of another size or
+place fails all its specs with one message. An
 `ignore` pattern that names no path of either file is listed as a warning (`--strict-ignore` makes it fail the file).
 A missing input map is that spec's ERROR (naming the `make-*.mjs` that writes it); the rest run. After each spec
 Studio's settings that it changed, the `w3.window` functions its evals stubbed and its `window.__*` globals are put

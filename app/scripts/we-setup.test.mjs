@@ -218,3 +218,48 @@ test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT o
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** Opens a file of a read-only mount for writing (open O_RDWR, creat) as the editor's CASC reader does, in bubblewrap
+ *  with the whole machine read-only; prints what each call gave. */
+const ROFS_PROBE = String.raw`
+import ctypes, errno, json, os, sys
+f = sys.argv[1]
+out = {}
+try:
+    fd = os.open(f, os.O_RDWR)
+    out["open"] = "fd"
+    try:
+        os.write(fd, b"x")
+        out["write"] = "wrote"
+    except OSError as e:
+        out["write"] = errno.errorcode[e.errno]
+    out["read"] = os.read(fd, 4).decode()
+except OSError as e:
+    out["open"] = errno.errorcode[e.errno]
+libc = ctypes.CDLL(None, use_errno=True)
+for name, path in (("creat", f), ("creatMissing", f + ".new")):
+    r = libc.creat(path.encode(), 0o644)
+    out[name] = "fd" if r >= 0 else errno.errorcode[ctypes.get_errno()]
+print(json.dumps(out))
+`;
+
+test("we-rofs.so turns a read-write open and a creat of a read-only file into a read-only open; a write through it fails", (t) => {
+  try { execFileSync("cc", ["--version"], { stdio: "ignore" }); execFileSync("bwrap", ["--ro-bind", "/", "/", "true"], { stdio: "ignore" }); } catch { return t.skip("no C compiler or no working bubblewrap"); }
+  const dir = scratchDir("we-rofs-run-");
+  try {
+    const so = join(dir, "we-rofs.so");
+    execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", so, repoPath("app", "scripts", "we-rofs.c"), "-ldl"]);
+    const data = join(dir, "data.idx");
+    writeFileSync(data, "CASC");
+    const probe = join(dir, "probe.py");
+    writeFileSync(probe, ROFS_PROBE);
+    const run = (preload) => JSON.parse(execFileSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--", "env", ...(preload ? [`LD_PRELOAD=${so}`] : []), "python3", "-I", probe, data], { encoding: "utf8" }));
+    // Control: on the read-only mount every write open fails.
+    assert.deepEqual(run(false), { open: "EROFS", creat: "EROFS", creatMissing: "EROFS" });
+    // With the shim: the existing file opens read-only (the write through it fails), a new one still can't be made.
+    assert.deepEqual(run(true), { open: "fd", write: "EBADF", read: "CASC", creat: "fd", creatMissing: "EROFS" });
+    assert.equal(readFileSync(data, "utf8"), "CASC", "the file is unchanged");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

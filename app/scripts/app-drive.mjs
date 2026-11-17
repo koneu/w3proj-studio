@@ -9,7 +9,7 @@
 // Options:
 //   --no-build          use the app as last built (otherwise it's built first; incremental, cheap if unchanged)
 //   --app PATH          a built app to run (W3_APP_BIN does the same; verify-build.mjs makes one): nothing is built. Its
-//                       settings and webview storage are under --work (W3PROJ_CONFIG_DIR moves the settings), so two
+//                       settings and webview storage are under --work (<work>/config, made and removed by the run), so two
 //                       runs with different --work folders can use one binary at once
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
 //   --work DIR          scratch folder (default: target/app-drive); projects are copied or unpacked into it

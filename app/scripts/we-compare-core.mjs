@@ -129,8 +129,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`${label}: "name" is needed (letters, digits, . _ -; it names the folder)`);
   if (RESERVED_NAMES.includes(name.toLowerCase())) throw new Error(`${label}: the name ${name} is one of we-compare's own folders (${RESERVED_NAMES.join(", ")})`);
   const where = `${label} (${name})`;
-  const unknown = Object.keys(raw).filter((k) => !["name", "description", "input", "we", "studio", "compare", "limit"].includes(k));
-  if (unknown.length) throw new Error(`${where}: unknown key ${unknown.join(", ")}`);
+  const unknown = Object.keys(raw).filter((k) => !["name", "description", "input", "we", "studio", "compare", "limit"].includes(k));  if (unknown.length) throw new Error(`${where}: unknown key ${unknown.join(", ")}`);
   const input = raw.input;
   if (!isObject(input)) throw new Error(`${where}: "input" is needed: { "map": … } or { "new": { name, width, height } }`);
   let parsedInput;
@@ -147,6 +146,10 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (we.mode !== undefined && !["sd", "hd", "de"].includes(we.mode)) throw new Error(`${where}: we.mode is sd, hd or de`);
   if (we.from !== undefined && !["input", "studio"].includes(we.from)) throw new Error(`${where}: we.from is input (the spec's map) or studio (the map Studio saved: does the editor open and re-save it unchanged?)`);
   if (we.saveAccept !== undefined && !(Array.isArray(we.saveAccept) && we.saveAccept.every((t) => typeof t === "string" && t && !t.includes(",")))) throw new Error(`${where}: we.saveAccept is a list of dialog titles`);
+  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "steps", "freshEditor", "expectCrash", "prefs"].includes(k));
+  if (unknownWe.length) throw new Error(`${where}: unknown we.${unknownWe.join(", we.")}`);
+  for (const k of ["freshEditor", "expectCrash"]) if (we[k] !== undefined && typeof we[k] !== "boolean") throw new Error(`${where}: we.${k} is true or false`);
+  const prefs = parsePrefs(we.prefs, `${where}: we.prefs`);
   const studio = raw.studio ?? {};
   if (!isObject(studio)) throw new Error(`${where}: "studio" is an object`);
   if (studio.settings !== undefined && !isObject(studio.settings)) throw new Error(`${where}: studio.settings is an object`);
@@ -155,7 +158,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     if (!isObject(e) || typeof e.file !== "string" || !e.file || /[\\/]/.test(e.file)) throw new Error(`${where}: compare[${i}] is a file name of the map (no folders)`);
     if (e.as !== undefined && !KINDS.includes(e.as)) throw new Error(`${where}: compare[${i}].as is one of ${KINDS.join(", ")}`);
     if (e.expect !== undefined && !["match", "differs"].includes(e.expect)) throw new Error(`${where}: compare[${i}].expect is match or differs`);
-    if (e.tolerance !== undefined && !(Number.isFinite(e.tolerance) && e.tolerance >= 0)) throw new Error(`${where}: compare[${i}].tolerance is a number of 0 or more (numbers within it count as equal)`);
+    if (e.tolerance !== undefined) checkTolerance(e.tolerance, `${where}: compare[${i}].tolerance`);
     if (e.ignore !== undefined && !(Array.isArray(e.ignore) && e.ignore.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].ignore is a list of paths ("doodads[3].scale", "units[].itemTable")`);
     if (e.expectPaths !== undefined) {
       if (!(Array.isArray(e.expectPaths) && e.expectPaths.length && e.expectPaths.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].expectPaths is a list of paths that must all differ ("players[].start")`);
@@ -173,11 +176,13 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     for (const opt of ["tolerance", "ignore", "expectPaths"]) {
       if (e[opt] !== undefined && kind !== "auto" && !JSON_KINDS.includes(kind)) throw new Error(`${where}: compare[${i}].${opt} has no effect on "as": "${kind}" (only on ${JSON_KINDS.join(", ")})`);
     }
-    // "differs" on a JSON kind without expectPaths passes on ANY difference, also when the World Editor's steps never
-    // applied: refused, except for the entries of tests/we-compare/differs-without-paths.json (written before the
-    // rule; that list only shrinks).
-    if (e.expect === "differs" && !e.expectPaths && takesPaths(kind, e.file) && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
-      throw new Error(`${where}: compare[${i}] (${e.file}) expects "differs" without "expectPaths": name the paths that must differ (any difference would pass, also a World Editor step that missed)`);
+    // "differs" without expectPaths passes on ANY difference, also when the World Editor's steps never applied:
+    // refused, except for the entries of tests/we-compare/differs-without-paths.json (written before the rule; that
+    // list only shrinks). On a JSON kind the way out is expectPaths; on text, text-set, text-exact, bytes and wpm,
+    // which can't name paths, it is a JSON kind of the file, or "lines" narrowed to what must match.
+    if (e.expect === "differs" && !e.expectPaths && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
+      if (takesPaths(kind, e.file)) throw new Error(`${where}: compare[${i}] (${e.file}) expects "differs" without "expectPaths": name the paths that must differ (any difference would pass, also a World Editor step that missed)`);
+      throw new Error(`${where}: compare[${i}] (${e.file}, as ${kind === "auto" ? `auto: ${autoKind(e.file, null)}` : kind}) expects "differs" on a kind that can't name what differs: any difference would pass, also a World Editor step that missed. Compare it as a JSON kind with "expectPaths", or narrow it with "lines" to what must match`);
     }
     return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.lines ? { lines: e.lines } : {}) };
   });
@@ -189,11 +194,82 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     name,
     description: raw.description ?? "",
     input: parsedInput,
-    we: { mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))) },
+    we: {
+      mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))),
+      freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs,
+    },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
     limit: raw.limit ?? 10,
+    files: checkoutFiles(raw, vars),
   };
+}
+
+/**
+ * `we.prefs`: { "Section": { "Key": "value" } } of the editor's WorldEditPreferences.txt, written before each start of
+ * the editor the spec runs in (we-drive --pref). Returned as a sorted list of "Section/Key=value" (we-drive's form, and
+ * the key of the spec's editor group: specs with other prefs never share an editor). Values are strings or numbers.
+ */
+export function parsePrefs(prefs, where = "we.prefs") {
+  if (prefs === undefined) return [];
+  if (!isObject(prefs)) throw new Error(`${where} is { "Section": { "Key": "value" } } (WorldEditPreferences.txt)`);
+  const out = [];
+  for (const [section, keys] of Object.entries(prefs)) {
+    if (!section || /[/\]\[\r\n]/.test(section) || !isObject(keys)) throw new Error(`${where}: "${section}" is a section name (no / [ ]) holding { "Key": "value" }`);
+    for (const [key, value] of Object.entries(keys)) {
+      if (!key || /[=\r\n]/.test(key) || key !== key.trim()) throw new Error(`${where}.${section}: "${key}" is a key name (no =, no line break, no space at its ends)`);
+      if (!(typeof value === "string" || Number.isFinite(value)) || /[\r\n]/.test(String(value))) throw new Error(`${where}.${section}.${key}: a value is a string or a number on one line`);
+      out.push(`${section}/${key}=${value}`);
+    }
+  }
+  return out.sort();
+}
+
+/** A "tolerance": a number of 0 or more, or { "path pattern": number, "default": number } (pathPattern; "default"
+ *  for every other path, 0 when left out). Throws naming what is wrong. */
+export function checkTolerance(t, where = "tolerance") {
+  const ok = (v) => Number.isFinite(v) && v >= 0;
+  if (typeof t === "number") { if (!ok(t)) throw new Error(`${where} is a number of 0 or more (numbers within it count as equal)`); return; }
+  if (!isObject(t) || !Object.keys(t).length) throw new Error(`${where} is a number of 0 or more, or { "path pattern": number, "default": number }`);
+  for (const [k, v] of Object.entries(t)) if (!k || !ok(v)) throw new Error(`${where}: "${k}" wants a number of 0 or more`);
+}
+
+/**
+ * A tolerance as a function of the path: the number for every path, or for the object form the value of the longest
+ * pattern that matches the path (the most specific; "doodads[].z" over "doodads"), else "default" (0 when absent).
+ */
+export function toleranceAt(t) {
+  if (typeof t === "function") return t;
+  if (!isObject(t)) { const n = t ?? 0; return () => n; }
+  const rules = Object.entries(t).filter(([k]) => k !== "default").map(([k, v]) => ({ re: pathPattern(k), len: k.length, v })).sort((a, b) => b.len - a.len);
+  const fallback = t.default ?? 0;
+  return (path) => { for (const r of rules) if (r.re.test(path)) return r.v; return fallback; };
+}
+
+/** Whether a tolerance would change anything: a number above 0, or an object with any value above 0. */
+const toleranceUsed = (t) => (isObject(t) ? Object.values(t).some((v) => v > 0) : t > 0);
+
+/**
+ * The files of the checkouts a spec's "--type" texts and evals name (`${REPO}/…`, `${MAIN}/…`, `${REPO_WE}\…`,
+ * `${MAIN_WE}\…`), as paths of this machine: a file picked in a dialog or handed to pickFiles that isn't there (one a
+ * make-*.mjs writes into target/) would make both sides import nothing and match. we-compare stops the spec before
+ * the run instead, as for a missing input map.
+ */
+export function checkoutFiles(raw, vars) {
+  const texts = [];
+  for (const s of raw.we?.steps ?? []) {
+    if (typeof s === "string" && /^--type\s/.test(s)) texts.push(s.replace(/^--type\s+/, ""));
+    else if (Array.isArray(s) && s[0] === "--type" && typeof s[1] === "string") texts.push(s[1]);
+  }
+  for (const s of [...(raw.input?.steps ?? []), ...(raw.studio?.steps ?? [])]) if (isObject(s) && typeof s.eval === "string") texts.push(s.eval);
+  const found = new Set();
+  for (const t of texts) {
+    for (const m of t.matchAll(/\$\{(REPO|MAIN)(?:_WE)?\}((?:[\\/][^\\/'"`\s,;()[\]{}<>|*?]+)+)/g)) {
+      if (!Object.hasOwn(vars, m[1])) continue;
+      found.add(join(vars[m[1]], ...m[2].split(/[\\/]/).filter(Boolean)));
+    }
+  }
+  return [...found];
 }
 
 /** A spec file's text: one spec or an array of them. Names must differ. */
@@ -213,11 +289,21 @@ export const takesPaths = (kind, file) => JSON_KINDS.includes(kind) || (kind ===
 
 /** The file of the "differs" entries without expectPaths that are let through, under the checkout `repoDir`. */
 export const differsAllowlistPath = (repoDir) => join(repoDir, "tests", "we-compare", "differs-without-paths.json");
-/** The allowlist (its "entries", each "spec-name file") as a Set, for parseSpec's `differsWithoutPaths`. */
-export function readDiffersAllowlist(repoDir) {
+/** The allowlist's two sections, each a list of "spec-name file": `entries` (JSON kinds, which could name expectPaths)
+ *  and `textEntries` (text, text-set, text-exact, bytes, wpm: no paths to name). */
+export function readDiffersAllowlistSections(repoDir) {
   const raw = JSON.parse(readFileSync(differsAllowlistPath(repoDir), "utf8"));
-  if (!Array.isArray(raw.entries) || !raw.entries.every((e) => typeof e === "string" && / /.test(e))) throw new Error(`${differsAllowlistPath(repoDir)}: "entries" is a list of "spec-name file"`);
-  return new Set(raw.entries);
+  const list = (k) => {
+    if (!Array.isArray(raw[k]) || !raw[k].every((e) => typeof e === "string" && / /.test(e))) throw new Error(`${differsAllowlistPath(repoDir)}: "${k}" is a list of "spec-name file"`);
+    return new Set(raw[k]);
+  };
+  return { entries: list("entries"), textEntries: list("textEntries") };
+}
+
+/** The allowlist (both sections) as one Set, for parseSpec's `differsWithoutPaths`. */
+export function readDiffersAllowlist(repoDir) {
+  const { entries, textEntries } = readDiffersAllowlistSections(repoDir);
+  return new Set([...entries, ...textEntries]);
 }
 
 /**
@@ -290,7 +376,8 @@ const show = (v) => {
  * ("doodads[210]: WE absent, Studio {…}"). `entries` counts the differing elements of the top-level lists ({ list: { total, differing } }).
  * `a` is the World Editor's, `b` Studio's. `limit` is how many differences are kept in `diffs` (the count is all).
  *
- * `tolerance` is a number, or a function of the path giving one (the minimap: its blocks only). `ignore` and
+ * `tolerance` is a number, { "path pattern": number, "default": number } (toleranceAt: the longest matching pattern
+ * wins), or a function of the path giving one (the minimap: its blocks only). `ignore` and
  * `expectPaths` are path patterns (pathPattern). Also returned: `ignoreUnmatched`, the ignore patterns that name no path
  * of either document (a typo, or a field that is gone: it ignores nothing); with `expectPaths`, `expectMissing` (the
  * expected paths that don't differ) and `unexpected` ({ count, paths }: differences outside them).
@@ -299,7 +386,7 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPat
   const diffs = [];
   let count = 0;
   const entries = {};
-  const tol = typeof tolerance === "function" ? tolerance : () => tolerance;
+  const tol = toleranceAt(tolerance);
   // Two numbers within `tolerance` of each other are the same (a known, bounded difference of the two editors).
   const same = (x, y, path) => x === y || (Number.isNaN(x) && Number.isNaN(y)) || (typeof x === "number" && typeof y === "number" && Math.abs(x - y) <= tol(path));
   // `ignore`: paths whose differences don't count (a known, named difference): "doodads[3].scale" (with everything below
@@ -459,14 +546,17 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
     return { file, kind, status: "MISSING", count: 1, diffs: [{ text: `the file is in ${where}` }] };
   }
   if (!JSON_KINDS.includes(kind)) {
-    const used = [tolerance > 0 && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
+    const used = [toleranceUsed(tolerance) && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
     if (used.length) return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `${used.join(", ")} has no effect on a file compared as ${kind} (only on ${JSON_KINDS.join(", ")})` }] };
   }
   let r;
   // The JSON kinds: the codecs' JSON (parsed) and the reduced tables of we-compare-w3e.mjs (w3e…, unit-…, doodad-places,
   // minimap), field by field; "ignore" names known differences ("header.ground"), "tolerance" bounds numbers. The
   // minimap's tolerance is for its block colours only: its size is compared exactly.
-  if (JSON_KINDS.includes(kind)) r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tolerance : 0) : tolerance, ignore, expectPaths);
+  if (JSON_KINDS.includes(kind)) {
+    const tol = toleranceAt(tolerance);
+    r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tol(path) : 0) : tol, ignore, expectPaths);
+  }
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
   else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true);
   else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit);
@@ -496,15 +586,26 @@ export function loadSide(r, file, kind, decodeImage, lines) {
     return { json: minimapView(decodeImage(new Uint8Array(r.bytes(file)), file).mip(0)) };
   }
   if (kind === "text" || kind === "text-set") {
-    // `lines`: only the lines matching this regular expression (a spec that wants one kind of line of a long script)
-    if (!lines) return { text: r.text(file) };
+    const text = textOnly(r.text(file), file);
+    // `lines`: only the lines matching this regular expression (a spec that wants one kind of line of a long script).
+    // None matching is an error, not an empty text: two empty texts would match whatever the saves hold.
+    if (!lines) return { text };
     const re = new RegExp(lines);
-    return { text: r.text(file).split(/\r?\n/).filter((l) => re.test(l)).join("\n") };
+    const kept = text.split(/\r?\n/).filter((l) => re.test(l));
+    if (!kept.length) throw new Error(`"lines" /${lines}/ matches no line of ${file}: an empty compare would match anything (a typo, or the lines are gone)`);
+    return { text: kept.join("\n") };
   }
   // The file's own bytes from the map (its line endings as saved) when the map holds it; a file only the unpack makes
   // (war3map.wct.txt) is read as the unpack wrote it.
-  if (kind === "text-exact") return { text: r.listed(file) ? Buffer.from(r.bytes(file)).toString("utf8") : r.text(file) };
+  if (kind === "text-exact") return { text: textOnly(r.listed(file) ? Buffer.from(r.bytes(file)).toString("utf8") : r.text(file), file) };
   return { bytes: r.bytes(file) };
+}
+
+/** A file's text for the text kinds; a binary one (a NUL in it: w3e, wpm, doo read raw) is refused, since splitting
+ *  its bytes at LF compares nothing meaningful. */
+function textOnly(text, file) {
+  if (text.includes("\0")) throw new Error(`${file} is binary (it holds NUL bytes): compare it as bytes, wpm or a JSON kind (parsed, w3e, ...), not as text`);
+  return text;
 }
 
 /**
@@ -576,7 +677,10 @@ export function runOutcome(results, { strictIgnore = false } = {}) {
 export function weOutcome(n, outs) {
   // Which spec each line belongs to: the --map lines start one.
   let at = -1;
-  const state = Array.from({ length: n }, () => ({ saved: false, failure: null, warning: null, stopped: false }));
+  const state = Array.from({ length: n }, () => ({ saved: false, failure: null, warning: null, stopped: false, close: null }));
+  // The editor's window isn't the size every spec's clicks were measured in (we-drive --expect-layout): no spec of
+  // this process or a next one can run right, so all get that one message and none is run again.
+  let layout = null;
   for (const o of outs) {
     if (o.step === "--map" && !o.error) { at = Math.min(at + 1, n - 1); continue; }
     const i = Math.max(at, 0);
@@ -585,9 +689,12 @@ export function weOutcome(n, outs) {
     if (o.step === "--close" && o.crashed && o.closed && !o.error && state[i].saved && !state[i].failure) {
       state[i].warning ??= `the World Editor crashed while closing, after the save (${o.message ?? "crashed"})`;
       state[i].stopped = true;
+      state[i].close = "crashed";
     } else if (o.error || o.crashed) state[o.step === "--map" ? Math.min(at + 1, n - 1) : i].failure ??= o.error ?? "the World Editor crashed";
     else if (o.step === "--save") { if (o.saved) state[i].saved = true; else state[i].failure ??= `the save didn't finish: ${JSON.stringify(o.dialogs ?? o.timeout ?? "")}`; }
+    else if (o.step === "--wait-ready" && o.ready === false && o.layout) { layout ??= o.layout; state[i].failure ??= o.layout; }
     else if (o.step === "--wait-ready" && o.ready === false) state[i].failure ??= `the map wasn't shown: ${JSON.stringify(o.dialogs ?? o.reason ?? "")}`;
+    else if (o.step === "--close" && o.closed && !o.crashed && state[i].saved) state[i].close ??= "clean";
   }
   // Where the process stopped: a failure, a spec without its save, or a crash on close after a save.
   const stopAt = state.findIndex((s) => s.failure || !s.saved || s.stopped);
@@ -595,11 +702,44 @@ export function weOutcome(n, outs) {
   const errors = state.map((s, i) => {
     if (s.failure) return `World Editor: ${s.failure}`;
     if (s.saved) return null;
+    if (layout) return `World Editor: ${layout}`;
     if (i > stopAt) { rerun.push(i); return null; }
     return "World Editor: no save (the run stopped before it)";
   });
-  return { errors, rerun, warnings: state.map((s) => (s.warning ? `World Editor: ${s.warning}` : null)) };
+  return { errors, rerun, warnings: state.map((s) => (s.warning ? `World Editor: ${s.warning}` : null)), closes: state.map((s) => s.close) };
 }
+
+/**
+ * A spec's World Editor result against its `we.expectCrash` (the editor must crash while closing after the save:
+ * close-crash-light-ranges). `close` is weOutcome's for the spec: "crashed", "clean" or null (no close seen).
+ * Returns { error, warning }: the crash expected and seen is a note, not a warning; expected and not seen (or no close
+ * at all) is an error, so the spec can fail on what it tests; a crash not expected stays the warning it was.
+ */
+export function crashExpectation(expectCrash, close, error, warning) {
+  if (!expectCrash || error) return { error, warning };
+  if (close === "crashed") return { error: null, warning: `World Editor: crashed while closing after the save, as we.expectCrash says` };
+  return { error: `World Editor: we.expectCrash: the editor ${close === "clean" ? "closed without a crash" : "wasn't seen closing after the save"}`, warning };
+}
+
+/**
+ * The World Editor steps of one process for `specs` (one mode, accept list and prefs; in order): per spec --map, its
+ * steps, --save; a --close after the last, after one with `we.expectCrash` (the crash is on close), before one with
+ * `we.freshEditor` (its --map then starts a new editor: nothing of an earlier spec's toggles, palette or tree state is
+ * left), and after every spec with `restart` (--restart-per-map). `mapOf(spec)` and `saveOf(spec)` are its files.
+ */
+export function weDriveSteps(specs, { restart = false, mapOf, saveOf }) {
+  const args = [];
+  specs.forEach((s, i) => {
+    args.push("--map", mapOf(s), "--wait-ready", ...s.we.steps.flat(), "--save", saveOf(s));
+    const next = specs[i + 1];
+    if (restart || !next || s.we.expectCrash || next.we.freshEditor) args.push("--close");
+  });
+  return args;
+}
+
+/** The key of a spec's World Editor process: specs share one (one editor) only with the same mode, dialogs the save
+ *  answers and pinned prefs (each is an option of the whole we-drive process). */
+export const weGroupKey = (s) => JSON.stringify([s.we.mode, s.we.saveAccept, s.we.prefs ?? []]);
 
 /** One spec's result as text: a line per file, then its first differences. */
 export function formatReport(result, limit = 10, { strictIgnore = false } = {}) {
