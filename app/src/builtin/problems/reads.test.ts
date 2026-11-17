@@ -149,7 +149,9 @@ test("a run of the checks reads each project file once and looks game paths up i
 
 test("control: the same checks without a shared run read files again, and the counting sees it", async () => {
   const app = fakeApp();
-  for (const check of [...builtinChecks(app.w3), ...mapChecks(app.w3)]) await check.run().catch(() => []);
+  const failed: string[] = [];
+  for (const check of [...builtinChecks(app.w3), ...mapChecks(app.w3)]) await check.run().catch((e: unknown) => { failed.push(String(e instanceof Error ? e.message : e)); return []; });
+  assert.deepEqual(failed.filter((m) => !/^no [\w.\\]+$/.test(m)), [], "only the checks that need the game's scripts may fail here");
   assert.notDeepEqual(repeated(app.calls), [], "the counting saw no repeated read: it can't catch one");
   assert.ok(total(app.calls) > BUDGET, `only ${total(app.calls)} calls without sharing: the budget can't tell`);});
 

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
+import { gameCli, mainCheckout } from "../testhelpers/gamefiles";
+import { fixturePath, skipOrFail } from "../testhelpers/testutil";
 import { CornerUndo } from "./cliffs";
 import { adjustCliffLevels, cliffShiftRange, RANDOM_DEFAULTS, randomizeHeightField, resetHeightField, TOP_LEVEL } from "./wholemap";
 import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
@@ -53,11 +55,7 @@ test("Reset Height Field flattens every corner over its cliff level and leaves t
  *  gradient, a cliff block one level up and a lake; noise: random heights) and as it saved it after Reset Height Field
  *  with Random at variation 0 (r3, r8: smoothing 3 and 8 on relief; n1: smoothing 1 on noise). */
 function fixture(name: string): Terrain {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "height-random", name);
-    if (existsSync(p)) return parseW3e(new Uint8Array(readFileSync(p)));
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/height-random/${name} not found`);
-  }
+  return parseW3e(new Uint8Array(readFileSync(fixturePath("height-random", name))));
 }
 
 /** A seeded random source (mulberry32): a failure replays from its seed. */
@@ -284,19 +282,22 @@ test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or th
   assert.equal(adjustCliffLevels(t, 0, new CornerUndo()), 0, "nothing to do");
 });
 
-/** The w3e of a real map, through the release CLI; null when the map or the CLI isn't there. */
+/** The corpus folder (W3PROJ_CORPUS or smoketest_maps of the main checkout); null without git. */
+const corpusDir = (() => { const where = mainCheckout(); return where ? process.env.W3PROJ_CORPUS ?? join(where.main, "smoketest_maps") : null; })();
+const w3eCache = new Map<string, Uint8Array | null>();
+
+/** The w3e of a real map, through the release CLI (found once, each map's read once); null when the map or the CLI isn't there. */
 function realW3e(name: string): Uint8Array | null {
-  // The test runs bundled elsewhere (scripts/test.mjs), so the checkout is found from where it was started.
-  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
-  const repo = git("--show-toplevel"), common = git("--git-common-dir");
-  if (!repo) return null;
-  const main = common ? dirname(resolve(common)) : repo;
-  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
-  const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
-  const map = join(process.env.W3PROJ_CORPUS ?? join(main, "smoketest_maps"), name);
-  if (!bin || !existsSync(map)) return null;
-  const r = spawnSync(bin, ["cat", map, "war3map.w3e"], { maxBuffer: 1 << 26 });
-  return r.status === 0 ? new Uint8Array(r.stdout) : null;
+  const hit = w3eCache.get(name);
+  if (hit !== undefined) return hit ? new Uint8Array(hit) : null;
+  const cli = gameCli(), map = corpusDir ? join(corpusDir, name) : "";
+  let w3e: Uint8Array | null = null;
+  if (cli && existsSync(map)) {
+    const r = spawnSync(cli.bin, ["cat", map, "war3map.w3e"], { maxBuffer: 1 << 26 });
+    if (r.status === 0) w3e = new Uint8Array(r.stdout);
+  }
+  w3eCache.set(name, w3e);
+  return w3e ? new Uint8Array(w3e) : null;
 }
 
 /** Whether +1 changed exactly what the World Editor's +1 changes in the bytes of a w3e: each moved corner's layer
@@ -328,6 +329,9 @@ const WE_PLUS_ONE: Record<string, string> = {
   "4v4_SnowareBay_w3c_260125_1357_5658.w3x": "d61a82eaaa07026685e6e2fe3de96bae729864af275b83a11783b70247688507",
 };
 
+/** Maps checked below that the World Editor's +1 wasn't recorded on: only the byte-level checks run. */
+const NO_WE_FILE: Record<string, true> = { "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x": true };
+
 test("Adjust Cliff Levels on real maps: +1 gives the World Editor's file, changes only layers and water words, -1 gives it back", (ctx) => {
   const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
   let tried = 0;
@@ -340,12 +344,13 @@ test("Adjust Cliff Levels on real maps: +1 gives the World Editor's file, change
     assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), t.corners.length, name);
     const up = writeW3e(t);
     checkPlusOne(name, original, up, t, () => true);
+    assert.ok(name in WE_PLUS_ONE || name in NO_WE_FILE, `${name}: a map present here has a recorded World Editor hash (or is listed as having none)`);
     if (WE_PLUS_ONE[name]) assert.equal(createHash("sha256").update(up).digest("hex"), WE_PLUS_ONE[name], `${name}: the World Editor's file`);
     const back = parseW3e(up);
     assert.equal(adjustCliffLevels(back, -1, new CornerUndo()), back.corners.length);
     assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
   }
-  if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
+  if (!tried) skipOrFail(ctx, "no real map or release CLI (smoketest_maps, target/release/w3proj)");
 });
 
 test("the water words don't limit the shift of dry corners: theirs wrap round, as in the World Editor", () => {
@@ -434,7 +439,7 @@ test("Level +1 then -1 on a block of a real map changes only the block's layers 
     for (const i of dropped) back.corners[i].ramp = true;
     assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file but for those flags`);
   }
-  if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
+  if (!tried) skipOrFail(ctx, "no real map or release CLI (smoketest_maps, target/release/w3proj)");
   else assert.ok(cut > 0, "a block's edge cut a ramp on one of the maps at least (control)");
 });
 

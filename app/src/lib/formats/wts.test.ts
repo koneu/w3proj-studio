@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mulberry32, readFixture } from "../testhelpers/testutil";
 import { StringTable, checkStringIds, compactStringIds, WtsReader, importStrings, pruneStrings, removeStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsStrayLines } from "./wts";
 
 /** Processor time of this process in ms: unlike the clock, it doesn't grow while other gates hold the machine. */
@@ -170,19 +169,26 @@ test("a header that doesn't qualify is skipped, a later one that does is used", 
 });
 
 test("many unclosed blocks are read in one pass, not one search to the end each", () => {
-  const n = 30000;
-  let text = "";
-  for (let i = 1; i <= n; i++) text += `STRING ${i}\r\n{\r\nName ${i}}\r\n\r\n`;
-  text += "STRING 0\r\n{\r\nEnd\r\n}\r\n";
-  const t0 = cpuMs();
-  const table = new StringTable(text);
-  assert.equal(table.get(n), `Name ${n}`);
-  assert.equal(table.get(0), "End");
-  assert.equal([...table.entries()].length, n + 1);
-  table.set(n, "x");
-  assert.ok(table.serialize().includes("x\r\n}"));
+  /** The processor time of reading, changing and writing a table of n unclosed blocks. */
+  const run = (n: number) => {
+    let text = "";
+    for (let i = 1; i <= n; i++) text += `STRING ${i}\r\n{\r\nName ${i}}\r\n\r\n`;
+    text += "STRING 0\r\n{\r\nEnd\r\n}\r\n";
+    const t0 = cpuMs();
+    const table = new StringTable(text);
+    assert.equal(table.get(n), `Name ${n}`);
+    assert.equal(table.get(0), "End");
+    assert.equal([...table.entries()].length, n + 1);
+    table.set(n, "x");
+    assert.ok(table.serialize().includes("x\r\n}"));
+    return cpuMs() - t0;
+  };
+  const small = run(15000), big = run(60000);
   // A search to the end per block takes minutes here; one pass takes well under a tenth of the limit.
-  assert.ok(cpuMs() - t0 < 4000, `took ${cpuMs() - t0} ms of processor time`);
+  assert.ok(big < 4000, `took ${big} ms of processor time`);
+  // Four times the blocks: about four times the time in one pass, sixteen times in a search per block (the small
+  // run counts at least 20 ms, so that timer noise on a fast machine can't make the ratio large).
+  assert.ok(big / Math.max(small, 20) < 10, `15000 blocks ${small} ms, 60000 blocks ${big} ms`);
 });
 
 test("the reader finds what the header and close patterns find, on random text", () => {
@@ -191,8 +197,8 @@ test("the reader finds what the header and close patterns find, on random text",
   const CLOSE = /(?:\r?\n)?(?<!\\)\}/g;
   const parts = ["STRING", "STRING ", "STRING\t", " ", "\t", "\n", "\r\n", "\r", " ", "　", "﻿", "1", "07", "x",
     "{", "}", "//", "// c", "/", "STRING 1\n{\n", "STRING 2 // c\n{\r\n", "\n}", "}\n\nSTRING 3\n{\n", "\\", "\\}", "\n\\}"];
-  let seed = 12345;
-  const rand = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const next = mulberry32(12345);
+  const rand = (n: number) => Math.floor(next() * n);
   const exec = (re: RegExp, text: string, from: number) => { re.lastIndex = from; return re.exec(text); };
   for (let round = 0; round < 3000; round++) {
     let text = "";
@@ -321,24 +327,12 @@ test("Adjust Map String IDs: a number a drop recorded (pruned-strings.json) isn'
 
 // ---- Stray carriage returns (`\r\r\n`, `\r\r`) -------------------------------------------------
 
-/** tests/fixtures/wts-crcrlf/war3map.wts, found from where the tests run (app/ or the repository). The Rust port
- *  reads the same file (crates/w3proj/src/wts.rs, `stray_carriage_returns_stay_where_they_are`). */
-function crcrlfFixture(): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "wts-crcrlf", "war3map.wts");
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-crcrlf not found");
-  }
-}
+/** tests/fixtures/wts-crcrlf/war3map.wts. The Rust port reads the same file (crates/w3proj/src/wts.rs,
+ *  `stray_carriage_returns_stay_where_they_are`). */
+const crcrlfFixture = (): string => readFixture("wts-crcrlf", "war3map.wts");
 
 /** A file of tests/fixtures/wts-braces (see the test below). */
-function bracesFixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "wts-braces", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-braces not found");
-  }
-}
+const bracesFixture = (name: string): string => readFixture("wts-braces", name);
 
 test("the World Editor's own saves: Studio reads each file as the editor read it", () => {
   // X-in.wts: map 24 of the play protocols with texts holding braces and backslashes in every place (A, B) and blocks

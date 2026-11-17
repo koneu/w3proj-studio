@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
-const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", "w3proj");
+const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
 const game = chosenGamePath();
 const dir = join(app, "..", "target", "hostile-seeds");
 
@@ -40,7 +40,16 @@ for (const [name, path, size] of FILES) {
 // one test, and its default folder is emptied by any other `npm test` in this checkout (the gate's unit tests).
 const run = spawnSync(process.execPath, ["scripts/test.mjs", "src/lib/hostile.test.ts", "--test-name-pattern=damaged files"], {
   cwd: app,
-  stdio: "inherit",
+  stdio: ["inherit", "pipe", "inherit"],
+  encoding: "utf8",
+  maxBuffer: 1 << 28,
   env: { ...process.env, W3_HOSTILE_SEEDS: dir, W3_HOSTILE_ROUNDS: "1000", W3_TEST_OUT: join(app, "..", "target", "hostile-seeds-tests") },
 });
+process.stdout.write(run.stdout ?? "");
+// A pattern that matched nothing, or a test that skipped itself (no seeds found), ends green with no test run.
+const passed = Number(/^\s*(?:ℹ|#)\s+pass\s+(\d+)/m.exec(run.stdout ?? "")?.[1] ?? 0);
+if (run.status === 0 && passed === 0) {
+  console.error("FAIL the hostile test ran no passing test (the pattern matched nothing, or it skipped itself)");
+  process.exit(1);
+}
 process.exit(run.status ?? 1);

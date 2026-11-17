@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
 import { mainCheckout } from "../../tests/gamepath.mjs";
 import { clean, compare, guardedWeDir, repo, setup, snapshot } from "./we-setup.mjs";
@@ -15,7 +16,7 @@ const test = (name, fn) => nodeTest(name, { skip: process.platform === "win32" }
 /** Runs fn with W3PROJ_WE_DIR (and W3PROJ_WE_LOCK, so no real lock is looked at) set; puts both back. */
 async function withEnv(we, fn) {
   const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
-  const lockDir = mkdtempSync(join(tmpdir(), "we-setup-lock-"));
+  const lockDir = scratchDir("we-setup-lock-");
   process.env.W3PROJ_WE_LOCK = join(lockDir, "l");
   if (we === undefined) delete process.env.W3PROJ_WE_DIR; else process.env.W3PROJ_WE_DIR = we;
   try {
@@ -144,7 +145,7 @@ test("the farm: a file name with a backslash is linked as it is; a refreshed run
 });
 
 test("the snapshot lists a file it couldn't stat, and the comparison fails for a guarded one", () => {
-  const root = mkdtempSync(join(tmpdir(), "we-snap-"));
+  const root = scratchDir("we-snap-");
   try {
     writeFileSync(join(root, "a\\b"), "x"); // a backslash in the name: the path has to come back as it is
     writeFileSync(join(root, "ok"), "y");
@@ -165,7 +166,7 @@ test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT o
   const src = join(process.cwd(), "scripts", "we-rofs.c"); // the test runs bundled, from the app folder
   const text = readFileSync(src, "utf8");
   assert.ok(!/flags & \(O_CREAT \| O_TMPFILE\)/.test(text), "the mask test is also true for a plain O_DIRECTORY");
-  const dir = mkdtempSync(join(tmpdir(), "we-rofs-"));
+  const dir = scratchDir("we-rofs-");
   try {
     const out = join(dir, "we-rofs.so");
     execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", out, src, "-ldl"], { stdio: ["ignore", "pipe", "pipe"] });

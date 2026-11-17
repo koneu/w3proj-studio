@@ -94,7 +94,9 @@ test("saveSnapshot: writes what was taken up front, and an edit during the write
 
 test("saveSnapshot: a failed write records nothing", async () => {
   const mark = new SaveMark();
-  await assert.rejects(saveSnapshot(mark, { at: () => 2, take: () => 0, write: async () => { throw new Error("disk"); }, saved: () => { assert.fail("saved"); } }), /disk/);
+  let savedCalled = false;
+  await assert.rejects(saveSnapshot(mark, { at: () => 2, take: () => 0, write: async () => { throw new Error("disk"); }, saved: () => { savedCalled = true; } }), /disk/);
+  assert.equal(savedCalled, false, "saved isn't called after a failed write");
   assert.equal(mark.isDirty(2), true);
   assert.equal(mark.pending(2), false);
 });

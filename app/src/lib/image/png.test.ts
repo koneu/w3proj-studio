@@ -81,7 +81,9 @@ test("a failing compressor is an error of encodePng, not an unhandled rejection 
   (globalThis as { CompressionStream?: unknown }).CompressionStream = Broken;
   try {
     await assert.rejects(encodePng(2, 2, new Uint8Array(16)), /deflate broke/);
-    await new Promise((r) => setTimeout(r, 20));
+    // An unhandled rejection is reported once the current job's promise work is done: two turns of the event loop.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
     assert.deepEqual(unhandled, []);
   } finally {
     (globalThis as { CompressionStream?: unknown }).CompressionStream = real;
@@ -94,14 +96,18 @@ test("when the reader fails first, the write's later failure is not left unhandl
   const unhandled: unknown[] = [];
   const on = (e: unknown) => unhandled.push(e);
   process.on("unhandledRejection", on);
+  let failLate!: () => void;
+  const late = new Promise<void>((_, no) => { failLate = () => no(new Error("late")); });
   class Broken {
-    writable = { getWriter: () => ({ write: () => new Promise((_, no) => setTimeout(() => no(new Error("late")), 5)), close: async () => {} }) };
+    writable = { getWriter: () => ({ write: () => late, close: async () => {} }) };
     readable = { getReader: () => ({ read: async () => { throw new Error("read broke"); } }) };
   }
   (globalThis as { CompressionStream?: unknown }).CompressionStream = Broken;
   try {
     await assert.rejects(encodePng(2, 2, new Uint8Array(16)), /read broke/);
-    await new Promise((r) => setTimeout(r, 50));
+    failLate(); // the write fails after encodePng has given up on the reader's error
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
     assert.deepEqual(unhandled, []);
   } finally {
     (globalThis as { CompressionStream?: unknown }).CompressionStream = real;

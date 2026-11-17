@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { skipOrFail } from "../testhelpers/testutil";
 import { gameFiles } from "../testhelpers/gamefiles";
 import { writeLightMdl } from "./dnclight";
 import { isMdlText, parseMdl, parseModel } from "./mdl";
@@ -512,9 +513,11 @@ test("damaged MDL text is refused or read in part, never thrown as anything but 
   const deep = `Version { FormatVersion 800, }\nWobble ${"{".repeat(200000)}`;
   assert.equal(parseMdl(deep).version, 800);
   const many = `Version { FormatVersion 800, }\n${'Helper "h" { ObjectId 0, }\n'.repeat(20000)}`;
-  const t0 = performance.now();
+  const t0 = process.cpuUsage();
   assert.equal(parseMdl(many).nodes.length, 1);
-  assert.ok(performance.now() - t0 < 4000);
+  const used = process.cpuUsage(t0);
+  const cpu = (used.user + used.system) / 1000;
+  assert.ok(cpu < 4000, `took ${cpu} ms of processor time`);
 
   // Odd numbers some converters print.
   const odd = parseMdl(good.replace("BoundsRadius 5,", "BoundsRadius -1.#IND,").replace("{ -1, -2, 0 }", "{ 1.#INF, -2, 0 }"));
@@ -535,7 +538,7 @@ test("the game's models written as MDL text read back as the MDX reader read the
     "War3.w3mod:Abilities/Spells/NightElf/Starfall/StarfallTarget.mdx",
     "War3.w3mod:Abilities/Weapons/FarseerMissile/FarseerMissile.mdx",
   ]);
-  if (!models.length) return ctx.skip("no game or release CLI (.game-path, target/release/w3proj)");
+  if (!models.length) return skipOrFail(ctx, "no game or release CLI (.game-path, target/release/w3proj)");
   for (const { name, bytes } of models) {
     const fromMdx = parseMdx(bytes);
     const fromMdl = parseModel(new TextEncoder().encode(writeMdl(fromMdx)));

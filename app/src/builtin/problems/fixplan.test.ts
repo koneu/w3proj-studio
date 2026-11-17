@@ -79,12 +79,18 @@ test("two models with one file name get two folders, the same conversion twice o
 test("fixes run one after the other, also after a failure", async () => {
   const q = serialQueue();
   const log: string[] = [];
-  const task = (n: string, ms: number, fail = false) => () => new Promise<string>((res, rej) => {
+  const finish = new Map<string, () => void>();
+  const task = (n: string, fail = false) => () => new Promise<string>((res, rej) => {
     log.push(`start ${n}`);
-    setTimeout(() => { log.push(`end ${n}`); fail ? rej(new Error(n)) : res(n); }, ms);
+    finish.set(n, () => { log.push(`end ${n}`); fail ? rej(new Error(n)) : res(n); });
   });
-  const a = q(task("a", 30, true)), b = q(task("b", 1));
-  await assert.rejects(a);
+  const a = q(task("a", true)), b = q(task("b"));
+  await Promise.resolve();
+  assert.deepEqual(log, ["start a"], "b waits while a runs");
+  finish.get("a")!();
+  await assert.rejects(a, /^Error: a$/);
+  await Promise.resolve();
+  finish.get("b")!();
   assert.equal(await b, "b");
   assert.deepEqual(log, ["start a", "end a", "start b", "end b"]);
 });

@@ -30,12 +30,13 @@
 // and the game (W3PROJ_GAME, else the folder in `.game-path`, else the Warcraft III folder above it:
 // tests/gamepath.mjs).
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, killTree, runShell } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -158,22 +159,16 @@ function context(log) {
     say: write,
     log,
     sh(command, { cwd = repo, env = {}, stdout } = {}) {
-      return new Promise((done) => {
-        const out = stdout ? openSync(stdout, "w") : fd;
-        const child = spawn(command, { cwd, shell: true, stdio: ["ignore", out, fd], env: { ...process.env, ...env } });
-        child.on("error", (e) => {
-          write(String(e));
-          done(false);
-        });
-        child.on("close", (code) => {
-          if (stdout) closeSync(out);
-          done(code === 0);
-        });
-      });
+      return runShell(command, { cwd, env, stdout, fd, write, timeoutMs: stepTimeoutMs, live: liveChildren });
     },
     close: () => closeSync(fd),
   };
 }
+
+/** A step's longest run: a hung one fails instead of holding the gate for ever. */
+const stepTimeoutMs = (Number(process.env.W3_GATE_STEP_TIMEOUT_MIN) || 90) * 60000;
+/** Every command a step started that hasn't ended. */
+const liveChildren = new Set();
 
 /** A command as a step: `sh("cargo ...", { cwd, env })`. */
 const shell = (command, options) => (ctx) => ctx.sh(command, options);
@@ -209,18 +204,10 @@ async function rustCoverage(ctx) {
   }
   const floorFile = join(repo, "tests", "coverage-floor.json");
   const all = JSON.parse(readFileSync(floorFile, "utf8"));
-  let ok = true;
   const updating = args.includes("--update-floor");
-  for (const [crate, a] of Object.entries(areas)) {
-    const percent = (100 * a.covered) / a.lines;
-    const floor = all.rust[crate];
-    ctx.say(`${crate.padEnd(8)} ${percent.toFixed(1).padStart(5)}%  ${a.covered} / ${a.lines}${floor === undefined ? "" : `  (floor ${floor}%)`}`);
-    if (floor !== undefined && percent < floor) {
-      ctx.say(`coverage of ${crate} fell below its floor`);
-      ok = false;
-    }
-    if (updating && floor !== undefined) all.rust[crate] = Math.max(floor, Math.floor(percent * 10) / 10);
-  }
+  const r = checkFloors(areas, all.rust, ctx.say, updating);
+  all.rust = r.floors;
+  const ok = r.ok;
   if (updating) writeFileSync(floorFile, JSON.stringify(all, null, 2) + "\n");
   return ok;
 }
@@ -298,10 +285,12 @@ const steps = [
   { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
   { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
+  // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
+  { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "tstestcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],
@@ -316,6 +305,8 @@ if (!tiers[tier]) {
   console.error(`no tier "${tier}": ${Object.keys(tiers).join(", ")}`);
   process.exit(2);
 }
+// A step missing from the table would be run but left out of the result.
+assertInTable(steps, table);
 const chosen = steps.filter((s) => tiers[tier].includes(s.tier));
 // The `corpus` tier alone also needs nothing from the others; the `commit` tier needs the
 // release CLI for nothing. A step's `after` that isn't part of the tier is simply not waited for.
@@ -384,10 +375,14 @@ function skip(step, why) {
   show(step, log, false);
 }
 
+// Ctrl-C or a kill of the gate ends the steps' processes too.
+installSignalHandlers(liveChildren);
+
 const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
 await schedule({ steps: order, locks, serial, jobs, launch, skip, done });
 
 console.log(`\n--- gate: ${tier}`);
+for (const s of chosen) if (!done.has(s.id)) done.set(s.id, { ok: false, seconds: 0 }); // never ran: a failure, not a gap
 const results = table.filter((id) => done.has(id)).map((id) => ({ name: steps.find((s) => s.id === id).name, ...done.get(id) }));
 for (const r of results) console.log(`${r.ok ? "pass" : "FAIL"}  ${String(r.seconds).padStart(4)}s  ${r.name}`);
 const failed = results.filter((r) => !r.ok).length;
