@@ -24,3 +24,19 @@ export function planMoves(paths: string[], folder: string, exists: (path: string
   }
   return { moves, problem: null };
 }
+
+/** Asks the disk about each target of a plan, as the file list may be behind it (a file written outside Studio, or
+ *  right after an open): the problem to show, or null when none is taken. `exists` rejecting means it can't be told,
+ *  which isn't "free". */
+export async function takenOnDisk(moves: readonly (readonly [from: string, to: string])[], exists: (path: string) => Promise<boolean>): Promise<string | null> {
+  for (const [, to] of moves) {
+    let taken: boolean;
+    try {
+      taken = await exists(to);
+    } catch (e) {
+      return `${to} can't be checked: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (taken) return `${to} already exists.`;
+  }
+  return null;
+}

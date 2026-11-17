@@ -395,6 +395,8 @@ export interface W3Api {
     listFolder(path: string): Promise<string[]>;
     /** Moves a project file to another path in the project (fails if the target exists). */
     rename(from: string, to: string): Promise<void>;
+    /** Whether the disk has something at the project path now (file or folder), whatever the file list says; rejects when that can't be told. */
+    exists(path: string): Promise<boolean>;
     /** A project file was written through the workspace (path as written, forward slashes). */
     onDidSave(listener: (path: string) => void): Disposable;
   };
