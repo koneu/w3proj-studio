@@ -1,5 +1,5 @@
 // The Problems checks and the import previews read a map's per-graphics-mode files in one order (lib/imports.ts
-// modeNames; Classic the plain one, Reforged _HD.w3mod\ then plain, 3.0 _DE.w3mod\ then _HD.w3mod\ then plain).
+// modeNames; Classic the plain one, Reforged _HD.w3mod\ then plain, 3.0 _DE.w3mod\ then plain).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

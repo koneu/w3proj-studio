@@ -31,12 +31,13 @@ export function artSetOf(archive: string): string {
 }
 
 /** Whether a graphics mode (`layer`: null Classic, "_hd", "_de") reads one of the map's copies of a file (`sets`: the art
- *  sets it has it in, see artSetOf): the plain one in every mode, the `_HD.w3mod\` one in both Reforged modes (as the
- *  previews and the terrain view read it), a `_DE.w3mod\` one in DE. A `_teen.w3mod\` copy alone counts for none. */
+ *  sets it has it in, see artSetOf): the plain one in every mode, the `_HD.w3mod\` one in Reforged HD (as the
+ *  previews and the terrain view read it), a `_DE.w3mod\` one in DE (which doesn't read the `_HD.w3mod\` one: the World
+ *  Editor's 3.0 graphics show the missing-model cube for it). A `_teen.w3mod\` copy alone counts for none. */
 export function mapModeHas(sets: ReadonlySet<string> | undefined, layer: string | null): boolean {
   if (!sets) return false;
   if (sets.has("")) return true;
-  return layer === "_hd" ? sets.has("_hd") : layer === "_de" ? sets.has("_de") || sets.has("_hd") : false;
+  return layer === "_hd" ? sets.has("_hd") : layer === "_de" ? sets.has("_de") : false;
 }
 
 /** The supported graphics modes (each with its game folder: null Classic, "_hd", "_de") that can't load a file:

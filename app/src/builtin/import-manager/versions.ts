@@ -26,10 +26,10 @@ export function versionToAdd(row: ImportRow, side?: Side): { side: Side; path: s
 }
 
 /** The entry of a row a graphics mode shows (game.graphicsMode), in the order the mode reads the versions (modeNames):
- *  Classic its plain one; Reforged its `_HD.w3mod\` one, then the plain one; 3.0 its `_DE.w3mod\` one, then the Reforged
- *  one, then the plain one. A version the mode never reads is shown when the row has nothing else. */
+ *  Classic its plain one; Reforged its `_HD.w3mod\` one, then the plain one; 3.0 its `_DE.w3mod\` one, then the plain
+ *  one. A version the mode never reads is shown when the row has nothing else. */
 export function shownEntry(row: ImportRow, mode: string | undefined): ImportEntry {
-  const order: Side[] = mode === "sd" ? ["classic", "reforged", "de"] : mode === "de" ? ["de", "reforged", "classic"] : ["reforged", "classic", "de"];
+  const order: Side[] = mode === "sd" ? ["classic", "reforged", "de"] : mode === "de" ? ["de", "classic", "reforged"] : ["reforged", "classic", "de"];
   return row[order.find((s) => row[s])!]!;
 }
 

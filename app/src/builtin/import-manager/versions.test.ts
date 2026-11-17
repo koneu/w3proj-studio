@@ -25,13 +25,14 @@ test("a row shows the version of the graphics mode set, else the one it has", ()
   const [pair] = importRows([plain, hd]);
   assert.equal(shownEntry(pair, "sd"), plain);
   assert.equal(shownEntry(pair, "hd"), hd);
-  assert.equal(shownEntry(pair, "de"), hd, "3.0 reads the Reforged version when the row has no 3.0 one");
-  // A row of three: each mode its own; 3.0 falls back to Reforged, then to the plain file.
+  assert.equal(shownEntry(pair, "de"), plain, "3.0 reads the plain file when the row has no 3.0 version, not the Reforged one");
+  // A row of three: each mode its own; 3.0 falls back to the plain file.
   const [three] = importRows([plain, hd, de]);
   assert.deepEqual(["sd", "hd", "de"].map((m) => shownEntry(three, m)), [plain, hd, de]);
   assert.equal(shownEntry(importRows([plain, de])[0], "hd"), plain);
   assert.equal(shownEntry(importRows([de])[0], "sd"), de, "a version no mode of the choice reads is shown when it is all the row has");
   assert.equal(shownEntry(importRows([hd])[0], "sd"), hd);
+  assert.equal(shownEntry(importRows([hd])[0], "de"), hd, "a Reforged version alone is what a 3.0 row shows: nothing else to show");
   assert.equal(shownEntry(importRows([plain])[0], "hd"), plain);
 });
 
