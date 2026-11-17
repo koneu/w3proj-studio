@@ -35,7 +35,5 @@
     "water-plateau-on war3map.w3e",
     "water-ramp-on war3map.w3e"
   ],
-  "textEntries": [
-    "open-paths-forsaken-start war3map.wpm"
-  ]
+  "textEntries": []
 }

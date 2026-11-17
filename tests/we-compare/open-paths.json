@@ -551,7 +551,7 @@
   },
   {
     "name": "open-paths-forsaken-start",
-    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project forsaken-start of smoketest_maps packed by the release CLI (make-open-paths.mjs; the wpm differs in 2184 cells, x 26..255 y 0..193, all the editor's 0xee against Studio's 0xce: the blight bit 0x20, measured 2026-11-17; too many to name, so the file stays on the allowlist of differs-without-paths.json); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project forsaken-start of smoketest_maps packed by the release CLI (make-open-paths.mjs; its unplayable border holds 0xee on the 2184 cells whose nearest corner is blighted: until branch fix-we-studio Studio wrote 0xce there, pathing.ts); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
     "input": {
       "map": "${REPO}/target/open-paths/forsaken-start.w3x"
     },
@@ -634,8 +634,7 @@
       },
       {
         "file": "war3map.wpm",
-        "as": "wpm",
-        "expect": "differs"
+        "as": "wpm"
       }
     ],
     "limit": 12

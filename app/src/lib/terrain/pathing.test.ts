@@ -105,6 +105,26 @@ test("a tile whose lower-left corner is painted Boundary is blocked as the borde
   assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_BUILD));
 });
 
+test("the unplayable border keeps the blight of each cell's nearest corner (0xee), as on ForsakenStart", () => {
+  // Curse of the Forsaken's ForsakenStart (64x64, margins 6): its stored war3map.wpm and the World Editor's save of it
+  // (we-compare open-paths-forsaken-start, 2026-11-17) hold 0xee on the 2184 border cells whose nearest corner is
+  // blighted and 0xce on every other border cell, whatever the lower-left corner is.
+  const BORDER = BLOCKED | NO_WATER | NO_BUILD | NO_FLY | NO_WALK;
+  const t = ground();
+  corner(t, 1, 1).blight = true;
+  const p = generatePathing({ terrain: t, margins: [1, 0, 1, 0], tileRules: new Map() }), w = 16;
+  const at = (cx: number, cy: number) => p[16 + cy * w + cx];
+  // Cells 2..5 on both axes have corner (1, 1) nearest; those in the border (x < 4 or y < 4) keep its blight.
+  for (let cy = 0; cy < 8; cy++) for (let cx = 0; cx < 8; cx++) {
+    const border = cx < 4 || cy < 4, near = cx >= 2 && cx < 6 && cy >= 2 && cy < 6;
+    if (!border) continue;
+    assert.equal(at(cx, cy), BORDER | (near ? BLIGHT : 0), `cell ${cx},${cy}`);
+  }
+  // Inside the playable area the same corner's blight is there as before.
+  assert.equal(at(4, 4), NO_WATER | BLIGHT);
+  assert.equal(at(6, 6), NO_WATER);
+});
+
 test("ships sail shallow and deep water alike; footmen wade it to 52 deep, as the World Editor saves it", () => {
   // we-compare ford-wpm (2026-11-15, tests/fixtures/we-specs/ford.w3x): the editor's own pathing map over bands of
   // water 2.4 to 160.4 deep. Every band is ship water (0x40 clear, 0x08 set); up to 51.9 walkable too (0x08), from
