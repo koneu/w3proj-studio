@@ -14,7 +14,9 @@ its own), through python-xlib and its XTest extension. Every command prints one 
                                                        400), release; MOD held all the while; --dry only prints the
                                                        pointer path (needs no display)
   we-x11.py --display :N shot FILE [--rect X,Y,W,H]    picture of the screen (or a part of it) as PNG
-  we-x11.py --display :N focus ID                      give a window the keyboard focus and raise it
+  we-x11.py --display :N clipboard FILE [--target NAME]  the CLIPBOARD selection's text (target UTF8_STRING unless given) into
+                                                       FILE; "bytes": null when nobody owns it
+  we-x11.py --display :N focus ID                     give a window the keyboard focus and raise it
   we-x11.py --display :N close ID                      ask a window to close (WM_DELETE_WINDOW)
   we-x11.py --display :N stats [--rect X,Y,W,H]        counts of a part of the screen (see stats())
   we-x11.py --display :N frames MS [--rect X,Y,W,H]    how often a part of the screen changes during MS
@@ -487,6 +489,14 @@ def main(argv):
         img = grab(d, parse_rect(rect) if rect else None)
         img.save(rest[0])
         out({"shot": rest[0], "size": list(img.size)})
+    elif cmd == "clipboard":
+        data = clipboard_text(d, opt("--target", "UTF8_STRING"))
+        if data is None:
+            out({"clipboard": rest[0], "bytes": None})
+        else:
+            with open(rest[0], "wb") as f:
+                f.write(data)
+            out({"clipboard": rest[0], "bytes": len(data), "crlf": data.count(bytes([13, 10])), "lf": data.count(bytes([10]))})
     elif cmd == "focus":
         out({"focus": int(rest[0], 0), "focused": focus(d, int(rest[0], 0))})
     elif cmd == "close":
@@ -508,6 +518,34 @@ def main(argv):
     else:
         raise SystemExit(f"unknown command {cmd}")
     return 0
+
+
+def clipboard_text(d, target="UTF8_STRING", timeout=3.0):
+    """The CLIPBOARD selection as bytes, or None when nobody owns it or it doesn't answer in time. A window of ours asks
+    the owner to convert it (ConvertSelection); the answer is read from that window's property."""
+    import time
+    from Xlib import X
+    clip, tgt, dest = d.intern_atom("CLIPBOARD"), d.intern_atom(target), d.intern_atom("W3_CLIP")
+    if d.get_selection_owner(clip) == X.NONE:
+        return None
+    win = d.screen().root.create_window(0, 0, 1, 1, 0, X.CopyFromParent, event_mask=X.PropertyChangeMask)
+    try:
+        win.convert_selection(clip, tgt, dest, X.CurrentTime)
+        d.flush()
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            while d.pending_events():
+                ev = d.next_event()
+                if ev.type == X.SelectionNotify:
+                    if ev.property == X.NONE:
+                        return None
+                    p = win.get_full_property(dest, X.AnyPropertyType)
+                    return bytes(p.value) if p is not None and isinstance(p.value, (bytes, bytearray)) else None
+            time.sleep(0.02)
+        return None
+    finally:
+        win.destroy()
+        d.flush()
 
 
 def focus(d, wid):
