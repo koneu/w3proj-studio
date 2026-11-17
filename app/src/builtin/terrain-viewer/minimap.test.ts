@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type PathMask, type Rgb } from "./minimap";
+import { dotReach, grainAt, groundColors, minimapFrame, renderMinimap, sharpShare, type MinimapInput, type PathMask, type Rgb } from "./minimap";
 import { minimapBase, minimapObjects, modelTextureColor, shownTextureMean, smallestMipColor, textureOrder } from "./minimapgen";
 import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
@@ -49,8 +49,9 @@ test("war3mapMap.blp's picture: a change detector for the whole render (the real
   // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them. Taken
   // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11), and when the water did
   // (2026-11-12: its minimap colour at mmAlpha, twice where deep), and when the drawn area, the sampling, one softening
-  // pass, bigger dots and cut values came from the editor's exports of seven maps (2026-11-13).
-  assert.equal(digest(renderMinimap(base())), "0240a7468d4120dc");
+  // pass, bigger dots and cut values came from the editor's exports of seven maps (2026-11-13). Taken again when the
+  // dots became tiles and the edges the editor's own smoothing (2026-11-17, branch we-minimap-2: intended).
+  assert.equal(digest(renderMinimap(base())), "21f816b2fd4c1424");
 });
 
 test("groundColors: a tile point colours its tile, a point next to a cliff its cliff type, no cliff type its ground", () => {
@@ -178,19 +179,57 @@ test("minimapObjects: shown types in their minimap colour or their model's, as b
   assert.deepEqual(objects, [
     { x: 0, y: 64, rgb: [32, 90, 32], size: 1 },
     { x: 128, y: 64, rgb: [87, 88, 82], size: 3 },
-    { x: 512, y: 64, rgb: [200, 0, 0], size: 1 },
-    { x: 640, y: 64, rgb: [1, 2, 3], size: 1 },
+    // No pathing texture (none, "_"): the one tile it stands in.
+    { x: 512, y: 64, rgb: [200, 0, 0], size: 0, cells: [0, 0] },
+    { x: 640, y: 64, rgb: [1, 2, 3], size: 0, cells: [0, 0] },
     { x: 768, y: 64, rgb: [87, 88, 82], size: 0.5 },
   ]);
   assert.deepEqual([...new Set(asked)].sort(), ["PathTextures\\4x4Default.tga", "PathTextures\\LargeRockSpire.tga", "PathTextures\\Small.tga"]);
-  // A bigger pathing texture draws a bigger dot.
+  // A bigger pathing texture draws a bigger dot (whole tiles: 3 tiles' texture reaches 3 or 4 of them, a 1 tile one 1 or 2).
   const dots = (size: number) => {
     const rgba = renderMinimap({ ...base(), objects: [{ x: 0, y: 0, rgb: [255, 0, 255], size }], params: { blurPasses: 0, groundNoise: 0 } });
     let n = 0;
     for (let i = 0; i < rgba.length; i += 4) if (rgba[i] === 255 && rgba[i + 1] === 0) n++;
     return n;
   };
-  assert.ok(dots(3) > 6 * dots(1) && dots(1) > 0, `${dots(3)} vs ${dots(1)}`);
+  assert.ok(dots(3) > 3 * dots(1) && dots(1) > 0, `${dots(3)} vs ${dots(1)}`);
+});
+
+test("dotReach: the tiles [u - a, u + a] touches, a = (cells - 2) / 8, as the editor's dots swept over a tile (4x4, 6x6, 8x8, 12x12)", () => {
+  // we-drive 2026-11-17 (minimap-dots-sweep.w3x: the centre moved 4 units at a time): 4x4 reaches two tiles within a
+  // quarter tile of a tile edge, one otherwise; 6x6 two always (the pair changing at the tile's middle); 8x8 two, three
+  // within [.25, .75), two; 12x12 four or three.
+  const width = (cells: number, f: number) => { const [a, b] = dotReach(10 + f, cells); return b - a + 1; };
+  assert.deepEqual([0, 0.2, 0.25, 0.5, 0.74, 0.75, 0.95].map((f) => width(4, f)), [2, 2, 1, 1, 1, 2, 2]);
+  assert.deepEqual([0, 0.49, 0.5, 0.95].map((f) => width(6, f)), [2, 2, 2, 2]);
+  assert.deepEqual([0, 0.2, 0.25, 0.74, 0.75].map((f) => width(8, f)), [2, 2, 3, 3, 2]);
+  assert.deepEqual([0, 0.5].map((f) => width(12, f)), [4, 3]);
+  // Where the tiles are: 6x6 at f below a half reaches the tile before.
+  assert.deepEqual([dotReach(10.4, 6), dotReach(10.5, 6)], [[9, 10], [10, 11]]);
+  // No pathing texture: the tile it stands in.
+  assert.deepEqual(dotReach(10.7, 0), [10, 10]);
+});
+
+test("sharpShare and the tile edges: an edge pixel keeps 7/8 of its tile, a lone tile's corner pixel 1/6, a neighbour doubling it", () => {
+  // The editor's pixels on a dot of tiles, 4 and 2 pixels a tile (we-drive 2026-11-17).
+  assert.equal(sharpShare(0.625), 0.875);
+  assert.equal(sharpShare(0.375), 0.125);
+  assert.ok(Math.abs(sharpShare(0.5625) - 0.6875) < 1e-9);
+  assert.equal(sharpShare(0.2), 0);
+  assert.equal(sharpShare(0.9), 1);
+  const lone = (blurPasses: number) => {
+    // A 4 x 4 tile ground with one dot tile at (2, 2) (a doodad with no pathing width, at its middle): 4 pixels a tile.
+    const rgba = renderMinimap({ terrain: flat(4, 4), margins: [0, 0, 0, 0], tileColor: () => [0, 0, 0], waterColor: [0, 0, 192], size: 16, params: { groundNoise: 0, blurPasses },
+      objects: [{ x: 2 * 128 + 64, y: 2 * 128 + 64, rgb: [255, 255, 255], size: 0 }] });
+    return (x: number, y: number) => rgba[(y * 16 + x) * 4];
+  };
+  const soft = lone(1), hard = lone(0);
+  // The tile (2, 2) is pixels 8..11 across, rows 4..7 from the top (rows count from the south: tile row 2 of 4 is 4..7).
+  assert.equal(hard(9, 5), 255, "control: hard tiles have the tile's pixels at full colour");
+  assert.equal(hard(7, 5), 0);
+  assert.ok(soft(9, 5) === 255 && soft(10, 6) === 255, "inner pixels stay pure");
+  assert.ok(Math.abs(soft(8, 5) - 223) <= 1 && Math.abs(soft(7, 5) - 31) <= 1, `edge pixel 7/8 of the tile, the one across 1/8: ${soft(8, 5)} ${soft(7, 5)}`);
+  assert.ok(Math.abs(soft(8, 4) - 43) <= 2, `corner pixel: ${soft(8, 4)}`);
 });
 
 /** A pathing texture from rows of "#" (a non-black cell) and "." (black), row 0 north. */
@@ -199,17 +238,20 @@ const maskOf = (rows: string[]): PathMask => ({ width: rows[0].length, height: r
 const GATE1 = maskOf(Array(4).fill("#".repeat(20)));
 const WALL2 = maskOf(Array.from({ length: 10 }, (_, r) => ".".repeat(r - (r % 2)) + "##" + ".".repeat(8 - (r - (r % 2)))));
 
-test("minimapObjects: a gate or wall texture is drawn as its cells, a texture of one full square as a dot", async () => {
+test("minimapObjects: a texture with gaps is drawn as its cells, one full rectangle (a gate, a tree) as a dot of tiles", async () => {
   const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "1", MMRed: "9", MMGreen: "8", MMBlue: "7", pathTex });
-  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["odd", row("PathTextures\\Gone.tga")]]);
-  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
+  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["wall", row("PathTextures\\StoneWall2Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["odd", row("PathTextures\\Gone.tga")]]);
+  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\StoneWall2Path.tga": WALL2, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
   const objects = await minimapObjects(
-    ["gate", "tree", "odd"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number], angle: 4.5 })),
-    { rows, bases: new Map(), modelColor: async () => null, footprint: async (path) => (path.includes("Gate") ? 2.2 : 1), pathMask: async (path) => masks[path] ?? null });
+    ["gate", "wall", "tree", "odd"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number], angle: 4.5 })),
+    { rows, bases: new Map(), modelColor: async () => null, footprint: async (path) => (path.includes("Gate") ? 2.2 : 1),
+      cells: async (path) => { const m = masks[path]; return m ? [m.width, m.height] : null; }, pathMask: async (path) => masks[path] ?? null });
   assert.deepEqual(objects, [
-    { x: 0, y: 64, rgb: [9, 8, 7], mask: GATE1, angle: 4.5 },
-    { x: 128, y: 64, rgb: [9, 8, 7], size: 1 },
-    { x: 256, y: 64, rgb: [9, 8, 7], size: 1 },
+    // The gate's 20 × 4 cells: five tiles by one or two (see dotReach), not its cells.
+    { x: 0, y: 64, rgb: [9, 8, 7], size: 2.2, cells: [20, 4], angle: 4.5 },
+    { x: 128, y: 64, rgb: [9, 8, 7], mask: WALL2, angle: 4.5 },
+    { x: 256, y: 64, rgb: [9, 8, 7], size: 1, cells: [4, 4], angle: 4.5 },
+    { x: 384, y: 64, rgb: [9, 8, 7], size: 1, angle: 4.5 },
   ]);
 });
 
@@ -270,12 +312,13 @@ test("shownTextureMean: the mean of the colours of the textures the materials sh
 
 test("minimapObjects: a model's colour is asked for as a mean for a dot and as the first texture's for a drawn shape", async () => {
   const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", MMRed: "0", MMGreen: "0", MMBlue: "0", pathTex });
-  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["bare", row("_")]]);
-  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
+  // A shape is a texture with gaps (a diagonal wall); a full rectangle (a gate, a tree) is a dot.
+  const rows = new Map([["wall", row("PathTextures\\StoneWall2Path.tga")], ["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["bare", row("_")]]);
+  const masks: Record<string, PathMask> = { "PathTextures\\StoneWall2Path.tga": WALL2, "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
   const asked: string[] = [];
-  await minimapObjects(["gate", "tree", "bare"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
+  await minimapObjects(["wall", "gate", "tree", "bare"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
     { rows, bases: new Map(), modelColor: async (type, mean) => { asked.push(`${type}:${mean}`); return [1, 2, 3]; }, footprint: async () => 1, pathMask: async (p) => masks[p] ?? null });
-  assert.deepEqual(asked, ["gate:false", "tree:true", "bare:true"]);
+  assert.deepEqual(asked, ["wall:false", "gate:true", "tree:true", "bare:true"]);
 });
 
 test("modelTextureColor: with `mean` a model whose geosets show no texture still gives its first texture's colour", async () => {
@@ -452,9 +495,8 @@ test("minimapBase: a pathing texture is read once for its cells and its size, ho
   const t = { ...flat(2, 2), tileset: "Y", groundTiles: ["Ypth"], cliffTiles: [] } as unknown as Terrain;
   const placed = ["Ytre", "Ytre", "Ygat", "Ytre", "Ygat"].map((id, i) => ({ id, position: [i * 64, 64, 0], angle: 0 }));
   const b = await minimapBase(w3, t, placed as unknown as Parameters<typeof minimapBase>[2], read);
-  // The control: both textures were used, the square one as a dot of its size, the strip as its cells.
-  assert.deepEqual(b.objects.map((o) => ("mask" in o && o.mask ? `mask ${o.mask.width}x${o.mask.height}` : `size ${(o as { size?: number }).size}`)),
-    ["size 1", "size 1", "mask 8x2", "size 1", "mask 8x2"]);
+  // The control: both textures were used, as dots of their cells' width and height (a full strip is a dot too).
+  assert.deepEqual(b.objects.map((o) => `cells ${o.cells}`), ["cells 4,4", "cells 4,4", "cells 8,2", "cells 4,4", "cells 8,2"]);
   assert.deepEqual([reads.get("PathTextures\\Square.tga"), reads.get("PathTextures\\Strip.tga")], [1, 1]);
   assert.deepEqual(unexpected, [], "no other file was asked for");
 });
