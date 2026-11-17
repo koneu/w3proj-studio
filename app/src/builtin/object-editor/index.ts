@@ -1584,7 +1584,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const which = clash.length === 1 ? `String ${clash[0]}` : `Strings ${clash.join(", ")}`;
                 const answer = await w3.window.showWarning(`${which} of ${wtsName} ${clash.length === 1 ? "was" : "were"} saved by another editor since this one read ${clash.length === 1 ? "it" : "them"}. Saving writes over ${clash.length === 1 ? "that text" : "those texts"} with what this editor has.`, "Overwrite", "Keep theirs");
                 if (answer === "Keep theirs") { wts.takeTheirs(onDisk, clash); tookTheirs = true; }
-                else if (answer !== "Overwrite") throw new Error("Not saved.");
+                else if (answer !== "Overwrite") return; // dismissed: nothing is saved, the tab stays unsaved
               }
             }
             // The backend encodes the JSON to binary (validating it) and returns
