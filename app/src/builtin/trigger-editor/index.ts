@@ -859,11 +859,11 @@ class TriggerView {
     const picked = (lines ?? this.area === "detail") ? kind?.selectedLines?.(it) ?? [] : [];
     if (lines && !picked.length) throw new Error(`Select a line of ${it.name} to copy.`);
     const src = { display: this.handle.display, file: this.file, language: this.handle.language, customText: (t: TriggerItem) => this.texts.get(t) ?? null };
-    // A clicked section heading ("Actions") copies the heading and its lines, as the World Editor's Copy As Text does.
-    const section = as === "text" && !picked.length && !lines && this.area === "detail" ? kind?.selectedSection?.(it) : undefined;
-    const text = copyAs(as, src, it, picked, section);
+    // A clicked heading ("Actions", "Then - Actions") copies the heading and its lines, as the World Editor's Copy As Text does.
+    const heading = as === "text" && !picked.length && !lines && this.area === "detail" ? kind?.selectedHeading?.(it) : undefined;
+    const text = copyAs(as, src, it, picked, heading);
     if (text === null) throw new Error(`${it.name} is custom text: Copy As Script copies it.`);
-    return { text, what: picked.length ? `${picked.length === 1 ? "a line" : `${picked.length} lines`} of ${it.name}` : section !== undefined ? `the ${["events", "conditions", "actions"][section] ?? "lines"} of ${it.name}` : it.name };
+    return { text, what: picked.length ? `${picked.length === 1 ? "a line" : `${picked.length} lines`} of ${it.name}` : heading ? `a ${"section" in heading ? "section" : "branch"} of ${it.name}` : it.name };
   }
   /** The commands on the lines of the shown trigger (Select All, Clear, Toggle Function Enabled). */
   runOnLines(action: "selectAll" | "clear" | "toggleFunction") {

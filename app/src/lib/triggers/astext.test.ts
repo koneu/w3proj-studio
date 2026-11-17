@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { copyAs, ecasAsText, sectionAsText, triggerAsText, type CopySource } from "./astext";
+import { branchAsText, copyAs, ecasAsText, sectionAsText, triggerAsText, type CopySource } from "./astext";
 import { parseTriggerData } from "./triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "./wtg";
 
@@ -77,9 +77,14 @@ test("Copy As Text: a clicked section gives its heading and lines one level in (
   // A section without lines is its heading alone.
   assert.equal(sectionAsText(trigger, 1, ctx), "Conditions\n");
   // copyAs takes it for text only: Copy As Script keeps the whole trigger, a line selection wins over it.
-  assert.equal(copyAs("text", src(), trigger, [], 0), "Events\n    Foo starts\n");
-  assert.equal(copyAs("text", src(), trigger, [iff.children[1]], 0), "Foo - Log yes\n");
-  assert.equal(copyAs("script", src(), trigger, [], 0), copyAs("script", src(), trigger));
+  assert.equal(copyAs("text", src(), trigger, [], { section: 0 }), "Events\n    Foo starts\n");
+  assert.equal(copyAs("text", src(), trigger, [iff.children[1]], { section: 0 }), "Foo - Log yes\n");
+  assert.equal(copyAs("script", src(), trigger, [], { section: 0 }), copyAs("script", src(), trigger));
+  // A branch label of a block, clicked: the label and its lines (the editor's "Then - Actions" / "Else - Actions", empty one too).
+  assert.equal(branchAsText(iff, 1, ctx), "Then - Actions\n    Foo - Log yes\n");
+  assert.equal(branchAsText(iff, 0, ctx), "If - Conditions\n    Foo - Foo 3 is ready\n");
+  assert.equal(branchAsText(iff, 2, ctx), "Else - Actions\n");
+  assert.equal(copyAs("text", src(), trigger, [], { block: iff, group: 1 }), "Then - Actions\n    Foo - Log yes\n");
 });
 
 const src = (language: "jass" | "lua" = "jass", texts = new Map<TriggerItem, string>()): CopySource =>
