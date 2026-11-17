@@ -1,25 +1,7 @@
 [
   {
-    "name": "mmsave-tiles-rand-sd",
-    "description": "the editor re-renders war3mapMap.blp on every save (the input's is flat.w3x's picture, a different map; the editor's save of this map is the picture of its ground, which Studio's rebuild matches): 4096 tiles with random corner textures, 16-pixel squares within 8 per channel (the largest was 6: both draw a tile by its south-west corner, the edge pixels differ: see minimap-diff.mjs, TESTING.md 'Export Minimap against the editor'). SD",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-tiles-rand.w3x" },
-    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 8 }],
-    "limit": 20
-  },
-  {
-    "name": "mmsave-tiles-rand-hd",
-    "description": "the same in HD (the ground colours are the _Diffuse textures')",
-    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-tiles-rand.w3x" },
-    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
-    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 8 }],
-    "limit": 20
-  },
-  {
     "name": "mmsave-tiles-blobs-sd",
-    "description": "the ground in squares of 4 x 4 corners, SD (the largest square difference was 3)",
+    "description": "the editor re-renders war3mapMap.blp on every save (the input's is flat.w3x's picture, a different map; the editor's save of this map is the picture of its ground, which Studio's rebuild matches): the ground in squares of 4 x 4 corners (tiles with two to four textures at the squares' edges), 16-pixel squares within 8 per channel (the largest was 3; both draw a tile by its south-west corner and differ in the edge pixels, see TESTING.md 'Export Minimap and the saved minimap'). SD. Not the random-corner map (minimap-tiles-rand.w3x): there the editor's JPEG itself moves the colours (its saved picture is redder than its own export by 6 to 9 on the green textures, blue 8 lower on Lrok: its encoder's chroma), squares differ by up to 15",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-tiles-blobs.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
@@ -27,8 +9,17 @@
     "limit": 20
   },
   {
+    "name": "mmsave-tiles-blobs-hd",
+    "description": "the same in HD (the ground colours are the _Diffuse textures')",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-tiles-blobs.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 8 }],
+    "limit": 20
+  },
+  {
     "name": "mmsave-dots-sd",
-    "description": "48 isolated doodads of three kinds (a rock 4x4, an elven house 6x6, a goblin shipyard ruin 8x8 pathing), SD: the dots' colours (the ruin: the mean of its textures, team colour black) and places agree within 12 per channel in 16-pixel squares. Not the dots' shape: the editor draws sharp squares of 2 tiles whatever the texture (8 x 8 pixels here, the corner pixels out), Studio softened discs of 1, 1.4 and 2.8 tiles; the largest square difference is the shape's",
+    "description": "48 isolated doodads of three kinds (a rock 4x4, an elven house 6x6, a goblin shipyard ruin 8x8 pathing), SD: the dots' colours (the ruin: the mean of its textures, team colour black) and places agree within 12 per channel in 16-pixel squares. Not the dots' shape: the editor draws sharp squares of 2 tiles whatever the texture (8 x 8 pixels here, the corner pixels out), Studio softened discs of 1, 1.4 and 2.8 tiles; the largest square difference is the shape's (8 now, 19 before the colour change)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
@@ -37,7 +28,7 @@
   },
   {
     "name": "mmsave-dots-hd",
-    "description": "the same in HD: before branch we-minimap-checks Studio drew no dot at all (an HD model's .tif texture isn't in the game, only its .dds), the editor's are there (its colours: the _Diffuse textures')",
+    "description": "the same in HD: before branch we-minimap-checks Studio drew no dot at all (an HD model's .tif texture isn't in the game, only its .dds; the largest square difference 21), the editor's are there (its colours: the _Diffuse textures'; now 10)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
