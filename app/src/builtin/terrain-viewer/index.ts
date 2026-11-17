@@ -291,10 +291,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Not in the manifest: the Map Script extension, after making the script, has the project's open terrain editor set
     // its destructables' flags (map-script followFlags). True when that editor holds war3map.doo (the file is its).
-    w3.commands.register("w3.terrain.followDestructableFlags", async (follow?: unknown) => {
-      if (typeof follow !== "function") return false;
+    w3.commands.register("w3.terrain.followDestructableFlags", async (follow?: unknown, root?: unknown) => {
+      if (typeof follow !== "function" || typeof root !== "string") return false;
+      // The flags are worked out for the project at `root`: an editor of another one (opened meanwhile) isn't touched.
       const editor = ownEditor();
-      return editor ? editor.followFlags(follow as FollowFlags) : false;
+      return editor && editor.root === root ? editor.followFlags(follow as FollowFlags) : false;
     }),
     // Not in the manifest (no palette entry): the app smoke calls it so a step reads the models again.
     w3.commands.register("w3.terrain.clearShadowCache", () => clearShadowMeshes()),
@@ -5980,7 +5981,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!handed) return false;
             await new Promise((done) => setTimeout(done, 0));
             await ready();
-            if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record) return false;
+            if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record || w3.workspace.project()?.root !== record.root) return false;
             const f = dooFile;
             const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
             // Not an edit of the user's: no undo step. The file follows the script as the World Editor's save writes it.

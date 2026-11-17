@@ -1,7 +1,7 @@
 [
   {
     "name": "cliff-adjust-dry-plus1",
-    "description": "test.md 'Dry corners wrap as in the WE': Advanced > Adjust Cliff Levels +1 on a map of dry corners whose water words run through the extremes of the 14 bits (fixtures/we-specs/dry-words.w3x, make-dry-words.mjs); w3e corner by corner: the dry word wraps as in the editor, layers and the rest move alike",
+    "description": "Advanced > Adjust Cliff Levels +1 on a map of dry corners whose water words run through the extremes of the 14 bits (fixtures/we-specs/dry-words.w3x, make-dry-words.mjs): the editor moves every corner a level up and its water word 512 with it, a dry word near the top wrapping round its 14 bits (Studio did the same up to 2026-11-17). Studio refuses the shift (decided 2026-11-17: a wrapped word throws the water from the top of the range to the bottom; wholemap.ts adjustCliffLevels) and changes nothing. expectCorners (2026-11-17, branch fix-bugs-dest-cliff): every one of the 4225 corners' layer one below the editor's, and its water word (512 lower, or the wrapped ones)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -22,12 +22,15 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectCorners": [
+      { "fields": ["layer"], "delta": 1, "corners": [4225, 4225] },
+      { "fields": ["water"], "corners": [4225, 4225] }
+    ] }],
     "limit": 20
   },
   {
     "name": "cliff-adjust-dry-minus3",
-    "description": "the same by -3: corners on levels 0-2 stop at level 0 (their water word moves only as far as their level did), the others' words wrap below 0 as in the editor",
+    "description": "the same by -3: in the editor corners on levels 0-2 stop at level 0 (their water word moves only as far as their level did) and the others' words wrap below 0. Studio refuses the shift, as it would wrap words, and changes nothing. expectCorners (2026-11-17, branch fix-bugs-dest-cliff): the 3900 corners above level 0 differ in layer and water word, the 325 on level 0 match",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -49,7 +52,10 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectCorners": [
+      { "fields": ["layer"], "corners": [3900, 3900] },
+      { "fields": ["water"], "corners": [3900, 3900] }
+    ] }],
     "limit": 20
   }
 ]

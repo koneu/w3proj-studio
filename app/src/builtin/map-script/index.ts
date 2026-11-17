@@ -295,7 +295,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  that can't be read is left as it is (said in the output). False: another project is open now. */
   const followFlags = async (f: FlagRule, root: string | undefined, reason: string): Promise<boolean> => {
     const follow: FollowFlags = (doodads) => flagsToFollow(f.rule, doodads, f.destructable);
-    const held = await w3.commands.execute<boolean>("w3.terrain.followDestructableFlags", follow).catch(() => false);
+    // The rule is this project's: another project's terrain editor must never take it.
+    if (!root || w3.workspace.project()?.root !== root) return false;
+    const held = await w3.commands.execute<boolean>("w3.terrain.followDestructableFlags", follow, root).catch(() => false);
     if (w3.workspace.project()?.root !== root) return false;
     if (held === true) return true;
     /** The file's text and whether it's the JSON form; null when there is none. */

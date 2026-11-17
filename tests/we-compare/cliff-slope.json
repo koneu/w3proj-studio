@@ -46,7 +46,7 @@
   {
     "limit": 40,
     "name": "cliff-slope-wrap",
-    "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field (tools.ts strokeLayer, cliffSlope)",
+    "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the editor's corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field (tools.test.ts checks cliffSlope against it). Studio refuses the click with a message (decided 2026-11-17: tools.ts strokeLayer, increaseRefusal) and leaves the field as it was. expectCorners (2026-11-17, branch fix-bugs-dest-cliff): only the 13x13 pit's 169 corners differ, Studio's at level 14 with the field's cliff type 15 where the editor's are lower and typed 1 (Grass Cliff)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
     "we": {
       "mode": "sd",
@@ -63,7 +63,10 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectCorners": [
+      { "box": [26, 24, 38, 36], "fields": ["layer"], "studio": 14, "corners": [169, 169] },
+      { "box": [26, 24, 38, 36], "fields": ["cliffType"], "we": 1, "studio": 15, "corners": [169, 169] }
+    ] }]
   },
   {
     "limit": 40,
