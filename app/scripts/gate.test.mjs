@@ -58,7 +58,8 @@ test("control: a command that ends in time passes, and a failing one fails", asy
   closeSync(fd);
 });
 
-test("SIGTERM to the gate kills the commands of its steps", async () => {
+// Windows has no catchable SIGTERM: host.kill() ends the host outright, so no handler can run and kill the step.
+test("SIGTERM to the gate kills the commands of its steps", { skip: process.platform === "win32" && "Windows cannot catch SIGTERM" }, async () => {
   const dir = join(base, "sigterm");
   mkdirSync(dir);
   const pidFile = join(dir, "pid");
@@ -82,7 +83,7 @@ setInterval(() => {}, 1000);
     assert.ok(alive(pid));
     host.kill("SIGTERM");
     const r = await exited;
-    if (process.platform !== "win32") assert.equal(r.code, 143);
+    assert.equal(r.code, 143);
     await until(() => !alive(pid), "the step's command to be gone");
   } finally {
     host.kill("SIGKILL");
