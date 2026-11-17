@@ -211,12 +211,12 @@ fn a_sync_with_a_chapter_in_another_case_leaves_one_folder() {
 
 /// A case-sensitive file system with both cases of a chapter folder: the one the sync brings is synced,
 /// the other goes, and the question before deleting names it.
+/// Needs a case-sensitive file system (Linux); on one that ignores case (Windows, macOS) it's skipped by name.
 #[test]
+#[cfg_attr(any(windows, target_os = "macos"), ignore = "needs a case-sensitive file system")]
 fn a_chapter_folder_beside_its_own_name_in_another_case_goes() {
     let dir = workdir("chapter-case-both");
-    if !case_sensitive(&dir) {
-        return;
-    }
+    assert!(case_sensitive(&dir), "this file system ignores case: run with --ignored only where it doesn't");
     let root = new_project(&dir);
     let maps = root.join("maps");
     for name in ["Chapter.w3x", "chapter.w3x", "CHAPTER.w3x"] {

@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
 import { ensureCli, smokeId } from "./appctl.mjs";
+import { checkFresh, staleAllowed } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
 
@@ -15147,6 +15148,7 @@ async function run() {
   mkdirSync(work, { recursive: true });
   if (!process.argv.includes("--no-build") && !prebuilt) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
+  if (process.argv.includes("--no-build") || prebuilt) checkFresh(exe, { kind: "app", allowStale: staleAllowed() });
   // The release CLI is built when it isn't there (unless W3PROJ_BIN names another).
   cli = ensureCli();
 
@@ -15193,17 +15195,26 @@ async function run() {
       ({ page, stop, exited } = launched);
       appStarted = true;
     } else {
-      const port = await freePort();
-      const child = spawn(exe, [], {
-        stdio: "ignore",
-        env: { ...process.env, W3PROJ_TRIGGERDATA: triggerData, ...configEnv, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
-      });
-      let code = null;
-      child.on("exit", (c) => { code = c; });
-      exited = () => code;
-      stop = async () => { child.kill(); };
-      appStarted = true;
-      page = await connect(port);
+      // The port is free when picked and can be taken before the app binds it: an app that exits before it answers starts again on another.
+      for (let attempt = 1; ; attempt++) {
+        const port = await freePort();
+        const child = spawn(exe, [], {
+          stdio: "ignore",
+          env: { ...process.env, W3PROJ_TRIGGERDATA: triggerData, ...configEnv, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
+        });
+        let code = null;
+        child.on("exit", (c) => { code = c ?? -1; });
+        exited = () => code;
+        stop = async () => { child.kill(); };
+        appStarted = true;
+        try {
+          page = await connect(port);
+          break;
+        } catch (e) {
+          if (code === null || attempt >= 3) throw e;
+          process.stderr.write(`the app exited at its start (${String(e.message).slice(0, 200)}); starting again\n`);
+        }
+      }
     }
     // A page call that hangs fails after this, naming itself, instead of holding the run for minutes.
     page.callTimeout = PAGE_CALL_TIMEOUT;

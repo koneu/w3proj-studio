@@ -21,7 +21,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -75,7 +75,8 @@ given.filter((p) => !existsSync(p)).forEach((p) => console.log(`not found: ${p}`
 if (only) maps = maps.filter((m) => basename(m).includes(only));
 if (!maps.length) throw new Error("no maps found (give a map or folder, or put maps into smoketest_maps)");
 
-const cache = join(tmpdir(), "w3proj-wpm-compare");
+// In the repository's target/ (git-ignored), not the OS temp folder.
+const cache = join(app, "..", "target", "w3proj-wpm-compare");
 mkdirSync(cache, { recursive: true });
 const { build } = await import("esbuild");
 const bundle = join(cache, `pathing-${process.pid}.mjs`);
@@ -100,7 +101,7 @@ const run = (file, argv) => new Promise((done) => {
 /** The map's unpacked project (reused while the map file is the same), or null with the reason. */
 async function unpacked(map) {
   const st = statSync(map);
-  const key = createHash("sha1").update(`${resolve(map)}|${st.size}|${st.mtimeMs}`).digest("hex").slice(0, 12);
+  const key = createHash("sha1").update(`${resolve(map)}|${st.size}|${st.mtimeMs}|cli:${statSync(cli).mtimeMs}`).digest("hex").slice(0, 12);
   const dir = join(cache, `${basename(map).replace(/[^\w.()-]/g, "_")}-${key}`);
   const ready = join(dir, ".unpacked");
   if (!existsSync(ready)) {
