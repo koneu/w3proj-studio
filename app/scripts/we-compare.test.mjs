@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import * as core from "./we-compare-core.mjs";
-import { asExpected, autoKind, compareFile, diffBytes, diffJson, diffText, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
+import { asExpected, autoKind, compareFile, diffBytes, diffJson, diffText, diffTextSet, diffWpm, editorPath, expandPath, expandText, formatReport, parseSpec, parseSpecFile } from "./we-compare-core.mjs";
 import { layout, testerCommands } from "./verify-build.mjs";
 
 const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.wpm"] });
@@ -161,6 +161,19 @@ test("diffText counts lines", () => {
   const d = diffText("a\nb\nc", "a\nx");
   assert.equal(d.count, 2);
   assert.match(d.diffs[0].text, /line 2: WE "b", Studio "x"/);
+});
+
+test("diffTextSet ignores the order of lines but not their number or content", () => {
+  assert.equal(diffTextSet("a\nb\nc", "c\r\na\nb").equal, true);
+  const d = diffTextSet("a\nb\nb", "b\nx\na");
+  assert.equal(d.equal, false);
+  assert.equal(d.count, 2);
+  assert.deepEqual(d.diffs.map((x) => x.text), ['Studio only: "x"', 'WE only: "b"']);
+  // the control: the same lines in another order DIFFER as "text"
+  assert.equal(diffText("a\nb\nc", "c\na\nb").equal, false);
+  assert.equal(compareFile("f", "text-set", { text: "a\nb" }, { text: "b\na" }).status, "MATCH");
+  assert.equal(compareFile("f", "text-set", { text: "a\nb" }, { text: "b\nb" }).status, "DIFFERS");
+  assert.equal(parseSpec({ name: "n", input: { map: "m.w3x" }, compare: [{ file: "war3map.lua", as: "text-set" }] }, "/x").compare[0].as, "text-set");
 });
 
 test("compareFile: a file missing from one save or both is MISSING, never DIFFERS; formatReport shows it", () => {

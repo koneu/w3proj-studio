@@ -1,0 +1,74 @@
+[
+  {
+    "name": "items-script-set",
+    "description": "test.md 'Agents: a build-24371 map with items, against an editor save': flat.w3x (World Editor 7003, build 24371) with 11 items of five types (three types more than once: the editor's order within a type isn't the file's), placed by Studio and saved with the script it writes; the editor opens that map and saves it again. The script's lines as a set (the order of CreateAllItems may differ), the placed items by their data",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            true
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "units",
+            "objects": [
+              { "id": "ratc", "x": -512, "y": -256 },
+              { "id": "bspd", "x": -384, "y": -256 },
+              { "id": "ratc", "x": -256, "y": -256 },
+              { "id": "phea", "x": -128, "y": -256 },
+              { "id": "bspd", "x": 0, "y": -256 },
+              { "id": "stwp", "x": 128, "y": -256 },
+              { "id": "ratc", "x": 256, "y": -256 },
+              { "id": "tkno", "x": 384, "y": -256 },
+              { "id": "phea", "x": 512, "y": -256 },
+              { "id": "bspd", "x": 640, "y": -256 },
+              { "id": "ratc", "x": 768, "y": -256 }
+            ],
+            "ignoreRoom": true
+          }
+        },
+        {
+          "sleep": 2000
+        },
+        {
+          "mcp": "rebuild_map"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text-set"
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "subversion"
+        ],
+        "tolerance": 0.001
+      }
+    ],
+    "limit": 40
+  }
+]

@@ -33,7 +33,7 @@
 //   compare     files of the map: "war3map.w3i", or { "file": "war3map.wpm", "as": "wpm", "expect": "differs", "tolerance": 0.01 (parsed: numbers this close are equal),
 //               "ignore": ["doodads[3].scale", "units[].itemTable"] (parsed: paths whose differences are known and named; [] is any index) }. "as": auto
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
-//               text, bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
+//               text, text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
 //               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may.
 //               A file missing from a save, or one that can't be read, is MISSING / ERROR: never the expected difference.
 //               "tolerance", "ignore" and "expectPaths" are refused on text, bytes and wpm (they'd do nothing there).

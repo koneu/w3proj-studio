@@ -1,0 +1,642 @@
+[
+  {
+    "name": "open-paths-gui-meelee-map",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-meelee-map of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-meelee-map.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].position[2]"
+        ]
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-gui-meelee-map-2",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-meelee-map-2 of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-meelee-map-2.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-gui-another-melee",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-another-melee of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-another-melee.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-gui-untitled",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-untitled of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-untitled.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-gui-water-tint",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-water-tint of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-water-tint.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-gui-lastrefuge",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project gui-lastrefuge of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/gui-lastrefuge.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].position[2]"
+        ]
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      }
+    ],
+    "limit": 12
+  },
+  {
+    "name": "open-paths-forsaken-start",
+    "description": "test.md 'Maps from paths other than the WE's own save open in the WE': the project forsaken-start of smoketest_maps packed by the release CLI (make-open-paths.mjs); the editor opens it and saves it; Studio opens the terrain view (Fix Doodads on Load) and saves. Ignored: the editor's newer file versions (units subversion 11 with hp and mana -1, itemTable and hero attributes), skinIds, the save-time w3i flags and player names it blanks",
+    "input": {
+      "map": "${REPO}/target/open-paths/forsaken-start.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+        },
+        {
+          "sleep": 2000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].name",
+          "flags"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "doodads[].preFlags",
+          "doodads[].editorId",
+          "doodads[].trailer",
+          "doodads[].extras"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].hp",
+          "units[].mana",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3map.wpm",
+        "as": "wpm",
+        "expect": "differs"
+      }
+    ],
+    "limit": 12
+  }
+]
