@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { repoPath, waitUntil } from "./testhelpers/testutil";
 import {
   addKey, changeKey, changeWhen, commandsFor, conflictsOf, defaultBindings, effectiveBindings, eventChord, isViewBinding, keyLabel,
   KeybindingService, normalizeKey, parseKeybindingsFile, parseWhen, evalWhen, primaryKey, removeBinding, resetCommand, resolve,
@@ -292,8 +293,8 @@ test("undo and redo: the editors' keys are the Edit commands' bindings under und
 
 test("every default key of the built-in manifests can be read, and its command is declared", () => {
   type Manifest = { contributes?: { commands?: { id: string; keybinding?: string }[]; keybindings?: { key: string; command: string; when?: string }[] } };
-  const manifests = readdirSync("src/builtin", { withFileTypes: true }).filter((d) => d.isDirectory())
-    .map((d) => JSON.parse(readFileSync(`src/builtin/${d.name}/extension.json`, "utf8")) as Manifest);
+  const manifests = readdirSync(repoPath("app", "src", "builtin"), { withFileTypes: true }).filter((d) => d.isDirectory())
+    .map((d) => JSON.parse(readFileSync(repoPath("app", "src", "builtin", d.name, "extension.json"), "utf8")) as Manifest);
   const ids = new Set(manifests.flatMap((m) => m.contributes?.commands ?? []).map((c) => c.id));
   for (const c of manifests.flatMap((m) => m.contributes?.commands ?? [])) if (c.keybinding) assert.ok(normalizeKey(c.keybinding), `${c.id}: ${c.keybinding}`);
   const rules = manifests.flatMap((m) => m.contributes?.keybindings ?? []);
@@ -316,19 +317,21 @@ function disk() {
   const locked = new Set<string>();
   const writes: string[] = [];
   let gate: Promise<void> | null = null, readGate: Promise<void> | null = null;
+  /** How many writes and reads wait at their gate now (what a test waits for instead of a guessed pause). */
+  const waiting = { writes: 0, reads: 0 };
   const io = {
     readText: async (p: string) => {
       if (locked.has(p)) throw new Error(`${p}: Permission denied (os error 13)`);
       if (!files.has(p)) throw new Error(`${p}: No such file or directory (os error 2)`);
       // What is there when the read starts, handed back when the read is let through.
       const text = files.get(p)!;
-      if (readGate) await readGate;
+      if (readGate) { waiting.reads++; try { await readGate; } finally { waiting.reads--; } }
       return text;
     },
-    writeText: async (p: string, t: string) => { if (gate) await gate; writes.push(t); files.set(p, t); },
+    writeText: async (p: string, t: string) => { if (gate) { waiting.writes++; try { await gate; } finally { waiting.writes--; } } writes.push(t); files.set(p, t); },
     exists: async (p: string) => files.has(p) || locked.has(p),
   };
-  return { files, locked, writes, io, hold: (p: Promise<void> | null) => { gate = p; }, holdReads: (p: Promise<void> | null) => { readGate = p; } };
+  return { files, locked, writes, io, waiting, hold: (p: Promise<void> | null) => { gate = p; }, holdReads: (p: Promise<void> | null) => { readGate = p; } };
 }
 const commands = { contributions: () => [{ id: "workbench.save", title: "Save", keybinding: "ctrl+s" }, { id: "a", title: "A" }] };
 
@@ -408,10 +411,12 @@ test("a read asked for while a change is being written starts after it: it can't
   let releaseWrite!: () => void, releaseRead!: () => void;
   d.hold(new Promise<void>((r) => { releaseWrite = r; }));
   const write = s.addKey("a", "ctrl+1");
-  await new Promise((r) => setTimeout(r, 0)); // its read is done, its write waits
+  await waitUntil(() => d.waiting.writes > 0, "the write at its gate"); // its read is done, its write waits
   d.holdReads(new Promise<void>((r) => { releaseRead = r; }));
   const load = s.load(FILE); // saved as JSON in the app meanwhile, say
-  await new Promise((r) => setTimeout(r, 0));
+  // Give the load every chance to read early: it must not, the write holds the queue.
+  for (let i = 0; i < 5; i++) await new Promise<void>((r) => setImmediate(r));
+  assert.equal(d.waiting.reads, 0, "the load's read hasn't started while the write waits");
   releaseWrite();
   await write;
   releaseRead();

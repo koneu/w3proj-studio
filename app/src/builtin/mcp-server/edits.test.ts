@@ -72,7 +72,8 @@ test("the refusal over unsaved changes speaks to the person in the app, and to a
 test("only map/ can be written, and only inside the project", async () => {
   const { log, files } = setup();
   for (const bad of [".w3proj/extensions/x/index.js", "w3proj.toml", "map/../w3proj.toml", "C:\\x", "../x"]) {
-    await assert.rejects(log.edit("Bad", put(bad, "x")), Error, bad);
+    const want = bad === "w3proj.toml" || bad.startsWith(".w3proj/") ? /AI edits stay inside map\// : /isn't a path inside the project/;
+    await assert.rejects(log.edit("Bad", put(bad, "x")), want, bad);
   }
   await assert.rejects(log.edit("Bad read", async (read) => { await read(".w3proj/x"); return []; }), /stay inside map/);
   assert.equal(files.size, 0);

@@ -1,4 +1,4 @@
-// Checks the tooling scripts the commit gate never runs: every app/scripts/**/*.mjs and tests/*.mjs loads
+// Checks the tooling scripts the commit gate never runs: every app/scripts/**/*.mjs, tests/*.mjs and scripts/*.mjs loads
 // (`node --check`), and app-smoke.mjs's two lists of checks, the `--only=<check>` map and the full run, name the same
 // checks. Both lists are kept by hand and drifted in merges; a merge once broke app-smoke.mjs's syntax and the commit
 // tier passed. Part of `npm run check`.
@@ -11,14 +11,14 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The scripts to check: app/scripts and its sub-folders, and tests/ (not its fixtures). */
+/** The scripts to check: app/scripts and its sub-folders, tests/ (not its fixtures) and the repository's own scripts/. */
 export function scriptFiles(repo) {
   const walk = (dir, deep) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = join(dir, e.name);
     if (e.isDirectory()) return deep && e.name !== "node_modules" ? walk(p, deep) : [];
     return e.name.endsWith(".mjs") ? [p] : [];
   });
-  return [...walk(join(repo, "app", "scripts"), true), ...walk(join(repo, "tests"), false)].sort();
+  return [...walk(join(repo, "app", "scripts"), true), ...walk(join(repo, "tests"), false), ...walk(join(repo, "scripts"), false)].sort();
 }
 
 /** `node --check` on each file, some at a time; resolves with a problem per file that doesn't load. */

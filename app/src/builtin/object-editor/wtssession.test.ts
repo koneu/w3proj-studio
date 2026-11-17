@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, mapFolderGone, mapFolderStop, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave } from "./wtssession";
 
@@ -567,14 +567,22 @@ test("the retry waits retryMs, reads again, and asks about the second error too"
   a.set(1, "ONE"); a.snapshot();
   const asked: unknown[] = [];
   let reads = 0, writes = 0;
-  const t0 = Date.now();
-  const r = await a.save(
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const saving = a.save(
     async () => { reads++; throw `gone ${reads} (os error 2)`; },
     async () => { writes++; },
     async (e) => { asked.push(e); return isNotFoundError(e); },
     60,
   );
-  assert.ok(Date.now() - t0 >= 50, "waited before the second read");
+  try {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(reads, 1, "waiting for the retry");
+    mock.timers.tick(59);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(reads, 1, "not before retryMs (60)");
+    mock.timers.tick(1);
+  } finally { mock.timers.reset(); }
+  const r = await saving;
   assert.equal(reads, 2);
   assert.equal(writes, 1);
   assert.equal(r.recreated, true);

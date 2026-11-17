@@ -138,6 +138,24 @@ test("custom script, Reforged: null and empty stay different", () => {
   assert.deepEqual(writeWct(parseWct(bytes, 3)), bytes);
 });
 
+test("a trigger or custom script file cut off anywhere is refused with the reader's own error, not the DataView's", () => {
+  const files: [string, Uint8Array, (b: Uint8Array) => unknown][] = [
+    ["wtg", writeWtg(reforged()), (b) => parseWtg(b, data)],
+    ["wct reforged", writeWct(texts()), (b) => parseWct(b, 3)],
+    ["wct classic", writeWct({ reforged: false, version: 1, comment: "c", header: "// header", texts: ["a", null] }), (b) => parseWct(b, 2)],
+  ];
+  for (const [what, bytes, parse] of files) {
+    parse(bytes); // control: the whole file reads
+    for (let n = 0; n < bytes.length; n++) {
+      assert.throws(() => parse(bytes.subarray(0, n)), (e: Error) => e.constructor === Error && !/DataView/.test(e.message), `${what} cut to ${n} bytes`);
+    }
+  }
+  // A text whose stated length runs past the end isn't read short.
+  const one = writeWct({ reforged: false, version: 0, comment: "", header: null, texts: ["abc"] });
+  new DataView(one.buffer).setUint32(8, 50, true);
+  assert.throws(() => parseWct(one, 1), /truncated/);
+});
+
 test("custom script, classic: with and without a header", () => {
   const v1: CustomTextFile = { reforged: false, version: 1, comment: "c", header: "// header", texts: ["a", null] };
   assert.deepEqual(parseWct(writeWct(v1), 2), v1);

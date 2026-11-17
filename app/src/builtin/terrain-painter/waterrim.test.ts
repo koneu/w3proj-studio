@@ -31,7 +31,7 @@ function expected(name: string, before: Terrain): Terrain {
 
 for (const [mode, file] of [["shallow", "ash-shallow.w3e"], ["deep", "ash-deep.w3e"]] as const) {
   test(`the ${mode} brush on one corner levels the ground two corners round it, as the World Editor`, () => {
-    const t = load("ash-before.w3e"), want = expected(file, load("ash-before.w3e"));
+    const t = load("ash-before.w3e"), want = expected(file, load("ash-before.w3e")), original = load("ash-before.w3e");
     const c = at(t, X, Y);
     const layer = c.layer - (mode === "deep" ? 2 : 1);
     const stroke = new Stroke(mode);
@@ -40,7 +40,7 @@ for (const [mode, file] of [["shallow", "ash-shallow.w3e"], ["deep", "ash-deep.w
     assert.equal(applyLayer(t, brush, mode, { layer, waterLevel: waterLevelAt(c.height - WATER_OFFSET) }, stroke), true);
     retypeCliffs(t, stroke, ["Agrd"]);
     assert.deepEqual(look(t), look(want));
-    assert.equal(stroke.corners().filter((i) => at(t, i % t.width, Math.floor(i / t.width)).rawHeight !== load("ash-before.w3e").corners[i].rawHeight).length, 12, "12 neighbours");
+    assert.equal(stroke.corners().filter((i) => at(t, i % t.width, Math.floor(i / t.width)).rawHeight !== original.corners[i].rawHeight).length, 12, "12 neighbours");
   });
 }
 

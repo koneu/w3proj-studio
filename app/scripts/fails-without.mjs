@@ -61,12 +61,19 @@ const runTest = (label) => {
 // What each file is now (null: not there), and what it is on the base (null: not there).
 const now = new Map(paths.map((p) => [p, existsSync(p) ? readFileSync(p) : null]));
 const atBase = new Map();
+let baseChecked = false;
 for (const p of paths) {
   // Both through realpath: on Windows the temp folder can come as a short 8.3 name (RUNNER~1) while git gives the long
   // one, and the path between them would leave the checkout.
   const real = (f) => (existsSync(f) ? realpathSync.native(f) : join(realpathSync.native(dirname(f)), basename(f)));
   const rel = relative(realpathSync.native(top), real(p)).replaceAll("\\", "/");
   const r = spawnSync("git", ["show", `${base}:${rel}`], { cwd: top, maxBuffer: 1 << 28 });
+  if (r.status !== 0 && !baseChecked) {
+    // A bad ref is an error; a path that isn't on the base just means the file is new.
+    const v = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], { cwd: top });
+    if (v.status !== 0) { console.error(`${base} isn't a commit in this checkout`); process.exit(2); }
+    baseChecked = true;
+  }
   atBase.set(p, r.status === 0 ? r.stdout : null);
 }
 // The base's code with the file's own tests as they are now.
@@ -98,7 +105,7 @@ const restore = () => {
   }
   swapped = false;
 };
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { restore(); process.exit(130); });
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { restore(); process.exit(130); });
 process.on("exit", restore);
 
 const withFix = runTest("with the fix");

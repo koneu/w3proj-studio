@@ -21,7 +21,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -75,7 +75,8 @@ given.filter((p) => !existsSync(p)).forEach((p) => console.log(`not found: ${p}`
 if (only) maps = maps.filter((m) => basename(m).includes(only));
 if (!maps.length) throw new Error("no maps found (give a map or folder, or put maps into smoketest_maps)");
 
-const cache = join(tmpdir(), "w3proj-wpm-compare");
+// In the repository's target/ (git-ignored), not the OS temp folder.
+const cache = join(app, "..", "target", "w3proj-wpm-compare");
 mkdirSync(cache, { recursive: true });
 const { build } = await import("esbuild");
 const bundle = join(cache, `pathing-${process.pid}.mjs`);
@@ -100,7 +101,7 @@ const run = (file, argv) => new Promise((done) => {
 /** The map's unpacked project (reused while the map file is the same), or null with the reason. */
 async function unpacked(map) {
   const st = statSync(map);
-  const key = createHash("sha1").update(`${resolve(map)}|${st.size}|${st.mtimeMs}`).digest("hex").slice(0, 12);
+  const key = createHash("sha1").update(`${resolve(map)}|${st.size}|${st.mtimeMs}|cli:${statSync(cli).mtimeMs}`).digest("hex").slice(0, 12);
   const dir = join(cache, `${basename(map).replace(/[^\w.()-]/g, "_")}-${key}`);
   const ready = join(dir, ".unpacked");
   if (!existsSync(ready)) {
@@ -117,10 +118,10 @@ async function compare(map) {
   // The folder too: the ladder seasons hold maps of the same name.
   const name = `${basename(dirname(resolve(map)))}/${basename(map)}`;
   const u = await unpacked(map);
-  if (!u.dir) return { name, skip: u.why };
+  if (!u.dir) return { name, skip: u.why, failure: u.why.startsWith("unpack failed") };
   const out = join(u.dir, "regenerated.wpm");
   const r = await run(process.execPath, [fileURLToPath(import.meta.url), "--one", bundle, u.dir, out, game, cli]);
-  if (r.code !== 0) return { name, skip: `regeneration failed: ${(r.err || r.out).trim().split("\n").pop()}` };
+  if (r.code !== 0) return { name, skip: `regeneration failed: ${(r.err || r.out).trim().split("\n").pop()}`, failure: true };
   const old = readFileSync(join(u.dir, "map", "war3map.wpm")), neu = readFileSync(out);
   const w = old.readUInt32LE(8), h = old.readUInt32LE(12);
   if (neu.readUInt32LE(8) !== w || neu.readUInt32LE(12) !== h) return { name, skip: `size differs: stored ${w}x${h}, regenerated ${neu.readUInt32LE(8)}x${neu.readUInt32LE(12)}` };
@@ -160,6 +161,10 @@ if (saveTo) {
   console.log(`saved ${saveTo}`);
 }
 let worse = 0;
+// Nothing compared, or a map that failed to unpack or regenerate, is a failure: not a quiet skip.
+const failures = results.filter((r) => r.failure).length;
+if (!compared) console.log("FAIL no map was compared");
+if (failures) console.log(`FAIL ${failures} maps failed to unpack or regenerate`);
 if (baseFile) {
   const base = JSON.parse(readFileSync(baseFile, "utf8")).maps;
   const better = [], worseList = [];
@@ -167,9 +172,11 @@ if (baseFile) {
     if (!(name in base) || base[name] === n) continue;
     (n < base[name] ? better : worseList).push(`  ${name}: ${base[name]} -> ${n}`);
   }
+  const gone = Object.keys(base).filter((n) => !(n in now));
+  if (gone.length) worseList.push(...gone.map((n) => `  ${n}: in the baseline, not compared now`));
   worse = worseList.length;
   console.log(`against ${baseFile}: ${better.length} better, ${worse} worse, ${Object.keys(now).filter((n) => !(n in base)).length} not in the baseline`);
   if (better.length) console.log(`better:\n${better.join("\n")}`);
   if (worse) console.log(`worse:\n${worseList.join("\n")}`);
 }
-process.exit(worse ? 1 : 0);
+process.exit(worse || !compared || failures ? 1 : 0);

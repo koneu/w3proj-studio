@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { CommandContribution } from "../extensions/api";
 import { menuFor, menuTree, nextEnabled, shortcutText, whyBlocked } from "./menus";
@@ -39,7 +39,15 @@ test("shortcuts read as people write them", () => {
 });
 
 test("what a user looks for first is in the menus of the built-in extensions", () => {
-  const builtin = "src/builtin";
+  /** The app's src folder, found from where the tests run (app/ or the repository). */
+  const appSrc = (() => {
+    for (let dir = process.cwd(); ; dir = dirname(dir)) {
+      for (const p of [join(dir, "src"), join(dir, "app", "src")]) if (existsSync(join(p, "builtin", "terrain-viewer", "extension.json"))) return p;
+      if (dirname(dir) === dir) throw new Error("app/src not found from " + process.cwd());
+    }
+  })();
+
+  const builtin = join(appSrc, "builtin");
   const placed = new Map(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
     const m = JSON.parse(readFileSync(join(builtin, d.name, "extension.json"), "utf8")) as { contributes?: { commands?: CommandContribution[] } };
     return (m.contributes?.commands ?? []).filter((c) => c.menu).map((c) => [c.id, c.menu as string] as const);

@@ -125,6 +125,8 @@ const RUN = `(async () => {
 })()`;
 
 async function main() {
+  // The app is driven over WebView2's DevTools port: Windows only (on Linux it would use the real display and settings).
+  if (process.platform !== "win32") { console.error("problems-bench runs on Windows only (WebView2 DevTools)"); process.exit(2); }
   mkdirSync(work, { recursive: true });
   if (!process.argv.includes("--no-build") && !process.env.W3_BENCH_EXE) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
@@ -136,14 +138,14 @@ async function main() {
 }
 
 async function bench(name, dir) {
-  const configDir = join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
+  const configDir = join(work, "config");
   rmSync(configDir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
   writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "game.installDir": game }));
   const port = await freePort();
   const child = spawn(exe, [], {
     stdio: "ignore",
-    env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
+    env: { ...process.env, W3PROJ_CONFIG_DIR: configDir, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
   });
   const entry = { runs: [] };
   try {

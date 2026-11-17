@@ -3,29 +3,25 @@
 // 12 and a German-only 30, LF line ends, a block that ends on its last line).
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fixturePath } from "../testhelpers/testutil";
 import { addLocaleStrings, adjustStringTables, localeNumbers, localeOnlyNumbers, renumberLocaleTables } from "./localewts";
 import { compactStringIds, renumberWts, StringTable } from "./wts";
 
-function fixture(): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "wts-prune");
-    if (existsSync(p)) return p;
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/wts-prune not found");
-  }
-}
+const fixture = (): string => fixturePath("wts-prune");
 const DE_PATH = "map/_Locales/deDE.w3mod/war3map.wts";
 const FR_PATH = "map/_Locales/frFR.w3mod/war3map.wts";
-const MAIN = readFileSync(join(fixture(), "map", "war3map.wts"), "utf8");
-const DE = readFileSync(join(fixture(), DE_PATH), "utf8");
+const mainText = (): string => readFileSync(join(fixture(), "map", "war3map.wts"), "utf8");
+const deText = (): string => readFileSync(join(fixture(), DE_PATH), "utf8");
 const block = (n: number, t: string, eol = "\r\n") => `STRING ${n}${eol}{${eol}${t}${eol}}${eol}${eol}`;
 /** A French table in CRLF holding none of the numbers that move. */
 const FR = block(1, "Nom de la carte") + block(2, "Fantassin");
 const entries = (wts: string) => [...new StringTable(wts).entries()];
 
 test("the languages' own numbers: those war3map.wts lacks, with the first table that has them", () => {
+  const MAIN = mainText(), DE = deText();
   const main = new StringTable(MAIN);
   assert.deepEqual([...localeOnlyNumbers(main, [{ path: DE_PATH, wts: DE }])], [[30, DE_PATH]]);
   assert.deepEqual([...localeOnlyNumbers(main, [{ path: FR_PATH, wts: FR + block(30, "x") }, { path: DE_PATH, wts: DE }])], [[30, FR_PATH]]);
@@ -35,6 +31,7 @@ test("the languages' own numbers: those war3map.wts lacks, with the first table 
 });
 
 test("renumbering all from 1 steps over a language's own number and renumbers the German table the same way", () => {
+  const MAIN = mainText(), DE = deText();
   const main = new StringTable(MAIN);
   const localeOnly = localeOnlyNumbers(main, [{ path: DE_PATH, wts: DE }]);
   // The control: without the German table's numbers 0012 and 13 become 11 and 12 all the same (30 is out of reach).
@@ -72,6 +69,7 @@ test("renumbering all from 1: a language's own number in reach is stepped over",
 });
 
 test("a string can't take a number only a language has; one past it can", () => {
+  const MAIN = mainText(), DE = deText();
   const locales = [{ path: DE_PATH, wts: DE }];
   assert.throws(() => adjustStringTables(MAIN, locales, new Map([[13, 30]])),
     /String 30 is in map\/_Locales\/deDE\.w3mod\/war3map\.wts but not in war3map\.wts/);
@@ -95,6 +93,7 @@ test("a table that doesn't read back under its new numbers throws", () => {
 });
 
 test("new strings: added in the table's own line ends, a number it has with the same text left, another text refused", () => {
+  const DE = deText();
   const blocks = [{ num: 31, text: "new\nline two", comment: "Sounds: a comment" }, { num: 32, text: "other" }];
   const de = addLocaleStrings(DE_PATH, DE, blocks);
   assert.ok(de.startsWith(DE));

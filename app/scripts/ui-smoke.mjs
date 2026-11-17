@@ -127,7 +127,8 @@ async function run() {
     await page.send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/` });
 
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`));
-    await sleep(1000); // extensions activate in the background
+    // Extensions activate in the background: wait until the host has them all registered.
+    await until("the extensions", () => page.evaluate(`(() => { const e = w3Workbench.host?.extensions; return !!e && e.length > 0; })()`));
 
     const views = await page.evaluate(`[...document.querySelectorAll("button.activity")].map((e) => e.title || e.textContent.trim())`);
     // Most extensions wait for an event: activate them all, which also loads their lazy chunks.
@@ -145,11 +146,11 @@ async function run() {
       const current = ["units", "human", "footman", "footman"].join(String.fromCharCode(92));
       return w3.services.get("w3.objects").then((o) => { window.__pick = o.pickFile(document.body, { title: "Smoke", kind: "model", current }); });
     })()`);
-    await sleep(300);
+    await until("the file browser", () => page.evaluate(`[".browse-tree", ".picker-rows", ".browse-preview canvas", ".picker-row"].every((c) => !!document.querySelector(c))`));
     const browser_ = await page.evaluate(`[".browse-tree", ".picker-rows", ".browse-preview canvas"].map((c) => !!document.querySelector(c))`);
     const browserStart = await page.evaluate(`JSON.stringify({ search: document.querySelector(".picker-search").value, row: document.querySelector(".picker-row.active")?.textContent ?? "", folder: document.querySelector(".browse-folder.active")?.textContent ?? "" })`);
     await page.evaluate(`document.querySelectorAll(".browse-folder")[0].click()`);
-    await sleep(100);
+    await until("the folder's rows", () => page.evaluate(`document.querySelectorAll(".picker-row").length >= 1 && document.querySelectorAll(".browse-folder")[0].classList.contains("active")`));
     const browserAll = await page.evaluate(`document.querySelectorAll(".picker-row").length`);
     await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);

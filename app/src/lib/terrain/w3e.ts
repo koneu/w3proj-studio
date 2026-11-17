@@ -171,6 +171,7 @@ export function parseW3e(buf: Uint8Array): Terrain {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const id = (p: number) => String.fromCharCode(buf[p], buf[p + 1], buf[p + 2], buf[p + 3]);
   if (id(0) !== "W3E!") throw new Error("not a w3e file (missing W3E! header)");
+  if (buf.length < 13) throw new Error(`truncated: a header of 13 bytes, the file has ${buf.length}`);
   const version = dv.getUint32(4, true);
   if (version !== 11 && version !== 12) throw new Error(`unsupported w3e version ${version}`);
   const tileset = String.fromCharCode(buf[8]);
@@ -178,6 +179,7 @@ export function parseW3e(buf: Uint8Array): Terrain {
   const customTilesets = customTilesetsRaw !== 0;
   let p = 13;
   const list = () => {
+    if (p + 4 > buf.length) throw new Error("truncated: before a list of tiles");
     const n = dv.getUint32(p, true);
     p += 4;
     if (p + n * 4 > buf.length) throw new Error(`truncated: a list of ${n} tiles`);
@@ -187,6 +189,7 @@ export function parseW3e(buf: Uint8Array): Terrain {
   };
   const groundTiles = list();
   const cliffTiles = list();
+  if (p + 16 > buf.length) throw new Error("truncated: before the size of the terrain");
   const width = dv.getUint32(p, true), height = dv.getUint32(p + 4, true);
   const offsetX = dv.getFloat32(p + 8, true), offsetY = dv.getFloat32(p + 12, true);
   p += 16;

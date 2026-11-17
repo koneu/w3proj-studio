@@ -7,13 +7,23 @@ import { dirname, join, resolve } from "node:path";
 
 /** The git work tree and the main checkout it belongs to (the same folder outside a worktree); null outside git. */
 export function mainCheckout(): { repo: string; main: string } | null {
+  if (checkout === undefined) checkout = findCheckout();
+  return checkout;
+}
+let checkout: { repo: string; main: string } | null | undefined;
+function findCheckout(): { repo: string; main: string } | null {
   const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
   const repo = git("--show-toplevel"), common = git("--git-common-dir");
   return repo ? { repo, main: common ? dirname(resolve(common)) : repo } : null;
 }
 
 /** The release CLI and the game folder to give it; null without the CLI. */
-function gameCli(): { bin: string; install: string[] } | null {
+export function gameCli(): { bin: string; install: string[] } | null {
+  if (cli === undefined) cli = findGameCli();
+  return cli;
+}
+let cli: { bin: string; install: string[] } | null | undefined;
+function findGameCli(): { bin: string; install: string[] } | null {
   const where = mainCheckout();
   if (!where) return null;
   const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
@@ -28,11 +38,11 @@ function gameCli(): { bin: string; install: string[] } | null {
 
 /** The game's files by full storage path (War3.w3mod:_HD.w3mod:…); those it has (none without the game or the CLI). */
 export function gameFiles(names: string[]): { name: string; bytes: Uint8Array }[] {
-  const cli = gameCli();
-  if (!cli) return [];
+  const g = gameCli();
+  if (!g) return [];
   const out: { name: string; bytes: Uint8Array }[] = [];
   for (const name of names) {
-    const r = spawnSync(cli.bin, ["game", "cat", name, ...cli.install], { maxBuffer: 1 << 28 });
+    const r = spawnSync(g.bin, ["game", "cat", name, ...g.install], { maxBuffer: 1 << 28 });
     if (r.status === 0 && r.stdout.length) out.push({ name, bytes: new Uint8Array(r.stdout) });
   }
   return out;
@@ -40,9 +50,9 @@ export function gameFiles(names: string[]): { name: string; bytes: Uint8Array }[
 
 /** A game table's rows through `game slk`; null without the game or the CLI. */
 export function gameTable(path: string, cols: string): Record<string, string>[] | null {
-  const cli = gameCli();
-  if (!cli) return null;
-  const r = spawnSync(cli.bin, ["game", "slk", path, "--col", cols, ...cli.install], { encoding: "utf8", maxBuffer: 1 << 26 });
+  const g = gameCli();
+  if (!g) return null;
+  const r = spawnSync(g.bin, ["game", "slk", path, "--col", cols, ...g.install], { encoding: "utf8", maxBuffer: 1 << 26 });
   if (r.status !== 0) return null;
   const [head, ...rows] = r.stdout.split(/\r?\n/).filter((l) => l);
   const names = head.split("\t");

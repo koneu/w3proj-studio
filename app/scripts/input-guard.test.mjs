@@ -2,8 +2,8 @@
 // mode with a fake /proc, plus the real command refusing without touching any display.
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -21,7 +21,7 @@ function py(args, env = {}) {
 
 /** A fake /proc: each entry is { argv, unix?, sockets? } (unix: the text of net/unix; sockets: inodes the process holds open). */
 function fakeProc(procs) {
-  const root = mkdtempSync(join(tmpdir(), "w3-guard-"));
+  const root = scratchDir("w3-guard-");
   procs.forEach((p, i) => {
     const dir = join(root, String(100 + i));
     mkdirSync(join(dir, "net"), { recursive: true });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fmt, lightAt, readLightMdl, writeLightMdl, type LightModel } from "./dnclight";
+import { fmt, lightAt, readLightMdl, readLightMdx, writeLightMdl, type LightModel } from "./dnclight";
 
 test("fmt prints numbers like C's %g (6 significant digits, 3-digit exponent)", () => {
   assert.equal(fmt(0), "0");
@@ -46,6 +46,35 @@ function sample(): LightModel {
     pivots: [[0, 0, 0]],
   };
 }
+
+/** MDLX, VERS 800 and a LITE chunk of one light without tracks (node 96 bytes, light 172). */
+function lightMdx() {
+  const b = new Uint8Array(4 + 12 + 8 + 172), d = new DataView(b.buffer);
+  b.set(new TextEncoder().encode("MDLXVERS"), 0);
+  d.setUint32(8, 4, true);
+  d.setUint32(12, 800, true);
+  b.set(new TextEncoder().encode("LITE"), 16);
+  d.setUint32(20, 172, true);
+  d.setUint32(24, 172, true);
+  d.setUint32(28, 96, true);
+  b.set(new TextEncoder().encode("Sun"), 32);
+  d.setInt32(116, -1, true);
+  d.setFloat32(136, 80, true);
+  return b;
+}
+
+test("a lighting MDX cut off anywhere reads up to a whole chunk or is refused with the reader's own error, not the DataView's", () => {
+  const bytes = lightMdx(), m = readLightMdx(bytes);
+  assert.deepEqual([m.version, m.lights.length, m.lights[0].name, m.lights[0].parentId, m.lights[0].attenuationEnd], [800, 1, "Sun", -1, { value: [80] }], "control: the whole file reads");
+  for (let n = 0; n < bytes.length; n++) {
+    try {
+      readLightMdx(bytes.subarray(0, n));
+    } catch (e) {
+      assert.ok(e instanceof Error && e.constructor === Error && !/DataView/.test(e.message), `cut to ${n} bytes: ${String(e)}`);
+    }
+  }
+  assert.throws(() => readLightMdx(bytes.subarray(0, 100)), /truncated/);
+});
 
 test("an MDL text written and read back gives the same model", () => {
   const m = sample();
