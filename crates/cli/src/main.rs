@@ -424,13 +424,15 @@ enum Cmd {
     /// --only: pathing, shadows and the minimap when the terrain or doodads changed since they were
     /// made (then `w3proj pack` takes them again), and the script. Shadows are calculated in whole,
     /// as Calculate Shadows does. A script that isn't the one Studio wrote last (edited by hand,
-    /// from the World Editor with other code) is kept, and vJASS isn't compiled.
+    /// from the World Editor with other code) is kept unless --force, and vJASS isn't compiled.
     Rebuild {
         project: PathBuf,
         /// Only these parts, comma-separated: wpm, shd, minimap, script.
         #[arg(long, value_delimiter = ',')]
         only: Option<Vec<String>>,
-        /// Make pathing, shadows and the minimap even when they follow the terrain and doodads.
+        /// Make pathing, shadows and the minimap even when they follow the terrain and doodads, and
+        /// replace a war3map.j / war3map.lua that isn't the script Studio wrote last (its code the
+        /// triggers don't make is lost; the line says which file was replaced). vJASS stays kept.
         #[arg(long)]
         force: bool,
         /// Game install folder: its tables, models and textures go into the files.
