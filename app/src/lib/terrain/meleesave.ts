@@ -207,7 +207,13 @@ export interface MeleeFiles {
   readBytes(path: string): Promise<Uint8Array>;
   gameText?(path: string): Promise<string>;
   gameBytes?(path: string): Promise<Uint8Array>;
+  /** readTypeVersions of gameText, kept between calls (meleeFiles keeps it per game). */
+  typeVersions?(): Promise<Map<string, number> | null>;
 }
+
+/** readTypeVersions per game: UnitData.slk is parsed once, not on every save (a campaign's import saves each chapter).
+ *  A result that isn't known (null) isn't kept, so the next call reads again. */
+const versionsByGame = new WeakMap<object, Promise<Map<string, number> | null>>();
 
 /** The project and the game of the app, as the melee rules read them. */
 export function meleeFiles(w3: Pick<W3Api, "workspace" | "game">): MeleeFiles {
@@ -217,6 +223,15 @@ export function meleeFiles(w3: Pick<W3Api, "workspace" | "game">): MeleeFiles {
     readBytes: (p) => w3.workspace.readBytes(p),
     gameText: (p) => w3.game.readText(p),
     gameBytes: (p) => w3.game.read(p),
+    typeVersions: () => {
+      let got = versionsByGame.get(w3.game);
+      if (!got) {
+        got = readTypeVersions({ gameText: (p) => w3.game.readText(p) });
+        versionsByGame.set(w3.game, got);
+        void got.then((v) => { if (!v && versionsByGame.get(w3.game) === got) versionsByGame.delete(w3.game); });
+      }
+      return got;
+    },
   };
 }
 
@@ -337,7 +352,8 @@ const tftMayClear = (facts: Pick<MeleeFacts, "customData" | "customTriggers" | "
 
 /** The game's unit and item types → their version (Units\UnitData.slk, Units\ItemData.slk: tftflag.ts typeVersions);
  *  null when there's no game or a table can't be read or has no versions. */
-export async function readTypeVersions(ws: Pick<MeleeFiles, "gameText">): Promise<Map<string, number> | null> {
+export async function readTypeVersions(ws: Pick<MeleeFiles, "gameText" | "typeVersions">): Promise<Map<string, number> | null> {
+  if (ws.typeVersions) return ws.typeVersions();
   if (!ws.gameText) return null;
   try {
     const units = typeVersions(parseSlk(await ws.gameText("Units\\UnitData.slk")), "unitID");
@@ -424,8 +440,11 @@ export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readon
     let mayClear = false;
     if (need === false) {
       const files = ws.files().map((f) => f.path);
-      const { triggers, known } = await readTriggers(ws, files);
-      mayClear = tftMayClear({ customData: await customDataState(ws, files), triggersKnown: known, customTriggers: !!triggers && hasCustomTriggers(triggers) });
+      // The object data first: it is small, and decides most custom maps without parsing their triggers.
+      if (await customDataState(ws, files) === false) {
+        const { triggers, known } = await readTriggers(ws, files);
+        mayClear = tftMayClear({ customData: false, triggersKnown: known, customTriggers: !!triggers && hasCustomTriggers(triggers) });
+      }
     }
     return { flags: tftFlagsAfter(info.flags, need, mayClear), reasons: [] };
   }

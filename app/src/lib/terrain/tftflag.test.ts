@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readTypeVersions, savedMelee, type MeleeFiles } from "./meleesave";
+import { meleeFiles, readTypeVersions, savedMelee, type MeleeFiles } from "./meleesave";
 import { placedNeedTft, REQUIRES_TFT, tftFlagsAfter, typeVersions } from "./tftflag";
 
 /** UnitData.slk: a footman (0), a tavern (1), a Reforged unit (2); ItemData.slk: an item of version 0 and one of 1. */
@@ -69,6 +69,18 @@ test("the versions come from the game's unit and item tables; unreadable ones ar
   assert.equal(await readTypeVersions(ws({ ...GAME, "Units\\UnitData.slk": "" })), null, "an empty UnitData.slk");
   assert.equal(await readTypeVersions(ws({ ...GAME, "Units\\ItemData.slk": 'ID;PWXL;N;E\nC;Y1;X1;K"itemID"\nC;Y2;X1;K"ratc"\nE\n' })), null, "items without versions");
   assert.deepEqual(typeVersions([{ unitID: "a", version: "" }, { unitID: "b", version: "x" }, { unitID: "c", version: "1" }], "unitID"), new Map([["c", 1]]));
+});
+
+test("the app's game tables are read once per game; a failed read is tried again", async () => {
+  let reads = 0, fail = true;
+  const game = { readText: async (p: string) => { reads++; if (fail) throw new Error("EIO"); return GAME[p]; }, read: async () => new Uint8Array() };
+  const w3 = { workspace: {} as never, game: game as never };
+  assert.equal(await readTypeVersions(meleeFiles(w3)), null, "unreadable");
+  fail = false;
+  assert.deepEqual(await readTypeVersions(meleeFiles(w3)), VERSIONS, "read again after the failure");
+  const after = reads;
+  assert.deepEqual(await readTypeVersions(meleeFiles(w3)), VERSIONS);
+  assert.equal(reads, after, "kept: not read again");
 });
 
 test("a save sets and clears 0x4000 on melee maps and others alike, through savedMelee", async () => {
