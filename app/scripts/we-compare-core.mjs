@@ -175,12 +175,19 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
       if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectLines goes with "expect": "differs"`);
       if (e.as !== "text-set") throw new Error(`${where}: compare[${i}].expectLines goes with "as": "text-set"`);
     }
+    // expectCorners (w3e only): the expectPaths of a difference whose exact corners change from run to run or cover
+    // the whole map: rules naming where (a box of corners), which fields and which values, and how many corners.
+    if (e.expectCorners !== undefined) {
+      checkExpectCorners(e.expectCorners, `${where}: compare[${i}].expectCorners`);
+      if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectCorners goes with "expect": "differs"`);
+      if (e.as !== "w3e") throw new Error(`${where}: compare[${i}].expectCorners goes with "as": "w3e"`);
+    }
     // minCount (unit-ids only): each save must hold at least this many objects (unit-ids compares no counts).
     if (e.minCount !== undefined) {
       if (!Number.isInteger(e.minCount) || e.minCount < 1) throw new Error(`${where}: compare[${i}].minCount is a whole number of 1 or more`);
       if (e.as !== "unit-ids") throw new Error(`${where}: compare[${i}].minCount goes with "as": "unit-ids"`);
     }
-    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths", "expectLines", "lines", "minCount"].includes(k));
+    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths", "expectLines", "expectCorners", "lines", "minCount"].includes(k));
     if (e.lines !== undefined) {
       if (typeof e.lines !== "string" || !e.lines) throw new Error(`${where}: compare[${i}].lines is a regular expression (only the lines matching it are compared)`);
       try { new RegExp(e.lines); } catch (x) { throw new Error(`${where}: compare[${i}].lines is not a regular expression: ${x.message}`); }
@@ -196,11 +203,11 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     // refused, except for the entries of tests/we-compare/differs-without-paths.json (written before the rule; that
     // list only shrinks). On a JSON kind the way out is expectPaths; on text, text-set, text-exact, bytes and wpm,
     // which can't name paths, it is a JSON kind of the file, or "lines" narrowed to what must match.
-    if (e.expect === "differs" && !e.expectPaths && !e.expectLines && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
+    if (e.expect === "differs" && !e.expectPaths && !e.expectLines && !e.expectCorners && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
       if (takesPaths(kind, e.file)) throw new Error(`${where}: compare[${i}] (${e.file}) expects "differs" without "expectPaths": name the paths that must differ (any difference would pass, also a World Editor step that missed)`);
       throw new Error(`${where}: compare[${i}] (${e.file}, as ${kind === "auto" ? `auto: ${autoKind(e.file, null)}` : kind}) expects "differs" on a kind that can't name what differs: any difference would pass, also a World Editor step that missed. Compare it as a JSON kind with "expectPaths", as text-set with "expectLines", or narrow it with "lines" to what must match`);
     }
-    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.expectLines ? { expectLines: e.expectLines } : {}), ...(e.lines ? { lines: e.lines } : {}), ...(e.minCount ? { minCount: e.minCount } : {}) };
+    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.expectLines ? { expectLines: e.expectLines } : {}), ...(e.expectCorners ? { expectCorners: e.expectCorners } : {}), ...(e.lines ? { lines: e.lines } : {}), ...(e.minCount ? { minCount: e.minCount } : {}) };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
   const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
@@ -248,6 +255,56 @@ export function checkTolerance(t, where = "tolerance") {
   if (typeof t === "number") { if (!ok(t)) throw new Error(`${where} is a number of 0 or more (numbers within it count as equal)`); return; }
   if (!isObject(t) || !Object.keys(t).length) throw new Error(`${where} is a number of 0 or more, or { "path pattern": number, "default": number }`);
   for (const [k, v] of Object.entries(t)) if (!k || !ok(v)) throw new Error(`${where}: "${k}" wants a number of 0 or more`);
+}
+
+/** The fields of a corner in the "w3e" kind's form (readW3e without the variations). */
+export const W3E_CORNER_FIELDS = ["ground", "water", "edge", "texture", "ramp", "blight", "wet", "boundary", "cliffType", "layer"];
+
+/**
+ * "expectCorners" (w3e): a list of rules, each { "box": [x0, y0, x1, y1] (corners, both ends included; left out: the
+ * whole map), "fields": ["texture", …] (W3E_CORNER_FIELDS), "we": n, "studio": n, "delta": n (optional: every claimed
+ * field's value in the World Editor's save, in Studio's, or the World Editor's minus Studio's), "corners": [min, max]
+ * (how many corners the rule claims) }. At least one rule wants a corner (min of 1 or more): a "differs" names
+ * something that must differ. Throws naming what is wrong.
+ */
+export function checkExpectCorners(rules, where = "expectCorners") {
+  const int = (v) => Number.isInteger(v);
+  if (!Array.isArray(rules) || !rules.length) throw new Error(`${where} is a list of rules: { "box": [x0, y0, x1, y1], "fields": [...], "corners": [min, max] }`);
+  rules.forEach((r, i) => {
+    const at = `${where}[${i}]`;
+    if (!isObject(r)) throw new Error(`${at} is an object`);
+    const unknown = Object.keys(r).filter((k) => !["box", "fields", "we", "studio", "delta", "corners"].includes(k));
+    if (unknown.length) throw new Error(`${at}: unknown key ${unknown.join(", ")}`);
+    if (r.box !== undefined && !(Array.isArray(r.box) && r.box.length === 4 && r.box.every((v) => int(v) && v >= 0) && r.box[0] <= r.box[2] && r.box[1] <= r.box[3])) throw new Error(`${at}.box is [x0, y0, x1, y1]: corners, x0 <= x1, y0 <= y1`);
+    if (!(Array.isArray(r.fields) && r.fields.length && r.fields.every((f) => W3E_CORNER_FIELDS.includes(f)))) throw new Error(`${at}.fields is a list of corner fields (${W3E_CORNER_FIELDS.join(", ")})`);
+    for (const k of ["we", "studio", "delta"]) if (r[k] !== undefined && !Number.isFinite(r[k])) throw new Error(`${at}.${k} is a number`);
+    if (!(Array.isArray(r.corners) && r.corners.length === 2 && r.corners.every((v) => int(v) && v >= 0) && r.corners[0] <= r.corners[1])) throw new Error(`${at}.corners is [min, max]: how many corners the rule claims`);
+  });
+  if (!rules.some((r) => r.corners[0] >= 1)) throw new Error(`${where}: no rule wants a corner (corners [0, …] on every one): a "differs" would pass on nothing named`);
+}
+
+/**
+ * The matcher of "expectCorners" rules (checked) for diffJson: `claim(path, we, studio)` takes a difference of the w3e
+ * form ("corners.12,30.texture") and says whether a rule claims it (the first rule whose box, field and values fit);
+ * `missing()` lists the rules whose count of claimed corners is outside their range, `counts()` each rule's count.
+ */
+export function cornerClaims(rules) {
+  const seen = rules.map(() => new Set());
+  const claim = (path, we, studio) => {
+    const m = /^corners\.(\d+),(\d+)\.(\w+)$/.exec(path);
+    if (!m) return false;
+    const x = Number(m[1]), y = Number(m[2]), field = m[3];
+    const i = rules.findIndex((r) => r.fields.includes(field)
+      && (!r.box || (x >= r.box[0] && y >= r.box[1] && x <= r.box[2] && y <= r.box[3]))
+      && (r.we === undefined || we === r.we) && (r.studio === undefined || studio === r.studio)
+      && (r.delta === undefined || (typeof we === "number" && typeof studio === "number" && we - studio === r.delta)));
+    if (i < 0) return false;
+    seen[i].add(`${x},${y}`);
+    return true;
+  };
+  const counts = () => seen.map((s) => s.size);
+  const missing = () => rules.flatMap((r, i) => (seen[i].size < r.corners[0] || seen[i].size > r.corners[1] ? [`expectCorners[${i}] (${r.fields.join(", ")}${r.box ? ` in ${r.box[0]},${r.box[1]} to ${r.box[2]},${r.box[3]}` : ""}): ${seen[i].size} corners, wants ${r.corners[0]} to ${r.corners[1]}`] : []));
+  return { claim, counts, missing };
 }
 
 /**
@@ -398,7 +455,7 @@ const show = (v) => {
  * of either document (a typo, or a field that is gone: it ignores nothing); with `expectPaths`, `expectMissing` (the
  * expected paths that don't differ) and `unexpected` ({ count, paths }: differences outside them).
  */
-export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPaths = []) {
+export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPaths = [], expectCorners = null) {
   const diffs = [];
   let count = 0;
   const entries = {};
@@ -419,6 +476,8 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPat
   };
   const expected = expectPaths.map(pathPattern);
   const expectHit = new Set();
+  // expectCorners (w3e): a difference a corner rule claims is expected too (cornerClaims).
+  const corners = expectCorners?.length ? cornerClaims(expectCorners) : null;
   const unexpected = { count: 0, paths: [] };
   const paths = [];
   const add = (path, x, y) => {
@@ -428,10 +487,10 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPat
     count++;
     paths.push(path);
     if (diffs.length < limit) diffs.push({ path, we: x, studio: y });
-    if (expected.length) {
+    if (expected.length || corners) {
       const hits = expected.flatMap((re, i) => (re.test(path) ? [i] : []));
       for (const i of hits) expectHit.add(i);
-      if (!hits.length) { unexpected.count++; if (unexpected.paths.length < limit) unexpected.paths.push(path); }
+      if (!hits.length && !corners?.claim(path, x, y)) { unexpected.count++; if (unexpected.paths.length < limit) unexpected.paths.push(path); }
     }
   };
   const walk = (x, y, path) => {
@@ -465,7 +524,8 @@ export function diffJson(a, b, limit = 10, tolerance = 0, ignore = [], expectPat
   return {
     equal: count === 0, count, entries, diffs: diffs.map((d) => ({ ...d, text: `${d.path}: WE ${show(d.we)}, Studio ${show(d.studio)}` })),
     ignoreUnmatched: [...unseen].map((i) => ignore[i]),
-    ...(expected.length ? { expectMissing: expectPaths.filter((p, i) => !expectHit.has(i)), unexpected } : {}),
+    ...(expected.length || corners ? { expectMissing: [...expectPaths.filter((p, i) => !expectHit.has(i)), ...(corners?.missing() ?? [])], unexpected } : {}),
+    ...(corners ? { cornerCounts: corners.counts() } : {}),
   };
 }
 
@@ -575,12 +635,13 @@ export function diffTextSet(a, b, limit = 10, expectLines = null) {
  *   "ERROR"    the comparison can't be made (an option the kind doesn't use; see also compareEntry's load errors).
  * `limit`, `tolerance`, `ignore`, `expectPaths` as the spec's compare entry has them.
  */
-export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = [], expectPaths = [], expectLines = null) {
+export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = [], expectPaths = [], expectLines = null, expectCorners = null) {
   if (!we || !studio) {
     const where = !we && !studio ? "neither map" : !we ? "Studio's save only" : "the World Editor's save only";
     return { file, kind, status: "MISSING", count: 1, diffs: [{ text: `the file is in ${where}` }] };
   }
   if (expectLines && kind !== "text-set") return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `expectLines has no effect on a file compared as ${kind} (only on text-set)` }] };
+  if (expectCorners && kind !== "w3e") return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `expectCorners has no effect on a file compared as ${kind} (only on w3e)` }] };
   if (!JSON_KINDS.includes(kind)) {
     const used = [toleranceUsed(tolerance) && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
     if (used.length) return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `${used.join(", ")} has no effect on a file compared as ${kind} (only on ${JSON_KINDS.join(", ")})` }] };
@@ -591,7 +652,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
   // minimap's tolerance is for its block colours only: its size is compared exactly.
   if (JSON_KINDS.includes(kind)) {
     const tol = toleranceAt(tolerance);
-    r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tol(path) : 0) : tol, ignore, expectPaths);
+    r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tol(path) : 0) : tol, ignore, expectPaths, expectCorners);
   }
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
   else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true);
@@ -651,7 +712,7 @@ function textOnly(text, file) {
  */
 export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImage } = {}) {
   let kind = c.as;
-  const base = { file: c.file, expect: c.expect, ...(c.expectPaths ? { expectPaths: c.expectPaths } : {}), ...(c.expectLines ? { expectLines: c.expectLines } : {}) };
+  const base = { file: c.file, expect: c.expect, ...(c.expectPaths ? { expectPaths: c.expectPaths } : {}), ...(c.expectLines ? { expectLines: c.expectLines } : {}), ...(c.expectCorners ? { expectCorners: c.expectCorners } : {}) };
   const sides = [["the World Editor's save", weReader], ["Studio's save", studioReader]];
   let loaded;
   try {
@@ -669,7 +730,7 @@ export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImag
   } catch (e) {
     return { ...base, kind, status: "ERROR", count: 1, diffs: [{ text: e.message }] };
   }
-  return { ...base, ...compareFile(c.file, kind, loaded[0], loaded[1], limit, c.tolerance, c.ignore, c.expectPaths ?? [], c.expectLines ?? null) };
+  return { ...base, ...compareFile(c.file, kind, loaded[0], loaded[1], limit, c.tolerance, c.ignore, c.expectPaths ?? [], c.expectLines ?? null, c.expectCorners ?? null) };
 }
 
 /** What the kind "auto" means for a file: the codecs' form when the unpack made one (json), else by name. */
@@ -809,8 +870,9 @@ export function formatReport(result, limit = 10, { strictIgnore = false } = {}) 
     for (const d of (f.diffs ?? []).slice(0, limit)) lines.push(`    ${d.text}`);
     if (f.count > (f.diffs ?? []).length && f.diffs?.length) lines.push(`    ... and ${f.count - f.diffs.length} more`);
     if (f.note) lines.push(`    (${f.note})`);
+    if (f.cornerCounts) lines.push(`    expectCorners: ${f.cornerCounts.map((n, i) => `[${i}] ${n} corner${n === 1 ? "" : "s"}${f.expectCorners?.[i] ? ` (wants ${f.expectCorners[i].corners[0]} to ${f.expectCorners[i].corners[1]})` : ""}`).join(", ")}`);
     if (f.expectMissing?.length) lines.push(`    expected to differ but don't: ${f.expectMissing.join(", ")}`);
-    if (f.unexpected?.count) lines.push(`    ${f.unexpected.count} difference${f.unexpected.count === 1 ? "" : "s"} outside ${f.expectLines ? "expectLines" : "expectPaths"}: ${f.unexpected.paths.join(", ")}${f.unexpected.count > f.unexpected.paths.length ? ", ..." : ""}`);
+    if (f.unexpected?.count) lines.push(`    ${f.unexpected.count} difference${f.unexpected.count === 1 ? "" : "s"} outside ${f.expectLines ? "expectLines" : f.expectCorners ? (f.expectPaths ? "expectPaths and expectCorners" : "expectCorners") : "expectPaths"}: ${f.unexpected.paths.join(", ")}${f.unexpected.count > f.unexpected.paths.length ? ", ..." : ""}`);
     if (f.ignoreUnmatched?.length) lines.push(`    ${strictIgnore ? "error" : "warning"}: ignore names no path of either file: ${f.ignoreUnmatched.join(", ")}`);
   }
   return lines.join("\n");

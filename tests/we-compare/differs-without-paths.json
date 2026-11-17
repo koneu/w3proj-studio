@@ -1,12 +1,5 @@
 {
-  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" without naming expectPaths: any difference passes them, also a World Editor step that never applied. \"entries\": on a JSON kind (written before parseSpec refused that, 2026-11-17): give an entry its expectPaths from a real World Editor run, then take it out. \"textEntries\": on text, text-set, text-exact, bytes or wpm, which can't name paths (refused since 2026-11-17): compare the file as a JSON kind with expectPaths, or narrow it with lines to what must match, then take it out. Both only shrink (we-compare-runner.test.mjs fails on an entry that is no longer needed, and on a longer list). The entries left (2026-11-17, two World Editor runs each): boundary-flags-wpm (its Blight brush turns a random set of corners to the second ground tile), drag-stroke-quick and drag-stroke-raise (the editor's own ticks decide where a drag stamps), low-ground-d-open, water-floor-e-deep-3 and water-floor-e-shallow-3 (every corner of the map differs: 3200 to 4224 paths); each difference is an open point (bugs.md; the quick drag's gaps in onhold.md).",
-  "entries": [
-    "boundary-flags-wpm war3map.w3e",
-    "drag-stroke-quick war3map.w3e",
-    "drag-stroke-raise war3map.w3e",
-    "low-ground-d-open war3map.w3e",
-    "water-floor-e-deep-3 war3map.w3e",
-    "water-floor-e-shallow-3 war3map.w3e"
-  ],
+  "description": "we-compare compare entries (\"spec-name file\") that expect \"differs\" without naming expectPaths: any difference passes them, also a World Editor step that never applied. \"entries\": on a JSON kind (written before parseSpec refused that, 2026-11-17): give an entry its expectPaths from a real World Editor run, then take it out. \"textEntries\": on text, text-set, text-exact, bytes or wpm, which can't name paths (refused since 2026-11-17): compare the file as a JSON kind with expectPaths, or narrow it with lines to what must match, then take it out. Both only shrink (we-compare-runner.test.mjs fails on an entry that is no longer needed, and on a longer list). Emptied 2026-11-17 (branch fix-we-stable): the last six (boundary-flags-wpm, drag-stroke-quick, drag-stroke-raise, low-ground-d-open, water-floor-e-deep-3, water-floor-e-shallow-3), whose differences change from run to run or cover the whole map, name them with expectCorners (w3e: boxes of corners, fields, values and a count per rule).",
+  "entries": [],
   "textEntries": []
 }

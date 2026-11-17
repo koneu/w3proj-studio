@@ -463,7 +463,7 @@
   },
   {
     "name": "water-floor-e-deep-3",
-    "description": "bugs.md 'Under Enforce Water Height Limits, a brush whose click corner is at -2048 with neighbours below it': low-ground-e.w3x (make-low-ground.mjs: every corner at stored -8192 on level 1, world -2176, the clicked corner 32,30 on level 2, world -2048), Deep, size 3, one click. DIFFERS (2026-11-15, branch snap-angle-we): the editor draws the water (the brush's corners to level 0, the clicked one lifted to -7168, a ring round them) and raises EVERY corner of the map below -2048 to it (stored -7680 on level 1, corner 0,0 too), which the open alone doesn't (low-ground-e-open); Studio refuses the stroke (its limit check takes each corner's own height, limits.ts waterLimitHits) and changes nothing",
+    "description": "bugs.md 'Under Enforce Water Height Limits, a brush whose click corner is at -2048 with neighbours below it': low-ground-e.w3x (make-low-ground.mjs: every corner at stored -8192 on level 1, world -2176, the clicked corner 32,30 on level 2, world -2048), Deep, size 3, one click. DIFFERS (2026-11-15, branch snap-angle-we): the editor draws the water (the brush's corners to level 0, the clicked one lifted to -7168, a ring round them) and raises corners of the map below -2048 to it (stored -7680 on level 1, corner 0,0 too), which the open alone doesn't (low-ground-e-open); Studio refuses the stroke (its limit check takes each corner's own height, limits.ts waterLimitHits) and changes nothing. expectCorners (2026-11-17, branch fix-we-stable, two editor runs alike to the corner): the brush's box 29,27 to 35,33 (water 0, cliff type 1, 13 corners wet on level 0, all 49 heights), and outside it exactly 3089 corners lifted from -8192 to -7680: not every corner, the west part of the map up to a ragged edge (x 30 to 63 by row), the east part stays -8192",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-e.w3x"
     },
@@ -478,7 +478,17 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [
+        { "box": [29, 27, 35, 33], "fields": ["water"], "we": 0, "studio": 8192, "corners": [37, 37] },
+        { "box": [29, 27, 35, 33], "fields": ["cliffType"], "we": 1, "studio": 15, "corners": [37, 37] },
+        { "box": [29, 27, 35, 33], "fields": ["wet"], "we": 1, "studio": 0, "corners": [13, 13] },
+        { "box": [29, 27, 35, 33], "fields": ["layer"], "we": 0, "corners": [13, 13] },
+        { "box": [29, 27, 35, 33], "fields": ["ground"], "corners": [49, 49] },
+        { "fields": ["ground"], "we": -7680, "studio": -8192, "corners": [3089, 3089] }
+      ]
+    }],
     "limit": 30
   },
   {
@@ -498,7 +508,17 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [
+        { "box": [29, 27, 35, 33], "fields": ["water"], "we": 0, "studio": 8192, "corners": [25, 25] },
+        { "box": [29, 27, 35, 33], "fields": ["cliffType"], "we": 1, "studio": 15, "corners": [33, 33] },
+        { "box": [29, 27, 35, 33], "fields": ["wet"], "we": 1, "studio": 0, "corners": [1, 1] },
+        { "box": [29, 27, 35, 33], "fields": ["layer"], "we": 1, "studio": 2, "corners": [1, 1] },
+        { "box": [29, 27, 35, 33], "fields": ["ground"], "corners": [49, 49] },
+        { "fields": ["ground"], "we": -7680, "studio": -8192, "corners": [3089, 3089] }
+      ]
+    }],
     "limit": 30
   },
   {
@@ -520,7 +540,7 @@
   },
   {
     "name": "low-ground-d-open",
-    "description": "low-ground-d.w3x (make-low-ground.mjs: stored ground -8400, below the word's 0, the clicked corner at -8192) opened and saved. DIFFERS (2026-11-15, branch snap-angle-we): the editor reads the ground word in its low 14 bits: every -8400 corner (word -208) comes back as 7984 (0x3f30), the -8192 one stays; Studio keeps -8400",
+    "description": "low-ground-d.w3x (make-low-ground.mjs: stored ground -8400, below the word's 0, the clicked corner at -8192) opened and saved. DIFFERS (2026-11-15, branch snap-angle-we): the editor reads the ground word in its low 14 bits: every -8400 corner (word -208) comes back as 7984 (0x3f30), the -8192 one stays; Studio keeps -8400. expectCorners (2026-11-17, branch fix-we-stable, two runs): the ground of 4224 corners, 7984 against -8400, and nothing else",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/low-ground-d.w3x"
     },
@@ -532,7 +552,10 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e", "expect": "differs" }],
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [{ "fields": ["ground"], "we": 7984, "studio": -8400, "corners": [4224, 4224] }]
+    }],
     "limit": 20
   }
 ]
