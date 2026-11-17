@@ -5958,6 +5958,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redraw();
           }
         };
+        /** Set once this editor is handed to the workbench (resolve returned): before that its tab has no editor to save,
+         *  so a save asked for while it opens would be lost (followFlags). */
+        let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
           handle, ready, screenshot: takeScreenshot,
@@ -5971,17 +5974,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           minimapSource: exportSource,
           followFlags: async (follow) => {
+            // Still opening (or its open failed): the file is the caller's to write, and an editor still opening reads it
+            // again once it's there (the workbench's missed saves). The workbench sets the tab's editor right after resolve
+            // returns: a macrotask later it has it, so the save below reaches it.
+            if (!handed) return false;
+            await new Promise((done) => setTimeout(done, 0));
             await ready();
-            if (disposed || !dooFile || !editable) return false;
+            if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record) return false;
             const f = dooFile;
             const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
-            if (!changes.length) return true;
             // Not an edit of the user's: no undo step. The file follows the script as the World Editor's save writes it.
             for (const c of changes) (f.list[c.index] as Placed & { flags?: number }).flags = c.flags;
+            const clean = !mark.isDirty(at) && !w3.editors.isDirty(doc.path);
+            // Flags taken while it had unsaved edits, which were undone since: the editor is clean, the file behind.
+            const saved = savedDoodads;
+            const behind = clean && !!saved && saved.length === f.list.length
+              && f.list.some((p, i) => (p as Placed & { flags?: number }).flags !== (saved[i] as Placed & { flags?: number }).flags);
+            if (!changes.length && !behind) return true;
             objectsTouched = true;
             // Saved now unless there are unsaved edits, which the save of them shouldn't be taken for: their save writes
-            // the flags along (and runs this again).
-            if (!w3.editors.isDirty(doc.path)) {
+            // the flags along (and runs this again). Should they be undone instead, the next run (packing follows the
+            // flags again: w3.script.followFlags) finds the file behind and saves.
+            if (clean) {
               doc.setDirty(true);
               await w3.editors.save(doc.path);
             }
@@ -6246,6 +6260,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderer.dispose();
           },
         };
+        handed = true;
         return editorApi;
       },
     }),

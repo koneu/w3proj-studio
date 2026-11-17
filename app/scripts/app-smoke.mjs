@@ -4513,9 +4513,44 @@ async function destructableFlags(page, found) {
     .catch(() => fail(`with the trigger gone the tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 2`));
   if (script().includes(global)) fail(`with the trigger gone the script still has ${global}`);
 
+  // An unsaved edit in the editor: the trigger's script run doesn't save it (the flag waits in the editor); the edit
+  // undone, the editor is clean with the file behind the script, and packing follows the flags. The trigger is made
+  // disabled first (MCP tools refuse while an editor has unsaved changes) and enabled in war3map.wtg.json, as a
+  // Trigger Editor's save would write it.
+  await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
+  await k.tool("set_trigger_enabled", { name: "Names Tree", enabled: false });
+  await settled(page);
+  if (script().includes(`set ${global} = BlzCreateDestructable`) || trees().find((d) => d.position[0] === 0)?.flags !== 2) fail(`a disabled trigger made the script create the tree (control): flags ${trees().find((d) => d.position[0] === 0)?.flags}`);
+  const edit = await k.run("w3.terrain.adjustCliffLevels", 1);
+  if (edit) return fail(`Adjust Cliff Levels (unsaved): ${edit}`);
+  await page.evaluate(`(async () => {
+    const wtg = JSON.parse(await w3.workspace.readText("map/war3map.wtg.json"));
+    const t = wtg.items.find((i) => i.name === "Names Tree");
+    if (!t) throw new Error("no trigger Names Tree in war3map.wtg.json");
+    t.enabled = true;
+    await w3.workspace.writeText("map/war3map.wtg.json", JSON.stringify(wtg, null, 2));
+  })()`);
+  await settled(page);
+  await until("the script again", () => script().includes(`set ${global} = BlzCreateDestructable`), 20000).catch(() => fail(`the script doesn't create ${global} again`));
+  if (!(await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`))) fail("the editor's unsaved edit was saved by the script's run");
+  if (trees().find((d) => d.position[0] === 0)?.flags !== 2) fail(`with an unsaved edit in the editor the file's flags changed (${trees().find((d) => d.position[0] === 0)?.flags}): the edit was saved along`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled(page);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("undoing the unsaved edit left the editor changed");
+  const built = resolve(k.root, await page.evaluate(`w3.workspace.project().default_output`));
+  rmSync(built, { force: true });
+  await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+  await until("the build", () => existsSync(built), 60000).catch(() => fail("Pack Map wrote no map"));
+  await settled(page);
+  if (trees().find((d) => d.position[0] === 0)?.flags !== 0) fail(`after packing the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0 (packing didn't follow them)`);
+  await k.tool("set_trigger_enabled", { name: "Names Tree", enabled: false });
+  await settled(page);
+  await until("the tree's flag back again", () => trees().find((d) => d.position[0] === 0)?.flags === 2, 20000)
+    .catch(() => fail(`with the trigger disabled the tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 2`));
+
   // The terrain editor closed: the file itself follows.
   await page.evaluate(`w3.editors.closeAll()`);
-  await k.tool("create_script_trigger", { name: "Names Tree", script: `function InitTrig_Names_Tree takes nothing returns nothing\n    call KillDestructable( ${global} )\nendfunction\n` });
+  await k.tool("set_trigger_enabled", { name: "Names Tree", enabled: true });
   await settled(page);
   await until("the flag in the file", () => trees().find((d) => d.position[0] === 0)?.flags === 0, 20000)
     .catch(() => fail(`with no terrain editor open the named tree's flags are ${trees().find((d) => d.position[0] === 0)?.flags}, not 0`));

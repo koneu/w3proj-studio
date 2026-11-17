@@ -601,6 +601,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (path) await due(path);
       await running.catch(() => true);
     }),
+    // Packing, once everything is saved and the script settled: the destructables' flags follow the script on disk again,
+    // when it is the one the map's data makes (an editor that held them with unsaved edits may have had those undone
+    // since, leaving the file behind the script). Nothing is written otherwise.
+    w3.commands.register("w3.script.followFlags", () => {
+      running = running.catch(() => true).then(async () => {
+        const root = w3.workspace.project()?.root;
+        if (!root) return true;
+        try {
+          const made = await generate(true);
+          if (made.vjass || !made.flags || w3.workspace.project()?.root !== root) return true;
+          const current = await readScript(made.path);
+          if (typeof current !== "string" || current !== made.text) return true;
+          await followFlags(made.flags, root, "packing");
+        } catch (e) {
+          out.append(`packing: the destructables' flags weren't looked at: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return true;
+      });
+      return running.then(() => {}, () => {});
+    }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards.
     w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
       const written = await write("command");
