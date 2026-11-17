@@ -342,7 +342,11 @@ function levelRows(t: Terrain, x0: number, x1: number, y0: number, y1: number): 
  *  then the cliff types). */
 function increaseTwo(t: Terrain, x: number, y: number, size: number, limits = false): boolean {
   const target = painterTools.layerTarget(t, "cliffUp2", x, y, 1, limits);
-  if (!target) return false;
+  return target ? stampCliff(t, x, y, size, target) : false;
+}
+/** A cliff brush stamp at corner (x, y) setting `target` as it is (a level Increase itself refuses: the World Editor's
+ *  wrapped click), then the cliff types. */
+function stampCliff(t: Terrain, x: number, y: number, size: number, target: painterTools.LayerTarget): boolean {
   const s = new Stroke("cliffUp2");
   const changed = applyLayer(t, painterTools.cornerBrush(t, t.offsetX + x * 128, t.offsetY + y * 128, size), "cliffUp2", target, s);
   retypeCliffs(t, s, CLIFF_GROUND, 1);
@@ -373,11 +377,16 @@ test("the cliff slope spreads ring after ring until no cliff is taller than two 
   // Its cliff types: the slope's corners took Grass Cliff, the level-2 corners round its outermost ring didn't (the
   // first click's stencil, rows 31 to 29, did: tools.ts typingArea). The editor's, x 27..37, y 31..20:
   assert.deepEqual(typeRows(t, 27, 37, 20, 31), ["ffff111ffff", ...Array(10).fill("f111111111f"), "fffffffffff"]);
-  // Size 3: the seventh click hit the level-14 top and wrapped round to 0 (strokeLayer), the slope taking the plateau
-  // down round the pit; the eighth to tenth clicks climbed again. The editor's levels of x 22..42, y 34..14:
+  // Size 3: the seventh click hit the level-14 top and wrapped round to 0 in the editor, the slope taking the plateau
+  // down round the pit; the eighth to tenth clicks climbed again. Studio refuses that click (strokeLayer), so the
+  // editor's wrapped stamp is put down directly here to check the slope against its levels of x 22..42, y 34..14:
   const u = flat64(2);
-  const clicks = [30, 29, 27, 26, 25, 24, 23];
-  for (const y of clicks) increaseTwo(u, 32, y, 3);
+  for (const y of [30, 29, 27, 26, 25, 24]) increaseTwo(u, 32, y, 3);
+  const six = structuredClone(u.corners);
+  assert.equal(u.corners[23 * u.width + 32].layer, 14, "the seventh click's corner is on the top (control)");
+  assert.equal(increaseTwo(u, 32, 23, 3), false, "Studio's seventh click is refused");
+  assert.deepEqual(u.corners, six, "and changes nothing");
+  stampCliff(u, 32, 23, 3, { layer: 0, start: 14, cliffType: 1 });
   assert.deepEqual(levelRows(u, 22, 42, 14, 34), [
     "222222222222222222222", "222222222222222222222", "222222222444222222222", "222224444464444422222", "222244666666666442222",
     "222446688888886644222", "222466866666668664222", "222468664444466864222", "222466644222446664222", "222466442202244664222",
@@ -401,16 +410,22 @@ test("the cliff slope spreads ring after ring until no cliff is taller than two 
   ]);
 });
 
-test("Increase past the top wraps round without Enforce Terrain Limits and does nothing above 14 with it", () => {
+test("Increase past the top is refused without Enforce Terrain Limits (the editor wraps round) and does nothing above 14 with it", () => {
   // we-drive, 2026-11-15, branch cliff-slope-we, one size-1 click on maps of one level: switch off, Increase Two from 14
   // and One from 15 set the corner to 0 and left a pit of square rings 2, 4, … 12 (the 14 field from x 25..39); switch
-  // on, Increase One from 14 and Two from 13 and 14 changed nothing, One from 13 and Two from 12 built 14.
-  const { strokeLayer, ENFORCED_TOP_LEVEL } = painterTools;
+  // on, Increase One from 14 and Two from 13 and 14 changed nothing, One from 13 and Two from 12 built 14. Studio
+  // refuses the wrap (decided 2026-11-17) and says why in both cases (increaseRefusal).
+  const { strokeLayer, increaseRefusal, ENFORCED_TOP_LEVEL } = painterTools;
   assert.equal(ENFORCED_TOP_LEVEL, 14);
-  assert.equal(strokeLayer("cliffUp2", 14), 0);
-  assert.equal(strokeLayer("cliffUp", 15), 0);
-  assert.equal(strokeLayer("cliffUp2", 15), 1);
+  assert.equal(strokeLayer("cliffUp2", 14), null, "the editor's wrap to 0 is refused");
+  assert.equal(strokeLayer("cliffUp", 15), null);
+  assert.equal(strokeLayer("cliffUp2", 15), null);
+  assert.match(String(increaseRefusal("cliffUp2", 14)), /^Not done: Increase would raise the ground from cliff level 14 to 16, past 15, .*wrap it round to level 0\)\.$/);
+  assert.match(String(increaseRefusal("cliffUp", 14, true)), /past 14, the top the map's Enforce Terrain Limits allows/);
+  assert.equal(increaseRefusal("cliffUp2", 13), null);
+  assert.equal(increaseRefusal("cliffDown", 15), null, "only Increase is refused");
   assert.equal(strokeLayer("cliffUp2", 13), 15, "15 is a level when the switch is off (Increase Two from 13 built it)");
+  assert.equal(strokeLayer("cliffUp", 14), 15);
   assert.equal(strokeLayer("cliffUp", 14, true), null);
   assert.equal(strokeLayer("cliffUp2", 13, true), null);
   assert.equal(strokeLayer("cliffUp2", 14, true), null);
@@ -419,7 +434,10 @@ test("Increase past the top wraps round without Enforce Terrain Limits and does 
   assert.equal(strokeLayer("cliffDown2", 15, true), 13, "only Increase is held");
   assert.equal(strokeLayer("cliffLevel", 15, true), 15);
   const t = flat64(14);
-  assert.equal(increaseTwo(t, 32, 30, 1), true);
+  assert.equal(increaseTwo(t, 32, 30, 1), false, "Studio's click is refused");
+  assert.deepEqual(levelRows(t, 0, 64, 0, 64), levelRows(flat64(14), 0, 64, 0, 64), "and changes nothing");
+  // The editor's wrapped stamp, put down directly: the slope round it is the editor's pit.
+  stampCliff(t, 32, 30, 1, { layer: 0, start: 14, cliffType: 1 });
   assert.deepEqual(levelRows(t, 25, 39, 23, 37), [
     "eeeeeeeeeeeeeee", "eccccccccccccce", "ecaaaaaaaaaaace", "eca888888888ace", "eca866666668ace", "eca864444468ace",
     "eca864222468ace", "eca864202468ace", "eca864222468ace", "eca864444468ace", "eca866666668ace", "eca888888888ace",

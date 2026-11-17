@@ -148,10 +148,12 @@ const WATER_BITS = 0x3fff;
  *    so the water keeps its depth; its top two bits (the map edge bit) stay;
  *  - downwards the corners stop at level 0, so a deep shift squeezes the low ones together, and a corner's water moves
  *    only as far as its own level did (map 03 by -5: level 5 went to 0 with its water 2560 down, level 3 to 0 with 1536);
- *  - upwards the shift goes as far as cliffShiftRange's max (a bigger one is cut to it, as the dialog caps it at +10).
+ *  - upwards the editor's shift goes as far as cliffShiftRange's max (a bigger one is cut to it, as its dialog caps it
+ *    at +10). Studio refuses a bigger one instead, with nothing changed (decided 2026-11-17: refuse, never clamp).
  *  The editor's water word wraps round its 14 bits (0x3e80 +1 gave 0x0080, 0x0000 -3 gave 0x3a00), even with Enforce
- *  Water Height Limits on. That would throw a lake from the top of the range to the bottom, so a shift that wraps a
- *  corner with water is refused here, with nothing changed; a dry corner's word wraps as in the editor.
+ *  Water Height Limits on, on wet and dry corners alike. That would throw a lake from the top of the range to the
+ *  bottom (and a dry corner's water, once it is made wet), so a shift that wraps any corner's word is refused here,
+ *  with nothing changed (decided 2026-11-17).
  *  (Runs on 2026-11-11 reported the water words kept on map 03 and 4v4_SnowareBay; the saves of 2026-11-13 of both,
  *  and map 03's of 2026-11-09, show them moving. The editor's w3e of cliff.w3m and SnowareBay by +1 is what this
  *  writes, byte for byte.)
@@ -164,19 +166,25 @@ export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog, area?:
   if (!Number.isInteger(by)) return "The adjustment is a whole number of cliff levels.";
   const corners = cornersOf(t, area);
   if (by === 0 || !corners.length) return 0;
-  const shift = Math.min(by, cliffShiftRange(t, area).max);
+  const { max } = cliffShiftRange(t, area);
+  if (by > max) {
+    const what = area ? "this area" : "the map";
+    return max === 0
+      ? `Not done: ${what} can't go up: its highest corner is at level ${TOP_LEVEL} already, the top.`
+      : `Not done: ${what} goes up by at most +${max} (its highest corner to level ${TOP_LEVEL}, at most +${MAX_RAISE} in one go), not +${by}.`;
+  }
   const moves: [number, number][] = [];
   let wrapped = 0;
   for (const i of corners) {
     const c = t.corners[i];
-    const layer = Math.max(0, c.layer + shift);
+    const layer = Math.max(0, c.layer + by);
     if (layer === c.layer) continue;
     const level = (c.rawWater & WATER_BITS) + (layer - c.layer) * WATER_PER_LEVEL;
-    if (c.hasWater && (level < 0 || level > WATER_BITS)) wrapped++;
+    if (level < 0 || level > WATER_BITS) wrapped++;
     moves.push([i, layer]);
   }
   if (wrapped) {
-    return `Not done: the water at ${wrapped} corner${wrapped === 1 ? "" : "s"} would go past the highest or lowest water height a map can store (the World Editor would wrap it round to the other end).`;
+    return `Not done: the water level stored at ${wrapped} corner${wrapped === 1 ? "" : "s"} would go past the highest or lowest a map can store (the World Editor would wrap it round to the other end).`;
   }
   const before = new Map<number, number>();
   for (const [i, layer] of moves) {

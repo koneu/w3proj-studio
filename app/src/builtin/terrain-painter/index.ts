@@ -9,7 +9,7 @@ import { TILESETS } from "../../lib/terrain/tilesets";
 import { HEIGHT_TICK, strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, increaseRefusal, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -410,8 +410,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const cx = Math.round((g[0] - terrain.offsetX) / 128), cy = Math.round((g[1] - terrain.offsetY) / 128);
         const c = terrain.corners[cy * terrain.width + cx];
         // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
-        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), enforceLimits()) : { layer: c.layer };
-        if (layer === null) return;
+        const limits = enforceLimits();
+        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), limits) : { layer: c.layer };
+        if (layer === null) {
+          // An Increase past the top is refused with a word why (never wrapped round); a Decrease below 0 says nothing.
+          const why = c && isLayerTool(tool) ? increaseRefusal(tool, c.layer, limits) : null;
+          if (why) void w3.window.showWarning(why);
+          return;
+        }
         stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);
         else applyAt(g);
