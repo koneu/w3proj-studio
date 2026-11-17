@@ -71,6 +71,7 @@ import { Hands, problems, sleep, until } from "./cdp.mjs";
 import { buildApp, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 import { parseLook, resolveLook, studioCamera, studioLighting } from "./we-camera.mjs";
+import { lit } from "./jslit.mjs";
 
 const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key", "--click"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
@@ -196,8 +197,8 @@ async function main() {
       await sleep(500);
     };
     const open = async (dir) => {
-      await page.evaluate(`(async () => { window.__driveEd = null; await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(dir)}); })()`);
-      await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+      await page.evaluate(`(async () => { window.__driveEd = null; await w3.editors.closeAll(); await w3.workspace.open(${lit(dir)}); })()`);
+      await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(dir)}`));
     };
     const canvasClip = () => page.evaluate(`(() => {
       const area = document.querySelector(".editor-area, .editors, main") ?? document;
@@ -217,7 +218,7 @@ async function main() {
       try {
         if (step === "--map") {
           const map = resolve(arg), dir = join(opts.work, basename(map).replace(/\.(w3x|w3m)$/i, ""));
-          await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game)} })`);
+          await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${lit(map)}, dir: ${lit(dir)}, allowIncomplete: false, install: ${lit(game)} })`);
           await open(dir);
           out({ step, project: dir });
         } else if (step === "--project") {
@@ -226,7 +227,7 @@ async function main() {
           await open(dir);
           out({ step, project: dir });
         } else if (step === "--open") {
-          await page.evaluate(`w3.editors.open(${JSON.stringify(arg)})`);
+          await page.evaluate(`w3.editors.open(${lit(arg)})`);
           await sleep(300);
           out({ step, active: await page.evaluate(`w3.editors.activePath()`) });
         } else if (step === "--terrain") {
@@ -242,13 +243,13 @@ async function main() {
             const t = await page.evaluate(`window.__driveEd.view().target`);
             await page.evaluate(`window.__driveEd.lookAt(${x ?? t[0]}, ${y ?? t[1]})`);
           }
-          await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${JSON.stringify(v)} }); })()`);
+          await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${lit(v)} }); })()`);
           await sleep(500);
           out({ step, view: await page.evaluate(`window.__driveEd.view()`) });
         } else if (step === "--compare-ready") {
           await editor();
           const settings = studioLighting(arg);
-          for (const [k, v] of Object.entries(settings)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${JSON.stringify(v)})`);
+          for (const [k, v] of Object.entries(settings)) await page.evaluate(`w3.settings.set(${lit(k)}, ${lit(v)})`);
           await settle();
           out({ step, mode: arg, settings });
         } else if (step === "--view-size") {
@@ -260,7 +261,7 @@ async function main() {
           const got = await page.evaluate(`(async () => {
             const stage = window.__driveEd.host.querySelector(".model-stage");
             if (!stage) throw new Error("no .model-stage in the terrain view");
-            const size = ${JSON.stringify(size)};
+            const size = ${lit(size)};
             if (size) {
               const r = devicePixelRatio;
               Object.assign(stage.style, { position: "fixed", left: "0", top: "0", flex: "none", zIndex: "10000",
@@ -310,7 +311,7 @@ async function main() {
           out({ step, tool: name, text: await mcpCall(page, name, args) });
         } else if (step === "--command") {
           // Not awaited to the end: a command can wait for its toast's buttons.
-          const r = await page.evaluate(`Promise.race([w3.commands.execute(${JSON.stringify(arg)}).then(() => null, (e) => String(e)), new Promise((r) => setTimeout(() => r("still running after 10 s (waiting for an answer?)"), 10000))])`);
+          const r = await page.evaluate(`Promise.race([w3.commands.execute(${lit(arg)}).then(() => null, (e) => String(e)), new Promise((r) => setTimeout(() => r("still running after 10 s (waiting for an answer?)"), 10000))])`);
           out({ step, command: arg, error: r });
         } else if (step === "--eval") {
           out({ step, value: await page.evaluate(evalSource(arg)) });
