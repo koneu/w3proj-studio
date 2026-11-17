@@ -13533,7 +13533,7 @@ async function triggerMultiSelect(page, found) {
 
 /** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
  *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
- *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
+ *  lines); Allow negative real values (an unreal field refuses -5 from a tool and makes a typed one 0 until the setting is on); the
  *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step,
  *  Ctrl+Z and Ctrl+Y there, undo and redo pressed during a step's file write waiting for it); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
  *  region), Rename (a sound) and Play Sound, done by the owning editors, and a group's menu; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
@@ -14215,9 +14215,10 @@ async function editorExtras(page, found) {
     await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpr"; s.dispatchEvent(new Event("input")); })()`);
     await until("the field uhpr", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input:not(.color-tools-picker)").length === 1`), 5000).catch(() => fail("the field filter doesn't find uhpr alone"));
     const typeRegen = (v) => page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)"); i.value = ${lit(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input:not(.color-tools-picker)")?.classList.contains("invalid") ?? null; })()`);
-    if ((await typeRegen("-2")) !== true) fail("typing -2 into an unreal field wasn't refused without the setting");
+    // Without the setting a typed -2 becomes 0, as the World Editor's Modify Selected Field makes it (we-misc-2).
+    if ((await typeRegen("-2")) !== false) fail("typing -2 into an unreal field was refused instead of made 0 without the setting");
     await k.save();
-    if (modOf("uhpr") !== undefined) fail(`a refused -2 reached the file: ${modOf("uhpr")}`);
+    if ((modOf("uhpr") ?? 0) !== 0) fail(`a typed -2 without the setting reached the file as ${modOf("uhpr")}, not 0`);
     await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", true)`);
     if ((await typeRegen("-2")) !== false) fail("typing -2 into an unreal field was refused with the setting on");
     await k.save();

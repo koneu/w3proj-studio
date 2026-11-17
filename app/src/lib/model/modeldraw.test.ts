@@ -56,20 +56,32 @@ test("a see-through tint scales the threshold as before", () => {
   assert.deepEqual(drawn(0, "uOpaque", [1, 1, 1, 0.5]), [1]);
 });
 
-test("a geoset animation's colour is red, green, blue as stored (ShimmeringPortal's ring is violet, not pink)", () => {
-  // The fire ring of Doodads\Cinematic\ShimmeringPortal (geoset 6) stores 0.467, 0, 0.992: the World Editor and the
-  // game show the portal violet (we-drive, example-maps/image-7.png); read blue first it was pink.
+/** The colours (uColor, red, green, blue) a draw of a one-layer model with this geoset animation gave, one per clock. */
+function geosetColours(anim: { color: [number, number, number]; colorTrack?: { interp: 0; globalSeq: number; times: Uint32Array; values: Float32Array; size: number } }, clocks: { frame: number; seqStart: number; seqEnd: number; time: number }[]) {
   const colours: number[][] = [];
   const { gl } = recordingGl();
   const recording = new Proxy(gl as unknown as Record<string, unknown>, {
     get: (t, k) => (k === "uniform4f" ? (loc: string, ...v: number[]) => { if (loc === "uColor") colours.push(v); } : t[k as string]),
   }) as unknown as WebGL2RenderingContext;
   const m = model(3);
-  m.geosetAnims.push({ geosetId: 0, alpha: 1, color: [0.467, 0, 0.992] });
+  m.geosetAnims.push({ geosetId: 0, alpha: 1, ...anim });
   const gpu = new ModelGpu(recording, m);
-  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
-  gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, {});
-  assert.deepEqual(colours.map((c) => c.slice(0, 3).map((v) => +v.toFixed(3))), [[0.467, 0, 0.992]]);
+  for (const clock of clocks) {
+    gpu.pose(clock);
+    gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, {});
+  }
+  return colours.map((c) => c.slice(0, 3).map((v) => +v.toFixed(3)));
+}
+
+test("a geoset animation's static colour is red, green, blue, a colour track's keys blue, green, red (the World Editor's pictures)", () => {
+  // World Editor, we-drive (tests/fixtures/we-specs/make-geoset-color.mjs): RuneArt's key (0, 0, 1) is red, GCracks'
+  // (1, 0.85, 0) cyan; ShimmeringPortal's static (0.467, 0, 0.992) stays violet (read blue first its glow went red).
+  const still = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
+  assert.deepEqual(geosetColours({ color: [0.467, 0, 0.992] }, [still]), [[0.467, 0, 0.992]]);
+  const track = { interp: 0 as const, globalSeq: -1, times: new Uint32Array([0, 100]), values: new Float32Array([0, 0, 1, 0, 0.5, 1]), size: 3 };
+  // a sequence with no key of the track keeps the static colour as stored
+  const colours = geosetColours({ color: [0.25, 0.5, 0.75], colorTrack: track }, [{ frame: 0, seqStart: 0, seqEnd: 50, time: 0 }, { frame: 300, seqStart: 200, seqEnd: 250, time: 300 }]);
+  assert.deepEqual(colours, [[1, 0, 0], [0.25, 0.5, 0.75]]);
 });
 
 test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD shading", () => {

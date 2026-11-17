@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, rangeRefused, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, clampsToZero, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, rangeRefused, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
@@ -29,6 +29,18 @@ test("Allow negative real values: unreal fields take values below 0 only with th
   assert.equal(negativeRefused("unreal", -1, false) !== null, true);
   assert.equal(negativeRefused("unreal", -1, true), null);
   assert.equal(negativeRefused("real", -1, false), null);
+});
+
+test("a typed negative for an unreal field is made 0 while negative reals are off, as in the World Editor's Modify Selected Field", () => {
+  // World Editor (TESTING.md "Negative reals", we-misc-2): Cast Range 350, typed -7, shows 0.000; Hit Points Gained (a real) keeps -4.
+  assert.equal(clampsToZero("unreal", "-7", false), true);
+  assert.equal(clampsToZero("unreal", " -0.5 ", false), true);
+  assert.equal(clampsToZero("unreal", "-7", true), false, "the setting lets it stand");
+  assert.equal(clampsToZero("unreal", "7", false), false);
+  assert.equal(clampsToZero("unreal", "", false), false);
+  assert.equal(clampsToZero("unreal", "x", false), false);
+  assert.equal(clampsToZero("real", "-4", false), false);
+  assert.equal(clampsToZero("int", "-5", false), false);
 });
 
 test("values past what the file stores are refused, not wrapped: int is 32-bit, real and unreal 32-bit float", () => {

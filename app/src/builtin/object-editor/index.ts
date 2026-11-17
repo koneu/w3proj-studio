@@ -24,7 +24,7 @@ import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, p
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, clampsToZero, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
@@ -814,6 +814,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             title: shown ? shown.join("\n") : (resolved ?? ""),
             onchange: () => {
               const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
+              // The World Editor's Modify Selected Field takes a typed negative for a real of the game's unsigned kind as 0
+              // (Cast Range 350, -7 typed: 0.000), where it asks for none (TESTING.md "Negative reals").
+              if (clampsToZero(type, input.value, allowNegative)) input.value = "0";
               const v = parseValue(type, input.value, allowNegative);
               if (v === null) {
                 input.classList.add("invalid");
