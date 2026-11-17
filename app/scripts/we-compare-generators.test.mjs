@@ -32,7 +32,7 @@ function run(script, args, cwd) {
   assert.equal(r.status, 0, `${script} ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
 }
 
-/** Every file of the map's unpacked project (name -> bytes) but the minimap. */
+/** Every file of the map's unpacked project (name -> bytes) but the minimap and the shadow map (Studio now writes war3map.shd, the committed maps were made before). */
 function unpacked(cli, map, into) {
   const r = spawnSync(cli, ["unpack", map, into, "--game", "none"], { encoding: "utf8" });
   assert.equal(r.status, 0, `unpack ${map}: ${r.stderr}`);
@@ -41,7 +41,7 @@ function unpacked(cli, map, into) {
     for (const n of readdirSync(d)) {
       const p = join(d, n);
       if (statSync(p).isDirectory()) walk(p, `${prefix}${n}/`);
-      else if (n !== "war3mapMap.blp") files[prefix + n] = readFileSync(p);
+      else if (n !== "war3mapMap.blp" && n !== "war3map.shd") files[prefix + n] = readFileSync(p);
     }
   };
   walk(into, "");
