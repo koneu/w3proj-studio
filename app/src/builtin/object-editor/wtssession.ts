@@ -63,6 +63,26 @@ export class WtsSession {
     this.table.set(n, text);
   }
 
+  /** The strings the editor changed that another editor has saved differently since (against the file text `diskText`
+   *  just read): saving would replace their text with the editor's. A string put back by undo keeps their text anyway. */
+  collisions(diskText: string): number[] {
+    const disk = new StringTable(diskText);
+    return [...this.owned].filter(([n, o]) => !o.undone && disk.has(n)
+      && norm(this.table.get(n)) !== norm(this.savedValues.get(n))
+      && norm(disk.get(n)) !== norm(this.savedValues.get(n)) && norm(disk.get(n)) !== norm(this.table.get(n))).map(([n]) => n);
+  }
+
+  /** Takes the other editor's text for these strings (the user chose theirs over the editor's own change). */
+  takeTheirs(diskText: string, ns: number[]) {
+    const disk = new StringTable(diskText);
+    for (const n of ns) {
+      const v = disk.get(n);
+      if (v === undefined) continue;
+      this.table.set(n, v);
+      this.owned.delete(n);
+    }
+  }
+
   /** Whether a string differs from the saved file, or the last write failed and may have left the file cut short. */
   get dirty(): boolean {
     if (this.torn) return true;

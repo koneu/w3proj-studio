@@ -832,3 +832,38 @@ test("a write refused before anything was written (locked, denied) changes nothi
     assert.equal(d.text, three("A1", "two", "B3"));
   }
 });
+
+// The session alone: A saves string 1, B saves the same string, A undoes and redoes: A shows its text and is clean while the
+// disk has B's (the session only reads the disk when it saves). In the app a clean tab re-reads war3map.wts itself (watches),
+// so this state is only reached by a dirty tab; here it is the session's fallback. Nothing is lost by that alone; the stale display only costs B's text
+// when A types that string again (last save wins, as A sees it).
+test("A saves, B saves the same string, A undoes and redoes: stale display, B's text kept until A types it again", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "A1"); const s1 = a.snapshot(); await a.save(d.read, d.write);
+  d.b(1, "B1");
+  a.restore(s0); a.snapshot();
+  a.restore(s1);
+  assert.equal(a.table.get(1), "A1");
+  assert.equal(a.dirty, false);
+  assert.equal(get(d.text, 1), "B1");
+  a.set(2, "A2"); await a.save(d.read, d.write);
+  assert.deepEqual([get(d.text, 1), get(d.text, 2)], ["B1", "A2"], "another string saved: B's text stays");
+  a.set(1, "A1b"); await a.save(d.read, d.write);
+  assert.deepEqual([get(d.text, 1), get(d.text, 2)], ["A1b", "A2"], "the same string typed again: A's text wins");
+});
+
+test("collisions: a string both editors changed is named, undone, unchanged and other strings aren't; taking theirs keeps B's text", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "A1"); a.snapshot(); a.set(2, "A2"); a.snapshot();
+  assert.deepEqual(a.collisions(d.text), [], "nobody else saved");
+  d.b(1, "B1");
+  assert.deepEqual(a.collisions(d.text), [1]);
+  d.b(2, "A2");
+  assert.deepEqual(a.collisions(d.text), [1], "string 2: B saved the very text the editor has");
+  a.takeTheirs(d.text, [1]);
+  assert.equal(a.table.get(1), "B1");
+  await a.save(d.read, d.write);
+  assert.deepEqual([get(d.text, 1), get(d.text, 2)], ["B1", "A2"]);
+  assert.deepEqual(a.collisions(d.text), []);
+});
