@@ -127,6 +127,9 @@ const LOADING_FRAME_MS = 250;
 /** How long a picture waits for models and textures at most: a backend call that never answers
  *  mustn't hang the screenshot tool. What isn't in by then is left out. */
 const PICTURE_WAIT_MS = 120_000;
+/** How long the destructables' flags (followFlags) wait for a terrain editor's objects before the file is written
+ *  without it. */
+const FOLLOW_READY_MS = 5_000;
 /** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
 const SHADOW_EDIT_DELAY = 700;
 /** Which key on the keyboard an event is of, whatever Shift made of it (A and a), so that a held key's release is found. */
@@ -5980,7 +5983,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // returns: a macrotask later it has it, so the save below reaches it.
             if (!handed) return false;
             await new Promise((done) => setTimeout(done, 0));
-            await ready();
+            // Its objects still being read (a big map, a slow disk) don't hold the script's queue, which other work waits
+            // on: past a moment the file is the caller's too, and the editor takes it when its objects are in.
+            let timer = 0;
+            const placed = await Promise.race([ready().then(() => true), new Promise<false>((done) => { timer = window.setTimeout(() => done(false), FOLLOW_READY_MS); })]);
+            clearTimeout(timer);
+            if (!placed) return false;
             if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record || w3.workspace.project()?.root !== record.root) return false;
             const f = dooFile;
             const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
