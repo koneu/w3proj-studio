@@ -140,9 +140,11 @@ export function heroAbilities(files: (ObjectFile | null | undefined)[], game: Re
 
 /** Tint of a destructable type (object data fields bvcr, bvcg, bvcb, 0–255) as the map sets it, the rest
  *  255 (the game's types are all untinted, colorR/G/B of Units\DestructableSkin.txt). The World Editor
- *  writes it into SetDestructableVertexColor (HumanX03, HumanX06, UndeadX07a–c tint theirs). */
+ *  writes it into SetDestructableVertexColor (HumanX03, HumanX06, UndeadX07a–c tint theirs). A custom type
+ *  has only the fields it sets itself: the map's change to its base's original doesn't reach it (editor 7003,
+ *  tests/we-compare/dest-tint.json: LTe3 with bvcg 40 gives 255, 40, 255, a custom type on it with bvcb 7 gives 255, 255, 7). */
 export function destructableTints(files: (ObjectFile | null | undefined)[]): (id: string) => [number, number, number] {
-  const [r, g, b] = ["bvcr", "bvcg", "bvcb"].map((f) => mapNumbers(files, f));
+  const [r, g, b] = ["bvcr", "bvcg", "bvcb"].map((f) => mapNumbers(files, f, false));
   return (id) => [r.value(id) ?? 255, g.value(id) ?? 255, b.value(id) ?? 255];
 }
 
@@ -158,7 +160,7 @@ function flagOf(files: (ObjectFile | null | undefined)[], field: string, game: R
 /** A number field as the map sets it: a custom type's own value, else its base's as the map changes that;
  *  undefined when the map doesn't say. An entry only changes what it sets: war3mapSkin.* lists most types
  *  again without the field, and that keeps war3map.*'s. `base` is a custom type's base (the id itself else). */
-function mapNumbers(files: (ObjectFile | null | undefined)[], field: string): { value: (id: string) => number | undefined; base: (id: string) => string } {
+function mapNumbers(files: (ObjectFile | null | undefined)[], field: string, inherit = true): { value: (id: string) => number | undefined; base: (id: string) => string } {
   const own = (o: ObjectEntry) => {
     const v = o.mods?.find((m) => m.field === field)?.value;
     return typeof v === "number" ? v : undefined;
@@ -178,7 +180,8 @@ function mapNumbers(files: (ObjectFile | null | undefined)[], field: string): { 
     }
   }
   const base = (id: string) => custom.get(id)?.base ?? id;
-  return { base, value: (id) => custom.get(id)?.value ?? changed.get(base(id)) };
+  // `inherit` false: a custom type doesn't take the change the map makes to its base's original.
+  return { base, value: (id) => custom.get(id)?.value ?? (inherit || !custom.has(id) ? changed.get(base(id)) : undefined) };
 }
 
 /** Unit types the map makes gold mines (the Gold Mine ability in their list) and those based on the

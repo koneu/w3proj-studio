@@ -571,7 +571,9 @@ test("a destructable's tint is its type's, as the map's object data sets it", ()
     { original: [{ base: "LTg1", mods: [{ field: "bvcr", value: 80 }, { field: "bvcg", value: 80 }, { field: "bvcb", value: 80 }] }],
       custom: [{ id: "B000", base: "DTes", mods: [{ field: "bvcg", value: 150 }] }, { id: "B001", base: "LTlt", mods: [] }] },
   ]);
-  assert.deepEqual([tint("DTes"), tint("LTg1"), tint("B000"), tint("B001"), tint("LTlt")], [[100, 100, 100], [80, 80, 80], [100, 150, 100], [10, 255, 255], [255, 255, 255]]);
+  assert.deepEqual([tint("DTes"), tint("LTg1"), tint("B000"), tint("B001"), tint("LTlt")], [[100, 100, 100], [80, 80, 80], [255, 150, 255], [10, 255, 255], [255, 255, 255]]);
+  // A custom type has only what it sets itself, not the map's change to its base's original (we-compare dest-tint, editor 7003):
+  // B000's base DTes is tinted 100, B000 sets only green.
   has(dests([dest({ id: "LTg1" })], { editorVersion: 7003, tint }), "    call SetDestructableVertexColor( gg_dest_x, 80, 80, 80, 255 )");
 });
 
