@@ -1,7 +1,11 @@
 {
   "name": "close-crash-light-ranges",
-  "description": "we-compare itself: the editor crashes when it is closed with View > Light Ranges on (HD); the crash comes after the save, so the spec is OK with a warning, not failed. Nothing is changed in the map: the terrain and pathing of flat.w3x match",
-  "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
-  "we": { "mode": "hd", "steps": ["--key ctrl+shift+l", "--sleep 2000"] },
+  "description": "we-compare itself: the editor crashes when it is closed with View > Light Ranges on (HD) and a light on the map (a Ruins Brazier); the crash comes after the save, so the spec is OK with a warning, not failed. The terrain and pathing match",
+  "input": {
+    "new": { "name": "LightClose", "width": 64, "height": 64 },
+    "steps": [{ "mcp": "place_objects", "args": { "kind": "doodads", "objects": [{ "id": "ZObz", "x": 0, "y": 0 }] } }]
+  },
+  "we": { "mode": "hd", "steps": ["--key ctrl+shift+l", "--sleep 3000"] },
+  "studio": { "settings": { "mcp.writeTools": true } },
   "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.wpm", "as": "wpm" }]
 }

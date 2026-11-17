@@ -61,7 +61,7 @@
 // never touched (we-drive).
 
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
@@ -287,6 +287,8 @@ async function runWorldEditor(specs, opts, game, mode, saveAccept) {
       return;
     }
     const outs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    // we-drive's own lines, for a look afterwards (what each step answered, a crash on close).
+    try { appendFileSync(join(opts.work, "we-drive", "steps.jsonl"), lines.map((l) => `${l}\n`).join("")); } catch { /* the log is a help only */ }
     if (outs.some((o) => o.skipped)) { for (const s of rest) s.error = `the World Editor can't run here: ${outs.find((o) => o.skipped).skipped}`; return; }
     say(`the World Editor part took ${Math.round((Date.now() - t0) / 1000)} s (exit ${code})`);
     // After a failure the process stopped; the specs behind it that haven't run go again in the next process.
@@ -468,6 +470,7 @@ export function missingInput(map, repoDir = repo) {
 
 async function runSpecs(specs, o, game) {
   for (const s of specs) rmSync(join(o.work, s.name), { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  rmSync(join(o.work, "we-drive", "steps.jsonl"), { force: true });
   const cli = ensureCli();
   const t0 = Date.now();
   if (specs.some((s) => !s.error)) await runStudio(specs, o, game);
