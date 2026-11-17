@@ -32,12 +32,15 @@ function w3iTypes(): Map<string, string> {
   return out;
 }
 
+/** A number as plain decimal text (String() would write 3.4e+38, which a field refuses). */
+const plainText = (n: number): string => (Math.abs(n) >= 1e21 ? BigInt(n).toString() : String(n));
+
 /** The values just past each stored type, and its edges, which are taken. */
 const PAST: Record<string, string[]> = {
   u8: ["-1", "256", "1.5", "", "abc"],
   u32: ["-1", "4294967296", "2.5", "", "1e400"],
   i32: ["-2147483649", "2147483648", "0.5", "", "x"],
-  f32: ["1e39", "-3.5e38", "", "Infinity", "NaN"],
+  f32: ["1000000000000000000000000000000000000000", "-350000000000000000000000000000000000000", "1e39", "", "Infinity", "NaN"],
 };
 const EDGES: Record<string, number[]> = {
   u8: [0, 255], u32: [0, 4294967295], i32: [-2147483648, 2147483647], f32: [-3.4028234663852886e38, 3.4028234663852886e38, 0.1],
@@ -67,7 +70,7 @@ for (const key of Object.keys(INFO_NUMBERS) as InfoNumberKey[]) {
       assert.equal(JSON.stringify(info), before, `${JSON.stringify(typed)} changed nothing`);
     }
     for (const edge of EDGES[f.kind]) {
-      const r = setInfoNumber(info, key, String(edge), player);
+      const r = setInfoNumber(info, key, plainText(edge), player);
       assert.deepEqual(r, { value: edge });
       assert.equal(infoNumber(info, key, player), edge);
     }
