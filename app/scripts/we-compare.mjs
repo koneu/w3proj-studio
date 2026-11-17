@@ -89,12 +89,29 @@ export function parseArgs(argv) {
 
 // ---------------------------------------------------------------- Studio's side
 
+/**
+ * Opens `path` in its editor and waits until that editor is made. `w3.editors.open` resolves once the provider has
+ * built it (EditorService.load awaits it), except when the file's tab was already there and still loading (showAgain
+ * returns at once): the tab's state is what counts. Replaced a fixed 300 ms pause: measured on 2026-11-17 (Sound Editor,
+ * sound-order-move), the rows were all there at the first look after open, and nothing changed in the 300 ms after.
+ * An editor that failed to open (its pane shows the error) stops the spec instead of running steps against nothing.
+ */
+async function openEditor(page, path) {
+  const p = JSON.stringify(path);
+  await page.evaluate(`w3.editors.open(${p})`);
+  const state = await until(`the editor of ${path}`, async () => {
+    const s = await page.evaluate(`(() => { const t = w3Workbench.editors.tabs.find((x) => x.path === ${p}); return !t ? "not open" : t.failed ? "failed" : t.loading || !t.instance ? "" : "ready"; })()`);
+    return s || false;
+  }, 60000);
+  if (state !== "ready") throw new Error(`${path}: the editor ${state === "failed" ? "failed to open (its tab shows why)" : "didn't open"}`);
+}
+
 /** Runs one Studio step in the page. */
 async function studioStep(page, step, ctx) {
   if (step.mcp) await mcpCall(page, step.mcp, step.args ?? {});
   else if (step.eval) await page.evaluate(`(async () => {\n${step.eval}\n})()`, { timeout: 300000 });
   else if (step.sleep !== undefined) await sleep(step.sleep);
-  else if (step.open) { await page.evaluate(`w3.editors.open(${JSON.stringify(step.open)})`); await sleep(300); }
+  else if (step.open) await openEditor(page, step.open);
   else if (step.setting) await page.evaluate(`w3.settings.set(${JSON.stringify(step.setting[0])}, ${JSON.stringify(step.setting[1])})`);
   else if (step.ui) await uiStep(page, step.ui);
   else if (step.command) await page.evaluate(`w3.commands.execute(${JSON.stringify(step.command)}, ${JSON.stringify(step.args ?? {})})`, { timeout: 300000 });
@@ -160,7 +177,12 @@ async function runStudio(specs, opts, game) {
         } else {
           await mcpCall(page, "new_map", { ...spec.input.new, folder: dir });
           for (const s of spec.input.steps) await studioStep(page, s, spec);
-          await sleep(2500);
+          // The app at rest before the pack (edits flushed, saves and writes ended, the script, pathing, shadows and
+          // minimap due written, the terrain view drawn): replaced a fixed 2500 ms pause. Measured on 2026-11-17
+          // (new maps with and without input steps): no work started or ran during those 2500 ms, and the packs made
+          // after 0 ms, after the pause and after settled() held the same files (only the random ground variations
+          // differ, as between any two new maps); settled() took 0.1 to 0.5 s.
+          await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
           await packProject(page, join(dir, "input.w3x"));
         }
         for (const s of spec.studio.steps) await studioStep(page, s, spec);
