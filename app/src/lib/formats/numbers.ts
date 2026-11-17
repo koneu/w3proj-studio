@@ -24,11 +24,16 @@ export function storableText(kind: StoredNumber, label: string): string {
   return kind === "f32" ? float32Text(label) : `${label} must be ${RANGE[kind][2]}.`;
 }
 
+const PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
+const PLAIN_INTEGER = /^-?\d+$/;
+
 /** A typed number for a field of type `kind`: the value, or why it is refused (empty, not a number, not whole for an
  *  integer field, past the type's range). */
 export function typedNumber(kind: StoredNumber, typed: string, label: string): { value: number } | { refused: string } {
-  const v = Number(typed.trim());
-  if (typed.trim() === "" || !storable(kind, v)) return { refused: storableText(kind, label) };
+  // Plain decimal text only (user decision 2026-11-17): "1e3", "0x10", "+5", " 5 ", ".5", "Infinity" are refused.
+  const plain = kind === "f32" ? PLAIN_DECIMAL : PLAIN_INTEGER;
+  const v = plain.test(typed) ? Number(typed) + 0 : NaN; // + 0: "-0" is 0
+  if (!storable(kind, v)) return { refused: storableText(kind, label) };
   return { value: v };
 }
 
