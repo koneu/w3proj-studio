@@ -1,6 +1,6 @@
 {
   "name": "move-texts-objects",
-  "description": "Move Texts to String Table (Studio's command w3.strings.moveToTable) against the WE's own save, which moves the texts of custom objects into war3map.wts: a unit with a Skin-only tooltip, an item with a description, an ability with level fields (tooltip and description at level 1 and 2); the string table with its comments, and the object files",
+  "description": "Move Texts to String Table (Studio's command w3.strings.moveToTable) against the WE's own save, which moves the texts of custom objects into war3map.wts: three custom objects made by create_object with only their names set (a unit from hfoo, an item from ratf, an ability from AHhb), so only the names move (this input sets no tooltip, description or level field: a Skin-only tooltip, an item description and an ability's level fields are not covered here); the string table with its comments, and the object files",
   "input": {
     "new": { "name": "MoveTexts", "width": 64, "height": 64 },
     "steps": [
