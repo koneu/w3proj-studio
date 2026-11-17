@@ -4,6 +4,9 @@
 # Nothing here needs the game: tests that read game files or the map corpus stay local.
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { Settings } from "../extensions/api";
 
 // The backend is the Tauri IPC: a stand-in game with a few files, counting what is asked.
+/** Lets every pending promise step of the stand-in backend run (it has no timers). */
+const settle = async () => { for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r)); };
 const stored = new Map<string, Uint8Array>([
   ["units/unitdata.slk", new Uint8Array([1, 2, 3])],
   ["big.dds", new Uint8Array(600)],
@@ -168,7 +170,7 @@ test("at most MAX_READS_IN_FLIGHT reads wait on the backend at once; the rest fo
   hold = new Promise((r) => { open = r; });
   // Not there, and the same file twice: a failure frees its place too, a shared read takes one.
   const reads = [...Array.from({ length: n }, (_, i) => game.read(`q${i}.dds`)), game.read("q0.dds"), game.read("gone.dds").catch(() => null)];
-  await new Promise((r) => setTimeout(r, 10));
+  await settle();
   assert.equal(asked.length, MAX_READS_IN_FLIGHT, "the rest wait their turn");
   assert.deepEqual(asked.map((a) => a.path), Array.from({ length: MAX_READS_IN_FLIGHT }, (_, i) => `q${i}.dds`), "first come, first asked");
   open();
@@ -190,7 +192,7 @@ async function queueOrder(queue: [string, boolean][], meanwhile?: (game: Instanc
   const reads = Array.from({ length: MAX_READS_IN_FLIGHT }, (_, i) => game.read(`f${i}.dds`));
   reads.push(...queue.map(([p, background]) => game.read(p, undefined, background)));
   meanwhile?.(game);
-  await new Promise((r) => setTimeout(r, 10));
+  await settle();
   assert.equal(asked.length, MAX_READS_IN_FLIGHT, "the queue waits for a place");
   open();
   await Promise.all(reads);
@@ -231,10 +233,10 @@ test("background reads take a few places only: a read someone waits on asked aft
   let open!: () => void;
   hold = new Promise((r) => { open = r; });
   const later = Array.from({ length: n }, (_, i) => game.read(`bg${i}.dds`, undefined, true));
-  await new Promise((r) => setTimeout(r, 10));
+  await settle();
   assert.equal(asked.length, BACKGROUND_IN_FLIGHT, "the rest of the background reads wait, with places free");
   const now = game.read("now.dds");
-  await new Promise((r) => setTimeout(r, 10));
+  await settle();
   assert.equal(asked.at(-1)?.path, "now.dds", "the read waited on didn't queue behind them");
   open();
   assert.equal((await now)[0], 7);

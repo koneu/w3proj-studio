@@ -53,7 +53,7 @@ test("no _Locales folder gives no warning", async () => {
 
 test("an import list that can't be read fails the check", async () => {
   const f = fake({ "map/war3map.imp.json": "{nope", "map/_Locales/deDE.w3mod/war3map.wts": "" });
-  await assert.rejects(f.run());
+  await assert.rejects(f.run(), /war3map\.imp\.json is there but can't be read/);
 });
 
 test("a table stored as one escaped file name is found, unlisted: warning and fix name the backslash path", async () => {

@@ -3,8 +3,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
 import { checkScripts, scriptFiles, smokeChecks, smokeListProblems, syntaxProblems } from "./check-scripts.mjs";
 
@@ -26,7 +26,7 @@ test("the scripts as they are load, and app-smoke's two lists agree", async () =
 });
 
 test("a broken copy of app-smoke.mjs doesn't load", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "w3proj-check-scripts-"));
+  const dir = scratchDir("w3proj-check-scripts-");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const good = join(dir, "good.mjs"), broken = join(dir, "broken.mjs");
   writeFileSync(good, smoke);

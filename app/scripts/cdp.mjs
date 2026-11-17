@@ -1,6 +1,7 @@
 // Talking to a page over the Chrome DevTools Protocol, with Node's own WebSocket. Used by the
 // smoke tests, for headless Edge and for the app's WebView2 alike.
 
+import { lit } from "./jslit.mjs";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Waits for a check to come out true. One that throws counts as not yet: a file can be half
@@ -41,14 +42,24 @@ export class Page {
   next = 1;
   pending = new Map();
   events = [];
-  /** The time limit of an `evaluate` that doesn't give its own, in ms; 0: none (app-smoke sets one). */
-  callTimeout = 0;
+  /** The time limit of an `evaluate` that doesn't give its own, in ms (app-smoke sets its own); 0: none, if a caller asks. */
+  callTimeout = 120000;
   constructor(ws) {
     this.ws = ws;
+    // A closed or broken socket answers nothing any more: every call waiting for one fails now, not never.
+    const drop = (why) => {
+      this.closed = true;
+      for (const { reject } of this.pending.values()) reject(new Error(why));
+      this.pending.clear();
+    };
+    ws.addEventListener("close", () => drop("the connection to the page closed"));
+    ws.addEventListener("error", () => drop("the connection to the page failed"));
     ws.addEventListener("message", (m) => {
       const msg = JSON.parse(m.data);
       if (msg.id) {
-        const { resolve, reject } = this.pending.get(msg.id);
+        const call = this.pending.get(msg.id);
+        if (!call) return; // answer to a call dropped already
+        const { resolve, reject } = call;
         this.pending.delete(msg.id);
         if (msg.error) reject(new Error(`${msg.error.message}`));
         else resolve(msg.result);
@@ -58,6 +69,7 @@ export class Page {
   send(method, params = {}) {
     const id = this.next++;
     return new Promise((resolve, reject) => {
+      if (this.closed) return reject(new Error("the connection to the page is closed"));
       this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
@@ -79,7 +91,7 @@ export class Hands {
   /** The centre of the first element matching a selector, and containing a text if given. */
   async where(selector, text = null) {
     const at = await this.page.evaluate(`(() => {
-      const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((x) => ${JSON.stringify(text)} === null || x.textContent.trim() === ${JSON.stringify(text)});
+      const e = [...document.querySelectorAll(${lit(selector)})].find((x) => ${lit(text)} === null || x.textContent.trim() === ${lit(text)});
       if (!e) return null;
       e.scrollIntoView({ block: "center" });
       const r = e.getBoundingClientRect();
@@ -100,7 +112,7 @@ export class Hands {
     for (let round = 0; round < 8; round++) {
       const at = await this.where(selector, text);
       const cover = await this.page.evaluate(`((x, y) => {
-        const want = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.trim() === ${JSON.stringify(text)});
+        const want = [...document.querySelectorAll(${lit(selector)})].find((e) => ${lit(text)} === null || e.textContent.trim() === ${lit(text)});
         const hit = document.elementFromPoint(x, y);
         // Nothing found there (off the window) is left to the click; so is the element's own part, or what holds it
         // when the element itself takes no pointer (an icon in a button).

@@ -16,9 +16,16 @@ fn the_app_written_minimal_manifest_loads() {
 
 #[test]
 fn control_a_manifest_without_format_is_refused() {
-    let dir = std::env::temp_dir().join(format!("w3proj-minimal-control-{}", std::process::id()));
+    // Under target/ (not the OS temp folder), removed again when the test ends, also when an assert fails.
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("w3proj-minimal-control-{}", std::process::id()));
+    let _cleanup = Cleanup(dir.clone());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(w3proj::project::MANIFEST), "[checks]\ndisable = [\"a\"]\n").unwrap();
     assert!(Manifest::load(&dir).is_err());
-    std::fs::remove_dir_all(&dir).ok();
 }

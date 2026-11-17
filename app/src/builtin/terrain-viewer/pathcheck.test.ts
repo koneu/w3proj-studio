@@ -69,7 +69,7 @@ test("the way is the shortest this unit fits, and the wider detour is mentioned"
 });
 
 test("a diagonal between two blocks isn't a way through", () => {
-  const r = checkPath(grid(["..#", "...".replace(".", "."), "#.."].map((s, i) => (i === 1 ? ".#." : s))), at(0, 0), at(2, 2), 16);
+  const r = checkPath(grid(["..#", ".#.", "#.."]), at(0, 0), at(2, 2), 16);
   assert.equal(r.walkable, false);
 });
 

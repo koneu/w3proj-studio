@@ -192,7 +192,8 @@ test("every random map's war3map.lua reads as Lua", () => {
 });
 
 test("the random maps reach what they're meant to reach", () => {
-  const scripts = Array.from({ length: ROUNDS }, (_, k) => generateScript(randomMap(k + 1, false))).join("\n");
+  // The rare features show up within a few hundred maps; a smaller W3PROJ_ROBUSTNESS_ROUNDS must not make this fail.
+  const scripts = Array.from({ length: Math.max(ROUNDS, 300) }, (_, k) => generateScript(randomMap(k + 1, false))).join("\n");
   for (const want of ["CreateAllUnits", "CreateAllItems", "CreateAllDestructables", "InitSounds", "CreateRegions", "CreateCameras", "InitUpgrades", "InitTechTree", "InitRandomGroups",
     "RunInitializationTriggers", "InitAllyPriorities", "ItemTable000000_DropItems", "Unit000000_DropItems", "bj_forLoopAIndex", "exitwhen (i >", "CreateBlightedGoldmine", "WaygateActivate", "gg_rg_002[1]", "ChooseRandomCreep", "ChooseRandomNPBuilding"]) {
     assert.ok(scripts.includes(want), `no random map has ${want}`);

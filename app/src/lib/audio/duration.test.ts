@@ -58,7 +58,32 @@ test("a Xing or Info header's frame count is the length, its own frame not count
   assert.equal(soundDurationMs(concat(noCount, frames(100))), ms(102));
 });
 
+test("a WAV whose fmt chunk is cut off before its byte rate has no length, without throwing", () => {
+  const b = new Uint8Array(30), d = new DataView(b.buffer);
+  b.set(new TextEncoder().encode("RIFF"), 0);
+  b.set(new TextEncoder().encode("WAVEfmt "), 8);
+  d.setUint32(16, 16, true);
+  assert.equal(soundDurationMs(b), null);
+  const whole = new Uint8Array(52), w = new DataView(whole.buffer);
+  whole.set(b.subarray(0, 20));
+  w.setUint32(28, 1000, true);
+  whole.set(new TextEncoder().encode("data"), 36);
+  w.setUint32(40, 500, true);
+  assert.equal(soundDurationMs(whole), 500, "control: the whole header gives its length");
+});
+
 test("bytes that aren't an mp3 have no length", () => {
   assert.equal(soundDurationMs(new Uint8Array(500)), null);
   assert.equal(soundDurationMs(id3v1()), null);
+});
+
+test("an ID3v2 tag that claims more bytes than the file has, an empty array and a lone header have no length, without throwing", () => {
+  const huge = id3(1014);
+  assert.equal(soundDurationMs(huge.subarray(0, 100)), null, "a tag cut short, with no frame after it");
+  const claims = concat(id3(5000).subarray(0, 10), frames(3));
+  assert.equal(soundDurationMs(claims), null, "a tag whose size runs past the end of the file");
+  assert.equal(soundDurationMs(new Uint8Array(0)), null, "an empty array");
+  assert.equal(soundDurationMs(id3(0)), null, "a header alone");
+  assert.equal(soundDurationMs(id3(0).subarray(0, 9)), null, "a header cut short");
+  assert.equal(soundDurationMs(frame()), ms(2), "control: one frame by itself is read (a frame longer than its frames)");
 });

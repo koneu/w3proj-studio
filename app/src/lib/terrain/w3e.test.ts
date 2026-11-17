@@ -81,6 +81,16 @@ test("setLayer keeps the ground and moves the corner to 0-15", () => {
   assert.equal(c.height, 13 * 128);
 });
 
+test("a terrain file cut off anywhere is refused with the reader's own error, not the DataView's", () => {
+  for (const version of [11, 12]) {
+    const bytes = writeW3e(tiny(version));
+    parseW3e(bytes); // control: the whole file reads
+    for (let n = 0; n < bytes.length; n++) {
+      assert.throws(() => parseW3e(bytes.subarray(0, n)), (e: Error) => e.constructor === Error && /truncated|W3E!/.test(e.message), `version ${version} cut to ${n} bytes`);
+    }
+  }
+});
+
 test("writeW3e refuses a corner field past its bits, or not whole, instead of cutting it to them", () => {
   const ok = tiny();
   const bytes = writeW3e(ok);

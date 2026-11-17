@@ -15,6 +15,15 @@ import { fileURLToPath } from "node:url";
 import { mergeSections, mergeValid, printSections, printValid } from "./report.mjs";
 import { chosenGamePath } from "../../../tests/gamepath.mjs";
 
+// --experimental-transform-types (the checks run TypeScript directly) came with Node 22.7.
+{
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  if (major < 22 || (major === 22 && minor < 7)) {
+    console.error(`script check needs Node 22.7 or newer (this is ${process.versions.node})`);
+    process.exit(2);
+  }
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, "..", "..");
 const repo = resolve(app, "..");
@@ -43,7 +52,8 @@ function waitFor(args) {
   return new Promise((done) => {
     const p = spawn(bin, args, { stdio: "ignore" });
     p.on("error", () => done(1));
-    p.on("close", done);
+    // Killed by a signal gives a null code: that is a failure too.
+    p.on("close", (code) => done(code === 0 ? 0 : 1));
   });
 }
 
@@ -158,11 +168,18 @@ if (update) {
 const base = JSON.parse(readFileSync(baselineFile, "utf8"));
 const problems = [];
 const better = [];
+const numbers = (name, got, want) => {
+  if (Number.isFinite(got) && Number.isFinite(want)) return true;
+  problems.push(`${name}: ${JSON.stringify(got)} against ${JSON.stringify(want)} in the baseline: not numbers`);
+  return false;
+};
 const atLeast = (name, got, want) => {
+  if (!numbers(name, got, want)) return;
   if (got < want) problems.push(`${name}: ${got}, was ${want}`);
   else if (got > want) better.push(`${name}: ${got}, was ${want}`);
 };
 const atMost = (name, got, want) => {
+  if (!numbers(name, got, want)) return;
   if (got > want) problems.push(`${name}: ${got}, was ${want}`);
   else if (got < want) better.push(`${name}: ${got}, was ${want}`);
 };

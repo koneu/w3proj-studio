@@ -103,8 +103,12 @@ class Reader {
   o = 0;
   private dv: DataView;
   constructor(private b: Uint8Array) { this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength); }
-  u32() { const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
-  i32() { const v = this.dv.getInt32(this.o, true); this.o += 4; return v; }
+  /** Refuses a read past the end, as a cut-off file, before the DataView would. */
+  private need(n: number) {
+    if (this.o + n > this.b.length) throw new Error(`truncated: ${n} bytes wanted at ${this.o}, the file ends at ${this.b.length}`);
+  }
+  u32() { this.need(4); const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
+  i32() { this.need(4); const v = this.dv.getInt32(this.o, true); this.o += 4; return v; }
   str() {
     const e = this.b.indexOf(0, this.o);
     if (e < 0) throw new Error(`unterminated string at ${this.o}`);
@@ -113,7 +117,7 @@ class Reader {
     this.o = e + 1;
     return s;
   }
-  bytes(n: number) { const s = this.b.subarray(this.o, this.o + n); this.o += n; return s; }
+  bytes(n: number) { this.need(n); const s = this.b.subarray(this.o, this.o + n); this.o += n; return s; }
   get done() { return this.o >= this.b.length; }
 }
 

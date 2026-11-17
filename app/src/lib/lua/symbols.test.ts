@@ -26,7 +26,7 @@ test("members after a table's name: math.fl offers floor, a text's tables their 
 });
 
 /** Text with | where the cursor is. */
-const at = (s: string) => { const pos = s.indexOf("|"); return luaSpot(s.replace("|", ""), pos); };
+const at = (s: string) => { const pos = s.indexOf("|"); return luaSpot(s.replaceAll("|", ""), pos); };
 
 test("strings with either quote, and the call they're in", () => {
   assert.deepEqual(at('AddSpecialEffect("Abilities\\\\Fi|", x, y)'), { inString: true, inRawcode: false, prefix: "Abilities\\Fi", from: 18, quote: '"', call: { name: "AddSpecialEffect", argIndex: 0 } });

@@ -260,7 +260,7 @@ test("pathing overrides: malformed cells leave the file untouched instead of thr
 });
 
 test("pathing overrides: the text parses back, even with a format that needs escaping", () => {
-  const f = { format: 'a"b\c', width: 4, height: 4, cells: [[1, 2, 3, 4]] } as PathingOverrides;
+  const f = { format: 'a"b\\c', width: 4, height: 4, cells: [[1, 2, 3, 4]] } as PathingOverrides;
   assert.deepEqual(JSON.parse(pathingOverridesText(f)), f);
   assert.deepEqual(JSON.parse(pathingOverridesText({ ...f, cells: [] })).cells, []);
 });

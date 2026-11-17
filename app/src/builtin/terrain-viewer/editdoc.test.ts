@@ -31,6 +31,8 @@ test("editMapDoc: a present w3i that can't be parsed or decoded refuses and leav
   assert.equal(bad.files["map/war3map.w3i.json"], "{not json");
   assert.deepEqual(bad.writes, []);
   const raw = project({ "map/war3map.w3i": "binary" }, () => { throw new Error("undecodable"); });
-  await assert.rejects(editMapDoc(raw.w3, "war3map.w3i", () => assert.fail("changed")), /undecodable/);
+  let changed = false;
+  await assert.rejects(editMapDoc(raw.w3, "war3map.w3i", () => { changed = true; }), /undecodable/);
+  assert.equal(changed, false, "the change callback isn't run on an undecodable file");
   assert.deepEqual(raw.writes, []);
 });
