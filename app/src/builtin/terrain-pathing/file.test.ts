@@ -51,7 +51,7 @@ test("a backup never takes the name of an earlier one, and a name it can't check
   const taken = new Set([`${FILE}.bak`, `${FILE}.bak2`]);
   assert.equal(await backupPath(FILE, async (p) => taken.has(p)), `${FILE}.bak3`);
   assert.equal(await backupPath(FILE, no), `${FILE}.bak`);
-  await assert.rejects(backupPath(FILE, async () => { throw "Permission denied"; }));
+  await assert.rejects(backupPath(FILE, async () => { throw "Permission denied"; }), (e) => e === "Permission denied");
   await assert.rejects(backupPath(FILE, yes), /99 backups/);
 });
 

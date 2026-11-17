@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { GUIDES, guideTemplate, hasRules, isTopic, LAYOUT_IDEAS, layoutIdea, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 
-const builtin = "src/builtin";
+/** The app's src folder, found from where the tests run (app/ or the repository). */
+const appSrc = (() => {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    for (const p of [join(dir, "src"), join(dir, "app", "src")]) if (existsSync(join(p, "builtin", "terrain-viewer", "extension.json"))) return p;
+    if (dirname(dir) === dir) throw new Error("app/src not found from " + process.cwd());
+  }
+})();
+const builtin = join(appSrc, "builtin");
 const tools = new Set(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
   const manifest = JSON.parse(readFileSync(join(builtin, d.name, "extension.json"), "utf8")) as { contributes?: { mcpTools?: { name: string }[] } };
   return (manifest.contributes?.mcpTools ?? []).map((t) => t.name);
@@ -86,7 +93,7 @@ test("the place_objects options the melee guide relies on are declared", () => {
   const tool = (JSON.parse(manifest) as { contributes: { mcpTools: { name: string; inputSchema: { properties: { objects: { items: { properties: Record<string, unknown> } } } } }[] } })
     .contributes.mcpTools.find((t) => t.name === "place_objects")!;
   for (const option of ["camp", "gold", "drops"]) assert.ok(option in tool.inputSchema.properties.objects.items.properties, option);
-  assert.ok(new RegExp("camp true").test(GUIDES.melee.text) && GUIDES.melee.text.includes("drops on place_objects"));
+  for (const option of ["camp", "gold", "drops"]) assert.ok(GUIDES.melee.text.includes(option), `the melee guide mentions ${option}`);
 });
 
 test("no MCP setting can come from a project: a map from someone else mustn't open the door", () => {

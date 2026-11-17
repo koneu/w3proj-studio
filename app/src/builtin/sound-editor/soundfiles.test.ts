@@ -150,7 +150,11 @@ test("Replace Internal Sound right after an open, while the file list is still r
   // The control: the list as it is before the listing ends has neither the sound nor the import list.
   assert.equal(f.w3.workspace.files().length, 0);
   const run = replaceSound(f.w3, "Sound\\x.wav");
-  setTimeout(done, 20);
+  let settled = false;
+  void run.then(() => { settled = true; }, () => { settled = true; });
+  for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r));
+  assert.equal(settled, false, "it waits for the listing");
+  done();
   assert.equal(await run, "map/Sound/x.wav");
   assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.wav" }, { flags: 21, path: "Sound\\x.wav" }]);
   assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/Sound/x.wav"), "the map's own file, now listed, is replaced");

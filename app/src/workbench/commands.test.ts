@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { CommandService } from "./commands";
 import { defaultBindings, isViewBinding, resolve, targetContext } from "../lib/keybindings";
+
+/** The app's src folder, found from where the tests run (app/ or the repository). */
+const appSrc = (() => {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    for (const p of [join(dir, "src"), join(dir, "app", "src")]) if (existsSync(join(p, "builtin", "terrain-viewer", "extension.json"))) return p;
+    if (dirname(dir) === dir) throw new Error("app/src not found from " + process.cwd());
+  }
+})();
 
 test("a chord WebKitGTK gives as key Unidentified is read from the physical key", () => {
   const ev = (key: string, code: string, shift: boolean) => ({ key, code, ctrlKey: true, metaKey: false, altKey: false, shiftKey: shift }) as KeyboardEvent;
@@ -18,7 +27,7 @@ test("the terrain view's keys stay with it while it has the keyboard; elsewhere 
   const svc = new CommandService();
   svc.contribute("core", { id: "workbench.reload", title: "Reload Window", keybinding: "ctrl+r" });
   svc.contribute("core", { id: "workbench.save", title: "Save", keybinding: "ctrl+s" });
-  const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
+  const manifest = JSON.parse(readFileSync(join(appSrc, "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
   const bindings = defaultBindings(svc.contributions(), manifest.contributes.keybindings);
   // The canvas says whose keys they are; the workbench asks the element the key went to.
   const canvas = { tagName: "CANVAS", getAttribute: (n: string) => (n === "data-key-context" ? "terrainFocus" : null), closest: (s: string) => (s === "[data-key-context]" ? canvas : null) };
@@ -43,7 +52,7 @@ test("in the terrain view Ctrl+Shift+B is Enforce Camera Bounds and Y Set Unifor
   // selected doodads to their mean height without a dialog.
   const svc = new CommandService();
   const read = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { contributes: { commands: { id: string; title: string; keybinding?: string }[]; keybindings?: { key: string; command: string; when?: string }[] } };
-  const project = read("src/builtin/map-project/extension.json"), terrain = read("src/builtin/terrain-viewer/extension.json");
+  const project = read(join(appSrc, "builtin", "map-project", "extension.json")), terrain = read(join(appSrc, "builtin", "terrain-viewer", "extension.json"));
   for (const c of [...project.contributes.commands, ...terrain.contributes.commands]) svc.contribute("x", c);
   const bindings = defaultBindings(svc.contributions(), [...(project.contributes.keybindings ?? []), ...(terrain.contributes.keybindings ?? [])]);
   const inView = { terrainFocus: true, project: true, terrain: true };
