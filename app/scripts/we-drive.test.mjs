@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as drive from "./we-drive.mjs";
 import { weOutcome } from "./we-compare-core.mjs";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -424,6 +424,14 @@ test("editorPrefs pins the persisted toggles to the editor's defaults, unless ke
   for (const k of Object.keys(PINNED_PREFS)) assert.equal(k in kept, false, `${k} stays as it was with keep`);
   assert.equal(parseArgs(["--keep-prefs"]).opts.keepPrefs, true);
   assert.equal(parseArgs([]).opts.keepPrefs, undefined);
+});
+
+test("--null-audio keeps Wine's ALSA driver and gives it a null device only", () => {
+  assert.equal(parseArgs(["--null-audio"]).opts.nullAudio, true);
+  assert.equal(parseArgs([]).opts.nullAudio, undefined);
+  assert.equal(wineOverrides(true, "x=n"), "winepulse.drv=d;wineoss.drv=d;x=n");
+  assert.equal(wineOverrides(false), "winepulse.drv=d;winealsa.drv=d;wineoss.drv=d", "control: without it ALSA is off too");
+  assert.match(NULL_ALSA_CONF, /pcm\.!default \{\n {2}type null\n\}/);
 });
 
 test("withEditorPrefs unticks the minimap's Show Creep Camp Icon before each start (the editor keeps it), unless kept", () => {

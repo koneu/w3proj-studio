@@ -28,6 +28,9 @@
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //   --pref S/KEY=VALUE  a key of WorldEditPreferences.txt written before each start of the editor (after we-drive's
 //                       own, --keep-prefs or not), e.g. "Misc/Enforce Water Limits=false"; repeatable
+//   --null-audio        give the editor an audio device that plays nowhere (Wine's ALSA driver on, ALSA's own config a
+//                       "null" device in the work folder; /dev/snd, PulseAudio and PipeWire stay hidden). Without it
+//                       the editor has no device and File > Preferences stops at "Unable to initialize audio device"
 //   --expect-layout     --wait-ready fails ("layout": why) when the main window isn't at 4,30 1352x937 or the tool
 //                       palette not at 1356,30: the layout spec clicks are measured in (we-compare passes it)
 //
@@ -37,7 +40,10 @@
 //                       stopped and started again with the map: "via": "open" or "restart" says which); after a --close
 //                       it starts the editor again. One display, one lock, one setup for several maps (we-compare.mjs);
 //                       the --look cameras go into the first map only
-//   --open FILE         open this map in the running editor (a copy in the prefix's Documents/Warcraft III/Maps; Ctrl+O, its row in
+//   --campaign FILE     put a copy of this campaign (.w3n) where the Campaign Editor's Open dialog lists it (the prefix's
+//                       Documents/Warcraft III/Campaigns): F7, Ctrl+O, --type its file name (no path: the dialog refuses
+//                       / and :), Return. A copy of the same name is replaced
+//   --open FILE        open this map in the running editor (a copy in the prefix's Documents/Warcraft III/Maps; Ctrl+O, its row in
 //                       the editor's Open list, OK;
 //                       a "Save changes?" question about the map before is answered No: put --save before it to keep
 //                       that map's changes), then --wait-ready as after --map. Each further map costs its load time,
@@ -136,6 +142,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
 const HELPER = join(here, "we-x11.py");
 const SIZE = [1600, 1000];
+/** ALSA's whole configuration with --null-audio: a default device that takes the sound and drops it. */
+export const NULL_ALSA_CONF = "pcm.!default {\n  type null\n}\npcm.null {\n  type null\n}\n";
+/** Wine's WINEDLLOVERRIDES for the editor: its audio drivers off, but ALSA's with `nullAudio` (it finds only the null device). */
+export function wineOverrides(nullAudio, extra) {
+  return ["winepulse.drv=d", ...(nullAudio ? [] : ["winealsa.drv=d"]), "wineoss.drv=d", extra].filter(Boolean).join(";");
+}
 /** Where the Vulkan loader looks for drivers' manifests. */
 const ICD_DIRS = ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -201,7 +213,7 @@ const MAX_LOOKS = 16;
 /** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
 const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
  *  "Layout"). */
@@ -367,6 +379,7 @@ export function parseArgs(argv) {
       opts.keyboard = layout;
     }
     else if (a === "--keep-prefs") opts.keepPrefs = true;
+    else if (a === "--null-audio") opts.nullAudio = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
     else if (a === "--expect-layout") opts.expectLayout = true;
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
@@ -514,6 +527,8 @@ export function wineserverPath(tool, exists = existsSync) {
 /** The folder the editor's Open list shows: the prefix's Documents/Warcraft III/Maps. */
 export const openMapsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "steamuser", "Documents", "Warcraft III", "Maps");
 /** The name of the n-th opened copy there: unique per open, so the editor's title says which map it shows. */
+/** The folder the Campaign Editor's Open dialog starts in (it takes a bare file name only: no path, no drive). */
+export const openCampaignsDir = () => join(prefixDir(), "pfx", "drive_c", "users", "steamuser", "Documents", "Warcraft III", "Campaigns");
 export const openCopyName = (n, map) => `we-open-${n}-${basename(map)}`;
 export const winePath = (p) => `Z:${p.split("/").join("\\")}`;
 
@@ -858,7 +873,7 @@ export class Session {
       // English system dialogs whatever the user's language, so their buttons' keys are known ("n" is No).
       LANG: "en_US.UTF-8",
       LC_ALL: "en_US.UTF-8",
-      WINEDLLOVERRIDES: ["winepulse.drv=d", "winealsa.drv=d", "wineoss.drv=d", process.env.WINEDLLOVERRIDES].filter(Boolean).join(";"),
+      WINEDLLOVERRIDES: wineOverrides(!!this.opts.nullAudio, process.env.WINEDLLOVERRIDES),
       PULSE_SERVER: "unix:/nonexistent",
       PIPEWIRE_RUNTIME_DIR: "/nonexistent",
       LD_PRELOAD: shimPath(),
@@ -867,6 +882,13 @@ export class Session {
       // and fontconfig's caches go there too.
       XDG_CACHE_HOME: sandboxCache(),
     });
+    if (this.opts.nullAudio) {
+      // ALSA with nothing but a null device: Wine finds a device, nothing is played (and no hardware is looked at).
+      mkdirSync(this.opts.work, { recursive: true });
+      const conf = join(resolve(this.opts.work), "asound-null.conf");
+      writeFileSync(conf, NULL_ALSA_CONF);
+      env.ALSA_CONFIG_PATH = conf;
+    }
     return { bw, env, fdArgs };
   }
 
@@ -1662,6 +1684,12 @@ async function main() {
           if (arg !== "status" && r.numlock !== arg) throw new Error(`Num Lock is still ${r.numlock} after ${r.pressed ? "pressing Num_Lock" : "no press"}${r.reason ? ` (${r.reason})` : ""}`);
           await s.wait(r.pressed ? 300 : 0);
           out({ step, numlock: r.numlock, was: r.was, pressed: r.pressed });
+        } else if (step === "--campaign") {
+          // A copy of the campaign where the Campaign Editor's Open dialog (Ctrl+O there) lists it: --type its name.
+          const dir = openCampaignsDir();
+          mkdirSync(dir, { recursive: true });
+          copyFileSync(arg, join(dir, basename(arg)));
+          out({ step, name: basename(arg), dir });
         } else if (step === "--type") {
           // Into the open dialog if there is one, else the main window, as --key.
           const w = s.windows();

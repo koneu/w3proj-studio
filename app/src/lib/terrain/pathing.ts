@@ -9,6 +9,7 @@
 
 import { drawnGroundTiles, rampLift, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 import { rampSides } from "./cliffs";
+import { quarterTurn } from "./quarter";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
 
@@ -218,7 +219,7 @@ export function generatePathing(input: PathingInput): Uint8Array {
 export function forEachStampCell(t: Terrain, w: number, h: number,
   s: { x: number; y: number; angle: number; width: number; height: number }, fn: (cx: number, cy: number, pixel: number) => void) {
   // Textures are drawn for the default facing (270°).
-  const turns = (((Math.round(s.angle / (Math.PI / 2)) + 1) % 4) + 4) % 4;
+  const turns = (quarterTurn(s.angle) + 1) % 4;
   const sw = turns % 2 ? s.height : s.width, sh = turns % 2 ? s.width : s.height;
   // Bottom-left cell of the (turned) texture.
   const x0 = Math.round((s.x - t.offsetX) / 32 - sw / 2), y0 = Math.round((s.y - t.offsetY) / 32 - sh / 2);

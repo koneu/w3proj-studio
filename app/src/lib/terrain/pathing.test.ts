@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BLIGHT, BLOCKED, generatePathing, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "./pathing";
+import { BLIGHT, BLOCKED, forEachStampCell, generatePathing, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "./pathing";
 import type { Corner, Terrain } from "./w3e";
 
 /** Flat dry ground of 4 × 4 tiles at layer 2, no ramps. */
@@ -231,4 +231,19 @@ test("with the custom tilesets flag 0 a corner's pathing is its drawn tile's, by
   assert.equal(cell(0, own), NO_WATER, "drawn as Ldrt: buildable");
   assert.equal(cell(1, own), NO_WATER | NO_BUILD, "control: the flag set, the file's Lrok");
   assert.equal(cell(0), NO_WATER | NO_BUILD, "the own list unknown: the file's");
+});
+
+test("a stamp turns by the editor's single precision quarter, also above 2 pi (we-compare fence-exact)", () => {
+  const t = ground();
+  const across = (deg: number) => {
+    const xs = new Set<number>(), ys = new Set<number>();
+    forEachStampCell(t, 16, 16, { x: 256, y: 256, angle: Math.fround((deg * Math.PI) / 180), width: 8, height: 2 }, (cx, cy) => { xs.add(cx); ys.add(cy); });
+    return xs.size > ys.size ? "x" : "y";
+  };
+  // The 8x2 texture is drawn for 270 degrees (8 across x); a quarter turn of 0 or 180 puts its 8 along y.
+  const want: [number, string][] = [[0, "y"], [45, "x"], [135, "y"], [225, "x"], [315, "x"], [-45, "y"], [405, "y"], [675, "x"], [765, "y"], [90, "x"]];
+  for (const [deg, w] of want) assert.equal(across(deg), w, `${deg} degrees`);
+  // Control: rounding the double quotient (the earlier rule) puts 405 across x.
+  const old = (deg: number) => (((Math.round(Math.fround((deg * Math.PI) / 180) / (Math.PI / 2)) + 1) % 4) + 4) % 4 % 2 ? "y" : "x";
+  assert.equal(old(405), "x");
 });

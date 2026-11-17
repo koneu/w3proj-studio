@@ -71,6 +71,24 @@ mod tests {
         assert!(list.contains("war3mapImported\\model.mdx"));
     }
 
+    /// A campaign's chapter maps are stored whole, as the game's campaigns hold them: the World Editor's Edit Map
+    /// can't open a compressed one (we-drive 2026-11-17, "Main map file could not be opened").
+    #[test]
+    fn chapter_maps_are_stored_not_compressed() {
+        let inner: Vec<u8> = vec![b'a'; 20_000];
+        let mut b = ArchiveBuilder::new(WriteOptions::default());
+        b.add("Chapter 1.w3x", inner.clone());
+        b.add("Old Map.W3M", inner.clone());
+        b.add("war3campaign.w3u", inner.clone());
+        let a = Archive::from_bytes(b.write(b"HM3W").unwrap()).unwrap();
+        let flags_of = |n: &str| a.find(n).unwrap().block.flags;
+        assert_eq!(flags_of("Chapter 1.w3x"), flags::EXISTS);
+        assert_eq!(flags_of("Old Map.W3M"), flags::EXISTS);
+        // Control: any other file of the same bytes is compressed.
+        assert_eq!(flags_of("war3campaign.w3u"), flags::EXISTS | flags::COMPRESS);
+        assert_eq!(a.read("Chapter 1.w3x").unwrap(), inner);
+    }
+
     #[test]
     fn a_nonsense_sector_size_still_round_trips() {
         let mut b = ArchiveBuilder::new(WriteOptions { sector_size_shift: 0xffff, ..WriteOptions::default() });
