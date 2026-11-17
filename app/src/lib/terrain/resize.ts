@@ -24,27 +24,25 @@ export function resizedSize(t: Terrain, change: Sides): [number, number] {
  *  2026-11-14, a 64 × 64 map grown 56 clicks each way: every side stopped at ±32256, 220 tiles out; the 56th click
  *  moved that side's camera bounds and playable edge out by 4 more tiles instead, its border going from 6 to 2 on the
  *  left and right, 8 to 4 on top and 4 to 0 at the bottom; a 57th took the right border from 2 to 0 and left the
- *  bottom's 0; a 96 × 64 map stopped at 32256 too, after 51 clicks on the right). */
+ *  bottom's 0; a 96 × 64 map stopped at 32256 too, after 51 clicks on the right). Studio refuses growth past it instead
+ *  (coordProblem; project rule 2026-11-17: refuse, never cut silently): the map the editor ends at is asked for
+ *  directly, its border included (we-compare map-size-limits). */
 export const COORD_LIMIT = 32256;
 
-/** `change` and `complements` as the World Editor applies them at the coordinate limit: growth that would take a side's
- *  outer edge past COORD_LIMIT stops there (in whole SIZE_STEP clicks) and the rest moves that side's playable edge
- *  out instead, taking it from the border down to 0; what the border can't take is dropped, as the editor's arrows
- *  then do nothing (we-drive 2026-11-14, see COORD_LIMIT: playable width and camera bounds were those of the unlimited
- *  growth while the border lasted). Sides within the limit, and cuts, are unchanged. Maps whose edges aren't a whole
- *  number of clicks from the limit weren't measured (Studio's new maps all are). */
-export function limitResize(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">, change: Sides, complements: Sides): { change: Sides; complements: Sides } {
-  const ch: Sides = [...change], co: Sides = [...complements];
+const SIDE_NAMES = ["left", "right", "bottom", "top"] as const;
+
+/** Why `change` would take a side's outer edge past ±COORD_LIMIT, or null. Only growth counts: a map whose edge lies
+ *  past the limit already can be cut or left as it is. */
+export function coordProblem(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">, change: Sides): string | null {
   const r = worldRect(t);
   // How far each side's new edge reaches out from 0.
   const reach = [-(r.left - change[0] * 128), r.right + change[1] * 128, -(r.bottom - change[2] * 128), r.top + change[3] * 128];
   for (let k = 0; k < 4; k++) {
     if (!(change[k] > 0) || reach[k] <= COORD_LIMIT) continue;
-    const over = Math.min(change[k], Math.ceil((reach[k] - COORD_LIMIT) / 128 / SIZE_STEP) * SIZE_STEP);
-    ch[k] -= over;
-    co[k] = Math.max(0, co[k] - over);
+    const room = Math.max(0, Math.floor((COORD_LIMIT - (reach[k] - change[k] * 128)) / 128));
+    return `The ${SIDE_NAMES[k]} edge would reach ${k % 2 ? "" : "-"}${reach[k]}, past ±${COORD_LIMIT}, the farthest a map's edge may lie (${room} tile${room === 1 ? "" : "s"} can be added there).`;
   }
-  return { change: ch, complements: co };
+  return null;
 }
 
 /** Why the typed sides can't be taken as they are (Map Size refuses them rather than rounding or clamping), or null:
@@ -65,7 +63,7 @@ export function resizeProblem(t: Terrain, change: Sides, complements: Sides): st
     if (n % SIZE_STEP) return `The ${what} must be a multiple of ${SIZE_STEP} tiles (${n}).`;
   }
   if (w - complements[0] - complements[1] < 16 || h - complements[2] - complements[3] < 16) return "The playable area must stay at least 16 tiles wide and high.";
-  return null;
+  return coordProblem(t, change);
 }
 
 /** The cliff variation the World Editor gives a corner Map Size adds: 0, 1 or 2 at random (we-drive, 2026-11-11: 812

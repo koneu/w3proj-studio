@@ -9,7 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
-import { COORD_LIMIT, limitResize, playableSize, resizedSize, resizeProblem, sidesProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
+import { COORD_LIMIT, playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
 import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
@@ -116,18 +116,17 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 
   /** The preview: playable (clear), border (shaded), cut off (red), per tile of the current map. */
   const render = () => {
-    // As the resize applies them: growth past the coordinate limit moves the playable edge instead.
-    const { change: ch, complements: co } = limitResize(t, change, complements);
+    const ch = change, co = complements;
     const [w, hgt] = resizedSize(t, ch);
     const [pw, ph] = playableSize({ ...t, width: w + 1, height: hgt + 1 }, co);
-    // What was typed is checked before the coordinate limit moves any of it.
-    const problem = sidesProblem(change, complements) ?? resizeProblem(t, ch, co);
+    // Growth past the coordinate limit is refused here too (resizeProblem), with Apply off.
+    const problem = resizeProblem(t, ch, co);
     const same = change.every((c) => c === 0) && complements.every((c, k) => c === stored[k]);
     (apply as HTMLButtonElement).disabled = !ed.editable || !!problem || same;
     info.replaceChildren(
       h("div", {}, `Now ${t.width - 1} × ${t.height - 1} tiles (playable ${t.width - 1 - stored[0] - stored[1]} × ${t.height - 1 - stored[2] - stored[3]})`),
       h("div", {}, `After ${w} × ${hgt} tiles (playable ${pw} × ${ph})`),
-      problem ? h("div.mapsize-problem", {}, problem) : h("div.muted", {}, `The whole map's size is a multiple of ${SIZE_STEP} tiles. New ground copies the edge beside it. Doodads on or past the new edge, and units and items not in the playable area, are removed; start locations off the map move inside. No edge goes past ±${COORD_LIMIT}: growth beyond takes the border instead.`));
+      problem ? h("div.mapsize-problem", {}, problem) : h("div.muted", {}, `The whole map's size is a multiple of ${SIZE_STEP} tiles. New ground copies the edge beside it. Doodads on or past the new edge, and units and items not in the playable area, are removed; start locations off the map move inside. No edge goes past ±${COORD_LIMIT}.`));
     if (!active) return;
     const W = t.width - 1, H = t.height - 1;
     const rgba = new Uint8Array(W * H * 4);
