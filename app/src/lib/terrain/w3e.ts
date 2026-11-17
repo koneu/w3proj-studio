@@ -298,7 +298,9 @@ export function onBoundary(t: Terrain, x: number, y: number): boolean {
 
 /** Bit of the water word: the tile whose lower left corner this is lies past the playable map. The World Editor
  *  writes it from the w3i's camera complements on save; it doesn't draw by it (playableEdgeTiles). Measured: 14 of
- *  14 maps carry it, saved by the World Editor among them. */
+ *  14 maps carry it, saved by the World Editor among them. Bit 15 above it is set in none of 493 maps (the game's and
+ *  smoketest_maps), and a World Editor open and save clears it, keeping this one also where the w3i doesn't put it
+ *  (we-compare format-fields, 2026-11-17); Studio keeps the word as it is. */
 const MAP_EDGE = 0x4000;
 
 /** Per tile (`width - 1` by `height - 1`, row 0 in the south), 1 where the tile lies past the playable map by the
