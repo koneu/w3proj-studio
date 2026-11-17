@@ -348,8 +348,8 @@ test("the allowlist of differs without paths only shrinks: every entry exists an
   const root = repoPath("tests", "we-compare");
   const { entries, textEntries } = core.readDiffersAllowlistSections(resolve(root, "..", ".."));
   // Lower these as entries get their paths (or a JSON kind, or "lines" and a match); never raise them.
-  assert.ok(entries.size <= 34,`the JSON kinds' list grew to ${entries.size}`);
-  assert.ok(textEntries.size <= 3,`the text kinds' list grew to ${textEntries.size}`);
+  assert.ok(entries.size <= 33, `the JSON kinds' list grew to ${entries.size}`);
+  assert.ok(textEntries.size <= 1, `the text kinds' list grew to ${textEntries.size}`);
   const needed = { json: new Set(), text: new Set() };
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {

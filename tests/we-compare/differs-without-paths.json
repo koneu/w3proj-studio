@@ -25,7 +25,6 @@
     "low-ground-d-open war3map.w3e",
     "melee-valid-melee-tree-256 war3map.w3i",
     "painted-with-cliff-rock-level war3map.w3e",
-    "ramp-plateau-twice war3map.w3e",
     "water-brush-edge-high war3map.w3e",
     "water-brush-edge-high-deep war3map.w3e",
     "water-brush-edge-high-far war3map.w3e",
@@ -37,8 +36,6 @@
     "water-ramp-on war3map.w3e"
   ],
   "textEntries": [
-    "open-paths-forsaken-start war3map.wpm",
-    "open-paths-gui-meelee-map-2 war3map.wpm",
-    "ramp-plateau-twice war3map.wpm"
+    "open-paths-forsaken-start war3map.wpm"
   ]
 }

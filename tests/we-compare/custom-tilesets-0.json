@@ -1,11 +1,11 @@
 [
   {
     "name": "ct0-minimap-rev6-0",
-    "description": "custom-tilesets 0 with the file's ground list the tileset's own reversed (make-custom-tilesets.mjs, stripes per slot): the editor's saved minimap shows the stripes as the terrain view draws them, with the tileset's own list (Dirt west, Grass east), not the file's (we-drive 2026-11-16, branch tileset0-lists). Studio: minimapgen.ts drawnGroundTiles. HD on both sides (Studio's colours follow game.graphicsMode)",
+    "description": "custom-tilesets 0 with the file's ground list the tileset's own reversed (make-custom-tilesets.mjs, stripes per slot): the editor's saved minimap shows the stripes as the terrain view draws them, with the tileset's own list (Dirt west, Grass east), not the file's (we-drive 2026-11-16, branch tileset0-lists). Studio: minimapgen.ts drawnGroundTiles. HD on both sides (Studio's colours follow game.graphicsMode). Tolerance 6 per channel for all four ct0-minimap specs (was 24): measured 2026-11-17 (branch fix-we-specs) the largest difference of a 16-pixel block's mean between the two pictures is 3, and the closest two stripe colours of a picture differ by 13 or more in some channel, so a swapped stripe can't pass",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 6 }],
     "limit": 20
   },
   {
@@ -14,7 +14,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-1.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 6 }],
     "limit": 20
   },
   {
@@ -23,7 +23,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 6 }],
     "limit": 20
   },
   {
@@ -32,7 +32,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more9-0.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
-    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 24 }],
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 6 }],
     "limit": 20
   },
   {
