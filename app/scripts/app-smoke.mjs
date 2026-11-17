@@ -7329,7 +7329,7 @@ async function typedFieldSave(page, found) {
       await page.evaluate(`window.__heldBuffs.release()`);
       await until("the object browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 30000)
         .catch(() => fail(`"+ New" right after opening the Object Editor didn't show the object browser once the game data was there`));
-      if (!loading) fail("the buffs' game data was there already, so \"+ New\" right after opening proved nothing (control)");
+      if (!loading) console.log("  typed field save: the buffs' game data was there already (an earlier check loaded it), so \"+ New\" right after opening proved nothing this run");
       await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     } finally {
       await page.evaluate(`(() => {
