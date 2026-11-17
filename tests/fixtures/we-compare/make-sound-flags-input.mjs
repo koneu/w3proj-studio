@@ -2,9 +2,11 @@
 // 22050 Hz: the file the World Editor's Import Sound / Replace Internal Sound and Studio take from disk) and
 // sound-flags.w3m, a copy of random-group.w3m (a map the editor saved, with no sounds and no import list).
 //
-//   node tests/fixtures/we-compare/make-sound-flags-input.mjs
-import { copyFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+//   node tests/fixtures/we-compare/make-sound-flags-input.mjs [<out folder>]
+//
+// The outputs go next to this script, or into the out folder (the generators' test writes there, not over the fixtures).
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,8 @@ export function toneWav(ms = 250, hz = 440, rate = 22050) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  writeFileSync(join(here, "beep.wav"), toneWav());
-  copyFileSync(join(here, "random-group.w3m"), join(here, "sound-flags.w3m"));
+  const outDir = process.argv[2] ? resolve(process.argv[2]) : here;
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "beep.wav"), toneWav());
+  copyFileSync(join(here, "random-group.w3m"), join(outDir, "sound-flags.w3m"));
 }
