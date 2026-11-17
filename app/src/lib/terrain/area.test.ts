@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { borderShade, darkWaterCorners } from "./area";
+import { borderShade, darkWaterCorners, isBackdrop } from "./area";
 import { mapEdgeTiles, markMapEdge, onBoundary, playableEdgeTiles, setWaterLevel, validComplements, type Corner, type Terrain } from "./w3e";
 
 /** A terrain of `tilesX` by `tilesY` tiles, its map edge marked for these complements (left, right, bottom, top). */
@@ -88,4 +88,15 @@ test("a tile counts as Boundary when one of its corners is painted, the same til
   assert.equal(onBoundary(t, 300, 64), false, "two tiles away");
   assert.equal(onBoundary(t, -10, 64), false, "off the map");
   assert.equal(onBoundary(t, 64, 400), false, "past the last row of tiles");
+});
+
+test("trees and doodads may stand in the border, units and items may not", () => {
+  const playable = { left: 0, bottom: 0, right: 1000, top: 1000 }, whole = { left: -500, bottom: -500, right: 1500, top: 1500 };
+  assert.equal(isBackdrop("w3b", -100, 500, playable, whole), true);
+  assert.equal(isBackdrop("w3d", 1200, 1200, playable, whole), true);
+  assert.equal(isBackdrop("w3u", -100, 500, playable, whole), false);
+  assert.equal(isBackdrop("w3t", -100, 500, playable, whole), false);
+  assert.equal(isBackdrop("w3b", 500, 500, playable, whole), false, "inside, the ground still decides");
+  assert.equal(isBackdrop("w3b", -900, 500, playable, whole), false, "off the map altogether");
+  assert.equal(isBackdrop("w3b", -100, 500, null, whole), false, "bounds unknown: no exception");
 });

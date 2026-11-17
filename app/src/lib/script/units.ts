@@ -54,6 +54,8 @@ export interface UnitsInput {
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Whether an ability is a hero ability (lib/script/objects heroAbilities): unlearned ones get no autocast order. */
   heroAbility?: (ability: string) => boolean;
+  /** Whether an ability isn't one of the game's (a map's or campaign's own, or one defined nowhere). */
+  customAbility?: (ability: string) => boolean;
 }
 
 /** Fixed decimals of a 32-bit float, ties to even like C's printf (-3722.25 → -3722.2). */
@@ -134,23 +136,32 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   // hero level and the mana (the game's maps: 308 times after the mana, 10 after the level, never before either).
   if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
   else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
+  // The colour comes before the learned skills (World Editor, TestMapOrcCampaign's hero: SetHeroLevel, SetUnitColor,
+  // SelectHeroSkill); a waygate's stays after its destination (the game's maps).
+  const waygate = isWaygate(i, u.id);
+  const pushColor = () => {
+    const custom = i.customColor ? i.customColor(u.id) : waygate;
+    const color = custom && u.color !== -1 ? u.color : i.teamColor?.(u.id);
+    if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
+  };
+  if (!waygate) pushColor();
   for (const a of u.abilities) {
     for (let l = 0; l < a.level; l++) lines.push(`    call SelectHeroSkill( ${v}, '${a.id}' )`);
     // Autocast abilities are switched on or off as placed; a hero ability not learned (level 0) isn't.
     if (a.level === 0 && i.heroAbility?.(a.id)) continue;
     const orders = i.autocastOrders?.(a.id), order = a.autocast ? orders?.on : orders?.off;
     if (order) lines.push(`    call IssueImmediateOrder( ${v}, "${order}" )`);
+    // A learned custom ability without an autocast order gets an empty order (World Editor 2.0: TestMapOrcCampaign's
+    // XAC1 on Impale, Forsaken09's A649 and A65N, which no map file defines; the game's own abilities get none).
+    else if (!orders && a.level > 0 && i.customAbility?.(a.id)) lines.push(`    call IssueImmediateOrder( ${v}, "" )`);
   }
   for (const it of u.inventory) lines.push(`    call UnitAddItemToSlotById( ${v}, '${it.id}', ${it.slot} )`);
   // Other units store 0 here, and in the colour field: only waygates mean them.
-  const waygate = isWaygate(i, u.id);
   if (waygate && u.waygate >= 0) {
     const r = i.regionName?.(u.waygate);
     if (r) lines.push(`    call WaygateSetDestination( ${v}, GetRectCenterX(${r}), GetRectCenterY(${r}) )`, `    call WaygateActivate( ${v}, true )`);
   }
-  const custom = i.customColor ? i.customColor(u.id) : waygate;
-  const color = custom && u.color !== -1 ? u.color : i.teamColor?.(u.id);
-  if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
+  if (waygate) pushColor();
   // Items drop from a map item table or the unit's own sets.
   const drops = dropFunctionOf("Unit", u, i.units.indexOf(u), i.itemTables);
   if (drops) {

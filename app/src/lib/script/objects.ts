@@ -196,7 +196,10 @@ export function specialUnits(files: (ObjectFile | null | undefined)[]): { goldMi
   for (const f of files) {
     for (const o of f?.custom ?? []) {
       if (!o.id) continue;
-      if (hasGold(o) || goldMines.has(o.base)) goldMines.add(o.id);
+      // A custom type that sets its own ability list keeps a gold mine's resource only with Agld in it
+      // (World Editor, TestMapOrcCampaign: an ngol-based unit without Agld gets no SetResourceAmount).
+      const own = o.mods?.some((m) => m.field === "uabi");
+      if (own ? hasGold(o) : goldMines.has(o.base)) goldMines.add(o.id);
       if (waygates.has(o.base)) waygates.add(o.id);
     }
   }

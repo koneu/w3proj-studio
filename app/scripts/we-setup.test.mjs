@@ -3,14 +3,14 @@
 // refuses others); the "game" is a small folder next to it, under target/tmp.
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
 import { mainCheckout } from "../../tests/gamepath.mjs";
-import { clean, compare, guardedWeDir, repo, setup, snapshot } from "./we-setup.mjs";
+import { clean, compare, compareExit, guardedWeDir, lockPath, repo, setup, snapshot, takeLock } from "./we-setup.mjs";
 
 const test = (name, fn) => nodeTest(name, { skip: process.platform === "win32" }, fn);
 
@@ -163,6 +163,47 @@ test("the snapshot lists a file it couldn't stat, and the comparison fails for a
   }
 });
 
+test("--compare fails when the snapshots hold no guarded file (they prove nothing), as for a changed one", () => {
+  const root = scratchDir("we-snap-none-");
+  try {
+    writeFileSync(join(root, "ok"), "y");
+    const s = snapshot([root]);
+    assert.equal(compareExit(compare(s, s, [root])), 0, "control: guarded files there and unchanged");
+    assert.equal(compareExit(compare(s, s, ["/no/such/install"])), 1, "no guarded file in the snapshots");
+    const changed = { ...s, files: { [join(root, "ok")]: { ...s.files[join(root, "ok")], sha256: "x" } } };
+    assert.equal(compareExit(compare(s, changed, [root])), 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the World Editor lock: a lock another run takes while a stale one is taken over is put back, not swept away", async () => {
+  await withEnv(undefined, async () => {
+    const dir = lockPath();
+    const child = spawn(process.execPath, ["-e", ""]);
+    await new Promise((ok) => child.on("close", ok));
+    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"]);
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: child.pid, repo: "dead" }));
+      // Another run takes the lock between the stale check and the rename.
+      const steal = () => { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir); writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: other.pid, repo: "other", since: "now" })); };
+      await assert.rejects(takeLock(() => {}, 1500, { beforeRename: steal }), /still holds/);
+      assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, other.pid, "the other run's lock is where it was");
+      assert.deepEqual(readdirSync(join(dir, "..")).filter((n) => n.includes("stale")), [], "nothing left behind");
+      // Control: without the other run, the stale lock is taken over.
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir);
+      writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: child.pid, repo: "dead" }));
+      const said = [];
+      const release = await takeLock((m) => said.push(m), 5000);
+      assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, process.pid);
+      assert.match(said.join("\n"), /took over the World Editor lock of dead/);
+      release();
+    } finally { other.kill(); }
+  });
+});
+
 test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT or a whole O_TMPFILE", (t) => {
   try { execFileSync("cc", ["--version"], { stdio: "ignore" }); } catch { return t.skip("no C compiler"); }
   const src = repoPath("app", "scripts", "we-rofs.c"); // the test runs bundled: found from the working directory up
@@ -173,6 +214,51 @@ test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT o
     const out = join(dir, "we-rofs.so");
     execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", out, src, "-ldl"], { stdio: ["ignore", "pipe", "pipe"] });
     assert.ok(lstatSync(out).size > 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Opens a file of a read-only mount for writing (open O_RDWR, creat) as the editor's CASC reader does, in bubblewrap
+ *  with the whole machine read-only; prints what each call gave. */
+const ROFS_PROBE = String.raw`
+import ctypes, errno, json, os, sys
+f = sys.argv[1]
+out = {}
+try:
+    fd = os.open(f, os.O_RDWR)
+    out["open"] = "fd"
+    try:
+        os.write(fd, b"x")
+        out["write"] = "wrote"
+    except OSError as e:
+        out["write"] = errno.errorcode[e.errno]
+    out["read"] = os.read(fd, 4).decode()
+except OSError as e:
+    out["open"] = errno.errorcode[e.errno]
+libc = ctypes.CDLL(None, use_errno=True)
+for name, path in (("creat", f), ("creatMissing", f + ".new")):
+    r = libc.creat(path.encode(), 0o644)
+    out[name] = "fd" if r >= 0 else errno.errorcode[ctypes.get_errno()]
+print(json.dumps(out))
+`;
+
+test("we-rofs.so turns a read-write open and a creat of a read-only file into a read-only open; a write through it fails", (t) => {
+  try { execFileSync("cc", ["--version"], { stdio: "ignore" }); execFileSync("bwrap", ["--ro-bind", "/", "/", "true"], { stdio: "ignore" }); } catch { return t.skip("no C compiler or no working bubblewrap"); }
+  const dir = scratchDir("we-rofs-run-");
+  try {
+    const so = join(dir, "we-rofs.so");
+    execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", so, repoPath("app", "scripts", "we-rofs.c"), "-ldl"]);
+    const data = join(dir, "data.idx");
+    writeFileSync(data, "CASC");
+    const probe = join(dir, "probe.py");
+    writeFileSync(probe, ROFS_PROBE);
+    const run = (preload) => JSON.parse(execFileSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--", "env", ...(preload ? [`LD_PRELOAD=${so}`] : []), "python3", "-I", probe, data], { encoding: "utf8" }));
+    // Control: on the read-only mount every write open fails.
+    assert.deepEqual(run(false), { open: "EROFS", creat: "EROFS", creatMissing: "EROFS" });
+    // With the shim: the existing file opens read-only (the write through it fails), a new one still can't be made.
+    assert.deepEqual(run(true), { open: "fd", write: "EBADF", read: "CASC", creat: "fd", creatMissing: "EROFS" });
+    assert.equal(readFileSync(data, "utf8"), "CASC", "the file is unchanged");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

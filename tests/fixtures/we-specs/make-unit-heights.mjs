@@ -3,8 +3,8 @@
 //
 //   node tests/fixtures/we-specs/make-unit-heights.mjs <w3proj cli> <game folder>
 //
-// A plateau two cliff levels up (ground height 256) over corners 20-40 in both directions (world x and y from -1536
-// to 1024), and four units with a height of their own in the file: footmen at 0 and 500 on the plateau, a footman at 500
+// A plateau two cliff levels up (ground height 256) over corners 20-40 in both directions (world x from -1536 to 1024;
+// the w3e rows run from the north, so rows 20-40 are corners y 24-44: world y from -1024 to 1536), and four units with a height of their own in the file: footmen at 0 and 500 on the plateau, a footman at 500
 // on the flat ground, a gryphon at 0 on the plateau. The editor saves every unit at the height of the ground it stands on.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -8,7 +8,7 @@
 // Without --case it makes the CASES below; --case makes others (for measuring), the JSON as a CASES entry:
 //   off        true: the w3i's Melee flag cleared (0x9c10), to see whether the editor's save puts it back
 //   doodads    [[id, dx, dy]]: doodads or destructables at the start + (dx, dy)
-//   units      [[id, dx, dy, player]]: units or items (player 24: neutral passive) at the start + (dx, dy)
+//   units      [[id, dx, dy, player]]: units or items (player 24: Neutral Hostile, the default; 27 is Neutral Passive) at the start + (dx, dy)
 //   start      [dx, dy]: moves the start location
 //   corners    [[x0, y0, x1, y1, { layer, flags, texture, water, height }]]: corners (inclusive, the map's corner
 //              indices; the start's is 32, 30) set to these values; cliff corners get Grass Cliff as Apply Cliff leaves it
@@ -28,9 +28,17 @@ requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_ST
 let out = resolve(here, "..", "..", "..", "target", "melee-valid");
 const extra = [];
 for (let i = 2; i < argv.length; i++) {
-  if (argv[i] === "--out") out = resolve(argv[++i]);
-  else if (argv[i] === "--case") { const [name, ...json] = argv[++i].split("="); extra.push([name, JSON.parse(json.join("="))]); }
-  else if (argv[i] !== "--allow-stale") throw new Error(`unknown argument ${argv[i]}`);
+  if (argv[i] === "--out") {
+    if (argv[i + 1] === undefined) { console.error("--out needs a folder"); process.exit(2); }
+    out = resolve(argv[++i]);
+  } else if (argv[i] === "--case") {
+    // NAME=JSON, the name a plain file-name part (it becomes melee-valid-<name>.w3x inside the out folder)
+    const [name, ...json] = (argv[++i] ?? "").split("=");
+    let value;
+    try { value = JSON.parse(json.join("=")); } catch { /* reported below */ }
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name) || value === undefined) { console.error("--case needs NAME=JSON (NAME letters, digits, . _ -)"); process.exit(2); }
+    extra.push([name, value]);
+  } else if (argv[i] !== "--allow-stale") { console.error(`unknown argument ${argv[i]}`); process.exit(2); }
 }
 
 /** The cases of tests/we-compare/melee-valid-we.json: the pairs either side of each threshold measured there. All

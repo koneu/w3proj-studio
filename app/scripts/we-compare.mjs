@@ -26,22 +26,55 @@
 //               editor's file dialogs take them (Z:\… on Linux), `${REPO}` / `${MAIN}` in an "eval" their paths.
 //   we          { "mode": "sd|hd|de", "from": "input|studio" (studio: the editor opens the map Studio saved and re-saves it), "saveAccept": ["Warning"] (dialog titles the save answers with Return), "steps": ["--key d", ["--click", "100,100"], ...] }: we-drive steps between the map being
 //               ready and the save (the save and the close are added); several specs of one mode share ONE we-drive
-//               process, so one display and one lock, and ONE editor: each next map is opened in it (File > Open)
+//               process, so one display and one lock, and ONE editor: each next map is opened in it (File > Open).
+//               What an earlier spec toggled in that editor stays (Ctrl+Shift+W, a palette pick, a tree's scroll): a
+//               step that depends on it is set, not toggled. Num Lock: "--numlock on" (reads the X server's state and
+//               presses Num_Lock only when it differs; a blind "--key Num_Lock" depends on the spec before).
+//               "freshEditor": true  this spec gets an editor of its own: the editor before is closed and a new one
+//                 started for it (the preferences written again), so nothing of the specs before it is left.
+//               "prefs": { "Misc": { "Enforce Water Limits": "false" } }  keys of WorldEditPreferences.txt written
+//                 before each start of its editor (we-drive --pref); specs with other prefs get another we-drive
+//                 process. Pinned for every run unless --keep-prefs: Enforce Water Limits, Enforce Camera Boundaries,
+//                 Reset Fixed Z When Moving Objects, Show Creep Camps (we-drive PINNED_PREFS).
+//               "expectCrash": true  the editor must crash while closing after this spec's save (it is closed right
+//                 after it): no crash is the spec's error (close-crash-light-ranges tests that crash)
 //   studio      { "settings": { key: value }, "steps": [ { "mcp": "tool", "args": {} }, { "eval": "js" }, { "sleep": ms },
 //               { "open": "map/war3map.w3e.txt" }, { "terrain": true }, { "setting": [key, value] }, { "command": id } ] }:
 //               the project (the input map unpacked, or the new map) is open; afterwards everything is saved and packed
 //   compare     files of the map: "war3map.w3i", or { "file": "war3map.wpm", "as": "wpm", "expect": "differs", "tolerance": 0.01 (parsed: numbers this close are equal),
 //               "ignore": ["doodads[3].scale", "units[].itemTable"] (parsed: paths whose differences are known and named; [] is any index) }. "as": auto
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
-//               text, text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
+//               text, text-exact (lines split at LF only: a CR is part of its line, so line endings count; the map's own
+//               bytes), text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
 //               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may.
+//               A "differs" without expectPaths passes on any difference, also a World Editor step that missed: refused,
+//               on a JSON kind (name the paths) and on text, text-set, text-exact, bytes and wpm alike (compare the file
+//               as a JSON kind, or narrow it with "lines" and expect a match); only the entries and textEntries of
+//               tests/we-compare/differs-without-paths.json are let through (that list only shrinks).
+//               "tolerance": 0.5, or per path { "doodads[].z": 1, "camera.x": 4, "default": 0 }: the longest pattern
+//               that matches a path gives its tolerance, "default" (else 0) every other path.
+//               A file of the checkout that a "--type" text or an eval names (${REPO}/target/x/Rabbit.mdx,
+//               ${REPO_WE}\tests\…) must exist: a missing one is the spec's ERROR (naming its make-*.mjs), as a missing
+//               input map; else both sides would import nothing and match.
 //               A file missing from a save, or one that can't be read, is MISSING / ERROR: never the expected difference.
+//               A "parsed" file of the World Editor's save that doesn't come back the same from the codecs (w3proj
+//               verify) is ERROR: the codecs' JSON of both sides would hide what they lose.
 //               "tolerance", "ignore" and "expectPaths" are refused on text, bytes and wpm (they'd do nothing there).
-//               "lines": "regex" (text and text-set only) compares only the lines of each save that match it.
+//               "lines": "regex" (text and text-set only) compares only the lines of each save that match it; none
+//               matching in a save is ERROR (two empty texts would match). A text kind on a binary file (a NUL in
+//               it: a w3e or wpm the unpack left raw) is ERROR too: compare it as bytes, wpm or a JSON kind.
 //               More kinds (we-compare-w3e.mjs): w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
 //               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
 //               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],
 //               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.
+//
+// A spec whose input map is missing gets an ERROR naming the make-*.mjs that writes it; the other specs still run.
+// Between specs Studio is put back: the settings a spec changes (studio.settings, "setting" steps), the w3.window
+// functions its evals stub, and the "__" window globals they make. Studio's save must leave no editor unsaved and the
+// terrain's rebuild must succeed, else the spec fails. A World Editor crash while closing after the spec's save is a
+// warning in the report (the save is whole), not a failure. Every we-drive process runs with --expect-layout: an editor
+// whose main window or tool palette isn't where the specs' clicks were measured (4,30 1352x937; the palette at
+// 1356,30) fails all its specs with one message instead of clicking beside every button.
 //
 // Output: a short report on stdout (OK / UNEXPECTED per spec, MATCH / DIFFERS per file with the first differences:
 // "doodads[3].angle: WE 4.71, Studio 0", counts of fields and entries) and the same as JSON. Exit 0 when every file is
@@ -51,12 +84,12 @@
 // never touched (we-drive).
 
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { compareEntry, duplicateName, formatReport, parseSpecFile, runOutcome, weOutcome } from "./we-compare-core.mjs";
+import { applyRoundtrip, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
@@ -135,10 +168,46 @@ async function studioStep(page, step, ctx) {
   } else throw new Error(`unknown Studio step ${JSON.stringify(step)}`);
 }
 
+/**
+ * Runs in the page (stringified; the tests call it with fakes): saves every editor, lets the terrain's derived files
+ * (pathing, shadows, minimap) be written, and throws when an editor still has unsaved changes after the save (its save
+ * failed: the pack would hold the file as it was) or the terrain's rebuild failed.
+ */
+export async function saveForPack(w3, wb) {
+  await w3.editors.saveAll();
+  const dirty = wb.editors.tabs.filter((t) => t.dirty).map((t) => t.path);
+  if (dirty.length) throw new Error(`the save left unsaved changes in ${dirty.join(", ")} (its save failed)`);
+  try { await w3.commands.execute("w3.terrain.settle"); } catch (e) { throw new Error(`the terrain's derived files weren't written: ${e?.message ?? e}`); }
+}
+
+/**
+ * Runs in the page before a spec (stringified; tested with fakes): what a spec's evals may change that would reach
+ * the next spec: the functions of w3.window (a stubbed showWarning or confirm) and the window's "__" globals
+ * (window.__prefs, __asked). spec-isolation's restore puts them back.
+ */
+export function isolateSnapshot(win, w3) {
+  win.__weCompareKept = { methods: Object.fromEntries(Object.getOwnPropertyNames(w3.window).map((k) => [k, w3.window[k]])), globals: Object.keys(win).filter((k) => k.startsWith("__")) };
+}
+
+/** Runs in the page after a spec: w3.window as isolateSnapshot found it, the "__" globals the spec made deleted (the
+ *  runner's own __compareGroup and __driveEd stay). Returns what it put back, for the log. */
+export function isolateRestore(win, w3) {
+  const kept = win.__weCompareKept;
+  if (!kept) return [];
+  const changed = [];
+  for (const k of Object.getOwnPropertyNames(w3.window)) {
+    if (!Object.hasOwn(kept.methods, k)) { delete w3.window[k]; changed.push(`w3.window.${k}`); } else if (w3.window[k] !== kept.methods[k]) { w3.window[k] = kept.methods[k]; changed.push(`w3.window.${k}`); }
+  }
+  for (const [k, v] of Object.entries(kept.methods)) if (!Object.hasOwn(w3.window, k)) { w3.window[k] = v; changed.push(`w3.window.${k}`); }
+  const own = new Set([...kept.globals, "__weCompareKept", "__compareGroup", "__driveEd"]);
+  for (const k of Object.keys(win)) if (k.startsWith("__") && !own.has(k)) { delete win[k]; changed.push(`window.${k}`); }
+  delete win.__weCompareKept;
+  return changed;
+}
+
 /** Saves what is open and packs the project into `output`. */
 async function packProject(page, output) {
-  await page.evaluate(`w3.editors.saveAll()`, { timeout: 120000 });
-  await page.evaluate(`w3.commands.execute("w3.terrain.settle").catch(() => {})`).catch(() => {});
+  await page.evaluate(`(${saveForPack})(w3, w3Workbench)`, { timeout: 300000 });
   const root = await page.evaluate(`w3.workspace.project()?.root`);
   if (!root) throw new Error("no project is open to pack");
   mkdirSync(dirname(output), { recursive: true });
@@ -159,16 +228,21 @@ async function runStudio(specs, opts, game) {
     await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
     await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
     for (const spec of specs) {
+      // A spec whose input is missing (main) has its error already: nothing to make.
+      if (spec.error) continue;
       const dir = join(opts.work, spec.name);
       const t0 = Date.now();
-      // The settings are put back after the spec: the next one starts from the app's.
+      // Put back after the spec, so the next one starts from the app's: every setting the spec changes (its
+      // studio.settings and its "setting" steps; the user layer as it was, absent included), the functions of
+      // w3.window its evals stub, and the window globals they make (isolateSnapshot).
       const kept = {};
+      let isolated = false;
       try {
         await page.evaluate(`(async () => { window.__driveEd = null; await w3.editors.closeAll(); })()`);
-        for (const [k, v] of Object.entries(spec.studio.settings)) {
-          kept[k] = await page.evaluate(`w3.settings.get(${JSON.stringify(k)})`);
-          await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${JSON.stringify(v)})`);
-        }
+        await page.evaluate(`(${isolateSnapshot})(window, w3)`);
+        isolated = true;
+        for (const k of settingKeys(spec)) kept[k] = await page.evaluate(`w3.settings.inspect(${JSON.stringify(k)}).user`);
+        for (const [k, v] of Object.entries(spec.studio.settings)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${JSON.stringify(v)})`);
         if (spec.input.map) {
           const project = join(dir, "project");
           cpSync(spec.input.map, join(dir, "input.w3x"));
@@ -193,7 +267,13 @@ async function runStudio(specs, opts, game) {
         spec.error = `Studio: ${e.message}`;
         say(`${spec.name}: ${spec.error}`);
       } finally {
-        for (const [k, v] of Object.entries(kept)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${v === undefined ? "undefined" : JSON.stringify(v)})`).catch(() => {});
+        for (const [k, v] of Object.entries(kept)) {
+          await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${v === undefined ? "undefined" : JSON.stringify(v)})`).catch((e) => say(`${spec.name}: the setting ${k} wasn't put back: ${e.message}`));
+        }
+        if (isolated) {
+          const back = await page.evaluate(`(${isolateRestore})(window, w3)`).catch((e) => { say(`${spec.name}: the page's state wasn't put back: ${e.message}`); return []; });
+          if (back?.length) say(`${spec.name}: put back ${back.join(", ")}`);
+        }
       }
     }
   } finally {
@@ -208,18 +288,22 @@ async function runStudio(specs, opts, game) {
  * (--close after the last only). One editor for all maps; the display, the lock and the farm's setup once. A spec whose steps fail
  * stops that process (we-drive stops at a failed step): the specs after it run in the next process.
  */
-async function runWorldEditor(specs, opts, game, mode, saveAccept) {
+async function runWorldEditor(specs, opts, game) {
+  const { mode, saveAccept, prefs } = specs[0].we;
   let rest = specs.filter((s) => !s.error);
   while (rest.length) {
-    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, ...(opts.keepPrefs ? ["--keep-prefs"] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : [])];
+    // --expect-layout: the first --wait-ready on a main window or tool palette of another size or place than the
+    // spec coordinates were measured in stops the process with one message (weOutcome gives it to every spec).
+    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
     // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
-    // fails), the map before it was saved, so nothing is asked. Only the last map is followed by --close.
-    // --restart-per-map (opts.restart) is the old way, an editor start per map, for timing the two.
-    for (const s of rest) {
-      const dir = join(opts.work, s.name);
-      args.push("--map", join(dir, s.we.from === "studio" ? "studio.w3x" : "input.w3x"), "--wait-ready", ...s.we.steps.flat(), "--save", join(dir, "we.w3x"));
-      if (opts.restart || s === rest.at(-1)) args.push("--close");
-    }
+    // fails), the map before it was saved, so nothing is asked. --close after the last map, around a spec with
+    // we.freshEditor or we.expectCrash (weDriveSteps). --restart-per-map (opts.restart) is the old way, an editor
+    // start per map, for timing the two.
+    args.push(...weDriveSteps(rest, {
+      restart: opts.restart,
+      mapOf: (s) => join(opts.work, s.name, s.we.from === "studio" ? "studio.w3x" : "input.w3x"),
+      saveOf: (s) => join(opts.work, s.name, "we.w3x"),
+    }));
     const t0 = Date.now();
     say(`the World Editor on ${rest.length} map${rest.length === 1 ? "" : "s"} (${mode}), one we-drive process`);
     let code, lines;
@@ -230,11 +314,18 @@ async function runWorldEditor(specs, opts, game, mode, saveAccept) {
       return;
     }
     const outs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    // we-drive's own lines, for a look afterwards (what each step answered, a crash on close).
+    try { appendFileSync(join(opts.work, "we-drive", "steps.jsonl"), lines.map((l) => `${l}\n`).join("")); } catch { /* the log is a help only */ }
     if (outs.some((o) => o.skipped)) { for (const s of rest) s.error = `the World Editor can't run here: ${outs.find((o) => o.skipped).skipped}`; return; }
     say(`the World Editor part took ${Math.round((Date.now() - t0) / 1000)} s (exit ${code})`);
     // After a failure the process stopped; the specs behind it that haven't run go again in the next process.
-    const { errors, rerun } = weOutcome(rest.length, outs);
-    rest.forEach((s, i) => { s.error = errors[i] ?? undefined; });
+    const { errors, rerun, warnings, closes } = weOutcome(rest.length, outs);
+    rest.forEach((s, i) => {
+      if (rerun.includes(i)) return;
+      const { error, warning } = crashExpectation(s.we.expectCrash, closes[i], errors[i] ?? null, warnings[i]);
+      s.error = error ?? undefined;
+      if (warning) { (s.warnings ??= []).push(warning); say(`${s.name}: ${warning}`); }
+    });
     rest = rerun.map((i) => rest[i]);
   }
 }
@@ -317,7 +408,14 @@ function compareSpec(spec, cli, game, opts) {
   const dir = join(opts.work, spec.name);
   const limit = opts.limit ?? spec.limit;
   const we = reader(cli, game, dir, "we.w3x"), studio = reader(cli, game, dir, "studio.w3x");
-  return spec.compare.map((c) => compareEntry(c, we, studio, { limit, decodeImage: opts.decodeImage }));
+  const files = spec.compare.map((c) => compareEntry(c, we, studio, { limit, decodeImage: opts.decodeImage }));
+  // A parsed compare sees the codecs' JSON of both saves, so what the codecs lose cancels out: the World Editor's save
+  // has to come back the same from unpack and pack (w3proj verify, in memory), else that file's result is ERROR.
+  if (!files.some((f) => f.kind === "parsed" && f.status !== "ERROR" && f.status !== "MISSING")) return files;
+  const v = spawnSync(cli, ["verify", join(dir, "we.w3x"), "--game", game ?? "none", "-q"], { encoding: "utf8", timeout: 600000 });
+  const outcome = v.status === 0 ? {} : verifyOutcome(v.stdout);
+  if (v.status !== 0 && !outcome.mismatched && !outcome.error) outcome.error = `w3proj verify exited ${v.status ?? v.signal ?? v.error?.message}: ${String(v.stderr || "").trim().split("\n").pop()}`;
+  return applyRoundtrip(files, outcome);
 }
 
 /**
@@ -325,29 +423,43 @@ function compareSpec(spec, cli, game, opts) {
  * <work>/we-compare.lock (this process's pid); one left by a process that is gone is taken over. Returns a release
  * function; throws when a live process holds it.
  */
-export function lockWork(work, pid = process.pid) {
+export function lockWork(work, pid = process.pid, { graceMs = 5000, beforeRename = () => {} } = {}) {
   const file = join(work, "we-compare.lock");
   mkdirSync(work, { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       writeFileSync(file, String(pid), { flag: "wx" });
       return () => { try { if (readFileSync(file, "utf8").trim() === String(pid)) rmSync(file, { force: true }); } catch { /* already gone */ } };
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      let holder = NaN;
-      try { holder = Number(readFileSync(file, "utf8").trim()); } catch { /* removed meanwhile: try again */ }
-      if (Number.isInteger(holder) && holder > 0 && alive(holder)) throw new Error(`another we-compare (pid ${holder}) uses ${work}: wait for it, or give this run its own --work`);
-      // Taken over by renaming it away, as the gate's lock is: of two runs that both see it stale only one can rename
-      // it, and one that took the lock in between isn't swept away (the holder is checked once more before the rename).
-      let again = NaN;
-      try { again = Number(readFileSync(file, "utf8").trim()); } catch { continue; }
-      if (again !== holder && Number.isInteger(again) && again > 0 && alive(again)) continue;
-      const gone = `${file}.stale-${process.pid}-${Date.now()}`;
+      let seen;
+      try { seen = readFileSync(file, "utf8").trim(); } catch { continue; } // removed meanwhile: try again
+      const holder = /^[1-9][0-9]*$/.test(seen) ? Number(seen) : null;
+      // No pid in it: a run between its create and its write (the "wx" create and the write are two steps), unless
+      // the file is older than the grace (a run that died in between).
+      if (holder === null && fileAgeMs(file) < graceMs) throw new Error(`another we-compare is taking ${work} (its lock has no pid yet): wait for it, or give this run its own --work`);
+      if (holder !== null && alive(holder)) throw new Error(`another we-compare (pid ${holder}) uses ${work}: wait for it, or give this run its own --work`);
+      // Taken over by renaming it to a name of this run's own: of two runs that both see it stale only one can rename
+      // it. What was moved is read again: when it isn't the stale lock seen above (another run took the lock between
+      // the read and the rename), it is put back where it was.
+      const gone = `${file}.stale-${pid}-${Date.now()}`;
+      beforeRename(file); // tests: another run takes the lock just here
       try { renameSync(file, gone); } catch { continue; }
+      let moved = null;
+      try { moved = readFileSync(gone, "utf8").trim(); } catch { /* gone meanwhile */ }
+      if (moved !== null && moved !== seen) {
+        try { linkSync(gone, file); } catch { rmSync(gone, { force: true }); throw new Error(`the lock ${file} changed hands while it was taken over (pid ${moved}'s lock was moved and can't be put back): stop the other run, or give this run its own --work`); }
+        rmSync(gone, { force: true });
+        continue;
+      }
       rmSync(gone, { force: true });
     }
   }
   throw new Error(`can't take the lock ${file}`);
+}
+
+function fileAgeMs(path) {
+  try { return Date.now() - statSync(path).mtimeMs; } catch { return 0; }
 }
 
 function alive(pid) {
@@ -361,10 +473,15 @@ async function main() {
     return 0;
   }
   const vars = { MAIN: mainCheckout(repo), REPO: repo };
-  const specs = o.files.flatMap((f) => parseSpecFile(readFileSync(f, "utf8"), f, vars));
+  const differsWithoutPaths = readDiffersAllowlist(repo);
+  const specs = o.files.flatMap((f) => parseSpecFile(readFileSync(f, "utf8"), f, vars, { differsWithoutPaths }));
   const dup = duplicateName(specs);
   if (dup) throw new Error(`two specs are named ${dup} (names are folders: any case)`);
-  for (const s of specs) if (s.input.map && !existsSync(s.input.map)) throw new Error(`${s.name}: no input map at ${s.input.map}`);
+  // A missing input (most are made by a generator into target/) is that spec's error; the others still run.
+  for (const s of specs) if (s.input.map && !existsSync(s.input.map)) s.error = missingInput(s.input.map);
+  // So is a file of the checkout its "--type" texts or evals pick (an import's model): absent, both sides would import
+  // nothing and match.
+  for (const s of specs) if (!s.error) { const f = s.files.find((x) => !existsSync(x)); if (f) s.error = missingInput(f, repo, "file"); }
   const game = o.game ?? chosenGamePath() ?? gamePath(repo);
   const release = lockWork(o.work);
   try {
@@ -374,25 +491,35 @@ async function main() {
   }
 }
 
+/** The error of a spec whose input map (or another file it names, `what`) isn't there: the generator that makes it
+ *  named, when one does. */
+export function missingInput(map, repoDir = repo, what = "input map") {
+  const dir = join(repoDir, "tests", "fixtures", "we-specs");
+  let gens = [];
+  try { gens = readdirSync(dir).filter((n) => /^make-.*\.mjs$/.test(n)).map((name) => ({ name, text: readFileSync(join(dir, name), "utf8") })); } catch { /* no generators */ }
+  const gen = generatorOf(map, repoDir, gens);
+  return `no ${what} at ${map}${gen ? ` (made by node tests/fixtures/we-specs/${gen}: its first lines name the arguments)` : ""}`;
+}
+
 async function runSpecs(specs, o, game) {
   for (const s of specs) rmSync(join(o.work, s.name), { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  rmSync(join(o.work, "we-drive", "steps.jsonl"), { force: true });
   const cli = ensureCli();
   const t0 = Date.now();
-  await runStudio(specs, o, game);
+  if (specs.some((s) => !s.error)) await runStudio(specs, o, game);
   const tStudio = Date.now();
   if (o.we) {
     // One we-drive process per mode and set of accepted dialogs (both are options of the whole process).
-    const key = (s) => `${s.we.mode}|${s.we.saveAccept.join(",")}`;
-    for (const k of [...new Set(specs.map(key))]) {
-      const group = specs.filter((s) => key(s) === k);
-      await runWorldEditor(group, o, game, group[0].we.mode, group[0].we.saveAccept);
+    for (const k of [...new Set(specs.map(weGroupKey))]) {
+      const group = specs.filter((s) => weGroupKey(s) === k);
+      await runWorldEditor(group, o, game);
     }
   }
   const tWe = Date.now();
   if (specs.some((s) => s.compare.some((c) => c.as === "minimap"))) o.decodeImage = await imageDecoder(o.work);
   const results = [];
   for (const s of specs) {
-    const r = { name: s.name, description: s.description, files: [], error: s.error ?? null };
+    const r = { name: s.name, description: s.description, files: [], error: s.error ?? null, ...(s.warnings ? { warnings: s.warnings } : {}) };
     // --no-we: Studio's side only; nothing was compared, which is never "ok" (runOutcome: exit 3).
     if (!s.error && !o.we) r.notCompared = true;
     if (!s.error && o.we) {

@@ -1,6 +1,8 @@
 // Renders the app icon source (1024x1024 PNG) without image dependencies.
 // `npm run icon` then lets the Tauri CLI derive all platform sizes from it.
 import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 
 const S = 1024;
@@ -30,7 +32,8 @@ for (let y = 0; y < S; y++) {
     const d = Math.min(...segs.map((s) => distSeg(x, y, s)));
     if (d < 58) {
       const shade = 1 - (y - 300) / 900;
-      [r, gr, b] = [217 * shade + 30, 164 * shade + 20, 65 * shade];
+      // shade is above 1 near the top of the strokes: clamp (a Buffer would wrap 261 to 5)
+      [r, gr, b] = [217 * shade + 30, 164 * shade + 20, 65 * shade].map((v) => Math.min(255, v));
     }
     px[i] = r; px[i + 1] = gr; px[i + 2] = b; px[i + 3] = 255;
   }
@@ -59,6 +62,8 @@ const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0)),
 ]);
-mkdirSync("src-tauri/icons", { recursive: true });
-writeFileSync("src-tauri/icons/source.png", png);
-console.log("wrote src-tauri/icons/source.png");
+// next to the app's Tauri project whatever the working folder is
+const icons = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "icons");
+mkdirSync(icons, { recursive: true });
+writeFileSync(join(icons, "source.png"), png);
+console.log(`wrote ${join(icons, "source.png")}`);

@@ -28,8 +28,10 @@ if (!game) { console.error("usage: make-import-modes.mjs <w3proj cli> <game fold
 requireFresh(cli, "cli");
 let out = resolve(here, "..", "..", "..", "target", "import-modes");
 for (let i = 2; i < argv.length; i++) {
-  if (argv[i] === "--out") out = resolve(argv[++i]);
-  else if (argv[i] !== "--allow-stale") throw new Error(`unknown argument ${argv[i]}`);
+  if (argv[i] === "--out") {
+    if (argv[i + 1] === undefined) { console.error("--out needs a folder"); process.exit(2); }
+    out = resolve(argv[++i]);
+  } else if (argv[i] !== "--allow-stale") { console.error(`unknown argument ${argv[i]}`); process.exit(2); }
 }
 
 const run = (...args) => {

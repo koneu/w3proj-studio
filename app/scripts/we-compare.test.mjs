@@ -230,26 +230,18 @@ test("verify-build: folders per commit and per tester differ", () => {
   assert.equal(a.env.W3_APP_BIN, l.exe);
 });
 
-function isGenerated(map, repo, gens) {
-  const rel = relative(join(repo, "target"), map);
-  if (rel.startsWith("..") || resolve(rel) === rel) return false;
-  const folder = basename(dirname(map));
-  const file = basename(map);
-  // A generator names its output either literally or as a template (`melee-valid-${name}.w3x`): then the template's
-  // fixed prefix and suffix must fit the file and the case name between them must appear in the generator.
-  const templated = (g) => [...g.matchAll(/([\w.-]*)\$\{[^}]+\}([\w.-]*)/g)].some(([, pre, post]) => {
-    if (!pre && !post) return false;
-    if (!file.startsWith(pre) || !file.endsWith(post) || file.length <= pre.length + post.length) return false;
-    return g.includes(file.slice(pre.length, file.length - post.length));
-  });
-  return gens.some((g) => g.includes(folder) && (g.includes(file) || templated(g)));
-}
+/** Whether a make-*.mjs (texts) writes the map: we-compare's own generatorOf, which also names it in a missing input's error. */
+const isGenerated = (map, repo, gens) => core.generatorOf(map, repo, gens.map((text, i) => ({ name: `gen-${i}`, text }))) !== null;
 
 test("no spec under tests/we-compare reads openpoints, and every input map is in the repository (or in smoketest_maps)", () => {
   const root = repoPath("tests", "we-compare");
   const files = [];
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith(".json") && files.push(join(d, e.name)); };
   walk(root);
+  // The allowlist of "differs" without paths is no spec.
+  const allow = files.indexOf(core.differsAllowlistPath(resolve(root, "..", "..")));
+  assert.ok(allow >= 0, "the differs allowlist is among the files found (splice(-1) would drop the last spec)");
+  files.splice(allow, 1);
   assert.ok(files.length > 50, "found the specs");
   // A main checkout without openpoints: ${MAIN} points at a folder that has none.
   const vars = { MAIN: join(root, "no-such-main"), REPO: resolve(root, "..", "..") };
@@ -257,21 +249,27 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
   // e.g. the game's own): that generator has to name the file and its folder.
   const gens = readdirSync(resolve(root, "..", "fixtures", "we-specs")).filter((n) => /^make-.*\.mjs$/.test(n)).map((n) => readFileSync(resolve(root, "..", "fixtures", "we-specs", n), "utf8"));
   const generated = (map) => isGenerated(map, vars.REPO, gens);
-  for (const f of files) {
-    const text = readFileSync(f, "utf8");
-    assert.ok(!/openpoints/i.test(text), `${f} mentions openpoints`);
-    // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one in
-    // the main checkout's (${MAIN}), and only there.
-    const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
-    for (const s of parseSpecFile(text, f, vars)) if (s.input.map && !resolve(s.input.map).startsWith(userMaps)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
-  }
-  // Controls: the exemption is the main checkout's smoketest_maps folder, not any path that mentions the name.
+  // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one in
+  // the main checkout's (${MAIN}), and only there.
   const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
-  assert.ok(join(vars.MAIN, "smoketest_maps", "a.w3x").startsWith(userMaps));
-  assert.ok(!join(vars.REPO, "smoketest_maps_x", "a.w3x").startsWith(userMaps));
-  assert.ok(!join(vars.REPO, "target", "smoketest_maps", "a.w3x").startsWith(userMaps));
-  // The control: a spec text that does name it is caught by the same check.
-  assert.ok(/openpoints/i.test('{"input":{"map":"${MAIN}/openpoints/x.w3x"}}'));
+  /** What is wrong with a spec file's text: the same check for every committed spec and for the controls below. */
+  const problems = (text, f) => {
+    const out = [];
+    if (/openpoints/i.test(text)) out.push(`${f} mentions openpoints`);
+    for (const s of parseSpecFile(text, f, vars, { differsWithoutPaths: core.readDiffersAllowlist(vars.REPO) })) {
+      if (s.input.map && !resolve(s.input.map).startsWith(userMaps) && !existsSync(s.input.map) && !generated(s.input.map)) out.push(`${f}: ${s.name}: no input map at ${s.input.map}`);
+    }
+    return out;
+  };
+  for (const f of files) assert.deepEqual(problems(readFileSync(f, "utf8"), f), []);
+  // Controls, through the same check: a spec that names openpoints is caught; an input in the main checkout's smoketest_maps
+  // is exempt, one in a folder that only resembles it (or under target/) is not and must exist.
+  const spec = (map, extra = "") => JSON.stringify([{ name: "control", description: `${extra}x`, input: { map }, we: { mode: "sd", steps: [] }, studio: { steps: [] }, compare: ["war3map.w3i"] }]);
+  assert.ok(problems(spec("${REPO}/tests/fixtures/we-compare/camera-farz.w3m", " see openpoints/test.md "), "c.json").some((p) => /openpoints/.test(p)));
+  assert.ok(problems(spec("${MAIN}/openpoints/x.w3x"), "c.json").some((p) => /openpoints/.test(p)));
+  assert.deepEqual(problems(spec("${MAIN}/smoketest_maps/zz-nothing.w3x"), "c.json"), []);
+  assert.equal(problems(spec("${REPO}/smoketest_maps_x/zz-nothing.w3x"), "c.json").length, 1);
+  assert.equal(problems(spec("${REPO}/target/smoketest_maps/zz-nothing.w3x"), "c.json").length, 1);
   // Controls: a target/ input needs a generator that names it; anything outside target/ never counts as generated.
   const gen = ['// into <repo>/target/studio-paths/\n// echo-plain.w3x  unpack, pack\nconst out = join(repo, "target", "studio-paths");'];
   const repo = vars.REPO;

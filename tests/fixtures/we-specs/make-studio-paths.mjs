@@ -10,7 +10,7 @@
 //   matrix.w3x        MatrixPCDefense_v4.3 (no war3map.wtg: the editor refuses it, "Trigger data missing or invalid") with
 //                     echo's war3map.wtg.json and war3map.wct.txt added, packed as is; its ally masks stay all zero
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chosenGamePath, mainCheckout } from "../../gamepath.mjs";
@@ -21,7 +21,9 @@ const main = mainCheckout();
 const cli = join(main, "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const src = join(main, "smoketest_maps", "blizzard", "(2)EchoIsles_S2_v2.2.w3x");
-const out = join(repo, "target", "studio-paths");
+// Built next to the result and swapped in at the end: a failed run leaves the previous maps in place.
+const final = join(repo, "target", "studio-paths");
+const out = `${final}.new`;
 const env = { ...process.env, W3PROJ_GAME: chosenGamePath() };
 
 function run(...args) {
@@ -55,4 +57,6 @@ const matrixSrc = join(main, "smoketest_maps", "new(er)_maps", "MatrixPCDefense_
 run("unpack", matrixSrc, join(out, "matrix"));
 for (const f of ["war3map.wtg.json", "war3map.wct.txt"]) cpSync(join(out, "base", "map", f), join(out, "matrix", "map", f));
 packAsIs(join(out, "matrix"), join(out, "matrix.w3x"));
-console.log(`made ${out}/echo-{rebuilt,nolua,nowts,plain,zeromasks}.w3x and matrix.w3x`);
+rmSync(final, { recursive: true, force: true });
+renameSync(out, final);
+console.log(`made ${final}/echo-{rebuilt,nolua,nowts,plain,zeromasks}.w3x and matrix.w3x`);
