@@ -44,3 +44,16 @@ test("a text with a { or a \\} is written and read back whole", () => {
   t.set(2, "set {a\n  {\nend \\}");
   assert.equal(new StringTable(t.serialize()).get(2), "set {a\r\n  {\r\nend \\}");
 });
+
+test("a } in a // comment line of a block isn't a text's end, and the comment is kept", () => {
+  const raw = map.replace("STRING 2\r\n{", "STRING 2\r\n// Units: h000 (Hero }), x\r\n{");
+  const t = new StringTable(raw);
+  assert.equal(t.get(2), "A hero");
+  assert.equal(t.get(3), "Kept");
+  t.set(3, "Kept 2");
+  assert.equal(t.serialize(), raw.replace("Kept", "Kept 2"), "written whole, the comment and the brace in it untouched");
+  // Control: the same brace in the text itself is refused.
+  const bad = new StringTable(raw);
+  bad.set(2, "A hero }");
+  assert.throws(() => bad.serialize(), /a "}"/);
+});

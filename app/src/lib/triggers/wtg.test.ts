@@ -95,7 +95,7 @@ for (const version of [7, 4]) {
 
 test("damaged trigger files are refused, not half read", () => {
   const b = writeWtg(reforged());
-  assert.throws(() => parseWtg(b.subarray(0, b.length - 3), data));
+  assert.throws(() => parseWtg(b.subarray(0, b.length - 3), data), /truncated|unterminated/);
   assert.throws(() => parseWtg(new Uint8Array([...b, 1, 2, 3]), data), /bytes after/);
   assert.throws(() => parseWtg(new TextEncoder().encode("NOPE...."), data), /WTG!/);
   const other = new Uint8Array(b);

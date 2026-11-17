@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { decodeImage } from "../../lib/image/index.ts";
 import { presetFixedRot, doodadOnGrid, doodadSnaps, mixedPicture, onDoodadGrid, quarterTurn, snapSize, type PathSize } from "./doodadgrid";
 import type { Placed } from "./objects";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
 /** The pathing texture sizes of the measured types (the game's Doodads.slk and DestructableData.slk, the textures'
  *  TGA headers). */
@@ -17,14 +16,8 @@ const SIZES: Record<string, PathSize | null> = {
 /** An angle in degrees as the map file stores it (single precision radians). */
 const stored = (deg: number) => Math.fround((deg * Math.PI) / 180);
 
-/** tests/fixtures/doodad-grid-we/<name>, found from where the tests run (app/ or the repository). */
-function fixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "doodad-grid-we", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/doodad-grid-we/${name} not found`);
-  }
-}
+/** tests/fixtures/doodad-grid-we/<name>. */
+const fixture = (name: string): string => readFixture("doodad-grid-we", name);
 
 const cases = fixture("snaptest-cases.txt").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((line) => {
   const m = /^(\w{4}) (\S+) (\S+) (\S+) -> (\S+) (\S+) (\S+)$/.exec(line.trim());

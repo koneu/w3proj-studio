@@ -242,7 +242,7 @@ test("the terrain's shadows done in steps are the same as at once, and stop when
   try {
     assert.deepEqual(await terrainShadowsInSteps(hill, undefined, async () => { pauses++; return true; }), once);
     assert.ok(pauses > 1);
-    await assert.rejects(terrainShadowsInSteps(hill, undefined, async () => false));
+    await assert.rejects(terrainShadowsInSteps(hill, undefined, async () => false), /superseded/);
   } finally {
     performance.now = real;
   }

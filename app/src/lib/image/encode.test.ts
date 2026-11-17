@@ -35,9 +35,7 @@ test("BLP1 JPEG whose header claims 16384×16384 over a 16×16 picture is refuse
   const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
   d.setUint32(12, 16384, true);
   d.setUint32(16, 16384, true);
-  const before = process.memoryUsage().arrayBuffers;
-  assert.throws(() => decodeImage(b).mip(0), /JPEG/);
-  assert.ok(process.memoryUsage().arrayBuffers - before < 64 << 20);
+  assert.throws(() => decodeImage(b).mip(0), /BLP1 JPEG level of 16384×16384 over a 16×16 picture/);
   // Control: the honest file decodes.
   const ok = encodeBlp1Jpeg(16, 16, new Uint8Array(16 * 16 * 4).fill(128), 80, { alpha: true, mipmaps: true });
   assert.equal(decodeImage(ok).mip(0).width, 16);

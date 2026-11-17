@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Turns } from "./turns";
 
-const later = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** A job that takes a while: it gives other work a turn (the length doesn't matter, the queue is what is tested). */
+const later = (_ms: number) => new Promise<void>((r) => setImmediate(r));
 
 test("jobs run one at a time, in the order they were queued", async () => {
   const t = new Turns(), log: string[] = [];

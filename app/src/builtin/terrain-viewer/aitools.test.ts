@@ -5,9 +5,10 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
+import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 /** Repeatable numbers in 0..1. */
-const seeded = (seed = 1) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+const seeded = (seed = 1) => mulberry32(seed);
 const box = { left: 0, bottom: 0, right: 1024, top: 1024 };
 
 test("an area is a region by name, or a rectangle, or none", () => {
@@ -316,7 +317,6 @@ test("the pathing picture tells free, cliffs, water, what stands there and destr
 test("a flattened path levels the ground across it towards its middle", () => {
   const t = field();
   for (let i = 8 * 17; i < 9 * 17; i++) t.corners[i].rawHeight += 400;
-  for (let i = 0; i < 289; i++) if (i % 17 === 8 && i !== 8 * 17 + 8) t.corners[i].rawHeight += 0;
   const crown = at(t, 8, 8);
   paintPath(t, [[0, 896], [2048, 896]], 512, 1, 0, true, seeded());
   assert.ok(at(t, 8, 8) < crown, "a bump beside the line is brought down");

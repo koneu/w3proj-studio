@@ -34,7 +34,7 @@ test("right after an open a run waits for the whole file list before any check r
   let checked = 0;
   service.registerCheck({ id: "t.listed", title: "listed", async run() { checked++; return []; } });
   const run = service.run();
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise<void>((r) => setImmediate(r));
   assert.equal(checked, 0, "no check judges an incomplete list");
   done();
   await run;
@@ -57,7 +57,7 @@ test("a run asked for during another run starts after the ask and sees the chang
     },
   });
   const first = service.run();
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise<void>((r) => setImmediate(r));
   file = "fixed"; // the fix, while the first run is still going
   const second = service.run();
   const third = service.run(); // shares the second

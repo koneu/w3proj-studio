@@ -64,7 +64,8 @@ const PROFILE: Record<string, string> = {
   "War3.w3mod:Units/SubFolder/Other.txt": "[hfoo]\nName=not this one\n",
 };
 
-function fakeW3(graphicsMode = "hd", missing: string[] = []) {
+/** `extra`: files this game has on top of FILES, which a test may add to later without changing the shared table. */
+function fakeW3(graphicsMode = "hd", missing: string[] = [], extra: Record<string, string> = {}) {
   const reads: string[] = [];
   const w3 = {
     settings: { get: (key: string) => (key === "game.graphicsMode" ? graphicsMode : undefined) },
@@ -72,7 +73,7 @@ function fakeW3(graphicsMode = "hd", missing: string[] = []) {
       list: async () => Object.keys(PROFILE),
       readText: async (path: string) => {
         reads.push(path);
-        const text = FILES[path] ?? PROFILE[path];
+        const text = extra[path] ?? FILES[path] ?? PROFILE[path];
         if (text === undefined || missing.includes(path)) throw new Error(`no ${path}`);
         return text;
       },
@@ -203,12 +204,13 @@ test("an unknown kind is refused", async () => {
 });
 
 test("a kind that failed to load is tried again", async () => {
-  const { w3 } = fakeW3("hd", ["Units\\UpgradeData.slk"]);
+  const extra: Record<string, string> = {};
+  const { w3 } = fakeW3("hd", ["Units\\UpgradeData.slk"], extra);
   // w3q is already loaded from `game`: another kind that isn't.
   const fresh = "w3b";
-  FILES["Units\\DestructableMetaData.slk"] = FILES["Doodads\\DoodadMetaData.slk"];
+  extra["Units\\DestructableMetaData.slk"] = FILES["Doodads\\DoodadMetaData.slk"];
   await assert.rejects(loadKind(w3, fresh), /no Units\\DestructableData.slk/);
-  FILES["Units\\DestructableData.slk"] = slk([["DestructableID", "category"], ["LTbr", "D"]]);
+  extra["Units\\DestructableData.slk"] = slk([["DestructableID", "category"], ["LTbr", "D"]]);
   assert.deepEqual((await loadKind(w3, fresh)).baseIds, ["LTbr"]);
 });
 

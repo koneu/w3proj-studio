@@ -19,5 +19,5 @@ test("unprintable tile ids round-trip as hex:XXXXXXXX", () => {
   // Header 13 bytes, 3 ground ids (+count), the cliff count and CLdi: the zero id follows.
   assert.deepEqual([...bytes.subarray(13 + 4 + 12 + 4 + 4, 13 + 4 + 12 + 4 + 8)], [0, 0, 0, 0]);
   assert.equal(w3eToText(bytes), TEXT);
-  assert.throws(() => w3eFromText(TEXT.replace("hex:00000000", "hex:0000000g")));
+  assert.throws(() => w3eFromText(TEXT.replace("hex:00000000", "hex:0000000g")), /war3map\.w3e: tile id "hex:0000000g" isn't 4 characters or hex:XXXXXXXX/);
 });

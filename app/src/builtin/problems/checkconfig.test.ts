@@ -5,10 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { MINIMAL_MANIFEST, addDisabled, isDisabled, parseChecksConfig, readChecksConfig } from "./checkconfig";
 import { activate } from "./index";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
 test("disable lists are read from [checks] only, with comments, single quotes and several lines", () => {
   const toml = `format = 1\ndisable = ["wrong"]\n[map]\nname = "x" # disable\n\n[checks]\n# why\ndisable = [\n  "imports", # slow\n  'melee/camps',\n]\n\n[pack]\noutput = "o"\ndisable = ["also-wrong"]\n`;
@@ -108,7 +107,7 @@ test("a project without a w3proj.toml gets a minimal one: the same text the Rust
   assert.equal(none.files["w3proj.toml"], 'format = 1\n\n[checks]\ndisable = ["mine-a"]\n');
   assert.deepEqual(parseChecksConfig(none.files["w3proj.toml"]).disable, ["mine-a"]);
   assert.deepEqual(none.service.problems().map((p) => p.location), ["mine-b"], "re-run: the check is gone");
-  const fixture = readFileSync(join(process.cwd(), "..", "tests", "fixtures", "manifest-minimal-checks", "w3proj.toml"), "utf8");
+  const fixture = readFixture("manifest-minimal-checks", "w3proj.toml");
   assert.equal(addDisabled(MINIMAL_MANIFEST, "imports"), fixture, "the fixture crates/w3proj loads is what the app writes");
 });
 

@@ -40,7 +40,9 @@ test("a type that appears or goes, or takes another base, counts as changed", ()
   assert.deepEqual([...changedTypes(after, before, ["h001"])], ["h001"]);
 });
 
-test("a reload that is scheduled is waited for, also while it runs; a burst makes one", async () => {
+test("a reload that is scheduled is waited for, also while it runs; a burst makes one", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const flush = () => new Promise<void>((r) => setImmediate(r));
   let runs = 0, finished = 0;
   let open!: () => void;
   const gate = new Promise<void>((r) => { open = r; });
@@ -50,8 +52,12 @@ test("a reload that is scheduled is waited for, also while it runs; a burst make
   reload.schedule(); reload.schedule(); reload.schedule();
   let waited = false;
   const w = reload.settled().then(() => { waited = true; });
-  await new Promise((r) => setTimeout(r, 40));
+  t.mock.timers.tick(5);
+  await flush();
   assert.equal(runs, 1);
+  t.mock.timers.tick(1000);
+  await flush();
+  assert.equal(runs, 1, "the burst made one run");
   assert.equal(waited, false, "still running");
   open();
   await w;
@@ -66,14 +72,16 @@ test("a failing reload is reported, and still ends the wait", async () => {
   assert.deepEqual(errors, ["boom"]);
 });
 
-test("cancelling ends the wait without running", async () => {
+test("cancelling ends the wait without running", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
   let runs = 0;
   const reload = new DebouncedReload(async () => { runs++; }, () => {}, 20);
   reload.schedule();
   const w = reload.settled();
   reload.cancel();
   await w;
-  await new Promise((r) => setTimeout(r, 40));
+  t.mock.timers.tick(1000);
+  await new Promise<void>((r) => setImmediate(r));
   assert.equal(runs, 0);
 });
 
@@ -112,17 +120,23 @@ test("saves that keep coming can't starve the wait: the reload runs after the lo
   assert.equal(runsAt.at(-1), start + savesFor + delay, "the last save's reload, a delay after it");
 });
 
-test("a save during a run gets its own run, and the wait covers both", async () => {
+test("a save during a run gets its own run, and the wait covers both", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const flush = () => new Promise<void>((r) => setImmediate(r));
   const order: string[] = [];
   let open!: () => void;
   const gate = new Promise<void>((r) => { open = r; });
   let n = 0;
   const reload = new DebouncedReload(async () => { const me = ++n; order.push(`start ${me}`); if (me === 1) await gate; order.push(`end ${me}`); }, () => {}, 5, 50);
   reload.schedule();
-  await new Promise((r) => setTimeout(r, 30));
+  t.mock.timers.tick(5);
+  await flush();
+  assert.deepEqual(order, ["start 1"], "the first run is going");
   reload.schedule();
   const w = reload.settled();
   open();
+  await flush();
+  t.mock.timers.tick(5);
   await w;
   assert.deepEqual(order, ["start 1", "end 1", "start 2", "end 2"]);
 });

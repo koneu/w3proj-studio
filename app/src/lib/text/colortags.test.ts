@@ -56,9 +56,11 @@ describe("parseColorTags", () => {
   it("a real line break and |n mix", () => {
     assert.equal(plainText("a\r\nb|nc|Nd\ne"), "a\nb\nc\nd\ne");
   });
-  it("never hangs on hostile input", () => {
+  it("never hangs on hostile input", { timeout: 30_000 }, () => {
     const hostile = "|c".repeat(50000) + "|cff".repeat(50000) + "\u0000|".repeat(50000);
-    assert.ok(parseColorTags(hostile).length > 0);
+    const parts = parseColorTags(hostile);
+    assert.ok(parts.length > 0);
+    assert.ok(parts.length <= hostile.length, "never more parts than characters");
   });
 });
 
@@ -85,7 +87,7 @@ describe("wrapColor", () => {
     assert.equal(r.text.replace("|cff010203|r", ""), t);
   });
   it("refuses a bad colour", () => {
-    assert.throws(() => wrapColor("a", 0, 1, "xyz"));
+    assert.throws(() => wrapColor("a", 0, 1, "xyz"), /Not an RRGGBB colour: xyz/);
   });
 });
 

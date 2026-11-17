@@ -91,6 +91,22 @@ test("a terrain file cut off anywhere is refused with the reader's own error, no
   }
 });
 
+test("a header claiming a huge size is refused by its byte count, with nothing allocated for it", () => {
+  for (const version of [11, 12]) {
+    const bytes = writeW3e(tiny(version));
+    const at = bytes.length - 4 * (version === 12 ? 8 : 7) - 16; // where the 2 x 2 size is
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    assert.deepEqual([dv.getUint32(at, true), dv.getUint32(at + 4, true)], [2, 2], "control: the size is where it was looked for");
+    for (const [w, h] of [[0xffffffff, 0xffffffff], [65536, 65536], [0xffffffff, 1], [1 << 20, 2]]) {
+      const big = new Uint8Array(bytes);
+      const d = new DataView(big.buffer);
+      d.setUint32(at, w, true);
+      d.setUint32(at + 4, h, true);
+      assert.throws(() => parseW3e(big), (e: Error) => e.constructor === Error && new RegExp(`truncated: ${w}×${h} points need`).test(e.message), `version ${version}, ${w} x ${h}`);
+    }
+  }
+});
+
 test("writeW3e refuses a corner field past its bits, or not whole, instead of cutting it to them", () => {
   const ok = tiny();
   const bytes = writeW3e(ok);

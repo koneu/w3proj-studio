@@ -34,8 +34,7 @@ test("a browser opened before the editor types load uses them once they arrive",
   assert.equal(list.entries.filter((e) => list.matches(e)).length, 0, "only raw values match before");
   assert.equal(list.valueText(race, archer(list)), "Race: nightelf");
   arrive(types);
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise<void>((r) => setImmediate(r)); // every microtask the loading chains has run
   assert.equal(redraws, 1, "the browser is drawn again");
   assert.deepEqual(list.entries.filter((e) => list.matches(e)).map((e) => e.id), ["earc"]);
   assert.equal(list.valueText(race, archer(list)), "Race: Night Elf");
@@ -55,8 +54,7 @@ test("a quoted value keeps its space: race:\"Night Elf\" is the label, not race:
 test("types that fail to load leave the browser on raw values, without a redraw", async () => {
   let redraws = 0;
   const list = pickerList(kd, { editorTypes: Promise.resolve(null) }, () => redraws++);
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise<void>((r) => setImmediate(r)); // every microtask the loading chains has run
   assert.equal(redraws, 0);
   assert.equal(list.valueText(race, archer(list)), "Race: nightelf");
 });

@@ -49,7 +49,7 @@ function project(initial: Record<string, string>) {
 test("dropped strings are recorded before the table is written, and a later string never reuses their numbers", async () => {
   // 1 is used by the map's name, 2 and 5 nothing refers to; the unit has a literal name to move.
   const p = project({
-    [WTS]: "﻿" + block(1, "Map") + block(2, "gone two") + block(5, "gone\r\nfive"),
+    [WTS]: "\uFEFF" + block(1, "Map") + block(2, "gone two") + block(5, "gone\r\nfive"),
     "map/war3map.w3i.json": JSON.stringify({ name: "TRIGSTR_001" }),
     [W3U]: units("Footman"),
   });
@@ -75,7 +75,7 @@ test("dropped strings are recorded before the table is written, and a later stri
 });
 
 test("a record that can't be read stops Move Texts before anything is written", async () => {
-  const p = project({ [WTS]: "﻿" + block(1, "Map") + block(2, "x"), "map/war3map.w3i.json": JSON.stringify({ name: "TRIGSTR_001" }),
+  const p = project({ [WTS]: "\uFEFF" + block(1, "Map") + block(2, "x"), "map/war3map.w3i.json": JSON.stringify({ name: "TRIGSTR_001" }),
     [PRUNED_STRINGS_FILE]: "{" });
   const before = p.files.get(WTS);
   await assert.rejects(moveTextsToStringTable(p.w3), /pruned-strings\.json/);

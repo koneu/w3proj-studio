@@ -102,7 +102,7 @@ function chapter(opts: Options = {}) {
 }
 
 /** Lets the pending promise callbacks run (the check gets as far as it can without the list). */
-const settle = () => new Promise((r) => setTimeout(r, 10));
+const settle = () => new Promise<void>((r) => setImmediate(r));
 
 /** Runs the imports check, releasing the campaign list only after the check had time to finish without it. */
 async function runImports(app: ReturnType<typeof chapter>): Promise<Problem[]> {

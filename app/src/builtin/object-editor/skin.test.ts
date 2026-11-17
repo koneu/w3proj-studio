@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { gameTable } from "../../lib/testhelpers/gamefiles";
+import { skipOrFail } from "../../lib/testhelpers/testutil";
 import type { FieldMeta } from "../../lib/objects/metadata";
 import type { EditFile, EditMod, EditObject } from "./objectedit";
 import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withSkin } from "./skin";
@@ -144,20 +145,22 @@ test("which fields belong in the Skin file comes from the metadata's netsafe col
 test("isSkinField on the game's real metadata tables: every netsafe value is understood and the known fields land right", (ctx) => {
   const tables = ["Units/UnitMetaData.slk", "Units/AbilityMetaData.slk", "Units/UpgradeMetaData.slk", "Units/DestructableMetaData.slk", "Units/AbilityBuffMetaData.slk"];
   const unit = gameTable(tables[0], "ID,field,netsafe");
-  if (!unit) return ctx.skip("no game or release CLI (.game-path, target/release/w3proj)");
+  if (!unit) return skipOrFail(ctx, "no game or release CLI (.game-path, target/release/w3proj)");
   const as = (r: Record<string, string>) => ({ id: r.ID, use: { netsafe: r.netsafe } }) as unknown as FieldMeta;
   const byId = new Map(unit.map((r) => [r.ID, r]));
   for (const id of ["unam", "uico", "umdl", "utip"]) assert.equal(isSkinField(as(byId.get(id)!)), true, `${id} belongs in the Skin file`);
   for (const id of ["uhpm", "uabi"]) assert.equal(isSkinField(as(byId.get(id)!)), false, `${id} stays in the main file`);
-  let seen = 0;
+  let seen = 0, read = 0;
   for (const t of tables) {
     const rows = gameTable(t, "ID,netsafe");
     if (!rows) continue; // a table without the column fails the --col lookup
+    read++;
     for (const r of rows) {
       seen++;
       assert.match(r.netsafe ?? "", /^(|0|1|11)$/, `${t} ${r.ID}: netsafe "${r.netsafe}" is not a value the rule knows`);
     }
   }
+  assert.equal(read, tables.length, "every listed table has a netsafe column and was read");
   assert.ok(seen > 500, "the tables had rows");
   // control: a value outside the known ones would be seen by the pattern above
   assert.doesNotMatch("2", /^(|0|1|11)$/);

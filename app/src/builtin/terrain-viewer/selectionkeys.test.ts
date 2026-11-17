@@ -3,10 +3,11 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, FACE_COMMAND, HELD_COMMANDS, joinSteps, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, mouseChord, mouseCommandsFor, primaryKey, UNDO_BINDINGS, UNDO_CONTEXT } from "../../lib/keybindings";
+import { repoPath } from "../../lib/testhelpers/testutil";
 
 // The selection's keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
 // what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then what those commands do.
-const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
+const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
 const bindings = defaultBindings([], manifest.contributes.keybindings);
 type Ev = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey?: boolean };
 const bound = (e: Ev) => { const c = eventChord({ ...e, shiftKey: !!e.shiftKey }); return c ? commandsFor(bindings, c, { terrainFocus: true }) : []; };

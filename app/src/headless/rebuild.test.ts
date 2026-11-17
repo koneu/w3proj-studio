@@ -6,15 +6,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fixturePath, repoPath } from "../lib/testhelpers/testutil";
 
-const fixture = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "tests", "fixtures", "mini-map");
-// The bundled test runs from elsewhere: find the fixture from the working folder (app/) when it isn't beside it.
-const mini = existsSync(fixture) ? fixture : join(process.cwd(), "..", "tests", "fixtures", "mini-map");
+const mini = fixturePath("mini-map");
 
-const work = mkdtempSync(join(tmpdir(), "w3-rebuild-test-"));
+// A scratch folder inside the checkout (git-ignored, like the test runner's own), not the OS temp folder.
+const cache = join(repoPath("app", "node_modules"), ".cache", "w3-rebuild-test");
+mkdirSync(cache, { recursive: true });
+const work = mkdtempSync(join(cache, "run-"));
 const gameCalls: string[] = [];
 
 function list(root: string) {

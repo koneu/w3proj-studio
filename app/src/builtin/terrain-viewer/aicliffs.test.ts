@@ -5,6 +5,7 @@ import { generatePathing, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import { planCliffs } from "./cliffs";
 import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
+import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
 
@@ -357,10 +358,9 @@ test("changing the ground under part of a ramp removes all of it", () => {
   const t = flat();
   setCliffs(t, block, "box", { level: 3 }, kinds);
   setRamp(t, 7.5 * 128, 12 * 128, 2, false);
-  const elsewhere = flat();
+  assert.ok(t.corners.filter((c) => c.ramp).length > 0, "control: the ramp is there before the change");
   setCliffs(t, block, "box", { level: 4 }, kinds);
   assert.equal(t.corners.filter((c) => c.ramp).length, 0, "no half ramp stays behind");
-  assert.equal(elsewhere.corners.filter((c) => c.ramp).length, 0);
   const wet = flat();
   setCliffs(wet, block, "box", { level: 3 }, kinds);
   setRamp(wet, 7.5 * 128, 12 * 128, 2, false);
@@ -380,7 +380,7 @@ test("two ramps apart: only the one touched goes", () => {
 });
 
 test("roughen makes ground uneven, gently, and repeats by seed", () => {
-  const random = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const random = mulberry32;
   const whole = { left: 0, bottom: 0, right: 32 * 128, top: 32 * 128 };
   const t = flat(), again = flat(), other = flat();
   const changed = roughenCorners(t, whole, "box", 24, random(7));

@@ -29,11 +29,10 @@ test("the widest way through a gap is the gap's width", () => {
 });
 
 test("nothing reaches sealed ground", () => {
-  const g = grid((x, y) => Math.abs(x - 2000) < 80 + 0 && Math.abs(y) < 1000 || Math.abs(y) < 1000 && Math.abs(Math.abs(y) - 1000) < 0);
-  const sealed = grid((x, y) => Math.hypot(x - 2000, y) > 500 && Math.hypot(x - 2000, y) < 700);
-  const best = widestFrom(sealed, [-3000, 0]);
-  assert.equal(best[Math.floor(4096 / 32) * sealed.width + Math.floor(6096 / 32)], 0);
-  assert.ok(g.blocked.length > 0);
+  const ring = (gap: boolean) => grid((x, y) => Math.hypot(x - 2000, y) > 500 && Math.hypot(x - 2000, y) < 700 && !(gap && x < 2000 && Math.abs(y) < 100));
+  const centre = Math.floor(4096 / 32) * 256 + Math.floor(6096 / 32);
+  assert.equal(widestFrom(ring(false), [-3000, 0])[centre], 0);
+  assert.ok(widestFrom(ring(true), [-3000, 0])[centre] > 0, "control: with a gap in the ring the same cell is reached");
 });
 
 test("camp spots keep the distances, and don't sit on what's there", () => {
@@ -61,12 +60,15 @@ test("a pocket beats open ground", () => {
 });
 
 test("a camp behind a crack isn't offered", () => {
-  const cracked = grid((x, y) => {
+  const ring = (crack: boolean) => grid((x, y) => {
     const d = Math.max(Math.abs(x + 2500), Math.abs(y - 2500));
-    return d > 560 && d < 800 && !(Math.abs(y - 2500) < 48 && x > -2500);
+    return d > 560 && d < 800 && !(crack && Math.abs(y - 2500) < 48 && x > -2500);
   });
-  const { spots } = findSpots("camp", facts(cracked), 30, false);
-  assert.ok(spots.every((s) => dist(s.at, [-2500, 2500]) > 560), JSON.stringify(spots.map((s) => s.at)));
+  for (const crack of [true, false]) {
+    const { spots } = findSpots("camp", facts(ring(crack)), 30, false);
+    assert.ok(spots.length > 0, "control: spots are offered elsewhere");
+    assert.ok(spots.every((s) => dist(s.at, [-2500, 2500]) > 560), JSON.stringify(spots.map((s) => s.at)));
+  }
 });
 
 test("with mirror every spot has a working twin, and spots don't take each other's twins", () => {
