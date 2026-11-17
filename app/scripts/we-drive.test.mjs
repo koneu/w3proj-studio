@@ -135,6 +135,11 @@ test("we-x11 drag path: even steps from the press to exactly the release point (
   assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
 });
 
+test("parseArgs: --clipboard takes the file the clipboard's text goes into", () => {
+  assert.deepEqual(parseArgs(["--start", "--clipboard", "clip.txt"]).steps, [["--start", null], ["--clipboard", "clip.txt"]]);
+  assert.throws(() => parseArgs(["--start", "--clipboard"]), /--clipboard needs a value/);
+});
+
 test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
   assert.equal(parseArgs(["--start"]).opts.screen, undefined);
   assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
@@ -611,6 +616,34 @@ test("Session: waitReady isn't ready while a reopened module window covers the v
   assert.equal(open, false, "the window is closed when ready is reported");
   assert.ok(closes.length >= 2, `closed again: ${closes}`);
   assert.ok(r.clock.t - t0 >= 5000, "not ready while the module window was open");
+});
+
+test("Session: a module window that ignores the close is raised over by the main window, and ready waits for the picture", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  let raised = 0;
+  const base = r.x11;
+  r.x11 = (cmd, ...rest) => {
+    if (cmd === "close" && rest[0] === 50) return { pressed: true }; // ignored, as the editor's restored module does
+    if (cmd === "focus") { raised++; r.stats = { pixels: 100, blackPixels: 0, mean: [120, 90, 40] }; return { focused: true }; }
+    return base(cmd, ...rest);
+  };
+  // The module covers the view (a grey 240 picture) until the main window has been raised.
+  r.stats = { pixels: 100, blackPixels: 0, mean: [240, 240, 240] };
+  r.windows = () => [mainWin("a.w3m"), dialogWin(50, "Object Editor", [300, 100, 900, 600])];
+  const ready = await r.s.waitReady();
+  assert.equal(ready.ready, true, JSON.stringify(ready));
+  assert.ok(raised >= 1, "the main window was raised");
+  assert.ok(r.clock.t - t0 >= 9000, "not ready before the close had been tried for a while");
+  // the control: with the view still grey after the raise, it isn't ready
+  const c = rig(t, { timeout: 30 });
+  await c.s.start(c.maps["a.w3m"]);
+  const cb = c.x11;
+  c.x11 = (cmd, ...rest) => (cmd === "close" ? { pressed: true } : cb(cmd, ...rest));
+  c.stats = { pixels: 100, blackPixels: 0, mean: [240, 240, 240] };
+  c.windows = () => [mainWin("a.w3m"), dialogWin(50, "Object Editor", [300, 100, 900, 600])];
+  assert.equal((await c.s.waitReady()).ready, false);
 });
 
 test("Session: waitReady gives up at the timeout and stops when the editor exits", async (t) => {

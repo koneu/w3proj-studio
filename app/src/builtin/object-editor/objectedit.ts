@@ -123,10 +123,14 @@ export function removeObject(file: EditFile, id: string): boolean {
 export interface AutoFill { from: number; to: number; base: number; previous: number; level: number; constant: number }
 
 /** The World Editor's Auto Fill Levels: level `from` gets the base value, and each after it the one before
- *  times `previous`, plus its level times `level`, plus `constant`. */
-export function autoFill(o: AutoFill): { level: number; value: number }[] {
-  const out = [{ level: o.from, value: o.base }];
-  for (let n = o.from + 1; n <= o.to; n++) out.push({ level: n, value: out[out.length - 1].value * o.previous + n * o.level + o.constant });
+ *  times `previous`, plus its level times `level`, plus `constant`. `floor`: the lowest value a level takes (0 for
+ *  a real the game reads as unsigned while Allow negative real values is off): a level below it takes the floor, and
+ *  the next level goes on from the floor, not from what it would have been (the editor's preview of base 1, previous 1,
+ *  level factor 4, constant -10 over 3 levels: 1.00, 0.00, 2.00; we-drive 2026-11-17). */
+export function autoFill(o: AutoFill, floor?: number): { level: number; value: number }[] {
+  const low = (v: number) => (floor !== undefined && v < floor ? floor : v);
+  const out = [{ level: o.from, value: low(o.base) }];
+  for (let n = o.from + 1; n <= o.to; n++) out.push({ level: n, value: low(out[out.length - 1].value * o.previous + n * o.level + o.constant) });
   return out;
 }
 

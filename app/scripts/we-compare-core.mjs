@@ -4,7 +4,7 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
 
-const KINDS = ["auto", "parsed", "text", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
+const KINDS = ["auto", "parsed", "text", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
 /** The kinds compared as JSON (diffJson): only these take "tolerance", "ignore" and "expectPaths". */
 export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
@@ -351,6 +351,22 @@ export function diffText(a, b, limit = 10) {
 }
 
 /**
+ * Text as a set of lines, order ignored (the editor writes some lists, such as the items of CreateAllItems, in an order
+ * the saved files don't keep): the lines only one side has, each counted with its multiplicity.
+ */
+export function diffTextSet(a, b, limit = 10) {
+  const x = a.split(/\r?\n/), y = b.split(/\r?\n/);
+  const left = new Map();
+  for (const l of x) left.set(l, (left.get(l) ?? 0) + 1);
+  const diffs = [];
+  let count = 0;
+  const add = (side, l, n) => { count += n; if (diffs.length < limit) diffs.push({ text: `${side} only${n > 1 ? ` (x${n})` : ""}: ${show(l)}` }); };
+  for (const l of y) { const n = left.get(l) ?? 0; if (n > 0) left.set(l, n - 1); else add("Studio", l, 1); }
+  for (const [l, n] of left) if (n > 0) add("WE", l, n);
+  return { equal: count === 0, count, lines: [x.length, y.length], diffs };
+}
+
+/**
  * The comparison of one file: `kind` as the spec names it (resolved, not "auto"), `we` and `studio` what was found:
  * each { bytes }, { text } or a parsed JSON value ({ json }), or null when the map has no such file. Returns
  * { file, kind, status, ... } where status is
@@ -375,6 +391,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
   // minimap's tolerance is for its block colours only: its size is compared exactly.
   if (JSON_KINDS.includes(kind)) r = diffJson(we.json, studio.json, limit, kind === "minimap" ? (path) => (path.startsWith("blocks.") ? tolerance : 0) : tolerance, ignore, expectPaths);
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
+  else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit);
   else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
   else r = diffBytes(we.bytes, studio.bytes, limit);
   return { file, kind, status: r.equal ? "MATCH" : "DIFFERS", ...r };
@@ -400,7 +417,7 @@ export function loadSide(r, file, kind, decodeImage) {
     if (!decodeImage) throw new Error("no image decoder for the minimap kind");
     return { json: minimapView(decodeImage(new Uint8Array(r.bytes(file)), file).mip(0)) };
   }
-  if (kind === "text") return { text: r.text(file) };
+  if (kind === "text" || kind === "text-set") return { text: r.text(file) };
   return { bytes: r.bytes(file) };
 }
 

@@ -12075,7 +12075,7 @@ async function placerAndCampaign(page, found) {
       // that word's Reveal button, so its promise isn't waited for).
       await soon(async () => /Packed \d+ files/.test(await k.toasts()), 30000);
       const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
-      for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
+      for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_000[0]", "BlzCreateItemWithSkin( itemID,"]) {
         if (!script.includes(line)) fail(`the packed script has no "${line}"`);
       }
       if (/'[ui]DNR'/.test(script)) fail("the packed script creates a random object by its placeholder id");
@@ -14114,6 +14114,15 @@ async function editorExtras(page, found) {
     // The palette's command: the trigger, and what the menu gave.
     const cmd = await run("w3.triggers.copyAsText", { lines: false });
     if (cmd.r !== wanted) fail(`w3.triggers.copyAsText gave ${lit(cmd)}`);
+    // A section heading clicked in the trigger's body: its heading and its lines, as the World Editor's Copy As Text
+    // (we-drive 2026-11-17: "Actions" and its lines one level in; empty "Conditions" alone).
+    const click = (selector, text) => page.evaluate(`(() => { const e = [...document.querySelectorAll(${lit(selector)})].find((x) => x.textContent.trim() === ${lit(text)}); if (!e) return false; e.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); e.click(); return true; })()`);
+    if (!(await click(".trig-section", "Events"))) fail("the trigger body has no Events heading");
+    const events = await run("w3.triggers.copyAsText");
+    if (events.r !== `Events\n    ${lines[0]}\n`) fail(`Copy As Text of the Events heading gave ${lit(events)}`);
+    if (!(await click(".trig-section", "Conditions"))) fail("the trigger body has no Conditions heading");
+    const conditions = await run("w3.triggers.copyAsText");
+    if (conditions.r !== "Conditions\n") fail(`Copy As Text of the empty Conditions heading gave ${lit(conditions)}`);
     await clip();
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("copying made the trigger file unsaved");
     await page.evaluate(`w3.editors.closeAll()`);

@@ -145,6 +145,17 @@ test("Auto Fill: each level from the one before, its number and a constant", () 
   assert.equal(autoFill({ from: 3, to: 3, base: 1, previous: 9, level: 9, constant: 9 }).length, 1);
 });
 
+test("Auto Fill with a floor: a level below it takes it and the next goes on from it (the World Editor's Allow negative real values off, we-drive 2026-11-17)", () => {
+  // The editor's preview for base 1, previous 1, level factor 4, constant -10 over three levels: 1.00, 0.00, 2.00.
+  const sum = { from: 1, to: 3, base: 1, previous: 1, level: 4, constant: -10 };
+  assert.deepEqual(autoFill(sum, 0).map((r) => r.value), [1, 0, 2]);
+  // Without a floor (negatives allowed) the sums go on as they are: -1, then -1 + 12 - 10.
+  assert.deepEqual(autoFill(sum).map((r) => r.value), [1, -1, 1]);
+  // Base 1.1, constant -2: both later levels 0 (the editor's preview 1.10, 0.00, 0.00); a negative base is the floor too.
+  assert.deepEqual(autoFill({ from: 1, to: 3, base: 1.1, previous: 1, level: 0, constant: -2 }, 0).map((r) => r.value), [1.1, 0, 0]);
+  assert.equal(autoFill({ from: 1, to: 1, base: -3, previous: 1, level: 0, constant: 0 }, 0)[0].value, 0);
+});
+
 test("Auto Fill on text puts the level where the mark is", () => {
   assert.deepEqual(autoFillText("Deals # damage, # times", "#", 1, 2).map((r) => r.value), ["Deals 1 damage, 1 times", "Deals 2 damage, 2 times"]);
   assert.deepEqual(autoFillText("Same", "", 1, 2).map((r) => r.value), ["Same", "Same"], "no mark, no change");

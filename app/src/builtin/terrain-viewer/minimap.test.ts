@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type PathMask, type Rgb } from "./minimap";
-import { minimapBase, minimapObjects, modelTextureColor, smallestMipColor, textureOrder } from "./minimapgen";
+import { minimapBase, minimapObjects, modelTextureColor, shownTextureMean, smallestMipColor, textureOrder } from "./minimapgen";
 import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
 
@@ -247,6 +247,24 @@ test("textureOrder: a model's colour comes from the texture its geosets' materia
   assert.deepEqual(textureOrder({ textures: [{}, {}, {}], geosets: [{ materialId: 0 }, { materialId: 3 }], materials: [{ layers: [{ textureIds: [2] }, { textureIds: [2] }] }] }), [2, 0, 1], "once each; a missing material counts for none");
 });
 
+test("shownTextureMean: the textures the materials show once each, a team colour texture black, as the editor's dot colours", async () => {
+  // we-drive 2026-11-17 (dots-more): a goblin shipyard ruin (textures: its own 93,70,49, team colour, a second 104,80,57) is
+  // 63,46,32 in the editor, two thirds of the first; a granary (123,101,74 and 66,49,38) the mean 90,70,53.
+  const colors: Record<string, Rgb> = { own: [93, 70, 49], second: [104, 80, 57], a: [123, 101, 74], b: [66, 49, 38] };
+  const color = async (tex: { path: string }) => colors[tex.path] ?? null;
+  const textures = [{ replaceableId: 0, path: "own" }, { replaceableId: 1, path: "" }, { replaceableId: 0, path: "second" }, { replaceableId: 0, path: "particle" }];
+  const ruin = { textures, geosets: [{ materialId: 2 }, { materialId: 0 }, { materialId: 1 }],
+    materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }, { textureIds: [2] }] }] };
+  assert.deepEqual((await shownTextureMean(ruin, color))!.map(Math.round), [66, 50, 35]);
+  const granary = { textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "b" }], geosets: [{ materialId: 0 }, { materialId: 1 }, { materialId: 2 }],
+    materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }] }, { layers: [{ textureIds: [1] }] }] };
+  assert.deepEqual((await shownTextureMean(granary, color))!.map(Math.round), [95, 75, 56]);
+  // Control: a texture that can't be read is left out, not black; nothing readable, or only the team colour: null.
+  assert.deepEqual((await shownTextureMean({ ...granary, textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "gone" }] }, color))!.map(Math.round), [123, 101, 74]);
+  assert.equal(await shownTextureMean({ textures: [{ replaceableId: 1, path: "" }], geosets: [{ materialId: 0 }], materials: [{ layers: [{ textureIds: [0] }] }] }, color), null);
+  assert.equal(await shownTextureMean({ ...granary, geosets: [] }, color), null);
+});
+
 test("minimapObjects: a destructable placed dead (life 0) isn't drawn, as on the editor's minimap", async () => {
   // SnowareBay's 205 Northrend tree walls are placed dead: the editor's export shows 77 of them, none of the 54
   // standing alone beside each other (why isn't known: minimapgen.ts).
@@ -290,6 +308,10 @@ test("modelTextureColor: the model's first texture, its replaceable one where it
     ["Doodads\\Tree\\Tree.mdx", mdxOfTextures([[31, ""]])],
     ["ReplaceableTextures\\Trees\\Bark.blp", tgaOf([110, 60, 10])],
     ["Doodads\\Bad\\Bad.mdx", mdxOfTextures([[0, "Textures\\Missing.blp"]])],
+    // An HD model names its texture .tif; the game stores only the .dds (we-drive 2026-11-17: the editor's HD export draws the
+    // rock, Studio's drew no dot while its colour came back null).
+    ["Doodads\\Hd\\Hd.mdx", mdxOfTextures([[0, "Doodads\\Hd\\Rocks_Diffuse.tif"]])],
+    ["Doodads/Hd/Rocks_Diffuse.dds", tgaOf([63, 46, 32])],
   ]);
   const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
   const skin = (file: string, numVar: number, texId = -1, texFile = "") => ({ file, numVar, texId, texFile });
@@ -298,6 +320,7 @@ test("modelTextureColor: the model's first texture, its replaceable one where it
   // Two variations, but only the file without a number is stored; the type's replaceable texture (doodad skins give no
   // extension).
   assert.deepEqual(await modelTextureColor(skin("Doodads\\Tree\\Tree", 2, 31, "ReplaceableTextures\\Trees\\Bark"), read), [110, 60, 10]);
+  assert.deepEqual(await modelTextureColor(skin("Doodads\\Hd\\Hd", 1), read), [63, 46, 32]);
   assert.equal(await modelTextureColor(skin("Doodads\\Bad\\Bad", 1), read), null);
   assert.equal(await modelTextureColor(skin("Doodads\\None\\None", 1), read), null);
 });

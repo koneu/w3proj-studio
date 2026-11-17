@@ -57,6 +57,8 @@
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
+//   --clipboard FILE    the clipboard's text into FILE (what Wine gives X: its own CRLF line ends are not visible
+//                       there); prints the byte count, "bytes": null when the clipboard is empty
 //   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
 //                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
@@ -166,6 +168,8 @@ export function viewChecks(column, items = VIEW_ITEMS) {
 const WELCOME = { title: "Welcome to the Warcraft III World Editor", button: { x: 473, y: 470 } };
 /** The editor's module windows: it opens those that were open when it was last closed again at the start. */
 const MODULE_RECLOSE_MS = 3000;
+/** How long a module window may stay after the closes before the main window is taken as raised over it. */
+const MODULE_STUCK_MS = 9000;
 const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager", "Asset Manager"]);
 /** Whether a window is one of those modules. The Campaign Editor's title names its campaign ("Campaign Editor -
  *  [Untitled]" when it reopens with none), so it goes by the start of the title. */
@@ -176,7 +180,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
@@ -812,7 +816,7 @@ export class Session {
   }
 
   /** Answers the dialogs we-drive knows (the first start's welcome); returns the ones it doesn't. */
-  answerKnown(dialogs) {
+  answerKnown(dialogs, main = null) {
     const rest = [];
     this.clicked ??= new Map();
     for (const d of dialogs) {
@@ -832,6 +836,10 @@ export class Session {
         // drawn it is lost), so the map's view is what's shown. waitReady counts it as not ready.
         if (this.now() - (this.clicked.get(d.id) ?? -Infinity) > MODULE_RECLOSE_MS) {
           this.x("close", d.id);
+          // A module the editor restored at its start (the Trigger or the Object Editor, the one that was open when a
+          // run before ended) may ignore the close for as long as the editor runs: then the main window is raised over
+          // it, which uncovers the view (checked 2026-11-17: the window stays mapped under the raised main window).
+          if (main) this.x("focus", main.id);
           if (!this.clicked.has(d.id)) this.answered = [...(this.answered ?? []), d.title];
           this.clicked.set(d.id, this.now());
         }
@@ -921,12 +929,14 @@ export class Session {
   async waitReady() {
     if (!this.editor) throw new Error("the editor isn't running: add --map or --start first");
     const deadline = this.now() + this.opts.timeout * 1000;
-    let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0;
+    let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0, moduleSince = 0;
     for (;;) {
       if (this.editorExited) throw new Error(`the editor exited while starting (see ${this.log})`);
       const { main, dialogs } = this.windows();
       if (main && !mainAt) mainAt = this.now() - this.startedAt;
-      const unknown = this.answerKnown(dialogs);
+      const unknown = this.answerKnown(dialogs, main);
+      if (dialogs.some((d) => isReopenedModule(d.title))) moduleSince ||= this.now();
+      else moduleSince = 0;
       // A loading window (no title, or "Progress") comes and goes while the map loads; a titled dialog that stays is
       // a question. While one is open the map isn't ready (below), so a long load waits up to the timeout.
       const questions = questionDialogs(unknown);
@@ -943,12 +953,14 @@ export class Session {
       let drawn = false;
       // A module window the editor opened again covers the view (a grey picture that isn't black): not ready until
       // it's gone (answerKnown closes it, again every few seconds).
-      if (titled && !unknown.length && !dialogs.some((d) => isReopenedModule(d.title))) {
+      // One that ignores the close (MODULE_STUCK_MS) is under the raised main window: the picture says whether it still covers.
+      const moduleStuck = moduleSince > 0 && this.now() - moduleSince > MODULE_STUCK_MS;
+      if (titled && !unknown.length && (moduleSince === 0 || moduleStuck)) {
         // The middle of the view (counting the whole of it in Python takes seconds).
         const [vx, vy, vw, vh] = this.viewRect(main);
         const s = this.x("stats", "--rect", [vx + Math.round(vw / 2) - 150, vy + Math.round(vh / 2) - 100, 300, 200].join(","));
         // Black until the view has drawn (dark ground, like Lordaeron's grass at night, isn't black).
-        drawn = s.blackPixels < s.pixels * 0.5;
+        drawn = s.blackPixels < s.pixels * 0.5 && !(moduleStuck && s.mean.every((c) => c >= 235));
       }
       if (drawn) {
         readySince ||= this.now();
@@ -1337,6 +1349,8 @@ async function main() {
           out({ step, ...s.shot(arg, main.rect) });
         } else if (step === "--shot-screen") {
           out({ step, ...s.shot(arg, null) });
+        } else if (step === "--clipboard") {
+          out({ step, ...s.x("clipboard", resolve(arg)) });
         } else if (step === "--key") {
           // To the open dialog if there is one, else to the main window (without a window manager the keyboard
           // stays with whatever was clicked last, e.g. the tool palette).

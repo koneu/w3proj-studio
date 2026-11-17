@@ -192,4 +192,20 @@ mod tests {
         assert!(unpack(&flag).is_err());
         assert!(unpack(&[]).is_err());
     }
+
+    /// What the World Editor's File > Export All Object Data wrote for 10_w3c_251104_0950_HillsbradCreek (units, items and
+    /// destructables with changes; the file is `we-drive`'s, 2026-11-17, branch we-open-checks): it reads to its end and
+    /// `pack` gives the same bytes back.
+    #[test]
+    fn a_file_the_world_editor_wrote_reads_and_packs_back_the_same() {
+        let bytes = include_bytes!("../../../tests/fixtures/w3o/we-export-hillsbrad.w3o");
+        let parts = unpack(bytes).unwrap();
+        assert_eq!(parts.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["w3u", "w3t", "w3b"]);
+        assert_eq!(pack(&parts).unwrap(), bytes);
+        // the control: the same file with its version changed, or cut short, doesn't read
+        let mut other = bytes.to_vec();
+        other[0] = 2;
+        assert!(unpack(&other).is_err());
+        assert!(unpack(&bytes[..bytes.len() - 1]).is_err());
+    }
 }

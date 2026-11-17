@@ -55,6 +55,24 @@ export function triggerAsText(t: TriggerItem, ctx: DisplayContext): string {
   return text;
 }
 
+/** One section of a GUI trigger as text, as the World Editor's Copy As Text gives a clicked "Events", "Conditions"
+ *  or "Actions": its heading, then its lines indented one level (we-drive, 2026-11-17, sd). `kind` is EVENT, CONDITION
+ *  or ACTION. */
+export function sectionAsText(t: TriggerItem, kind: number, ctx: DisplayContext): string {
+  const label = SECTIONS.find(([k]) => k === kind)?.[1] ?? "Actions";
+  return `${label}\n${ecasAsText(t.ecas.filter((e) => e.kind === kind), ctx, 1)}`;
+}
+
+/** One branch of a block ("If - Conditions", "Then - Actions", "Else - Actions", "Loop - Actions") the same way: its
+ *  label, then its lines one level in (the World Editor's, we-drive 2026-11-17). `group` is the branch number. */
+export function branchAsText(block: Eca, group: number, ctx: DisplayContext): string {
+  const label = branchLabels(block.name)[group] ?? "Actions";
+  return `${label}\n${ecasAsText(block.children.filter((c) => (c.group ?? 0) === group), ctx, 1)}`;
+}
+
+/** A heading of a GUI trigger's body that was clicked: a section, or a branch of a block line. */
+export type TriggerHeading = { section: number } | { block: Eca; group: number };
+
 /** What Copy As Text / Copy As Script needs of a trigger editor. */
 export interface CopySource {
   display: DisplayContext;
@@ -66,12 +84,17 @@ export interface CopySource {
 
 /** The text Copy As Text (`as` "text") or Copy As Script ("script") puts on the clipboard for the trigger `t`,
  *  or for its `lines` when there are any, with "\n" line ends; null when there is nothing of the kind:
- *  comments have neither, custom text has no GUI text (its script is its own text). */
-export function copyAs(as: "text" | "script", src: CopySource, t: TriggerItem, lines: readonly Eca[] = []): string | null {
+ *  comments have neither, custom text has no GUI text (its script is its own text). `heading`: a clicked
+ *  section or branch heading, for Copy As Text only (Copy As Script of one isn't compared yet). */
+export function copyAs(as: "text" | "script", src: CopySource, t: TriggerItem, lines: readonly Eca[] = [], heading?: TriggerHeading): string | null {
   if (t.type === 16 || t.isComment) return null;
   const gui = t.type === 8 && !t.isCustom;
   if (!gui) return as === "script" ? (src.customText(t) ?? "").replace(/\r\n?/g, "\n") : null;
-  if (as === "text") return lines.length ? ecasAsText(lines, src.display) : triggerAsText(t, src.display);
+  if (as === "text") {
+    if (lines.length) return ecasAsText(lines, src.display);
+    if (heading) return "section" in heading ? sectionAsText(t, heading.section, src.display) : branchAsText(heading.block, heading.group, src.display);
+    return triggerAsText(t, src.display);
+  }
   const input = { data: src.display.data, triggers: src.file, lua: src.language === "lua" };
   const script = lines.length ? linesCustomText(input, t, lines) : triggerCustomText(input, t);
   return script.replace(/\r\n?/g, "\n");
