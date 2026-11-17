@@ -8,7 +8,7 @@ import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
-import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
+import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { rampSides } from "../../lib/terrain/cliffs";
 
@@ -191,6 +191,8 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause, cliffs) : terrainShadows(terrain, sun, cliffs);
   let since = performance.now();
   const failed = stats?.failed ?? new Set<string>();
+  // The doodads' shadows end on the ground the terrain's are read from (castShadow).
+  const heights = doodads.length ? shadowCellHeights(terrain, cliffs) : undefined;
   for (const d of doodads) {
     if (pause && performance.now() - since > 8) {
       if (!(await pause())) throw new Error("superseded");
@@ -203,7 +205,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     const mesh = await modelMesh(path, readFile, artMode, failed);
     // Only a model that couldn't be read is unreadable; one read with nothing to cast is used (as nothing).
     if (stats) { stats.wanted++; if (mesh === null) stats.unreadable++; }
-    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
+    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun, heights);
   }
   return out;
 }

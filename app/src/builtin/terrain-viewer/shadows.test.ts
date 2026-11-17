@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { rampSides } from "../../lib/terrain/cliffs";
-import { cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, terrainShadows } from "./shadows";
+import { castShadow, cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, terrainShadows, type ShadowMesh } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
 function flat(): Terrain {
@@ -85,6 +85,54 @@ test("the walk goes on as far as the map: a corner raised 1536 casts 50 cells", 
   const top = (y: number) => rowOf(shd, y, 0, 255);
   assert.deepEqual([top(138), top(137), top(136), top(135)], [[73], [72, 74], [71, 73], [70, 72]]);
   assert.deepEqual(top(139), []);
+});
+
+/** A box model's triangles, 112 wide (x and y -56..56) from z0 to z1, each side counter-clockwise from outside;
+ *  `bottom`: with its bottom. */
+function boxMesh(z0: number, z1: number, bottom: boolean): ShadowMesh {
+  const [a, b] = [-56, 56];
+  const quads = [
+    [[a, a, z1], [b, a, z1], [b, b, z1], [a, b, z1]],
+    ...(bottom ? [[[a, a, z0], [a, b, z0], [b, b, z0], [b, a, z0]]] : []),
+    [[a, a, z0], [b, a, z0], [b, a, z1], [a, a, z1]], [[b, b, z0], [a, b, z0], [a, b, z1], [b, b, z1]],
+    [[a, b, z0], [a, a, z0], [a, a, z1], [a, b, z1]], [[b, a, z0], [b, b, z0], [b, b, z1], [b, a, z1]],
+  ];
+  const positions = quads.flat(2), faces: number[] = [];
+  quads.forEach((_, q) => faces.push(q * 4, q * 4 + 1, q * 4 + 2, q * 4, q * 4 + 2, q * 4 + 3));
+  return { positions: new Float32Array(positions), faces: new Uint32Array(faces) };
+}
+
+test("a model's shadow: a cell is dark only when all of the model on its line toward the sun is over the ground", () => {
+  // The World Editor's war3map.shd of box models imported into a map (we-drive, branch we-shadow-4, HD; the box's
+  // origin at a cell corner, (32, 192) in cells): the runs of shaded cells per row.
+  const cases: [string, number, number, boolean, Record<number, string>][] = [
+    // Standing on the ground with a bottom: the bottom is on every footprint cell's line, at the ground: lit.
+    ["closed", 0, 96, true, { 191: "34", 192: "34-35", 193: "34-36", 194: "31-36", 195: "32-36", 196: "33-36" }],
+    // Without its bottom the footprint is dark. The editor leaves (33, 193) lit: its centre is on the edge two of the
+    // top's triangles share, where which one takes it comes down to the floats' last bits (not compared).
+    ["cap", 0, 96, false, { 190: "30-33", 191: "30-34", 192: "30-35", 193: "30-32,34-36", 194: "31-36", 195: "32-36", 196: "33-36" }],
+    // Sunk 32 into the ground: the bottom under the footprint's cells, lit; the shadow shorter.
+    ["sunk", -32, 64, true, { 191: "34", 192: "34-35", 193: "34-35", 194: "31-35", 195: "32-35" }],
+    // Floating 32 over the ground: all of it over the footprint too, dark.
+    ["float", 32, 128, true, { 191: "31-34", 192: "31-35", 193: "31-36", 194: "31-37", 195: "32-38", 196: "33-38", 197: "34-38", 198: "35-38" }],
+  ];
+  for (const [name, z0, z1, bottom, editor] of cases) {
+    const t = flat();
+    const out = new Uint8Array(256 * 256);
+    castShadow(out, t, { mesh: boxMesh(z0, z1, bottom), x: -4096 + 32 * 32, y: -4096 + 192 * 32, z: 0, angle: 0, scale: [1, 1, 1] });
+    if (name === "cap") out[193 * 256 + 33] = 0;
+    for (let y = 180; y <= 210; y++) {
+      const xs = rowOf(out, y, 0, 255);
+      const runs: string[] = [];
+      for (let i = 0; i < xs.length; i++) {
+        let j = i;
+        while (j + 1 < xs.length && xs[j + 1] === xs[j] + 1) j++;
+        runs.push(i === j ? `${xs[i]}` : `${xs[i]}-${xs[j]}`);
+        i = j;
+      }
+      assert.equal(runs.join(","), editor[y] ?? "", `${name}, row ${y}`);
+    }
+  }
 });
 
 test("ramp sides: the ramp model named from the top-left corner on, read a quarter turn round", () => {

@@ -19,20 +19,6 @@ export interface Sun { azimuth: number; elevation: number }
 /** Fitted against the sample maps. */
 export const DEFAULT_SUN: Sun = { azimuth: 225, elevation: 30 };
 
-function sunVector(s: Sun): [number, number, number] {
-  const az = (s.azimuth * Math.PI) / 180, el = (s.elevation * Math.PI) / 180;
-  return [Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)];
-}
-
-/** Ground height (bilinear over the corners), clamped to the map. */
-function groundAt(t: Terrain, wx: number, wy: number): number {
-  const fx = Math.min(Math.max((wx - t.offsetX) / 128, 0), t.width - 1.001);
-  const fy = Math.min(Math.max((wy - t.offsetY) / 128, 0), t.height - 1.001);
-  const x = Math.floor(fx), y = Math.floor(fy), u = fx - x, v = fy - y;
-  const c = (i: number, j: number) => t.corners[(y + j) * t.width + x + i].height;
-  return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
-}
-
 /** The terrain's heights as the World Editor's Calculate Shadows reads them: one per 32×32 cell (the shd grid), at the
  *  cell's centre. Ground tiles: the corners' heights (layers and ramps included) over the tile's two triangles, split
  *  from the top-left to the bottom-right corner. Cliff tiles: `cliffs`' heights for the tile, over the tile's lowest
@@ -286,20 +272,53 @@ export interface ShadowCaster {
   scale: [number, number, number];
 }
 
-/** Darkens the cells under a model's shadow (projected along the sun onto
- *  the ground; cells whose centre is covered). */
-export function castShadow(out: Uint8Array, t: Terrain, c: ShadowCaster, s: Sun = DEFAULT_SUN) {
-  const sun = sunVector(s);
+/** Darkens the cells under a model's shadow. Each cell's line toward the sun (the walk's rise, shadowStepRise) from
+ *  its ground (`heights`, shadowCellHeights; without them the corners over the tile's two triangles) meets the model's
+ *  triangles: the cell is dark when every surface of the model on that line lies above the ground there; one at or
+ *  under the ground (a model's bottom, a rock's underside sunk into it) leaves it lit, the model's own footprint as a
+ *  rule. we-drive (branch we-shadow-4, 2026-11-17, HD): box models imported into a map (make-shadow-probes.mjs
+ *  shadow-boxes: a closed box on the ground leaves its footprint lit, the same box without its bottom shades it, sunk
+ *  into the ground lit, floating over it dark, either way round its triangles turn; of 235 cells the 8 whose centres
+ *  lie on a projected triangle's edge are off, 76 when every surface casts); LRrk's ten variations and eight turns 7
+ *  cells off (the editor 341; every surface casting: 53), the same in SD 3 (6 at tan 30°); LastRefuge whole 487 of
+ *  11050 (971 with the ground under each corner of the model instead of the cell's, 1216 every surface casting).
+ *  Whether a texture hole of an alpha-tested face counts as a surface isn't known: it is left out. */
+export function castShadow(out: Uint8Array, t: Terrain, c: ShadowCaster, s: Sun = DEFAULT_SUN, heights?: Float32Array) {
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const { positions: pos, faces } = c.mesh;
   const ca = Math.cos(c.angle), sa = Math.sin(c.angle);
-  const proj = new Float32Array((pos.length / 3) * 2);
+  // The model's corners projected along the sun onto the level of its origin (c.z), in cells, and their heights over it.
+  const az = (s.azimuth * Math.PI) / 180, slope = shadowStepRise(s) / (32 * Math.SQRT2), ux = Math.cos(az), uy = Math.sin(az);
+  const proj = new Float32Array((pos.length / 3) * 2), over = new Float32Array(pos.length / 3);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (let i = 0; i < pos.length / 3; i++) {
     const lx = pos[i * 3] * c.scale[0], ly = pos[i * 3 + 1] * c.scale[1], lz = pos[i * 3 + 2] * c.scale[2];
-    const wx = c.x + lx * ca - ly * sa, wy = c.y + lx * sa + ly * ca, wz = c.z + lz;
-    const k = Math.max(0, (wz - groundAt(t, wx, wy)) / sun[2]);
-    proj[i * 2] = (wx - sun[0] * k - t.offsetX) / 32;
-    proj[i * 2 + 1] = (wy - sun[1] * k - t.offsetY) / 32;
+    const wx = c.x + lx * ca - ly * sa, wy = c.y + lx * sa + ly * ca, k = lz / slope;
+    over[i] = lz;
+    const px = (proj[i * 2] = (wx - ux * k - t.offsetX) / 32), py = (proj[i * 2 + 1] = (wy - uy * k - t.offsetY) / 32);
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+  }
+  if (!(minX <= maxX && minY <= maxY)) return;
+  // A cell's line meets that level `(ground - c.z) / slope` away from the sun: the cells looked at reach that much
+  // further than the projection: MARGIN cells each way, ground up to about 640 over or under the model's origin.
+  const MARGIN = 24;
+  const bx0 = Math.max(0, Math.floor(minX) - MARGIN), bx1 = Math.min(w - 1, Math.ceil(maxX) + MARGIN);
+  const by0 = Math.max(0, Math.floor(minY) - MARGIN), by1 = Math.min(h - 1, Math.ceil(maxY) + MARGIN);
+  if (bx0 > bx1 || by0 > by1) return;
+  const bw = bx1 - bx0 + 1, n = bw * (by1 - by0 + 1);
+  /** Per cell: its ground over c.z, where its line meets c.z's level, the lowest surface on the line over its ground. */
+  const ground = new Float32Array(n), meetX = new Float32Array(n), meetY = new Float32Array(n), lowest = new Float32Array(n).fill(Infinity);
+  // How far the meeting points stand off the cells' centres, at most and least (a triangle looks that much further).
+  let offX0 = Infinity, offX1 = -Infinity, offY0 = Infinity, offY1 = -Infinity;
+  for (let y = by0; y <= by1; y++) {
+    for (let x = bx0; x <= bx1; x++) {
+      const i = (y - by0) * bw + x - bx0;
+      const g = (heights ? heights[y * w + x] : cornerGround(t, x, y)) - c.z, d = -g / slope / 32;
+      ground[i] = g;
+      meetX[i] = x + 0.5 + ux * d;
+      meetY[i] = y + 0.5 + uy * d;
+      offX0 = Math.min(offX0, ux * d); offX1 = Math.max(offX1, ux * d); offY0 = Math.min(offY0, uy * d); offY1 = Math.max(offY1, uy * d);
+    }
   }
   const { uvs, faceAlpha, alphaMaps } = c.mesh;
   for (let f = 0; f < faces.length; f += 3) {
@@ -310,27 +329,43 @@ export function castShadow(out: Uint8Array, t: Terrain, c: ShadowCaster, s: Sun 
     const area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
     if (Math.abs(area) < 1e-9) continue;
     const am = faceAlpha && alphaMaps && uvs && faceAlpha[f / 3] >= 0 ? alphaMaps[faceAlpha[f / 3]] : null;
-    const x0 = Math.max(0, Math.floor(Math.min(ax, bx, qx))), x1 = Math.min(w - 1, Math.ceil(Math.max(ax, bx, qx)));
-    const y0 = Math.max(0, Math.floor(Math.min(ay, by, qy))), y1 = Math.min(h - 1, Math.ceil(Math.max(ay, by, qy)));
+    const x0 = Math.max(bx0, Math.floor(Math.min(ax, bx, qx) - offX1) - 1), x1 = Math.min(bx1, Math.ceil(Math.max(ax, bx, qx) - offX0));
+    const y0 = Math.max(by0, Math.floor(Math.min(ay, by, qy) - offY1) - 1), y1 = Math.min(by1, Math.ceil(Math.max(ay, by, qy) - offY0));
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        const px = x + 0.5, py = y + 0.5;
+        const i = (y - by0) * bw + x - bx0, px = meetX[i], py = meetY[i];
         // Barycentric weights of a (w0), b (w1) and c.
         const w0 = ((bx - px) * (qy - py) - (by - py) * (qx - px)) / area;
         const w1 = ((qx - px) * (ay - py) - (qy - py) * (ax - px)) / area;
         if (w0 < 0 || w1 < 0 || w0 + w1 > 1) continue;
+        const w2 = 1 - w0 - w1;
         if (am) {
-          const w2 = 1 - w0 - w1;
           const u = uvs![ia * 2] * w0 + uvs![ib * 2] * w1 + uvs![ic * 2] * w2;
           const v = uvs![ia * 2 + 1] * w0 + uvs![ib * 2 + 1] * w1 + uvs![ic * 2 + 1] * w2;
           const tx = Math.min(am.width - 1, Math.floor((u - Math.floor(u)) * am.width));
           const ty = Math.min(am.height - 1, Math.floor((v - Math.floor(v)) * am.height));
           if (am.alpha[ty * am.width + tx] < ALPHA_CUTOFF) continue;
         }
-        out[y * w + x] = 0xff;
+        const z = over[ia] * w0 + over[ib] * w1 + over[ic] * w2 - ground[i];
+        if (z < lowest[i]) lowest[i] = z;
       }
     }
   }
+  // A surface less than a thousandth of a unit over the ground is on it (a box's bottom on flat ground: lit).
+  for (let y = by0; y <= by1; y++) {
+    for (let x = bx0; x <= bx1; x++) {
+      const z = lowest[(y - by0) * bw + x - bx0];
+      if (z > 1e-3 && z !== Infinity) out[y * w + x] = 0xff;
+    }
+  }
+}
+
+/** A cell's ground from the corners of its tile (their heights with the layers, without a ramp's lift), over the tile's
+ *  two triangles. */
+function cornerGround(t: Terrain, x: number, y: number): number {
+  const tx = Math.min(x >> 2, t.width - 2), ty = Math.min(y >> 2, t.height - 2), u = ((x & 3) + 0.5) / 4, v = ((y & 3) + 0.5) / 4;
+  const k = (i: number, j: number) => t.corners[(ty + j) * t.width + tx + i].height;
+  return splitTile(k(0, 0), k(1, 0), k(0, 1), k(1, 1), u, v);
 }
 
 /** The new shadow map: cells whose prediction differs between the last
