@@ -237,11 +237,11 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
     assert.ok(!/openpoints/i.test(text), `${f} mentions openpoints`);
     // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one in
     // the main checkout's (${MAIN}), and only there.
-    const userMaps = join(vars.MAIN, "smoketest_maps") + sep;
-    for (const s of parseSpecFile(text, f, vars, { differsWithoutPaths: core.readDiffersAllowlist(vars.REPO) })) if (s.input.map && !s.input.map.startsWith(userMaps)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
+    const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
+    for (const s of parseSpecFile(text, f, vars, { differsWithoutPaths: core.readDiffersAllowlist(vars.REPO) })) if (s.input.map && !resolve(s.input.map).startsWith(userMaps)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
   }
   // Controls: the exemption is the main checkout's smoketest_maps folder, not any path that mentions the name.
-  const userMaps = join(vars.MAIN, "smoketest_maps") + sep;
+  const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
   assert.ok(join(vars.MAIN, "smoketest_maps", "a.w3x").startsWith(userMaps));
   assert.ok(!join(vars.REPO, "smoketest_maps_x", "a.w3x").startsWith(userMaps));
   assert.ok(!join(vars.REPO, "target", "smoketest_maps", "a.w3x").startsWith(userMaps));
