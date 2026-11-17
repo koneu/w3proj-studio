@@ -903,3 +903,32 @@ fn verify_finds_no_map_in_an_empty_folder_and_says_so() {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     assert!(text(&o).contains("1 ok"), "{}", text(&o));
 }
+
+/// A project whose map/ has no war3map.j (or .lua) packs, but says the packed map has no script.
+#[test]
+fn pack_warns_when_the_map_script_is_missing() {
+    let dir = workdir("pack-no-script");
+    let project = dir.join("project");
+    // Control: the fixture has its script, so no warning.
+    let o = w3proj(&["pack", s(&fixture()), "-o", s(&dir.join("with.w3x")), "--game", "none"]);
+    assert!(o.status.success() && !text(&o).contains("no map script"), "{}", text(&o));
+    for e in fs::read_dir(fixture().join("map")).unwrap() {
+        let p = e.unwrap().path();
+        let to = project.join("map").join(p.file_name().unwrap());
+        fs::create_dir_all(to.parent().unwrap()).unwrap();
+        if p.is_file() {
+            fs::copy(&p, &to).unwrap();
+        } else {
+            let _ = fs::create_dir_all(&to);
+            for f in fs::read_dir(&p).unwrap() {
+                let f = f.unwrap().path();
+                fs::copy(&f, to.join(f.file_name().unwrap())).unwrap();
+            }
+        }
+    }
+    fs::copy(fixture().join("w3proj.toml"), project.join("w3proj.toml")).unwrap();
+    fs::remove_file(project.join("map/war3map.j")).unwrap();
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("without.w3x")), "--game", "none"]);
+    assert!(o.status.success(), "a missing script isn't a failure: {}", text(&o));
+    assert!(text(&o).contains("warning: map/war3map.j: there is no map script"), "{}", text(&o));
+}

@@ -1135,6 +1135,14 @@ fn pack_bytes_with(
         }
         encoded.insert(key, worked);
     }
+    // A map (it has war3map.w3i) without a script packs, but the game can't start it.
+    let has = |n: &str| encoded.keys().any(|k| k.eq_ignore_ascii_case(n));
+    if has("war3map.w3i") && !has("war3map.j") && !has("war3map.lua") {
+        warnings.push(format!(
+            "{MAP_DIR}/war3map.j: there is no map script (war3map.j or war3map.lua), so the packed map has none and the game \
+             can't start it: Generate Map Script in W3Proj Studio (or `w3proj rebuild --only=script`) makes one"
+        ));
+    }
     let maps_dir = project.join(MAPS_DIR);
     for dir in nested_projects(&maps_dir)? {
         let name = paths::to_archive_name(&dir);

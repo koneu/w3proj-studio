@@ -4335,6 +4335,13 @@ async function areaReplaceCt0Steps(page, found) {
   await k.save();
   if (!/^\[texture\] all 0$/m.test(text())) fail("one undo of the panel's Replace didn't put every corner back on slot 0");
   if (text().replace(/^ground .*$/m, "") !== before.replace(/^ground .*$/m, "")) fail("one undo of the panel's Replace left more than the ground list changed");
+  // The tiles it added go with the undo: the side list has the file's 2 again (open point: the added tiles stayed).
+  await until("the file's 2 tiles listed again", async () => (await listed()) === 2, 8000).catch(async () => fail(`one undo of the panel's Replace left ${await listed()} ground tiles listed, not the file's 2`));
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await k.save();
+  if (headLine("ground") !== own.join(" ") || !new Set([...(/^\[texture\]\n((?:[^[\n][^\n]*\n?)*)/m.exec(text())?.[1] ?? "").replace(/\s/g, "")]).has("4")) fail(`redo of the panel's Replace: ground ${headLine("ground")} (want the own list whole, corners on 4)`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
 
   // A stale panel (its tile replaced on the whole map meanwhile): its Replace finds nothing and adds no tile.
   await until("the panel again", () => page.evaluate(`!!${groundRow}`), 8000).catch(() => fail("no Ground tile row after the second undo"));
@@ -4354,7 +4361,7 @@ async function areaReplaceCt0Steps(page, found) {
   // Replace Tiles of a tile no slot is drawn as (own[5], past the list of 5; offered, the own list whole) with another
   // tileset's: nothing, and no tile added (nor the flag set).
   const n1 = await listed();
-  if (n1 !== 5) fail(`the list has ${n1} tiles before Replace Tiles of ${own[5]}, not 5 (control)`);
+  if (n1 >= 6) fail(`the list has ${n1} tiles before Replace Tiles of ${own[5]}: it is drawn already (control)`);
   const none = await k.run("w3.terrain.replaceTiles", { from: own[5], to: "Wsnw" });
   await settled(page);
   if (none) fail(`Replace Tiles ${own[5]} → Wsnw: ${none}`);

@@ -1876,6 +1876,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A finished terrain stroke as one undo step; objects on the edited
          *  ground follow it (doodads with a fixed height, flag 4, keep theirs). */
+        /** The tile lists as they were before the first tile an edit added under custom-tilesets 0 (ensureTile); the
+         *  commit that follows takes it, so its undo puts the lists back (the flag, and the list drawn). */
+        let pendingTiles: ReturnType<typeof tileSnapshot> | null = null;
         const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }, pasted = false): boolean => {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
@@ -1900,9 +1903,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const zBefore = follow.map((p) => p.position[2]);
           const zAfter = follow.map((p) => groundFor(p.id, p.position[0], p.position[1]));
           const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
+          const tilesBefore = pendingTiles;
+          pendingTiles = null;
+          const tilesAfter = tilesBefore ? tileSnapshot(terrain) : null;
+          const putTiles = (s: ReturnType<typeof tileSnapshot> | null) => { if (!s) return; restoreTiles(terrain, s); void syncTileList(); minimapStale.set(); };
           pushEdit({
-            undo: () => { st.undo(); if (moved) setZ(zBefore); },
-            redo: () => { st.redo(); if (moved) setZ(zAfter); },
+            undo: () => { st.undo(); putTiles(tilesBefore); if (moved) setZ(zBefore); },
+            redo: () => { putTiles(tilesAfter); st.redo(); if (moved) setZ(zAfter); },
             terrain: true, objects: moved,
           });
           if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); } else refloat();
@@ -2119,6 +2126,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Index of a ground tile type, adding it to the map's list if needed
          *  (null when the list is full). At once, with no wait: see placePaste. */
         const ensureTile = (id: string): number | null => {
+          const snap = tileSnapshot(terrain);
+          const slot = addTile(id);
+          // Under flag 0 the list is the tileset's own: the edit's undo gives the lists back (see pendingTiles).
+          if (snap.raw === 0 && !pendingTiles && (snap.raw !== terrain.customTilesetsRaw || snap.ground.join() !== terrain.groundTiles.join())) pendingTiles = snap;
+          return slot;
+        };
+        const addTile = (id: string): number | null => {
           // The slot drawn as the tile: with the flag 0 by the tileset's own list, not the file's (paintSlot).
           const own = ownTiles?.get(terrain.tileset);
           const listed = terrain.groundTiles.length;
@@ -2157,7 +2171,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  puts the tile lists back as they were before, so a run that replaced nothing leaves no tile added (nor the
          *  list settled or the flag changed). Call it with no wait in between, as placePaste does. */
         const tryEnsureTile = (id: string): { slot: number | null; takeBack(): void } => {
-          const before = tileSnapshot(terrain);
+          const before = tileSnapshot(terrain), hadPending = pendingTiles;
           const slot = ensureTile(id);
           return {
             slot,
@@ -2165,6 +2179,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const now = tileSnapshot(terrain);
               if (now.raw === before.raw && now.ground.join() === before.ground.join() && now.cliffs.join() === before.cliffs.join()) return;
               restoreTiles(terrain, before);
+              pendingTiles = hadPending;
               void syncTileList();
               minimapStale.set();
             },
@@ -3799,7 +3814,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           // From here to the end there is no wait: the lists are taken right before the tiles are added, so putting them
           // back can't drop a tile another edit added in between.
-          const tiles = tileSnapshot(terrain);
+          const tiles = tileSnapshot(terrain), hadPending = pendingTiles;
           const stamped = placeGround(f, g);
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
@@ -3811,6 +3826,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             keyPress = null;
             const added = terrain.groundTiles.length !== tiles.ground.length;
             restoreTiles(terrain, tiles);
+            pendingTiles = hadPending;
             // The side list's rows and counts for the tiles that went again.
             if (added) void syncTileList();
             return;

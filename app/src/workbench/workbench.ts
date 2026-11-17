@@ -390,6 +390,7 @@ export class Workbench {
         onDidSave: (l) => wb.workspace.onDidSave.on(l),
         delete: (p) => wb.workspace.delete(p),
         rename: (a, b) => wb.workspace.rename(a, b),
+        exists: (p) => wb.workspace.exists(p),
         copy: (a, b) => wb.workspace.copy(a, b),
         copyMany: (pairs) => wb.workspace.copyMany(pairs),
         deleteMany: (paths) => wb.workspace.deleteMany(paths),
