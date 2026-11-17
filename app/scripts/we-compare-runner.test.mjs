@@ -594,6 +594,18 @@ test("weDriveSteps: --close after the last spec, after an expectCrash, before a 
   assert.deepEqual(core.weDriveSteps([spec("a")], of), ["--map", "a.w3x", "--wait-ready", "--key", "d", "--save", "a-we.w3x", "--close"]);
 });
 
+test("we.save shadows: the save is File > Calculate Shadows and Save Map (--save-shadows), counted as the spec's save", () => {
+  const s = parseSpec({ ...good(), we: { save: "shadows" } }, "/s");
+  assert.equal(s.we.save, "shadows");
+  assert.equal(parseSpec(good(), "/s").we.save, "plain", "control: Ctrl+S by default");
+  assert.throws(() => parseSpec({ ...good(), we: { save: "calc" } }, "/s"), /we\.save is plain/);
+  assert.throws(() => parseSpec({ ...good(), we: { steps: [["--save-shadows", "x.w3x"]] } }, "/s"), /done by we-compare itself/);
+  const of = { mapOf: (x) => `${x.name}.w3x`, saveOf: (x) => `${x.name}-we.w3x` };
+  assert.deepEqual(core.weDriveSteps([s], of), ["--map", `${s.name}.w3x`, "--wait-ready", "--save-shadows", `${s.name}-we.w3x`, "--close"]);
+  assert.deepEqual(core.weOutcome(1, [{ step: "--map" }, { step: "--save-shadows", saved: true }, { step: "--close", closed: true }]).errors, [null]);
+  assert.match(core.weOutcome(1, [{ step: "--map" }, { step: "--save-shadows", saved: false, dialogs: ["Error"] }]).errors[0], /save didn't finish/);
+});
+
 test("an editor of the wrong layout fails every spec with one message and none is run again; closes are reported", () => {
   const layout = "the editor's main window is at 0,0 1200x700, not 4,30 1352x937";
   const r = core.weOutcome(3, [{ step: "--map" }, { step: "--wait-ready", ready: false, layout }]);
