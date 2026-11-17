@@ -160,14 +160,19 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec") {
       if (!(Array.isArray(e.expectPaths) && e.expectPaths.length && e.expectPaths.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].expectPaths is a list of paths that must all differ ("players[].start")`);
       if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectPaths goes with "expect": "differs"`);
     }
-    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths"].includes(k));
+    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths", "lines"].includes(k));
+    if (e.lines !== undefined) {
+      if (typeof e.lines !== "string" || !e.lines) throw new Error(`${where}: compare[${i}].lines is a regular expression (only the lines matching it are compared)`);
+      try { new RegExp(e.lines); } catch (x) { throw new Error(`${where}: compare[${i}].lines is not a regular expression: ${x.message}`); }
+      if (e.as !== "text" && e.as !== "text-set") throw new Error(`${where}: compare[${i}].lines goes with "as": "text" or "text-set"`);
+    }
     if (unknownKey.length) throw new Error(`${where}: compare[${i}]: unknown key ${unknownKey.join(", ")}`);
     // A kind compared as text, bytes or cells has no use for these: refused, so a spec never believes it is applied.
     const kind = e.as ?? "auto";
     for (const opt of ["tolerance", "ignore", "expectPaths"]) {
       if (e[opt] !== undefined && kind !== "auto" && !JSON_KINDS.includes(kind)) throw new Error(`${where}: compare[${i}].${opt} has no effect on "as": "${kind}" (only on ${JSON_KINDS.join(", ")})`);
     }
-    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}) };
+    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.lines ? { lines: e.lines } : {}) };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
   const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
@@ -402,7 +407,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
  * unpackedAs, json, text, bytes). null when the map has no such file; throws when it has one that can't be read as
  * the kind wants (a w3e that is cut short, a file that didn't unpack as JSON): that is never "absent".
  */
-export function loadSide(r, file, kind, decodeImage) {
+export function loadSide(r, file, kind, decodeImage, lines) {
   if (!r.has(file) && !r.listed(file)) return null;
   const json = () => {
     if (r.unpackedAs(file) !== "json") throw new Error(`${file} is in the map but the unpack made no JSON of it (${r.unpackedAs(file) ?? "not unpacked"})`);
@@ -417,7 +422,12 @@ export function loadSide(r, file, kind, decodeImage) {
     if (!decodeImage) throw new Error("no image decoder for the minimap kind");
     return { json: minimapView(decodeImage(new Uint8Array(r.bytes(file)), file).mip(0)) };
   }
-  if (kind === "text" || kind === "text-set") return { text: r.text(file) };
+  if (kind === "text" || kind === "text-set") {
+    // `lines`: only the lines matching this regular expression (a spec that wants one kind of line of a long script)
+    if (!lines) return { text: r.text(file) };
+    const re = new RegExp(lines);
+    return { text: r.text(file).split(/\r?\n/).filter((l) => re.test(l)).join("\n") };
+  }
   return { bytes: r.bytes(file) };
 }
 
@@ -440,7 +450,7 @@ export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImag
   }
   try {
     loaded = sides.map(([who, r]) => {
-      try { return loadSide(r, c.file, kind, decodeImage); } catch (e) { throw new Error(`${who}: ${e.message}`); }
+      try { return loadSide(r, c.file, kind, decodeImage, c.lines); } catch (e) { throw new Error(`${who}: ${e.message}`); }
     });
   } catch (e) {
     return { ...base, kind, status: "ERROR", count: 1, diffs: [{ text: e.message }] };
