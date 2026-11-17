@@ -35,34 +35,44 @@ const LAYER_STEPS: Partial<Record<LayerTool, number>> = { cliffUp: 1, cliffUp2: 
  *  beside it (we-compare cliff-floor and painted-cliff-type-grass, 2026-11-14, branch painted-cliff-type-we). Studio
  *  used to lower the whole brush to level 0 there. A water brush whose level would be below 0 lowers nothing: the
  *  corners turn wet on the level they are on (waterBelowFloor), so the level returned is the start's. Past the top,
- *  Increase does nothing with the map's Enforce Terrain Limits on (`enforceLimits`) and wraps round without it
- *  (ENFORCED_TOP_LEVEL). */
+ *  Increase does nothing with the map's Enforce Terrain Limits on (`enforceLimits`) above ENFORCED_TOP_LEVEL, and
+ *  nothing above 15 without it: the World Editor wraps that round to level 0, Studio refuses it (topRefusal says why). */
 export function strokeLayer(tool: LayerTool, start: number, enforceLimits = false): number | null {
   const to = start + (LAYER_STEPS[tool] ?? 0);
   if (to < 0 && (tool === "cliffDown" || tool === "cliffDown2")) return null;
   if (waterBelowFloor(tool, start)) return start;
-  if (tool === "cliffUp" || tool === "cliffUp2") {
-    if (enforceLimits && to > ENFORCED_TOP_LEVEL) return null;
-    if (to > 15) return to & 15;
-  }
+  if (topRefusal(tool, start, enforceLimits)) return null;
   return Math.max(0, Math.min(15, to));
+}
+
+/** Why an Increase stroke started on cliff level `start` is refused at the top, or null: past ENFORCED_TOP_LEVEL with
+ *  Enforce Terrain Limits on, past 15 (the level's 4 bits) without. Project rule (2026-11-17): a value past its end is
+ *  refused with a word, never wrapped round (the World Editor's Increase Two from 14 went to level 0: we-compare
+ *  cliff-slope-wrap). */
+export function topRefusal(tool: LayerTool, start: number, enforceLimits = false): string | null {
+  if (tool !== "cliffUp" && tool !== "cliffUp2") return null;
+  const to = start + (LAYER_STEPS[tool] ?? 0);
+  if (enforceLimits && to > ENFORCED_TOP_LEVEL) return `Not raised: level ${to} is above ${ENFORCED_TOP_LEVEL}, the highest cliff level with Enforce Terrain Limits on (Map Properties > Preferences).`;
+  if (to > 15) return `Not raised: level ${to} is above 15, the highest cliff level a map can store (the World Editor would wrap it round to level ${to & 15}).`;
+  return null;
 }
 
 /** The highest cliff level Increase One and Two build with the map's Enforce Terrain Limits on. The World Editor's
  *  Increase did nothing at all where it would have gone higher (we-drive, flat maps of one level, one size-1 click,
  *  2026-11-15, branch cliff-slope-we): Increase One from 14 and Two from 13 and 14 changed no corner, One from 13 and
- *  Two from 12 built level 14. With the switch off (the default) the level wraps round past 15 as its 4 bits do:
- *  Increase Two from 14 and One from 15 set the brush to level 0 and the slope round it climbed back to the plateau
+ *  Two from 12 built level 14. With the switch off (the default) the editor's level wraps round past 15 as its 4 bits
+ *  do: Increase Two from 14 and One from 15 set the brush to level 0 and the slope round it climbed back to the plateau
  *  (cliffSlope), the "cap" of 12 a size-3 brush clicked ten times on one pixel seemed to have (we-compare
- *  limits-off-cliff-cap): the pointer's corner moves down the growing slope, and a click on the top wraps it. */
+ *  limits-off-cliff-cap): the pointer's corner moves down the growing slope, and a click on the top wraps it. Studio
+ *  refuses that click instead (topRefusal). */
 export const ENFORCED_TOP_LEVEL = 14;
 
 /** The World Editor's cliff slope: after a cliff brush set its corners (`brush`), each corner beside or diagonal to
  *  one that moved comes to within two levels of it, and so on outwards until nothing moves (the brush's own corners
  *  stay). we-drive, 2026-11-15, branch cliff-slope-we: Increase Two clicked ten times on one pixel of flat.w3x, saved
  *  after each click, left square rings 2, 4, 6, … round a size-1 brush and the brush's disc grown by one corner each
- *  way per ring at size 3, every save the stamp of one corner (tools.test.ts); a brush wrapped to level 0 on a level-14
- *  field (Increase Two from 14) left a pit 0, 2, 4, … 12 in square rings (we-compare cliff-slope-wrap). `moved(i,
+ *  way per ring at size 3, every save the stamp of one corner (tools.test.ts); the editor's brush wrapped to level 0 on
+ *  a level-14 field (Increase Two from 14) left a pit 0, 2, 4, … 12 in square rings (we-compare cliff-slope-wrap). `moved(i,
  *  from, first)` is called before corner i changes (from: its level then; first: it is beside the brush). */
 export function cliffSlope(t: Terrain, brush: readonly number[], moved: (i: number, from: number, first: boolean) => void): void {
   const inBrush = new Set(brush);

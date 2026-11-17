@@ -1,7 +1,7 @@
 [
   {
     "name": "cliff-adjust-dry-plus1",
-    "description": "test.md 'Dry corners wrap as in the WE': Advanced > Adjust Cliff Levels +1 on a map of dry corners whose water words run through the extremes of the 14 bits (fixtures/we-specs/dry-words.w3x, make-dry-words.mjs); w3e corner by corner: the dry word wraps as in the editor, layers and the rest move alike",
+    "description": "test.md 'Dry corners wrap as in the WE': Advanced > Adjust Cliff Levels +1 on a map of dry corners whose water words run through the extremes of the 14 bits (fixtures/we-specs/dry-words.w3x, make-dry-words.mjs); w3e corner by corner: the editor wraps the dry words round the 14 bits, layers and the rest move alike. Expected to differ: Studio refuses a shift that would wrap any corner's word (wholemap.ts adjustCliffLevels; project rule 2026-11-17: refuse, never wrap), so its w3e is the input's; the rules are the editor's changes as Studio wrote them before (matched then): every layer +1, 3120 words +512, 1105 wrapped",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -22,12 +22,19 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [
+        { "fields": ["layer"], "delta": 1, "corners": [4225, 4225] },
+        { "fields": ["water"], "delta": 512, "corners": [3120, 3120] },
+        { "fields": ["water"], "delta": -15872, "corners": [1105, 1105] }
+      ]
+    }],
     "limit": 20
   },
   {
     "name": "cliff-adjust-dry-minus3",
-    "description": "the same by -3: corners on levels 0-2 stop at level 0 (their water word moves only as far as their level did), the others' words wrap below 0 as in the editor",
+    "description": "the same by -3: corners on levels 0-2 stop at level 0 (their water word moves only as far as their level did), the others' words wrap below 0 in the editor. Expected to differ: Studio refuses the shift (wholemap.ts adjustCliffLevels: a word that would wrap), so its w3e is the input's; the rules are the editor's changes as Studio wrote them before (matched then)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/dry-words.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -49,7 +56,20 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }],
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [
+        { "fields": ["layer"], "delta": -3, "corners": [3250, 3250] },
+        { "fields": ["layer"], "delta": -2, "corners": [325, 325] },
+        { "fields": ["layer"], "delta": -1, "corners": [325, 325] },
+        { "fields": ["water"], "delta": -1536, "corners": [2450, 2450] },
+        { "fields": ["water"], "delta": -1024, "corners": [245, 245] },
+        { "fields": ["water"], "delta": -512, "corners": [245, 245] },
+        { "fields": ["water"], "delta": 14848, "corners": [800, 800] },
+        { "fields": ["water"], "delta": 15360, "corners": [80, 80] },
+        { "fields": ["water"], "delta": 15872, "corners": [80, 80] }
+      ]
+    }],
     "limit": 20
   }
 ]

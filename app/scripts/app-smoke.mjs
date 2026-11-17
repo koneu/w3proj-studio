@@ -5350,7 +5350,7 @@ async function resizeUndoChecks(page, found) {
 
 /** Map Size at its limits, through the real apply path (resize_map): a 64 × 64 map grown to 480 × 480 and cut to 32 × 32 has
  *  that size in the terrain, shadows, pathing, camera bounds and playable area, saved and reopened it is the same, and it
- *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) are refused with every file as it was. */
+ *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) and an edge past ±32256 are refused with every file as it was. */
 async function resizeLimits(page, found) {
   try {
   const fail = (what) => found.push(`resize limits: ${what}`);
@@ -5389,7 +5389,7 @@ async function resizeLimits(page, found) {
     const before = state();
     const err = await tool("resize_map", change).then(() => null, (e) => String(e.message ?? e));
     if (!err) fail(`${label} wasn't refused`);
-    else if (!/must be|multiple|changes nothing/.test(err)) fail(`${label} was refused with "${err}"`);
+    else if (!/must be|multiple|changes nothing|past ±32256/.test(err)) fail(`${label} was refused with "${err}"`);
     await settled(page);
     const moved = differ(before, state());
     if (moved.length) fail(`${label} was refused but changed ${moved.join(", ")}`);
@@ -5406,8 +5406,10 @@ async function resizeLimits(page, found) {
     if (moved.length) fail(`${label}: reopening the map changed ${moved.join(", ")}`);
   };
 
-  // Both sides, so the World Editor's coordinate limit (limitResize) doesn't cut the growth down to a size that is allowed.
+  // Both sides, so the size, not the coordinate limit, is what refuses them.
   await refused({ left: 209, right: 208 }, "481 tiles");
+  // Past the coordinate limit (±32256): refused, not cut to it as the World Editor does (resize.ts coordProblem).
+  await refused({ right: 224 }, "growth past ±32256");
   await refused({ left: 210, right: 210 }, "484 tiles");
   await refused({ top: -33 }, "31 tiles");
   await refused({ top: -36 }, "28 tiles");
@@ -7034,6 +7036,25 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await save();
   if (hash(ground) !== untouched) { fail("one undo after a pit and a refused −2 didn't give the map back: the refused click left an undo step"); return; }
+  // An Increase past the top is refused with a toast, never wrapped round to level 0 as the World Editor's (we-compare
+  // cliff-slope-wrap; tools.ts topRefusal): the whole map up to level 14 (Adjust Cliff Levels +10, +2), then +2 there.
+  for (const by of [10, 2]) {
+    const err = await page.evaluate(`w3.commands.execute("w3.terrain.adjustCliffLevels", ${by}).then(() => null, (e) => String(e))`);
+    if (err) { fail(`Adjust Cliff Levels +${by}: ${err}`); return; }
+  }
+  await save();
+  const top = hash(ground);
+  if (!/^\[layer\] all e$/m.test(readFileSync(ground, "utf8"))) { fail("the whole map isn't on level 14 after Adjust Cliff Levels +10, +2 (control)"); return; }
+  await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+  await press("+2:", 1);
+  const toastText = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  await until("the refusal's toast", async () => /Not raised/.test(await toastText()), 5000).catch(() => {});
+  const said = await toastText();
+  if (hash(ground) !== top) fail(`a +2 click on level 14 changed the map (${changed("layer")} corners off the common level): it must be refused, not wrapped round`);
+  if (!/Not raised: level 16 is above (15|14)/.test(said)) fail(`a +2 click on level 14 wasn't refused with why: "${said}"`);
+  for (let i = 0; i < 2; i++) await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("two undos after Adjust Cliff Levels +10, +2 and a refused +2 didn't give the map back: the refused click left an undo step"); return; }
   await setSize(2);
 }
 

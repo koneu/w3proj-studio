@@ -46,7 +46,7 @@
   {
     "limit": 40,
     "name": "cliff-slope-wrap",
-    "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field (tools.ts strokeLayer, cliffSlope)",
+    "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the editor's corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field, the 13 x 13 corners round 32,30 taking Grass Cliff. Expected to differ: Studio refuses the click with a message (tools.ts topRefusal; project rule 2026-11-17: refuse, never wrap), so its w3e is the input's. Studio's wrapped stamp matched the editor's before (tools.test.ts keeps it as the editor's 7th size-3 click)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
     "we": {
       "mode": "sd",
@@ -63,7 +63,13 @@
         { "sleep": 1000 }
       ]
     },
-    "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
+    "compare": [{
+      "file": "war3map.w3e", "as": "w3e", "expect": "differs",
+      "expectCorners": [
+        { "box": [26, 24, 38, 36], "fields": ["layer"], "studio": 14, "corners": [169, 169] },
+        { "box": [26, 24, 38, 36], "fields": ["cliffType"], "we": 1, "studio": 15, "corners": [169, 169] }
+      ]
+    }]
   },
   {
     "limit": 40,

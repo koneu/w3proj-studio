@@ -10,7 +10,7 @@ import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { HEIGHT_TICK, strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, topRefusal, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -105,7 +105,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let mapInfo: MapInfoService | null = null;
   void w3.services.get<MapInfoService>(MAP_INFO_SERVICE).then((s) => { mapInfo = s; }, () => {});
   /** Enforce Terrain Limits for a cliff stroke: the open Map Properties' (unsaved changes too), else the saved file's;
-   *  unknown counts as on, the side on which Increase refuses rather than wraps round (strokeLayer). */
+   *  unknown counts as on, the side that refuses more (strokeLayer). */
   const enforceLimits = () => (root !== null ? mapInfo?.liveEnforceTerrainLimits(root) : null) ?? savedLimits ?? true;
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number): boolean => {
@@ -502,7 +502,12 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const c = terrain.corners[cy * terrain.width + cx];
         // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
         const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), enforceLimits()) : { layer: c.layer };
-        if (layer === null) return;
+        if (layer === null) {
+          // Past the top is refused with a word (topRefusal); a Decrease from the floor stays quiet, as the editor's.
+          const why = c && isLayerTool(tool) ? topRefusal(tool, c.layer, enforceLimits()) : null;
+          if (why) void w3.window.showWarning(why);
+          return;
+        }
         stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);
         else applyAt(g);

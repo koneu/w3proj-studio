@@ -211,20 +211,19 @@ const corner = (layer: number, rawWater: number, hasWater: boolean): Terrain => 
   return t;
 };
 
-test("Adjust Cliff Levels moves each corner's water by the levels that corner moved, wrapping dry words as the World Editor does", () => {
+test("Adjust Cliff Levels moves each corner's water by the levels that corner moved, as the World Editor does", () => {
   // we-drive 2026-11-13, a made-up map (water words 0x0000-0x3fff, wet and dry, levels 0-12) and map 03; each row is
-  // one corner of a save: [level, water word, wet] by `by` gave [level, water word].
+  // one corner of a save: [level, water word, wet] by `by` gave [level, water word]. The editor's rows that wrapped a
+  // word round its 14 bits are refused here (next test).
   const rows: [number, number, boolean, number, number, number][] = [
     [0, 0x0000, false, +1, 1, 0x0200],
     [6, 0x1000, true, +1, 7, 0x1200],
     [10, 0x2400, false, +1, 11, 0x2600],
-    [2, 0x3e80, false, +1, 3, 0x0080], // round the top of the 14 bits
-    [5, 0x7fff, false, +1, 6, 0x41ff], // and the edge bit kept
-    [4, 0x0000, false, -3, 1, 0x3a00], // round the bottom
+    [5, 0x7000, false, +1, 6, 0x7200], // the edge bit kept
     [5, 0x6200, false, -5, 0, 0x5800], // map 03 by -5
     [3, 0x2600, true, -5, 0, 0x2000], // squeezed: 3 levels, so 0x600 only
     [2, 0x2180, true, -3, 0, 0x1d80],
-    [0, 0x5800, false, +12, 10, 0x6c00], // map 03 by +12: cut to +10
+    [0, 0x5800, false, +10, 10, 0x6c00], // map 03 by +10
   ];
   for (const [layer, w, wet, by, wantLayer, wantWord] of rows) {
     const t = corner(layer, w, wet);
@@ -238,21 +237,27 @@ test("Adjust Cliff Levels moves each corner's water by the levels that corner mo
   }
 });
 
-test("Adjust Cliff Levels refuses a shift that would wrap a corner's water round its 14 bits (the World Editor wraps it)", () => {
-  // The editor turned a wet 0x3fff on level 2 by +1 into 0x01ff: the lake from the top of the range to the bottom.
-  for (const [w, by] of [[0x3fff, 1], [0x3e80, 1], [0x0180, -1], [0x0000, -1]] as const) {
-    const t = corner(4, w, true), before = corner(4, w, true), undo = new CornerUndo();
-    const r = adjustCliffLevels(t, by, undo);
-    assert.equal(typeof r, "string", `wet ${w.toString(16)} by ${by}`);
-    assert.match(r as string, /water at 1 corner /);
-    assert.deepEqual(t.corners, before.corners, "nothing changed");
-    assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
+test("Adjust Cliff Levels refuses a shift that would wrap a corner's water round its 14 bits, wet or dry (the World Editor wraps it)", () => {
+  // The editor turned a wet 0x3fff on level 2 by +1 into 0x01ff: the lake from the top of the range to the bottom; dry
+  // words alike (2 / 0x3e80 by +1 gave 0x0080, 5 / 0x7fff 0x41ff, 4 / 0x0000 by -3 0x3a00). Project rule 2026-11-17:
+  // refused, never wrapped.
+  for (const wet of [true, false]) {
+    for (const [w, by] of [[0x3fff, 1], [0x3e80, 1], [0x7fff, 1], [0x0180, -1], [0x0000, -1], [0x0000, -3]] as const) {
+      const t = corner(4, w, wet), before = corner(4, w, wet), undo = new CornerUndo();
+      const r = adjustCliffLevels(t, by, undo);
+      assert.equal(typeof r, "string", `${wet ? "wet" : "dry"} ${w.toString(16)} by ${by}`);
+      assert.match(r as string, /water height stored at 1 corner \(wet or dry\)/);
+      assert.deepEqual(t.corners, before.corners, "nothing changed");
+      assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
+    }
   }
+  // Control: a word that stays inside moves.
+  assert.equal(adjustCliffLevels(corner(4, 0x3c00, false), 1, new CornerUndo()), 1);
   // A corner squeezed at level 0 doesn't move, so its water can't wrap.
   assert.equal(adjustCliffLevels(corner(0, 0x0000, true), -1, new CornerUndo()), 0);
 });
 
-test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or the top, as the World Editor does", () => {
+test("Adjust Cliff Levels stops corners at level 0 as the World Editor does, and refuses a raise past +10 or the top", () => {
   // Levels 2 and 4: down to -2 without squeezing, up to +10, the dialog's most (TOP_LEVEL - 4 is as much).
   assert.deepEqual(cliffShiftRange(make()), { min: -2, max: Math.min(10, TOP_LEVEL - 4) });
   // map 03 by -3 (we-drive, 2026-11-09): level 4 went to 1, the lake's 2 to 0.
@@ -272,11 +277,25 @@ test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or th
   undo = new CornerUndo();
   assert.equal(adjustCliffLevels(t, -1, undo), 0, "nothing left to lower");
   assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
-  // Up: +12 is +10, as the dialog caps it (map 03, levels 2 and 4: +10 and +12 both gave 12 and 14).
+  // Up: the editor cut +12 to +10, as its dialog caps it (map 03, levels 2 and 4: +10 and +12 both gave 12 and 14).
+  // Studio refuses +12 with nothing changed and takes +10.
   t = make();
-  assert.equal(adjustCliffLevels(t, 12, new CornerUndo()), 8);
+  undo = new CornerUndo();
+  assert.match(String(adjustCliffLevels(t, 12, undo)), /^Not done: .*at most \+10 \(asked \+12/);
+  assert.deepEqual(t.corners, before.corners, "+12 changed nothing");
+  assert.equal(undo.step(t).corners.length, 0, "and logged nothing");
+  assert.equal(adjustCliffLevels(t, 10, new CornerUndo()), 8);
   assert.deepEqual([...new Set(t.corners.map((c) => c.layer))].sort((a, b) => a - b), [12, 14]);
-  assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), 0, "the top corner is at the top: nothing moves");
+  undo = new CornerUndo();
+  assert.match(String(adjustCliffLevels(t, 1, undo)), /^Not done: the highest corner of the map is on level 14, and \+1 would take it past level 14/, "the top corner is at the top: refused");
+  assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
+  // Within +10 but past the top: refused too, saying how far it goes.
+  const mid = make();
+  assert.equal(adjustCliffLevels(mid, 5, new CornerUndo()), 8);
+  const room = TOP_LEVEL - 9;
+  assert.ok(room < 10, "control: the top, not +10, is the bound here");
+  assert.match(String(adjustCliffLevels(mid, room + 1, new CornerUndo())), new RegExp(`level 9, and \\+${room + 1} would take it past level ${TOP_LEVEL}, the highest \\(\\+${room} is the most\\)`));
+  assert.equal(adjustCliffLevels(mid, room, new CornerUndo()), 8, "control: as far as the top is taken");
   assert.equal(typeof adjustCliffLevels(t, 1.5, new CornerUndo()), "string", "half a level isn't one");
   assert.equal(typeof adjustCliffLevels(t, Number.NaN, new CornerUndo()), "string");
   assert.equal(adjustCliffLevels(t, 0, new CornerUndo()), 0, "nothing to do");
@@ -353,16 +372,17 @@ test("Adjust Cliff Levels on real maps: +1 gives the World Editor's file, change
   if (!tried) skipOrFail(ctx, "no real map or release CLI (smoketest_maps, target/release/w3proj)");
 });
 
-test("the water words don't limit the shift of dry corners: theirs wrap round, as in the World Editor", () => {
-  const t = make();
-  t.corners[0].rawWater = 0x3fff - 300;
-  assert.equal(cliffShiftRange(t).max, TOP_LEVEL - 4);
-  assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), 8);
-  assert.equal(t.corners[0].rawWater, 0x3fff - 300 + 0x200 - 0x4000, "a dry word near the top of its 14 bits goes round");
-  t.corners[0].rawWater = 400;
-  assert.equal(cliffShiftRange(t).min, -3, "nor near the bottom");
-  assert.equal(adjustCliffLevels(t, -3, new CornerUndo()), 8);
-  assert.equal(t.corners[0].rawWater, 400 - 0x600 + 0x4000);
+test("a dry corner's water word near an end of its 14 bits refuses the shift that would wrap it (the World Editor wraps it)", () => {
+  const t = make(), before = make();
+  t.corners[0].rawWater = before.corners[0].rawWater = 0x3fff - 300;
+  assert.equal(cliffShiftRange(t).max, TOP_LEVEL - 4, "the range is the levels'");
+  assert.match(String(adjustCliffLevels(t, 1, new CornerUndo())), /^Not done: the water height stored at 1 corner/);
+  assert.deepEqual(t.corners, before.corners, "near the top: nothing changed");
+  t.corners[0].rawWater = before.corners[0].rawWater = 400;
+  assert.match(String(adjustCliffLevels(t, -3, new CornerUndo())), /^Not done: the water height stored at 1 corner/);
+  assert.deepEqual(t.corners, before.corners, "near the bottom: nothing changed");
+  t.corners[0].rawWater = 0x1000;
+  assert.equal(adjustCliffLevels(t, -3, new CornerUndo()), 8, "control: with a word that stays inside it is taken");
 });
 
 /** The Area panel's Level +1/-1: Adjust Cliff Levels on a block of corners (inclusive corner numbers). */
@@ -398,7 +418,7 @@ test("Adjust Cliff Levels on a block keeps it within levels 0 to 14", () => {
   for (let n = 0; n < 10; n++) adjustCliffLevels(t, 1, new CornerUndo(), land);
   assert.deepEqual([t.corners[0].layer, t.corners[1].layer], [TOP_LEVEL, TOP_LEVEL]);
   const undo = new CornerUndo();
-  assert.equal(adjustCliffLevels(t, 1, undo, land), 0, "nothing goes past the top");
+  assert.match(String(adjustCliffLevels(t, 1, undo, land)), /^Not done: the highest corner of the block is on level 14/, "nothing goes past the top: refused");
   assert.equal(undo.step(t).corners.length, 0, "and nothing is logged");
   assert.equal(adjustCliffLevels(t, -1, new CornerUndo(), lake), 1);
   assert.equal(adjustCliffLevels(t, -1, new CornerUndo(), lake), 1);

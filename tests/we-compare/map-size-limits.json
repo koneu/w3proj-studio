@@ -264,7 +264,7 @@
  },
  {
   "name": "mapsize-max-width",
-  "description": "Map Size: the widest map: the right edge's > clicked 56 times (the map stops at 32256 after 55, a coordinate limit; the 56th click moves the playable edge out instead, the right border 6 to 2), then the left edge's outward arrow (463,333) 60 times (stops at 480 x 64 after 49, map -29184 to 32256, playable 472); Studio's resize_map right 224 (limitResize: 220 and the border), left 196",
+  "description": "Map Size: the widest map: the right edge's > clicked 56 times (the map stops at 32256 after 55, a coordinate limit; the 56th click moves the playable edge out instead, the right border 6 to 2), then the left edge's outward arrow (463,333) 60 times (stops at 480 x 64 after 49, map -29184 to 32256, playable 472); Studio refuses growth past ±32256 (resize.ts coordProblem; project rule 2026-11-17), so its resize_map asks for the editor's result: right 220, left 196, border 6 2 4 8",
   "input": {
    "new": {
     "name": "mapsize-max-width",
@@ -1253,7 +1253,8 @@
      "mcp": "resize_map",
      "args": {
       "left": 196,
-      "right": 224
+      "right": 220,
+      "border": [6, 2, 4, 8]
      }
     }
    ]
@@ -1285,7 +1286,7 @@
  },
  {
   "name": "mapsize-limit-left",
-  "description": "Map Size at the coordinate limit on the left: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (left border 6 to 2)",
+  "description": "Map Size at the coordinate limit on the left: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (left border 6 to 2). Studio refuses growth past ±32256 (resize.ts coordProblem), so its resize_map asks for that: left 220, border 2 6 4 8",
   "input": {
    "new": {
     "name": "mslimitleft",
@@ -1793,7 +1794,8 @@
     {
      "mcp": "resize_map",
      "args": {
-      "left": 224
+      "left": 220,
+      "border": [2, 6, 4, 8]
      }
     }
    ]
@@ -1825,7 +1827,7 @@
  },
  {
   "name": "mapsize-limit-top",
-  "description": "Map Size at the coordinate limit on top: 56 clicks out, the map stops at 32256 after 55, the 56th moves the playable edge (top border 8 to 4)",
+  "description": "Map Size at the coordinate limit on top: 56 clicks out, the map stops at 32256 after 55, the 56th moves the playable edge (top border 8 to 4). Studio refuses growth past ±32256 (resize.ts coordProblem), so its resize_map asks for that: top 220, border 6 6 4 4",
   "input": {
    "new": {
     "name": "mslimittop",
@@ -2333,7 +2335,8 @@
     {
      "mcp": "resize_map",
      "args": {
-      "top": 224
+      "top": 220,
+      "border": [6, 6, 4, 4]
      }
     }
    ]
@@ -2365,7 +2368,7 @@
  },
  {
   "name": "mapsize-limit-bottom",
-  "description": "Map Size at the coordinate limit at the bottom: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (bottom border 4 to 0)",
+  "description": "Map Size at the coordinate limit at the bottom: 56 clicks out, the map stops at -32256 after 55, the 56th moves the playable edge (bottom border 4 to 0). Studio refuses growth past ±32256 (resize.ts coordProblem), so its resize_map asks for that: bottom 220, border 6 6 0 8",
   "input": {
    "new": {
     "name": "mslimitbottom",
@@ -2873,7 +2876,8 @@
     {
      "mcp": "resize_map",
      "args": {
-      "bottom": 224
+      "bottom": 220,
+      "border": [6, 6, 0, 8]
      }
     }
    ]
@@ -2905,7 +2909,7 @@
  },
  {
   "name": "mapsize-limit-bottom57",
-  "description": "Map Size past the coordinate limit at the bottom: 57 clicks out, the 57th does nothing (the bottom border is 0 already)",
+  "description": "Map Size past the coordinate limit at the bottom: 57 clicks out, the 57th does nothing (the bottom border is 0 already). Studio refuses growth past ±32256 (resize.ts coordProblem), so its resize_map asks for that: bottom 220, border 6 6 0 8",
   "input": {
    "new": {
     "name": "mslimitbottom5",
@@ -3421,7 +3425,8 @@
     {
      "mcp": "resize_map",
      "args": {
-      "bottom": 228
+      "bottom": 220,
+      "border": [6, 6, 0, 8]
      }
     }
    ]
@@ -3453,7 +3458,7 @@
  },
  {
   "name": "mapsize-ns-limit-right",
-  "description": "Map Size past the coordinate limit on a 96 x 64 map: the right edge's > 54 times, the map stops at 32256 after 51 (204 tiles), the 52nd takes the right border from 6 to 2, the 53rd to 0, the 54th does nothing (playable 294)",
+  "description": "Map Size past the coordinate limit on a 96 x 64 map: the right edge's > 54 times, the map stops at 32256 after 51 (204 tiles), the 52nd takes the right border from 6 to 2, the 53rd to 0, the 54th does nothing (playable 294). Studio refuses growth past ±32256 (resize.ts coordProblem), so its resize_map asks for that: right 204, border 6 0 4 8",
   "input": {
    "new": {
     "name": "msnslimitright",
@@ -3945,7 +3950,8 @@
     {
      "mcp": "resize_map",
      "args": {
-      "right": 216
+      "right": 204,
+      "border": [6, 0, 4, 8]
      }
     }
    ]

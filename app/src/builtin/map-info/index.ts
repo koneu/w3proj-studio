@@ -637,7 +637,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   (n) => { extra.timeOfDay = n < 0 ? undefined : n; })),
                 h("div.form-checks", {}, check("Enforce terrain limits", () => extra.enforceTerrainLimits === true, (b) => { extra.enforceTerrainLimits = b || undefined; })),
                 h("small.muted", {}, "What the World Editor's terrain view uses for this map (Map Properties › Prefs). Studio's terrain view keeps its own sky; "
-                  + "with the limits on, the cliff brush's Increase builds no higher than level 14 (off, it wraps round to 0 past 15, as the editor's)."),
+                  + "with the limits on, the cliff brush's Increase builds no higher than level 14 (off, no higher than 15: Studio refuses what the editor would wrap round to 0)."),
               ),
             ];
           },

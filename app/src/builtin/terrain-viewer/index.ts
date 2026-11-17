@@ -102,7 +102,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, doodadStays, limitResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -787,8 +787,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { handle } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
-      // Growth past the coordinate limit moves the playable edge instead (limitResize), as handle.resizeMap applies it.
-      const { change, complements } = limitResize(t, asked, (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides);
+      // Growth past the coordinate limit is refused (resizeProblem), not cut to it.
+      const change = asked, complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
       const same = change.every((n) => n === 0) && complements.every((n, k) => n === info?.cameraComplements?.[k]);
       if (same) throw new Error("That changes nothing.");
       const problem = resizeProblem(t, change, complements);
@@ -4359,10 +4359,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (shd) out.push(shd);
           return out;
         };
-        const resizeLocked = async (asked: Sides, askedBorder: Sides): Promise<{ removed: number }> => {
+        const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
-          // Growth past the coordinate limit moves the playable edge instead (limitResize).
-          const { change, complements } = limitResize(terrain, asked, askedBorder);
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
           // A file the resize must rewrite that is there but can't be read would be left at the old size (a half-resized
@@ -4421,8 +4419,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return { rect, edge, stays };
         };
         /** How many placed objects (special doodads included) a resize would remove; changes nothing. */
-        const resizeRemovals = async (asked: Sides, askedBorder: Sides): Promise<number> => {
-          const { change, complements } = limitResize(terrain, asked, askedBorder);
+        const resizeRemovals = async (change: Sides, complements: Sides): Promise<number> => {
           const [w, h] = resizedSize(terrain, change);
           const next = { offsetX: terrain.offsetX - change[0] * 128, offsetY: terrain.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
           const { stays } = await resizeRules(next, complements);
