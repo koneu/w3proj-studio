@@ -411,7 +411,9 @@ export function cameras(i: ScriptInput): string {
     // Only the newer camera file has these (war3map.w3c v3; v0 is the old form).
     if (v3) lines.push(field("DEPTH_OF_FIELD_DISTANCE", c.dofDistance ?? 0), field("DEPTH_OF_FIELD_SCALE", c.dofScale ?? 0), field("ZABSOLUTE", c.posAbsoluteZ ?? 0));
     lines.push(`    call CameraSetupSetDestPosition( ${n}, ${r1(c.targetX)}, ${r1(c.targetY)}, 0.0 )`);
-    if (v3) lines.push(`    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`);
+    // The u32 after the name is the camera type: 1 a free camera (the editor's Create Free Camera), 0 not; the editor
+    // writes any other value as 1 (we-compare format-fields).
+    if (v3) lines.push(`    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ? 1 : 0} )`);
     lines.push("");
   }
   lines.push("endfunction", "", "");
