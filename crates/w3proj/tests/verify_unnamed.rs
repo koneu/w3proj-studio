@@ -12,6 +12,7 @@ const ORPHAN: &str = "war3campImported\\Orphan.blp";
 
 fn map(tag: &str, listfile: bool, script: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("verify-unnamed-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir); // nothing of an earlier run
     std::fs::create_dir_all(&dir).unwrap();
     let mut b = ArchiveBuilder::new(WriteOptions { listfile, ..WriteOptions::default() });
     // A map is told by its war3map.w3i; with no codecs its bytes are only carried over.

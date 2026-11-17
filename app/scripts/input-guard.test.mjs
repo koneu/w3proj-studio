@@ -6,17 +6,21 @@ import { mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 
 // The guard reads Linux /proc: nothing to test on Windows.
 const test = (name, fn) => nodeTest(name, { skip: process.platform === "win32" }, fn);
 
-// Tests run from app/ (the runner copies the compiled tests elsewhere, so not next to this file).
-const HELPER = join(process.cwd(), "scripts", "we-x11.py");
+// Tests run bundled elsewhere (not next to this file): found from the working directory up.
+const HELPER = repoPath("app", "scripts", "we-x11.py");
 
+/** python3 on the helper; a python that couldn't start or ran past the time limit fails the test, with its reason. */
 function py(args, env = {}) {
   const e = { ...process.env, ...env };
   if (!("W3_ALLOW_REAL_DISPLAY" in env)) delete e.W3_ALLOW_REAL_DISPLAY;
-  return spawnSync("python3", ["-I", HELPER, ...args], { encoding: "utf8", env: e });
+  const r = spawnSync("python3", ["-I", HELPER, ...args], { encoding: "utf8", env: e, timeout: 60_000 });
+  assert.equal(r.error, undefined, `python3 did not finish: ${r.error?.message}`);
+  return r;
 }
 
 /** A fake /proc: each entry is { argv, unix?, sockets? } (unix: the text of net/unix; sockets: inodes the process holds open). */
@@ -113,7 +117,8 @@ test("display guard: a refusal is asked again before it counts (the scan races w
       "    return (len(calls) > int(sys.argv[2]), 'n%d' % len(calls))",
       "print(json.dumps([m.guard_with_retries(sys.argv[3], decide=decide, pause=0), len(calls)]))",
     ].join("\n");
-    const r = spawnSync("python3", ["-I", "-c", code, HELPER, String(failures), display], { encoding: "utf8" });
+    const r = spawnSync("python3", ["-I", "-c", code, HELPER, String(failures), display], { encoding: "utf8", timeout: 60_000 });
+    assert.equal(r.error, undefined, `python3 did not finish: ${r.error?.message}`);
     return JSON.parse(r.stdout.trim());
   };
   assert.deepEqual(run(0), [[true, "n1"], 1], "allowed at once: asked once");

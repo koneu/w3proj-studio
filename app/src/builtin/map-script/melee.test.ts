@@ -2,23 +2,16 @@
 // also with script.generateOnSave off, on a vJASS map whose script isn't made, and for a start location under water.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { defaultTriggerFile } from "../../lib/triggers/defaults";
 import { writeWtgJson } from "../../lib/triggers/wtg";
 import { activate } from "./index";
+import { readFixture } from "../../lib/testhelpers/testutil";
 
-/** The mini map's map/ folder, found from where the tests run (app/ or the repository). */
-function fixture(name: string): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "mini-map", "map", name);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/mini-map not found");
-  }
-}
+/** The mini map's map/ folder file `name`. */
+const fixture = (name: string): string => readFixture("mini-map", "map", name);
 
 const MELEE = 4, ROOT = "/maps/Melee";
 

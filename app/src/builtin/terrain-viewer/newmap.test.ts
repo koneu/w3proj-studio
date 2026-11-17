@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mapChoices, mapInfo, newTerrain, playableOf, type NewMapOptions } from "./newmap";
+import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 const data = {
   sets: [
@@ -109,8 +110,7 @@ const heightStats = (t: ReturnType<typeof newTerrain>) => {
 // World Editor 7003's random height field on a new 64 × 64 map (we-drive save, 2026-11-11): -51 to 47.25, standard
 // deviation 18.25, mean neighbour step 16.6, correlation 0.37 with the next corner, 0.00 three on.
 test("random hills are as rough as the World Editor's random height field", () => {
-  let seed = 1;
-  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const random = mulberry32(1);
   for (const size of [64, 256]) {
     const s = heightStats(newTerrain(choices({ noise: true, width: size, height: size }), random));
     const what = `${size} × ${size}: ${JSON.stringify(s)}`;

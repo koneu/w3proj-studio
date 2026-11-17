@@ -23,6 +23,30 @@ test("SLK rows are keyed by the header row; the cursor carries over between cell
   ]);
 });
 
+test("SLK: a value may contain ';', and a file without a header row has no rows", () => {
+  const rows = parseSlk(['ID;PWXL;N;E', 'C;X1;Y1;K"name"', 'C;X1;Y2;K"a;b;c"', "E"].join("\r\n"));
+  assert.deepEqual(rows, [{ name: "a;b;c" }]);
+  // Control: the rows above are read with their header on row 1; with the header missing nothing is.
+  assert.deepEqual(parseSlk(['ID;PWXL;N;E', 'C;X1;Y2;K"name"', 'C;X1;Y3;K"x"', "E"].join("\r\n")), []);
+  assert.deepEqual(parseSlk(""), []);
+});
+
+test("SLK: the K field before X and Y still lands in its cell", { todo: "parseSlk reads the coordinates only up to ';K'" }, () => {
+  const rows = parseSlk(['ID;PWXL;N;E', 'C;K"name";X1;Y1', 'C;K"v";X1;Y2', "E"].join("\r\n"));
+  assert.deepEqual(rows, [{ name: "v" }]);
+});
+
+test("INI: a repeated key keeps its last value (its first with firstWins), and '=' stays in the value", () => {
+  const text = "[S]\r\nk=1\r\nK=2\r\nurl=a=b=c\r\n";
+  assert.equal(parseIni(text).get("S")?.get("k"), "2");
+  assert.equal(parseIni(text, { firstWins: true }).get("S")?.get("k"), "1");
+  assert.equal(parseIni(text).get("S")?.get("url"), "a=b=c");
+});
+
+test("INI: a byte order mark before the first section doesn't hide it", { todo: "parseIniRaw tests line.startsWith('[') on the raw first line" }, () => {
+  assert.equal(parseIni("\uFEFF[S]\r\nk=1").get("S")?.get("k"), "1");
+});
+
 test("INI sections: keys lower-cased, quotes removed, comments skipped; comma lists honour quotes", () => {
   const ini = parseIni("[TerrainLights]\r\n// comment\r\nL=\"Environment\\DNC\\DNCLordaeronTerrain.mdl\"\r\nA = x\r\n[Other]\r\nKey=1");
   assert.equal(ini.get("TerrainLights")?.get("l"), "Environment\\DNC\\DNCLordaeronTerrain.mdl");

@@ -4,12 +4,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
-import { join } from "node:path";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { checkScripts, scriptFiles, smokeChecks, smokeListProblems, syntaxProblems } from "./check-scripts.mjs";
 
-// npm test, the gate and the coverage run all start the runner in app/.
-const repo = join(process.cwd(), "..");
+// The repository's root, found from the working directory up.
+const repo = dirname(dirname(repoPath("tests", "gate.mjs")));
 const smokePath = join(repo, "app", "scripts", "app-smoke.mjs");
 const smoke = readFileSync(smokePath, "utf8");
 

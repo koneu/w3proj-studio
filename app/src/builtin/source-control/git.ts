@@ -28,7 +28,7 @@ export interface CommitFile { status: string; path: string; from?: string }
 
 /** \`git show --name-status -z --format=\`: status, path(s), separated by zeros. */
 export function parseNameStatus(out: string): CommitFile[] {
-  const parts = out.split("\0").map((p) => p.replace(/^\s+/, "")).filter(Boolean);
+  const parts = out.replace(/^\n+/, "").split("\0").filter(Boolean);
   const files: CommitFile[] = [];
   for (let i = 0; i < parts.length;) {
     const status = parts[i++];
@@ -60,6 +60,7 @@ export function branchProblem(name: string): string | null {
   if (!name) return "A branch needs a name.";
   if (name.startsWith("-") || name.startsWith("/") || name.endsWith("/") || name.endsWith(".") || name.endsWith(".lock")) return `"${name}" can't start with - or /, or end with /, . or .lock.`;
   // eslint-disable-next-line no-control-regex
+  if (name === "@" || name.split("/").some((c) => c.startsWith(".") || c.endsWith(".lock"))) return `"${name}" has a part that starts with . or ends with .lock, or is just @.`;
   if (/[\s~^:?*[\\\u0000-\u001f\u007f]|\.\.|\/\/|@\{/.test(name)) return `"${name}" has characters a branch can't have (spaces, ~ ^ : ? * [ \\, ..).`;
   return null;
 }

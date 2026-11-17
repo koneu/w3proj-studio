@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { waitUntil } from "../../lib/testhelpers/testutil";
 import type { ExtensionContext, FileInfo, ProjectInfo, W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
 import { activate } from "./index";
@@ -202,7 +203,7 @@ test("an automatic checkpoint during a restore doesn't prune the chosen one eith
   app.onSync(async () => {
     app.tick();
     // Within the restore's second it waits for the next one.
-    for (let i = 0; i < 150 && packs(app.log, "done").length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => packs(app.log, "done").length >= 2, "the automatic checkpoint to be made", 3000);
   });
   await app.commands.get("w3.checkpoints.restore")!();
   assert.equal(packs(app.log, "done").length, 2, "the automatic one was made meanwhile");

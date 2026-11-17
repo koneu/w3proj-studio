@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Track } from "./mdx";
 import { sample } from "./renderer";
+import { mulberry32 } from "../testhelpers/testutil";
 
 /** What sample() is defined to do, the slow way: the first and last key inside the interval by going
  *  through all of them, then the key at or before t, linearly interpolated (interp 1, size 1). */
@@ -18,9 +19,7 @@ function byScan(times: number[], values: number[], start: number, end: number, t
 }
 
 /** Fixed seed, so every run checks the same tracks. */
-function random(seed: number) {
-  return () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x80000000; };
-}
+const random = mulberry32;
 
 test("sample finds a sequence's keys among all of a track's as going through them all does", () => {
   const r = random(7);

@@ -103,7 +103,8 @@ test("a bending ramp is flagged as the World Editor does", () => {
   cells.forEach((row, n) => row.forEach((c, x) => {
     if (band.has(`${x},${h - 1 - n}`) !== (c.length > 1)) wrong.push(`${x},${h - 1 - n}`);
   }));
-  assert.ok(wrong.length <= 1, `${wrong.length} corners differ of ${w * h}: ${wrong.join(" ")}`);
+  // The one known deviation from the World Editor's picture: corner 7,4 (every other corner of the 210 matches).
+  assert.deepEqual(wrong, ["7,4"], `${wrong.length} corners differ of ${w * h}`);
 });
 
 // A diagonal that runs into a long straight edge on its way east.

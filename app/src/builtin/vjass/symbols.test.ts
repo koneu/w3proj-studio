@@ -60,3 +60,30 @@ test("library globals know their library", () => {
   const g = vjassSymbols(SMOKE_LIB).find((s) => s.name === "Count")!;
   assert.equal(g.container, "SmokeLib");
 });
+
+test("what is commented out or in a novjass block declares nothing, and a comment opener in a string comments nothing out", () => {
+  const src = [
+    "library Real",
+    "    public function Live takes nothing returns nothing",
+    "    endfunction",
+    "    // public function Dead takes nothing returns nothing",
+    "    /* public function AlsoDead takes nothing returns nothing",
+    "    endfunction */",
+    '    private constant string S = "/* a comment opener in a string"',
+    "    public function AfterString takes nothing returns nothing",
+    "    endfunction",
+    "endlibrary",
+    "//! novjass",
+    "library Docs",
+    "    public function InDocs takes nothing returns nothing",
+    "    endfunction",
+    "endlibrary",
+    "//! endnovjass",
+    "",
+  ].join("\n");
+  assert.deepEqual(vjassSymbols(src).filter((s) => s.kind === "function" || s.kind === "library").map((s) => s.name), ["Real", "Live", "AfterString"]);
+  assert.deepEqual(vjassExports(src, "trigger:x").map((s) => s.name), ["Real_Live", "Real_AfterString"]);
+  // Control: without the comment marks the same declarations are found.
+  const live = src.replace("// public function Dead", "public function Dead").replace("//! novjass", "//");
+  assert.ok(vjassSymbols(live).some((s) => s.name === "Dead") && vjassSymbols(live).some((s) => s.name === "InDocs"));
+});

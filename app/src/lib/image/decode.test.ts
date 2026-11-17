@@ -172,3 +172,22 @@ test("DDS it can't read says why", () => {
   assert.throws(() => decodeImage(bc7), /BC7/);
   assert.throws(() => decodeImage(dds(4, "DXT1", 0, [0, 0, 0, 0], new Uint8Array(2), 4, 4)), /truncated/);
 });
+
+test("zero-sized pictures: a BLP is refused, a DDS reads as one pixel (no crash, no huge allocation)", () => {
+  assert.throws(() => decodeImage(blp1(0, [new Uint8Array(0)], 0, 0)), /no readable mip/);
+  for (const m of [decodeImage(dds(0x41, "", 32, [0xff0000, 0xff00, 0xff, 0xff000000], new Uint8Array(4), 0, 0)), decodeImage(dds(4, "DXT1", 0, [0, 0, 0, 0], new Uint8Array(8), 0, 0))]) {
+    const level = m.mip(0);
+    assert.deepEqual([level.width, level.height, level.rgba.length], [1, 1, 4]);
+  }
+  // Control: the same files at 1 x 1 / 4 x 4 read as they did.
+  assert.equal(decodeImage(blp1(0, [new Uint8Array(1)], 1, 1)).mip(0).width, 1);
+});
+
+test("TGA colour-mapped: an index past the colour map is an opaque black pixel, not a crash", () => {
+  const b = new Uint8Array(18 + 6 + 1);
+  b[1] = 1; b[2] = 1; b[5] = 2; b[7] = 24; b[12] = 1; b[14] = 1; b[16] = 8;
+  b.set([1, 2, 3, 4, 5, 6, 7], 18);
+  assert.deepEqual(px(decodeImage(b, "a.tga").mip(0), 0), [0, 0, 0, 255]);
+  b[24] = 1;
+  assert.deepEqual(px(decodeImage(b, "a.tga").mip(0), 0), [6, 5, 4, 255], "control: an index inside the map");
+});

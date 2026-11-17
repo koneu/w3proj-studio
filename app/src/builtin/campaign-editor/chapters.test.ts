@@ -19,7 +19,8 @@ test("every chapter names a map that is in the map order, once", () => {
   c.chapters.pop();
   addChapter(c, "two.w3x", "Two");
   assert.deepEqual(c.mapOrder.map((m) => m.map), ["One.w3x", "Two.w3x"]);
-  assert.ok(c.chapters.every((x) => c.mapOrder.some((m) => m.map === x.map) || x.map === "two.w3x"));
+  assert.deepEqual(c.chapters.map((x) => x.map), ["One.w3x", "two.w3x"], "the chapter keeps the name it was given");
+  assert.equal(c.chapters.filter((x) => !c.mapOrder.some((m) => m.map.toLowerCase() === x.map.toLowerCase())).length, 0, "each is in the order, whatever the case");
 });
 
 test("a campaign whose first button was hidden by hand gets the next one shown", () => {

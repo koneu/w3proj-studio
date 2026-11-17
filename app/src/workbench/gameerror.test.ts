@@ -13,7 +13,7 @@ test("a failure to open the game's data says what's needed and where to set it, 
 });
 
 test("other errors of the game's files pass through unchanged", () => {
-  const other = "not in the storage: Units\Nope.slk";
+  const other = "not in the storage: Units\\Nope.slk";
   assert.equal(gameDataError(other, "D:/W3"), other);
   const err = new Error("unknown graphics mode");
   assert.equal(gameDataError(err, "D:/W3"), err);

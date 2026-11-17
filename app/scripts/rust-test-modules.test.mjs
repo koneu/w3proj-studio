@@ -4,7 +4,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { baseWithTests, cfgOnlyInTests, rustTestModules } from "./rust-test-modules.mjs";
 
 test("cfg predicates that only hold in tests", () => {
@@ -53,7 +54,7 @@ test("the base's code with the new tests", () => {
 });
 
 test("every Rust file of the repository: its test modules end in a closing brace or a semicolon, and taking them out and putting them back is the file", () => {
-  const repo = join(process.cwd(), "..");
+  const repo = dirname(dirname(repoPath("tests", "gate.mjs")));
   const files = [];
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {

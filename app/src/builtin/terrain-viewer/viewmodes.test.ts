@@ -5,11 +5,12 @@ import { WHEEL_ZOOM } from "./wheelzoom";
 import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
+import { repoPath } from "../../lib/testhelpers/testutil";
 
 // The View and camera keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
 // what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then the View command (any that isn't
 // one of the view's own key commands) or the camera move.
-const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { commands: { id: string; title: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
+const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { commands: { id: string; title: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
 const bindings = defaultBindings([], manifest.contributes.keybindings);
 type Ev = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
 const bound = (e: Ev) => { const c = eventChord(e); return c ? commandsFor(bindings, c, { terrainFocus: true }) : []; };

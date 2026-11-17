@@ -3,10 +3,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pruneBuilds } from "./verify-build.mjs";
+import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
+import { scratchDir } from "../../tests/scratch.mjs";
+import { inside, pruneBuilds } from "./verify-build.mjs";
 
 const NOW = Date.now();
 const HOUR = 3600 * 1000;
@@ -14,7 +14,7 @@ const at = (path, ms) => utimesSync(path, new Date(ms), new Date(ms));
 
 /** builds: { sha: { age (hours since built), runsAge (hours since the runs folder changed; omit = no runs), lock } } */
 function fake(builds) {
-  const root = mkdtempSync(join(tmpdir(), "w3proj-verify-prune-"));
+  const root = scratchDir("w3proj-verify-prune-");
   for (const [sha, b] of Object.entries(builds)) {
     const dir = join(root, "target", "verify", sha);
     mkdirSync(dir, { recursive: true });
@@ -84,14 +84,33 @@ test("a dry run removes nothing but reports the same", () => {
 
 test("refuses a path outside target/verify (control: a symlink-free escape through the injected remover is never reached)", () => {
   const root = fake({ a: { age: 50 }, b: { age: 20 } });
-  const outside = mkdtempSync(join(tmpdir(), "w3proj-verify-outside-"));
+  const outside = scratchDir("w3proj-verify-outside-");
   const seen = [];
   try {
     pruneBuilds(root, { keep: 1, now: NOW, remove: (p) => seen.push(p) });
-    assert.ok(seen.length > 0 && seen.every((p) => p.startsWith(join(root, "target", "verify"))));
+    assert.ok(seen.length > 0 && seen.every((p) => p.startsWith(join(root, "target", "verify") + sep) || p.startsWith(join(root, "target", "verify-runs") + sep)));
     // a root whose target/verify is missing: nothing happens, nothing outside is touched
     writeFileSync(join(outside, "keep.txt"), "k");
     assert.equal(pruneBuilds(outside, { keep: 1, now: NOW }).removed.length, 0);
     assert.ok(existsSync(join(outside, "keep.txt")));
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});
+
+test("the guard: only what is strictly below the folder, not a sibling with the same start, not a way out through ..", () => {
+  const base = join(scratchDir("w3proj-verify-inside-"), "target", "verify");
+  assert.equal(inside(base, join(base, "abc")), true);
+  assert.equal(inside(base, join(base, "..x")), true, "a name that merely starts with two dots is inside");
+  assert.equal(inside(base, base), false);
+  assert.equal(inside(base, base + "-evil"), false, "target/verify-evil is not inside target/verify");
+  assert.equal(inside(base, join(base, "..", "x")), false);
+  assert.equal(inside(base, join(base, "a", "..", "..", "x")), false);
+});
+
+test("a build folder named like a way out (..x) is an ordinary build and is pruned, nothing outside goes", () => {
+  const root = fake({ "..x": { age: 50 }, b: { age: 20 } });
+  const seen = [];
+  try {
+    pruneBuilds(root, { keep: 1, now: NOW, remove: (p) => seen.push(p) });
+    assert.deepEqual(seen, [join(root, "target", "verify", "..x")]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

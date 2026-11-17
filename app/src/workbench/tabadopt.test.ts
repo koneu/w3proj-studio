@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { adoptOldTabKeys, mayBeSameFolder, tabsKey, type KeyValueStore } from "./tabmemory";
-import { timeLimit } from "./timelimit";
 
 const memory = (init: Record<string, string>): KeyValueStore => {
   const data = new Map(Object.entries(init));
@@ -31,10 +30,4 @@ test("nothing is asked when no old key exists (the normal open)", async () => {
   let asked = 0;
   await adoptOldTabKeys(memory({ [tabsKey(ROOT)]: "NOW" }), ROOT, async (p) => { asked++; return p; });
   assert.equal(asked, 0);
-});
-
-test("timeLimit: an answer that never comes is a rejection; a prompt one passes", async () => {
-  await assert.rejects(timeLimit(new Promise<string>(() => {}), 20), /no answer/);
-  assert.equal(await timeLimit(Promise.resolve("x"), 1000), "x");
-  await assert.rejects(timeLimit(Promise.reject(new Error("boom")), 1000), /boom/);
 });

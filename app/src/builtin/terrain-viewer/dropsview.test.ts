@@ -191,8 +191,8 @@ test("Map Properties' item tables differ from the saved ones by name, number, it
 
 test("the drops editor takes a chance whole from 0 to 100 or refuses it, never rounds or clamps", () => {
   assert.deepEqual(dropChance("0"), { value: 0 });
-  assert.deepEqual(dropChance(" 33 "), { value: 33 });
+  assert.deepEqual(dropChance("33"), { value: 33 });
   assert.deepEqual(dropChance("100"), { value: 100 });
-  for (const bad of ["33.5", "-1", "101", "4294967296", "1e3", "", " ", "abc", "NaN"]) assert.ok("refused" in dropChance(bad), `"${bad}" must be refused`);
+  for (const bad of [" 33 ", "+5", "0x10", "0b1", "0o7", "1e1", "5.", "33.5", "-1", "101", "4294967296", "1e3", "", " ", "abc", "NaN"]) assert.ok("refused" in dropChance(bad), `"${bad}" must be refused`);
   assert.match((dropChance("150") as { refused: string }).refused, /A chance must be a whole number from 0 to 100/);
 });

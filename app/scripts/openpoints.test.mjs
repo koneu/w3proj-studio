@@ -4,16 +4,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { countsOf, diffSnapshots, idOf, idsAt, lineOf, pageOf, parsePoints, similarity, tagsOf } from "../../scripts/openpoints-burndown.mjs";
 import { applyVerdicts, parseVerdicts } from "../../scripts/openpoints-close.mjs";
+import { scratchDir } from "../../tests/scratch.mjs";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 
-// The tests run from app/ (bundled elsewhere, so import.meta.url is no help).
-const repo = join(process.cwd(), "..");
-const burndown = join(repo, "scripts", "openpoints-burndown.mjs");
-const closer = join(repo, "scripts", "openpoints-close.mjs");
+// The tests run bundled elsewhere, so import.meta.url is no help: found from the working directory up.
+const burndown = repoPath("scripts", "openpoints-burndown.mjs");
+const closer = repoPath("scripts", "openpoints-close.mjs");
 
 test("tags are the bracketed words at the start of the text", () => {
   assert.deepEqual(tagsOf("[we] [Game] check the lake"), ["we", "game"]);
@@ -83,7 +83,7 @@ test("the page builds with and without the new fields", () => {
 });
 
 test("burndown run writes ids and flows; second run sees a close, an open and an edit", () => {
-  const dir = mkdtempSync(join(tmpdir(), "op-burn-"));
+  const dir = scratchDir("op-burn-");
   try {
     const long = "the lake keeps its colour after saving and loading the map again in the editor, ok";
     writeFileSync(join(dir, "bugs.md"), `## A\n- [ ] first bug\n- [ ] ${long}\n- [ ] gone bug\n`);
@@ -167,7 +167,7 @@ test("unknown, duplicate and incomplete verdicts change nothing", () => {
 });
 
 test("the script: dry run changes nothing, a real run backs up what it changes, a bad id refuses", () => {
-  const dir = mkdtempSync(join(tmpdir(), "op-close-"));
+  const dir = scratchDir("op-close-");
   try {
     for (const [f, t] of Object.entries(FIXTURE)) writeFileSync(join(dir, f), t);
     const verdicts = join(dir, "verdicts.txt");

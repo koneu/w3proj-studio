@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readMapExtra, writeMapExtra } from "./mapextra";
+import { mulberry32 } from "../testhelpers/testutil";
 
 // The editor's own saves (branch map-settings-we, 2026-11-14): the JassHelper menu's switches one after another, then
 // Map Properties > Prefs (Felwood Sky, Fixed - Dusk, Enforce Terrain Limits) on top.
@@ -50,8 +51,8 @@ test("a file whose values don't change comes back byte for byte (line ends, orde
 test("any text: reading never throws, the same values give it back, and what is written reads back as written", () => {
   const parts = ["[MapExtraInfo]", "[mapextrainfo]", "[Other]", "[", "]", "SkyModel=", "TimeOfDay=", "EnableJassHelper=", "EnableJassHelperDebug=",
     "EnableJassHelperVJass=", "EnforceTerrainLimits=", "Unknown=", "true", "false", "1", "0", "-3", "x", "=", " ", ";c", "\n", "\r\n", "\r", "\u0000", "ä"];
-  let seed = 7;
-  const rand = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const next = mulberry32(7);
+  const rand = (n: number) => Math.floor(next() * n);
   for (let round = 0; round < 3000; round++) {
     const text = Array.from({ length: rand(24) }, () => parts[rand(parts.length)]).join("");
     const values = readMapExtra(text);

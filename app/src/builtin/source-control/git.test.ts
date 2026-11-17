@@ -23,6 +23,7 @@ test("files of a commit, with renames", () => {
     { status: "M", path: "map/a.json" }, { status: "A", path: "map/b c.txt" },
     { status: "R", from: "map/old.blp", path: "map/new.blp" }, { status: "D", path: "x" },
   ]);
+  assert.deepEqual(parseNameStatus("M\0 a.txt\0"), [{ status: "M", path: " a.txt" }]);
   assert.deepEqual(parseNameStatus("\nM\0a\0"), [{ status: "M", path: "a" }]);
 });
 
@@ -36,7 +37,7 @@ test("branches and how far they are from their upstream", () => {
 
 test("branch names", () => {
   for (const ok of ["dev", "feature/terrain", "v1.2", "ÄÖ"]) assert.equal(branchProblem(ok), null, ok);
-  for (const bad of ["", "-x", "a b", "a..b", "a~1", "x^", "a:b", "a?", "a*", "[a", "a\\b", "/a", "a/", "a//b", "a.", "a.lock", "a@{b"]) assert.ok(branchProblem(bad), bad);
+  for (const bad of ["", "-x", "a b", "a..b", "a~1", "x^", "a:b", "a?", "a*", "[a", "a\\b", "/a", "a/", "a//b", "a.", "a.lock", "a@{b", "@", "a/.b", "a/b.lock", "a/b.lock/c", ".x"]) assert.ok(branchProblem(bad), bad);
 });
 
 test("a selection's paths: renames count twice, none repeats", () => {

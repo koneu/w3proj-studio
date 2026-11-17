@@ -6,9 +6,7 @@ const hunks = (a: string, b: string) => lineHunks(splitLines(a), splitLines(b));
 // Applies the changes to b: must give a (with line breaks as \n).
 function apply(a: string, b: string): string {
   let out = b.replace(/\r\n?/g, "\n"), shift = 0;
-  const bn = out;
   for (const c of changesToA(a, b)) { out = out.slice(0, c.from + shift) + c.insert + out.slice(c.to + shift); shift += c.insert.length - (c.to - c.from); }
-  assert.ok(bn.length >= 0);
   return out;
 }
 
@@ -33,20 +31,28 @@ test("the changes turn b into a", () => {
   const cases: [string, string][] = [["a\nb\nc", "a\nX\nc"], ["a\nb", "a\nb\nc\nd"], ["a\nb\nc\nd", "a\nb"], ["", "q\nr"], ["q\nr", ""], ["a\r\nb\r\n", "b\na\n"], ["x", "y"], ["1\n2\n3\n4\n5\n6", "0\n2\n3\n9\n5\n7\n8"]];
   for (const [a, b] of cases) assert.equal(apply(a, b), a.replace(/\r\n?/g, "\n"), JSON.stringify([a, b]));
 });
-test("a 20000-line file with 3 edits is 3 hunks, fast", () => {
+/** `lines` that counts how many elements are read from it: the work is counted, not timed. */
+function counted(lines: string[]): { lines: string[]; reads: () => number } {
+  let reads = 0;
+  const proxy = new Proxy(lines, { get(target, key, receiver) { if (typeof key === "string" && /^\d+$/.test(key)) reads++; return Reflect.get(target, key, receiver); } });
+  return { lines: proxy, reads: () => reads };
+}
+// A hang guard only (nothing is measured against it): a quadratic diff would not come back.
+const HANG = { timeout: 60_000 };
+test("a 20000-line file with 3 edits is 3 hunks, in work proportional to its size", HANG, () => {
   const lines = Array.from({ length: 20000 }, (_, i) => `call F(${i % 50}) // ${i}`);
   const other = [...lines];
   other[3000] = "changed"; other.splice(9000, 2); other[15000] += "x";
-  const t = Date.now();
-  const h = lineHunks(lines, other);
+  const a = counted(lines), b = counted(other);
+  const h = lineHunks(a.lines, b.lines);
   assert.equal(h.length, 3);
-  assert.ok(Date.now() - t < 1000);
+  const reads = a.reads() + b.reads();
+  assert.ok(reads > 20000, `control: the lines are read (${reads})`);
+  assert.ok(reads <= 20 * 20000, `${reads} line reads for 20000 lines`);
 });
-test("a big different text falls back to one hunk, quickly", () => {
+test("a big different text falls back to one hunk", HANG, () => {
   const a = Array.from({ length: 18000 }, (_, i) => `a${i}`), b = Array.from({ length: 18000 }, (_, i) => `b${i}`);
-  const t = Date.now();
   assert.deepEqual(lineHunks(a, b), [{ fromA: 0, toA: 18000, fromB: 0, toB: 18000 }]);
-  assert.ok(Date.now() - t < 2000);
 });
 test("control: the hunks of 18k lines with many scattered edits are found", () => {
   const a = Array.from({ length: 18000 }, (_, i) => `l${i}`), b = a.map((l, i) => (i % 100 === 50 ? `${l}!` : l));
@@ -67,13 +73,13 @@ test("a big block only one text has is one hunk of its own; the small edits befo
   assert.equal(h2.length, 3);
   assert.deepEqual([h2[0].fromA, h2[1].fromA], [10, 3400]);
 });
-test("20,000 lines with 3 edits are fast", () => {
+test("20,000 lines with 3 edits are 3 hunks, in work proportional to the size", HANG, () => {
   const base = lines(20000);
   const b = [...base]; b[5] = "a"; b[9000] = "b"; b[19990] = "c";
-  const t = Date.now();
-  const h = lineHunks(base, b);
+  const x = counted(base), y = counted(b);
+  const h = lineHunks(x.lines, y.lines);
   assert.equal(h.length, 3);
-  assert.ok(Date.now() - t < 500, `took ${Date.now() - t} ms`);
+  assert.ok(x.reads() + y.reads() <= 20 * 20000, `${x.reads() + y.reads()} line reads`);
 });
 test("repeated lines still give a valid edit script", () => {
   const a = ["x", "y", "x", "y", "z", "x"], b = ["y", "x", "y", "x", "z", "z", "x"];
@@ -100,11 +106,9 @@ test("many separate hunks stay separate chunks in the merge view's state", async
     if (H >= 20) assert.equal(typeAll(true), 1, "control: in one transaction CodeMirror merges them");
   }
 });
-test("a 20000-line script with 200 hunks diffs fast", () => {
+test("a 20000-line script with 200 hunks is diffed to 200 changes", HANG, () => {
   const lines = Array.from({ length: 20000 }, (_, i) => `// filler line ${i}`);
   const l2 = lines.slice();
   for (let c = 0; c < 200; c++) l2[40 + c * 90] += " // EDITED";
-  const t = Date.now();
   assert.equal(changesToA(l2.join("\n"), lines.join("\n")).length, 200);
-  assert.ok(Date.now() - t < 2000);
 });

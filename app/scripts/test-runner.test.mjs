@@ -8,10 +8,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { COMMAND_LINE_LIMIT, testBatches } from "./test-batches.mjs";
 
-// npm test, the gate and the coverage run all start the runner in app/.
-const app = process.cwd();
+// The app/ folder, found from the working directory up.
+const app = repoPath("app");
 
 test("a second test run leaves the first one's bundles alone", () => {
   const runner = join(app, "scripts", "test.mjs");
@@ -22,7 +23,8 @@ test("a second test run leaves the first one's bundles alone", () => {
   const env = { ...process.env };
   delete env.W3_TEST_OUT;
   delete env.NODE_V8_COVERAGE;
-  const other = spawnSync(process.execPath, [runner, join(app, "scripts", "coverage-core.test.mjs")], { cwd: app, env, encoding: "utf8" });
+  const other = spawnSync(process.execPath, [runner, join(app, "scripts", "coverage-core.test.mjs")], { cwd: app, env, encoding: "utf8", timeout: 300_000 });
+  assert.equal(other.error, undefined, `the second run did not finish: ${other.error?.message}`);
   assert.equal(other.status, 0, `the second run failed:\n${other.stdout}\n${other.stderr}`);
   assert.ok(existsSync(mine), "the second run removed the first run's bundles");
 });

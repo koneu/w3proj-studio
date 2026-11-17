@@ -19,7 +19,9 @@ export function checkpointTime(name: string): number | null {
   const m = STAMP.exec(name);
   if (!m) return null;
   const [y, mo, d, h, mi, s] = m.slice(1).map(Number);
-  return new Date(y, mo - 1, d, h, mi, s).getTime();
+  const at = new Date(y, mo - 1, d, h, mi, s);
+  // Date rolls 2026-13-45 over to a later day: such a stamp isn't one.
+  return at.getFullYear() === y && at.getMonth() === mo - 1 && at.getDate() === d && at.getHours() === h && at.getMinutes() === mi && at.getSeconds() === s ? at.getTime() : null;
 }
 
 /** The checkpoints among `names` (paths below build/checkpoints, `/` between folders), newest first. Only files

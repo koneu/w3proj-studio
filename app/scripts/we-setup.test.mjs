@@ -1,13 +1,14 @@
 // we-setup.mjs without the game and without the editor: the guards around the farm folder, the farm's refresh, the
 // snapshot proof, and the C shim's source. The farm of a test lives in a folder inside the repository (the guard
-// refuses others); the "game" is a small folder in the temp dir.
+// refuses others); the "game" is a small folder next to it, under target/tmp.
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { scratchDir } from "../../tests/scratch.mjs";
 import { join } from "node:path";
+import { scratchDir } from "../../tests/scratch.mjs";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { mainCheckout } from "../../tests/gamepath.mjs";
 import { clean, compare, guardedWeDir, repo, setup, snapshot } from "./we-setup.mjs";
 
@@ -28,7 +29,7 @@ async function withEnv(we, fn) {
 }
 
 function fakeGame() {
-  const game = mkdtempSync(join(tmpdir(), "we-setup-game-"));
+  const game = scratchDir("we-setup-game-");
   mkdirSync(join(game, "Data", "data"), { recursive: true });
   writeFileSync(join(game, ".build.info"), "build-1");
   writeFileSync(join(game, "Data", "data", "data.001"), "bigdata");
@@ -38,13 +39,14 @@ function fakeGame() {
   return game;
 }
 
-const inRepo = () => mkdtempSync(join(repo, "we-setup-test-"));
+const inRepo = () => scratchDir("we-setup-test-");
 
 test("W3PROJ_WE_DIR empty means the default, and a folder outside the repository is refused (clean never reaches the cwd)", async () => {
   const game = fakeGame();
   try {
     await withEnv("", () => assert.match(guardedWeDir(game), /target[\\/]we$/));
     // The old code: `??` kept "", resolve("") is the cwd, and --clean removed cwd/install and cwd/prefix.
+    // Outside the repository on purpose: the guard must refuse exactly such a folder.
     const cwd = mkdtempSync(join(tmpdir(), "we-setup-cwd-"));
     mkdirSync(join(cwd, "install"));
     mkdirSync(join(cwd, "prefix"));
@@ -163,7 +165,7 @@ test("the snapshot lists a file it couldn't stat, and the comparison fails for a
 
 test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT or a whole O_TMPFILE", (t) => {
   try { execFileSync("cc", ["--version"], { stdio: "ignore" }); } catch { return t.skip("no C compiler"); }
-  const src = join(process.cwd(), "scripts", "we-rofs.c"); // the test runs bundled, from the app folder
+  const src = repoPath("app", "scripts", "we-rofs.c"); // the test runs bundled: found from the working directory up
   const text = readFileSync(src, "utf8");
   assert.ok(!/flags & \(O_CREAT \| O_TMPFILE\)/.test(text), "the mask test is also true for a plain O_DIRECTORY");
   const dir = scratchDir("we-rofs-");

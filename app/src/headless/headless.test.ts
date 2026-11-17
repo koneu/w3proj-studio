@@ -3,6 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { waitUntil } from "../lib/testhelpers/testutil";
 
 const disk = new Map<string, string>();
 const writes: string[] = [];
@@ -59,11 +60,12 @@ test("a finished job waits for the commands still running, also the ones their a
     const background = call("fs_read_text", { path: "a" }).then(() => call("fs_read_text", { path: "b" }));
     let done = false;
     const quiet = settled(5_000).then((v) => { done = true; return v; });
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => sent.length === 1, "the first read to be sent");
+    await new Promise<void>((r) => setImmediate(r));
     assert.equal(done, false, "a command waits for its answer");
     receive({ id: sent[0].id, ok: "x" }, null);
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(sent.length, 2);
+    await waitUntil(() => sent.length === 2, "the read its answer started to be sent");
+    await new Promise<void>((r) => setImmediate(r));
     assert.equal(done, false, "the command its answer started waits too");
     receive({ id: sent[1].id, ok: "y" }, null);
     assert.equal(await quiet, true);

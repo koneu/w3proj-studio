@@ -78,8 +78,18 @@ fn damage(data: &[u8], rng: &mut Rng) -> Vec<u8> {
     b
 }
 
+/// A number set in the environment: None when the variable isn't set, a panic when it is set to something that isn't
+/// one (a typo must not quietly run the defaults and look like a pass).
+fn env_u64(name: &str) -> Option<u64> {
+    match std::env::var(name) {
+        Ok(v) => Some(v.trim().parse().unwrap_or_else(|_| panic!("{name}={v:?} isn't a number"))),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(e) => panic!("{name}: {e}"),
+    }
+}
+
 fn rounds() -> u64 {
-    std::env::var("W3PROJ_ROBUSTNESS_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(200)
+    env_u64("W3PROJ_ROBUSTNESS_ROUNDS").unwrap_or(200)
 }
 
 fn fixture() -> PathBuf {
@@ -225,7 +235,7 @@ fn single_seed() -> bool {
 /// The seeds of one loop: `0..total`, or with `W3PROJ_ROBUSTNESS_SEED=<n>` only seed n, to
 /// reproduce a failure that names its seed.
 fn seeds(total: u64) -> Range<u64> {
-    match std::env::var("W3PROJ_ROBUSTNESS_SEED").ok().and_then(|v| v.parse::<u64>().ok()) {
+    match env_u64("W3PROJ_ROBUSTNESS_SEED") {
         Some(only) if only < total => only..only + 1,
         Some(_) => 0..0,
         None => 0..total,

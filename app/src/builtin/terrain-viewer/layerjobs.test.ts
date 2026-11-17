@@ -55,8 +55,11 @@ test("a rejected layer is reported, and an older refresh doesn't hide the label 
   assert.equal(v.label.busy, false);
 });
 
-test("no late layers: the label isn't shown", async () => {
+test("no late layers: the label is only ever set hidden (and shown for a late one)", async () => {
   const seen: boolean[] = [];
   assert.equal(await runLayerJobs(() => [], () => true, (b) => seen.push(b)), null);
   assert.deepEqual(seen, [false, false]);
+  const withLate: boolean[] = [];
+  assert.equal(await runLayerJobs(() => [Promise.resolve()], () => true, (b) => withLate.push(b)), null);
+  assert.deepEqual(withLate, [true, false], "control: a late layer does put the label up");
 });

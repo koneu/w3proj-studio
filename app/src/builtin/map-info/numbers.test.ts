@@ -1,17 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { INFO_NUMBERS, infoNumber, setInfoNumber, WATER_NUMBERS, type InfoNumber, type InfoNumberKey } from "./numbers";
+import { repoPath } from "../../lib/testhelpers/testutil";
 
-/** A file of the repository, found from where the tests run (app/ or the repository). */
-function repoFile(...parts: string[]): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, ...parts);
-    if (existsSync(p)) return readFileSync(p, "utf8");
-    if (dirname(dir) === dir) throw new Error(`${parts.join("/")} not found`);
-  }
-}
+const repoFile = (...parts: string[]): string => readFileSync(repoPath(...parts), "utf8");
 const mini = JSON.parse(repoFile("tests", "fixtures", "mini-map", "map", "war3map.w3i.json"));
 /** The mini map's map info, with the 3.0 parts it lacks (crest race, camera zoom, terrain fog, water) as a v39 file has them. */
 const fixture = () => {
@@ -39,12 +32,15 @@ function w3iTypes(): Map<string, string> {
   return out;
 }
 
+/** A number as plain decimal text (String() would write 3.4e+38, which a field refuses). */
+const plainText = (n: number): string => (Math.abs(n) >= 1e21 ? BigInt(n).toString() : String(n));
+
 /** The values just past each stored type, and its edges, which are taken. */
 const PAST: Record<string, string[]> = {
   u8: ["-1", "256", "1.5", "", "abc"],
   u32: ["-1", "4294967296", "2.5", "", "1e400"],
   i32: ["-2147483649", "2147483648", "0.5", "", "x"],
-  f32: ["1e39", "-3.5e38", "", "Infinity", "NaN"],
+  f32: ["1000000000000000000000000000000000000000", "-350000000000000000000000000000000000000", "1e39", "", "Infinity", "NaN"],
 };
 const EDGES: Record<string, number[]> = {
   u8: [0, 255], u32: [0, 4294967295], i32: [-2147483648, 2147483647], f32: [-3.4028234663852886e38, 3.4028234663852886e38, 0.1],
@@ -74,7 +70,7 @@ for (const key of Object.keys(INFO_NUMBERS) as InfoNumberKey[]) {
       assert.equal(JSON.stringify(info), before, `${JSON.stringify(typed)} changed nothing`);
     }
     for (const edge of EDGES[f.kind]) {
-      const r = setInfoNumber(info, key, String(edge), player);
+      const r = setInfoNumber(info, key, plainText(edge), player);
       assert.deepEqual(r, { value: edge });
       assert.equal(infoNumber(info, key, player), edge);
     }

@@ -197,7 +197,7 @@ test("object kinds: an open editor's data wins over the saved file, kind by kind
   const live = new Map([["w3u", { custom: [{ id: "h000", base: "hfoo" }], original: [], names: new Map([["h000", "Captain"]]) }]]);
   const k = objectKinds(kinds, saved, live);
   assert.deepEqual(k.custom.map((c) => [c.ext, c.label, c.ids.map((o) => o.id)]), [["w3u", "Units", ["h000"]], ["w3a", "Abilities", ["A000"]], ["w3q", "Upgrades", []]]);
-  assert.deepEqual(k.objects.map((o) => [o.label, o.objects.length]), [["Unit", 1], ["Abilitie", 1], ["Upgrade", 0]]);
+  assert.deepEqual(k.objects.map((o) => [o.label, o.objects.length]), [["Unit", 1], ["Ability", 1], ["Upgrade", 0]]);
   assert.deepEqual([...k.names], [["h000", "Captain"]]);
   // Without an open editor: the saved file, standard objects' changes included.
   const s = objectKinds(kinds, saved, new Map());

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
+import { repoPath } from "../../lib/testhelpers/testutil";
 
-const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as {
+const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "extension.json"), "utf8")) as {
   contributes: { configuration: { properties: Record<string, { default?: unknown }> } };
 };
 const declared = (key: string) => manifest.contributes.configuration.properties[key]?.default;
@@ -63,13 +64,13 @@ test("a switch that isn't set is its default; a set one is what was set", () => 
 });
 
 test("the object placer starts as a fresh World Editor's Tools menu: Randomly Rotate Doodads, Randomly Scale Doodads Symmetric", () => {
-  const objects = JSON.parse(readFileSync("src/builtin/terrain-objects/extension.json", "utf8")) as typeof manifest;
+  const objects = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-objects", "extension.json"), "utf8")) as typeof manifest;
   const placed = (key: string) => objects.contributes.configuration.properties[key]?.default;
   assert.equal(placed("terrain.placement.randomRotation"), true);
   assert.equal(placed("terrain.placement.randomScale"), "symmetric");
 });
 
 test("the terrain view starts with the grid of its setting (large) and the camera bounds", () => {
-  const source = readFileSync("src/builtin/terrain-viewer/index.ts", "utf8");
+  const source = readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "index.ts"), "utf8");
   assert.match(source, /const viewState = \{\s*grid: gridDefault\(w3\.settings\.get\("terrain\.grid\.default", "large"\)\),[^}]*cameraBounds: true,/);
 });

@@ -5,6 +5,7 @@ import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { HEIGHT_TICK, heightPerPoint, HeightStroke } from "../../lib/terrain/strokepath";
 import { applyHeight, applyLayer, brushOf, brushReach, matchCliffTypes, paintBoundary, paintTexture, retypeCliffs, Stroke } from "./tools";
 import * as painterTools from "./tools";
+import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 /** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
  *  (15), as the World Editor's New Map makes it. */
@@ -554,7 +555,7 @@ test("Level on flat ground moves nothing but types the World Editor's stencil ro
 });
 
 /** The same numbers every run (seed printed in the test's name). */
-const seeded = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+const seeded = mulberry32;
 
 test("Noise (seed 7) roughens the ground under the brush only, within the strength, the same every time", () => {
   const brush = { ...centre(flatMap()), radius: 3 };

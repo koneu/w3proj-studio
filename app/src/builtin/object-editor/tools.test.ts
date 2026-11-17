@@ -168,8 +168,9 @@ test("delete_object names what still uses the object: map script, custom scripts
   // There but unreadable: said, not taken for "nothing there".
   assert.match(said, /Not checked.*war3map\.doo/);
   // Control: an object nothing names.
+  p.files[`${root}/map/war3map.doo.json`] = JSON.stringify({ doodads: [] });
   const quiet = await p.call("delete_object", { kind: "units", id: "h001" }) as string;
-  assert.match(quiet, /Nothing in the project names it|Not checked/);
+  assert.match(quiet, /Nothing in the project names it/);
   assert.doesNotMatch(quiet, /still named/);
 });
 

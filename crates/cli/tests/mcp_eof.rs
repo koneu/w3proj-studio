@@ -1,13 +1,27 @@
 //! `w3proj mcp` answers every request it read, even when the client closes stdin right after the last one
 //! (`echo … | w3proj mcp`). Studio isn't reachable here (the socket folder is an empty one of the test's own),
 //! so the answers are the offline ones.
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
+
+/// The test's socket folder under the build's scratch folder; removed when it goes out of scope (also on a failure).
+struct TestDir(PathBuf);
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 #[test]
 fn answers_everything_read_before_stdin_closed() {
-    let dir = std::env::temp_dir().join(format!("w3proj-mcp-eof-{}", std::process::id()));
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("w3proj-mcp-eof-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    let _guard = TestDir(dir.clone());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -27,11 +41,33 @@ fn answers_everything_read_before_stdin_closed() {
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, "\n",
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"studio_status","arguments":{}}}"#, "\n",
     );
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
-    let out = child.wait_with_output().unwrap();
-    std::fs::remove_dir_all(&dir).ok();
-    assert!(out.status.success());
-    let text = String::from_utf8(out.stdout).unwrap();
+    // The writing and the reading run on threads, so a server that never answers (or never ends) fails the test after
+    // the deadline instead of hanging it; a server that ends before it read everything (BrokenPipe) is for the
+    // answers' check below to judge.
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let mut stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        let _ = tx.send(bytes);
+    });
+    let bytes = match rx.recv_timeout(Duration::from_secs(60)) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("w3proj mcp did not finish within 60 s of stdin closing");
+        }
+    };
+    let status = child.wait().unwrap();
+    writer.join().unwrap();
+    reader.join().unwrap();
+    assert!(status.success());
+    let text = String::from_utf8(bytes).unwrap();
     let mut ids: Vec<i64> = text
         .lines()
         .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"].as_i64().unwrap())

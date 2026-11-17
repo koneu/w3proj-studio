@@ -1,8 +1,10 @@
 //! `w3proj rebuild` end to end: the real binary, Node running the app's code (app/src/headless), the installed game.
 //! On a copy of the mini map: what is made, what pack takes afterwards, what is skipped when nothing changed. Needs the
 //! game (W3PROJ_GAME, else the main checkout's `.game-path`, as tests/gamepath.mjs finds it) and Node with the app's
-//! packages installed: without the game the tests that need it say so and pass, as the corpus tests do. That the
+//! packages installed: without the game the tests that need it say so and pass (they fail under W3PROJ_REQUIRE_CORPUS=1), as the corpus tests do. That the
 //! files are the app's own bytes is app-smoke's `rebuildCli` (the app and the CLI on copies of one project).
+
+mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,7 +48,8 @@ fn game() -> Option<String> {
     let text = fs::read_to_string(main.join(".game-path")).ok()?;
     // One folder per line; the first that exists wins (a checkout shared by a Windows and a Linux machine), as in tests/gamepath.mjs.
     let listed: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-    listed.iter().find(|l| Path::new(l).exists()).or(listed.first()).map(|l| l.to_string())
+    // None when none exists: a folder that isn't there is no game, and the tests say so (or fail, when required).
+    listed.iter().find(|l| Path::new(l).exists()).map(|l| l.to_string())
 }
 
 fn w3proj(args: &[&str], game: &str) -> Output {
@@ -72,7 +75,7 @@ fn derived(project: &Path) -> Vec<Option<Vec<u8>>> {
 #[test]
 fn rebuild_makes_what_pack_takes_skips_what_follows_and_records_only_when_all_follow() {
     let Some(game) = game() else {
-        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
         return;
     };
     let dir = workdir("cycle");
@@ -146,7 +149,7 @@ fn without_the_game_nothing_is_made() {
 #[test]
 fn shadows_whose_models_are_all_unreadable_keep_the_stored_file() {
     let Some(game) = game() else {
-        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
         return;
     };
     let dir = workdir("shd-verdict");
@@ -196,7 +199,7 @@ fn packed_script(map: &Path, game: &str) -> String {
 #[test]
 fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let Some(game) = game() else {
-        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
         return;
     };
     let dir = workdir("pack-script");
@@ -264,7 +267,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
 #[test]
 fn a_script_that_cant_be_made_again_is_packed_as_it_is_with_a_warning() {
     let Some(game) = game() else {
-        eprintln!("skipped: no game set up (W3PROJ_GAME or .game-path)");
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
         return;
     };
     let dir = workdir("pack-script-no-game");

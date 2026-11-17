@@ -3,11 +3,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { checkKeys, directKeyUses, eventNames } from "./check-keys.mjs";
 
-// npm test, the gate and the coverage run all start the runner in app/.
-const src = join(process.cwd(), "src");
+// The app's src/ folder, found from the working directory up.
+const src = repoPath("app", "src");
 
 test("src/ reads every shortcut's key through keyOf", () => {
   assert.deepEqual(checkKeys(src), []);
