@@ -228,7 +228,10 @@ It never starts the game itself.
   checkout (`W3PROJ_WE_DIR` moves it): `install/` holds hardlinks of the install, except what the editor writes (the
   CASC `.idx` files, `shmem`, `ecache`: about 10 MB of copies), and `prefix/` is a Wine prefix of its own (about
   0.35 GB). The farm is made again only for another game build (`.build.info`), `--clean` removes it all. The editor
-  runs in bubblewrap with the user's whole Steam prefix and every hardlink mounted read-only; the editor opens the
+  runs in bubblewrap with the whole machine mounted read-only except the farm, its prefix, the run's work folder,
+  `$XDG_RUNTIME_DIR` and `/tmp` (`writableDirs`), and with the user's whole Steam prefix and every hardlink read-only
+  inside those; `--die-with-parent` takes Proton along when we-drive is killed, and each start kills a leftover
+  wineserver of the prefix first; the editor opens the
   CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
   at a time, machine-wide: the lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
   every worktree and every `W3PROJ_WE_DIR`; a second run says once who holds it and since when, and waits
