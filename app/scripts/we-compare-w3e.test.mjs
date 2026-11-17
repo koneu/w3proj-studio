@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoPath } from "../src/lib/testhelpers/testutil";
 import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
-import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
+import { compareFile, parseSpecFile, readDiffersAllowlist } from "./we-compare-core.mjs";
 
 /** A version 11 w3e of `w`x`h` corners: each corner [ground, water, textureAndFlags, variation, cliffAndLayer]. */
 function w3e(w, h, corner) {
@@ -99,7 +99,7 @@ test("the spec files in tests/we-compare/ that use these kinds parse", () => {
   const there = readdirSync(dir);
   for (const f of names) assert.ok(there.includes(f), `${f} is in tests/we-compare`);
   for (const f of names) {
-    const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" });
+    const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" }, { differsWithoutPaths: readDiffersAllowlist(join(dir, "..", "..")) });
     assert.ok(specs.length > 0, f);
     parsed += specs.length;
   }

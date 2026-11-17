@@ -230,7 +230,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const soundDuration = await soundDurations(sounds.map((s) => s.file), path, campaign);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), itemColor: (id) => itemColors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, customAbility: (id) => !g.abilities.has(id), destructableTint, teamColor: (id) => colors.get(id), itemColor: (id) => itemColors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
       customColor: customColorTypes(unitFiles, g.customColors),
       lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,

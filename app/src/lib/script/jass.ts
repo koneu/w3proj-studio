@@ -74,6 +74,8 @@ export interface ScriptInput {
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Whether an ability is a hero ability (lib/script/objects heroAbilities). */
   heroAbility?: (ability: string) => boolean;
+  /** Whether an ability isn't one of the game's (units.ts). */
+  customAbility?: (ability: string) => boolean;
   /** The tint of a destructable type in the map's object data (lib/script/objects destructableTints). */
   destructableTint?: (id: string) => [number, number, number];
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
@@ -499,7 +501,7 @@ function unitCreation(i: ScriptInput): string {
   const regions = i.regions ?? [];
   const body = unitsSection({
     itemTables: tableNumbers(i), randomGroups: groupNumbers(i),
-    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate, customColor: i.customColor,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, customAbility: i.customAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate, customColor: i.customColor,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";

@@ -166,11 +166,11 @@
     "compare": [
       {
         "file": "war3map.j",
-        "as": "text"
+        "as": "text-exact"
       },
       {
         "file": "war3map.wct.txt",
-        "as": "text"
+        "as": "text-exact"
       }
     ],
     "limit": 30
@@ -218,11 +218,11 @@
     "compare": [
       {
         "file": "war3map.j",
-        "as": "text"
+        "as": "text-exact"
       },
       {
         "file": "war3map.wct.txt",
-        "as": "text"
+        "as": "text-exact"
       }
     ],
     "limit": 30
@@ -270,11 +270,11 @@
     "compare": [
       {
         "file": "war3map.j",
-        "as": "text"
+        "as": "text-exact"
       },
       {
         "file": "war3map.wct.txt",
-        "as": "text"
+        "as": "text-exact"
       }
     ],
     "limit": 30
@@ -330,11 +330,11 @@
     "compare": [
       {
         "file": "war3map.lua",
-        "as": "text"
+        "as": "text-exact"
       },
       {
         "file": "war3map.wct.txt",
-        "as": "text"
+        "as": "text-exact"
       }
     ],
     "limit": 30
@@ -390,11 +390,11 @@
     "compare": [
       {
         "file": "war3map.lua",
-        "as": "text"
+        "as": "text-exact"
       },
       {
         "file": "war3map.wct.txt",
-        "as": "text"
+        "as": "text-exact"
       }
     ],
     "limit": 30

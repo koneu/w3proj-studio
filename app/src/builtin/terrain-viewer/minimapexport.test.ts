@@ -40,10 +40,16 @@ test("the picture has the chosen size, and the playable area fills it unless the
   const s = source();
   const playable = await exportPicture(s, opts({ size: 64, doodads: false }));
   assert.equal(playable.length, 64 * 64 * 4);
-  // The corner of the playable area is ground; of the whole map (border 4 of 16 tiles) still ground, both green.
-  assert.deepEqual(px(playable, 64, 0, 0), [100, 200, 100]);
-  const whole = await exportPicture(s, opts({ size: 64, doodads: false, playableOnly: false }));
-  assert.deepEqual(px(whole, 64, 0, 0), [100, 200, 100]);
+  // The map's 4 outer columns of tiles (of 16) are another ground: the playable picture is all the inner ground, the
+  // whole map's picture has the border at its west edge.
+  const bordered = source();
+  bordered.terrain.groundTiles = ["Lgrs", "Ldrt"];
+  bordered.terrain.corners.forEach((c, i) => { c.texture = i % 17 < 4 ? 1 : 0; });
+  bordered.base = { ...bordered.base, tileColor: (id) => (id === "Ldrt" ? [10, 20, 30] : [100, 200, 100]) };
+  assert.deepEqual(px(await exportPicture(bordered, opts({ size: 64, doodads: false })), 64, 0, 32), [100, 200, 100]);
+  const whole = await exportPicture(bordered, opts({ size: 64, doodads: false, playableOnly: false }));
+  assert.deepEqual(px(whole, 64, 0, 32), [10, 20, 30]);
+  assert.deepEqual(px(whole, 64, 32, 32), [100, 200, 100]);
   // The doodad at the centre is bigger on the playable picture (it covers fewer tiles).
   const dot = (rgba: Uint8ClampedArray) => { let n = 0; for (let i = 0; i < 64 * 64; i++) if (rgba[i * 4] === 250) n++; return n; };
   const a = await exportPicture(s, opts({ size: 64 })), b = await exportPicture(s, opts({ size: 64, playableOnly: false }));
@@ -52,7 +58,7 @@ test("the picture has the chosen size, and the playable area fills it unless the
 });
 
 test("without terrain the ground is black; pathing, units, regions and icons are drawn when asked", async () => {
-  const s = source({ units: [unit("hfoo", -256, 256, 1), unit("ngol", 256, 256), unit("sloc", 256, -256, 0)], regions: [{ left: -512, bottom: -512, right: -256, top: -256, color: { red: 255, green: 0, blue: 0 } }] });
+  const s = source({ units: [unit("hfoo", -256, 256, 1), unit("ngol", 256, 256), unit("sloc", 256, -256, 0), unit("hfoo", -256, -256, 27)], regions: [{ left: -512, bottom: -512, right: -256, top: -256, color: { red: 255, green: 0, blue: 0 } }] });
   const bare = await exportPicture(s, opts({ size: 64, terrain: false, doodads: false, units: false, icons: false }));
   assert.deepEqual(px(bare, 64, 10, 10), [0, 0, 0]);
   assert.deepEqual(s.asked, []);
@@ -64,6 +70,9 @@ test("without terrain the ground is black; pathing, units, regions and icons are
   const units = await exportPicture(s, opts({ size: 64, doodads: false, units: true, icons: false }));
   assert.deepEqual(px(units, 64, 16, 16), [0, 66, 255]);
   assert.deepEqual(px(units, 64, 48, 48), [100, 200, 100]);
+  // The gold mine is the owner's (player 0: red here); a unit of a player past the colours is the neutral grey.
+  assert.deepEqual(px(units, 64, 48, 16), [255, 3, 3]);
+  assert.deepEqual(px(units, 64, 16, 48), [46, 45, 46]);
   // Regions: outlined in their colour.
   const regions = await exportPicture(s, opts({ size: 64, doodads: false, units: false, icons: false, regions: true }));
   assert.deepEqual(px(regions, 64, 0, 63), [255, 0, 0]);
@@ -119,26 +128,39 @@ test("smoothing softens the edges", async () => {
 });
 
 test("the pathing map's colours", () => {
-  const rgba = pathingOverlay(Uint8Array.from([NO_WATER, NO_WATER | NO_WALK, NO_WALK, 0, NO_WATER | NO_BUILD]));
-  assert.deepEqual([...rgba.subarray(0, 4)], [0, 0, 0, 0]);
-  assert.deepEqual([...rgba.subarray(4, 8)], [230, 30, 30, 170]);
-  assert.deepEqual([...rgba.subarray(8, 12)], [30, 90, 240, 170]);
-  assert.equal(rgba[15], 110);
-  assert.deepEqual([...rgba.subarray(16, 20)], [230, 200, 40, 110]);
+  const cells = [NO_WATER, NO_WATER | NO_WALK, NO_WALK, 0, NO_WATER | NO_BUILD, NO_WATER | NO_WALK | NO_BUILD, NO_BUILD, NO_WALK | NO_BUILD];
+  const rgba = pathingOverlay(Uint8Array.from(cells));
+  const at = (i: number) => [...rgba.subarray(i * 4, i * 4 + 4)];
+  assert.deepEqual(at(0), [0, 0, 0, 0], "free land");
+  assert.deepEqual(at(1), [230, 30, 30, 170], "unwalkable land");
+  assert.deepEqual(at(2), [30, 90, 240, 170], "unwalkable water");
+  assert.deepEqual(at(3), [60, 150, 255, 110], "water");
+  assert.deepEqual(at(4), [230, 200, 40, 110], "unbuildable land");
+  assert.deepEqual(at(5), [230, 30, 30, 170], "unwalkable beats unbuildable on land");
+  assert.deepEqual(at(6), [60, 150, 255, 110], "no-build on water is water");
+  assert.deepEqual(at(7), [30, 90, 240, 170], "unwalkable beats unbuildable on water");
 });
 
 function pixels(png: Uint8Array) {
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  // The layout this reads: signature, IHDR (8-bit RGBA, no interlace), one IDAT up to the 12 bytes of IEND.
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(String.fromCharCode(...png.subarray(12, 16)), "IHDR");
+  assert.deepEqual([png[24], png[25], png[28]], [8, 6, 0], "8 bit RGBA, not interlaced");
+  assert.equal(String.fromCharCode(...png.subarray(37, 41)), "IDAT");
+  assert.equal(String.fromCharCode(...png.subarray(png.length - 8, png.length - 4)), "IEND");
   const width = view.getUint32(16), height = view.getUint32(20);
   const raw = inflateSync(Buffer.from(png.subarray(41, png.length - 12)));
+  for (let y = 0; y < height; y++) assert.equal(raw[y * (1 + width * 4)], 0, `row ${y} unfiltered`);
   return { width, height, at: (x: number, y: number) => [...raw.subarray(y * (1 + width * 4) + 1 + x * 4, y * (1 + width * 4) + 1 + x * 4 + 3)] };
 }
 
-function fake(pick: string | null = "C:\\out\\mini") {
+// The paths are opaque to the export (it only adds .png): neutral names, no platform's separator.
+function fake(pick: string | null = "out-mini") {
   const written: { path: string; bytes: Uint8Array }[] = [];
   const picked: unknown[] = [];
   const w3 = {
-    workspace: { project: () => ({ name: "My Map", root: "C:\\p" }) },
+    workspace: { project: () => ({ name: "My Map", root: "proj" }) },
     window: { pickSaveFile: async (o: unknown) => { picked.push(o); return pick; }, showInfo: async () => undefined },
     backend: { writeBytes: async (path: string, bytes: Uint8Array) => { written.push({ path, bytes }); } },
   } as unknown as W3Api;
@@ -148,10 +170,10 @@ function fake(pick: string | null = "C:\\out\\mini") {
 test("Export Minimap writes the picture as a PNG to the chosen file, adding .png", async () => {
   const { w3, written, picked } = fake();
   let sourced = 0;
-  assert.equal(await exportMinimap(w3, async () => { sourced++; return source(); }, { size: 128, smooth: false }), "C:\\out\\mini.png");
+  assert.equal(await exportMinimap(w3, async () => { sourced++; return source(); }, { size: 128, smooth: false }), "out-mini.png");
   assert.equal(sourced, 1);
   assert.equal(written.length, 1);
-  assert.equal(written[0].path, "C:\\out\\mini.png");
+  assert.equal(written[0].path, "out-mini.png");
   const png = pixels(written[0].bytes);
   assert.deepEqual([png.width, png.height], [128, 128]);
   assert.deepEqual(png.at(0, 0), [100, 200, 100]);
@@ -161,21 +183,34 @@ test("Export Minimap writes the picture as a PNG to the chosen file, adding .png
 
 test("another project opened while the file was chosen: nothing is written", async () => {
   const { w3, written } = fake();
-  let root = "C:\\p";
+  let root = "proj";
   (w3.workspace as { project: () => unknown }).project = () => ({ name: "My Map", root });
-  await assert.rejects(exportMinimap(w3, async () => { root = "C:\\other"; return source(); }, {}), /Another project/);
+  await assert.rejects(exportMinimap(w3, async () => { root = "other-proj"; return source(); }, {}), /Another project/);
   assert.equal(written.length, 0);
 });
 
 test("a chosen .PNG name stays; cancelling writes nothing and draws nothing; a bad size is refused", async () => {
-  const a = fake("D:\\x\\Mini.PNG");
-  assert.equal(await exportMinimap(a.w3, async () => source(), {}), "D:\\x\\Mini.PNG");
+  const a = fake("Mini.PNG");
+  assert.equal(await exportMinimap(a.w3, async () => source(), {}), "Mini.PNG");
+  assert.deepEqual(a.written.map((w) => w.path), ["Mini.PNG"]);
   const b = fake(null);
   assert.equal(await exportMinimap(b.w3, async () => { throw new Error("not drawn"); }, {}), null);
   assert.equal(b.written.length, 0);
   const c = fake();
-  await assert.rejects(exportMinimap(c.w3, async () => source(), { size: 0 }), /image size/);
+  for (const size of [0, 15.4, 4096.6, NaN, Infinity, -Infinity]) {
+    await assert.rejects(exportMinimap(c.w3, async () => source(), { size }), /image size/, `size ${size}`);
+  }
   assert.equal(c.picked.length, 0);
+  assert.equal(c.written.length, 0);
+  // The edges: 15.6 rounds to 16, 4096.4 to 4096 (both accepted; the biggest is only checked as far as its size).
+  assert.equal(await exportMinimap(c.w3, async () => source(), { size: 15.6 }), "out-mini.png");
+  assert.equal(c.written.length, 1);
+  assert.deepEqual([pixels(c.written[0].bytes).width], [16]);
+  // No project open.
+  const d = fake();
+  (d.w3.workspace as { project: () => unknown }).project = () => null;
+  await assert.rejects(exportMinimap(d.w3, async () => source(), {}), /Open or import a project/);
+  assert.equal(d.picked.length, 0);
 });
 
 /** A file of tests/fixtures/minimap-we. */

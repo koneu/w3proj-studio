@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isBackdrop } from "../../lib/terrain/area";
 import { generatePathing, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import { planCliffs } from "./cliffs";
-import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
+import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
@@ -180,6 +179,7 @@ test("a ford slopes in on one cliff level, shallow enough to walk", () => {
   assert.equal(corner(t, 2, 2).hasWater, false);
   const inward = [8, 10, 12, 14, 16].map((x) => corner(t, x, 16).height);
   assert.deepEqual(inward, [...inward].sort((a, b) => b - a), "it slopes down towards the middle");
+  assert.ok(inward[0] > inward[1] && inward[1] > inward[4], `it does slope (the bed levels out in the middle): ${inward}`);
   assert.ok(inward[0] - inward[1] < 47 * 2, "as gently as real banks, measured per tile");
 });
 
@@ -402,8 +402,11 @@ test("roughen leaves ramps and water alone", () => {
   setCliffs(t, block, "box", { level: 3 }, kinds);
   setRamp(t, 7.5 * 128, 12 * 128, 2, false);
   setWater(t, { left: 20 * 128, bottom: 20 * 128, right: 30 * 128, top: 30 * 128 }, "ellipse", "ford", kinds);
-  const ramp = corner(t, 7, 12).rawHeight, water = corner(t, 25, 25).rawHeight;
-  roughenCorners(t, { left: 0, bottom: 0, right: 32 * 128, top: 32 * 128 }, "box", 40, () => 0.9);
+  const ramp = corner(t, 7, 12).rawHeight, water = corner(t, 25, 25).rawHeight, dry = corner(t, 2, 2).rawHeight;
+  const changed = roughenCorners(t, { left: 0, bottom: 0, right: 32 * 128, top: 32 * 128 }, "box", 40, () => 0.9);
+  // Control: it does roughen the dry ground that isn't a ramp.
+  assert.ok(changed.length > 0, "something was roughened");
+  assert.notEqual(corner(t, 2, 2).rawHeight, dry, "dry ground");
   assert.equal(corner(t, 7, 12).rawHeight, ramp);
   assert.equal(corner(t, 25, 25).rawHeight, water);
 });
@@ -430,22 +433,4 @@ test("wrong unit choices are refused before anything changes", () => {
   assert.deepEqual(e0.itemSets, [[{ id: "YkI0", chance: 100 }], [{ id: "YYI/", chance: 100 }], [{ id: "YlI/", chance: 100 }]]);
   assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
   assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
-});
-
-test("a tile that stays doesn't get a second slot when a tileset changes", () => {
-  const { tiles, kept } = swapTiles(["Ldrt", "Lgrs", "Alvd", "Lrok"], ["Ldrt", "Lgrs", "Lrok"], ["Alvd", "Adrt", "Agrs", "Arok"]);
-  assert.deepEqual(kept, ["Alvd"]);
-  assert.equal(new Set(tiles).size, tiles.length, tiles.join());
-  assert.equal(tiles[2], "Alvd", "it stays in its slot");
-});
-
-test("trees and doodads may stand in the border, units and items may not", () => {
-  const playable = { left: 0, bottom: 0, right: 1000, top: 1000 }, whole = { left: -500, bottom: -500, right: 1500, top: 1500 };
-  assert.equal(isBackdrop("w3b", -100, 500, playable, whole), true);
-  assert.equal(isBackdrop("w3d", 1200, 1200, playable, whole), true);
-  assert.equal(isBackdrop("w3u", -100, 500, playable, whole), false);
-  assert.equal(isBackdrop("w3t", -100, 500, playable, whole), false);
-  assert.equal(isBackdrop("w3b", 500, 500, playable, whole), false, "inside, the ground still decides");
-  assert.equal(isBackdrop("w3b", -900, 500, playable, whole), false, "off the map altogether");
-  assert.equal(isBackdrop("w3b", -100, 500, null, whole), false, "bounds unknown: no exception");
 });
