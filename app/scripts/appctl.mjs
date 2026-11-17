@@ -28,10 +28,13 @@ export function smokeId(root = repo) {
   return process.env.W3_SMOKE_ID ?? `dev.w3proj.studio.smoke.${basename(root).replace(/[^A-Za-z0-9-]+/g, "-")}`;
 }
 
-/** Where the app with this identifier keeps its settings. */
-export function configDir(id) {
-  const base = process.platform === "win32" ? process.env.APPDATA : (process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"));
-  return join(base ?? "", id);
+/** How long buildApp lets a build take: a cold one (no sccache) took about 25 minutes here. */
+export const BUILD_TIMEOUT_MS = 90 * 60 * 1000;
+
+/** The command buildApp runs: the Tauri CLI's own script under node, as an argument list (no shell: a path with
+ *  spaces or quotes in `patch` stays one argument, on Windows too, where npx is a .cmd node won't spawn without one). */
+export function buildCommand(appDir, patch) {
+  return [process.execPath, [join(appDir, "node_modules", "@tauri-apps", "cli", "tauri.js"), "build", "--debug", "--no-bundle", "--config", patch]];
 }
 
 /** Builds the smoke app (debug, no bundle) with this identifier; incremental, so cheap when nothing changed.
@@ -45,8 +48,10 @@ export function buildApp(id, work, appDir = app) {
   mkdirSync(work, { recursive: true });
   const patch = join(work, "tauri.smoke.json");
   writeFileSync(patch, JSON.stringify({ identifier: id, app: { windows }, build: { beforeBuildCommand: "npm run build" } }));
-  const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: appDir, shell: true, stdio: ["ignore", process.stderr, process.stderr] });
-  if (r.status !== 0) throw new Error("the app build failed");
+  const [cmd, args] = buildCommand(appDir, patch);
+  const r = spawnSync(cmd, args, { cwd: appDir, stdio: ["ignore", process.stderr, process.stderr], timeout: BUILD_TIMEOUT_MS });
+  if (r.error?.code === "ETIMEDOUT") throw new Error(`the app build took longer than ${BUILD_TIMEOUT_MS / 60000} minutes (stopped)`);
+  if (r.status !== 0) throw new Error(`the app build failed${r.error ? `: ${r.error.message}` : ""}`);
 }
 
 /** The release CLI, built if it isn't there (and W3PROJ_BIN doesn't name another). */
@@ -77,9 +82,10 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: build it first`);
   // A prebuilt app (W3_APP_BIN) can be of any age; the one built here is rebuilt by buildApp.
   if (prebuilt()) checkFresh(exe, { kind: "app", allowStale: staleAllowed() });
-  // Settings in the run's own folder (W3PROJ_CONFIG_DIR, else under `work`) and the webview's storage too (Linux), so
-  // two runs of one build, or of a prebuilt one, never share them.
-  const dir = process.env.W3PROJ_CONFIG_DIR ? resolve(process.env.W3PROJ_CONFIG_DIR) : join(work, "config");
+  // Settings in the run's own folder under `work` and the webview's storage too (Linux), so two runs of one build, or
+  // of a prebuilt one, never share them. Always this folder (configDirOf): it is removed before and after, so it must
+  // be one this script makes, never a W3PROJ_CONFIG_DIR of the caller's environment (which could name real settings).
+  const dir = configDirOf(work);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "settings.json"), JSON.stringify({
@@ -93,8 +99,14 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
     ...(LINUX ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}), ...env,
   };
   let page, stop, exited;
+  const removeConfig = () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   if (LINUX) {
-    ({ page, stop, exited } = await launch(exe, appEnv));
+    try {
+      ({ page, stop, exited } = await launch(exe, appEnv));
+    } catch (e) {
+      removeConfig();
+      throw e;
+    }
   } else {
     const port = await freePort();
     const child = spawn(exe, [], {
@@ -102,15 +114,24 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
       env: { ...process.env, ...appEnv, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
     });
     let code = null;
-    child.on("exit", (c) => { code = c; });
+    child.on("exit", (c, signal) => { code = c ?? signal ?? "gone"; });
+    child.on("error", () => { code ??= "failed to start"; });
     exited = () => code;
-    stop = async () => { child.kill(); };
-    page = await connect(port);
+    // The app's exit is awaited (at most 10 s) before its settings folder is removed: a running app may still write it.
+    stop = async () => { if (code === null) child.kill(); await waitFor(() => code !== null, 10000); };
+    try {
+      page = await connect(port);
+    } catch (e) {
+      // A failed connect left the app running and its settings behind.
+      await stop();
+      removeConfig();
+      throw e;
+    }
   }
   const end = async () => {
     await stop();
     await sleep(300);
-    rmSync(dir, { recursive: true, force: true });
+    removeConfig();
   };
   try {
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`), 60000);
@@ -119,6 +140,15 @@ export async function startApp({ id, work, game, settings = {}, env = {} }) {
     throw e;
   }
   return { page, stop: end, exited };
+}
+
+/** The settings folder startApp makes for a run in `work` (and removes before and after it). */
+export const configDirOf = (work) => join(work, "config");
+
+/** Waits until `done()` is true, at most `ms`; returns whether it became true. */
+async function waitFor(done, ms) {
+  for (const end = Date.now() + ms; !done(); await sleep(50)) if (Date.now() >= end) return false;
+  return true;
 }
 
 /** Calls an MCP tool of the app, as an AI client would; a tool error throws. Returns the reply's text. */

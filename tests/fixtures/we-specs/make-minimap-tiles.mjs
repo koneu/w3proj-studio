@@ -15,11 +15,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
+import { modeArgs, requireValid } from "../../gen-args.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-const only = process.argv.slice(4);
+const only = modeArgs();
 if (!game) { console.error("usage: make-minimap-tiles.mjs <w3proj cli> <game folder> [name…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -55,6 +56,7 @@ const MAPS = {
     return grid;
   },
 };
+requireValid(only.every((n) => Object.hasOwn(MAPS, n)), `unknown map ${only.filter((n) => !Object.hasOwn(MAPS, n)).join(" ")}; usage: make-minimap-tiles.mjs <w3proj cli> <game folder> [${Object.keys(MAPS).join(" | ")}]…`);
 for (const [name, make] of Object.entries(MAPS)) {
   if (only.length && !only.includes(name)) continue;
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
@@ -65,8 +67,10 @@ for (const [name, make] of Object.entries(MAPS)) {
     const lines = readFileSync(file, "utf8").split("\n");
     // The corners' map-edge bits (the margins of flat.w3x) all off: no margin.
     const bits = lines.findIndex((l) => l.startsWith("[water-bits]"));
+    if (bits < 0) throw new Error("no [water-bits] section in the w3e text");
     lines.splice(bits + 1, N, ...Array.from({ length: N }, () => "0".repeat(N)));
     const at = lines.findIndex((l) => l.startsWith("[texture]"));
+    if (at < 0) throw new Error("no [texture] section in the w3e text");
     const grid = make();
     // Rows of the text run from the north (its first row is the map's top).
     lines.splice(at, 1, "[texture]", ...grid.map((row) => row.map((t) => t.toString(16)).join("")));

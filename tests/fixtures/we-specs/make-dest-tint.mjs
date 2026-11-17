@@ -7,19 +7,21 @@
 // data (test.md); this map puts one destructable of each of many types, several of one type (varying variation, scale,
 // angle, life), and one with each flag set on the 64x64 flat map, and a custom text trigger names every one, so the
 // editor's script has them all (CreateAllDestructables).
-//   node tests/fixtures/we-specs/make-dest-tint.mjs <cli> [<game folder>] [--types A,B,..]
+//   node tests/fixtures/we-specs/make-dest-tint.mjs <cli> [<game folder>] [--types=A,B,..]
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gamePath } from "../../gamepath.mjs";
+import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const typesArg = process.argv.find((a) => a.startsWith("--types="));
 const cli = args[0] ? resolve(args[0]) : null;
 if (!cli) { console.error("usage: make-dest-tint.mjs <w3proj cli> [game folder] [--types=A,B]"); process.exit(2); }
+requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const game = args[1] ? resolve(args[1]) : gamePath();
 const run = (...a) => {
   const r = spawnSync(cli, a, { encoding: "utf8" });
