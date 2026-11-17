@@ -24,6 +24,10 @@
 //                       run doesn't depend on the last one)
 //   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
 //                       a turning day changes the brightness from one run to the next, which spoils comparisons)
+//   --pref S/KEY=VALUE  a key of WorldEditPreferences.txt written before each start of the editor (after we-drive's
+//                       own, --keep-prefs or not), e.g. "Misc/Enforce Water Limits=false"; repeatable
+//   --expect-layout     --wait-ready fails ("layout": why) when the main window isn't at 4,30 1352x937 or the tool
+//                       palette not at 1356,30: the layout spec clicks are measured in (we-compare passes it)
 //
 // Steps (in the order given; each prints one JSON line):
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
@@ -58,9 +62,14 @@
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
 //   --clipboard FILE    the clipboard's text into FILE (what Wine gives X: its own CRLF line ends are not visible
-//                       there); prints the byte count, "bytes": null when the clipboard is empty
-//   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
-//                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"
+//                       there); prints the byte count, "bytes": null with a "reason" when there is none (no owner,
+//                       refused, timeout, incremental)
+//   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names; "A" or ":" with Shift,
+//                       "+" the plus key); @MS holds it down that long (the X server's autorepeat runs meanwhile), e.g.
+//                       "ctrl+Up@2000"
+//   --numlock on|off|status   Num Lock as the X server holds it (it stays across editors on one display): on/off press
+//                       Num_Lock only when it differs, and fail when it still does; the number pad's digits (KP_6, the
+//                       nudge) want it on. Unlike a blind "--key Num_Lock" it doesn't depend on the step before
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
 //   --double-click X,Y  the same, twice in a row (a list row's own dialog: Advanced > Adjust Map String IDs)
 //   --drag X,Y:X,Y[@MS] press the left button at the first position, move to the second in 20 steps over MS (400) and
@@ -86,7 +95,8 @@
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
 //   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
 //                       Area Only); the TGA it writes is copied to FILE. Another dialog is reported, not answered
-//   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it
+//   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it; printable
+//                       ASCII only (a text with another character types nothing and fails)
 //   --close             quit without saving: closes the main window and answers "don't save" questions
 //                       (a crash-report dialog is never answered: the editor is killed, "crashed": true, nothing sent)
 //
@@ -183,7 +193,31 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+
+/** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
+ *  "Layout"). */
+export const LAYOUT = Object.freeze({ main: Object.freeze([4, 30, 1352, 937]), palette: Object.freeze([1356, 30]) });
+
+/**
+ * What is wrong with the editor's layout for clicks measured in LAYOUT, or null: the main window's place and size,
+ * and a tool palette's corner (`main`, `palettes` as classify gives them). For --expect-layout (we-compare).
+ */
+export function layoutProblem(main, palettes, want = LAYOUT) {
+  if (!main) return "the editor's layout can't be checked: no main window";
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  if (!same(main.rect, want.main)) return `the editor's main window is at ${main.rect.slice(0, 2).join(",")} ${main.rect[2]}x${main.rect[3]}, not ${want.main.slice(0, 2).join(",")} ${want.main[2]}x${want.main[3]}: the spec's clicks were measured in that layout (the 1600x1000 display; does the farm's prefix keep another window size? TESTING.md "Layout")`;
+  const p = palettes.find((w) => w.rect[0] >= main.rect[0] + main.rect[2] / 2);
+  if (p && !same(p.rect.slice(0, 2), want.palette)) return `the editor's tool palette is at ${p.rect.slice(0, 2).join(",")}, not ${want.palette.join(",")}: the spec's palette clicks were measured there`;
+  return null;
+}
+
+/** A --pref value "Section/Key=value" into { section, key, value } (the key may hold spaces and "-"; not "="). */
+export function parsePref(v) {
+  const m = /^([^/[\]\r\n]+)\/([^=\r\n]+)=([^\r\n]*)$/.exec(v ?? "");
+  if (!m || m[2] !== m[2].trim()) throw new Error(`--pref wants Section/Key=value ("Misc/Enforce Water Limits=false"), not ${JSON.stringify(v)}`);
+  return { section: m[1], key: m[2], value: m[3] };
+}
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
@@ -320,12 +354,16 @@ export function parseArgs(argv) {
       opts.screen = [Number(m[1]), Number(m[2])];
     }
     else if (a === "--keep-prefs") opts.keepPrefs = true;
+    else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
+    else if (a === "--expect-layout") opts.expectLayout = true;
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown argument ${a} (see the top of we-drive.mjs)`);
   }
+  if (opts.expectLayout && opts.screen && (opts.screen[0] !== SIZE[0] || opts.screen[1] !== SIZE[1])) throw new Error("--expect-layout checks the layout of the 1600x1000 display: leave out --screen");
+  for (const [step, v] of steps) if (step === "--numlock" && !["on", "off", "status"].includes(v)) throw new Error("--numlock wants on, off or status");
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
     throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
   }
@@ -548,9 +586,11 @@ export function editorPrefs(mode, dayNight, keep = false) {
  * pinned to the editor's defaults before each start so a run doesn't depend on what the last one left. The editor
  * writes a switched-off Enforce Water Limits as "false", so the default is written as "true". The other View menu
  * toggles (Grid, Camera Bounds, pathing, ...) aren't kept in the preferences file: they start as the editor's own.
- * `--keep-prefs` leaves these as they are.
+ * "Reset Fixed Z When Moving Objects" is the switch Ctrl+Shift+H toggles (unit-heights; seen 2026-11-17: false before,
+ * true after one press, and kept by the next start when not pinned): pinned to false, what the farm's prefix held
+ * through the runs the specs were written in. `--keep-prefs` leaves these as they are.
  */
-export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1" });
+export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1", "Reset Fixed Z When Moving Objects": "false" });
 
 /**
  * The [Minimap] toggle pinned the same way: the editor keeps the "Show Creep Camp Icon" box under the minimap as it
@@ -564,6 +604,16 @@ export const PINNED_MINIMAP_PREFS = Object.freeze({ "Show Creep Camps": "false" 
 export function withEditorPrefs(text, mode, dayNight, keep = false) {
   const misc = setPrefs(text, "Misc", editorPrefs(mode, dayNight, keep));
   return keep ? misc : setPrefs(misc, "Minimap", PINNED_MINIMAP_PREFS);
+}
+
+/** The preferences text with the --pref keys ([{ section, key, value }], parsePref) set over it, in their sections; a
+ *  later --pref of the same key wins. Applied after we-drive's own keys, --keep-prefs or not. */
+export function withExtraPrefs(text, prefs) {
+  const bySection = new Map();
+  for (const p of prefs) bySection.set(p.section, { ...(bySection.get(p.section) ?? {}), [p.key]: p.value });
+  let out = text;
+  for (const [section, values] of bySection) out = setPrefs(out, section, values);
+  return out;
 }
 
 /**
@@ -876,7 +926,7 @@ export class Session {
     const file = join(dir, "WorldEditPreferences.txt");
     mkdirSync(dir, { recursive: true });
     const before = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const after = withEditorPrefs(before, this.opts.mode, this.opts.dayNight, !!this.opts.keepPrefs);
+    const after = withExtraPrefs(withEditorPrefs(before, this.opts.mode, this.opts.dayNight, !!this.opts.keepPrefs), this.opts.prefs ?? []);
     if (after !== before) writeFileSync(file, after);
   }
 
@@ -1110,7 +1160,7 @@ export class Session {
     let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0, moduleSince = 0;
     for (;;) {
       if (this.editorExited) throw new Error(`the editor exited while starting (see ${this.log})`);
-      const { main, dialogs } = this.windows();
+      const { main, dialogs, palettes } = this.windows();
       if (main && !mainAt) mainAt = this.now() - this.startedAt;
       const unknown = this.answerKnown(dialogs, main);
       if (dialogs.some((d) => isReopenedModule(d.title))) moduleSince ||= this.now();
@@ -1143,6 +1193,11 @@ export class Session {
       if (drawn) {
         readySince ||= this.now();
         if (this.now() - readySince > 3000) {
+          // --expect-layout: a main window or palette elsewhere than where the clicks were measured stops the run.
+          if (this.opts.expectLayout) {
+            const layout = layoutProblem(main, palettes);
+            if (layout) return { ready: false, layout, main: main.rect, palettes: palettes.map((p) => ({ title: p.title, rect: p.rect })), screen: this.dialogShot("layout") };
+          }
           return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
         }
       } else readySince = 0;
@@ -1575,6 +1630,14 @@ async function main() {
           const r = s.x("key", ...(to ? ["--window", to.id] : []), m[1], ...(m[2] ? ["--hold", m[2]] : []));
           await s.wait(300);
           out({ step, key: m[1], ...(m[2] ? { holdMs: Number(m[2]) } : {}), ...(r.pressed === false ? { pressed: false, reason: r.reason } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--numlock") {
+          // Num Lock as the X server holds it (it outlives an editor on the display): Num_Lock is pressed, into the
+          // main window as --key does, only when the state differs, then read again.
+          const { main } = s.windows();
+          const r = s.x("numlock", arg, ...(main ? ["--window", main.id] : []));
+          if (arg !== "status" && r.numlock !== arg) throw new Error(`Num Lock is still ${r.numlock} after ${r.pressed ? "pressing Num_Lock" : "no press"}${r.reason ? ` (${r.reason})` : ""}`);
+          await s.wait(r.pressed ? 300 : 0);
+          out({ step, numlock: r.numlock, was: r.was, pressed: r.pressed });
         } else if (step === "--type") {
           // Into the open dialog if there is one, else the main window, as --key.
           const w = s.windows();
