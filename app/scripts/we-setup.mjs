@@ -18,7 +18,8 @@
 //   node scripts/we-setup.mjs --snapshot FILE  write a list of the user's Steam prefix's files (the install is in it):
 //                                              size, mtime, ctime, inode, and the sha256 of files under 64 MB
 //   node scripts/we-setup.mjs --compare A B    compare two snapshots; exit 1 if a file of the install or of the
-//                                              editor's preferences (Documents/Warcraft III) changed, came or went.
+//                                              editor's preferences (Documents/Warcraft III) changed, came or went,
+//                                              or when the snapshots hold no such file at all (they prove nothing).
 //                                              Other changes in the prefix are listed (the user's running Battle.net
 //                                              app writes there; the editor can't, its sandbox has the prefix read-only)
 //
@@ -264,7 +265,7 @@ export function lockPath() {
  * process is gone). Waits while another run holds it, saying so once (who, since when); gives
  * up after `timeoutMs`. Returns a function that lets it go.
  */
-export async function takeLock(say, timeoutMs = 30 * 60 * 1000) {
+export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename = () => {} } = {}) {
   const dir = lockPath(), owner = join(dir, "owner.json");
   mkdirSync(dirname(dir), { recursive: true });
   const start = Date.now();
@@ -281,8 +282,21 @@ export async function takeLock(say, timeoutMs = 30 * 60 * 1000) {
       if (stale) {
         const again = lockOwner(owner);
         if (again ? alive(again.pid) || again.pid !== held?.pid : held || ageMs(dir) <= 10000) continue;
+        // Renamed to a name of this run's own, then read again: when what was moved isn't the stale lock seen above
+        // (another run took the lock between the check and the rename), it is put back where it was.
         const gone = `${dir}.stale-${process.pid}-${Date.now()}`;
+        beforeRename(dir); // tests: another run takes the lock just here
         try { renameSync(dir, gone); } catch { continue; }
+        const moved = lockOwner(join(gone, "owner.json"));
+        if (held ? moved?.pid !== held.pid : moved !== null) {
+          // A folder at the name now is a third run's: renaming onto it (empty) would take its place, so give up.
+          if (existsSync(dir)) {
+            rmSync(gone, { recursive: true, force: true });
+            throw new Error(`the World Editor lock ${dir} changed hands while it was taken over (process ${moved?.pid ?? "?"}'s lock was moved and can't be put back): stop the other runs and try again`);
+          }
+          try { renameSync(gone, dir); } catch (e) { rmSync(gone, { recursive: true, force: true }); throw new Error(`the World Editor lock ${dir} changed hands while it was taken over and can't be put back: ${e.message}`); }
+          continue;
+        }
         say(held ? `took over the World Editor lock of ${held.repo} (process ${held.pid} is gone)` : `took over a lock without an owner: ${dir}`);
         rmSync(gone, { recursive: true, force: true });
         continue;
@@ -341,6 +355,10 @@ export function compare(a, b, guarded = []) {
   return { files: Object.keys(a.files).length, guarded, guardedFiles, guardedChanged: all.filter(isGuarded), skippedGuarded: skipped.filter(isGuarded), skippedElsewhere: skipped.filter((p) => !isGuarded(p)), elsewhereChanged: all.filter((p) => !isGuarded(p)) };
 }
 
+/** --compare's exit code: 1 when a guarded file changed or couldn't be read, and when the snapshots hold no guarded
+ *  file at all (taken of another folder, or of a prefix without the install: they prove nothing), else 0. */
+export const compareExit = (r) => (r.guardedChanged.length || r.skippedGuarded.length || r.guardedFiles === 0 ? 1 : 0);
+
 /** The paths of the user's that must stay as they are: the install, and the editor's preferences in their prefix. */
 export function guardedPaths(game) {
   const user = userCompatData(game);
@@ -370,7 +388,7 @@ function main(argv) {
     if (!a || !b) throw new Error("--compare wants two snapshot files");
     const r = compare(JSON.parse(readFileSync(a, "utf8")), JSON.parse(readFileSync(b, "utf8")), guardedPaths(game));
     console.log(JSON.stringify(r, null, 1));
-    return r.guardedChanged.length || r.skippedGuarded.length ? 1 : 0;
+    return compareExit(r);
   }
   console.log(JSON.stringify(setup(game)));
   return 0;

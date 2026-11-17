@@ -215,26 +215,16 @@ test("verify-build: folders per commit and per tester differ", () => {
   assert.equal(a.env.W3_APP_BIN, l.exe);
 });
 
-function isGenerated(map, repo, gens) {
-  const rel = relative(join(repo, "target"), map);
-  if (rel.startsWith("..") || resolve(rel) === rel) return false;
-  const folder = basename(dirname(map));
-  const file = basename(map);
-  // A generator names its output either literally or as a template (`melee-valid-${name}.w3x`): then the template's
-  // fixed prefix and suffix must fit the file and the case name between them must appear in the generator.
-  const templated = (g) => [...g.matchAll(/([\w.-]*)\$\{[^}]+\}([\w.-]*)/g)].some(([, pre, post]) => {
-    if (!pre && !post) return false;
-    if (!file.startsWith(pre) || !file.endsWith(post) || file.length <= pre.length + post.length) return false;
-    return g.includes(file.slice(pre.length, file.length - post.length));
-  });
-  return gens.some((g) => g.includes(folder) && (g.includes(file) || templated(g)));
-}
+/** Whether a make-*.mjs (texts) writes the map: we-compare's own generatorOf, which also names it in a missing input's error. */
+const isGenerated = (map, repo, gens) => core.generatorOf(map, repo, gens.map((text, i) => ({ name: `gen-${i}`, text }))) !== null;
 
 test("no spec under tests/we-compare reads openpoints, and every input map is in the repository (or in smoketest_maps)", () => {
   const root = repoPath("tests", "we-compare");
   const files = [];
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith(".json") && files.push(join(d, e.name)); };
   walk(root);
+  // The allowlist of "differs" without paths is no spec.
+  files.splice(files.indexOf(core.differsAllowlistPath(resolve(root, "..", ".."))), 1);
   assert.ok(files.length > 50, "found the specs");
   // A main checkout without openpoints: ${MAIN} points at a folder that has none.
   const vars = { MAIN: join(root, "no-such-main"), REPO: resolve(root, "..", "..") };
@@ -248,7 +238,7 @@ test("no spec under tests/we-compare reads openpoints, and every input map is in
     // smoketest_maps/ is the user's own folder of real maps (read only, not in the repository): a spec may name one in
     // the main checkout's (${MAIN}), and only there.
     const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
-    for (const s of parseSpecFile(text, f, vars)) if (s.input.map && !resolve(s.input.map).startsWith(userMaps)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
+    for (const s of parseSpecFile(text, f, vars, { differsWithoutPaths: core.readDiffersAllowlist(vars.REPO) })) if (s.input.map && !resolve(s.input.map).startsWith(userMaps)) assert.ok(existsSync(s.input.map) || generated(s.input.map), `${f}: ${s.name}: no input map at ${s.input.map}`);
   }
   // Controls: the exemption is the main checkout's smoketest_maps folder, not any path that mentions the name.
   const userMaps = resolve(vars.MAIN, "smoketest_maps") + sep;
