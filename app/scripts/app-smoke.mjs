@@ -732,7 +732,7 @@ async function waterPathing(page, found) {
   if (await tab()) fail(`the rebuild after an edit with the terrain tab closed opened ${await tab()}`);
 
   // A commit straight after a tool's edit takes the rebuilt pathing map with it: nothing of the project is left uncommitted.
-  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8" });
+  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(root) } });
   if (git("init", "-q").status !== 0) return fail("git init failed in the project folder");
   git("add", "-A");
   git("commit", "-q", "-m", "base");
@@ -1214,9 +1214,10 @@ async function pasteWaitsForSizes(page, found) {
  *  cycle's clock is performance.now, which the page gets an offset on: a jump of it instead of twenty seconds' wait. */
 async function verify3Steps(page, found) {
   const fail = (what) => found.push(`verify 3 steps: ${what}`);
-  const k = await heightKit(page, "Verify3");
-  const { hands } = k;
+  let k;
   try {
+  k = await heightKit(page, "Verify3");
+  const { hands } = k;
   // ---- mcp.ignoreUndoSteps: begin_edit's description and project_info follow it, and it goes back -----------------------
   const rpc = async (method, params) => JSON.parse(await page.evaluate(`w3.mcp.handle(${lit(JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }))})`));
   const beginEdit = async () => (await rpc("tools/list", {})).result?.tools?.find((t) => t.name === "begin_edit")?.description ?? "";
@@ -1323,7 +1324,7 @@ async function verify3Steps(page, found) {
   await k.save();
   await k.verify(fail);
   } finally {
-    await k.reset().catch(() => {});
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1721,6 +1722,8 @@ async function terrainSelectCameras(page, found) {
   }, 20000).catch(async (e) => fail(`${e.message} (the selection: ${lit(await page.evaluate(at))} "${await page.evaluate(name)}")`));
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.animate", undefined)`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2065,7 +2068,7 @@ async function viewModes(page, found) {
       await setMode("hd");
       await ringsBecome("Light Ranges back in HD shows rings again", (n) => n > 0);
     } finally {
-      await setMode(mode ?? "hd");
+      await setMode(mode);
       if ((await state())?.lightRanges) await k.hands.click(".model-toggle", "Light ranges");
     }
   }
@@ -2075,6 +2078,9 @@ async function viewModes(page, found) {
   await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
+    await page.evaluate(`w3.settings.set("terrain.animate", undefined)`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2380,12 +2386,12 @@ async function unitProperties(page, found) {
   }
   if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== unitsBefore) fail("a refused set_object_properties changed war3mapUnits.doo");
   await k.verify(fail);
-  await page.evaluate(`window.__propsGroup?.dispose(); delete window.__propsGroup; delete window.__propsEd;`);
-  await page.evaluate(`w3.editors.closeAll()`);
-  // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
-  // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
-  await page.evaluate(`w3Workbench.game.reload()`);
   } finally {
+    await page.evaluate(`window.__propsGroup?.dispose(); delete window.__propsGroup; delete window.__propsEd;`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
+    // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
+    await page.evaluate(`w3Workbench.game.reload()`).catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -2542,7 +2548,7 @@ async function techtreeRandomLevels(page, found) {
     // At 900 px (#app narrowed) the row's name label wraps or is cut with an ellipsis and a tooltip: never silently clipped by the pane.
     await page.evaluate(`document.getElementById("app").style.width = "900px"`);
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      await page.evaluate(`new Promise((r) => { const t = setTimeout(r, 1000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })`);
       const m = await page.evaluate(`(() => { const row = document.querySelector(${lit(`${cell(0)} .techtree-object`)}), l = row.querySelector(".techtree-name");
         let p = row.parentElement; while (p && !/(auto|scroll|hidden)/.test(getComputedStyle(p).overflowX)) p = p.parentElement;
         const lr = l.getBoundingClientRect(), pr = (p ?? document.documentElement).getBoundingClientRect();
@@ -2657,7 +2663,7 @@ async function mapInfoColorTools(page, found) {
   for (const width of ["", "900px"]) try {
     await page.evaluate(`document.getElementById("app").style.width = ${lit(width)}`);
     await page.evaluate(`${field}.focus()`);
-    await new Promise((r) => setTimeout(r, 300));
+    await page.evaluate(`new Promise((r) => { const t = setTimeout(r, 1000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })`);
     const w = await page.evaluate(`(() => { const f = ${field}, r = f.closest(".color-tools"), b = (e) => e.getBoundingClientRect().width, bar = r.querySelector(".color-tools-bar"), pv = r.querySelector(".color-tools-preview");
       return { field: b(f), bar: b(bar), barShown: getComputedStyle(bar).display !== "none", preview: pv.hidden ? 0 : b(pv), scroll: r.scrollWidth - r.clientWidth }; })()`);
     if (!w.barShown) fail("the colour toolbar isn't shown while the name box has focus");
@@ -2712,6 +2718,9 @@ async function objectListSuffix(page, found) {
     await until("the standard ability's row", async () => (await rowText("ANfb")) !== null, 30000);
     const std = await rowText("ANfb");
     if (!/ - \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
+    // Control: a text that matches nothing takes the row away, so the row seen next is the filter's doing.
+    await search("zzz no such object");
+    if (!(await soon(async () => (await rowText("ANfb")) === null))) fail("the search box doesn't filter the list (control)");
     await search("neutral hostile");
     if (!(await soon(async () => (await rowText("ANfb")) !== null))) fail("the filter doesn't find the suffix");
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
@@ -2911,6 +2920,7 @@ async function itemTablesAccess(page, found) {
   await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
   await panel();
   const oldLayout = !("itemTable" in footman());
+  if (!oldLayout) console.log("  item tables: a new map already has the newer unit layout, the older-layout assertions are skipped");
   if (oldLayout) {
     if ((await options("drops-mode")).includes("table")) fail("a unit file without item tables offers \"Map item table\"");
     if (!(await shown("drops-hint")) || !/Reign of Chaos/.test(await page.evaluate(`document.querySelector(${lit(at("drops-hint"))})?.textContent ?? ""`))) fail("the older layout doesn't say why only own sets are offered");
@@ -3074,6 +3084,7 @@ async function itemDrops(page, found) {
   const ogre = (x) => k.units().find((u) => u.id === "nogr" && u.position[0] === x);
   // The game's names in the install's language: the forest troll (trapper) and Claws of Attack.
   const trollName = await gameName(page, "nftt"), clawsName = await gameName(page, "ratf");
+  if (!trollName || !clawsName) return fail(`the game data has no names for nftt / ratf (${lit([trollName, clawsName])}); the name checks below would be vacuous`);
   const T = (sel) => `.drops-tab ${sel}`;
   const text = (sel) => page.evaluate(`document.querySelector(${lit(sel)})?.textContent ?? null`);
   const has = (sel) => page.evaluate(`!!document.querySelector(${lit(sel)})`);
@@ -3198,7 +3209,7 @@ async function itemDrops(page, found) {
   await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
   await redrawn();
   const before = unitsHash();
-  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
+  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; window.__pickRestore = () => { s.pick = pick; }; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
   await page.evaluate(`window.__picked`);
   await k.hands.click(T("[data-prop=\"add-set-each\"]"));
   await redrawn();
@@ -3351,7 +3362,7 @@ async function flyingHeights(page, found) {
           .catch(async () => fail(`with the water hidden, the water's depth picture is ${lit(await depth())}`));
         await page.evaluate(`${water}.click()`);
       }
-    }
+    } else console.log("  fly heights: graphicsMode is sd, the HD water depth section is skipped");
   } finally {
     await page.evaluate(`window.__flyGroup?.dispose(); window.__flyGroup = null; window.__flyEd = null;`);
   }
@@ -3454,7 +3465,7 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
     await borderFromInfo(page, k, offset, boundary, fail, toggle);
   } finally {
     await boundary(true);
-    await page.evaluate(`w3.settings.set("terrain.animate", ${lit(animate ?? true)})`);
+    await page.evaluate(`w3.settings.set("terrain.animate", ${lit(animate)})`);
     await k.reset();
   }
 }
@@ -3687,7 +3698,7 @@ async function artModeReload(page, found) {
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("still unsaved after Save and Reopen");
   } finally {
     await page.evaluate(`window.__artGroup?.dispose(); window.__artGroup = null; window.__artEds = null;`);
-    await setMode(original ?? "hd");
+    await setMode(original);
   }
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
@@ -3703,8 +3714,8 @@ async function importArtReload(page, found) {
   const k = await heightKit(page, "ImportArtReload");
   const MODEL = "map/war3mapimported/artreload.mdx";
   const file = join(k.root, "map", "war3mapimported", "artreload.mdx");
-  const game = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
-  const footman = await game("Units\\Human\\Footman\\Footman.mdx"), other = await game("Units\\Human\\Peasant\\Peasant.mdx");
+  const readGame = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  const footman = await readGame("Units\\Human\\Footman\\Footman.mdx"), other = await readGame("Units\\Human\\Peasant\\Peasant.mdx");
   mkdirSync(dirname(file), { recursive: true });
   await page.evaluate(`window.__artReloadGroup?.dispose()`);
   try {
@@ -3963,7 +3974,7 @@ async function groundTextureReload(page, found) {
   try {
   const fail = (what) => found.push(`ground texture reload: ${what}`);
   const k = await heightKit(page, "GroundTexReload");
-  const game = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
+  const readGame = (p) => page.evaluate(`w3.game.read(${lit(p)}).then((b) => { let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(t); })`).then((b64) => Buffer.from(b64, "base64"));
   try {
     // The first tile's texture path is on its row in the side list (the title, once loaded).
     const loaded = () => page.evaluate(`[...document.querySelectorAll(".model-row")].map((r) => r.title).find((t) => /\\.blp$/i.test(t)) ?? null`);
@@ -3973,7 +3984,7 @@ async function groundTextureReload(page, found) {
     const find = (re) => list.find((p) => re.test(p));
     const aName = find(/TerrainArt[\\/][^\\/]*[\\/]Dalaran_BlackMarble\.(blp|dds)$/i), bName = find(/TerrainArt[\\/][^\\/]*[\\/]Lords_Dirt\.(blp|dds)$/i);
     if (!aName || !bName) return fail(`no two other ground textures in the game data (${aName}, ${bName})`);
-    const [a, b] = [await game(aName), await game(bName)];
+    const [a, b] = [await readGame(aName), await readGame(bName)];
     if (a.equals(b)) return fail("the two textures are the same file (control)");
     const file = join(k.root, "map", ...tile.split("\\"));
     mkdirSync(dirname(file), { recursive: true });
@@ -4973,6 +4984,8 @@ async function gameName(page, id) {
  *  dialogs, and call this in a `finally`). */
 async function restoreWindow(page) {
   await page.evaluate(`(() => { for (const [name, fn] of Object.entries(window.__w3WindowOrig ?? {})) w3.window[name] = fn; })()`).catch(() => {});
+  // gateWrites' replacement of workspace.writeText goes too, so a later check writes through the real one.
+  await page.evaluate(`(() => { const space = w3Workbench.workspace; if (space.__write) { space.writeText = space.__write; delete space.__write; } window.__gates = {}; window.__pickRestore?.(); delete window.__pickRestore; })()`).catch(() => {});
 }
 
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
