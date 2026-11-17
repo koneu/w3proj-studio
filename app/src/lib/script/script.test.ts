@@ -317,6 +317,19 @@ test("a type's team colour goes on placed units", () => {
   has(units([unit({ id: "ntav" })], { teamColor: () => 0 }), "    call SetUnitColor( u, ConvertPlayerColor(0) )");
 });
 
+test("a coloured hero's SetUnitColor comes after SetHeroLevel and before SelectHeroSkill", () => {
+  const s = units([unit({ id: "O61R", level: 10, abilities: [{ id: "XAC1", level: 1, autocast: 0 }] })], { teamColor: () => 3 });
+  const at = (t: string) => s.indexOf(t);
+  assert.ok(at("SetHeroLevel") < at("SetUnitColor") && at("SetUnitColor") < at("SelectHeroSkill"));
+});
+
+test("a learned custom ability without an autocast order gets an empty order", () => {
+  const abilities = [{ id: "XAC1", level: 2, autocast: 0 }, { id: "AUav", level: 1, autocast: 0 }, { id: "XAC9", level: 0, autocast: 0 }];
+  const s = units([unit({ abilities })], { customAbility: (id: string) => id.startsWith("X") });
+  assert.equal(s.split('IssueImmediateOrder( u, "" )').length - 1, 1);
+  hasNot(units([unit({ abilities })], {}), 'IssueImmediateOrder( u, "" )');
+});
+
 test("team colours: the game's, changed by the map, inherited by custom units", () => {
   const game = gameTeamColors([{ unitUIID: "ntav", teamColor: "0" }, { unitUIID: "nmr2", teamColor: "12" }, { unitUIID: "hfoo", teamColor: "-1" }, { unitUIID: "hkni", teamColor: "" }, { unitUIID: "hpea" } as never]);
   assert.deepEqual([...game], [["ntav", 0], ["nmr2", 12]]);
@@ -370,9 +383,10 @@ test("buildings: the game's, changed by the map, inherited by custom types; the 
 
 test("custom gold mines and waygates are found in the object data", () => {
   const s = specialUnits([{ original: [{ base: "nrdr", mods: [{ field: "uabi", value: "Awan,Agld,Avul" }] }, { base: "hfoo", mods: [{ field: "uabi", value: "Adef" }] }],
-    custom: [{ id: "n000", base: "ngol" }, { id: "n001", base: "hfoo", mods: [{ field: "uabi", value: "Agld" }] }, { id: "n002", base: "nwgt" }, { id: "n003", base: "hfoo" }] }, null]);
+    custom: [{ id: "n000", base: "ngol" }, { id: "n001", base: "hfoo", mods: [{ field: "uabi", value: "Agld" }] }, { id: "n002", base: "nwgt" }, { id: "n003", base: "hfoo" }, { id: "n004", base: "ngol", mods: [{ field: "uabi", value: "Avul" }] }] }, null]);
   for (const id of ["ngol", "ugol", "egol", "nrdr", "n000", "n001"]) assert.ok(s.goldMines.has(id), id);
   assert.ok(!s.goldMines.has("n003"));
+  assert.ok(!s.goldMines.has("n004"), "own ability list without Agld");
   assert.ok(!s.goldMines.has("hfoo"));
   assert.ok(s.waygates.has("n002"));
   assert.ok(!s.waygates.has("n003"));
