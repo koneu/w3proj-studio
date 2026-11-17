@@ -3,23 +3,16 @@
 // invented function whose blocks showed as "Loop - Actions / Actions / Actions".
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { readFixture } from "../testhelpers/testutil";
 import { branchLabels } from "./display";
 import { parseWtgJson, type Eca } from "./wtg";
 
-/** The mini map's triggers, found from where the tests run (app/ or the repository). */
-function fixture(): string {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "mini-map", "map", "war3map.wtg.json");
-    if (existsSync(p)) return p;
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/mini-map not found");
-  }
-}
-const file = parseWtgJson(readFileSync(fixture(), "utf8"));
+/** The mini map's triggers (read when a test asks, not when the file loads). */
+const miniMapTriggers = () => parseWtgJson(readFixture("mini-map", "map", "war3map.wtg.json"));
 
 test("the mini map: every variable entry of the trigger tree is a variable, in the same folder", () => {
+  const file = miniMapTriggers();
   const entries = file.items.filter((i) => i.type === 64);
   assert.ok(entries.length > 0, "the fixture has a variable entry (control)");
   for (const e of entries) {
@@ -31,6 +24,7 @@ test("the mini map: every variable entry of the trigger tree is a variable, in t
 });
 
 test("the mini map: every block of a control-flow action has the World Editor's label", () => {
+  const file = miniMapTriggers();
   let blocks = 0;
   const visit = (e: Eca) => {
     const groups = [...new Set(e.children.map((c) => c.group ?? 0))];

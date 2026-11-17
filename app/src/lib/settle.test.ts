@@ -82,26 +82,30 @@ test("a step that throws doesn't stop the others", async () => {
   assert.equal(ran, true);
 });
 
-test("DueTimer runs its job once after the last schedule, and runNow runs a waiting job at once", async () => {
+test("DueTimer runs its job once after the last schedule, and runNow runs a waiting job at once", (ctx) => {
+  ctx.mock.timers.enable({ apis: ["setTimeout"] });
   let runs = 0;
   const t = new DueTimer(() => { runs++; }, 20);
   assert.equal(t.runNow(), false, "nothing waits: nothing runs");
   assert.equal(runs, 0);
   t.schedule();
+  ctx.mock.timers.tick(10);
   t.schedule();
   assert.equal(t.due, true);
-  await new Promise((r) => setTimeout(r, 60));
+  ctx.mock.timers.tick(19);
+  assert.equal(runs, 0, "scheduled again, the wait starts again");
+  ctx.mock.timers.tick(1);
   assert.equal(runs, 1, "two schedules in a row run the job once, after the delay");
   assert.equal(t.due, false);
   t.schedule();
   assert.equal(t.runNow(), true);
   assert.equal(runs, 2, "runNow runs the waiting job without its delay");
   assert.equal(t.due, false);
-  await new Promise((r) => setTimeout(r, 60));
+  ctx.mock.timers.tick(60);
   assert.equal(runs, 2, "and the delay's run doesn't come on top (control: a timer left running would run it again)");
   t.schedule();
   t.cancel();
-  await new Promise((r) => setTimeout(r, 60));
+  ctx.mock.timers.tick(60);
   assert.equal(runs, 2, "a cancelled job doesn't run");
 });
 

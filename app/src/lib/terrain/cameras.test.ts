@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFixture } from "../testhelpers/testutil";
 import { CAMERA_FIELDS, CAMERA_RANGES, type CameraField, cameraFieldName, cameraMarkers, DEPTH_OF_FIELD, typedCameraValue, EDITOR_VIEW_CLIP, MARKER_RGB, MARKER_STRIDE, markerHandles, nameDepthOfField, segmentDistance, targetInCameraBounds, VIEW_OUTSIDE_BOUNDS, ViewClipping, viewInCameraBounds } from "./cameras";
 
 /** The corners of cameraMarkers' triangles as [x, y, z], their normals and their colours. */
@@ -231,15 +230,12 @@ test("typedCameraValue: what the World Editor's Camera Properties would move (we
 });
 
 test("typedCameraValue agrees with every Camera Properties value recorded from the World Editor (camera-region-limits-we.json)", () => {
-  // Found from where the tests run (app/ or the repository).
-  let file = "";
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    file = join(dir, "tests", "fixtures", "we-specs", "camera-region-limits-we.json");
-    if (existsSync(file)) break;
-    if (dirname(dir) === dir) throw new Error("tests/fixtures/we-specs/camera-region-limits-we.json not found");
-  }
-  const rec = JSON.parse(readFileSync(file, "utf8")) as { cameras: { field: CameraField; typed: number; we: number; moved?: boolean }[] };
-  assert.ok(rec.cameras.length > 30);
+  const rec = JSON.parse(readFixture("we-specs", "camera-region-limits-we.json")) as { cameras: { field: CameraField; typed: number; we: number; moved?: boolean }[] };
+  assert.equal(rec.cameras.length, 39, "the recording's rows");
+  // Every row names a field Studio has, and the recording covers the fields it can type (not targetX/targetY).
+  for (const row of rec.cameras) assert.ok(CAMERA_FIELDS.some(([k]) => k === row.field), `unknown field ${row.field}`);
+  assert.deepEqual([...new Set(rec.cameras.map((r) => r.field))].sort(),
+    ["angleOfAttack", "distance", "farZ", "fieldOfView", "nearZ", "roll", "rotation", "zOffset"]);
   let kept = 0, changed = 0;
   for (const row of rec.cameras) {
     const c = { targetX: 0, targetY: 0, zOffset: 1, rotation: 91, angleOfAttack: 305, distance: 1650, roll: 1, fieldOfView: 71, farZ: 5000, nearZ: 100 };
@@ -248,5 +244,5 @@ test("typedCameraValue agrees with every Camera Properties value recorded from t
     if (editorKept) { kept++; assert.ok(!("refused" in got), `${row.field} = ${row.typed}: the editor kept it, Studio refused: ${"refused" in got ? got.refused : ""}`); }
     else { changed++; assert.ok("refused" in got, `${row.field} = ${row.typed}: the editor changed it (to ${row.we}), Studio took it`); }
   }
-  assert.ok(kept >= 10 && changed >= 15, `${kept} kept, ${changed} changed`);
+  assert.deepEqual({ kept, changed }, { kept: 12, changed: 27 });
 });

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { skipOrFail } from "../testhelpers/testutil";
 import { gameFiles, mainCheckout } from "../testhelpers/gamefiles";
 import { toClassicMdx } from "./classic";
 import { checkClassicModel } from "./classiccheck";
@@ -131,7 +132,7 @@ test("the Reforged art of the 14a/14c doodads, converted as Convert to Classic d
     "War3.w3mod:_HD.w3mod:Units/Creeps/Owl/Owl.mdx",
     "War3.w3mod:_HD.w3mod:Doodads/Cityscape/Structures/MoreCityBuilding3/MoreCityBuilding3.mdx",
   ]);
-  if (!models.length) return ctx.skip("no game or release CLI (.game-path, target/release/w3proj)");
+  if (!models.length) return skipOrFail(ctx, "no game or release CLI (.game-path, target/release/w3proj)");
   assert.ok(models.length >= 23, `only ${models.length} of the game's models read`);
   for (const { name, bytes } of models) {
     const src = parseMdx(bytes);
@@ -144,7 +145,7 @@ test("the Reforged art of the 14a/14c doodads, converted as Convert to Classic d
 test("the Classic models of real maps (MDX 800 files of smoketest_maps, drawn by the game) read without an error", (ctx) => {
   const where = mainCheckout();
   const corpus = process.env.W3PROJ_CORPUS ?? (where ? join(where.main, "smoketest_maps") : "");
-  if (!corpus || !existsSync(corpus)) return ctx.skip("no smoketest_maps (W3PROJ_CORPUS)");
+  if (!corpus || !existsSync(corpus)) return skipOrFail(ctx, "no smoketest_maps (W3PROJ_CORPUS)");
   const files: string[] = [];
   const walk = (dir: string) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -153,8 +154,9 @@ test("the Classic models of real maps (MDX 800 files of smoketest_maps, drawn by
     }
   };
   walk(corpus);
-  const classic = files.map((p) => ({ p, bytes: new Uint8Array(readFileSync(p)) })).filter(({ bytes }) => new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true) === 800);
-  if (!classic.length) return ctx.skip("no MDX 800 file in smoketest_maps");
-  const bad = classic.map(({ p, bytes }) => ({ p, errors: checkClassicModel(bytes).errors })).filter((x) => x.errors.length);
+  const classic = files.map((p) => ({ p, bytes: new Uint8Array(readFileSync(p)) })).filter(({ bytes }) => bytes.length >= 16 && new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true) === 800);
+  if (!classic.length) return skipOrFail(ctx, "no MDX 800 file in smoketest_maps");
+  const check = (p: string, bytes: Uint8Array) => { try { return checkClassicModel(bytes).errors; } catch (e) { throw new Error(`${p}: the checker threw: ${e instanceof Error ? e.message : e}`); } };
+  const bad = classic.map(({ p, bytes }) => ({ p, errors: check(p, bytes) })).filter((x) => x.errors.length);
   assert.deepEqual(bad.slice(0, 5).map((x) => `${x.p}: ${x.errors[0]}`), [], `${bad.length} of ${classic.length} real Classic models`);
 });
