@@ -47,6 +47,15 @@ function toContent(value: unknown): McpContent[] {
   return [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }];
 }
 
+/** The arguments a call gave that the tool's schema doesn't list, or none: a tool with a `properties` list takes those and
+ *  nothing else (unless it says `additionalProperties: true`), so a misspelt or unsupported one is refused instead of
+ *  being dropped without a word. */
+export function unknownArguments(schema: unknown, args: Record<string, unknown>): string[] {
+  const s = schema as { properties?: Record<string, unknown>; additionalProperties?: unknown } | undefined;
+  if (!s || typeof s.properties !== "object" || s.properties === null || s.additionalProperties === true) return [];
+  return Object.keys(args).filter((k) => !Object.prototype.hasOwnProperty.call(s.properties, k));
+}
+
 const failed = (text: string) => ({ content: [{ type: "text", text }] as McpContent[], isError: true });
 
 /** An error that reads differently to an AI client: code shared by the app's own commands and the MCP tools refuses
@@ -104,6 +113,11 @@ export class McpTools {
   async call(name: string, args: Record<string, unknown>): Promise<{ content: McpContent[]; isError?: boolean }> {
     const d = this.declared.get(name);
     if (!d || !this.usable(d)) return failed(`There's no tool "${name}".`);
+    const unknown = unknownArguments(d.tool.inputSchema, args);
+    if (unknown.length) {
+      const takes = Object.keys((d.tool.inputSchema as { properties: object }).properties);
+      return failed(`${name} doesn't take ${unknown.length === 1 ? "the argument" : "the arguments"} ${unknown.map((k) => `"${k}"`).join(", ")}, so nothing was done. It takes: ${takes.length ? takes.join(", ") : "no arguments"}.`);
+    }
     try {
       if (!this.handlers.has(name)) await this.hooks.activate(`onMcpTool:${name}`);
       const handler = this.handlers.get(name);
