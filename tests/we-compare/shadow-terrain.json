@@ -1,7 +1,7 @@
 [
   {
     "name": "shadow-terrain",
-    "description": "Calculate Shadows on ground and cliffs (branch we-shadow-3, 2026-11-17): shadow-terrain.w3x (fixtures/we-specs/make-shadow-probes.mjs: a 128 bank, cliffs one and two levels up, single corners raised 128, 256 and 512, two ridges, a 64 bank; no doodads). The editor: File > Calculate Shadows and Save Map. Studio: w3.terrain.calculateShadows. war3map.shd cell by cell: the editor's walk of 16 cells toward the sun over heights at the cell centres (shadows.ts shadowCellHeights, cliffs from the model the editor names from the top-left corner, a quarter turn round); the same in SD",
+    "description": "Calculate Shadows on ground and cliffs (branch we-shadow-3, 2026-11-17): shadow-terrain.w3x (fixtures/we-specs/make-shadow-probes.mjs: a 128 bank, cliffs one and two levels up, single corners raised 128, 256 and 512, two ridges, a 64 bank; no doodads). The editor: File > Calculate Shadows and Save Map. Studio: w3.terrain.calculateShadows. war3map.shd cell by cell: the editor's walk toward the sun (80/3 a step, as far as the map goes) over heights at the cell centres (shadows.ts shadowCellHeights, cliffs from the model the editor names from the top-left corner, a quarter turn round); the same in SD",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/shadow-terrain.w3x"
     },
