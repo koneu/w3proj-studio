@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { copyAs, ecasAsText, triggerAsText, type CopySource } from "./astext";
+import { copyAs, ecasAsText, sectionAsText, triggerAsText, type CopySource } from "./astext";
 import { parseTriggerData } from "./triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "./wtg";
 
@@ -66,6 +66,20 @@ test("Copy As Text: selected lines carry what they contain, from no indentation"
   assert.equal(ecasAsText([iff], ctx).split("\n").length, 7);
   // A function TriggerData doesn't know is named as stored, as the Trigger Editor shows it.
   assert.equal(ecasAsText([eca(2, "NoSuchThing")], ctx), "NoSuchThing()\n");
+});
+
+test("Copy As Text: a clicked section gives its heading and lines one level in (the World Editor's, we-drive 2026-11-17)", () => {
+  // Its Actions heading, clicked: "Actions" and the lines under it, nested lines in their blocks as ever.
+  const actions = sectionAsText(trigger, 2, ctx);
+  assert.equal(actions.split("\n").slice(0, 3).join("\n"), ["Actions", "    Foo - Log first", "    If (All Conditions are True) then do (Then Actions) else do (Else Actions)"].join("\n"));
+  assert.equal(actions.split("\n").length, 9);
+  assert.equal(sectionAsText(trigger, 0, ctx), "Events\n    Foo starts\n");
+  // A section without lines is its heading alone.
+  assert.equal(sectionAsText(trigger, 1, ctx), "Conditions\n");
+  // copyAs takes it for text only: Copy As Script keeps the whole trigger, a line selection wins over it.
+  assert.equal(copyAs("text", src(), trigger, [], 0), "Events\n    Foo starts\n");
+  assert.equal(copyAs("text", src(), trigger, [iff.children[1]], 0), "Foo - Log yes\n");
+  assert.equal(copyAs("script", src(), trigger, [], 0), copyAs("script", src(), trigger));
 });
 
 const src = (language: "jass" | "lua" = "jass", texts = new Map<TriggerItem, string>()): CopySource =>

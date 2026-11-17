@@ -92,6 +92,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         flagged.set(t.id, at);
       },
       selectedLines: (t) => chosenIn(t).map((c) => c.eca),
+      selectedSection: (t) => { const s = selection.get(t.id); return s && "section" in s ? s.section : undefined; },
     }));
   });
 }

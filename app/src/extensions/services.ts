@@ -563,6 +563,9 @@ export interface TriggerKind {
   /** The lines selected in the trigger's body (Copy As Text / Copy As Script take them instead of the
    *  whole trigger), or none. */
   selectedLines?(trigger: TriggerItem): import("../lib/triggers/wtg").Eca[];
+  /** The section heading (EVENT 0, CONDITION 1, ACTION 2) selected in the trigger's body, if one is: Copy As Text
+   *  then gives its heading and lines, as the World Editor does. */
+  selectedSection?(trigger: TriggerItem): number | undefined;
 }
 
 /** A place in a GUI trigger: a line, and in it a parameter. */
