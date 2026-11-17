@@ -521,7 +521,11 @@ by restart, 47 s by open (an extra map costs about 9 s instead of 18 s; the star
 (the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
 entries), `wpm` (cells with x, y and flags), `text` (lines), `bytes`. `"expect": "differs"` marks a known difference
 (not a failure); `"expectPaths": ["players[].start", …]` (JSON kinds) says which: every listed path must differ and no
-other may, else the file is UNEXPECTED. Without it any difference passes, so a `differs` without `expectPaths` is
+other may, else the file is UNEXPECTED. A w3e difference whose corners change from run to run or cover the whole map
+takes `"expectCorners": [{ "box": [x0, y0, x1, y1], "fields": ["texture"], "we": 1, "studio": 0, "delta": 512,
+"corners": [min, max] }, …]` instead: every differing field must be claimed by a rule (the first whose box, fields and
+values fit; no box is the whole map, `we`/`studio`/`delta` optional) and each rule's count of corners must lie in its
+range, so a difference anywhere else, in another field or of another size stays red. Without either any difference passes, so a `differs` without `expectPaths` is
 refused: on a JSON kind (name the paths) and on `text`, `text-set`, `text-exact`, `bytes` and `wpm` alike (compare the
 file as a JSON kind, or narrow it with `lines` and expect a match), unless `tests/we-compare/differs-without-paths.json`
 lists it ("spec-name file" in `entries` for the JSON kinds, `textEntries` for the others: written before the rule; both

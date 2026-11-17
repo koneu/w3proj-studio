@@ -79,7 +79,7 @@
   },
   {
     "name": "drag-stroke-quick",
-    "description": "the same stroke dragged in 20 ms; DIFFERS by timing (2026-11-14, branch drag-stroke-we): the editor stamps its brush only where the pointer is at its own ticks, without filling in between, so it put down one brush (not at the press point) where Studio's stroke (stamped along the way, lib/terrain/strokepath.ts) covers the whole line. At 400 ms the editor's result varies from run to run (size 3: 0, 2, 14 and 58 differing fields in four runs; size 1: 4 to 6 corners against Studio's 12), so no spec can hold it",
+    "description": "the same stroke dragged in 20 ms; DIFFERS by timing (2026-11-14, branch drag-stroke-we): the editor stamps its brush only where the pointer is at its own ticks, without filling in between, so it put down one brush (not at the press point) where Studio's stroke (stamped along the way, lib/terrain/strokepath.ts) covers the whole line. At 400 ms the editor's result varies from run to run (size 3: 0, 2, 14 and 58 differing fields in four runs; size 1: 4 to 6 corners against Studio's 12), so no spec can hold it. expectCorners (2026-11-17, branch fix-we-stable, runs with the editor's brush at the start and near the end of the line): only cliff layers and types differ, inside the stroke's box 26,26 to 38,33; corners Studio raised and the editor left (layer 3 against 2, cliff type 1 against 15) and the few round the editor's brush that Studio left; at least one Studio corner is the editor's too (a run in which the editor stamped nothing, or missed the tool, fails)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
     },
@@ -151,14 +151,20 @@
       {
         "file": "war3map.w3e",
         "as": "w3e",
-        "expect": "differs"
+        "expect": "differs",
+        "expectCorners": [
+          { "box": [26, 26, 38, 33], "fields": ["layer"], "we": 2, "studio": 3, "corners": [1, 42] },
+          { "box": [26, 26, 38, 33], "fields": ["cliffType"], "we": 15, "studio": 1, "corners": [1, 80] },
+          { "box": [26, 26, 38, 33], "fields": ["layer"], "we": 3, "studio": 2, "corners": [0, 13] },
+          { "box": [26, 26, 38, 33], "fields": ["cliffType"], "we": 1, "studio": 15, "corners": [0, 37] }
+        ]
       }
     ],
     "limit": 40
   },
   {
     "name": "drag-stroke-raise",
-    "description": "a slowly dragged Apply Height Raise stroke (round, size 3, 600,500 to 900,500 in 20 steps over 3 s) on the blank 64x64 map; DIFFERS (2026-11-15, branch snap-angle-we): the editor's stroke covers corners 28 to 35 of rows 28 to 31 with a ridge of 230 to 444 stored units along row 30 and nothing on row 28 west of 34; Studio's piles up 600 to 660 on row 29 and leaves row 31 east of 31 at 0 (31 corners differ). A Raise stamp adds per stamp, so the count of the editor's ticks during the drag decides (TESTING.md 'Height brushes'): no spec can hold it, but Studio's stroke also lies about a row south and is less even",
+    "description": "a slowly dragged Apply Height Raise stroke (round, size 3, 600,500 to 900,500 in 20 steps over 3 s) on the blank 64x64 map; DIFFERS (2026-11-15, branch snap-angle-we): the editor's stroke covers corners 28 to 35 of rows 28 to 31 with a ridge of 230 to 444 stored units along row 30 and nothing on row 28 west of 34; Studio's piles up 600 to 660 on row 29 and leaves row 31 east of 31 at 0 (31 corners differ). A Raise stamp adds per stamp, so the count of the editor's ticks during the drag decides (TESTING.md 'Height brushes'): no spec can hold it, but Studio's stroke also lies about a row south and is less even. 2026-11-17 (branch fix-we-stable, two runs alike): the east half from column 33 matches corner for corner (the editor's peak 640 at 32,29 against Studio's 660 at 32,29); only the first columns of the stroke differ (19 corners in 28,28 to 32,31). expectCorners: only ground heights, inside the stroke's box 27,27 to 37,32 (Studio's stroke is 28,28 to 36,31), 1 to 45 corners, of them at most 12 the editor left flat (a run in which the editor raised nothing differs in all 30 of Studio's corners, flat in the editor's: red)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/flat.w3x"
     },
@@ -201,7 +207,11 @@
       {
         "file": "war3map.w3e",
         "as": "w3e",
-        "expect": "differs"
+        "expect": "differs",
+        "expectCorners": [
+          { "box": [27, 27, 37, 32], "fields": ["ground"], "we": 0, "corners": [0, 12] },
+          { "box": [27, 27, 37, 32], "fields": ["ground"], "corners": [1, 45] }
+        ]
       }
     ],
     "limit": 40

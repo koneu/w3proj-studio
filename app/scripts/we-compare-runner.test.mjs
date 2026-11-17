@@ -348,21 +348,26 @@ test("the allowlist of differs without paths only shrinks: every entry exists an
   const root = repoPath("tests", "we-compare");
   const { entries, textEntries } = core.readDiffersAllowlistSections(resolve(root, "..", ".."));
   // Lower these as entries get their paths (or a JSON kind, or "lines" and a match); never raise them.
-  assert.ok(entries.size <= 6,`the JSON kinds' list grew to ${entries.size}`);
-  assert.ok(textEntries.size <= 1, `the text kinds' list grew to ${textEntries.size}`);
+  assert.ok(entries.size <= 0, `the JSON kinds' list grew to ${entries.size}`);
+  assert.ok(textEntries.size <= 0, `the text kinds' list grew to ${textEntries.size}`);
   const needed = { json: new Set(), text: new Set() };
+  let differs = 0;
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith(".json") && p !== core.differsAllowlistPath(resolve(root, "..", ".."))) {
         const raw = JSON.parse(readFileSync(p, "utf8"));
-        for (const s of Array.isArray(raw) ? raw : [raw]) for (const c of s.compare) if (typeof c === "object" && c.expect === "differs" && !c.expectPaths && !c.expectLines) needed[core.takesPaths(c.as ?? "auto", c.file) ? "json" : "text"].add(`${s.name} ${c.file}`);
+        for (const s of Array.isArray(raw) ? raw : [raw]) for (const c of s.compare) {
+          if (typeof c !== "object" || c.expect !== "differs") continue;
+          differs++;
+          if (!c.expectPaths && !c.expectLines && !c.expectCorners) needed[core.takesPaths(c.as ?? "auto", c.file) ? "json" : "text"].add(`${s.name} ${c.file}`);
+        }
       }
     }
   };
   walk(root);
-  assert.ok(needed.json.size > 0, "found the specs");
+  assert.ok(differs > 30, `found the specs' "differs" entries (${differs})`);
   for (const [list, need, name] of [[entries, needed.json, "entries"], [textEntries, needed.text, "textEntries"]]) {
     for (const e of list) assert.ok(need.has(e), `${e} is in the allowlist's ${name} but no spec needs it there (gone, or it names what differs now): take it out`);
     for (const e of need) assert.ok(list.has(e), `${e} expects differs without expectPaths and isn't in the allowlist's ${name}`);
@@ -627,4 +632,93 @@ test("expectCrash: the crash on close is required (its absence is the error); se
   assert.equal(core.crashExpectation(true, "clean", "World Editor: the save didn't finish", null).error, "World Editor: the save didn't finish");
   assert.deepEqual(core.crashExpectation(false, "clean", null, null), { error: null, warning: null });
   assert.deepEqual(core.crashExpectation(false, "crashed", null, "w"), { error: null, warning: "w" });
+});
+
+// ---------------------------------------------------------------- 13: expectCorners (2026-11-17, branch fix-we-stable)
+
+/** A version 11 w3e of w x h corners from `corner(x, y)`: { ground, tex (texture | flags << 4), layer }, defaults 0. */
+function w3eOf(w, h, corner) {
+  const buf = w3eFile(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const c = corner(i % w, Math.floor(i / w)) ?? {};
+    buf.writeInt16LE(0x2000 + (c.ground ?? 0), 41 + i * 7);
+    buf[41 + i * 7 + 4] = c.tex ?? 0;
+    buf[41 + i * 7 + 6] = c.layer ?? 0;
+  }
+  return buf;
+}
+const w3eRun = (c, we, studio) => core.compareEntry(entry(c), fakeReader({ "war3map.w3e": { bytes: we } }), fakeReader({ "war3map.w3e": { bytes: studio } }));
+
+test("expectCorners: the corners of a box, the fields, the values and the count are named; anything outside stays red", () => {
+  const flat = w3eOf(8, 8, () => ({}));
+  // The World Editor turns 4 corners of the box 2,2 to 5,5 to texture 1 (boundary-flags-wpm's second ground tile).
+  const turned = new Set(["2,2", "3,4", "5,5", "4,2"]);
+  const we = (extra = () => ({})) => w3eOf(8, 8, (x, y) => ({ ...(turned.has(`${x},${y}`) ? { tex: 1 } : {}), ...extra(x, y) }));
+  const rule = { box: [2, 2, 5, 5], fields: ["texture"], we: 1, studio: 0, corners: [3, 5] };
+  const spec = (rules) => ({ file: "war3map.w3e", as: "w3e", expect: "differs", expectCorners: rules });
+  const ok = w3eRun(spec([rule]), we(), flat);
+  assert.equal(ok.status, "DIFFERS");
+  assert.ok(asExpected(ok), JSON.stringify(ok.expectMissing ?? ok.unexpected));
+  assert.deepEqual(ok.cornerCounts, [4]);
+  assert.match(formatReport({ name: "s", files: [ok] }), /expectCorners: \[0\] 4 corners \(wants 3 to 5\)/);
+  // Controls, each of them red: a corner outside the box, another field in the box, another value, a count out of
+  // range (too few: a World Editor step that missed; too many), nothing differing at all, the header differing.
+  const outside = w3eRun(spec([rule]), we((x, y) => (x === 7 && y === 7 ? { tex: 1 } : {})), flat);
+  assert.ok(!asExpected(outside));
+  assert.deepEqual(outside.unexpected.paths, ["corners.7,7.texture"]);
+  const blight = w3eRun(spec([rule]), we((x, y) => (x === 3 && y === 3 ? { tex: 0x20 } : {})), flat);
+  assert.deepEqual(blight.unexpected.paths, ["corners.3,3.blight"]);
+  const other = w3eRun(spec([rule]), we((x, y) => (x === 3 && y === 3 ? { tex: 2 } : {})), flat);
+  assert.deepEqual(other.unexpected.paths, ["corners.3,3.texture"], "texture 2 is not the named value 1");
+  const few = w3eRun(spec([{ ...rule, corners: [5, 8] }]), we(), flat);
+  assert.ok(!asExpected(few));
+  assert.match(few.expectMissing[0], /expectCorners\[0\] \(texture in 2,2 to 5,5\): 4 corners, wants 5 to 8/);
+  assert.ok(!asExpected(w3eRun(spec([{ ...rule, corners: [1, 3] }]), we(), flat)), "too many");
+  assert.ok(!asExpected(w3eRun(spec([rule]), flat, flat)), "a MATCH is not the difference");
+  const head = Buffer.from(we());
+  head.write("A", 8, "latin1");
+  assert.deepEqual(w3eRun(spec([rule]), head, flat).unexpected.paths, ["header.tileset"]);
+});
+
+test("expectCorners: a map-wide difference of one field by a constant, with a region where more may differ", () => {
+  // water-floor-e: the World Editor lifts every corner by 512 and changes more round the click (2,2 to 3,3); Studio nothing.
+  const studio = w3eOf(6, 6, () => ({ ground: -8192, layer: 1 }));
+  const we = (odd) => w3eOf(6, 6, (x, y) => (x >= 2 && x <= 3 && y >= 2 && y <= 3 ? { ground: -7168, tex: 0x40, layer: 0 } : odd?.(x, y) ?? { ground: -7680, layer: 1 }));
+  const rules = [
+    { box: [2, 2, 3, 3], fields: ["ground", "wet", "layer"], corners: [4, 4] },
+    { fields: ["ground"], delta: 512, corners: [32, 32] },
+  ];
+  const c = { file: "war3map.w3e", as: "w3e", expect: "differs", expectCorners: rules };
+  const ok = w3eRun(c, we(), studio);
+  assert.ok(asExpected(ok), JSON.stringify(ok.expectMissing ?? ok.unexpected));
+  assert.deepEqual(ok.cornerCounts, [4, 32]);
+  // Controls: one corner off by another amount, one with another field, and the "we"/"studio" values form of the rule.
+  const off = w3eRun(c, we((x, y) => (x === 0 && y === 5 ? { ground: -7700, layer: 1 } : undefined)), studio);
+  assert.deepEqual(off.unexpected.paths, ["corners.0,5.ground"]);
+  assert.ok(!asExpected(off));
+  const layer = w3eRun(c, we((x, y) => (x === 5 && y === 0 ? { ground: -7680, layer: 2 } : undefined)), studio);
+  assert.deepEqual(layer.unexpected.paths, ["corners.5,0.layer"]);
+  const values = [rules[0], { fields: ["ground"], we: -7680, studio: -8192, corners: [32, 32] }];
+  assert.ok(asExpected(w3eRun({ ...c, expectCorners: values }, we(), studio)));
+  assert.ok(!asExpected(w3eRun({ ...c, expectCorners: [rules[0], { ...values[1], we: -7000 }] }, we(), studio)));
+});
+
+test("expectCorners is checked when the spec is read: w3e and differs only, known fields, a box, a count that wants a corner", () => {
+  const spec = (e) => ({ ...good(), compare: [{ file: "war3map.w3e", as: "w3e", expect: "differs", ...e }] });
+  const rule = { box: [0, 0, 3, 3], fields: ["texture"], corners: [1, 4] };
+  const parsed = parseSpec(spec({ expectCorners: [rule] }), "/s");
+  assert.deepEqual(parsed.compare[0].expectCorners, [rule], "no allowlist entry needed: it names what differs");
+  const bad = (e, re) => assert.throws(() => parseSpec(spec(e), "/s"), re, JSON.stringify(e));
+  bad({ expectCorners: [] }, /expectCorners is a list of rules/);
+  bad({ expectCorners: [{ ...rule, fields: ["variation"] }] }, /fields is a list of corner fields/);
+  bad({ expectCorners: [{ ...rule, fields: [] }] }, /fields is a list/);
+  bad({ expectCorners: [{ ...rule, box: [3, 0, 1, 3] }] }, /box is \[x0, y0, x1, y1\]/);
+  bad({ expectCorners: [{ ...rule, corners: [4, 1] }] }, /corners is \[min, max\]/);
+  bad({ expectCorners: [{ ...rule, corners: [0, 4] }] }, /no rule wants a corner/);
+  bad({ expectCorners: [{ ...rule, delta: "512" }] }, /delta is a number/);
+  bad({ expectCorners: [{ ...rule, area: 1 }] }, /unknown key area/);
+  bad({ expect: "match", expectCorners: [rule] }, /goes with "expect": "differs"/);
+  assert.throws(() => parseSpec({ ...good(), compare: [{ file: "war3map.w3e", as: "w3e-spread", expect: "differs", expectCorners: [rule] }] }, "/s"), /goes with "as": "w3e"/);
+  // compareFile refuses it on another kind too (a spec made without parseSpec).
+  assert.equal(compareFile("war3map.w3i", "parsed", { json: {} }, { json: { a: 1 } }, 10, 0, [], [], null, [rule]).status, "ERROR");
 });
