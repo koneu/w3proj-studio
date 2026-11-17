@@ -11,7 +11,7 @@ import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
-import { textureCandidates } from "../../lib/model/texpath";
+import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { maxPlayers } from "../../lib/terrain/startlocations";
 import { ModeCache } from "../../lib/modecache";
 import { drawnGroundTiles, type Terrain } from "../../lib/terrain/w3e";
@@ -64,11 +64,31 @@ export function textureOrder(model: { textures: readonly unknown[]; geosets: rea
   return [...new Set([...shown, ...model.textures.keys()])];
 }
 
+/** The mean of the colours of the textures a model's geosets' materials show, once each (`colorOf`: a texture's colour,
+ *  null when it has none or can't be read: left out), a team colour texture (replaceable 1 and 2) counting black; null
+ *  when none gives a colour. The editor's dot of a goblin shipyard (textures: its own, team colour, a second) is two
+ *  thirds of the first texture's colour, a granary's (two textures) the mean of both (we-drive 2026-11-17: dots-more). */
+export async function shownTextureMean(model: { textures: readonly { replaceableId: number; path: string }[]; geosets: readonly { materialId: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[] }[] }[] },
+  colorOf: (tex: { replaceableId: number; path: string }) => Promise<Rgb | null>): Promise<Rgb | null> {
+  const shown = [...new Set(model.geosets.flatMap((g) => model.materials[g.materialId]?.layers.map((l) => l.textureIds[0]) ?? []))];
+  const colors: Rgb[] = [];
+  for (const id of shown) {
+    const tex = model.textures[id];
+    if (!tex) continue;
+    if (tex.replaceableId === 1 || tex.replaceableId === 2) { colors.push([0, 0, 0]); continue; }
+    const c = await colorOf(tex);
+    if (c) colors.push(c);
+  }
+  if (!colors.some((c) => c[0] + c[1] + c[2] > 0)) return null;
+  return [0, 1, 2].map((k) => colors.reduce((a, c) => a + c[k], 0) / colors.length) as Rgb;
+}
+
 /** The minimap colour of a doodad or destructable without its own (useMMColor 0): the smallest mip colour of its
  *  model's first texture (its replaceable texture, trees' for example, where the model asks for one), null when the
- *  model or texture can't be read. The first variation's model stands for all. */
+ *  model or texture can't be read. The first variation's model stands for all.
+ *  `mean`: for a dot, shownTextureMean's colour when it has one. */
 export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "texId" | "texFile">,
-  readFile: (path: string) => Promise<Uint8Array>): Promise<Rgb | null> {
+  readFile: (path: string) => Promise<Uint8Array>, mean = false): Promise<Rgb | null> {
   let model;
   try {
     model = parseMdx(await readFile(modelPath(skin, 0)));
@@ -79,11 +99,23 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
   }
   const pathOf = (tex: { replaceableId: number; path: string }) => tex.replaceableId === 0 ? tex.path
     : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";
+  /** A texture's colour: null when it has none to read or can't be. HD models name their textures as the artists
+   *  exported them (.tif); the game stores those as .dds (texpath.ts). */
+  const colorOf = async (path: string): Promise<Rgb | null> => {
+    for (const p of neverStoredLast([...new Set([path, ...textureCandidates(path)])])) {
+      try { return smallestMipColor(decodeImage(await readFile(p), p)); } catch { /* the next name */ }
+    }
+    return null;
+  };
+  if (mean) {
+    const m = await shownTextureMean(model, async (tex) => { const path = pathOf(tex); return path ? colorOf(path) : null; });
+    if (m) return m;
+  }
   for (const id of textureOrder(model)) {
     const tex = model.textures[id];
     const path = tex && pathOf(tex);
     if (!path) continue;
-    try { return smallestMipColor(decodeImage(await readFile(path), path)); } catch { return null; }
+    return colorOf(path);
   }
   return null;
 }
@@ -96,7 +128,8 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
 export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "position"> & { life?: number; angle?: number })[], tables: {
   rows: ReadonlyMap<string, Record<string, string>>;
   bases: ReadonlyMap<string, { base: string; pathTex?: string }>;
-  modelColor: (type: string) => Promise<Rgb | null>;
+  /** `mean`: the colour of a dot (modelTextureColor), not of a shape drawn from its pathing texture's cells. */
+  modelColor: (type: string, mean: boolean) => Promise<Rgb | null>;
   footprint: (pathTex: string) => Promise<number>;
   /** The cells of a pathing texture, drawn as they are; null (or left out): a dot of its `footprint` size. */
   pathMask?: (pathTex: string) => Promise<PathMask | null>;
@@ -111,14 +144,15 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     const type = rows.has(d.id) ? d.id : bases.get(d.id)?.base ?? "";
     const r = rows.get(type);
     if (r?.showInMM !== "1") continue;
-    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type);
-    if (!rgb) continue;
     const pathTex = bases.get(d.id)?.pathTex ?? r.pathTex;
     const file = pathTex && !/^(_|none)$/i.test(pathTex.trim()) ? (/\.\w{3}$/i.test(pathTex) ? pathTex : `${pathTex}.tga`) : "";
     const mask = file ? await tables.pathMask?.(file) : null;
     // Gates, walls and rock spires are drawn as their texture's cells; a texture that is one full square (trees,
     // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
-    if (mask && !(mask.width === mask.height && mask.cells.every((c) => c))) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask, angle: d.angle }); continue; }
+    const shape = !!mask && !(mask.width === mask.height && mask.cells.every((c) => c));
+    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape);
+    if (!rgb) continue;
+    if (shape) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask: mask!, angle: d.angle }); continue; }
     const size = file ? await tables.footprint(file) : 1;
     objects.push({ x: d.position[0], y: d.position[1], rgb, size });
   }
@@ -198,11 +232,13 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   ]);
   const bases = new Map([...await pathOverrides(w3, "war3map.w3d", "dptx"), ...await pathOverrides(w3, "war3map.w3b", "bptx")]);
   let skins: Promise<Map<string, Skin>> | null = null;
-  const modelColor = memo((type: string) => (async () => {
+  const colorOf = memo((key: string) => (async () => {
     skins ??= loadSkins(w3);
+    const mean = key.startsWith("mean:"), type = key.slice(mean ? 5 : 6);
     const skin = (await skins).get(type);
-    return skin ? modelTextureColor(skin, readFile) : null;
+    return skin ? modelTextureColor(skin, readFile, mean) : null;
   })().catch(() => null));
+  const modelColor = (type: string, mean: boolean) => colorOf(`${mean ? "mean" : "first"}:${type}`);
   // A pathing texture is read and decoded once, for its cells and its size alike (null: unreadable).
   const pathImage = memo((path: string) => (async () => decodeImage(await readFile(path), path).mip(0))().catch(() => null));
   const footprint = async (path: string) => {
