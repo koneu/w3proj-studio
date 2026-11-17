@@ -475,10 +475,13 @@ On Linux:
 w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
                                     # (a re-sync that would delete files you added lists them and writes
                                     #  nothing; --allow-deletes deletes them)
-w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x)
+w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x); warns when the map
+                                    # has no war3map.j (no script) or no war3map.wtg (the World Editor
+                                    # can't open it), and packs it anyway
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
-                                    # --force, --mode sd|hd|de
+                                    # --mode sd|hd|de; --force also makes fresh ones and replaces a script
+                                    # Studio didn't write last (saying which)
 w3proj check MyMap/                 # the Problems view's checks (honouring .w3proj/problems-ignore.json) and
                                     # check_melee on melee and ladder-looking maps; --only=problems,melee,path,
                                     # --path x1,y1:x2,y2 (check_path), --json, --warnings-fail; exit 1 on errors

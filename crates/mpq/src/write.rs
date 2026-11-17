@@ -85,9 +85,9 @@ impl ArchiveBuilder {
 
         let sector = crate::sector_size(self.options.sector_size_shift);
         let mut blocks: Vec<[u32; 4]> = Vec::with_capacity(self.files.len());
-        for (_, data) in &self.files {
+        for (name, data) in &self.files {
             let pos = (out.len() - base) as u32;
-            let (bytes, fl) = encode_file(data, sector, self.options.compress)?;
+            let (bytes, fl) = encode_file(data, sector, self.options.compress && !is_nested_map(name))?;
             out.extend_from_slice(&bytes);
             blocks.push([pos, bytes.len() as u32, data.len() as u32, fl]);
         }
@@ -136,6 +136,13 @@ fn write_table(out: &mut Vec<u8>, rows: &[[u32; 4]], key_name: &str) {
     for w in words {
         out.extend_from_slice(&w.to_le_bytes());
     }
+}
+
+/// A chapter map inside a campaign: the campaigns of the game hold them stored whole (block flags 0x80000000), and the
+/// World Editor's Edit Map can't open a compressed one ("Main map file could not be opened", we-drive 2026-11-17).
+fn is_nested_map(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".w3x") || lower.ends_with(".w3m")
 }
 
 /// Encodes one file as a sectored block. Returns (bytes, flags).

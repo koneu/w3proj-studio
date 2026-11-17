@@ -29,6 +29,7 @@ test("an unknown mode exits 2 and writes nothing", () => {
     ["make-fence.mjs", "angels"], ["make-neutral-facing.mjs", "pos"],
     ["make-custom-tilesets.mjs", "rev7"], ["make-minimap-tiles.mjs", "randd"],
     ["make-import-modes.mjs", "--out"], ["make-import-modes.mjs", "--oops"],
+    ["make-shadow-probes.mjs", ".", "shadow-slope"],
     ["make-melee-valid.mjs", "--out"], ["make-melee-valid.mjs", "--case"], ["make-melee-valid.mjs", "--case", "x"], ["make-melee-valid.mjs", "--case", "../x={}"],
   ];
   for (const [script, ...args] of bad) {

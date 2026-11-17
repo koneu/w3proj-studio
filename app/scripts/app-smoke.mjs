@@ -4561,57 +4561,6 @@ async function destructableFlags(page, found) {
   }
 }
 
-/** Cliff levels past the top are refused, never wrapped round or cut (decided 2026-11-17): the Increase Two brush on
- *  level 14 with Enforce Terrain Limits off (the World Editor wraps it to 0) says why and changes nothing, no undo step;
- *  Adjust Cliff Levels past its range says why too (whole-map ground has the dialog's +12). */
-async function cliffTopRefused(page, found) {
-  try {
-  const fail = (what) => found.push(`cliff top refused: ${what}`);
-  const k = await heightKit(page, "CliffTop");
-  const TXT = "map/war3map.w3e.txt";
-  const file = () => readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
-  // A new map is on level 2: +10 then +2 take it to 14.
-  for (const by of [10, 2]) {
-    const err = await k.run("w3.terrain.adjustCliffLevels", by);
-    if (err) return fail(`Adjust Cliff Levels +${by}: ${err}`);
-  }
-  await k.save();
-  if (!/^\[layer\] all e$/m.test(file())) return fail(`the map at level 14 (control): ${/^\[layer\][^\n]*/m.exec(file())?.[0]}`);
-  const top = file();
-  await k.clearToasts();
-  const over = await k.run("w3.terrain.adjustCliffLevels", 1);
-  if (over) fail(`Adjust Cliff Levels +1 at the top threw: ${over}`);
-  await settled(page);
-  if (!/Not done: the map can't go up/.test(await k.toasts())) fail(`Adjust Cliff Levels +1 at the top didn't say why: "${await k.toasts()}"`);
-  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the refused Adjust Cliff Levels left unsaved changes");
-
-  // Increase Two, size 1, a click in the middle (Enforce Terrain Limits is off on a new map).
-  await k.tab("Terrain");
-  await page.evaluate(`(() => { const b = [...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith("+2:")); if (!b) throw new Error("no Increase Two button"); b.click(); })()`);
-  await page.evaluate(`(() => { const i = document.querySelector(".painter-options input[type=range]"); i.value = 1; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-  await k.clearToasts();
-  await k.clickMiddle();
-  await settled(page);
-  if (!/Not done: Increase would raise the ground from cliff level 14 to 16, past 15/.test(await k.toasts())) fail(`Increase Two on level 14 didn't say why: "${await k.toasts()}"`);
-  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the refused Increase left unsaved changes");
-  await k.save();
-  if (file() !== top) fail(`the refused Increase changed the terrain: ${/^\[layer\][^\n]*/m.exec(file())?.[0]}`);
-  // Control: Increase One from 14 builds 15, the top a map stores.
-  await page.evaluate(`[...document.querySelectorAll(".tool-button")].find((b) => b.title.startsWith("+1:")).click()`);
-  await k.clickMiddle();
-  await settled(page);
-  if (!(await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`))) fail("Increase One from 14 changed nothing (control)");
-  await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await k.save();
-  if (file() !== top) fail("one undo of Increase One didn't give the file back");
-  await k.focusMap();
-  await k.hands.key("Escape", "Escape", 27);
-  } finally {
-    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
-    await restoreWindow(page);
-  }
-}
-
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past level 0 stops every
  *  corner there (as the World Editor does), and undoing gives every file back byte for byte. */
@@ -4674,7 +4623,7 @@ async function wholeMapGround(page, found) {
   err = await k.run("w3.terrain.adjustCliffLevels", 12);
   if (err) fail(`Adjust Cliff Levels +12 threw: ${err}`);
   await settled(page);
-  if (!/Not done: the map goes up by at most \+10 .*not \+12/.test(await k.toasts())) fail(`Adjust Cliff Levels +12 wasn't refused with a word why: "${await k.toasts()}"`);
+  if (!/Not done: Adjust Cliff Levels raises by at most \+10 \(asked \+12/.test(await k.toasts())) fail(`Adjust Cliff Levels +12 wasn't refused with a word why: "${await k.toasts()}"`);
   if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the refused +12 left unsaved changes");
   await k.save();
   if (hashes() !== original) fail(`the refused +12 changed the files: ${hashes()}`);
@@ -5506,7 +5455,7 @@ async function resizeUndoChecks(page, found) {
 
 /** Map Size at its limits, through the real apply path (resize_map): a 64 × 64 map grown to 480 × 480 and cut to 32 × 32 has
  *  that size in the terrain, shadows, pathing, camera bounds and playable area, saved and reopened it is the same, and it
- *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) are refused with every file as it was. */
+ *  packs; 481, 31, 484, 28 (past a limit or off the step of 4) and an edge past ±32256 are refused with every file as it was. */
 async function resizeLimits(page, found) {
   try {
   const fail = (what) => found.push(`resize limits: ${what}`);
@@ -5545,7 +5494,7 @@ async function resizeLimits(page, found) {
     const before = state();
     const err = await tool("resize_map", change).then(() => null, (e) => String(e.message ?? e));
     if (!err) fail(`${label} wasn't refused`);
-    else if (!/must be|multiple|changes nothing/.test(err)) fail(`${label} was refused with "${err}"`);
+    else if (!/must be|multiple|changes nothing|past ±32256/.test(err)) fail(`${label} was refused with "${err}"`);
     await settled(page);
     const moved = differ(before, state());
     if (moved.length) fail(`${label} was refused but changed ${moved.join(", ")}`);
@@ -5562,8 +5511,10 @@ async function resizeLimits(page, found) {
     if (moved.length) fail(`${label}: reopening the map changed ${moved.join(", ")}`);
   };
 
-  // Both sides, so the World Editor's coordinate limit (limitResize) doesn't cut the growth down to a size that is allowed.
+  // Both sides, so the size, not the coordinate limit, is what refuses them.
   await refused({ left: 209, right: 208 }, "481 tiles");
+  // Past the coordinate limit (±32256): refused, not cut to it as the World Editor does (resize.ts coordProblem).
+  await refused({ right: 224 }, "growth past ±32256");
   await refused({ left: 210, right: 210 }, "484 tiles");
   await refused({ top: -33 }, "31 tiles");
   await refused({ top: -36 }, "28 tiles");
@@ -7190,6 +7141,25 @@ async function brushSizesByHand(page, hands, ground, untouched, canvas, save, fa
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await save();
   if (hash(ground) !== untouched) { fail("one undo after a pit and a refused −2 didn't give the map back: the refused click left an undo step"); return; }
+  // An Increase past the top is refused with a toast, never wrapped round to level 0 as the World Editor's (we-compare
+  // cliff-slope-wrap; tools.ts topRefusal): the whole map up to level 14 (Adjust Cliff Levels +10, +2), then +2 there.
+  for (const by of [10, 2]) {
+    const err = await page.evaluate(`w3.commands.execute("w3.terrain.adjustCliffLevels", ${by}).then(() => null, (e) => String(e))`);
+    if (err) { fail(`Adjust Cliff Levels +${by}: ${err}`); return; }
+  }
+  await save();
+  const top = hash(ground);
+  if (!/^\[layer\] all e$/m.test(readFileSync(ground, "utf8"))) { fail("the whole map isn't on level 14 after Adjust Cliff Levels +10, +2 (control)"); return; }
+  await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+  await press("+2:", 1);
+  const toastText = () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`);
+  await until("the refusal's toast", async () => /Not raised/.test(await toastText()), 5000).catch(() => {});
+  const said = await toastText();
+  if (hash(ground) !== top) fail(`a +2 click on level 14 changed the map (${changed("layer")} corners off the common level): it must be refused, not wrapped round`);
+  if (!/Not raised: level 16 is above (15|14)/.test(said)) fail(`a +2 click on level 14 wasn't refused with why: "${said}"`);
+  for (let i = 0; i < 2; i++) await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) { fail("two undos after Adjust Cliff Levels +10, +2 and a refused +2 didn't give the map back: the refused click left an undo step"); return; }
   await setSize(2);
 }
 
@@ -10535,7 +10505,8 @@ async function turtleCliffSave(page, found) {
     const TXT = "map/war3map.w3e.txt";
     const read = () => w3eSections(readFileSync(ground, "utf8"));
     const first = read();
-    const OPTIONS = "-1=Match the ground, 0=Dirt cliff, 1=Grass cliff, 3=Dirt cliff, 4=Grass cliff, 5=Snow cliff, 6=Grass cliff, 7=Desert cliff, 8=Grass cliff, 9=Dirt cliff, 10=Snow cliff, 11=Grass cliff, 12=Dirt cliff, 13=Grass cliff, 14=Dirt cliff, 15=Dirt cliff, 16=Square Tiles cliff";
+    // Entries 15 (CYdi) and 16 (CYsq) aren't offered: a corner's cliff type is 0 to 14, 15 is reserved and 16 doesn't fit.
+    const OPTIONS = "-1=Match the ground, 0=Dirt cliff (CLdi), 1=Grass cliff (CLgr), 3=Dirt cliff (CFdi), 4=Grass cliff (CFgr), 5=Snow cliff (CWsn), 6=Grass cliff (CWgr), 7=Desert cliff (CBde), 8=Grass cliff (CBgr), 9=Dirt cliff (CNdi), 10=Snow cliff (CNsn), 11=Grass cliff (CAgr), 12=Dirt cliff (CAdi), 13=Grass cliff (CCgr), 14=Dirt cliff (CCdi)";
     const LIST = ["CLdi", "CLgr", "CLno", "CFdi", "CFgr", "CWsn"];
     if (!first.head.includes(`cliffs ${LIST.join(" ")} CWgr CBde CBgr CNdi CNsn CAgr CAdi CCgr CCdi CYdi CYsq`) || first.head.some((l) => l === "custom-tilesets 1")) {
       return fail(`the map's cliff list isn't the one the check knows (control): ${first.head.join(" | ")}`);
@@ -10643,6 +10614,75 @@ async function turtleCliffSave(page, found) {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
     // The map's Lua script isn't one its triggers make: the save leaves it and asks, and the answer here is none.
     await page.evaluate(`document.querySelectorAll(".toast[data-asks] .toast-close").forEach((b) => b.click())`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** Cliffs… (the cliff tools' list of the map's cliff types): on a new map (CLdi CLgr) CAdi is added from the game's
+ *  list, a Cliff +1 by mouse with it chosen writes number 2 on the corners, removing it while in use asks for another
+ *  entry and its corners get that one's number, one undo brings list and corners back, and a removal refused (in use,
+ *  no replacement) leaves no change and no undo step. Read from the saved war3map.w3e.txt each time. */
+async function cliffTypeList(page, found) {
+  const fail = (what) => found.push(`cliff type list: ${what}`);
+  const k = await terrainMap(page, "CliffList");
+  const hands = new Hands(page);
+  try {
+    const read = () => w3eSections(readFileSync(k.w3e, "utf8"));
+    const cliffsLine = () => read().head.find((l) => l.startsWith("cliffs ")) ?? "";
+    const typed = (n) => read()["cliff-texture"].filter((v) => parseInt(v, 36) === n).length;
+    if (cliffsLine() !== "cliffs CLdi CLgr") return fail(`a new Lordaeron map's cliff list should be CLdi CLgr (control): ${cliffsLine()}`);
+    await k.tab("Terrain");
+    await page.evaluate(`document.querySelector('button.tool-button[title^="+1:"]').click()`);
+    const button = (text) => `[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === ${lit(text)})`;
+    await until("Cliffs…", () => page.evaluate(`!!${button("Cliffs…")} && !${button("Cliffs…")}.closest("[hidden]")`), 10000);
+    await page.evaluate(`${button("Cliffs…")}.click()`);
+    const addSel = `[...document.querySelectorAll(".terrain-cliffmgr select")].find((s) => s.options[0]?.textContent.startsWith("Add cliff type"))`;
+    await until("the cliff list", () => page.evaluate(`!!${addSel}`), 20000);
+    const addLabel = await page.evaluate(`${addSel}.options[0].textContent`);
+    if (addLabel !== "Add cliff type… (2/15)") fail(`the add box says "${addLabel}"`);
+    await page.evaluate(`(() => { const s = ${addSel}; s.value = "CAdi"; s.dispatchEvent(new Event("change")); })()`);
+    await k.save();
+    if (cliffsLine() !== "cliffs CLdi CLgr CAdi") return fail(`after adding CAdi the saved list is "${cliffsLine()}"`);
+    // The cliff type box offers it as number 2.
+    const cliffSel = `[...document.querySelectorAll("label.terrain-tool-opt")].find((l) => l.textContent.startsWith("Cliff type"))?.querySelector("select")`;
+    await until("CAdi in the cliff type box", () => page.evaluate(`!!${cliffSel} && [...${cliffSel}.options].some((o) => o.value === "2" && o.textContent.endsWith("(CAdi)"))`), 10000)
+      .catch(async () => fail(`the cliff type box has no 2 = CAdi: ${await page.evaluate(`[...(${cliffSel}?.options ?? [])].map((o) => o.value + "=" + o.textContent).join(", ")`)}`));
+    await page.evaluate(`(() => { const s = ${cliffSel}; s.value = "2"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    if (typed(2) !== 0) return fail("corners hold 2 before any cliff is made (control)");
+    const canvas = await hands.where(".terrain-view canvas, canvas");
+    await hands.mouse("mouseMoved", canvas.x, canvas.y);
+    await hands.mouse("mousePressed", canvas.x, canvas.y, 1);
+    await hands.mouse("mouseReleased", canvas.x, canvas.y);
+    await until("the stroke", () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`), 10000).catch(() => fail("Cliff +1 by mouse left the terrain unchanged"));
+    await k.save();
+    const onTwo = typed(2);
+    if (!onTwo) return fail(`Cliff +1 with CAdi chosen wrote no corner with number 2: ${[...new Set(read()["cliff-texture"])].join(",")}`);
+    const withCliff = readFileSync(k.w3e, "utf8");
+
+    // Refused: CAdi is in use, with no replacement given. Nothing changes, no undo step.
+    const err = await page.evaluate(`(() => { try { window.__smokeEd.removeCliffType(2); return null; } catch (e) { return String(e.message ?? e); } })()`);
+    if (!err || !/CAdi is in use/.test(err)) fail(`removing CAdi in use without a replacement wasn't refused: ${err}`);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the refused removal left the terrain unsaved");
+
+    // Removed by hand: the ✕ asks which entry its corners get; CLgr (1).
+    await page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .terrain-tilemgr-row")].find((r) => r.textContent.includes("(CAdi)")).querySelector("button").click()`);
+    await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-cliffmgr-replace")`), 5000);
+    await page.evaluate(`(() => { const s = document.querySelector(".terrain-cliffmgr-replace"); s.value = "1"; s.dispatchEvent(new Event("change")); })()`);
+    const onOne = typed(1);
+    await page.evaluate(`[...document.querySelectorAll(".terrain-cliffmgr .removing button")].find((b) => b.textContent === "Remove").click()`);
+    await k.save();
+    if (cliffsLine() !== "cliffs CLdi CLgr") fail(`after removing CAdi the list is "${cliffsLine()}"`);
+    if (typed(2) !== 0 || typed(1) !== onOne + onTwo) fail(`CAdi's ${onTwo} corners didn't go to CLgr: ${typed(2)} on 2, ${typed(1)} on 1 (was ${onOne})`);
+    // The choice followed its entry out: the box no longer offers 2.
+    if (await page.evaluate(`[...${cliffSel}.options].some((o) => o.value === "2")`)) fail("the cliff type box still offers 2 after CAdi went");
+
+    // One undo: list and corners as before the removal.
+    await k.undo();
+    await k.save();
+    if (readFileSync(k.w3e, "utf8") !== withCliff) fail(`one undo didn't bring CAdi and its corners back: ${cliffsLine()}, ${typed(2)} corners on 2`);
+  } finally {
+    await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt button")].find((b) => b.textContent === "Cliffs…" && b.classList.contains("active"))?.click()`).catch(() => {});
+    await k.done();
     await restoreWindow(page);
   }
 }
@@ -15509,7 +15549,7 @@ async function run() {
         chapterObjects,
         classicRefusal,
         cliCheck,
-        cliffTopRefused,
+        cliffTypeList,
         configSafety,
         contextLoss,
         dataSafety,
@@ -15795,8 +15835,6 @@ async function firstHalf(page, found) {
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
   await leftOpen(page, "wholeMapGround", found);
-  await cliffTopRefused(page, found).catch((e) => found.push(`cliff top refused: ${e.message}`));
-  await leftOpen(page, "cliffTopRefused", found);
   await destructableFlags(page, found).catch((e) => found.push(`destructable flags: ${e.message}`));
   await leftOpen(page, "destructableFlags", found);
   await areaLevels(page, found).catch((e) => found.push(`area levels: ${e.message}`));
@@ -15929,6 +15967,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "dropChancesRefused", found);
   await turtleCliffSave(page, found).catch((e) => found.push(`TurtleRock cliff save: ${e.message}`));
   await leftOpen(page, "turtleCliffSave", found);
+  await cliffTypeList(page, found).catch((e) => found.push(`cliff type list: ${e.message}`));
+  await leftOpen(page, "cliffTypeList", found);
   await editDuringSave(page, found).catch((e) => found.push(`edit during save: ${e.message}`));
   await leftOpen(page, "editDuringSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));

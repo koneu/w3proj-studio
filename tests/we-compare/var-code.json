@@ -1,0 +1,25 @@
+[
+  {
+    "name": "var-code",
+    "description": "Integer variables whose initial value in war3map.wtg is 'hfoo', 0x1F, -0x10, empty or 42 and a unitcode one with hfoo (make-var-code.mjs): the editor opens the map as it is and saves it; the wtg and the udg_ lines of its script. Its Variable dialog types only digits and a minus into an integer's value, but a file's 'hfoo' stays and compiles. Bare hfoo, 1.5 on an integer, 'hfoo' on a unitcode and abc on a real are written into the script as they are and its save stops with Script Errors (make-var-code.mjs --all)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/var-code.w3x"
+    },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "settings": { "mcp.writeTools": true },
+      "steps": [
+        { "setting": ["script.generateOnSave", true] },
+        { "sleep": 2000 },
+        { "command": "w3.script.generate" },
+        { "sleep": 2000 },
+        { "mcp": "rebuild_map" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      "war3map.wtg",
+      { "file": "war3map.j", "as": "text-set", "lines": "udg_" }
+    ]
+  }
+]

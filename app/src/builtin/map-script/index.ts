@@ -413,10 +413,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return false;
         }
+        // Forced over a script that would have been kept: said, naming the file and what of it is gone.
+        const before = force && current !== null ? scriptDecision(current, text, stamp) : null;
         await w3.workspace.writeText(path, text);
         await w3.workspace.writeText(STAMP, `${scriptHash(text)}
 `);
-        out.append(`${reason}: ${file} written (${text.length} chars${language ? `, compiled with ${language}` : ""})`);
+        const how = `${text.length} chars${language ? `, compiled with ${language}` : ""}`;
+        if (before?.action === "keep") {
+          const n = before.lost.length;
+          const lost = n ? `; its ${n} function${n === 1 ? "" : "s"} the triggers don't make (${before.lost.slice(0, 5).join(", ")}${n > 5 ? ", …" : ""}) ${n === 1 ? "is" : "are"} gone` : "";
+          out.append(`${reason}: ${file} written (${how}), replacing a ${file} that wasn't the script Studio wrote last${lost}`);
+        } else {
+          out.append(`${reason}: ${file} written (${how})`);
+        }
         return true;
       } catch (e) {
         out.append(`${reason}: map script not written: ${e instanceof Error ? e.message : String(e)}`);
@@ -623,9 +632,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       });
       return running.then(() => {}, () => {});
     }),
-    // `quiet` (other extensions, e.g. New Map): no message afterwards.
-    w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
-      const written = await write("command");
+    // `quiet` (other extensions, e.g. New Map): no message afterwards. `force` (`w3proj rebuild --force`): also over a
+    // script that isn't the one this app wrote last (said in the output, naming the file).
+    w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean; force?: boolean }) => {
+      const written = await write("command", opts?.force === true);
       if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
     // Export Script: the map script as it stands (a script still due from the last save is written first) copied byte for

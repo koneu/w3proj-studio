@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraBounds, doodadStays, limitResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
+import { cameraBounds, coordProblem, doodadStays, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -63,7 +63,7 @@ test("the whole map's size goes in steps of 4 tiles, as the World Editor's, from
   assert.match(resizeProblem(t, [0, 0, 0, -1], border) ?? "", /height must be a multiple of 4/);
   assert.match(resizeProblem(t, [-68, 0, 0, 0], none) ?? "", /width must be 32–480 tiles \(28\)/);
   assert.match(resizeProblem(t, [388, 0, 0, 0], none) ?? "", /484/);
-  assert.equal(resizeProblem(t, [384, 0, 0, 0], none), null, "480 is the largest");
+  assert.equal(resizeProblem(t, [228, 156, 0, 0], none), null, "480 is the largest (on both sides: one alone would go past ±32256)");
   assert.equal(resizeProblem(t, [-64, 0, 0, 0], none), null, "32 the smallest");
 });
 
@@ -422,40 +422,42 @@ test("Map Size cutting the top: the top row keeps the old row's edge bit, as the
   assert.equal(top(plain, 10), false, "control: the plain mark leaves the top row clear");
 });
 
-test("Map Size at the coordinate limit: growth past ±32256 moves the playable edge out instead", () => {
+test("Map Size refuses growth past ±32256; the map the World Editor ends at there is taken when asked for", () => {
   // we-drive 2026-11-14 (tests/we-compare/map-size-limits.json): a new 64x64 map (borders 6 6 4 8, -4096..4096) grown
-  // by 56 clicks on one side stopped at 32256, 284 tiles, the last click's 4 tiles taken from that side's border.
+  // by 56 clicks on one side stopped at 32256, 284 tiles, the last click's 4 tiles taken from that side's border. Studio
+  // refuses the growth past the limit (project rule 2026-11-17: refuse, never cut silently).
   const t = { offsetX: -4096, offsetY: -4096, width: 65, height: 65 };
+  const asTerrain = { ...t, corners: [] } as unknown as Terrain;
   const b: Sides = [6, 6, 4, 8];
-  assert.deepEqual(limitResize(t, [0, 224, 0, 0], b), { change: [0, 220, 0, 0], complements: [6, 2, 4, 8] }, "right");
-  assert.deepEqual(limitResize(t, [224, 0, 0, 0], b), { change: [220, 0, 0, 0], complements: [2, 6, 4, 8] }, "left");
-  assert.deepEqual(limitResize(t, [0, 0, 0, 224], b), { change: [0, 0, 0, 220], complements: [6, 6, 4, 4] }, "top");
-  assert.deepEqual(limitResize(t, [0, 0, 224, 0], b), { change: [0, 0, 220, 0], complements: [6, 6, 0, 8] }, "bottom");
-  assert.deepEqual(limitResize(t, [0, 220, 0, 0], b), { change: [0, 220, 0, 0], complements: b }, "control: up to the limit nothing changes");
-  assert.deepEqual(limitResize(t, [-4, 200, -8, 216], b), { change: [-4, 200, -8, 216], complements: b }, "control: cuts and growth within it");
-  // The widest map of the spec: right 56 clicks, then left 49 (480 wide): playable 472, camera right 31488.
-  const right = limitResize(t, [0, 224, 0, 0], b);
-  const wide = limitResize(t, [196, 224, 0, 0], b);
-  assert.deepEqual(wide, { change: [196, 220, 0, 0], complements: [6, 2, 4, 8] });
-  const [w] = resizedSize(t as Terrain, wide.change);
+  assert.match(coordProblem(t, [0, 224, 0, 0]) ?? "", /^The right edge would reach 32768, past ±32256, the farthest a map's edge may lie \(220 tiles can be added there\)\.$/);
+  assert.match(coordProblem(t, [224, 0, 0, 0]) ?? "", /^The left edge would reach -32768, past ±32256/);
+  assert.match(coordProblem(t, [0, 0, 0, 224]) ?? "", /^The top edge would reach 32768/);
+  assert.match(coordProblem(t, [0, 0, 228, 0]) ?? "", /^The bottom edge would reach -33280/);
+  assert.match(resizeProblem(asTerrain, [0, 224, 0, 0], b) ?? "", /past ±32256/, "resizeProblem refuses it (the Map Size view, resize_map and the editor's resize all ask it)");
+  assert.match(resizeProblem(asTerrain, [192, 224, 0, 0], b) ?? "", /The right edge/);
+  assert.equal(coordProblem(t, [0, 220, 0, 0]), null, "control: up to the limit");
+  assert.equal(coordProblem(t, [-4, 200, -8, 216]), null, "control: cuts and growth within it");
+  // A map already past the limit: cuts and the other sides' growth are still taken, more growth there isn't.
+  const past = { offsetX: -4096, offsetY: -4096, width: 289, height: 65 };
+  assert.equal(coordProblem(past, [-4, 0, 0, 0]), null);
+  assert.equal(coordProblem(past, [0, -4, 4, 0]), null);
+  assert.match(coordProblem(past, [0, 4, 0, 0]) ?? "", /\(0 tiles can be added there\)/);
+  // The editor's results, asked for directly (the we-compare specs' Studio steps): right 56 clicks is right 220 with the
+  // right border 2; the widest map (then left 49 clicks, 480 wide) left 196 and right 220: playable 472, camera right
+  // 31488; a 57th click took the right border to 0; a 96 x 64 map stopped after 51 clicks.
+  for (const [change, border] of [
+    [[0, 220, 0, 0], [6, 2, 4, 8]], [[220, 0, 0, 0], [2, 6, 4, 8]], [[0, 0, 0, 220], [6, 6, 4, 4]], [[0, 0, 220, 0], [6, 6, 0, 8]],
+    [[196, 220, 0, 0], [6, 2, 4, 8]], [[0, 220, 0, 0], [6, 0, 4, 8]],
+  ] as [Sides, Sides][]) assert.equal(resizeProblem(asTerrain, change, border), null, `${change} ${border}`);
+  const [w] = resizedSize(asTerrain, [196, 220, 0, 0]);
   assert.equal(w, 480);
   const next = { ...t, offsetX: -4096 - 196 * 128, width: 481 } as Terrain;
-  assert.equal(playableSize(next, wide.complements)[0], 472);
-  assert.equal(cameraBounds(next, wide.complements)[2], 31488);
-  assert.equal(cameraBounds(next, wide.complements)[0], -29184 + 10 * 128);
-  assert.equal(resizeProblem({ ...t, corners: [] } as unknown as Terrain, right.change, right.complements), null);
-  // The border goes down to 0 and no further; the rest is dropped, as the editor's arrows then do nothing (a 57th
-  // click: right border 2 to 0, playable 278, camera right 31744; at the bottom 0 stays 0).
-  assert.deepEqual(limitResize(t, [0, 228, 0, 0], b), { change: [0, 220, 0, 0], complements: [6, 0, 4, 8] });
-  assert.deepEqual(limitResize(t, [0, 0, 228, 0], b), { change: [0, 0, 220, 0], complements: [6, 6, 0, 8] });
-  assert.deepEqual(limitResize(t, [0, 0, 0, 400], b), { change: [0, 0, 0, 220], complements: [6, 6, 4, 0] });
-  // A 96 x 64 map: 51 clicks to the limit on the right.
-  assert.deepEqual(limitResize({ offsetX: -6144, offsetY: -4096, width: 97, height: 65 }, [0, 208, 0, 0], b), { change: [0, 204, 0, 0], complements: [6, 2, 4, 8] });
-  // A map already at the limit: growth there is all border.
-  const atLimit = { offsetX: -4096, offsetY: -4096, width: 285, height: 65 };
-  assert.deepEqual(limitResize(atLimit, [4, 4, 0, 0], b), { change: [4, 0, 0, 0], complements: [6, 2, 4, 8] });
-  // Applying it twice changes nothing more (the MCP tool and the editor both apply it).
-  assert.deepEqual(limitResize(t, right.change, right.complements), right);
+  assert.equal(playableSize(next, [6, 2, 4, 8])[0], 472);
+  assert.equal(cameraBounds(next, [6, 2, 4, 8])[2], 31488);
+  assert.equal(cameraBounds(next, [6, 2, 4, 8])[0], -29184 + 10 * 128);
+  const ns = { offsetX: -6144, offsetY: -4096, width: 97, height: 65, corners: [] } as unknown as Terrain;
+  assert.equal(resizeProblem(ns, [0, 204, 0, 0], [6, 0, 4, 8]), null);
+  assert.match(resizeProblem(ns, [0, 208, 0, 0], b) ?? "", /The right edge would reach 32768/);
 });
 
 test("Map Size moves a start location only when it's off the new map", () => {

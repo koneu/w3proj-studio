@@ -1,7 +1,7 @@
 [
   {
     "name": "shadow-terrain",
-    "description": "Calculate Shadows on ground and cliffs (branch we-shadow-3, 2026-11-17): shadow-terrain.w3x (fixtures/we-specs/make-shadow-probes.mjs: a 128 bank, cliffs one and two levels up, single corners raised 128, 256 and 512, two ridges, a 64 bank; no doodads). The editor: File > Calculate Shadows and Save Map. Studio: w3.terrain.calculateShadows. war3map.shd cell by cell: the editor's walk of 16 cells toward the sun over heights at the cell centres (shadows.ts shadowCellHeights, cliffs from the model the editor names from the top-left corner, a quarter turn round); the same in SD",
+    "description": "Calculate Shadows on ground and cliffs (branch we-shadow-3, 2026-11-17): shadow-terrain.w3x (fixtures/we-specs/make-shadow-probes.mjs: a 128 bank, cliffs one and two levels up, single corners raised 128, 256 and 512, two ridges, a 64 bank; no doodads). The editor: File > Calculate Shadows and Save Map. Studio: w3.terrain.calculateShadows. war3map.shd cell by cell: the editor's walk toward the sun (80/3 a step, as far as the map goes) over heights at the cell centres (shadows.ts shadowCellHeights, cliffs from the model the editor names from the top-left corner, a quarter turn round); the same in SD",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/shadow-terrain.w3x"
     },
@@ -28,6 +28,54 @@
     "description": "Calculate Shadows on plateau.w3x (fixtures/we-specs/make-plateau.mjs: a plateau one level up with long straight faces on all four sides): the one-level cliff's shadow reaches one cell further in one row of four along the east face, from the model the editor reads for a cliff tile (shadows.ts shadowCliffName); 367 cells, SD and HD alike",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "shadow-slopes",
+    "description": "Calculate Shadows on shadow-slopes.w3x (fixtures/we-specs/make-shadow-probes.mjs, branch we-shadow-4): planes facing away from the sun that fall 26.56, 26.63, 26.69 and 26.75 a step of the walk, two of them under water, and a corner raised 1000: the walk rises 80/3 a step (shadows.ts shadowStepRise: the first two lit, the others dark, water or not) and goes on past 16 steps (the corner's shadow is 33 cells long)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/shadow-slopes.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "shadow-cliffvar",
+    "description": "Calculate Shadows on shadow-cliffvar.w3x (make-shadow-probes.mjs, branch we-shadow-4): two plateaus, cliff variation 3 on the one and 1 on the other; the shadow models of the east and south faces (BAAB, BBAA) have two variations, and variation 3 reads 1 (shadowmap.ts shadowCliffVariation: counted round; variation 0 would leave 383 cells off)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/shadow-cliffvar.w3x"
     },
     "we": {
       "mode": "hd",

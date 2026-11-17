@@ -3,6 +3,7 @@
 // cliff is drawn with its cliff type: a cliff type (the w3e's cliff list, see cliffList) belongs to a ground tile, so
 // a tile no corner shows can still be what a cliff is made of.
 
+import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { customTilesFlag } from "../../lib/terrain/tilesets";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { cliffList, type CliffType } from "./cliffs";
@@ -88,13 +89,18 @@ export function planRemoval(tiles: readonly string[], remove: readonly number[],
 export function applyTileList(t: Terrain, tiles: readonly string[], map: (oldIndex: number) => number, types: ReadonlyMap<string, CliffType>, own: readonly string[] | undefined): void {
   const beforeGround = [...t.groundTiles], beforeCliffs = [...t.cliffTiles];
   const oldCliffs = cliffList(t, types);
-  t.groundTiles = [...tiles];
   // The stored list: the cliff types of the new ground list in its order, then the old entries that don't belong to a
   // removed tile (types the game doesn't define, and those whose ground wasn't in the list).
   const byGround = new Map([...types.values()].map((c) => [c.groundTile, c.cliffID]));
   const derived = tiles.flatMap((g) => { const id = byGround.get(g); return id ? [id] : []; });
   const removed = new Set(beforeGround.filter((g) => !tiles.includes(g)));
-  t.cliffTiles = [...derived, ...beforeCliffs.filter((id) => !derived.includes(id) && !removed.has(types.get(id)?.groundTile ?? ""))];
+  const cliffs = [...derived, ...beforeCliffs.filter((id) => !derived.includes(id) && !removed.has(types.get(id)?.groundTile ?? ""))];
+  // Refused before anything changes: a list grown past what a corner can name (a list that long already may stay).
+  if (cliffs.length > MAX_CLIFF_TYPES && cliffs.length > beforeCliffs.length) {
+    throw new Error(`These ground tiles would make the cliff list ${cliffs.length} long (${cliffs.join(", ")}), but a corner can name only ${MAX_CLIFF_TYPES}: remove cliff types first.`);
+  }
+  t.groundTiles = [...tiles];
+  t.cliffTiles = cliffs;
   const newCliffs = cliffList(t, types);
   const cliffOf = (tile: string | undefined) => newCliffs.findIndex((c) => !!c && c.groundTile === tile);
   for (const c of t.corners) {

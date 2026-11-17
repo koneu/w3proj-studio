@@ -2,6 +2,7 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
+import { crispPixels } from "./crispline";
 import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
@@ -476,6 +477,9 @@ export interface Ring {
   square?: boolean;
   /** A closed line through these points (x, y; on the ground or at `z`) instead of a circle: `x`, `y`, `r` unused. */
   outline?: readonly (readonly [number, number])[];
+  /** An `outline` drawn as the editor draws its camera bounds: one pixel wide, each pixel fully covered (the canvas
+   *  smooths a GL line over two pixels at half strength). */
+  crisp?: boolean;
 }
 
 export interface Marker {
@@ -573,6 +577,8 @@ export function edgeMode(b: Pick<ObjectBatch, "group" | "followGround">, tone: T
 interface Mesh {
   vao: WebGLVertexArrayObject;
   count: number;
+  /** A closed line drawn one pixel wide without smoothing (`Ring.crisp`): its corners (x, y, z, ...) and colour. */
+  crisp?: { points: number[]; rgb: Vec3 };
 }
 
 /** The sun's shadow map (HD): texels each way, how far above the ground in view a caster can stand and still be in
@@ -1515,7 +1521,9 @@ export class TerrainRenderer {
     const [cr, cg, cb] = [r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255];
     if (r.outline) {
       for (const [x, y] of r.outline) data.push(x, y, (r.z ?? this.groundHeight(x, y)) + 4, cr, cg, cb, 1);
-      return this.colorMesh(data);
+      const mesh = this.colorMesh(data);
+      if (r.crisp) mesh.crisp = { points: r.outline.flatMap(([x, y]) => [x, y, (r.z ?? this.groundHeight(x, y)) + 4]), rgb: r.rgb };
+      return mesh;
     }
     for (let i = 0; i < segments; i++) {
       const a = (i / segments) * Math.PI * 2;
@@ -1983,11 +1991,44 @@ export class TerrainRenderer {
     gl.disable(gl.DEPTH_TEST);
     for (const ring of [...[...this.ringSets.values()].flat(), ...this.selection, this.brush]) {
       if (!ring) continue;
+      if (ring.crisp) { this.drawCrisp(ring.crisp, viewProj); continue; }
       gl.bindVertexArray(ring.vao);
       gl.drawArrays(gl.LINE_LOOP, 0, ring.count);
     }
     gl.enable(gl.DEPTH_TEST);
     gl.bindVertexArray(null);
+  }
+
+  private crispVao: WebGLVertexArrayObject | null = null;
+  private crispBuf: WebGLBuffer | null = null;
+
+  /** A closed line of world points as pixels (crispPixels), each one point of size 1 at its centre, so none is shared
+   *  between two pixels. */
+  private drawCrisp(line: NonNullable<Mesh["crisp"]>, viewProj: Float32Array) {
+    const gl = this.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+    const out: number[] = [], [cr, cg, cb] = [line.rgb[0] / 255, line.rgb[1] / 255, line.rgb[2] / 255];
+    const pixels = crispPixels(line.points, viewProj, W, H);
+    for (let i = 0; i < pixels.length; i += 2) out.push((pixels[i] + 0.5) / W * 2 - 1, 1 - (pixels[i + 1] + 0.5) / H * 2, 0, cr, cg, cb, 1);
+    if (!out.length) return;
+    if (!this.crispVao) {
+      const vao = gl.createVertexArray()!;
+      gl.bindVertexArray(vao);
+      this.crispBuf = gl.createBuffer()!;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.crispBuf);
+      const pos = gl.getAttribLocation(this.colorProg, "aPos"), col = gl.getAttribLocation(this.colorProg, "aColor");
+      gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos, 3, gl.FLOAT, false, 28, 0);
+      gl.enableVertexAttribArray(col); gl.vertexAttribPointer(col, 4, gl.FLOAT, false, 28, 12);
+      this.crispVao = vao;
+    }
+    gl.bindVertexArray(this.crispVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.crispBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.DYNAMIC_DRAW);
+    const ident = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    gl.uniformMatrix4fv(gl.getUniformLocation(this.colorProg, "uViewProj"), false, ident);
+    gl.uniform1f(gl.getUniformLocation(this.colorProg, "uPointSize"), 1);
+    gl.drawArrays(gl.POINTS, 0, out.length / 7);
+    gl.uniformMatrix4fv(gl.getUniformLocation(this.colorProg, "uViewProj"), false, viewProj);
+    gl.uniform1f(gl.getUniformLocation(this.colorProg, "uPointSize"), 5000);
   }
 
   /** Whether a batch casts into the sun's shadow map: one that's drawn and castsSunShadow. */

@@ -479,6 +479,29 @@ mod tests {
         );
     }
 
+    /// The game draws a cliff list of three (openpoints example map 29: CLdi CLgr CAdi, corners on 2); lists run to
+    /// 17 in real maps (TurtleRock v2.0). Every length and the numbers 0 to 15 come back byte for byte.
+    #[test]
+    fn longer_cliff_lists_round_trip() {
+        let ids: Vec<[u8; 4]> = [b"CLdi", b"CLgr", b"CAdi", b"CLno", b"CFdi", b"CFgr", b"CWsn", b"CWgr", b"CBde", b"CBgr", b"CNdi", b"CNsn", b"CAgr", b"CYdi", b"CCgr", b"CCdi", b"CYsq"]
+            .iter()
+            .map(|s| **s)
+            .collect();
+        for n in [0, 2, 3, 15, 17] {
+            let mut t = parse(&sample(12, &[])).unwrap();
+            t.cliffs = ids[..n].to_vec();
+            for (i, c) in t.corners.iter_mut().enumerate() {
+                c.cliff_texture = (i % 16) as u8;
+            }
+            let b = write(&t);
+            let text = String::from_utf8(to_text(&b).unwrap()).unwrap();
+            let names: Vec<String> = ids[..n].iter().map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+            assert!(text.contains(&format!("\ncliffs {}\n", names.join(" "))), "{text}");
+            assert_eq!(from_text(text.as_bytes()).unwrap(), b, "{n} cliff types");
+            assert_eq!(parse(&b).unwrap().corners[2].cliff_texture, 2);
+        }
+    }
+
     #[test]
     fn a_size_too_large_to_multiply_is_an_error() {
         let mut b = sample(12, &[]);

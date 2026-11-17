@@ -901,7 +901,8 @@ pub struct PackReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strings: Option<wts::PruneOutcome>,
     /// What the packed map has that the user should know (chapter maps' as `maps/<folder>/…`): a
-    /// script whose ally priorities aren't those the pack worked out (`allies::script_agrees`).
+    /// script whose ally priorities aren't those the pack worked out (`allies::script_agrees`), no script or no
+    /// war3map.wtg (`missing_map_files`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
@@ -1069,6 +1070,32 @@ fn read_pruned_record(project: &Path) -> std::result::Result<Option<String>, Str
     }
 }
 
+/// What a map's archive (`encoded`: archive name → bytes) lacks that the game or the World Editor needs, as warnings;
+/// the pack goes on and adds nothing. No map script (war3map.j, or war3map.lua for a Lua map): the game has nothing to
+/// run. No war3map.wtg (protected, JASS-only maps leave it out): the World Editor refuses to open the map ("Trigger
+/// data missing or invalid"); an empty one isn't made up, it would drop the triggers the script has. A campaign's own
+/// archive (war3campaign.w3f) has neither.
+fn missing_map_files(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
+    let has = |name: &str| encoded.keys().any(|k| k.eq_ignore_ascii_case(name));
+    if has("war3campaign.w3f") {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if !has("war3map.j") && !has("war3map.lua") {
+        out.push(format!(
+            "{MAP_DIR}/war3map.j is missing, so the packed map has no script and the game can't run it: Generate Map Script in \
+             W3Proj Studio or `w3proj rebuild --only script` makes it"
+        ));
+    }
+    if !has("war3map.wtg") {
+        out.push(format!(
+            "{MAP_DIR}/war3map.wtg is missing (protected maps leave it out), so the World Editor can't open the packed map \
+             (\"Trigger data missing or invalid\"); the game runs it from its script, and no empty war3map.wtg is made up"
+        ));
+    }
+    out
+}
+
 /// `prune`: the map's war3map.wts goes into the archive without the strings nothing refers to
 /// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
 /// Chapter maps are packed as they are. Builds a project's archive (chapter maps under `maps/` are
@@ -1084,6 +1111,7 @@ fn pack_bytes_with(
         *outcome = wts::prune_files(&mut files, read_pruned_record(project), codecs);
     }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
+    warnings.extend(missing_map_files(&encoded));
     // The ally priorities the World Editor's save works out (`allies`); a map whose masks already
     // match goes in byte for byte. The script stays as it is: when its priorities aren't those, it
     // was made from other start locations or players; only the app's generator makes it again (its

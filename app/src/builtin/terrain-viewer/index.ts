@@ -33,6 +33,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 import { applyTileList, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
+import { applyCliffRemoval, cliffEntryUse, cliffListWith, planCliffRemoval } from "./clifflist";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { autoCycleLine, cycledId, startAutoCycle, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
@@ -65,7 +66,7 @@ import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField, TOP_LEVEL } from "../../lib/terrain/wholemap";
 import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
-import { CornerUndo } from "../../lib/terrain/cliffs";
+import { CornerUndo, MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -102,7 +103,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, doodadStays, limitResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -801,8 +802,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { handle } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
-      // Growth past the coordinate limit moves the playable edge instead (limitResize), as handle.resizeMap applies it.
-      const { change, complements } = limitResize(t, asked, (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides);
+      // Growth past the coordinate limit is refused (resizeProblem), not cut to it.
+      const change = asked, complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
       const same = change.every((n) => n === 0) && complements.every((n, k) => n === info?.cameraComplements?.[k]);
       if (same) throw new Error("That changes nothing.");
       const problem = resizeProblem(t, change, complements);
@@ -2026,6 +2027,43 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const remove = unused.length === terrain.groundTiles.length ? unused.slice(1) : unused;
           return remove.length ? removeTiles(remove, new Map()) : [];
         };
+        /** Changes the map's cliff list (`change` edits the terrain's list and corners) as one undo step. */
+        const changeCliffList = (change: () => void) => {
+          const snap = () => ({ cliffs: [...terrain.cliffTiles], ctex: terrain.corners.map((c) => c.cliffTexture) });
+          const restore = (v: ReturnType<typeof snap>) => {
+            terrain.cliffTiles = [...v.cliffs];
+            terrain.corners.forEach((c, i) => { c.cliffTexture = v.ctex[i]; });
+            void syncTileList();
+          };
+          const before = snap();
+          change();
+          const after = snap();
+          pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: true, objects: false });
+          void syncTileList();
+          replanCliffs();
+          renderer.terrainChanged();
+          redraw();
+        };
+        /** The game's cliff types, refused until they are read; and an edit of the read-only terrain. */
+        const cliffTypesForEdit = () => {
+          if (!editable) throw new Error("This terrain is read-only.");
+          if (glDead) throw new Error(VIEW_LOST);
+          if (!cliffData) throw new Error("The game's cliff types aren't read yet. Try again in a moment.");
+          return cliffData.types;
+        };
+        /** Adds a game cliff type to the end of the map's cliff list (one undo step): its number. Throws when refused. */
+        const addCliffType = (id: string): number => {
+          const list = cliffListWith(terrain.cliffTiles, id, cliffTypesForEdit());
+          changeCliffList(() => { terrain.cliffTiles = list; });
+          return list.length - 1;
+        };
+        /** Takes entry `index` out of the map's cliff list (one undo step); corners on it get `replacement` (required
+         *  when it's in use), the later entries' corners follow their entry. The removed id; throws when refused. */
+        const removeCliffType = (index: number, replacement?: number): string => {
+          const plan = planCliffRemoval(terrain.cliffTiles, index, replacement, cliffEntryUse(terrain, cliffTypesForEdit()));
+          changeCliffList(() => applyCliffRemoval(terrain, plan));
+          return plan.removed;
+        };
         /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
         const loadTilesetArt = () => {
         loadBlightAndWater();
@@ -2116,10 +2154,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The tile list no longer matches the tileset's default (as a rule).
           terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
           terrain.customTilesets = terrain.customTilesetsRaw !== 0;
-          // A tile with its own cliff type adds that type (cliff indices follow the tile order).
+          // A tile with its own cliff type adds that type (cliff indices follow the tile order), while the cliff list
+          // has room: a full one keeps its cliffs (Cliffs… adds and removes cliff types).
           if (cliffData) {
             const ct = [...cliffData.types.values()].find((c) => c.groundTile === id);
-            if (ct && !terrain.cliffTiles.includes(ct.cliffID)) terrain.cliffTiles.push(ct.cliffID);
+            if (ct && !terrain.cliffTiles.includes(ct.cliffID) && terrain.cliffTiles.length < MAX_CLIFF_TYPES) terrain.cliffTiles.push(ct.cliffID);
           }
           const added = terrain.groundTiles.length - 1;
           // Load in the background so the stroke starts right away. A paste that was refused took it out again meanwhile.
@@ -3626,7 +3665,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               commit(st);
             }),
             ...(usedCliffs.length && cliffGrounds.length ? [replaceRow("Cliff type", usedCliffs.map((n) => [String(n), label(cliffGrounds[n])[1]] as [string, string]),
-              cliffGrounds.flatMap((g, n) => (g ? [[String(n), label(g)[1]] as [string, string]] : [])), (from, to) => {
+              // Into the first 15 only: a corner can't name an entry past 14.
+              cliffGrounds.slice(0, MAX_CLIFF_TYPES).flatMap((g, n) => (g ? [[String(n), label(g)[1]] as [string, string]] : [])), (from, to) => {
                 const was = Number(from), number = Number(to);
                 commit(changeArea(terrain, a, (c) => { if (cliffOf(c) !== was || was === number) return false; c.cliffTexture = number; return true; }));
               })] : []),
@@ -4334,10 +4374,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (shd) out.push(shd);
           return out;
         };
-        const resizeLocked = async (asked: Sides, askedBorder: Sides): Promise<{ removed: number }> => {
+        const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
-          // Growth past the coordinate limit moves the playable edge instead (limitResize).
-          const { change, complements } = limitResize(terrain, asked, askedBorder);
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
           // A file the resize must rewrite that is there but can't be read would be left at the old size (a half-resized
@@ -4396,8 +4434,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return { rect, edge, stays };
         };
         /** How many placed objects (special doodads included) a resize would remove; changes nothing. */
-        const resizeRemovals = async (asked: Sides, askedBorder: Sides): Promise<number> => {
-          const { change, complements } = limitResize(terrain, asked, askedBorder);
+        const resizeRemovals = async (change: Sides, complements: Sides): Promise<number> => {
           const [w, h] = resizedSize(terrain, change);
           const next = { offsetX: terrain.offsetX - change[0] * 128, offsetY: terrain.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
           const { stays } = await resizeRules(next, complements);
@@ -4693,6 +4730,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pushEdit: (e) => pushEdit(e),
           cliffGroundTiles: () => (cliffData ? cliffList(terrain, cliffData.types).map((c) => c?.groundTile ?? "") : []),
           defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map())),
+          gameCliffTypes: () => (cliffData ? [...cliffData.types.values()].map((c) => ({ id: c.cliffID, groundTile: c.groundTile })) : []),
+          cliffTypeUse: () => (cliffData ? cliffEntryUse(terrain, cliffData.types) : null),
+          addCliffType: (id) => addCliffType(id),
+          removeCliffType: (index, replacement) => removeCliffType(index, replacement),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
           setShapes: (triangles) => { renderer.setShapes("tab", triangles); redraw(); },
@@ -4985,6 +5026,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 from = grounds.indexOf(req.from);
                 to = grounds.indexOf(req.to);
                 if (from < 0 || to < 0) throw new Error(`The map's cliff types are those of ${grounds.join(", ")}.`);
+                if (to >= MAX_CLIFF_TYPES) throw new Error(`${req.to}'s cliff is entry ${to} of the map's cliff list, but a corner can name only the first ${MAX_CLIFF_TYPES} (0 to ${MAX_CLIFF_TYPES - 1}).`);
               }
               const log = new CornerUndo();
               const changed = replaceCorners(terrain, kind === "tiles" ? "texture" : "cliffTexture", from, to, !!req.swap, log);
@@ -5240,7 +5282,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const key = corners ? corners.join(";") : "";
           if (key === boundsKey && !(again && corners)) return;
           boundsKey = key;
-          renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners) }] : []);
+          renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners), crisp: true }] : []);
           redraw();
         };
         /** Draws what `shown` says, after the choice or game view changed. */

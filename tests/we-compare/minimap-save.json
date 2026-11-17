@@ -73,10 +73,19 @@
   },
   {
     "name": "mmsave-dots-models-sd",
-    "description": "one doodad of every type whose dot takes its model's colour (159: pathing none, 2x2, 4x4, 6x6, 8x8), SD: one colour per material (its first layer's texture, team colour black); a model the game doesn't store gets the grey 183 dot also with a pathing texture (LRsr, UGsr, YOi1, YOig). Tolerance 14: the saved BLP goes through the editor's JPEG encoder. No HD spec: the editor draws grey for the models stored only below _DE.w3mod (EOcr, LCpa, UO*, YO*) where Studio reads them",
+    "description": "one doodad of every type whose dot takes its model's colour (159: pathing none, 2x2, 4x4, 6x6, 8x8), SD: one colour per material (its first layer's texture, team colour black); a model the game doesn't store gets the grey 183 dot also with a pathing texture (LRsr, UGsr, YOi1, YOig). Tolerance 14: the saved BLP goes through the editor's JPEG encoder.",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots-models.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 14 }],
+    "limit": 20
+  },
+  {
+    "name": "mmsave-dots-models-hd",
+    "description": "the same map in HD: the editor draws the grey 183 dot for a doodad whose model is stored only below _DE.w3mod (EOcr, LCpa, LRsr, UO*, YO*), Studio's minimap leaves that layer out (minimapgen withoutDeLayer)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots-models.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
     "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 14 }],
     "limit": 20
   }

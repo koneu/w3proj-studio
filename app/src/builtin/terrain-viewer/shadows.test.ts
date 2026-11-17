@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { newTerrain, type NewMapOptions } from "./newmap";
-import { cliffCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, terrainShadows, SHADOW_WALK_STEPS } from "./shadows";
+import { rampSides } from "../../lib/terrain/cliffs";
+import { castShadow, cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, terrainShadows, type ShadowMesh } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
 function flat(): Terrain {
@@ -27,7 +28,7 @@ test("a 128 high bank one tile wide: the editor's shadow starts a cell down the 
   assert.deepEqual(colOf(shd, 40, 60, 75), [65, 66, 67, 68]);
 });
 
-test("a single corner raised 512: the editor's shadow cell by cell, cut off after 16 steps toward the sun", () => {
+test("a single corner raised 512: the editor's shadow cell by cell", () => {
   const t = flat();
   setGroundHeight(corner(t, 40, 28), 512);
   const shd = terrainShadows(t);
@@ -48,12 +49,109 @@ test("a single corner raised 512: the editor's shadow cell by cell, cut off afte
     return out.join(",");
   };
   for (let y = 100; y <= 140; y++) assert.equal(runs(y), editor[y] ?? "", `row ${y}`);
-  // The gap at (175, 127) is the 17th step: the walk stops at SHADOW_WALK_STEPS.
-  assert.equal(SHADOW_WALK_STEPS, 16);
+  // The gap at (175, 127) is 17 steps off the corner, whose highest cell (448) is lower than the sun's 17 × 80/3 there.
   assert.equal(shd.reduce((n, v) => n + (v ? 1 : 0), 0), Object.values(editor).join(",").split(",").reduce((n, r) => {
     const [a, b] = r.split("-").map(Number);
     return n + (b === undefined ? 1 : b - a + 1);
   }, 0), "nothing else on the map is shaded");
+});
+
+// make-shadow-probes.mjs shadow-slopes.w3x (we-drive --save-shadows, branch we-shadow-4, 2026-11-17, HD).
+
+test("the walk rises 80/3 a step: a plane falling 26.63 a step away from the sun is lit, one falling 26.69 dark", () => {
+  assert.ok(Math.abs(shadowStepRise(DEFAULT_SUN) - 80 / 3) < 1e-9);
+  // Planes facing north, 0 on their north edge (corner row 6), 5 tiles wide: a walk toward the sun (south-west) climbs
+  // a / 4 a step on them. The editor's shaded cells per row inside each, rows 8 to 24.
+  const editor: Record<number, number[]> = {
+    106.25: Array(17).fill(0),
+    106.5: Array(17).fill(0),
+    106.75: [0, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 0],
+    107: [0, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 0],
+  };
+  for (const [a, rowsWe] of Object.entries(editor)) {
+    const t = flat();
+    for (let y = 2; y <= 6; y++) for (let x = 13; x <= 18; x++) setGroundHeight(corner(t, x, y), Number(a) * (6 - y));
+    const shd = terrainShadows(t);
+    const rows = Array.from({ length: 17 }, (_, i) => rowOf(shd, 8 + i, 52, 71).length);
+    assert.deepEqual(rows, rowsWe, `a = ${a}`);
+  }
+});
+
+test("the walk goes on as far as the map: a corner raised 1536 casts 50 cells", () => {
+  const t = flat();
+  setGroundHeight(corner(t, 6, 22), 1536);
+  const shd = terrainShadows(t);
+  // The editor's shadow ends at (73, 138), 49 steps off the corner's cells (a walk of 16 stopped at row 104).
+  const top = (y: number) => rowOf(shd, y, 0, 255);
+  assert.deepEqual([top(138), top(137), top(136), top(135)], [[73], [72, 74], [71, 73], [70, 72]]);
+  assert.deepEqual(top(139), []);
+});
+
+/** A box model's triangles, 112 wide (x and y -56..56) from z0 to z1, each side counter-clockwise from outside;
+ *  `bottom`: with its bottom. */
+function boxMesh(z0: number, z1: number, bottom: boolean): ShadowMesh {
+  const [a, b] = [-56, 56];
+  const quads = [
+    [[a, a, z1], [b, a, z1], [b, b, z1], [a, b, z1]],
+    ...(bottom ? [[[a, a, z0], [a, b, z0], [b, b, z0], [b, a, z0]]] : []),
+    [[a, a, z0], [b, a, z0], [b, a, z1], [a, a, z1]], [[b, b, z0], [a, b, z0], [a, b, z1], [b, b, z1]],
+    [[a, b, z0], [a, a, z0], [a, a, z1], [a, b, z1]], [[b, a, z0], [b, b, z0], [b, b, z1], [b, a, z1]],
+  ];
+  const positions = quads.flat(2), faces: number[] = [];
+  quads.forEach((_, q) => faces.push(q * 4, q * 4 + 1, q * 4 + 2, q * 4, q * 4 + 2, q * 4 + 3));
+  return { positions: new Float32Array(positions), faces: new Uint32Array(faces) };
+}
+
+test("a model's shadow: a cell is dark only when all of the model on its line toward the sun is over the ground", () => {
+  // The World Editor's war3map.shd of box models imported into a map (we-drive, branch we-shadow-4, HD; the box's
+  // origin at a cell corner, (32, 192) in cells): the runs of shaded cells per row.
+  const cases: [string, number, number, boolean, Record<number, string>][] = [
+    // Standing on the ground with a bottom: the bottom is on every footprint cell's line, at the ground: lit.
+    ["closed", 0, 96, true, { 191: "34", 192: "34-35", 193: "34-36", 194: "31-36", 195: "32-36", 196: "33-36" }],
+    // Without its bottom the footprint is dark. The editor leaves (33, 193) lit: its centre is on the edge two of the
+    // top's triangles share, where which one takes it comes down to the floats' last bits (not compared).
+    ["cap", 0, 96, false, { 190: "30-33", 191: "30-34", 192: "30-35", 193: "30-32,34-36", 194: "31-36", 195: "32-36", 196: "33-36" }],
+    // Sunk 32 into the ground: the bottom under the footprint's cells, lit; the shadow shorter.
+    ["sunk", -32, 64, true, { 191: "34", 192: "34-35", 193: "34-35", 194: "31-35", 195: "32-35" }],
+    // Floating 32 over the ground: all of it over the footprint too, dark.
+    ["float", 32, 128, true, { 191: "31-34", 192: "31-35", 193: "31-36", 194: "31-37", 195: "32-38", 196: "33-38", 197: "34-38", 198: "35-38" }],
+  ];
+  for (const [name, z0, z1, bottom, editor] of cases) {
+    const t = flat();
+    const out = new Uint8Array(256 * 256);
+    castShadow(out, t, { mesh: boxMesh(z0, z1, bottom), x: -4096 + 32 * 32, y: -4096 + 192 * 32, z: 0, angle: 0, scale: [1, 1, 1] });
+    if (name === "cap") out[193 * 256 + 33] = 0;
+    for (let y = 180; y <= 210; y++) {
+      const xs = rowOf(out, y, 0, 255);
+      const runs: string[] = [];
+      for (let i = 0; i < xs.length; i++) {
+        let j = i;
+        while (j + 1 < xs.length && xs[j + 1] === xs[j] + 1) j++;
+        runs.push(i === j ? `${xs[i]}` : `${xs[i]}-${xs[j]}`);
+        i = j;
+      }
+      assert.equal(runs.join(","), editor[y] ?? "", `${name}, row ${y}`);
+    }
+  }
+});
+
+test("ramp sides: the ramp model named from the top-left corner on, read a quarter turn round", () => {
+  const t = flat();
+  // A plateau one level up (corners 24..38 x 30..40) with a ramp down its south face, three corners wide (columns 30
+  // to 32: rows 30 high, 29 and 28 low), as shadow-slopes.w3x.
+  for (let y = 30; y <= 40; y++) for (let x = 24; x <= 38; x++) setLayer(corner(t, x, y), 3);
+  for (let y = 28; y <= 30; y++) for (let x = 30; x <= 32; x++) corner(t, x, y).ramp = true;
+  const sides = rampSides(t);
+  const west = sides.find((s) => s.x === 29 && s.y === 28);
+  assert.ok(west, `the ramp's west side: ${JSON.stringify(sides.map((s) => [s.x, s.y, s.w, s.h]))}`);
+  // Drawn as CliffTransABHL (bottom-left, top-left, top-right, bottom-right); the shadows read BHLA.
+  assert.equal(shadowRampName(west.outer, west.base), "BHLA");
+  // Read a quarter turn round: the side's point (x, y) at the model's (-y, x). A model whose height is its own -x (so
+  // the side's y) gives each row of cells its y, in both tiles of a 1 x 2 side.
+  const positions = [-256, 0, 256, 0, 0, 0, 0, 256, 0, -256, 256, 256];
+  const faces = [0, 1, 2, 0, 2, 3];
+  assert.deepEqual([...rampCellHeights(positions, faces, 0, 0).filter((_, i) => i % 4 === 0)], [16, 48, 80, 112]);
+  assert.deepEqual([...rampCellHeights(positions, faces, 0, 1).filter((_, i) => i % 4 === 0)], [144, 176, 208, 240]);
 });
 
 test("ground cells are read over the tile's two triangles, split from the top-left to the bottom-right corner", () => {

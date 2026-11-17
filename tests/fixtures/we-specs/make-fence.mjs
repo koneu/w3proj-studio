@@ -18,9 +18,9 @@ import { modeArgs, requireValid } from "../../gen-args.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
 const args = modeArgs();
-requireValid(args.length === 0 || (args.length === 1 && ["angles", "ints", "neg", "dest"].includes(args[0])), "usage: make-fence.mjs <w3proj cli> <game folder> [angles | ints | neg | dest]");
+requireValid(args.length === 0 || (args.length === 1 && ["angles", "ints", "neg", "dest", "exact"].includes(args[0])), "usage: make-fence.mjs <w3proj cli> <game folder> [angles | ints | neg | dest | exact]");
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-if (!game) { console.error("usage: make-fence.mjs <w3proj cli> <game folder> [angles|ints|neg|dest]"); process.exit(2); }
+if (!game) { console.error("usage: make-fence.mjs <w3proj cli> <game folder> [angles|ints|neg|dest|exact]"); process.exit(2); }
 // "angles": fence-angles.w3x, many facings of two rectangles (below), for the quarter the editor turns them to
 const angles = args[0] === "angles";
 // "ints": fence-ints.w3x, angles that are whole numbers of radians (2.0, 3.0, 180.0 …) on three kinds of doodad
@@ -31,6 +31,10 @@ const neg = args[0] === "neg";
 // "dest": fence-dest.w3x, whole-number angles on destructables without a fixed rotation: the barrel LTbr (2x2Default,
 // one colour), the thin path blocker YTpl (2x1Default, turns), the crate LTcr (4x4Default) and OTsp (no texture)
 const dest = args[0] === "dest";
+// "exact": fence-exact.w3x, the angles that sit on a rounding edge (multiples of 45 degrees from -405 to 765 as the single
+// precision numbers a file holds) on NOfl (8x2), NOal (Fence45) and VOal (Fence135), and NOfl every quarter degree within
+// 2 degrees of 45, 135, 225 and 315
+const exact = args[0] === "exact";
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -68,6 +72,11 @@ try {
     for (const id of ["NOfl", "LOch"]) for (let deg = 0; deg < 360; deg += 5) list.push([id, (deg * Math.PI) / 180]);
     for (const r of [1.7, 1.8, 1.9, 1.95, 2.0, 2.05, 2.1, 2.2, 2.3, 2.5, 3.0, 4.0]) list.push(["NOfl", r]);
     list.forEach(([id, a], i) => put(id, -2688 + (i % 12) * 448, -2688 + Math.floor(i / 12) * 384, a));
+  } else if (exact) {
+    const list = [];
+    for (const id of ["NOfl", "NOal", "VOal"]) for (let deg = -405; deg <= 765; deg += 45) list.push([id, (deg * Math.PI) / 180]);
+    for (const c of [45, 135, 225, 315]) for (let k = -8; k <= 8; k++) list.push(["NOfl", ((c + k / 4) * Math.PI) / 180]);
+    list.forEach(([id, a], i) => put(id, -2688 + (i % 12) * 448, -2688 + Math.floor(i / 12) * 384, a));
   } else if (ints) {
     // Whole numbers as angles: the straight fence (turns to a quarter), the plain square LOcb (keeps its angle) and the
     // mushrooms APms (no pathing texture), and the single precision neighbours of 2.0.
@@ -86,7 +95,7 @@ try {
     for (let k = 0; k < 10; k++) put("NOal", 128 + 64 * k, -1536 + 64 * k, 0, 1.2);
   }
   writeFileSync(file, JSON.stringify(doc, null, 2));
-  run("pack", dir, "-o", join(here, angles ? "fence-angles.w3x" : ints ? "fence-ints.w3x" : neg ? "fence-neg.w3x" : dest ? "fence-dest.w3x" : "fence-wpm.w3x"), "--force-stale");
+  run("pack", dir, "-o", join(here, angles ? "fence-angles.w3x" : exact ? "fence-exact.w3x" : ints ? "fence-ints.w3x" : neg ? "fence-neg.w3x" : dest ? "fence-dest.w3x" : "fence-wpm.w3x"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

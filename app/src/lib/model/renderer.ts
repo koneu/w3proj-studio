@@ -870,12 +870,12 @@ export class ModelGpu {
     this.geoColor.clear();
     for (const ga of m.geosetAnims) {
       this.geoAlpha.set(ga.geosetId, sample(ga.alphaTrack, clock, m.globalSequences, [ga.alpha])[0]);
-      // A key of the colour track is stored blue, green, red: the World Editor draws RuneArt's key (0, 0, 1) red, the lava
-      // cracks' red and GCracks' (1, 0.85, 0) cyan. The static colour is red, green, blue (ShimmeringPortal's static
-      // (0.47, 0, 0.99) stays violet; read blue first its glow went red, TESTING.md "Geoset colours"). `sample` gives
-      // the static colour itself where no key falls in the sequence.
+      // A geoset animation's colour is stored blue, green, red, its colour track's keys as well: the World Editor draws
+      // RuneArt's key (0, 0, 1) red, the lava cracks' red, GCracks' (1, 0.85, 0) cyan, and AzsharaStatue's static
+      // (0.31, 0.78, 0.86) gold (we-look-4; read red, green, blue it was grey stone). `sample` gives the static colour
+      // itself where no key falls in the sequence.
       const c = sample(ga.colorTrack, clock, m.globalSequences, ga.color);
-      this.geoColor.set(ga.geosetId, c === ga.color ? c : [c[2], c[1], c[0]]);
+      this.geoColor.set(ga.geosetId, [c[2], c[1], c[0]]);
     }
 
     // Opaque layers first, then blended ones (by priority plane).

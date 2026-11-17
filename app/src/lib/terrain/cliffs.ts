@@ -19,6 +19,10 @@ export class CornerUndo implements CornerLog {
   }
 }
 
+/** How many entries of the w3e's cliff list a corner can name: its cliff type is 4 bits, 0 to 14, and 15 is reserved
+ *  (a new map's corners hold it). Entries past 14 can't be painted. */
+export const MAX_CLIFF_TYPES = 15;
+
 /** Corners of cliff tiles get the cliff type `fixed` (a cliff type number, as chosen in the World
  *  Editor's cliff palette), or without it the cliff type of their ground tile where it has one,
  *  so painting grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
@@ -50,7 +54,8 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
     if (!own?.has(i) && !(cliffTile(x - 1, y - 1) || cliffTile(x, y - 1) || cliffTile(x - 1, y) || cliffTile(x, y))) continue;
     const c = t.corners[i];
     const type = fixed ?? cliffGround.indexOf(t.groundTiles[c.texture]);
-    if (type < 0 || c.cliffTexture === type) continue;
+    // A number past 14 can't be stored (15 is reserved): the corner keeps its type.
+    if (type < 0 || type >= MAX_CLIFF_TYPES || c.cliffTexture === type) continue;
     stroke.touch(t, i);
     c.cliffTexture = type;
     changed = true;

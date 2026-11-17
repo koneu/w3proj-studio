@@ -6,10 +6,11 @@ import { MAP_INFO_SERVICE, TERRAIN_SERVICE, type MapInfoService, type TerrainEdi
 import { MAP_EXTRA_PATH, readMapExtra } from "../../lib/formats/mapextra";
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
+import { MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { HEIGHT_TICK, strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, increaseRefusal, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintBlight, paintBoundary, paintTexture, retypeCliffs, Stroke, layerTarget, rampClick, brushOf, brushReach, takesShape, topRefusal, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -104,7 +105,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let mapInfo: MapInfoService | null = null;
   void w3.services.get<MapInfoService>(MAP_INFO_SERVICE).then((s) => { mapInfo = s; }, () => {});
   /** Enforce Terrain Limits for a cliff stroke: the open Map Properties' (unsaved changes too), else the saved file's;
-   *  unknown counts as on, the side on which Increase refuses rather than wraps round (strokeLayer). */
+   *  unknown counts as on, the side that refuses more (strokeLayer). */
   const enforceLimits = () => (root !== null ? mapInfo?.liveEnforceTerrainLimits(root) : null) ?? savedLimits ?? true;
   /** One brush application at a ground point; true if it changed something. */
   const stamp = (x: number, y: number): boolean => {
@@ -210,6 +211,9 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   };
   void fillPalette(true);
 
+  /** A list edit the editor may refuse: the reason as a warning (nothing changed then). */
+  const tryIt = (f: () => void) => { try { f(); } catch (e) { void w3.window.showWarning((e as Error).message ?? String(e)); } };
+
   // ---- the map's tile list: order (drawing order at transitions) and removal ----------
   const tilePanel = h("div.terrain-tilemgr", { hidden: true });
   /** Index whose removal is being confirmed. */
@@ -228,7 +232,6 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const use = ed.groundTileUse();
     const inUse = (i: number) => !use || use.ground[i] + use.cliffs[i] > 0;
     const unused = use ? t.map((_, i) => i).filter((i) => !inUse(i)) : [];
-    const tryIt = (f: () => void) => { try { f(); } catch (e) { void w3.window.showWarning((e as Error).message ?? String(e)); } };
     const useText = (i: number) => use ? `${use.ground[i].toLocaleString()} corners${use.cliffs[i] ? `, ${use.cliffs[i].toLocaleString()} cliff tiles` : ""}` : `${usage[i].toLocaleString()} corners`;
     const cleanupBar = h("div.terrain-tilemgr-row.terrain-tilemgr-cleanup", {},
       h("button", {
@@ -287,7 +290,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ...sets.map((s) => h("option", { value: s.id, selected: s.id === terrain.tileset }, s.name)));
     const applyTemplate = h("button", {
       title: "Replace the map's ground tiles with this tileset's own, slot by slot (painted ground keeps its slot; cliffs follow); one undo step",
-      onclick: () => { const s = sets.find((x) => x.id === templateSelect.value); if (s) ed.replaceGroundTiles(s.tiles); ed.focus(); },
+      onclick: () => { const s = sets.find((x) => x.id === templateSelect.value); if (s) tryIt(() => ed.replaceGroundTiles(s.tiles)); ed.focus(); },
     }, "Use its tiles");
     // Map Properties keeps its own tileset entry: offer to line the two up when they differ.
     const sync = mapSet && mapSet !== terrain.tileset ? h("div.terrain-tilemgr-sync", {},
@@ -317,14 +320,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           const others = t.map((o, j) => [o, j] as const).filter(([, j]) => j !== i);
           const sel = h("select", {}, ...others.map(([o, j]) => h("option", { value: String(j) }, `${names.get(o) ?? o} (${o})`)));
           return h("div.terrain-tilemgr-row.removing", {}, img, h("span", {}, `Remove ${label}: paint its ${usage[i].toLocaleString()} corners with`), sel,
-            h("button", { onclick: () => { removing = null; ed.removeGroundTile(i, Number(sel.value)); ed.focus(); } }, "Remove"),
+            h("button", { onclick: () => { removing = null; tryIt(() => ed.removeGroundTile(i, Number(sel.value))); ed.focus(); void renderTiles(); } }, "Remove"),
             h("button", { onclick: () => { removing = null; void renderTiles(); } }, "Cancel"));
         }
         return h("div.terrain-tilemgr-row", {}, img,
           h("span.terrain-tilemgr-name", {}, label),
           h("span.muted", { title: `${usage[i].toLocaleString()} corners` }, `${((100 * usage[i]) / total).toFixed(1)}%`),
-          h("button", { title: "Move up (drawn earlier, under the others)", disabled: i === 0, onclick: () => { ed.moveGroundTile(i, i - 1); ed.focus(); } }, "↑"),
-          h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => { ed.moveGroundTile(i, i + 1); ed.focus(); } }, "↓"),
+          h("button", { title: "Move up (drawn earlier, under the others)", disabled: i === 0, onclick: () => { tryIt(() => ed.moveGroundTile(i, i - 1)); ed.focus(); } }, "↑"),
+          h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => { tryIt(() => ed.moveGroundTile(i, i + 1)); ed.focus(); } }, "↓"),
           h("button", { title: "Remove from the map (its corners get another tile)", disabled: t.length < 2, onclick: () => { removing = i; void renderTiles(); } }, "✕"));
       }),
       ...(cleanup ? [cleanupFooter()!] : []),
@@ -340,17 +343,103 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   // Cliff type for the cliff and water tools (the World Editor's cliff palette choice): a cliff type number, -1 to
   // match the ground under the cliff, or until one is chosen the one the World Editor's palette starts on.
   let cliffType: number | "default" = "default";
-  const cliffSelect = h("select", { onchange: () => { cliffType = Number(cliffSelect.value); ed.focus(); } });
+  /** The chosen entry's id: when the cliff list changes (Cliffs…, an undo) the choice follows its entry. */
+  let cliffTypeId: string | null = null;
+  const cliffSelect = h("select", { onchange: () => {
+    cliffType = Number(cliffSelect.value);
+    cliffTypeId = cliffType >= 0 ? terrain.cliffTiles[cliffType] ?? null : null;
+    ed.focus();
+  } });
   const fillCliffTypes = async () => {
     const names = await tileNames(w3);
     const grounds = ed.cliffGroundTiles();
-    if (typeof cliffType === "number" && cliffType >= grounds.length) cliffType = "default";
+    if (typeof cliffType === "number" && cliffType >= 0 && terrain.cliffTiles[cliffType] !== cliffTypeId) {
+      // The list changed under the choice: its entry's new number, or (gone) the palette's start again.
+      const at = cliffTypeId === null ? -1 : terrain.cliffTiles.indexOf(cliffTypeId);
+      cliffType = at >= 0 && at < MAX_CLIFF_TYPES ? at : "default";
+    }
+    if (typeof cliffType === "number" && cliffType >= Math.min(grounds.length, MAX_CLIFF_TYPES)) cliffType = "default";
     const shown = cliffType === "default" ? ed.defaultCliffType() : cliffType;
+    // Only the first 15 entries: a corner's cliff type is 0 to 14 (15 is reserved), the rest can't be painted.
     cliffSelect.replaceChildren(
       h("option", { value: "-1", selected: shown < 0, title: "The cliff type of the ground tile under the cliff, where it has one" }, "Match the ground"),
-      ...grounds.flatMap((g, i) => (g ? [h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff`)] : [])));
+      ...grounds.slice(0, MAX_CLIFF_TYPES).flatMap((g, i) => (g ? [h("option", { value: String(i), selected: shown === i }, `${names.get(g) ?? g} cliff (${terrain.cliffTiles[i]})`)] : [])));
   };
-  const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
+
+  // ---- the map's cliff list: add the game's cliff types, remove entries -----------------
+  const cliffPanel = h("div.terrain-tilemgr.terrain-cliffmgr", { hidden: true });
+  /** Entry whose removal is being confirmed (it is in use: its corners need another entry). */
+  let removingCliff: number | null = null;
+  let cliffRetry: ReturnType<typeof setTimeout> | undefined;
+  const renderCliffs = async () => {
+    if (cliffPanel.hidden) return;
+    const names = await tileNames(w3);
+    const list = terrain.cliffTiles, game = ed.gameCliffTypes(), use = ed.cliffTypeUse();
+    if (!use || !game.length) {
+      cliffPanel.replaceChildren(h("div.muted", {}, "Reading the game's cliff types…"));
+      // Looked at again while the panel is open (dispose stops it).
+      clearTimeout(cliffRetry);
+      cliffRetry = setTimeout(() => void renderCliffs(), 500);
+      return;
+    }
+    const ground = new Map(game.map((c) => [c.id, c.groundTile]));
+    const label = (id: string) => { const g = ground.get(id); return g ? `${names.get(g) ?? g} cliff (${id})` : `${id} (not one of the game's)`; };
+    const useText = (i: number) => `${(use.corners[i] ?? 0).toLocaleString()} corners, ${(use.tiles[i] ?? 0).toLocaleString()} cliff tiles`;
+    const inUse = (i: number) => (use.corners[i] ?? 0) + (use.tiles[i] ?? 0) > 0;
+    if (removingCliff !== null && (removingCliff >= list.length || !inUse(removingCliff))) removingCliff = null;
+    const paintable = Math.min(list.length, MAX_CLIFF_TYPES);
+    // The game's cliff types not in the list, by the tileset their ground tile belongs to.
+    const bySet = new Map<string, string[]>();
+    for (const c of game) if (!list.includes(c.id)) bySet.set(c.groundTile[0], [...(bySet.get(c.groundTile[0]) ?? []), c.id]);
+    const full = list.length >= MAX_CLIFF_TYPES;
+    const addSelect = h("select", {
+      title: full ? `A corner can name ${MAX_CLIFF_TYPES} cliff types (0 to ${MAX_CLIFF_TYPES - 1}): remove one first` : "Add one of the game's cliff types to the end of the list; one undo step",
+      disabled: full,
+      onchange: () => {
+        const id = addSelect.value;
+        if (!id) return;
+        tryIt(() => ed.addCliffType(id));
+        ed.focus();
+      },
+    },
+    h("option", { value: "", selected: true }, `Add cliff type… (${list.length}/${MAX_CLIFF_TYPES})`),
+    ...[...bySet].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
+      .map(([ts, ids]) => h("optgroup", { label: TILESETS[ts] ?? ts }, ...ids.map((id) => h("option", { value: id }, label(id))))));
+    cliffPanel.replaceChildren(
+      h("div.muted", {}, "The map's cliff types: a corner names one by its number in this list. Changes are one undo step each."),
+      h("div.terrain-tilemgr-row", {}, addSelect),
+      ...list.map((id, i) => {
+        const name = `${i}: ${label(id)}`;
+        if (removingCliff === i) {
+          const others = list.map((o, j) => [o, j] as const).filter(([, j]) => j !== i && j < MAX_CLIFF_TYPES);
+          const sel = h("select.terrain-cliffmgr-replace", {}, ...others.map(([o, j]) => h("option", { value: String(j) }, `${j}: ${label(o)}`)));
+          return h("div.terrain-tilemgr-row.removing", {},
+            h("span", {}, `Remove ${label(id)}: its ${useText(i)} get`), sel,
+            h("button", { onclick: () => { removingCliff = null; tryIt(() => ed.removeCliffType(i, Number(sel.value))); ed.focus(); void renderCliffs(); } }, "Remove"),
+            h("button", { onclick: () => { removingCliff = null; void renderCliffs(); } }, "Cancel"));
+        }
+        return h(`div.terrain-tilemgr-row${i >= paintable ? ".muted" : ""}`, {},
+          h("span.terrain-tilemgr-name", { title: i >= paintable ? `Past ${MAX_CLIFF_TYPES - 1}: no corner can name it` : "" }, name),
+          h("span.muted", { title: useText(i) }, inUse(i) ? useText(i) : "unused"),
+          h("button", {
+            title: inUse(i) ? "Remove from the list (its corners get another entry)" : "Remove from the list",
+            disabled: list.length < 2,
+            onclick: () => {
+              if (inUse(i)) { removingCliff = i; void renderCliffs(); return; }
+              tryIt(() => ed.removeCliffType(i));
+              ed.focus();
+            },
+          }, "✕"));
+      }),
+    );
+  };
+  const cliffsButton = h("button", { title: "The map's cliff types: add the game's, remove entries", onclick: () => {
+    cliffPanel.hidden = !cliffPanel.hidden;
+    cliffsButton.classList.toggle("active", !cliffPanel.hidden);
+    removingCliff = null;
+    void renderCliffs();
+  } }, "Cliffs…");
+  const cliffWrap = h("span.terrain-tool-opt", {}, h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect), cliffsButton);
   /** While the button is held on the Ramp tool: the drag builds on. What the press had to say, if nothing built. */
   let rampDrag = false, rampProblem: string | null = null;
   const setTool = (t: Tool) => {
@@ -359,6 +448,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     texWrap.hidden = t !== "paint";
     if (t !== "paint") { tilePanel.hidden = true; tilesButton.classList.remove("active"); }
     cliffWrap.hidden = !isLayerTool(t) || t === "dry";
+    if (cliffWrap.hidden) { cliffPanel.hidden = true; cliffsButton.classList.remove("active"); }
     if (!cliffWrap.hidden) void fillCliffTypes();
     ed.setBrush(null);
     ed.focus();
@@ -380,13 +470,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
     cliffWrap, texWrap),
     tilePanel,
+    cliffPanel,
   );
   setTool("paint");
 
   return {
     toolbar,
     deactivate() { endStroke(); ed.setBrush(null); },
-    dispose() { stopLimitsWatch.dispose(); },
+    dispose() { stopLimitsWatch.dispose(); clearTimeout(cliffRetry); cliffPanel.hidden = true; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       const g = p.ground;
@@ -410,11 +501,10 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const cx = Math.round((g[0] - terrain.offsetX) / 128), cy = Math.round((g[1] - terrain.offsetY) / 128);
         const c = terrain.corners[cy * terrain.width + cx];
         // A Decrease from too low a level does nothing, as the editor's (layerTarget): no stroke, no undo step.
-        const limits = enforceLimits();
-        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), limits) : { layer: c.layer };
+        const layer: LayerTarget | null = !c ? { layer: 2 } : isLayerTool(tool) ? layerTarget(terrain, tool, cx, cy, chosenCliffType(), enforceLimits()) : { layer: c.layer };
         if (layer === null) {
-          // An Increase past the top is refused with a word why (never wrapped round); a Decrease below 0 says nothing.
-          const why = c && isLayerTool(tool) ? increaseRefusal(tool, c.layer, limits) : null;
+          // Past the top is refused with a word (topRefusal); a Decrease from the floor stays quiet, as the editor's.
+          const why = c && isLayerTool(tool) ? topRefusal(tool, c.layer, enforceLimits()) : null;
           if (why) void w3.window.showWarning(why);
           return;
         }
@@ -459,6 +549,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       void fillPalette(true);
       void renderTiles();
       void fillCliffTypes();
+      void renderCliffs();
     },
   };
 }

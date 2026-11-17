@@ -859,7 +859,7 @@ fn a_pack_works_out_stale_ally_priorities_unless_the_map_keeps_its_own() {
 fn a_pack_warns_when_the_script_hasnt_the_ally_priorities_it_worked_out() {
     let dir = workdir("ally-priorities-script");
     let first = dir.join("first.w3x");
-    assert!(!ok(&["pack", s(&fixture()), "-o", s(&first)]).contains("warning"), "the fixture's masks need no change");
+    assert!(!ok(&["pack", s(&fixture()), "-o", s(&first)]).contains("warning:"), "the fixture's masks need no change");
     let project = dir.join("project");
     unpack(&first, &project);
     let info = project.join("map/war3map.w3i.json");
@@ -880,7 +880,7 @@ fn a_pack_warns_when_the_script_hasnt_the_ally_priorities_it_worked_out() {
                 call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )\r\nendfunction\r\n";
     fs::write(&script, format!("{original}{prio}")).unwrap();
     let out = ok(&["pack", s(&project), "-o", s(&dir.join("matching.w3x"))]);
-    assert!(!out.contains("warning"), "{out}");
+    assert!(!out.contains("warning:"), "{out}");
 }
 
 #[test]

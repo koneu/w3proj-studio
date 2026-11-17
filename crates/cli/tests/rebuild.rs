@@ -216,7 +216,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     // Nothing changed: the pack makes the same script and writes nothing.
     let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("same.w3x"))], &game);
     assert!(o.status.success(), "{}", text(&o));
-    assert!(!text(&o).contains("warning") && !text(&o).contains("written"), "{}", text(&o));
+    assert!(!text(&o).contains("warning:") && !text(&o).contains("written"), "{}", text(&o));
     assert_eq!(fs::read_to_string(&script).unwrap(), studios);
 
     // A second user player, near the first: both get the other as High.
@@ -240,7 +240,7 @@ fn pack_makes_studios_script_again_and_keeps_one_edited_by_hand() {
     let said = text(&o);
     assert!(o.status.success(), "{said}");
     assert!(said.contains("written    map/war3map.j (map script made again"), "{said}");
-    assert!(!said.contains("warning"), "the made script agrees with the w3i the pack worked out: {said}");
+    assert!(!said.contains("warning:"), "the made script agrees with the w3i the pack worked out: {said}");
     let made = fs::read_to_string(&script).unwrap();
     assert!(made.contains(prio) && made.contains("call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )"), "{made}");
     assert!(made.contains("call DefineStartLocation( 1, 0.0, 1280.0 )"), "the new player's start is in the script: {made}");
@@ -283,6 +283,64 @@ fn a_script_that_cant_be_made_again_is_packed_as_it_is_with_a_warning() {
     assert!(text(&o).contains("warning: map script not made again"), "{}", text(&o));
     assert_eq!(fs::read(&script).unwrap(), studios);
     assert!(dir.join("out.w3x").is_file());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A script that isn't the one Studio wrote last (map 15's, from elsewhere, with a function of its own) is kept by
+/// `w3proj rebuild` (the control) and replaced with --force, whose line names the file and the code that is gone.
+#[test]
+fn rebuild_force_replaces_a_script_studio_did_not_write_and_says_so() {
+    let Some(game) = game() else {
+        common::skip_or_fail("no game set up (W3PROJ_GAME or .game-path)");
+        return;
+    };
+    let dir = workdir("force-script");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let script = project.join("map/war3map.j");
+    let foreign = format!("{}\nfunction MyOwnCode takes nothing returns nothing\nendfunction\n", fs::read_to_string(&script).unwrap());
+    fs::write(&script, &foreign).unwrap();
+
+    let o = w3proj(&["rebuild", s(&project), "--only=script"], &game);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("kept") && text(&o).contains("map/war3map.j"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&script).unwrap(), foreign, "without --force the script stays");
+
+    let o = w3proj(&["rebuild", s(&project), "--only=script", "--force"], &game);
+    let said = text(&o);
+    assert!(o.status.success(), "{said}");
+    assert!(said.contains("written    map/war3map.j"), "{said}");
+    assert!(said.contains("replacing a war3map.j that wasn't the script Studio wrote last"), "{said}");
+    assert!(said.contains("MyOwnCode"), "the line names the code that is gone: {said}");
+    let made = fs::read_to_string(&script).unwrap();
+    assert!(!made.contains("MyOwnCode") && made.contains("function main takes nothing"), "{made}");
+
+    // Now it's Studio's: a plain rebuild makes it again, with nothing replaced.
+    let o = w3proj(&["rebuild", s(&project), "--only=script", "--force"], &game);
+    assert!(o.status.success() && !text(&o).contains("replacing"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&script).unwrap(), made);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// `w3proj pack` says when the map has no script or no war3map.wtg, and packs it all the same (the library's
+/// pack_warnings.rs holds what goes into the archive).
+#[test]
+fn pack_warns_about_a_missing_script_and_war3map_wtg() {
+    let dir = workdir("pack-missing");
+    let project = dir.join("project");
+    copy_dir(&fixture(), &project);
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("whole.w3x"))], "none");
+    assert!(o.status.success() && !text(&o).contains("warning:"), "{}", text(&o));
+    fs::remove_file(project.join("map/war3map.j")).unwrap();
+    fs::remove_file(project.join("map/war3map.wtg.json")).unwrap();
+    let out = dir.join("bare.w3x");
+    let o = w3proj(&["pack", s(&project), "-o", s(&out)], "none");
+    let said = String::from_utf8_lossy(&o.stderr).into_owned();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(said.contains("warning: map/war3map.j is missing, so the packed map has no script"), "{said}");
+    assert!(said.contains("warning: map/war3map.wtg is missing"), "{said}");
+    assert!(out.is_file());
+    assert!(!project.join("map/war3map.j").exists() && !project.join("map/war3map.wtg").exists());
     let _ = fs::remove_dir_all(&dir);
 }
 
