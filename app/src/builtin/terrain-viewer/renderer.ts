@@ -2,6 +2,7 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
+import { crispPixels } from "./crispline";
 import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
@@ -2001,46 +2002,13 @@ export class TerrainRenderer {
   private crispVao: WebGLVertexArrayObject | null = null;
   private crispBuf: WebGLBuffer | null = null;
 
-  /** A closed line of world points as pixels: each segment projected, clipped to the picture and stepped pixel by pixel
-   *  (Bresenham), every pixel one point of size 1 at its centre, so none is shared between two pixels. */
+  /** A closed line of world points as pixels (crispPixels), each one point of size 1 at its centre, so none is shared
+   *  between two pixels. */
   private drawCrisp(line: NonNullable<Mesh["crisp"]>, viewProj: Float32Array) {
-    const gl = this.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, pts = line.points, n = pts.length / 3;
-    const clip = (i: number) => {
-      const x = pts[i * 3], y = pts[i * 3 + 1], z = pts[i * 3 + 2];
-      return [0, 1, 2, 3].map((r) => viewProj[r] * x + viewProj[4 + r] * y + viewProj[8 + r] * z + viewProj[12 + r]);
-    };
+    const gl = this.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     const out: number[] = [], [cr, cg, cb] = [line.rgb[0] / 255, line.rgb[1] / 255, line.rgb[2] / 255];
-    const pixel = (px: number, py: number) => out.push((px + 0.5) / W * 2 - 1, 1 - (py + 0.5) / H * 2, 0, cr, cg, cb, 1);
-    const near = 1e-4;
-    for (let i = 0; i < n && n > 1; i++) {
-      let a = clip(i), b = clip((i + 1) % n);
-      // Keep what is in front of the camera.
-      if (a[3] < near && b[3] < near) continue;
-      if (a[3] < near) { const t = (near - a[3]) / (b[3] - a[3]); a = a.map((v, k) => v + (b[k] - v) * t); }
-      else if (b[3] < near) { const t = (near - b[3]) / (a[3] - b[3]); b = b.map((v, k) => v + (a[k] - v) * t); }
-      let x0 = (a[0] / a[3] + 1) / 2 * W, y0 = (1 - a[1] / a[3]) / 2 * H, x1 = (b[0] / b[3] + 1) / 2 * W, y1 = (1 - b[1] / b[3]) / 2 * H;
-      // Liang-Barsky to the picture, so a segment far outside costs nothing.
-      let t0 = 0, t1 = 1;
-      const dx = x1 - x0, dy = y1 - y0;
-      let inside = true;
-      for (const [p, q] of [[-dx, x0], [dx, W - 1e-3 - x0], [-dy, y0], [dy, H - 1e-3 - y0]]) {
-        if (p === 0) { if (q < 0) inside = false; continue; }
-        const t = q / p;
-        if (p < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
-      }
-      if (!inside || t0 > t1) continue;
-      [x0, y0, x1, y1] = [x0 + dx * t0, y0 + dy * t0, x0 + dx * t1, y0 + dy * t1];
-      let px = Math.floor(x0), py = Math.floor(y0);
-      const ex = Math.floor(x1), ey = Math.floor(y1), sx = ex >= px ? 1 : -1, sy = ey >= py ? 1 : -1;
-      const ax = Math.abs(ex - px), ay = Math.abs(ey - py);
-      let err = ax - ay;
-      for (let k = ax + ay + 1; k > 0; k--) {
-        pixel(px, py);
-        const e2 = 2 * err;
-        if (e2 > -ay) { err -= ay; px += sx; }
-        if (e2 < ax) { err += ax; py += sy; }
-      }
-    }
+    const pixels = crispPixels(line.points, viewProj, W, H);
+    for (let i = 0; i < pixels.length; i += 2) out.push((pixels[i] + 0.5) / W * 2 - 1, 1 - (pixels[i + 1] + 0.5) / H * 2, 0, cr, cg, cb, 1);
     if (!out.length) return;
     if (!this.crispVao) {
       const vao = gl.createVertexArray()!;
