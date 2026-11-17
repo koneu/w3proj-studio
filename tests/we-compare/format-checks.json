@@ -9,7 +9,7 @@
       { "file": "war3map.w3c", "as": "parsed", "expect": "differs", "expectPaths": ["cameras[].trailer"] },
       { "file": "war3map.j", "as": "text-set" },
       { "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["doodads[6].extras"] },
-      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["corners.30,20.edge", "corners.30,21.edge", "corners.30,22.edge", "corners.30,23.edge", "corners.30,24.edge", "corners.31,20.edge", "corners.31,21.edge", "corners.31,22.edge", "corners.31,23.edge", "corners.31,24.edge", "corners.32,20.edge", "corners.32,21.edge", "corners.32,22.edge", "corners.32,23.edge", "corners.32,24.edge", "corners.33,20.edge", "corners.33,21.edge", "corners.33,22.edge", "corners.33,23.edge", "corners.33,24.edge", "corners.34,20.edge", "corners.34,21.edge", "corners.34,22.edge", "corners.34,23.edge", "corners.34,24.edge", "corners.40,20.edge", "corners.40,21.edge", "corners.40,22.edge", "corners.41,20.edge", "corners.41,21.edge", "corners.41,22.edge", "corners.42,20.edge", "corners.42,21.edge", "corners.42,22.edge"] }
     ],
     "limit": 40
   },
