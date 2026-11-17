@@ -46,5 +46,53 @@
       { "file": "war3map.shd", "as": "bytes" }
     ],
     "limit": 30
+  },
+  {
+    "name": "shadow-slopes",
+    "description": "Calculate Shadows on shadow-slopes.w3x (fixtures/we-specs/make-shadow-probes.mjs, branch we-shadow-4): planes facing away from the sun that fall 26.56, 26.63, 26.69 and 26.75 a step of the walk, two of them under water, and a corner raised 1000: the walk rises 80/3 a step (shadows.ts shadowStepRise: the first two lit, the others dark, water or not) and goes on past 16 steps (the corner's shadow is 33 cells long)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/shadow-slopes.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "shadow-cliffvar",
+    "description": "Calculate Shadows on shadow-cliffvar.w3x (make-shadow-probes.mjs, branch we-shadow-4): two plateaus, cliff variation 3 on the one and 1 on the other; the shadow models of the east and south faces (BAAB, BBAA) have two variations, and variation 3 reads 1 (shadowmap.ts shadowCliffVariation: counted round; variation 0 would leave 383 cells off)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/shadow-cliffvar.w3x"
+    },
+    "we": {
+      "mode": "hd",
+      "save": "shadows",
+      "saveAccept": ["Warning"]
+    },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "terrain": true },
+        { "command": "w3.terrain.calculateShadows" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.shd", "as": "bytes" }
+    ],
+    "limit": 30
   }
 ]
