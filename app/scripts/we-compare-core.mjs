@@ -3,11 +3,11 @@
 
 import { readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView } from "./we-compare-w3e.mjs";
+import { doodadPlaces, minimapView, unitHeights, unitIds, w3eView, wpmCells } from "./we-compare-w3e.mjs";
 
-const KINDS = ["auto", "parsed", "text", "text-exact", "text-set", "bytes", "wpm", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
+const KINDS = ["auto", "parsed", "text", "text-exact", "text-set", "bytes", "wpm", "wpm-cells", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "unit-heights", "unit-ids", "doodad-places", "minimap"];
 /** The kinds compared as JSON (diffJson): only these take "tolerance", "ignore" and "expectPaths". */
-export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "unit-heights", "unit-ids", "doodad-places"];
+export const JSON_KINDS = ["parsed", "minimap", "w3e", "w3e-spread", "w3e-noise", "w3e-variation", "wpm-cells", "unit-heights", "unit-ids", "doodad-places"];
 const STUDIO_STEPS = ["mcp", "eval", "sleep", "open", "terrain", "setting", "command", "ui"];
 /** Folder names inside the work folder that are we-compare's own: a spec can't be named so (any case: Windows). */
 export const RESERVED_NAMES = ["studio-app", "we-drive", "report.json", "we-compare.lock"];
@@ -165,7 +165,22 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
       if (!(Array.isArray(e.expectPaths) && e.expectPaths.length && e.expectPaths.every((x) => typeof x === "string" && x))) throw new Error(`${where}: compare[${i}].expectPaths is a list of paths that must all differ ("players[].start")`);
       if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectPaths goes with "expect": "differs"`);
     }
-    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths", "lines"].includes(k));
+    // expectLines: the text kinds' expectPaths (text-set only: a line's position means nothing there), the lines only
+    // the World Editor's save or only Studio's may have, as regular expressions per side.
+    if (e.expectLines !== undefined) {
+      const x = e.expectLines;
+      const list = (v) => v === undefined || (Array.isArray(v) && v.every((p) => typeof p === "string" && p));
+      if (!isObject(x) || Object.keys(x).some((k) => k !== "we" && k !== "studio") || !list(x.we) || !list(x.studio) || !((x.we?.length ?? 0) + (x.studio?.length ?? 0))) throw new Error(`${where}: compare[${i}].expectLines is { "we": [regex, …], "studio": [regex, …] }: the lines only that side's save has`);
+      for (const p of [...(x.we ?? []), ...(x.studio ?? [])]) { try { new RegExp(p); } catch (err) { throw new Error(`${where}: compare[${i}].expectLines: ${JSON.stringify(p)} is not a regular expression: ${err.message}`); } }
+      if (e.expect !== "differs") throw new Error(`${where}: compare[${i}].expectLines goes with "expect": "differs"`);
+      if (e.as !== "text-set") throw new Error(`${where}: compare[${i}].expectLines goes with "as": "text-set"`);
+    }
+    // minCount (unit-ids only): each save must hold at least this many objects (unit-ids compares no counts).
+    if (e.minCount !== undefined) {
+      if (!Number.isInteger(e.minCount) || e.minCount < 1) throw new Error(`${where}: compare[${i}].minCount is a whole number of 1 or more`);
+      if (e.as !== "unit-ids") throw new Error(`${where}: compare[${i}].minCount goes with "as": "unit-ids"`);
+    }
+    const unknownKey = Object.keys(e).filter((k) => !["file", "as", "expect", "tolerance", "ignore", "expectPaths", "expectLines", "lines", "minCount"].includes(k));
     if (e.lines !== undefined) {
       if (typeof e.lines !== "string" || !e.lines) throw new Error(`${where}: compare[${i}].lines is a regular expression (only the lines matching it are compared)`);
       try { new RegExp(e.lines); } catch (x) { throw new Error(`${where}: compare[${i}].lines is not a regular expression: ${x.message}`); }
@@ -181,11 +196,11 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     // refused, except for the entries of tests/we-compare/differs-without-paths.json (written before the rule; that
     // list only shrinks). On a JSON kind the way out is expectPaths; on text, text-set, text-exact, bytes and wpm,
     // which can't name paths, it is a JSON kind of the file, or "lines" narrowed to what must match.
-    if (e.expect === "differs" && !e.expectPaths && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
+    if (e.expect === "differs" && !e.expectPaths && !e.expectLines && differsWithoutPaths !== "any" && !differsWithoutPaths.has(`${name} ${e.file}`)) {
       if (takesPaths(kind, e.file)) throw new Error(`${where}: compare[${i}] (${e.file}) expects "differs" without "expectPaths": name the paths that must differ (any difference would pass, also a World Editor step that missed)`);
-      throw new Error(`${where}: compare[${i}] (${e.file}, as ${kind === "auto" ? `auto: ${autoKind(e.file, null)}` : kind}) expects "differs" on a kind that can't name what differs: any difference would pass, also a World Editor step that missed. Compare it as a JSON kind with "expectPaths", or narrow it with "lines" to what must match`);
+      throw new Error(`${where}: compare[${i}] (${e.file}, as ${kind === "auto" ? `auto: ${autoKind(e.file, null)}` : kind}) expects "differs" on a kind that can't name what differs: any difference would pass, also a World Editor step that missed. Compare it as a JSON kind with "expectPaths", as text-set with "expectLines", or narrow it with "lines" to what must match`);
     }
-    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.lines ? { lines: e.lines } : {}) };
+    return { file: e.file, as: kind, expect: e.expect ?? "match", tolerance: e.tolerance ?? 0, ignore: e.ignore ?? [], ...(e.expectPaths ? { expectPaths: e.expectPaths } : {}), ...(e.expectLines ? { expectLines: e.expectLines } : {}), ...(e.lines ? { lines: e.lines } : {}), ...(e.minCount ? { minCount: e.minCount } : {}) };
   });
   if (!compare.length) throw new Error(`${where}: "compare" names at least one file`);
   const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
@@ -518,17 +533,36 @@ export function diffText(a, b, limit = 10, exact = false) {
 /**
  * Text as a set of lines, order ignored (the editor writes some lists, such as the items of CreateAllItems, in an order
  * the saved files don't keep): the lines only one side has, each counted with its multiplicity.
+ * `expectLines` ({ we: [regex…], studio: [regex…] }, the text kinds' expectPaths): the lines only that side may have.
+ * Every pattern has to match a line only its side has, and every line only one side has has to match a pattern of its
+ * side; returned as `expectMissing` (the patterns no such line matched, "WE /re/") and `unexpected` ({ count, paths }:
+ * the other lines, "Studio only: …").
  */
-export function diffTextSet(a, b, limit = 10) {
+export function diffTextSet(a, b, limit = 10, expectLines = null) {
   const x = a.split(/\r?\n/), y = b.split(/\r?\n/);
   const left = new Map();
   for (const l of x) left.set(l, (left.get(l) ?? 0) + 1);
   const diffs = [];
   let count = 0;
-  const add = (side, l, n) => { count += n; if (diffs.length < limit) diffs.push({ text: `${side} only${n > 1 ? ` (x${n})` : ""}: ${show(l)}` }); };
+  const sides = expectLines ? { WE: (expectLines.we ?? []).map((p) => [p, new RegExp(p)]), Studio: (expectLines.studio ?? []).map((p) => [p, new RegExp(p)]) } : null;
+  const hit = new Set();
+  const unexpected = { count: 0, paths: [] };
+  const add = (side, l, n) => {
+    count += n;
+    const text = `${side} only${n > 1 ? ` (x${n})` : ""}: ${show(l)}`;
+    if (diffs.length < limit) diffs.push({ text });
+    if (!sides) return;
+    const hits = sides[side].filter(([, re]) => re.test(l));
+    for (const [p] of hits) hit.add(`${side} ${p}`);
+    if (!hits.length) { unexpected.count += n; if (unexpected.paths.length < limit) unexpected.paths.push(text); }
+  };
   for (const l of y) { const n = left.get(l) ?? 0; if (n > 0) left.set(l, n - 1); else add("Studio", l, 1); }
   for (const [l, n] of left) if (n > 0) add("WE", l, n);
-  return { equal: count === 0, count, lines: [x.length, y.length], diffs };
+  const expected = sides ? Object.entries(sides).flatMap(([side, list]) => list.map(([p]) => `${side} ${p}`)) : [];
+  return {
+    equal: count === 0, count, lines: [x.length, y.length], diffs,
+    ...(sides ? { expectMissing: expected.filter((k) => !hit.has(k)).map((k) => k.replace(" ", " /") + "/"), unexpected } : {}),
+  };
 }
 
 /**
@@ -541,11 +575,12 @@ export function diffTextSet(a, b, limit = 10) {
  *   "ERROR"    the comparison can't be made (an option the kind doesn't use; see also compareEntry's load errors).
  * `limit`, `tolerance`, `ignore`, `expectPaths` as the spec's compare entry has them.
  */
-export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = [], expectPaths = []) {
+export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, ignore = [], expectPaths = [], expectLines = null) {
   if (!we || !studio) {
     const where = !we && !studio ? "neither map" : !we ? "Studio's save only" : "the World Editor's save only";
     return { file, kind, status: "MISSING", count: 1, diffs: [{ text: `the file is in ${where}` }] };
   }
+  if (expectLines && kind !== "text-set") return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `expectLines has no effect on a file compared as ${kind} (only on text-set)` }] };
   if (!JSON_KINDS.includes(kind)) {
     const used = [toleranceUsed(tolerance) && "tolerance", ignore.length && "ignore", expectPaths.length && "expectPaths"].filter(Boolean);
     if (used.length) return { file, kind, status: "ERROR", count: 1, diffs: [{ text: `${used.join(", ")} has no effect on a file compared as ${kind} (only on ${JSON_KINDS.join(", ")})` }] };
@@ -560,7 +595,7 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
   }
   else if (kind === "text") r = diffText(we.text, studio.text, limit);
   else if (kind === "text-exact") r = diffText(we.text, studio.text, limit, true);
-  else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit);
+  else if (kind === "text-set") r = diffTextSet(we.text, studio.text, limit, expectLines);
   else if (kind === "wpm") r = diffWpm(we.bytes, studio.bytes, limit);
   else r = diffBytes(we.bytes, studio.bytes, limit);
   return { file, kind, status: r.equal ? "MATCH" : "DIFFERS", ...r };
@@ -571,16 +606,17 @@ export function compareFile(file, kind, we, studio, limit = 10, tolerance = 0, i
  * unpackedAs, json, text, bytes). null when the map has no such file; throws when it has one that can't be read as
  * the kind wants (a w3e that is cut short, a file that didn't unpack as JSON): that is never "absent".
  */
-export function loadSide(r, file, kind, decodeImage, lines) {
+export function loadSide(r, file, kind, decodeImage, lines, minCount = null) {
   if (!r.has(file) && !r.listed(file)) return null;
   const json = () => {
     if (r.unpackedAs(file) !== "json") throw new Error(`${file} is in the map but the unpack made no JSON of it (${r.unpackedAs(file) ?? "not unpacked"})`);
     return r.json(file);
   };
   if (kind === "w3e" || kind === "w3e-spread" || kind === "w3e-noise" || kind === "w3e-variation") return { json: w3eView(kind, r.bytes(file)) };
+  if (kind === "wpm-cells") return { json: wpmCells(Buffer.from(r.bytes(file))) };
   if (kind === "unit-heights") return { json: unitHeights(json()) };
   if (kind === "doodad-places") return { json: doodadPlaces(json()) };
-  if (kind === "unit-ids") return { json: unitIds(json()) };
+  if (kind === "unit-ids") return { json: unitIds(json(), minCount) };
   if (kind === "parsed") return { json: json() };
   if (kind === "minimap") {
     if (!decodeImage) throw new Error("no image decoder for the minimap kind");
@@ -615,7 +651,7 @@ function textOnly(text, file) {
  */
 export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImage } = {}) {
   let kind = c.as;
-  const base = { file: c.file, expect: c.expect, ...(c.expectPaths ? { expectPaths: c.expectPaths } : {}) };
+  const base = { file: c.file, expect: c.expect, ...(c.expectPaths ? { expectPaths: c.expectPaths } : {}), ...(c.expectLines ? { expectLines: c.expectLines } : {}) };
   const sides = [["the World Editor's save", weReader], ["Studio's save", studioReader]];
   let loaded;
   try {
@@ -628,12 +664,12 @@ export function compareEntry(c, weReader, studioReader, { limit = 10, decodeImag
   }
   try {
     loaded = sides.map(([who, r]) => {
-      try { return loadSide(r, c.file, kind, decodeImage, c.lines); } catch (e) { throw new Error(`${who}: ${e.message}`); }
+      try { return loadSide(r, c.file, kind, decodeImage, c.lines, c.minCount ?? null); } catch (e) { throw new Error(`${who}: ${e.message}`); }
     });
   } catch (e) {
     return { ...base, kind, status: "ERROR", count: 1, diffs: [{ text: e.message }] };
   }
-  return { ...base, ...compareFile(c.file, kind, loaded[0], loaded[1], limit, c.tolerance, c.ignore, c.expectPaths ?? []) };
+  return { ...base, ...compareFile(c.file, kind, loaded[0], loaded[1], limit, c.tolerance, c.ignore, c.expectPaths ?? [], c.expectLines ?? null) };
 }
 
 /** What the kind "auto" means for a file: the codecs' form when the unpack made one (json), else by name. */
@@ -771,7 +807,7 @@ export function formatReport(result, limit = 10, { strictIgnore = false } = {}) 
     if (f.count > (f.diffs ?? []).length && f.diffs?.length) lines.push(`    ... and ${f.count - f.diffs.length} more`);
     if (f.note) lines.push(`    (${f.note})`);
     if (f.expectMissing?.length) lines.push(`    expected to differ but don't: ${f.expectMissing.join(", ")}`);
-    if (f.unexpected?.count) lines.push(`    ${f.unexpected.count} difference${f.unexpected.count === 1 ? "" : "s"} outside expectPaths: ${f.unexpected.paths.join(", ")}${f.unexpected.count > f.unexpected.paths.length ? ", ..." : ""}`);
+    if (f.unexpected?.count) lines.push(`    ${f.unexpected.count} difference${f.unexpected.count === 1 ? "" : "s"} outside ${f.expectLines ? "expectLines" : "expectPaths"}: ${f.unexpected.paths.join(", ")}${f.unexpected.count > f.unexpected.paths.length ? ", ..." : ""}`);
     if (f.ignoreUnmatched?.length) lines.push(`    ${strictIgnore ? "error" : "warning"}: ignore names no path of either file: ${f.ignoreUnmatched.join(", ")}`);
   }
   return lines.join("\n");

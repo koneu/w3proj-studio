@@ -1,5 +1,6 @@
 [
   {
+    "limit": 40,
     "name": "resize-left-cut",
     "description": "Map Size, left side cut by 4 tiles (arrow right of the left pair): the w3e map-edge marks (water-bits) after the WE's resize and Studio's",
     "input": {
@@ -74,7 +75,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "text"
+        "as": "w3e"
       },
       {
         "file": "war3map.w3i",
@@ -92,6 +93,7 @@
     ]
   },
   {
+    "limit": 40,
     "name": "resize-bottom-cut",
     "description": "Map Size, bottom cut by 4 tiles: the w3e map-edge marks",
     "input": {
@@ -166,7 +168,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "text"
+        "as": "w3e"
       },
       {
         "file": "war3map.w3i",
@@ -184,8 +186,9 @@
     ]
   },
   {
+    "limit": 40,
     "name": "resize-top-grow",
-    "description": "Map Size, top grown by 4 tiles: the w3e map-edge marks: only the lines of the new corners' random variations differ (checked: no water-bits line does); expected differs, so the file is not a regression check for the edge marks of a growth",
+    "description": "Map Size, top grown by 4 tiles: the w3e map-edge marks and every other stored value of the new corners, compared corner by corner (as w3e: the new corners' random ground and cliff variations are left out, so the file has to match)",
     "input": {
       "new": {
         "name": "resizetopgrow",
@@ -258,8 +261,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "text",
-        "expect": "differs"
+        "as": "w3e"
       },
       {
         "file": "war3map.w3i",
@@ -277,11 +279,12 @@
     ]
   },
   {
+    "limit": 40,
     "name": "resize-right-cut",
     "description": "Map Size, right side cut by 4 tiles: the w3e map-edge marks (the right column of corners)",
     "input": {
       "new": {
-        "name": "resizeleftcut",
+        "name": "resizerightcut",
         "width": 64,
         "height": 64
       },
@@ -351,7 +354,7 @@
     "compare": [
       {
         "file": "war3map.w3e",
-        "as": "text"
+        "as": "w3e"
       },
       {
         "file": "war3map.w3i",

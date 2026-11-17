@@ -126,7 +126,7 @@
         { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
       ]
     },
-    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": 4 }],
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": { "doodads[].position": 4, "default": 0 } }],
     "limit": 40
   },
   {
@@ -158,7 +158,7 @@
         { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); await w3.editors.saveAll();" }
       ]
     },
-    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": 4 }, { "file": "war3mapExtra.txt", "as": "bytes" }],
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.doo", "as": "parsed", "tolerance": { "doodads[].position": 4, "default": 0 } }, { "file": "war3mapExtra.txt", "as": "bytes" }],
     "limit": 40
   }
 ]

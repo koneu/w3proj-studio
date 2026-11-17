@@ -46,10 +46,12 @@
 //               (the codecs' JSON when the unpack makes one, a pathing map by cells, text by lines, else bytes), parsed,
 //               text, text-exact (lines split at LF only: a CR is part of its line, so line endings count; the map's own
 //               bytes), text-set (the lines as a set, their order ignored), bytes, wpm. "expect": "differs" is for known differences: they don't fail the run; with
-//               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may.
+//               "expectPaths": ["players[].start", ...] (JSON kinds) every listed path must differ and nothing else may;
+//               "expectLines": { "we": [regex, ...], "studio": [regex, ...] } (text-set) the same for lines: each pattern
+//               has to match a line only that side's save has, and every line only one side has a pattern of its side.
 //               A "differs" without expectPaths passes on any difference, also a World Editor step that missed: refused,
 //               on a JSON kind (name the paths) and on text, text-set, text-exact, bytes and wpm alike (compare the file
-//               as a JSON kind, or narrow it with "lines" and expect a match); only the entries and textEntries of
+//               as a JSON kind, as text-set with expectLines, or narrow it with "lines" and expect a match); only the entries and textEntries of
 //               tests/we-compare/differs-without-paths.json are let through (that list only shrinks).
 //               "tolerance": 0.5, or per path { "doodads[].z": 1, "camera.x": 4, "default": 0 }: the longest pattern
 //               that matches a path gives its tolerance, "default" (else 0) every other path.
@@ -64,8 +66,8 @@
 //               matching in a save is ERROR (two empty texts would match). A text kind on a binary file (a NUL in
 //               it: a w3e or wpm the unpack left raw) is ERROR too: compare it as bytes, wpm or a JSON kind.
 //               More kinds (we-compare-w3e.mjs): w3e-noise (one Noise click: on the step lattice, span, number changed),
-//               w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
-//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
+//               wpm-cells (war3map.wpm as JSON, cells "x,y": expectPaths can name them), w3e (war3map.w3e corner by corner), w3e-spread (the set of ground offsets,
+//               for random runs), unit-heights (war3mapUnits.doo: id, x, y, z), unit-ids (war3mapUnits.doo: editor ids unique and in order, the kinds of object; "minCount": N also whether each save holds N objects or more), doodad-places (war3map.doo: which doodads are left, by the 64 square each stands in), minimap (war3mapMap.blp
 //               decoded by the app's lib/image: the mean colour of each 16-pixel square, within "tolerance" per channel). Studio step { "ui": [["tab","Terrain"],
 //               ["view","we"], ["tool","Paint:"], ["texture","Lgrs"], ["size",3], ["click",748,500]] } is we-compare-ui.mjs.
 //

@@ -229,7 +229,7 @@
   },
   {
     "name": "header-newlines",
-    "description": "A header of line breaks only (\"\\n\\n\"): the editor writes the second Custom Script Code banner and three empty lines, and Studio too since branch water-low-header-we (lib/script/jass.ts mapHeader; the editor keeps the header's LF breaks, Studio writes CRLF, which a text compare doesn't see)",
+    "description": "A header of line breaks only (\"\\n\\n\"): the editor writes the second Custom Script Code banner and three empty lines, and Studio too since branch water-low-header-we (lib/script/jass.ts mapHeader; the editor keeps the header's LF breaks between its CRLF lines, and Studio does the same: text-exact keeps the line endings, and the two war3map.j were the same bytes on 2026-11-17, branch fix-we-specs)",
     "input": {
       "new": {
         "name": "HeaderLines",

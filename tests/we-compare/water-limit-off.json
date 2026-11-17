@@ -1,23 +1,20 @@
 [
   {
     "name": "water-off-slope-shallow-east",
-    "description": "Enforce Water Height Limits off (ctrl+shift+w; the editor keeps it off for the next spec of this file): the Shallow brush 100 px east of the middle of slope.w3x. The editor leaves the dry corners round the water at the old water word (8192) as the other specs; Studio matches (2026-11-16)",
+    "description": "Enforce Water Height Limits off (the editor's preference Enforce Water Limits=false written before its start, we.prefs; Studio: terrain.enforceWaterLimits false): the Shallow brush 100 px east of the middle of slope.w3x. The editor leaves the dry corners round the water at the old water word (8192) as the other specs; Studio matches (2026-11-16)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/slope.w3x"
     },
     "we": {
+      "prefs": {
+        "Misc": {
+          "Enforce Water Limits": "false"
+        }
+      },
       "saveAccept": [
         "Warning"
       ],
       "steps": [
-        [
-          "--key",
-          "ctrl+shift+w"
-        ],
-        [
-          "--sleep",
-          "500"
-        ],
         [
           "--key",
           "t"
@@ -88,11 +85,16 @@
   },
   {
     "name": "water-off-edge-high",
-    "description": "Enforce Water Height Limits still off from the spec before (one editor per file): water-brush-edge-high's click. With the switch off the editor does not raise the corners next to the water (no level, no 35-unit lift: 18 of 20 stay), Studio the same. KNOWN DIFFERENCES: two corners (32,27 and 32,31, two level steps out diagonally) the editor raises a level without the lift, Studio leaves them (no rule found: the corners at 10 squared out beside them stay); and the raised corners' cliff type, as in water-brush-edge-high",
+    "description": "Enforce Water Height Limits off (we.prefs, as water-off-slope-shallow-east): water-brush-edge-high's click. With the switch off the editor does not raise the corners next to the water (no level, no 35-unit lift: 18 of 20 stay), Studio the same. KNOWN DIFFERENCES: two corners (32,27 and 32,31, two level steps out diagonally) the editor raises a level without the lift, Studio leaves them (no rule found: the corners at 10 squared out beside them stay); and cliff types: the editor types the corners round the water (31,26 32,27 31,30 32,31 31,32) Dirt Cliff (0) where Studio gives the chosen Grass Cliff (1), and re-types the slope's old cliff, corner columns 33 and 34 over the whole map height outside rows 24..34, from 0 to 1 (as cliff-type-mixed: far beyond the brush), which Studio leaves. expectPaths names those 115 values from a real run (2026-11-17, branch fix-we-specs)",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/slope-edge.w3x"
     },
     "we": {
+      "prefs": {
+        "Misc": {
+          "Enforce Water Limits": "false"
+        }
+      },
       "saveAccept": [
         "Warning"
       ],
@@ -161,7 +163,8 @@
       {
         "file": "war3map.w3e",
         "as": "w3e",
-        "expect": "differs"
+        "expect": "differs",
+        "expectPaths": ["corners.33,0.cliffType","corners.34,0.cliffType","corners.33,1.cliffType","corners.34,1.cliffType","corners.33,2.cliffType","corners.34,2.cliffType","corners.33,3.cliffType","corners.34,3.cliffType","corners.33,4.cliffType","corners.34,4.cliffType","corners.33,5.cliffType","corners.34,5.cliffType","corners.33,6.cliffType","corners.34,6.cliffType","corners.33,7.cliffType","corners.34,7.cliffType","corners.33,8.cliffType","corners.34,8.cliffType","corners.33,9.cliffType","corners.34,9.cliffType","corners.33,10.cliffType","corners.34,10.cliffType","corners.33,11.cliffType","corners.34,11.cliffType","corners.33,12.cliffType","corners.34,12.cliffType","corners.33,13.cliffType","corners.34,13.cliffType","corners.33,14.cliffType","corners.34,14.cliffType","corners.33,15.cliffType","corners.34,15.cliffType","corners.33,16.cliffType","corners.34,16.cliffType","corners.33,17.cliffType","corners.34,17.cliffType","corners.33,18.cliffType","corners.34,18.cliffType","corners.33,19.cliffType","corners.34,19.cliffType","corners.33,20.cliffType","corners.34,20.cliffType","corners.33,21.cliffType","corners.34,21.cliffType","corners.33,22.cliffType","corners.34,22.cliffType","corners.33,23.cliffType","corners.34,23.cliffType","corners.31,26.cliffType","corners.32,27.cliffType","corners.32,27.layer","corners.31,30.cliffType","corners.32,31.cliffType","corners.32,31.layer","corners.31,32.cliffType","corners.33,35.cliffType","corners.34,35.cliffType","corners.33,36.cliffType","corners.34,36.cliffType","corners.33,37.cliffType","corners.34,37.cliffType","corners.33,38.cliffType","corners.34,38.cliffType","corners.33,39.cliffType","corners.34,39.cliffType","corners.33,40.cliffType","corners.34,40.cliffType","corners.33,41.cliffType","corners.34,41.cliffType","corners.33,42.cliffType","corners.34,42.cliffType","corners.33,43.cliffType","corners.34,43.cliffType","corners.33,44.cliffType","corners.34,44.cliffType","corners.33,45.cliffType","corners.34,45.cliffType","corners.33,46.cliffType","corners.34,46.cliffType","corners.33,47.cliffType","corners.34,47.cliffType","corners.33,48.cliffType","corners.34,48.cliffType","corners.33,49.cliffType","corners.34,49.cliffType","corners.33,50.cliffType","corners.34,50.cliffType","corners.33,51.cliffType","corners.34,51.cliffType","corners.33,52.cliffType","corners.34,52.cliffType","corners.33,53.cliffType","corners.34,53.cliffType","corners.33,54.cliffType","corners.34,54.cliffType","corners.33,55.cliffType","corners.34,55.cliffType","corners.33,56.cliffType","corners.34,56.cliffType","corners.33,57.cliffType","corners.34,57.cliffType","corners.33,58.cliffType","corners.34,58.cliffType","corners.33,59.cliffType","corners.34,59.cliffType","corners.33,60.cliffType","corners.34,60.cliffType","corners.33,61.cliffType","corners.34,61.cliffType","corners.33,62.cliffType","corners.34,62.cliffType","corners.33,63.cliffType","corners.34,63.cliffType","corners.33,64.cliffType","corners.34,64.cliffType"]
       }
     ],
     "limit": 30

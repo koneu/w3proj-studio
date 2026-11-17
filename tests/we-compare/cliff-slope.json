@@ -1,5 +1,6 @@
 [
   {
+    "limit": 40,
     "name": "cliff-slope-pyramid-up2-8",
     "description": "bugs.md 'Cliff brush slopes (Increase/Decrease)' (branch cliff-slope-we, 2026-11-15): Increase Two, size 8, one click at 748,478 on the top of pyramid.w3x (at 748,500 the editor's pick landed one row north of Studio's, corner 32,24 for 32,23) (level 12 within 3 corners of 32,23, rings of 10, 8, 6, 4 round it; make-levels.mjs). The brush sets its disc to 14, down the pyramid's slope too, and each corner beside or diagonal to one that moved comes to within two levels of it, ring after ring outwards until nothing moves (terrain-painter/tools.ts cliffSlope); before, Studio moved one ring only",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/pyramid.w3x" },
@@ -21,6 +22,7 @@
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
   },
   {
+    "limit": 40,
     "name": "cliff-slope-pyramid-up1-5-square",
     "description": "cliff-slope-pyramid-up2-8 with Increase One, size 5, Square: the square of half side 4 goes to 13 and the slope spreads from its edge in square rings (tools.ts cliffSlope); the shape is set back to Circle afterwards (it stays for the editor's session)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/pyramid.w3x" },
@@ -42,6 +44,7 @@
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
   },
   {
+    "limit": 40,
     "name": "cliff-slope-wrap",
     "description": "Increase Two, size 1, one click on level14.w3x (every corner level 14; make-levels.mjs), Enforce Terrain Limits off: the corner wraps round to level 0 and the slope digs a pit of square rings 0, 2, ... 12 into the field (tools.ts strokeLayer, cliffSlope)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
@@ -63,6 +66,7 @@
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }]
   },
   {
+    "limit": 40,
     "name": "cliff-slope-wrap-limits",
     "description": "cliff-slope-wrap with Enforce Terrain Limits ticked first (Scenario > Map Preferences in the editor, Map Properties > Preferences in Studio, unsaved there when the click comes): Increase Two from 14 does nothing at all (tools.ts ENFORCED_TOP_LEVEL: nothing above 14 with the switch on)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/level14.w3x" },
@@ -86,6 +90,7 @@
     "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3mapExtra.txt", "as": "text" }]
   },
   {
+    "limit": 40,
     "name": "cliff-slope-up2-1-pick",
     "description": "Increase Two, size 1, clicked ten times at 748,500 of flat.w3x. Each click's stamp is the editor's (its saves after each click were Studio's stamps on rows 30, 29, 29, 28, 28, 27, 27, 26, 26, 25 of column 32: tools.test.ts), but the pointer lands on other corners of the growing slope: Studio's pick hit row 26 at the seventh click where the editor's hit 27 (rows 30, 29, 29, 28, 28, 27, 26, 26, 25, 25), so the tops differ. Expected to differ until Studio's pick over cliffs of two levels is the editor's",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/flat.w3x" },
