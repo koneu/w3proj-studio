@@ -9,6 +9,7 @@ test("a checkpoint's name carries its time, for maps and campaigns", () => {
   assert.equal(checkpointName("C:/p/build/Saga.w3n", at), "Saga 2026-11-05 09-07-03.w3n");
   assert.equal(checkpointTime("My Map 2026-11-05 09-07-03.w3x"), at.getTime());
   assert.equal(checkpointTime("My Map.w3x"), null);
+  for (const bad of ["2026-13-45 99-99-99", "2026-02-30 10-00-00", "2026-11-05 24-00-00"]) assert.equal(checkpointTime(`M ${bad}.w3x`), null, bad);
   assert.equal(checkpointTime("My Map 2026-11-05.w3x"), null);
 });
 

@@ -122,6 +122,9 @@ export function objectRefs(kinds: { ext: string; label: string; objects: ObjectE
  *  names). */
 export interface KindData { custom?: readonly ObjectEntry[]; original?: readonly ObjectEntry[]; names?: ReadonlyMap<string, string> }
 
+/** The label of one object of a kind, by the kind's (plural) label. */
+const SINGULAR: Record<string, string> = { Units: "Unit", Items: "Item", Destructables: "Destructable", Doodads: "Doodad", Abilities: "Ability", Buffs: "Buff", Upgrades: "Upgrade" };
+
 /** The object data of every kind in `kinds` ([ext, label]): an open editor's (`live`) where there is one, else the saved
  *  file's (`saved`, null when absent). The custom ids per kind, every object per kind, and the names the editors show. */
 export function objectKinds(kinds: readonly [string, string][], saved: ReadonlyMap<string, KindData | null>, live: ReadonlyMap<string, KindData>):
@@ -131,7 +134,7 @@ export function objectKinds(kinds: readonly [string, string][], saved: ReadonlyM
     const file = live.get(ext) ?? saved.get(ext) ?? null;
     const own = (file?.custom ?? []).filter((o): o is ObjectEntry & { id: string } => typeof o.id === "string");
     custom.push({ ext, label, ids: own.map((o) => ({ id: o.id, base: o.base })) });
-    objects.push({ ext, label: label.replace(/s$/, ""), objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
+    objects.push({ ext, label: SINGULAR[label] ?? label, objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
     for (const [id, n] of file?.names ?? []) names.set(id, n);
   }
   return { custom, objects, names };
