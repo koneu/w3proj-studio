@@ -92,6 +92,20 @@ export interface MinimapObject {
   mask?: PathMask; angle?: number;
 }
 
+/** Whether the World Editor's minimap draws a doodad's footprint as its texture is drawn (the textures face 270
+ *  degrees: an odd number of quarter turns, true here) or turned a quarter. The angle goes into [0, 2 pi) and is
+ *  divided by a quarter turn in single precision, rounded half up: true between 45 and 135 degrees and between 225
+ *  and 315 (we-drive 2026-11-17: 8x6 and 4x6 at 40 to 50, 130 to 140, 220 to 230 and 310 to 320 degrees in steps of
+ *  2). The angles at exactly 45, 135, 225 and 315 degrees, which a file holds as single precision numbers, fall on
+ *  the editor's side only by that arithmetic: 45, 225 and 315 count as 270 (true), 135 as 0; -45 and 405 as 0. */
+export function footprintTurned(angle: number): boolean {
+  if (!Number.isFinite(angle)) return false;
+  const f = Math.fround, whole = f(2 * Math.PI);
+  let a = f(f(angle) % whole);
+  if (a < 0) a = f(a + whole);
+  return Math.round(f(a / f(Math.PI / 2))) % 2 === 1;
+}
+
 /** The tiles the dot of a doodad covers along one axis, from its centre `u` (in tiles from the map's corner) and its
  *  pathing texture's `cells` across: every tile that [u - a, u + a] touches, a = (cells - 2) / 8 tiles (0 without a
  *  pathing texture: the one tile it stands in). The World Editor's minimap, measured with 4x4, 6x6, 8x8 and 12x12
@@ -225,7 +239,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     if (o.mask) continue;
     let cx = o.cells?.[0] ?? (o.size ?? 1) * 4, cy = o.cells?.[1] ?? (o.size ?? 1) * 4;
     // The textures are drawn for 270 degrees: nearer 0 or 180 the footprint is turned a quarter.
-    if (o.angle !== undefined && Math.abs(Math.cos(o.angle)) > Math.SQRT1_2) [cx, cy] = [cy, cx];
+    if (o.angle !== undefined && !footprintTurned(o.angle)) [cx, cy] = [cy, cx];
     const [x0, x1] = dotReach((o.x - t.offsetX) / 128, cx), [y0, y1] = dotReach((o.y - t.offsetY) / 128, cy);
     let id = dotRgb.findIndex((c) => c[0] === o.rgb[0] && c[1] === o.rgb[1] && c[2] === o.rgb[2]);
     if (id < 0) id = dotRgb.push(o.rgb) - 1;

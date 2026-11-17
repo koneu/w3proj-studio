@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { dotReach, grainAt, groundColors, minimapFrame, renderMinimap, sharpShare, type MinimapInput, type PathMask, type Rgb } from "./minimap";
+import { dotReach, footprintTurned, grainAt, groundColors, minimapFrame, renderMinimap, sharpShare, type MinimapInput, type PathMask, type Rgb } from "./minimap";
 import { minimapBase, minimapObjects, modelTextureColor, shownTextureMean, smallestMipColor, textureOrder } from "./minimapgen";
 import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
@@ -172,13 +172,14 @@ test("minimapObjects: shown types in their minimap colour or their model's, as b
       rows,
       // A custom rock with a pathing texture of its own (no extension: a .tga).
       bases: new Map([["X000", { base: "rock", pathTex: "PathTextures\\Small" }]]),
-      // The ruin's model can't be read: it isn't drawn.
+      // The ruin's model can't be read: a grey dot, as in the editor.
       modelColor: async (type) => (type === "rock" ? [87, 88, 82] : null),
       footprint: async (path) => { asked.push(path); return path.includes("Large") ? 3 : path.includes("Small") ? 0.5 : 1; },
     });
   assert.deepEqual(objects, [
     { x: 0, y: 64, rgb: [32, 90, 32], size: 1 },
     { x: 128, y: 64, rgb: [87, 88, 82], size: 3 },
+    { x: 384, y: 64, rgb: [183, 183, 183], size: 1 },
     // No pathing texture (none, "_"): the one tile it stands in.
     { x: 512, y: 64, rgb: [200, 0, 0], size: 0, cells: [0, 0] },
     { x: 640, y: 64, rgb: [1, 2, 3], size: 0, cells: [0, 0] },
@@ -289,9 +290,10 @@ test("textureOrder: a model's colour comes from the texture its geosets' materia
   assert.deepEqual(textureOrder({ textures: [{}, {}, {}], geosets: [{ materialId: 0 }, { materialId: 3 }], materials: [{ layers: [{ textureIds: [2] }, { textureIds: [2] }] }] }), [2, 0, 1], "once each; a missing material counts for none");
 });
 
-test("shownTextureMean: the mean of the colours of the textures the materials show once each, a team colour texture counting black", async () => {
-  // The rule is from we-drive 2026-11-17 (dots-more): the editor's dot of a goblin shipyard ruin (its own texture, team
-  // colour, a second one) is 63,46,32, a granary's (two textures) 90,70,53. The colours below are made up, NOT those
+test("shownTextureMean: the mean of one colour per material (its first layer's texture), a team colour texture counting black", async () => {
+  // The rule is from we-drive 2026-11-17 (dots-more, dots-models): the editor's dot of a goblin shipyard ruin (materials:
+  // its own texture twice, team colour first) is 62,46,32, a granary's (one material of its first texture, two of its second)
+  // two thirds of the second. The colours below are made up, NOT those
   // maps' texture colours (the means differ from the editor's numbers), so this checks the rule, not the editor's values.
   const colors: Record<string, Rgb> = { own: [93, 70, 49], second: [104, 80, 57], a: [123, 101, 74], b: [66, 49, 38] };
   const color = async (tex: { path: string }) => colors[tex.path] ?? null;
@@ -299,11 +301,13 @@ test("shownTextureMean: the mean of the colours of the textures the materials sh
   const ruin = { textures, geosets: [{ materialId: 2 }, { materialId: 0 }, { materialId: 1 }],
     materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }, { textureIds: [2] }] }] };
   const near = (got: Rgb | null, want: number[]) => { assert.ok(got, "a colour"); got.forEach((v, k) => assert.ok(Math.abs(v - want[k]) < 1e-9, `${got} vs ${want}`)); };
-  // The geosets show the team colour (black), the second texture and the own one: a third of each.
-  near(await shownTextureMean(ruin, color), [(93 + 104) / 3, (70 + 80) / 3, (49 + 57) / 3]);
+  // The materials' first layers: the team colour (black) and the own texture twice (the second layer's texture isn't counted).
+  near(await shownTextureMean(ruin, color), [(93 * 2) / 3, (70 * 2) / 3, (49 * 2) / 3]);
   const granary = { textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "b" }], geosets: [{ materialId: 0 }, { materialId: 1 }, { materialId: 2 }],
     materials: [{ layers: [{ textureIds: [0] }] }, { layers: [{ textureIds: [1] }] }, { layers: [{ textureIds: [1] }] }] };
-  near(await shownTextureMean(granary, color), [(123 + 66) / 2, (101 + 49) / 2, (74 + 38) / 2]);
+  near(await shownTextureMean(granary, color), [(123 + 66 * 2) / 3, (101 + 49 * 2) / 3, (74 + 38 * 2) / 3]);
+  // Control: the lower detail levels of an HD model (lod above 0) are copies and don't count.
+  near(await shownTextureMean({ ...granary, geosets: [{ materialId: 0, lod: 0 }, { materialId: 1, lod: 0 }, { materialId: 1, lod: 1 }, { materialId: 2, lod: 1 }] }, color), [(123 + 66) / 2, (101 + 49) / 2, (74 + 38) / 2]);
   // Control: a texture that can't be read is left out, not black; nothing readable, or only the team colour: null.
   assert.deepEqual((await shownTextureMean({ ...granary, textures: [{ replaceableId: 0, path: "a" }, { replaceableId: 0, path: "gone" }] }, color))!.map(Math.round), [123, 101, 74]);
   assert.equal(await shownTextureMean({ textures: [{ replaceableId: 1, path: "" }], geosets: [{ materialId: 0 }], materials: [{ layers: [{ textureIds: [0] }] }] }, color), null);
@@ -516,4 +520,24 @@ test("viewOutline: the view's corners on the ground, and far along a ray over th
   assert.equal(far.length, 4);
   assert.ok(Math.abs(Math.hypot(far[0][0], far[0][1]) - 5000 * Math.hypot(1, 1) / Math.hypot(1, 1, 0.5)) < 1e-6);
   assert.ok(far[2][1] > 0 && far[2][1] < 5000, "a bottom corner meets the ground in front");
+});
+
+test("footprintTurned: the editor's turn of a dot's footprint (we-drive 2026-11-17, 8x6 and 4x6 at 40 to 50, 130 to 140, 220 to 230, 310 to 320 degrees and exact multiples of 45)", () => {
+  const rad = (d: number) => Math.fround((d * Math.PI) / 180); // a file holds single precision angles
+  // Measured in the editor: true = drawn as the texture is (the 270 degree side).
+  const measured: [number, boolean][] = [[0, false], [40, false], [44, false], [45, true], [46, true], [90, true], [134, true], [135, false], [140, false], [180, false],
+    [224, false], [225, true], [226, true], [270, true], [314, true], [315, true], [316, false], [360, false], [-45, false], [-90, true], [405, false]];
+  for (const [deg, want] of measured) assert.equal(footprintTurned(rad(deg)), want, `${deg} degrees`);
+  assert.equal(footprintTurned(NaN), false);
+  // Control: the earlier rule (|cos| above 0.71 turns it) gets 225, -45 and 405 wrong, so this test can fail.
+  const old = (deg: number) => !(Math.abs(Math.cos(rad(deg))) > Math.SQRT1_2);
+  assert.ok([225, -45, 405].some((d) => old(d) !== measured.find((m) => m[0] === d)![1]));
+});
+test("minimapObjects: a doodad whose model can't be read is a grey dot whatever its pathing texture (a palisade has none)", async () => {
+  const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", pathTex });
+  const objects = await minimapObjects(
+    ["a", "b"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
+    { rows: new Map([["a", row("PathTextures\\4x4Default.tga")], ["b", row("none")]]), bases: new Map(), modelColor: async () => null, footprint: async () => 1,
+      cells: async () => [4, 4], pathMask: async () => maskOf(Array(4).fill("####")) });
+  assert.deepEqual(objects.map((o) => o.rgb), [[183, 183, 183], [183, 183, 183]]);
 });

@@ -40,6 +40,11 @@ const MAPS = {
   // The offset from the tile corner in both axes at once: 8 x 8 doodads a type, 16 units (an eighth of a tile) more each way.
   "minimap-dots-grid": { size: 128, margin: 0, types: ["LRrk", "LSeb", "LSrg"], grid: { n: 8, tiles: 4, unit: 16 } },
   "minimap-dots-more": { margin: 0, types: ["LTlt", "LZth", "LSgr", "LSst", "LSpl", "VSvb"], origin: (t) => [-3840 + (t % 3) * 2688, -3584 + Math.floor(t / 3) * 2688], step: 640, quarter: 8, cols: 2, rows: 2 },
+  // The dot colour of the doodad types whose model gives it (`models`), and the dot at angles other than 270 degrees (`angles`).
+  "minimap-dots-models": { size: 64, margin: 0, models: true },
+  "minimap-dots-angles": { size: 64, margin: 0, types: ["LSgr", "LSst", "LZth", "LSrg", "LSeb"], angles: true },
+  // Around the angles where the footprint turns (45, 135, 225, 315 degrees), and others: 8x6 and 4x6 pathing.
+  "minimap-dots-angles-fine": { size: 64, margin: 0, types: ["LSgr", "LSst"], angleList: [40, 42, 44, 45, 46, 48, 50, 130, 132, 134, 135, 136, 138, 140, 220, 222, 224, 225, 226, 228, 230, 310, 312, 314, 315, 316, 318, 320, 0, 90, 180, 270, 360, -45, -90, 405] },
 };
 
 for (const [name, m] of Object.entries(MAPS)) {
@@ -127,6 +132,35 @@ for (const [name, m] of Object.entries(MAPS)) {
           line++;
         }
       }
+    } else if (m.models) {
+      // One doodad of every type whose dot colour comes from its model (showInMM 1, useMMColor not 1) and whose pathing
+      // texture is none or a square of at most 8x8, in rows of 14, 4 tiles apart, at a tile corner (a tile's middle for
+      // "none": its dot is the tile it stands in). "id path" lines go to <name>.txt, in order, for reading the pictures.
+      const slk = spawnSync(cli, ["game", "slk", "Doodads\\Doodads.slk"], { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
+      if (slk.status !== 0) throw new Error(`w3proj game slk: ${slk.stderr}`);
+      const [head, ...body] = slk.stdout.split("\n").filter(Boolean).map((l) => l.split("\t"));
+      const col = (n) => head.indexOf(n);
+      const ok = /^(none|PathTextures\\(2x2|4x4|6x6|8x8)Default\.tga)$/;
+      const ids = body.filter((r) => r[col("showInMM")] === "1" && r[col("useMMColor")] !== "1" && ok.test(r[col("pathTex")])).map((r) => [r[0], r[col("pathTex")]]).sort();
+      ids.slice(0, 14 * 14).forEach(([id, path], n) => {
+        const half64 = path === "none" ? 64 : 0;
+        spots.push({ id, x: -half + (4 + (n % 14) * 4) * 128 + half64, y: -half + (4 + Math.floor(n / 14) * 4) * 128 + half64 });
+      });
+      writeFileSync(join(here, `${name}.txt`), ids.slice(0, 14 * 14).map(([id, path]) => `${id} ${path}`).join("\n") + "\n");
+    } else if (m.angleList) {
+      // The angles of `angleList` (degrees), 12 to a row, one row of them per type at a tile's middle, 5 tiles apart.
+      const rad = (d) => (d * Math.PI) / 180;
+      m.types.forEach((id, t) => m.angleList.forEach((d, c) => spots.push({ id, angle: rad(d), x: -half + (4 + (c % 12) * 5) * 128 + 64, y: -half + (4 + (t * 3 + Math.floor(c / 12)) * 5) * 128 + 64 })));
+    } else if (m.angles) {
+      // Each type at angles 0, 15 ... 165 degrees (a footprint is symmetric under 180), 5 tiles apart in a row, two rows per
+      // type: at a tile corner and at a tile's middle. Row 10 and 11: the angles 195 ... 345 of the second type (symmetry check).
+      const rad = (d) => (d * Math.PI) / 180;
+      m.types.forEach((id, t) => {
+        for (const [r, off] of [[0, 0], [1, 64]]) {
+          for (let c = 0; c < 12; c++) spots.push({ id, angle: rad(c * 15), x: -half + (4 + c * 5) * 128 + off, y: -half + (4 + (t * 2 + r) * 5) * 128 + off });
+        }
+      });
+      for (let c = 0; c < 12; c++) spots.push({ id: m.types[0], angle: rad(180 + c * 15), x: -half + (4 + c * 5) * 128, y: -half + (4 + m.types.length * 2 * 5) * 128 });
     } else {
       m.types.forEach((id, t) => {
         const [ox, oy] = m.origin(t);
@@ -135,8 +169,8 @@ for (const [name, m] of Object.entries(MAPS)) {
         }
       });
     }
-    spots.forEach(({ id, x, y }, n) => {
-      json.doodads.push({ id, variation: 0, position: [x, y, 0], angle: 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [n & 255, (n >> 8) & 255, 0], extras: [] });
+    spots.forEach(({ id, x, y, angle }, n) => {
+      json.doodads.push({ id, variation: 0, position: [x, y, 0], angle: angle ?? 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: 4294967295, trailer: [n & 255, (n >> 8) & 255, 0], extras: [] });
     });
     writeFileSync(doo, JSON.stringify(json, null, 2));
     run("pack", dir, "-o", join(here, `${name}.w3x`), "--force-stale");
