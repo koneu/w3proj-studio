@@ -28,5 +28,7 @@ export const fixedStartForRace = (fixedStart: number, race: number): number =>
   race === 0 ? (fixedStart | RACE_SELECTABLE) >>> 0 : (fixedStart & ~RACE_SELECTABLE) >>> 0;
 
 /** HUD skins (war3map.w3i, version 39 with player HUD skins): race preference bits, as SetPlayerRaceSkin takes them.
- *  The game's own maps (7003) have 64, "Selected Race". */
-export const HUD_SKINS: [number, string][] = [[64, "Selected Race"], [1, "Human"], [2, "Orc"], [4, "Undead"], [8, "Night Elf"]];
+ *  The game's own maps (7003) have 64, "Selected Race", and the Forsaken Kingdom scenarios 128. The bits are common.j's
+ *  RACE_PREF_ values, as the World Editor's script names them (we-compare format-hud: 4 NIGHTELF, 8 UNDEAD,
+ *  128 FORSAKEN). */
+export const HUD_SKINS: [number, string][] = [[64, "Selected Race"], [1, "Human"], [2, "Orc"], [4, "Night Elf"], [8, "Undead"], [128, "Forsaken"]];

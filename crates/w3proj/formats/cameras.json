@@ -2,6 +2,8 @@
 // Version 0 (classic) and 3 (Reforged: the local angles, three more floats and
 // a u32 after the name). Worked out from the game's maps and 46 others; the
 // three floats are zero except one 0.01, the trailer is zero in all samples.
+// The trailer is the camera type (we-compare format-fields, 2026-11-17): Create Free Camera writes 1, Create Camera 0,
+// the editor's script passes it to BlzCameraSetupSetCameraType, and its save writes any other value as 1.
 // They are the World Editor's DoF Distance, DoF Scale and Pos Absolute Z (its
 // camera dialog, 2026-11-12: 0, 123 and 2.5 typed there are those floats in
 // this order); JSON written before they had names keeps them in `unknown`.
@@ -36,7 +38,7 @@
       { "name": "dofScale", "type": "f32", "if": "version >= 3", "was": "unknown[1]", "doc": "the World Editor's DoF Scale" },
       { "name": "posAbsoluteZ", "type": "f32", "if": "version >= 3", "was": "unknown[2]", "doc": "the World Editor's Pos Absolute Z" },
       { "name": "name", "type": "cstring" },
-      { "name": "trailer", "type": "u32", "if": "version >= 3", "doc": "zero in all samples" }
+      { "name": "trailer", "type": "u32", "if": "version >= 3", "doc": "camera type: 1 a free camera (the World Editor's Create Free Camera), 0 not; the editor saves other values as 1" }
     ] }
   ]
 }

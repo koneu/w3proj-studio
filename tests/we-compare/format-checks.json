@@ -1,0 +1,76 @@
+[
+  {
+    "name": "format-fields",
+    "description": "test.md 'war3map.w3c v3: whether the u32 after the name' and 'war3map.w3e water-bits' (2026-11-17, SD): format-fields.w3x (tests/fixtures/we-specs/make-format-checks.mjs fields) opened and saved, no edits. Cameras Alpha..Delta with trailer 0, 1, 2, 7: the editor saves 0, 1, 1, 1 and its script has BlzCameraSetupSetCameraType 0, 1, 1, 1 (the camera type; Studio's file keeps 2 and 7, its script writes 1). Doodads with preFlags 0 and 7, roll and pitch floats, a placement id 100 and lights: the editor keeps them, and gives the lamp post without a light (doodads[6]) its model's one. Water bit 15 on 25 corners: the editor clears it (Studio keeps the word)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/format-fields.w3x" },
+    "we": { "mode": "sd", "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.w3c", "as": "parsed", "expect": "differs", "expectPaths": ["cameras[].trailer"] },
+      { "file": "war3map.j", "as": "text-set" },
+      { "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["doodads[6].extras"] },
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs" }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "format-hud",
+    "description": "test.md 'HUD skins' (2026-11-17, SD): format-hud.w3x (make-format-checks.mjs hud), ten players with the HUD skins 32759, 0, 1, 2, 4, 8, 16, 32, 64, 128. The editor's Player Properties shows Selected Race, Selected Race, Human, Orc, Night Elf, Undead, Selected Race, Selected Race, Selected Race, Forsaken, and its script SetPlayerRaceSkin RANDOM, RANDOM, HUMAN, ORC, NIGHTELF, UNDEAD, RANDOM, RANDOM, USER_SELECTABLE, FORSAKEN; Studio's script the same (setup.ts RACE_PREFS). The save says the map is no longer melee (start locations too close)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/format-hud.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text-set" }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "format-missing",
+    "description": "test.md 'A genuinely missing model id' (2026-11-17, SD): format-missing.w3x (make-format-checks.mjs missing), a doodad of the unknown id Xzz1 and a unit of the unknown id xzz1 beside a tree and a footman. The editor draws neither (no cube, nothing), writes 'Invalid object ID: Xzz1' twice in its view's message lines, and leaves both out of its save. Studio draws its checkered cube for them and keeps them (a save never drops data): the known difference is the two lists",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/format-missing.w3x" },
+    "we": { "mode": "sd", "steps": [] },
+    "studio": { "steps": [] },
+    "compare": [
+      { "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["doodads[0]", "doodads[1]"] },
+      { "file": "war3mapUnits.doo", "as": "parsed", "expect": "differs", "expectPaths": ["units[1]", "units[2]"] }
+    ],
+    "limit": 20
+  },
+  {
+    "name": "format-w3c-v0",
+    "description": "test.md 'What the WE writes when an unedited war3map.w3c of 4v4_MountHyjal' (2026-11-17, SD): the map's 8-byte version 0 file without cameras, opened and saved: the editor writes version 3 (03 00 00 00 00 00 00 00), Studio keeps the file as it is (its JSON: version 0 with localAngles, the layout of the 9 other such maps)",
+    "input": { "map": "${MAIN}/smoketest_maps/4v4_MountHyjal_v1.25_w3c_260125_1357_5149.w3x" },
+    "we": { "mode": "sd", "steps": [] },
+    "studio": { "steps": [] },
+    "compare": [
+      { "file": "war3map.w3c", "as": "parsed", "expect": "differs", "expectPaths": ["version", "localAngles"] }
+    ]
+  },
+  {
+    "name": "format-doodad-props",
+    "description": "test.md 'The 3.0 doo fields preFlags, trailer and extras' (2026-11-17, SD): format-doodad-props.w3x (make-format-checks.mjs props). The editor: the lamp post's Doodad Properties (d, a click on its pole, Return, its General tab: the dialog opens on the tab used last), Roll 15, Pitch 30, then its Lights tab, Light 1: Intensity 7, Shadow Start 20, Shadow End 40, Quadratic 3, Linear Falloff 2, Damping 1, OK. Studio writes the values those names stand for into war3map.doo.json: trailer [id, roll, pitch] in radians, the light [0, Casts Shadows, Color, Intensity, Shadow Start, Shadow End, Quadratic x 0.0001, Linear Falloff x 0.01, Damping x 0.000001] (the editor's float products: 3 x 0.0001 is 966609233, one below 0.0003's)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/format-doodad-props.w3x" },
+    "we": {
+      "mode": "sd",
+      "steps": [["--sleep","1500"],["--key","d"],["--sleep","1000"],["--key","Escape"],["--click","754,382"],["--sleep","800"],["--key","Return"],["--sleep","2000"],["--click","550,415"],["--sleep","800"],
+        ["--click","607,492"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","15"],
+        ["--click","607,517"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","30"],
+        ["--click","618,415"],["--sleep","1000"],["--click","535,441"],["--sleep","1000"],
+        ["--click","795,462"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","7"],
+        ["--click","795,482"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","20"],
+        ["--click","795,502"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","40"],
+        ["--click","795,522"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","3"],
+        ["--click","795,542"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","2"],
+        ["--click","795,562"],["--key","End"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--key","BackSpace"],["--type","1"],
+        ["--sleep","300"],["--click","734,650"],["--sleep","1500"]]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "const p = 'map/war3map.doo.json'; const doc = JSON.parse(await w3.workspace.readText(p)); const d = doc.doodads[0]; if (d.id !== 'LOlp') throw new Error('doodads[0] is ' + d.id); const f = (x) => { const v = new DataView(new ArrayBuffer(4)); v.setFloat32(0, x, true); return v.getUint32(0, true); }; d.trailer = [d.trailer[0], f(15 * Math.PI / 180), f(30 * Math.PI / 180)]; d.extras = [[0, 1, 0xff102030, f(7), f(20), f(40), 966609233, f(0.02), f(0.000001)]]; await w3.workspace.writeText(p, JSON.stringify(doc, null, 1));" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.doo", "as": "parsed" }
+    ]
+  }
+]

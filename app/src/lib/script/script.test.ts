@@ -699,6 +699,10 @@ test("player slots", () => {
   // World Editor 3.0.1 gives new maps 32759 and writes it as RANDOM.
   has(playersSection(setup({ players: [player(0, { hudSkin: 32759 })] })), "    call SetPlayerRaceSkin( Player(0), RACE_PREF_RANDOM )");
   has(playersSection(setup({ players: [player(0, { hudSkin: 64 })] })), "    call SetPlayerRaceSkin( Player(0), RACE_PREF_USER_SELECTABLE )");
+  // The World Editor's script for each HUD skin (we-compare format-hud, build 7003): common.j's bits (4 Night Elf,
+  // 8 Undead, 128 Forsaken); Demon (16), Random (32) and everything else are RANDOM.
+  const skins: [number, string][] = [[32759, "RANDOM"], [0, "RANDOM"], [1, "HUMAN"], [2, "ORC"], [4, "NIGHTELF"], [8, "UNDEAD"], [16, "RANDOM"], [32, "RANDOM"], [64, "USER_SELECTABLE"], [128, "FORSAKEN"]];
+  for (const [hudSkin, pref] of skins) has(playersSection(setup({ players: [player(0, { hudSkin })] })), `    call SetPlayerRaceSkin( Player(0), RACE_PREF_${pref} )`);
   has(s, "    call SetPlayerController( Player(3), MAP_CONTROL_COMPUTER )");
   has(s, "    call SetPlayerRaceSelectable( Player(3), true )");
   // With fixed settings only "selectable" races can be changed.
@@ -990,6 +994,16 @@ test("cameras of the old file format have fewer fields", () => {
   has(named, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_DEPTH_OF_FIELD_SCALE, 123.0, 0.0 )");
   has(named, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_ZABSOLUTE, 2.5, 0.0 )");
   has(named, "    call BlzCameraSetupSetCameraType( gg_cam_C, 0 )");
+});
+
+test("a camera's type is 0 or 1 in the script, as the World Editor writes it", () => {
+  // we-compare format-fields (2026-11-17): the u32 after the name is the camera type (Create Free Camera writes 1,
+  // Create Camera 0); the editor's script and save make 2 and 7 into 1.
+  const cam = { name: "C", targetX: 0, targetY: 0, zOffset: 0, rotation: 0, angleOfAttack: 0, distance: 0, roll: 0, fieldOfView: 0, farZ: 0, nearZ: 0, dofDistance: 0, dofScale: 0, posAbsoluteZ: 0 };
+  for (const [trailer, want] of [[0, 0], [1, 1], [2, 1], [7, 1], [0xffffffff, 1]]) {
+    const s = generateSections(input({ cameras: [{ ...cam, trailer }] })).get("Cameras")!;
+    has(s, `    call BlzCameraSetupSetCameraType( gg_cam_C, ${want} )`);
+  }
 });
 
 test("camera fields round like the rest", () => {
