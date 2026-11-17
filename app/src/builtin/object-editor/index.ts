@@ -1575,6 +1575,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // A text with a `}` would be cut by the game: nothing is saved, before the object file is written.
             const cuts = hasWts ? wts.table.cuts() : [];
             if (cuts.length) throw new WtsCutError(cuts);
+            // A string another editor saved meanwhile that this one changed too: the user decides before anything is written.
+            let tookTheirs = false;
+            if (hasWts) {
+              const onDisk = await w3.workspace.readText(WTS).catch(() => null);
+              const clash = onDisk === null ? [] : wts.collisions(onDisk);
+              if (onDisk !== null && clash.length) {
+                const which = clash.length === 1 ? `String ${clash[0]}` : `Strings ${clash.join(", ")}`;
+                const answer = await w3.window.showWarning(`${which} of ${wtsName} ${clash.length === 1 ? "was" : "were"} saved by another editor since this one read ${clash.length === 1 ? "it" : "them"}. Saving writes over ${clash.length === 1 ? "that text" : "those texts"} with what this editor has.`, "Overwrite", "Keep theirs");
+                if (answer === "Keep theirs") { wts.takeTheirs(onDisk, clash); tookTheirs = true; }
+                else if (answer !== "Overwrite") throw new Error("Not saved.");
+              }
+            }
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.
             let result: { shown: boolean; recreated: boolean } | undefined;
@@ -1647,7 +1659,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   void packedMapPath(w3).then((packed) => w3.window.showWarning(recreatedMessage(packed)));
                 }
                 // A text changed by the save (another editor's was kept) shows at once.
-                const renderNeeded = !!result?.shown;
+                const renderNeeded = !!result?.shown || tookTheirs;
                 if (renderNeeded) {
                   try { renderDetail(); } catch (e) { w3.window.showError(`Saved, but the detail view failed to redraw (${e})`); }
                 }
