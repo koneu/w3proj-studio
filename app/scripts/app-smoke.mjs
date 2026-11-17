@@ -588,7 +588,7 @@ async function atmosphereTools(page, found) {
   await tool("save_project");
   const w3i0 = read("war3map.w3i.json"), edits = () => tool("list_edits").then((t) => JSON.parse(t).length);
   const n0 = await edits();
-  const sky = await tool("set_sky", { lightEnvironment: "A", fogStyle: "Exponential 1", fogEnd: 7000, fogColor: "#ff0000", waterTint: [0, 255, 0], overSky: 1 }).catch((e) => fail(`set_sky: ${e.message}`));
+  const sky = await tool("set_sky", { lightEnvironment: "A", fogStyle: "Exponential 1", fogEnd: 7000, fogColor: "#ff0000", waterTint: [0, 255, 0], overSky: 1 }).catch((e) => { fail(`set_sky: ${e.message}`); return undefined; });
   if (sky === undefined) return;
   if (!/light environment/.test(sky) || !/terrain fog: off/.test(sky)) fail(`the reply doesn't list the changes: ${sky}`);
   if (await edits() !== n0 + 1) fail("set_sky wasn't one edit");
@@ -659,7 +659,7 @@ async function atmosphereTools(page, found) {
   if (readFileSync(join(root, "map", "war3map.w3r.json"), "utf8") !== regionsBefore) fail("the refused Right edge changed war3map.w3r.json");
   for (let i = 0; i < 4; i++) await tool("undo_last_edit");
   await tool("save_project");
-  if (read("war3map.w3i.json").weather !== "0x00000000" || !existsSync(join(root, "map", "war3map.w3r.json")) === false && read("war3map.w3r.json").regions.length) fail("the undos didn't bring back the map as it was");
+  if (read("war3map.w3i.json").weather !== "0x00000000" || (existsSync(join(root, "map", "war3map.w3r.json")) ? read("war3map.w3r.json").regions.length > 0 : true)) fail("the undos didn't bring back the map as it was");
   } finally {
     await restoreWindow(page);
   }
@@ -733,7 +733,7 @@ async function waterPathing(page, found) {
 
   // A commit straight after a tool's edit takes the rebuilt pathing map with it: nothing of the project is left uncommitted.
   const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8" });
-  git("init", "-q");
+  if (git("init", "-q").status !== 0) return fail("git init failed in the project folder");
   git("add", "-A");
   git("commit", "-q", "-m", "base");
   await page.evaluate(`(() => { w3.window.inputBox = async () => "lake"; })()`);
@@ -1084,7 +1084,7 @@ async function heightKit(page, name) {
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
     },
     /** The Advanced switches go back to what they were, for the next check. */
-    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds", "terrain.resetFixedHeights"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${lit(key)}, undefined, ${lit(layer)})`)))),
+    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds", "terrain.resetFixedHeights", "terrain.units.groundOnSave", "terrain.doodads.snapOnLoad"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${lit(key)}, undefined, ${lit(layer)})`)))),
   };
   return kit;
 }
@@ -1093,9 +1093,10 @@ async function heightKit(page, name) {
  *  twice at the same kind of spot, first with the setting on and then off. The two pastes differ only by the setting,
  *  which is what shows it made the difference. The toolbar box and the command are the same setting. */
 async function heightsPreserve(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (preserve): ${what}`);
-  const k = await heightKit(page, "Preserve");
+  k = await heightKit(page, "Preserve");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }], ignoreRoom: true });
   await k.save();
   const ground = k.doodads()[0].position[2];
@@ -1158,8 +1159,8 @@ async function heightsPreserve(page, found) {
   await k.hands.click(".model-toggle", "Keep pasted height");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1168,9 +1169,10 @@ async function heightsPreserve(page, found) {
  *  same isn't read again) counts its doodads as free and lands them at the pointer, not on the 64 grid: copied and
  *  pasted at an off-grid spot, the doodad must land as one copied after its size was read. */
 async function pasteWaitsForSizes(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`paste waits for sizes: ${what}`);
-  const k = await heightKit(page, "PasteSizes");
+  k = await heightKit(page, "PasteSizes");
   await k.tool("place_objects", { objects: [{ id: "LTbr", x: 0, y: 0 }], ignoreRoom: true });
   await k.save();
   const home = k.doodads()[0].position;
@@ -1200,8 +1202,8 @@ async function pasteWaitsForSizes(page, found) {
   await settled(page);
   const early = await pasteOnce(640);
   if (early.length !== 1 || early[0].position[0] !== normal[0].position[0] + 640 || early[0].position[1] !== normal[0].position[1]) fail(`a paste copied before the size was read landed at ${lit(early.map((d) => d.position))}, not at x ${normal[0].position[0] + 640}, y ${normal[0].position[1]}`);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -1402,9 +1404,10 @@ const sleepTicks = (page) => sleep(1100);
  *  key Y (the mean height, no dialog), a start location's nudge (64), and a unit stored 500 over the ground saved on it
  *  (setting Units on the Ground on Save; off, it stays). */
 async function heightsUniform(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (uniform): ${what}`);
-  const k = await heightKit(page, "Uniform");
+  k = await heightKit(page, "Uniform");
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }, { id: "LTlt", x: 0, y: 512 }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 0, player: 1 }], ignoreRoom: true });
   await k.save();
@@ -1551,8 +1554,8 @@ async function heightsUniform(page, found) {
   const onBy = await unitsGround(true);
   if (Math.abs(onBy) > 0.01) fail(`with Units on the Ground on Save on (the default), the footman stored 500 over the ground was saved ${onBy} over it`);
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await restoreWindow(page);
   }
 }
@@ -3482,7 +3485,7 @@ async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
     const before = await keeps();
     if (before < 0.95) fail(`border from the w3i: tile 8, inside the playable map, is shaded (keeps ${before.toFixed(3)} of its colour)`);
     const marks = await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
-    await writeInfo(`${lit({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
     let wide = 1;
     await until("tile 8 shaded once the w3i's west margin is 10", async () => (wide = await keeps()) < 0.3, 20000)
       .catch(() => fail(`border from the w3i: with the w3i's west margin at 10, tile 8 keeps ${wide.toFixed(3)} of its colour, not shaded as the editor's`));
@@ -3492,7 +3495,7 @@ async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
     await until("tile 8 lit again before the layer", async () => (await keeps()) > 0.95, 20000);
     await toggle("pathing");
     const drawn = await settledMapPicture(page);
-    await writeInfo(`${lit({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
     // (The shade ratio isn't read with a layer on: the layer lies over it.)
     await until("the picture changed with the margin", async () => (await pixelsApart(page, drawn, await mapPicture(page))) > 150, 20000);
     const stale = await settledMapPicture(page);
@@ -4009,8 +4012,8 @@ async function importedBlightWaterReload(page, found) {
     const ini = await page.evaluate(`w3.game.readText(${lit("UI\\WorldEditData.txt")})`);
     const sets = ini.slice(ini.indexOf("[TileSets]"));
     const blight = sets.split(/\r?\n/).map((l) => l.split("=")).find((x) => x[0].trim().toLowerCase() === tileset.toLowerCase())?.[1]?.split(",")[1]?.trim();
-    const paths = { blight: blight ? blight + ".blp" : null, water: true };
-    if (!paths.blight || !paths.water) return fail(`no blight or water row for tileset ${tileset}: ${lit(paths)}`);
+    const paths = { blight: blight ? blight + ".blp" : null };
+    if (!paths.blight) return fail(`no blight or water row for tileset ${tileset}: ${lit(paths)}`);
     // The water frames' texture file, as the view reads it (Water.slk's texFile column, then <file>00.blp).
     const slk = spawnSync(cli, ["game", ...installArgs, "slk", "TerrainArt/Water.slk", tileset + "Sha", "--col", "waterID,texFile,numTex"], { encoding: "utf8" });
     const row = slk.stdout.trim().split(/\r?\n/)[1]?.split("\t");
@@ -4559,9 +4562,10 @@ async function wholeMapGround(page, found) {
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
 async function heightsLimits(page, found) {
+  let k;
   try {
   const fail = (what) => found.push(`height tools (limits): ${what}`);
-  const k = await heightKit(page, "Limits");
+  k = await heightKit(page, "Limits");
   const { hands } = k;
   // On by default, as in the World Editor; the toggles below start from off.
   if ((await k.setting("terrain.enforceCameraBounds")) === false || (await k.box("Enforce camera bounds")) !== true) fail("Enforce Camera Bounds isn't on by default");
@@ -4846,8 +4850,8 @@ async function heightsLimits(page, found) {
   await hands.key("Escape", "Escape", 27);
   await k.tab("Select");
   await k.verify(fail);
-  await k.reset();
   } finally {
+    await k?.reset().catch(() => {});
     await page.evaluate(`w3.settings.set("terrain.doodads.snapOnLoad", undefined)`).catch(() => {});
     await restoreWindow(page);
   }
