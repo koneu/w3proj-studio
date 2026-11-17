@@ -312,12 +312,13 @@ test("shownTextureMean: the mean of the colours of the textures the materials sh
 
 test("minimapObjects: a model's colour is asked for as a mean for a dot and as the first texture's for a drawn shape", async () => {
   const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", MMRed: "0", MMGreen: "0", MMBlue: "0", pathTex });
-  const rows = new Map([["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["bare", row("_")]]);
-  const masks: Record<string, PathMask> = { "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
+  // A shape is a texture with gaps (a diagonal wall); a full rectangle (a gate, a tree) is a dot.
+  const rows = new Map([["wall", row("PathTextures\\StoneWall2Path.tga")], ["gate", row("PathTextures\\Gate1Path.tga")], ["tree", row("PathTextures\\4x4Default.tga")], ["bare", row("_")]]);
+  const masks: Record<string, PathMask> = { "PathTextures\\StoneWall2Path.tga": WALL2, "PathTextures\\Gate1Path.tga": GATE1, "PathTextures\\4x4Default.tga": maskOf(Array(4).fill("####")) };
   const asked: string[] = [];
-  await minimapObjects(["gate", "tree", "bare"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
+  await minimapObjects(["wall", "gate", "tree", "bare"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
     { rows, bases: new Map(), modelColor: async (type, mean) => { asked.push(`${type}:${mean}`); return [1, 2, 3]; }, footprint: async () => 1, pathMask: async (p) => masks[p] ?? null });
-  assert.deepEqual(asked, ["gate:false", "tree:true", "bare:true"]);
+  assert.deepEqual(asked, ["wall:false", "gate:true", "tree:true", "bare:true"]);
 });
 
 test("modelTextureColor: with `mean` a model whose geosets show no texture still gives its first texture's colour", async () => {
