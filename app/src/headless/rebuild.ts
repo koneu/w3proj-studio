@@ -9,7 +9,8 @@
 //            one is kept when the result would leave the doodads out (shadowVerdict: the game's data unreadable)
 //   minimap  war3mapMap.blp and its icons war3map.mmp, as the rebuild writes them
 //   script   war3map.j / war3map.lua from the triggers, as the Map Script extension's Generate Map Script: a script
-//            that isn't the one Studio wrote last is kept (lib/script/guard.ts), vJASS isn't compiled
+//            that isn't the one Studio wrote last is kept (lib/script/guard.ts) unless the job has `force`, vJASS isn't
+//            compiled
 
 import { headless, type Message } from "./host";
 import type { ExtensionManifest } from "../extensions/api";
@@ -29,6 +30,8 @@ export interface Job {
   /** The project folder. */
   root: string;
   parts: Part[];
+  /** The script also over one that isn't the one Studio wrote last (`w3proj rebuild --force`); the note names it. */
+  force?: boolean;
   /** Settings that win over the project's and the defaults (the game folder, the graphics mode). */
   settings: Record<string, unknown>;
 }
@@ -141,7 +144,7 @@ export async function rebuild(job: Job): Promise<Report> {
     await h.activate(scriptManifest.id, scriptExtension);
     let failure: string | undefined;
     try {
-      await w3.commands.execute("w3.script.generate", { quiet: true });
+      await w3.commands.execute("w3.script.generate", { quiet: true, force: job.force === true });
     } catch (e) {
       failure = text(e);
     }

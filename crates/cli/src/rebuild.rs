@@ -45,7 +45,8 @@ pub struct Options {
     pub project: PathBuf,
     /// The parts asked for by name (`--only`); None: what is due.
     pub only: Option<Vec<String>>,
-    /// Pathing, shadows and the minimap even when they follow the terrain and doodads.
+    /// Pathing, shadows and the minimap even when they follow the terrain and doodads, and the script also over one
+    /// that isn't the one Studio wrote last (its line says it replaced it).
     pub force: bool,
     /// The game folder (its data: tables, models, textures).
     pub game: String,
@@ -89,7 +90,7 @@ pub fn run(o: Options) -> Result<ExitCode> {
             backend::mode(mode).map_err(anyhow::Error::msg)?;
             settings["game.graphicsMode"] = json!(mode);
         }
-        let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "settings": settings });
+        let job = json!({ "task": "rebuild", "root": info.root, "parts": parts.run, "force": o.force, "settings": settings });
         let report = run_host(&job, &server)?;
         if let Some(e) = report.get("error").and_then(Value::as_str) {
             bail!("the rebuild stopped: {e}");
