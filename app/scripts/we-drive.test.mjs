@@ -432,7 +432,8 @@ test("procState reads the state after the last ')' of /proc/PID/stat; a zombie o
   assert.equal(procGone(1, fail("ENOENT")), true);
   assert.equal(procGone(1, stat("1 (a) S 0")), false);
   assert.equal(procGone(1, fail("EACCES")), false);
-  assert.equal(procState(process.pid) !== null && !procGone(process.pid), true, "control: this process is there");
+  // The control reads the real /proc: only where there is one (we-drive itself runs on Linux; Windows has no /proc).
+  if (existsSync("/proc/self/stat")) assert.equal(procState(process.pid) !== null && !procGone(process.pid), true, "control: this process is there");
 });
 
 test("we-x11 settle: two equal pictures in a row, else up to the timeout (python, no display)", (t) => {
