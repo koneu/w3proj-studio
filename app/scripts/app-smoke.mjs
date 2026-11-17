@@ -6666,9 +6666,9 @@ async function viewCommands(page, fail, shots, size) {
   if ((await shadowBox()) !== true) bad(`the Shadows box isn't checked at first (${await shadowBox()})`);
   // HD with the map's lighting: the models' real shadows from the sun (the footman casts into the sun's shadow map).
   const hd = (await page.evaluate(`w3.settings.get("game.graphicsMode")`)) !== "sd";
-  const lit = (await page.evaluate(`w3.settings.get("terrain.lighting.enabled")`)) !== false;
+  const lighting = (await page.evaluate(`w3.settings.get("terrain.lighting.enabled")`)) !== false;
   const sunOn = (await state()).sunShadows;
-  if (hd && lit && !(sunOn.drawn && sunOn.casters >= 1 && sunOn.texel > 0)) bad(`HD casts no real shadows next to the footman: ${lit(sunOn)}`);
+  if (hd && lighting && !(sunOn.drawn && sunOn.casters >= 1 && sunOn.texel > 0)) bad(`HD casts no real shadows next to the footman: ${lit(sunOn)}`);
   const shadowsErr = await run("w3.terrain.toggleShadows");
   if (shadowsErr) bad(`w3.terrain.toggleShadows: ${shadowsErr}`);
   const unshaded = await differ(close.plain, await picture("shadows-off"));
@@ -10815,7 +10815,7 @@ async function moveTextsToTable(page, found) {
     const wtgPath = "map/war3map.wtg.json", wctPath = "map/war3map.wct.txt";
     const wtgBefore = readFileSync(join(cliDir, "map", "war3map.wtg.json"), "utf8"), wctBefore = readFileSync(join(cliDir, "map", "war3map.wct.txt"), "utf8");
     const call = (name, params = []) => ({ type: 2, value: name, call: { kind: 3, name, hasParams: true, params, trailer: 0 } });
-    const lit = (value) => ({ type: 3, value }), pre = (value) => ({ type: 0, value });
+    const str = (value) => ({ type: 3, value }), pre = (value) => ({ type: 0, value });
     const eca = (kind, name, params) => [
       "        {", `          "kind": ${kind},`, `          "name": ${lit(name)},`, `          "enabled": true,`,
       params.length ? `          "params": [\n${params.map((p) => `            ${lit(p)}`).join(",\n")}\n          ],` : `          "params": [],`,
@@ -10827,10 +10827,10 @@ async function moveTextsToTable(page, found) {
       `      "ecas": [`,
       [
         eca(0, "MapInitializationEvent", []),
-        eca(1, "OperatorCompareString", [call("GetPlayerName", [pre("Player00")]), pre("OperatorEqualENE"), lit("lit cond")]),
-        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), lit("Lit Message")]),
-        eca(2, "CreateQuestBJ", [pre("QuestTypeReqDiscovered"), lit("Lit Quest"), lit("Lit Quest Text"), lit("ReplaceableTextures\\CommandButtons\\BTNFootman.blp")]),
-        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), call("StringCase", [lit("Lit Case"), pre("StringCaseUpper")])]),
+        eca(1, "OperatorCompareString", [call("GetPlayerName", [pre("Player00")]), pre("OperatorEqualENE"), str("lit cond")]),
+        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), str("Lit Message")]),
+        eca(2, "CreateQuestBJ", [pre("QuestTypeReqDiscovered"), str("Lit Quest"), str("Lit Quest Text"), str("ReplaceableTextures\\CommandButtons\\BTNFootman.blp")]),
+        eca(2, "DisplayTextToForce", [call("GetPlayersAll"), call("StringCase", [str("Lit Case"), pre("StringCaseUpper")])]),
       ].join(",\n"),
       "      ]", "    }",
     ].join("\n");
