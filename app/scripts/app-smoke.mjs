@@ -30,7 +30,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
@@ -50,12 +50,21 @@ if (part === undefined || (part && process.argv.some((x) => x.startsWith("--only
 }
 // W3_SMOKE_DIR: another folder, when this one has a project someone opened to try out.
 const work = (process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke")) + (part ? `-part${part}` : "");
+// The run deletes its folders: never one outside this repository.
+{
+  const rel = relative(repo, resolve(work));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    console.error(`FAIL W3_SMOKE_DIR must be inside the repository (${repo}): ${work}`);
+    process.exit(2);
+  }
+}
 const exeName = process.platform === "win32" ? ".exe" : "";
 // W3_APP_BIN: a built app to run (verify-build.mjs makes one): nothing is built, and the run keeps its settings and the
 // webview's storage under its own folder (W3_SMOKE_DIR), as the parts do, so testers can share one binary.
 const prebuilt = Boolean(process.env.W3_APP_BIN);
 const exe = prebuilt ? resolve(process.env.W3_APP_BIN) : join(repo, "target", "debug", `w3proj-studio${exeName}`);
-const ownFolders = Boolean(part) || prebuilt;
+// Always the run's own folders: the user's real settings and data folders are never touched.
+const ownFolders = true;
 let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
 // W3_SMOKE_ID: another identifier; without it one per checkout, the one the gate uses (so a run by hand doesn't
 // rebuild the gate's app for another identifier, and two worktrees don't share a settings folder).
@@ -15150,7 +15159,7 @@ async function run() {
 
   // A part's settings are in its own folder (both parts' apps have the build's identifier); the app is told where
   // its settings are in either case, and asked below whether it listened.
-  const configDir = ownFolders ? join(work, "config") : join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
+  const configDir = join(work, "config");
   // On Linux the webview keeps its storage (localStorage: the open tabs per project) by the build's identifier too: a
   // part has a folder of its own, else the other part's apps clear and rewrite it under this one's feet.
   const configEnv = { W3PROJ_CONFIG_DIR: configDir, ...(ownFolders && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
@@ -15395,8 +15404,6 @@ async function run() {
     // child.kill() ends it and the exit is heard a moment later. The retries cover a write still landing.
     if (appStarted && !LINUX) await until("the app to end", () => exited() !== null, 10000).catch(() => {});
     rmSync(configDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-    // Linux: the app's data folder (WebKit storage) under this run's own identifier; 92 of them piled up.
-    if (LINUX && !ownFolders) rmSync(join(process.env.XDG_DATA_HOME ?? join(process.env.HOME ?? "", ".local", "share"), IDENTIFIER), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
 

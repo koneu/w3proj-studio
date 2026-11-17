@@ -160,19 +160,47 @@ function context(log) {
     sh(command, { cwd = repo, env = {}, stdout } = {}) {
       return new Promise((done) => {
         const out = stdout ? openSync(stdout, "w") : fd;
-        const child = spawn(command, { cwd, shell: true, stdio: ["ignore", out, fd], env: { ...process.env, ...env } });
+        // A process group of its own (POSIX), so a timeout or a signal ends the whole tree, not just the shell.
+        const child = spawn(command, { cwd, shell: true, detached: process.platform !== "win32", stdio: ["ignore", out, fd], env: { ...process.env, ...env } });
+        liveChildren.add(child);
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          write(`gate: step timed out after ${stepTimeoutMs / 60000} min (W3_GATE_STEP_TIMEOUT_MIN), killed`);
+          killTree(child);
+        }, stepTimeoutMs);
         child.on("error", (e) => {
+          clearTimeout(timer);
+          liveChildren.delete(child);
           write(String(e));
           done(false);
         });
         child.on("close", (code) => {
+          clearTimeout(timer);
+          liveChildren.delete(child);
           if (stdout) closeSync(out);
-          done(code === 0);
+          done(code === 0 && !timedOut);
         });
       });
     },
     close: () => closeSync(fd),
   };
+}
+
+/** A step's longest run: a hung one fails instead of holding the gate for ever. */
+const stepTimeoutMs = (Number(process.env.W3_GATE_STEP_TIMEOUT_MIN) || 90) * 60000;
+/** Every command a step started that hasn't ended. */
+const liveChildren = new Set();
+
+/** Ends a step's process and all it started. */
+function killTree(child) {
+  if (child.pid === undefined) return;
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
+    else process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
 }
 
 /** A command as a step: `sh("cargo ...", { cwd, env })`. */
@@ -211,10 +239,12 @@ async function rustCoverage(ctx) {
   const all = JSON.parse(readFileSync(floorFile, "utf8"));
   let ok = true;
   const updating = args.includes("--update-floor");
-  for (const [crate, a] of Object.entries(areas)) {
-    const percent = (100 * a.covered) / a.lines;
+  // Every area with a floor is checked; one the run measured nothing for (a crate that dropped out) counts as 0%.
+  for (const crate of new Set([...Object.keys(areas), ...Object.keys(all.rust)])) {
+    const a = areas[crate] ?? { lines: 0, covered: 0 };
+    const percent = a.lines ? (100 * a.covered) / a.lines : 0;
     const floor = all.rust[crate];
-    ctx.say(`${crate.padEnd(8)} ${percent.toFixed(1).padStart(5)}%  ${a.covered} / ${a.lines}${floor === undefined ? "" : `  (floor ${floor}%)`}`);
+    ctx.say(`${crate.padEnd(8)} ${percent.toFixed(1).padStart(5)}%  ${a.covered} / ${a.lines}${floor === undefined ? "" : `  (floor ${floor}%)`}${a.lines ? "" : "  (not measured)"}`);
     if (floor !== undefined && percent < floor) {
       ctx.say(`coverage of ${crate} fell below its floor`);
       ok = false;
@@ -316,6 +346,8 @@ if (!tiers[tier]) {
   console.error(`no tier "${tier}": ${Object.keys(tiers).join(", ")}`);
   process.exit(2);
 }
+// A step missing from the table would be run but left out of the result.
+for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
 const chosen = steps.filter((s) => tiers[tier].includes(s.tier));
 // The `corpus` tier alone also needs nothing from the others; the `commit` tier needs the
 // release CLI for nothing. A step's `after` that isn't part of the tier is simply not waited for.
@@ -384,10 +416,19 @@ function skip(step, why) {
   show(step, log, false);
 }
 
+// Ctrl-C or a kill of the gate ends the steps' processes too.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    for (const c of liveChildren) killTree(c);
+    process.exit(sig === "SIGINT" ? 130 : 143);
+  });
+}
+
 const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
 await schedule({ steps: order, locks, serial, jobs, launch, skip, done });
 
 console.log(`\n--- gate: ${tier}`);
+for (const s of chosen) if (!done.has(s.id)) done.set(s.id, { ok: false, seconds: 0 }); // never ran: a failure, not a gap
 const results = table.filter((id) => done.has(id)).map((id) => ({ name: steps.find((s) => s.id === id).name, ...done.get(id) }));
 for (const r of results) console.log(`${r.ok ? "pass" : "FAIL"}  ${String(r.seconds).padStart(4)}s  ${r.name}`);
 const failed = results.filter((r) => !r.ok).length;

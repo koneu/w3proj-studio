@@ -127,6 +127,14 @@ if (baseFile) {
     if (!agrees) lost++;
     console.log(`changed: ${name}: Studio ${b.studio ? "set" : "left off"} -> ${r.studio ? "sets" : "leaves off"} (${agrees ? "now agrees" : "agreement lost"})`);
   }
-  console.log(`against ${baseFile}: ${lost} agreements lost`);
+  // A map the baseline has and this run didn't compare: dropped out (or failed), not "unchanged".
+  const gone = Object.keys(base).filter((n) => !(n in now));
+  for (const n of gone) console.log(`missing: ${n}: in the baseline, not compared now`);
+  lost += gone.length;
+  console.log(`against ${baseFile}: ${lost} agreements lost or maps missing`);
 }
-process.exit(lost ? 1 : 0);
+// Nothing compared, or a map that couldn't be unpacked or read, is a failure, not a quiet skip.
+const failures = results.length - done.length;
+if (!done.length) console.log("FAIL no map was compared");
+if (failures) console.log(`FAIL ${failures} maps failed to unpack or read`);
+process.exit(lost || !done.length || failures ? 1 : 0);

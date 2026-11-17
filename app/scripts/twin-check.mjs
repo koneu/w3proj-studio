@@ -10,25 +10,28 @@
 // Folders are searched for .w3x/.w3m files (campaigns are skipped; projects in them are left out with
 // their build/ and checkpoints, as `w3proj verify` does: find-maps.mjs). Needs the release CLI
 // (`cargo build --release`, or W3PROJ_BIN) and the installed game for TriggerData.txt
-// (W3PROJ_GAME, default C:\Program Files (x86)\Warcraft III).
+// (W3PROJ_GAME, else .game-path, else the folder above the checkout).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { chosenGamePath } from "../../tests/gamepath.mjs";
+import { gamePath } from "../../tests/gamepath.mjs";
 import { findMaps } from "./find-maps.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
-const game = chosenGamePath() ?? "C:\\Program Files (x86)\\Warcraft III";
+const game = gamePath();
 if (!existsSync(bin)) throw new Error(`${bin} not found: run cargo build --release first`);
 
 const maps = findMaps(process.argv.slice(2));
 if (!maps.length) throw new Error("usage: node scripts/twin-check.mjs <map or folder>...");
 
-const tmp = mkdtempSync(join(tmpdir(), "w3proj-twin-"));
+// Inside the repository (target/), not the system temp folder; removed in the end, whatever happens.
+const tmpRoot = join(app, "..", "target", "twin-check");
+mkdirSync(tmpRoot, { recursive: true });
+const tmp = mkdtempSync(join(tmpRoot, "run-"));
+try {
 await build({
   stdin: {
     contents: `export * from "./src/lib/terrain/w3etext"; export * from "./src/lib/terrain/w3e"; export * from "./src/lib/terrain/fragment"; export * from "./src/lib/triggers/wtg"; export { parseTriggerData } from "./src/lib/triggers/triggerdata";`,
@@ -69,12 +72,13 @@ function throughFragment(bytes, change = () => {}) {
   return ts.writeW3e(target);
 }
 
-let failed = 0, checked = 0, fragments = 0, controlled = false;
+let failed = 0, checked = 0, fragments = 0, skipped = 0, controlled = false;
 for (const [n, map] of maps.entries()) {
   const dir = join(tmp, `p${n}`);
   try {
     execFileSync(bin, ["unpack", map, dir, "--game", game], { stdio: "pipe" });
   } catch (e) {
+    skipped++;
     console.log(`skip ${map}: ${String(e.stderr ?? e).trim().split("\n").pop()}`);
     continue;
   }
@@ -114,6 +118,11 @@ for (const [n, map] of maps.entries()) {
   if (problems.length) { failed++; problems.forEach((p) => console.log(`FAIL ${map} — ${p}`)); }
   rmSync(dir, { recursive: true, force: true });
 }
-rmSync(tmp, { recursive: true, force: true });
-console.log(`${maps.length} maps, ${checked} files identical, ${fragments} through a fragment, ${failed} maps with differences`);
-process.exitCode = failed || !fragments ? 1 : 0;
+console.log(`${maps.length} maps (${skipped} skipped), ${checked} files identical, ${fragments} through a fragment, ${failed} maps with differences`);
+// Nothing checked, or most maps left out, proves little: a failure.
+const tooManySkipped = skipped * 2 > maps.length;
+if (tooManySkipped) console.log(`FAIL ${skipped} of ${maps.length} maps were skipped`);
+process.exitCode = failed || !fragments || !checked || tooManySkipped ? 1 : 0;
+} finally {
+  rmSync(tmp, { recursive: true, force: true });
+}

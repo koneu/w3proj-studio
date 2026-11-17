@@ -41,14 +41,24 @@ export class Page {
   next = 1;
   pending = new Map();
   events = [];
-  /** The time limit of an `evaluate` that doesn't give its own, in ms; 0: none (app-smoke sets one). */
-  callTimeout = 0;
+  /** The time limit of an `evaluate` that doesn't give its own, in ms (app-smoke sets its own); 0: none, if a caller asks. */
+  callTimeout = 120000;
   constructor(ws) {
     this.ws = ws;
+    // A closed or broken socket answers nothing any more: every call waiting for one fails now, not never.
+    const drop = (why) => {
+      this.closed = true;
+      for (const { reject } of this.pending.values()) reject(new Error(why));
+      this.pending.clear();
+    };
+    ws.addEventListener("close", () => drop("the connection to the page closed"));
+    ws.addEventListener("error", () => drop("the connection to the page failed"));
     ws.addEventListener("message", (m) => {
       const msg = JSON.parse(m.data);
       if (msg.id) {
-        const { resolve, reject } = this.pending.get(msg.id);
+        const call = this.pending.get(msg.id);
+        if (!call) return; // answer to a call dropped already
+        const { resolve, reject } = call;
         this.pending.delete(msg.id);
         if (msg.error) reject(new Error(`${msg.error.message}`));
         else resolve(msg.result);
@@ -58,6 +68,7 @@ export class Page {
   send(method, params = {}) {
     const id = this.next++;
     return new Promise((resolve, reject) => {
+      if (this.closed) return reject(new Error("the connection to the page is closed"));
       this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify({ id, method, params }));
     });

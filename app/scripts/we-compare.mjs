@@ -50,7 +50,7 @@
 // never touched (we-drive).
 
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
@@ -170,7 +170,7 @@ async function runStudio(specs, opts, game) {
         spec.error = `Studio: ${e.message}`;
         say(`${spec.name}: ${spec.error}`);
       } finally {
-        for (const [k, v] of Object.entries(kept)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${JSON.stringify(v ?? null)})`).catch(() => {});
+        for (const [k, v] of Object.entries(kept)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${v === undefined ? "undefined" : JSON.stringify(v)})`).catch(() => {});
       }
     }
   } finally {
@@ -314,7 +314,14 @@ export function lockWork(work, pid = process.pid) {
       let holder = NaN;
       try { holder = Number(readFileSync(file, "utf8").trim()); } catch { /* removed meanwhile: try again */ }
       if (Number.isInteger(holder) && holder > 0 && alive(holder)) throw new Error(`another we-compare (pid ${holder}) uses ${work}: wait for it, or give this run its own --work`);
-      rmSync(file, { force: true });
+      // Taken over by renaming it away, as the gate's lock is: of two runs that both see it stale only one can rename
+      // it, and one that took the lock in between isn't swept away (the holder is checked once more before the rename).
+      let again = NaN;
+      try { again = Number(readFileSync(file, "utf8").trim()); } catch { continue; }
+      if (again !== holder && Number.isInteger(again) && again > 0 && alive(again)) continue;
+      const gone = `${file}.stale-${process.pid}-${Date.now()}`;
+      try { renameSync(file, gone); } catch { continue; }
+      rmSync(gone, { force: true });
     }
   }
   throw new Error(`can't take the lock ${file}`);

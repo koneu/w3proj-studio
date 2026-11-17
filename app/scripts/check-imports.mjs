@@ -16,7 +16,10 @@ const area = (file) => {
 const problems = [];
 for (const file of walk(src).filter((f) => /\.ts$/.test(f))) {
   const from = area(file);
-  for (const m of readFileSync(file, "utf8").matchAll(/^\s*(?:import|export)[^"']*["'](\.[^"']+)["']/gm)) {
+  const text = readFileSync(file, "utf8");
+  // Static imports and re-exports at a line's start, and a dynamic import("./…") anywhere on a line.
+  const specifiers = [...text.matchAll(/^\s*(?:import|export)[^"']*["'](\.[^"']+)["']/gm), ...text.matchAll(/\bimport\(\s*["'](\.[^"']+)["']\s*\)/g)];
+  for (const m of specifiers) {
     const target = resolve(dirname(file), m[1]);
     const to = area(target);
     const rel = relative(src, target).split(sep).join("/");
@@ -29,7 +32,7 @@ for (const file of walk(src).filter((f) => /\.ts$/.test(f))) {
   }
 }
 if (problems.length) {
-  console.error(`Module boundary violations:\n  ${problems.join("\n  ")}`);
+  console.error(`Module boundary violations:\n  ${[...new Set(problems)].join("\n  ")}`);
   process.exit(1);
 }
 console.log("module boundaries ok");
