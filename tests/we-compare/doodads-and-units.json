@@ -38,7 +38,7 @@
   },
   {
     "name": "doodad-scale-one-axis-zero",
-    "description": "Fix Doodads on Load: a scale with one or two axes at 0. Destructables (LTbr, LTcr) get one random scale for all axes only when x is 0 (x nonzero: clamped x for all); doodads (LOch) a random value for each zero axis. The random picks differ by design (ignored here: scales of destructables with x 0, zero axes of LOch); every other scale matches",
+    "description": "Fix Doodads on Load: a scale with one or two axes at 0. Destructables (LTbr, LTcr) get one random scale for all axes only when x is 0 (x nonzero: clamped x for all); doodads (LOch) a random value for each zero axis. The random picks differ by design (ignored in the compare: scales of destructables with x 0, zero axes of LOch); every other scale matches. Studio's picks are checked in its eval: each destructable with x 0 has one scale on all axes within its type's range (DestructableSkin.txt: LTbr 1.1 to 1.5, LTcr 0.8 to 1.2), each zero axis of LOch a value within 0.8 to 1.2 (DoodadSkins.txt); the World Editor's picks aren't checked",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/scale-one-axis.w3x"
     },
@@ -57,7 +57,7 @@
           "terrain": true
         },
         {
-          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); const d = s.placedObjects().doodads; const range = { LTbr: [1.1, 1.5], LTcr: [0.8, 1.2], LOch: [0.8, 1.2] }; const inRange = (id, v) => v >= range[id][0] - 1e-4 && v <= range[id][1] + 1e-4; const bad = []; for (const i of [0, 3, 4, 7, 8, 11, 12, 15]) { const sc = d[i].scale; if (!(sc[0] === sc[1] && sc[1] === sc[2] && inRange(d[i].id, sc[0]))) bad.push(`${i} ${d[i].id} ${sc}`); } for (const [i, axes] of [[16, [0]], [17, [1]], [18, [2]], [19, [0, 1]], [20, [0]], [21, [1, 2]], [22, [1, 2]], [23, [0, 1]]]) { if (d[i].id !== 'LOch' || axes.some((a) => !inRange('LOch', d[i].scale[a]))) bad.push(`${i} ${d[i].id} ${d[i].scale}`); } if (d.length !== 24 || bad.length) throw new Error(`random scales outside their type's range (of ${d.length} doodads): ${bad.join('; ')}`); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
         },
         {
           "sleep": 2000
@@ -96,7 +96,7 @@
   },
   {
     "name": "doodad-scale-turned-range",
-    "description": "a 0 scale of LTt0 (range 1 to 0.8, turned; destructable) with references in and out of the range. The random picks of the three x=0 cases differ by design (ignored; both lie in 0.8..1.0); the others, 0.5 and 2 included, match",
+    "description": "a 0 scale of LTt0 (range 1 to 0.8, turned; destructable) with references in and out of the range. The random picks of the three x=0 cases differ by design (ignored in the compare); Studio's eval checks its picks: one scale on all axes within 0.8..1.0 (the World Editor's aren't checked); the others, 0.5 and 2 included, match",
     "input": {
       "map": "${REPO}/tests/fixtures/we-compare/scale-turned-range.w3x"
     },
@@ -115,7 +115,7 @@
           "terrain": true
         },
         {
-          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); const d = s.placedObjects().doodads; const bad = [0, 1, 2].filter((i) => { const sc = d[i]?.scale ?? []; return !(sc[0] === sc[1] && sc[1] === sc[2] && sc[0] >= 0.8 - 1e-4 && sc[0] <= 1 + 1e-4); }); if (bad.length) throw new Error(`LTt0's random scales outside 0.8..1.0: ${bad.map((i) => `${i} ${d[i]?.scale}`).join('; ')}`); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
         },
         {
           "sleep": 2000
@@ -192,7 +192,7 @@
           "terrain": true
         },
         {
-          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); if (!s.placedObjects()?.units?.length) throw new Error('the units never came'); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"
         },
         {
           "sleep": 2000

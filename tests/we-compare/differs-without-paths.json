@@ -38,23 +38,8 @@
     "water-ramp-on war3map.w3e"
   ],
   "textEntries": [
-    "injected-script war3map.j",
     "open-paths-forsaken-start war3map.wpm",
     "open-paths-gui-meelee-map-2 war3map.wpm",
-    "ramp-plateau-twice war3map.wpm",
-    "resize-top-grow war3map.w3e",
-    "sound-flags-we war3map.j",
-    "studio-paths-nolua war3map.lua",
-    "studio-paths-nolua war3map.w3e",
-    "studio-paths-nowts war3map.lua",
-    "studio-paths-nowts war3map.w3e",
-    "studio-paths-nowts-text war3map.lua",
-    "studio-paths-nowts-text war3map.w3e",
-    "studio-paths-plain war3map.lua",
-    "studio-paths-plain war3map.w3e",
-    "studio-paths-rebuilt war3map.lua",
-    "studio-paths-rebuilt war3map.w3e",
-    "studio-paths-terrain-save war3map.lua",
-    "studio-paths-terrain-save war3map.w3e"
+    "ramp-plateau-twice war3map.wpm"
   ]
 }

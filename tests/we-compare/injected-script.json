@@ -1,7 +1,7 @@
 [
   {
     "name": "injected-script",
-    "description": "test.md 'A JASS map with injected functions (W3Champions-style)': injected-script.w3x (make-injected-script.mjs: flat.w3x whose war3map.j has an added global, two functions and an ExecuteFunc call in main). The editor opens and saves it: it regenerates the script from the triggers and the injected code is gone (the lines 'WE only' are the editor's regenerated lines). Studio, after a unit is placed and the project saved, keeps the file as it is (its guard asks 'Replace the script / Show Difference / Keep it'), so the injected code stays: the two differ, expected.",
+    "description": "test.md 'A JASS map with injected functions (W3Champions-style)': injected-script.w3x (make-injected-script.mjs: flat.w3x whose war3map.j has an added global, two functions and an ExecuteFunc call in main). The editor opens and saves it: it regenerates the script from the triggers and the injected code is gone. Studio, after a unit is placed and the project saved, keeps the file as it is (its guard asks 'Replace the script / Show Difference / Keep it'), so the injected code stays. Compared as a set of lines with expectLines: the lines only Studio's file has are the injected ones (the global, the two functions with their endfunction and blank line, the ExecuteFunc call), each pattern has to be hit, and the editor's file has no line of its own.",
     "input": {
       "map": "${REPO}/tests/fixtures/we-specs/injected-script.w3x"
     },
@@ -41,8 +41,17 @@
     "compare": [
       {
         "file": "war3map.j",
-        "as": "text",
-        "expect": "differs"
+        "as": "text-set",
+        "expect": "differs",
+        "expectLines": {
+          "studio": [
+            "W3C_Injected",
+            "^    return n \\+ 1$",
+            "^    call BJDebugMsg\\(\"injected\"\\)$",
+            "^endfunction$",
+            "^$"
+          ]
+        }
       }
     ],
     "limit": 40
