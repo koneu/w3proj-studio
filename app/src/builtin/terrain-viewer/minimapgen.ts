@@ -67,19 +67,28 @@ export function textureOrder(model: { textures: readonly unknown[]; geosets: rea
   return [...new Set([...shown, ...model.textures.keys()])];
 }
 
-/** The mean of the colours of the textures a model's geosets' materials show, once each (`colorOf`: a texture's colour,
- *  null when it has none or can't be read: left out), a team colour texture (replaceable 1 and 2) counting black; null
- *  when none gives a colour. The editor's dot of a goblin shipyard (textures: its own, team colour, a second) is two
- *  thirds of the first texture's colour, a granary's (two textures) the mean of both (we-drive 2026-11-17: dots-more). */
-export async function shownTextureMean(model: { textures: readonly { replaceableId: number; path: string }[]; geosets: readonly { materialId: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[] }[] }[] },
+/** The mean of the colours of the textures a model's materials show, one per material (its first layer's texture; the
+ *  materials of the model's geosets, each once, of the full detail level when it has levels: an HD model's other
+ *  levels are copies), a team colour texture (replaceable 1 and 2) counting black; `colorOf`: a texture's colour, null
+ *  when it has none or can't be read (left out); null when none gives a colour. The editor's dot of a goblin shipyard
+ *  ruin (materials: its own texture, its own again, team colour with a second layer) is two thirds of the first
+ *  texture's colour, a granary's (three materials, two textures) a third of the first and two thirds of the second
+ *  (we-drive 2026-11-17, dots-more and dots-models: LSgr 84 where one of each texture said 94; the Sun Well, four
+ *  materials of which three show one water texture, 0.75 of it). Not fitted: the HD Ashenvale pier ASpr (the same
+ *  texture in two of its three materials; the editor's dot is the plain mean of its two textures). */
+export async function shownTextureMean(model: { textures: readonly { replaceableId: number; path: string }[]; geosets: readonly { materialId: number; lod?: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[] }[] }[] },
   colorOf: (tex: { replaceableId: number; path: string }) => Promise<Rgb | null>): Promise<Rgb | null> {
-  const shown = [...new Set(model.geosets.flatMap((g) => model.materials[g.materialId]?.layers.map((l) => l.textureIds[0]) ?? []))];
+  const top = model.geosets.filter((g) => !g.lod);
+  const materials = [...new Set((top.length ? top : model.geosets).map((g) => g.materialId))];
+  const shown = materials.map((m) => model.materials[m]?.layers[0]?.textureIds[0]).filter((t): t is number => t !== undefined);
   const colors: Rgb[] = [];
+  const known = new Map<number, Rgb | null>();
   for (const id of shown) {
     const tex = model.textures[id];
     if (!tex) continue;
     if (tex.replaceableId === 1 || tex.replaceableId === 2) { colors.push([0, 0, 0]); continue; }
-    const c = await colorOf(tex);
+    if (!known.has(id)) known.set(id, await colorOf(tex));
+    const c = known.get(id);
     if (c) colors.push(c);
   }
   if (!colors.some((c) => c[0] + c[1] + c[2] > 0)) return null;
@@ -110,6 +119,8 @@ export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "te
     }
     return null;
   };
+  // A model with no textures at all: the editor's dot is white (HD Ashenvale rock ARrk, 249 with its grain).
+  if (mean && model.textures.length === 0) return [255, 255, 255];
   if (mean) {
     const m = await shownTextureMean(model, async (tex) => { const path = pathOf(tex); return path ? colorOf(path) : null; });
     if (m) return m;
@@ -157,8 +168,9 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
     // rocks) stays a dot, which the editor's squares of about that size fit as well (see minimap.ts).
     // A texture that is one full rectangle is a dot of tiles (dotReach, turned by the angle); one with gaps is its cells.
     const shape = !!mask && !mask.cells.every((c) => c);
-    // The palisade (no pathing texture, no model colour to read): a grey dot, as the editor draws it (we-drive 2026-11-17).
-    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape) ?? (file ? null : NO_MODEL_RGB);
+    // No model colour to read (the palisade has no pathing texture; a model the game doesn't store in this mode, with one):
+    // a grey dot, as the editor draws it (we-drive 2026-11-17: LRsr, UGsr, YOi1 and YOig, which Studio left out).
+    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type, !shape) ?? (shape ? null : NO_MODEL_RGB);
     if (!rgb) continue;
     if (shape) { objects.push({ x: d.position[0], y: d.position[1], rgb, mask: mask!, angle: d.angle }); continue; }
     const size = file ? await tables.footprint(file) : 1;
