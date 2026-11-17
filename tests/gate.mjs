@@ -30,12 +30,13 @@
 // and the game (W3PROJ_GAME, else the folder in `.game-path`, else the Warcraft III folder above it:
 // tests/gamepath.mjs).
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
+import { assertInTable, checkFloors, installSignalHandlers, killTree, runShell } from "./gate-lib.mjs";
 import { wineserverReport } from "./wineservers.mjs";
 import { gamePath } from "./gamepath.mjs";
 
@@ -158,30 +159,7 @@ function context(log) {
     say: write,
     log,
     sh(command, { cwd = repo, env = {}, stdout } = {}) {
-      return new Promise((done) => {
-        const out = stdout ? openSync(stdout, "w") : fd;
-        // A process group of its own (POSIX), so a timeout or a signal ends the whole tree, not just the shell.
-        const child = spawn(command, { cwd, shell: true, detached: process.platform !== "win32", stdio: ["ignore", out, fd], env: { ...process.env, ...env } });
-        liveChildren.add(child);
-        let timedOut = false;
-        const timer = setTimeout(() => {
-          timedOut = true;
-          write(`gate: step timed out after ${stepTimeoutMs / 60000} min (W3_GATE_STEP_TIMEOUT_MIN), killed`);
-          killTree(child);
-        }, stepTimeoutMs);
-        child.on("error", (e) => {
-          clearTimeout(timer);
-          liveChildren.delete(child);
-          write(String(e));
-          done(false);
-        });
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          liveChildren.delete(child);
-          if (stdout) closeSync(out);
-          done(code === 0 && !timedOut);
-        });
-      });
+      return runShell(command, { cwd, env, stdout, fd, write, timeoutMs: stepTimeoutMs, live: liveChildren });
     },
     close: () => closeSync(fd),
   };
@@ -191,17 +169,6 @@ function context(log) {
 const stepTimeoutMs = (Number(process.env.W3_GATE_STEP_TIMEOUT_MIN) || 90) * 60000;
 /** Every command a step started that hasn't ended. */
 const liveChildren = new Set();
-
-/** Ends a step's process and all it started. */
-function killTree(child) {
-  if (child.pid === undefined) return;
-  try {
-    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
-    else process.kill(-child.pid, "SIGKILL");
-  } catch {
-    // already gone
-  }
-}
 
 /** A command as a step: `sh("cargo ...", { cwd, env })`. */
 const shell = (command, options) => (ctx) => ctx.sh(command, options);
@@ -237,20 +204,10 @@ async function rustCoverage(ctx) {
   }
   const floorFile = join(repo, "tests", "coverage-floor.json");
   const all = JSON.parse(readFileSync(floorFile, "utf8"));
-  let ok = true;
   const updating = args.includes("--update-floor");
-  // Every area with a floor is checked; one the run measured nothing for (a crate that dropped out) counts as 0%.
-  for (const crate of new Set([...Object.keys(areas), ...Object.keys(all.rust)])) {
-    const a = areas[crate] ?? { lines: 0, covered: 0 };
-    const percent = a.lines ? (100 * a.covered) / a.lines : 0;
-    const floor = all.rust[crate];
-    ctx.say(`${crate.padEnd(8)} ${percent.toFixed(1).padStart(5)}%  ${a.covered} / ${a.lines}${floor === undefined ? "" : `  (floor ${floor}%)`}${a.lines ? "" : "  (not measured)"}`);
-    if (floor !== undefined && percent < floor) {
-      ctx.say(`coverage of ${crate} fell below its floor`);
-      ok = false;
-    }
-    if (updating && floor !== undefined) all.rust[crate] = Math.max(floor, Math.floor(percent * 10) / 10);
-  }
+  const r = checkFloors(areas, all.rust, ctx.say, updating);
+  all.rust = r.floors;
+  const ok = r.ok;
   if (updating) writeFileSync(floorFile, JSON.stringify(all, null, 2) + "\n");
   return ok;
 }
@@ -328,10 +285,12 @@ const steps = [
   { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
   { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
+  // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
+  { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "tstestcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],
@@ -347,7 +306,7 @@ if (!tiers[tier]) {
   process.exit(2);
 }
 // A step missing from the table would be run but left out of the result.
-for (const s of steps) if (!table.includes(s.id)) throw new Error(`gate: step "${s.id}" is not in the table`);
+assertInTable(steps, table);
 const chosen = steps.filter((s) => tiers[tier].includes(s.tier));
 // The `corpus` tier alone also needs nothing from the others; the `commit` tier needs the
 // release CLI for nothing. A step's `after` that isn't part of the tier is simply not waited for.
@@ -417,12 +376,7 @@ function skip(step, why) {
 }
 
 // Ctrl-C or a kill of the gate ends the steps' processes too.
-for (const sig of ["SIGINT", "SIGTERM"]) {
-  process.on(sig, () => {
-    for (const c of liveChildren) killTree(c);
-    process.exit(sig === "SIGINT" ? 130 : 143);
-  });
-}
+installSignalHandlers(liveChildren);
 
 const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
 await schedule({ steps: order, locks, serial, jobs, launch, skip, done });
