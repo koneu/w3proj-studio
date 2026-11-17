@@ -24,7 +24,7 @@ import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, p
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, valueRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, objectToEdit, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
@@ -880,7 +880,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const values = () => {
             const from = Number(fromEl.value);
             if (text) return autoFillText(baseText.value, mark.value, from, levels);
-            const raw = autoFill({ from, to: levels, base: Number(base.input.value), previous: Number(previous.input.value), level: Number(level.input.value), constant: Number(constant.input.value) });
+            // A real the game reads as unsigned takes no level below 0 while Allow negative real values is off, as in the
+            // World Editor's Auto Fill Levels (its preview shows 0.00 where the sum is negative).
+            const floor = negativeRefused(f.valueType, -1, w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true) ? 0 : undefined;
+            const raw = autoFill({ from, to: levels, base: Number(base.input.value), previous: Number(previous.input.value), level: Number(level.input.value), constant: Number(constant.input.value) }, floor);
             return raw.map((r) => ({ level: r.level, value: f.valueType === "int" ? Math.round(r.value) : Math.round(r.value * 1000) / 1000 }));
           };
           function preview() { rows.replaceChildren(...values().map((r) => h("div.terrain-sel-row", {}, h("span.muted", {}, `Level ${r.level}`), h("span", {}, String(r.value))))); }
@@ -910,7 +913,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const held = fieldClip, fits = !!held && held.type === f.valueType;
           w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
             { label: "Copy value", run: () => { fieldClip = { type: f.valueType, value: current }; } },
-            { label: "Paste value", disabled: !fits, hint: held && !fits ? "The copied value is of another type." : undefined, run: () => { setValue(o, f, level, (held as { value: number | string }).value); markDirty(); renderDetail(); } },
+            { label: "Paste value", disabled: !fits, hint: held && !fits ? "The copied value is of another type." : undefined, run: () => {
+              const value = (held as { value: number | string }).value;
+              // A negative real is refused here as when typed (the editor has no field paste; its Paste Ability copies whole objects).
+              const why = typeof value === "number" ? negativeRefused(f.valueType, value, w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true) : null;
+              if (why) { void w3.window.showWarning(`${value} ${why}.`); return; }
+              setValue(o, f, level, value); markDirty(); renderDetail();
+            } },
             { label: "Reset to default", disabled: !findMod(o, f.id, level), run: () => { resetValue(o, f, level); markDirty(); renderDetail(); } },
             ...(levels > 1 ? ["-" as const, { label: "Auto Fill Levels…", run: () => openAutoFill(o, f, levels) }] : []),
           ]);

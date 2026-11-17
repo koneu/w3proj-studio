@@ -14,7 +14,7 @@ import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { customTextGlobals, runsAtInit, scriptItems, triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
-import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
+import { dropSection, itemTablesSection, randomGroupGlobal, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
 import { destructablesSection, type DestructableJson } from "./destructables";
 import { techTreeSection, upgradesSection, type TechJson, type UpgradeJson } from "./techs";
 
@@ -172,7 +172,7 @@ export function globals(i: ScriptInput): string {
   }
   for (const d of i.doodads ?? []) if (used.has(placedName(d, "dest"))) gen("destructable", placedName(d, "dest"), "null");
   const tables = (i.info.unitTables as { number: number }[] | undefined) ?? [];
-  if (tables.length) lines.push("", "    // Random Groups", ...tables.map((t) => `    integer array gg_rg_${String(t.number).padStart(3, "0")}`));
+  if (tables.length) lines.push("", "    // Random Groups", ...tables.map((_, place) => `    integer array ${randomGroupGlobal(place)}`));
   lines.push("endglobals", "");
   return lines.join(EOL) + EOL;
 }
@@ -466,6 +466,8 @@ function mapItemTables(i: ScriptInput): string {
 }
 
 /** The numbers of the map's item tables. */
+/** The numbers of the map's random groups in file order (the script names a group by its place there). */
+const groupNumbers = (i: ScriptInput) => ((i.info.unitTables as { number: number }[] | undefined) ?? []).map((t) => t.number);
 const tableNumbers = (i: ScriptInput) => new Set(((i.info.itemTables as { number: number }[] | undefined) ?? []).map((t) => t.number));
 
 function unitDrops(i: ScriptInput): string {
@@ -486,7 +488,7 @@ function destructableObjects(i: ScriptInput): string {
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), gameDataVersion: i.info.gameDataVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), itemColor: i.itemColor });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), gameDataVersion: i.info.gameDataVersion as number | undefined, randomGroups: groupNumbers(i), units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), itemColor: i.itemColor });
   return body ? banner("Items") + body : "";
 }
 
@@ -494,7 +496,7 @@ function unitCreation(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
   const regions = i.regions ?? [];
   const body = unitsSection({
-    itemTables: tableNumbers(i),
+    itemTables: tableNumbers(i), randomGroups: groupNumbers(i),
     units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate, customColor: i.customColor,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });

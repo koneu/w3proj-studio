@@ -102,14 +102,28 @@ function groupEntry(id: string | undefined, editorVersion: number): string {
   return `'${id}'`;
 }
 
-/** "Random Groups": InitRandomGroups picks one line per group into gg_rg_<number>[position]. */
+/** The global array of the random group at `index` in the map's list: the editor's script names the groups by their
+ *  place in the list (0, 1, …), not by the number the file stores (we-drive 2026-11-17, groups numbered 2 and 7:
+ *  gg_rg_000 and gg_rg_001, "// Group 0 - Mixed"). */
+export const randomGroupGlobal = (index: number) => `gg_rg_${String(index).padStart(3, "0")}`;
+
+/** What a placed random object's group number stands for in the script: the group's global array element, or -1
+ *  when the map has no such group (the editor writes `set unitID = -1`). `numbers`: the group numbers in file order;
+ *  not given, the number itself names the global. */
+export function randomGroupSlot(numbers: readonly number[] | undefined, group: number, position: number): string {
+  if (!numbers) return `${randomGroupGlobal(group)}[${position}]`;
+  const index = numbers.indexOf(group);
+  return index < 0 ? "-1" : `${randomGroupGlobal(index)}[${position}]`;
+}
+
+/** "Random Groups": InitRandomGroups picks one line per group into gg_rg_<place in the list>[position]. */
 export function randomGroupsSection(groups: RandomGroupJson[], editorVersion = 0): string {
   if (!groups.length) return "";
   const lines = ["function InitRandomGroups takes nothing returns nothing", "    local integer curset", ""];
-  for (const g of groups) {
-    const arr = `gg_rg_${String(g.number).padStart(3, "0")}`;
+  for (const [place, g] of groups.entries()) {
+    const arr = randomGroupGlobal(place);
     const set = (ids: (string | undefined)[]) => g.positions.map((_, k) => `        set ${arr}[${k}] = ${groupEntry(ids[k], editorVersion)}`);
-    lines.push(`    // Group ${g.number} - ${g.name}`, "    call RandomDistReset(  )",
+    lines.push(`    // Group ${place} - ${g.name}`, "    call RandomDistReset(  )",
       ...g.lines.map((l, k) => `    call RandomDistAddItem( ${k}, ${l.chance} )`), "    set curset = RandomDistChoose(  )", "");
     g.lines.forEach((l, k) => lines.push(`    ${k ? "elseif" : "if"} (curset == ${k}) then`, ...set(l.ids)));
     // No line chosen: nothing is created.

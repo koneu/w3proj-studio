@@ -613,12 +613,29 @@ test("drop functions are named after the table or the file position", () => {
 
 test("random groups pick a line, and an empty slot creates nothing", () => {
   const s = randomGroupsSection([{ number: 2, name: "Creeps", positions: [0, 1], lines: [{ chance: 60, ids: ["hfoo", "0x00000000"] }, { chance: 40, ids: ["hpea", "hkni"] }] }]);
-  has(s, "    // Group 2 - Creeps");
+  // The script names a group by its place in the list, not by its number (the editor's, we-drive 2026-11-17).
+  has(s, "    // Group 0 - Creeps");
   has(s, "    call RandomDistAddItem( 1, 40 )");
-  has(s, "        set gg_rg_002[0] = 'hfoo'");
-  has(s, "        set gg_rg_002[1] = -1");
+  has(s, "        set gg_rg_000[0] = 'hfoo'");
+  has(s, "        set gg_rg_000[1] = -1");
   has(s, "    elseif (curset == 1) then");
   assert.equal(randomGroupsSection([]), "");
+});
+
+test("random groups are named by their place in the list; a placed object follows its group number there, a missing group gives -1 (the editor's, we-drive 2026-11-17)", () => {
+  const group = (number: number, name: string) => ({ number, name, positions: [0], lines: [{ chance: 100, ids: ["hfoo"] }] });
+  const s = randomGroupsSection([group(2, "Mixed"), group(7, "Seven")]);
+  has(s, "    // Group 0 - Mixed");
+  has(s, "    // Group 1 - Seven");
+  has(s, "        set gg_rg_001[0] = 'hfoo'");
+  assert.ok(!s.includes("gg_rg_007") && !s.includes("gg_rg_002"), s);
+  const placed = (randomGroup: number) => units([unit({ id: "uDNR", randomType: 1, randomGroup, randomPosition: 0 })], { randomGroups: [2, 7] });
+  has(placed(2), "    set unitID = gg_rg_000[0]");
+  has(placed(7), "    set unitID = gg_rg_001[0]");
+  has(placed(5), "    set unitID = -1");
+  // An item takes the same way; without the list (callers that don't know the groups) the number names the array.
+  has(itemsSection({ units: [unit({ id: "iDNR", randomType: 1, randomGroup: 7, randomPosition: 1 })], kindOf: () => "item", referenced: new Set(), randomGroups: [2, 7] }), "    set itemID = gg_rg_001[1]");
+  has(units([unit({ id: "uDNR", randomType: 1, randomGroup: 7, randomPosition: 0 })]), "    set unitID = gg_rg_007[0]");
 });
 
 test("a random group's random objects by level are picked as the World Editor 2.0 writes them (we-drive 2026-11-12)", () => {

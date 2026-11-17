@@ -1,0 +1,17 @@
+{
+  "name": "random-script",
+  "description": "test.md 'Random class numbering, level ffffff and InitRandomGroups against the WE': random-script.w3x (tests/fixtures/we-specs/make-random-script.mjs) holds placed random items of classes 0..7 at level ffffff and 3, random units and a building by level, a unit and an item from random group 2, a unit from a custom list, and groups 2 and 7 with random creep, building and item entries. The editor opens and saves it (it regenerates the script); Studio saves it after a harmless doodad edit. war3map.j compared by lines",
+  "input": { "map": "${REPO}/tests/fixtures/we-specs/random-script.w3x" },
+  "we": { "mode": "sd" },
+  "studio": {
+    "settings": { "mcp.writeTools": true },
+    "steps": [
+      { "mcp": "place_objects", "args": { "kind": "doodads", "objects": [{ "id": "LTlt", "x": 2000, "y": 2000 }] } }
+    ]
+  },
+  "compare": [
+    { "file": "war3map.j", "as": "text" },
+    { "file": "war3mapUnits.doo", "as": "unit-ids" }
+  ],
+  "limit": 60
+}

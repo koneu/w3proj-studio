@@ -135,6 +135,11 @@ test("we-x11 drag path: even steps from the press to exactly the release point (
   assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
 });
 
+test("parseArgs: --clipboard takes the file the clipboard's text goes into", () => {
+  assert.deepEqual(parseArgs(["--start", "--clipboard", "clip.txt"]).steps, [["--start", null], ["--clipboard", "clip.txt"]]);
+  assert.throws(() => parseArgs(["--start", "--clipboard"]), /--clipboard needs a value/);
+});
+
 test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
   assert.equal(parseArgs(["--start"]).opts.screen, undefined);
   assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);

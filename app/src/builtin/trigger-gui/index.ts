@@ -92,6 +92,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         flagged.set(t.id, at);
       },
       selectedLines: (t) => chosenIn(t).map((c) => c.eca),
+      selectedHeading: (t) => {
+        const s = selection.get(t.id);
+        if (!s) return undefined;
+        if ("section" in s) return { section: s.section };
+        const block = s.branch !== undefined ? locateIn(t, s.path)?.eca : undefined;
+        return block && s.branch !== undefined ? { block, group: s.branch } : undefined;
+      },
     }));
   });
 }

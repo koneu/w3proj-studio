@@ -1,0 +1,27 @@
+{
+  "name": "camera-rename-we",
+  "description": "test.md 'Dismissing a camera rename question' (2026-11-17, SD): trigger-checks.w3m (tests/fixtures/we-specs/make-trigger-checks.mjs) has a GUI trigger applying cameras Alpha and Bravo (Bravo's line disabled), a Custom Script action whose text names gg_cam_Alpha (a comment), and a custom text trigger naming gg_cam_Bravo. The World Editor renames Alpha to Zulu in Camera Properties (the camera palette: M, the first row, Return, the name typed, Return): it asks nothing, the GUI line follows (Apply Zulu), the script text is left alone. Studio renames it in the Cameras tab and DISMISSES the question it asks at the save (the stub answers nothing): the same files. Expected MATCH: dismissing is the editor's own result (GUI renamed, script text kept)",
+  "input": { "map": "${REPO}/tests/fixtures/we-specs/trigger-checks.w3m" },
+  "we": {
+    "mode": "sd",
+    "steps": [
+      ["--sleep", "1500"], ["--key", "m"], ["--sleep", "1500"], ["--click", "1396,177"], ["--sleep", "500"], ["--key", "Return"], ["--sleep", "1500"],
+      ["--type", "Zulu"], ["--key", "Return"], ["--sleep", "3000"]
+    ]
+  },
+  "studio": {
+    "steps": [
+      { "terrain": true },
+      { "ui": [["tab", "Cameras"]] },
+      { "eval": "window.__asked = []; w3.window.showWarning = async (m) => { window.__asked.push(m); return undefined; };" },
+      { "eval": "const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const sel = document.querySelector('select[title=\"Go to a camera\"]'); const at = [...sel.options].find((o) => o.textContent === 'Alpha'); if (!at) throw new Error('no camera Alpha'); sel.value = at.value; sel.dispatchEvent(new Event('change')); await wait(500); const name = document.querySelector('input.terrain-region-name'); if (!name || name.value !== 'Alpha') throw new Error('Alpha is not selected: ' + name?.value); name.value = 'Zulu'; name.dispatchEvent(new Event('change')); await wait(500);" },
+      { "eval": "await w3.editors.saveAll(); await new Promise((r) => setTimeout(r, 1500)); if (window.__asked.length !== 1 || !/gg_cam_Alpha/.test(window.__asked[0])) throw new Error('the question: ' + JSON.stringify(window.__asked));" }
+    ]
+  },
+  "compare": [
+    { "file": "war3map.w3c", "as": "parsed" },
+    { "file": "war3map.wct", "as": "text" },
+    { "file": "war3map.wtg", "as": "parsed" }
+  ],
+  "limit": 30
+}

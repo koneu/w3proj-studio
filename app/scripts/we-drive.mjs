@@ -57,6 +57,8 @@
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
+//   --clipboard FILE    the clipboard's text into FILE (what Wine gives X: its own CRLF line ends are not visible
+//                       there); prints the byte count, "bytes": null when the clipboard is empty
 //   --key KEY[@MS]      press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names); @MS holds it down
 //                       that long (the X server's autorepeat runs meanwhile), e.g. "ctrl+Up@2000"
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
@@ -178,7 +180,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--key", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
@@ -1347,6 +1349,8 @@ async function main() {
           out({ step, ...s.shot(arg, main.rect) });
         } else if (step === "--shot-screen") {
           out({ step, ...s.shot(arg, null) });
+        } else if (step === "--clipboard") {
+          out({ step, ...s.x("clipboard", resolve(arg)) });
         } else if (step === "--key") {
           // To the open dialog if there is one, else to the main window (without a window manager the keyboard
           // stays with whatever was clicked last, e.g. the tool palette).

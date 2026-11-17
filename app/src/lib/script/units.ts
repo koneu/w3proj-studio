@@ -5,7 +5,7 @@
 // (resources, acquisition range, life and mana, colour, hero data, items,
 // waygates, item drops).
 
-import { dropFunctionOf, randomItem } from "./drops";
+import { dropFunctionOf, randomGroupSlot, randomItem } from "./drops";
 
 const EOL = "\r\n";
 const SEP = "//===========================================================================";
@@ -25,6 +25,8 @@ export interface UnitsInput {
   units: UnitJson[];
   /** The numbers of the map's item tables. */
   itemTables?: ReadonlySet<number>;
+  /** The numbers of the map's random groups, in file order: the script names a group by its place in this list. */
+  randomGroups?: readonly number[];
   /** What an object id is (custom ids by their base and the map's changes). */
   kindOf: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
   /** war3map.w3i editorVersion: newer editors write more (item colours). */
@@ -80,8 +82,8 @@ const ITEM_TYPES = ["ANY", "PERMANENT", "CHARGED", "POWERUP", "ARTIFACT", "PURCH
 /** The expression or lines that put a random item's type into itemID. No map of the game's places one; World Editor
  *  2.0 (7003) writes ChooseRandomItemExWithFilter as in its item drops (drops.ts randomItem), older editors are
  *  taken to write their drops' form. */
-function pickRandomItem(it: UnitJson, editorVersion: number): string[] {
-  if (it.randomType === 1) return [`    set itemID = gg_rg_${String(it.randomGroup ?? 0).padStart(3, "0")}[${it.randomPosition ?? 0}]`];
+function pickRandomItem(it: UnitJson, editorVersion: number, groups?: readonly number[]): string[] {
+  if (it.randomType === 1) return [`    set itemID = ${randomGroupSlot(groups, it.randomGroup ?? 0, it.randomPosition ?? 0)}`];
   if (it.randomType === 2) {
     return ["    call RandomDistReset(  )", ...(it.randomUnits ?? []).map((r) => `    call RandomDistAddItem( '${r.id}', ${r.chance} )`), "    set itemID = RandomDistChoose(  )"];
   }
@@ -91,8 +93,8 @@ function pickRandomItem(it: UnitJson, editorVersion: number): string[] {
 }
 
 /** Lines that put a random unit's type into unitID. */
-function pickRandom(u: UnitJson): string[] {
-  if (u.randomType === 1) return [`    set unitID = gg_rg_${String(u.randomGroup ?? 0).padStart(3, "0")}[${u.randomPosition ?? 0}]`];
+function pickRandom(u: UnitJson, groups?: readonly number[]): string[] {
+  if (u.randomType === 1) return [`    set unitID = ${randomGroupSlot(groups, u.randomGroup ?? 0, u.randomPosition ?? 0)}`];
   if (u.randomType === 2) {
     return ["    call RandomDistReset(  )", ...(u.randomUnits ?? []).map((r) => `    call RandomDistAddItem( '${r.id}', ${r.chance} )`), "    set unitID = RandomDistChoose(  )"];
   }
@@ -156,7 +158,7 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
       `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_CHANGE_OWNER )`, `    call TriggerAddAction( t, function ${drops} )`);
   }
   // A group's line can leave a slot empty: then nothing is placed there.
-  return random ? [...pickRandom(u), "    if (unitID != -1) then", ...lines.map((l) => `    ${l}`), "    endif"] : lines;
+  return random ? [...pickRandom(u, i.randomGroups), "    if (unitID != -1) then", ...lines.map((l) => `    ${l}`), "    endif"] : lines;
 }
 
 /** The "Items" section body: items placed on the map (war3mapUnits.doo), or "". */
@@ -193,7 +195,7 @@ export function itemsSection(i: UnitsInput): string {
     const made = [v ? `    set ${v} = ${create}` : `    call ${create}`];
     if (v && colorOf(it) !== -1) made.push(`    call ${colorFn ?? "BlzSetItemColor"}( ${v}, ConvertPlayerColor(${colorOf(it)}) )`);
     // A group's line can leave a slot empty: then nothing is placed there.
-    lines.push(...(random ? [...pickRandomItem(it, ev), "    if (itemID != -1) then", ...made.map((l) => `    ${l}`), "    endif"] : made));
+    lines.push(...(random ? [...pickRandomItem(it, ev, i.randomGroups), "    if (itemID != -1) then", ...made.map((l) => `    ${l}`), "    endif"] : made));
   }
   lines.push("endfunction", "");
   return lines.join(EOL);
