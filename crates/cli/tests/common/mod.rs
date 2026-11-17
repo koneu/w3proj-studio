@@ -1,4 +1,5 @@
 //! Shared by the system tests of the CLI (`mod common;`).
+#![allow(dead_code)] // each test crate compiles this module and uses only some of it
 
 /// Whether a test that needs something this machine may not have (the game, a folder that can't be searched) must
 /// fail instead of skip: `W3PROJ_REQUIRE_CORPUS=1`, the switch the TypeScript tests use (`corpusRequired`).
