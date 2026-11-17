@@ -3,8 +3,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { doodadPlaces, heightSpread, minimapView, readW3e, unitHeights, unitIds, variationSpread, w3eView } from "./we-compare-w3e.mjs";
 import { compareFile, parseSpecFile } from "./we-compare-core.mjs";
 
@@ -90,17 +91,14 @@ test("unitIds: editor ids unique and in order, and the kinds of object, whatever
 });
 
 test("the spec files in tests/we-compare/ that use these kinds parse", () => {
-  // The tests run from a copy of the scripts: the folder is found from where they run (app/ or the repository).
-  let dir = process.cwd();
-  while (!existsSync(join(dir, "tests", "we-compare"))) {
-    if (dirname(dir) === dir) throw new Error("tests/we-compare not found");
-    dir = dirname(dir);
-  }
-  dir = join(dir, "tests", "we-compare");
+  // The tests run from a copy of the scripts: the folder is found from the working directory up.
+  const dir = repoPath("tests", "we-compare");
   const names = ["cliff-adjust-dry.json", "unit-heights.json", "water-brush-slope.json", "height-random-stops.json", "painted-cliff-type.json", "random-group-scatter.json",
     "water-brush-low-level.json", "water-brush-ramp.json", "water-brush-square.json", "water-limit-square.json", "doodad-snap-custom-alpha.json", "doodad-snap-custom-misc.json"];
   let parsed = 0;
-  for (const f of readdirSync(dir).filter((f) => names.includes(f))) {
+  const there = readdirSync(dir);
+  for (const f of names) assert.ok(there.includes(f), `${f} is in tests/we-compare`);
+  for (const f of names) {
     const specs = parseSpecFile(readFileSync(join(dir, f), "utf8"), join(dir, f), { MAIN: "/main", REPO: "/repo" });
     assert.ok(specs.length > 0, f);
     parsed += specs.length;

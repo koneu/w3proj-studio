@@ -4,13 +4,13 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { scratchDir } from "../../tests/scratch.mjs";
 import { findMaps } from "./find-maps.mjs";
 
 function tree(files) {
-  const root = mkdtempSync(join(tmpdir(), "w3proj-find-maps-"));
+  const root = scratchDir("w3proj-find-maps-");
   for (const f of files) {
     const path = join(root, ...f.split("/"));
     mkdirSync(join(path, ".."), { recursive: true });

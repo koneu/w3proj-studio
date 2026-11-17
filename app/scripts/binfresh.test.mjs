@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { checkFresh, newestSource, staleAllowed } from "../../tests/binfresh.mjs";
+import { scratchDir } from "../../tests/scratch.mjs";
 
 function repo() {
-  const root = mkdtempSync(join(tmpdir(), "binfresh-"));
+  const root = scratchDir("binfresh-");
   const git = (...a) => execFileSync("git", a, { cwd: root, stdio: "ignore" });
   git("init", "-q");
   mkdirSync(join(root, "crates", "x"), { recursive: true });

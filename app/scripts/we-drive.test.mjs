@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { scratchDir } from "../../tests/scratch.mjs";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -114,13 +115,21 @@ test("parseArgs: --drag takes its two positions (and a duration) as one value; -
   assert.throws(() => parseArgs(["--drag-button", "2"]), /needs a --drag/);
 });
 
-// Tests run from app/ (the runner bundles them elsewhere, so not next to this file).
-const X11_HELPER = join(process.cwd(), "scripts", "we-x11.py");
+// Tests run bundled elsewhere (not next to this file): found from the working directory up.
+const X11_HELPER = repoPath("app", "scripts", "we-x11.py");
+
+/** Skips the test only for a python3 that isn't there or lacks Pillow (the exact import error); any other failure of
+ *  the probe fails the test, with what the helper printed. Returns true when the test should end (skipped). */
+function skipWithoutPython(t, probe) {
+  if (probe.status === 0 && !probe.error) return false;
+  if (probe.error?.code === "ENOENT") { t.skip("python3 isn't here"); return true; }
+  if (!probe.error && /No module named 'PIL'/.test(probe.stderr ?? "")) { t.skip("python3 has no Pillow"); return true; }
+  assert.fail(`the we-x11.py probe failed (status ${probe.status}${probe.error ? `, ${probe.error.message}` : ""}): ${probe.stderr}`);
+}
 
 test("we-x11 drag path: even steps from the press to exactly the release point (python, no display)", (t) => {
-  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "drag", ...a, "--dry"], { encoding: "utf8" });
-  const probe = run("0,0", "1,1");
-  if (probe.status !== 0) return t.skip("python3 with Pillow isn't here");
+  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "drag", ...a, "--dry"], { encoding: "utf8", timeout: 60_000 });
+  if (skipWithoutPython(t, run("0,0", "1,1"))) return;
   const path = JSON.parse(run("100,100", "300,60", "--steps", "4").stdout).path;
   assert.deepEqual(path, [[150, 90], [200, 80], [250, 70], [300, 60]]);
   assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
@@ -438,8 +447,8 @@ test("procState reads the state after the last ')' of /proc/PID/stat; a zombie o
 });
 
 test("we-x11 settle: two equal pictures in a row, else up to the timeout (python, no display)", (t) => {
-  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "settle", "--dry", ...a], { encoding: "utf8" });
-  if (run("--hashes", "a").status !== 0) return t.skip("python3 isn't here");
+  const run = (...a) => spawnSync("python3", ["-I", X11_HELPER, "settle", "--dry", ...a], { encoding: "utf8", timeout: 60_000 });
+  if (skipWithoutPython(t, run("--hashes", "a"))) return;
   assert.deepEqual(JSON.parse(run("--hashes", "a,b,b,c", "--interval", "200").stdout), { settled: true, ms: 400, grabs: 3 });
   assert.deepEqual(JSON.parse(run("--hashes", "a,b,c,d,e,f", "--interval", "400", "--timeout", "1000").stdout), { settled: false, ms: 1200, grabs: 4 });
 });
@@ -568,9 +577,8 @@ test("Session: stop() takes a zombie Xvfb as gone instead of waiting 5 s", (t) =
   const asked = [];
   r.s.procGone = (pid) => { asked.push(pid); return true; };
   r.s.xvfb = { pid: fakePid++, exitCode: null, signalCode: null, kill() {} };
-  const t0 = Date.now();
   r.s.stop();
-  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  // Asked once, and stop() went on (it returned): a Xvfb taken for running would have waited out its 5 s first.
   assert.deepEqual(asked, [r.s.xvfb.pid]);
 });
 

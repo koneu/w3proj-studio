@@ -41,7 +41,7 @@ fn a_manifest_that_isnt_toml_is_not_written_over() {
     let root = new_project(&dir);
     let broken = "format = = 1\n# the user's\n";
     fs::write(root.join(MANIFEST), broken).unwrap();
-    let m = Manifest { format: 1, map: Some(header("Map")), archive: Default::default(), pack: Default::default() };
+    let m = Manifest { format: project::FORMAT_VERSION, map: Some(header("Map")), archive: Default::default(), pack: Default::default() };
     assert!(m.save(&root).is_err());
     assert_eq!(fs::read_to_string(root.join(MANIFEST)).unwrap(), broken);
     // Not there: written new.
@@ -77,7 +77,7 @@ fn damaged_manifests_never_panic_a_save() {
     let dir = workdir("manifest-hostile");
     let root = new_project(&dir);
     let base = commented(&root).into_bytes();
-    let m = Manifest { format: 1, map: Some(header("Map")), archive: Default::default(), pack: Default::default() };
+    let m = Manifest { format: project::FORMAT_VERSION, map: Some(header("Map")), archive: Default::default(), pack: Default::default() };
     let mut seed = 0x2545_f491_4f6c_dd1du64;
     for round in 0..300 {
         let mut bytes = base.clone();
@@ -125,7 +125,7 @@ fn a_manifest_save_replaces_the_file_in_one_step() {
     names.sort();
     assert!(!names.iter().any(|n| n.ends_with(".tmp")), "a temporary file was left: {names:?}");
     // Saving again over the replaced file works (rename over an existing file, Windows too).
-    let m = Manifest { format: 1, map: Some(header("Again")), archive: Default::default(), pack: Default::default() };
+    let m = Manifest { format: project::FORMAT_VERSION, map: Some(header("Again")), archive: Default::default(), pack: Default::default() };
     m.save(&root).unwrap();
     assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Again");
 }

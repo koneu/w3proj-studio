@@ -6,13 +6,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import * as core from "./we-compare-core.mjs";
 import * as w3e from "./we-compare-w3e.mjs";
 import * as run from "./we-compare.mjs";
 import { checkFresh } from "../../tests/binfresh.mjs";
+import { scratchDir } from "../../tests/scratch.mjs";
+import { repoPath } from "../src/lib/testhelpers/testutil";
 
 const { asExpected, compareFile, diffJson, formatReport, parseSpec } = core;
 const good = () => ({ name: "ramp", input: { map: "R.w3x" }, compare: ["war3map.wpm"] });
@@ -116,12 +117,7 @@ test("expectPaths in a spec: with expect differs only, on JSON kinds only; studi
   assert.throws(() => entry({ file: "war3map.j", as: "text", expect: "differs", expectPaths: ["x"] }), /no effect on "as": "text"/);
   assert.throws(() => entry({ file: "war3map.w3i", as: "parsed", expect: "differs", expectPaths: [] }), /expectPaths/);
   // The tests run from a copy of the scripts: the spec folder is found from where they run (app/ or the repository).
-  let dir = process.cwd();
-  while (!existsSync(join(dir, "tests", "we-compare"))) {
-    if (dirname(dir) === dir) throw new Error("tests/we-compare not found");
-    dir = dirname(dir);
-  }
-  const specs = core.parseSpecFile(readFileSync(join(dir, "tests", "we-compare", "studio-paths.json"), "utf8"), "/r/tests/we-compare/studio-paths.json", { MAIN: "/m", REPO: "/r" });
+  const specs = core.parseSpecFile(readFileSync(repoPath("tests", "we-compare", "studio-paths.json"), "utf8"), "/r/tests/we-compare/studio-paths.json", { MAIN: "/m", REPO: "/r" });
   const masks = specs.find((s) => s.name === "studio-paths-matrix-masks").compare.find((c) => c.file === "war3map.w3i");
   assert.ok(masks.expectPaths?.includes("players[].start"));
 });
@@ -190,13 +186,13 @@ test("runLines: the last line without a line break is kept; output is read to it
 });
 
 test("runLines: a program that can't start rejects instead of hanging", async () => {
-  await assert.rejects(run.runLines(join(tmpdir(), "no-such-program-we-compare"), []), /ENOENT/);
+  await assert.rejects(run.runLines(join(scratchDir("we-compare-noprog-"), "no-such-program"), []), /ENOENT/);
 });
 
 // ---------------------------------------------------------------- 6: the app's web sources
 
 test("a prebuilt app older than a file of app/src is stale", () => {
-  const root = mkdtempSync(join(tmpdir(), "binfresh-app-"));
+  const root = scratchDir("binfresh-app-");
   try {
     for (const f of ["Cargo.lock", "app/src-tauri/main.rs", "app/src/main.ts", "app/index.html", "app/package-lock.json"]) {
       mkdirSync(join(root, f, ".."), { recursive: true });
@@ -227,7 +223,7 @@ test("spec names: we-compare's own folders are refused, in any case; two names d
 });
 
 test("the work folder's lock: a live holder stops a second run, a dead one's lock is taken over, release frees it", async () => {
-  const work = mkdtempSync(join(tmpdir(), "we-compare-lock-"));
+  const work = scratchDir("we-compare-lock-");
   try {
     const release = run.lockWork(work);
     assert.equal(readFileSync(join(work, "we-compare.lock"), "utf8"), String(process.pid));
