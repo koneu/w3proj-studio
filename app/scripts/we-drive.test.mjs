@@ -3,14 +3,15 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { encodePng } from "./pic-compare.mjs";
 import { tmpdir } from "node:os";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, isCrashDialog, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -358,8 +359,9 @@ test("closeAction never types into a dialog it can't vouch for", () => {
 
 test("EditorCrashed carries the message we-drive prints", () => {
   const e = new EditorCrashed([{ title: "Blizzard Error" }]);
-  assert.equal(e.message, CRASH_MESSAGE);
-  assert.match(CRASH_MESSAGE, /crashed on close; report dismissed without sending|crashed; report dismissed without sending/);
+  // The literal text TESTING.md quotes (and readers grep for), not the constant compared with itself.
+  assert.equal(e.message, "the World Editor crashed; report dismissed without sending");
+  assert.equal(CRASH_MESSAGE, e.message);
   assert.equal(e.crashed, true);
 });
 
@@ -495,7 +497,7 @@ function rig(t, { timeout = 300 } = {}) {
   writeFileSync(join(pfx, "user.reg"), String.raw`[Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3] 1` + `\n"LOCALE"="enUS"\n`);
   const maps = {};
   for (const n of ["a.w3m", "b.w3m"]) { maps[n] = join(dir, n); writeFileSync(maps[n], `map ${n}`); }
-  const r = { dir, maps, calls: [], ws: [], children: [], windows: [], stats: { pixels: 100, blackPixels: 0 }, onWineserver: null };
+  const r = { dir, pfx, game, maps, calls: [], ws: [], events: [], children: [], windows: [], stats: { pixels: 100, blackPixels: 0 }, onWineserver: null, onSpawn: null };
   r.clock = fakeClock();
   r.x11 = (cmd, ...rest) => {
     r.calls.push([cmd, ...rest]);
@@ -508,8 +510,8 @@ function rig(t, { timeout = 300 } = {}) {
     proton: { tool: "/nonexistent", steamRoot: "/nonexistent", appId: "1" },
     clock: r.clock,
     x11: (...a) => r.x11(...a),
-    spawnWine: () => { const c = new FakeChild(); r.children.push(c); return c; },
-    wineserver: (args) => { r.ws.push(args.join(" ")); r.onWineserver?.(args); return { status: 0 }; },
+    spawnWine: (program, args) => { const c = new FakeChild(); r.children.push(c); r.events.push(`spawn ${basename(program)}`); r.onSpawn?.(c, program, args); return c; },
+    wineserver: (args) => { r.ws.push(args.join(" ")); r.events.push(`wineserver ${args.join(" ")}`); r.onWineserver?.(args); return { status: 0 }; },
     procGone: () => false,
   });
   return r;
@@ -566,6 +568,7 @@ test("Session: start waits for the editor before it to exit, and refuses one tha
 test("Session: killEditor kills the prefix and waits for its wineserver to go", async (t) => {
   const r = rig(t);
   await r.s.start(r.maps["a.w3m"]);
+  r.ws.length = 0;
   r.s.killEditor();
   assert.deepEqual(r.ws, ["-k", "-w"]);
   assert.equal(r.s.running(), false);
@@ -683,7 +686,7 @@ test("Session: save answers a Reminder once, and copies the file once it stood s
   let written = false;
   r.windows = () => {
     if (r.clock.t - t0 < 3000) return [mainWin("a.w3m"), dialogWin(9, "Reminder")];
-    if (!written) { writeFileSync(r.s.copy, "saved by the editor"); written = true; }
+    if (!written) { writeFileSync(r.s.copy, fakeMap("saved by the editor")); written = true; }
     return [mainWin("a.w3m")];
   };
   const dest = join(r.dir, "out.w3m");
@@ -691,7 +694,7 @@ test("Session: save answers a Reminder once, and copies the file once it stood s
   assert.equal(res.saved, true, JSON.stringify(res));
   assert.deepEqual(res.answered, ["Reminder"]);
   assert.equal(r.calls.filter(([c, ...rest]) => c === "key" && rest.includes(9)).length, 1, "Return once, not on every poll");
-  assert.equal(readFileSync(dest, "utf8"), "saved by the editor");
+  assert.deepEqual(readFileSync(dest), fakeMap("saved by the editor"));
 });
 
 test("Session: a save that writes nothing with no dialog open fails long before the timeout; a Reminder that stays is reported", async (t) => {
@@ -730,4 +733,354 @@ test("waitExit: true once the child's exit was seen, false after the time", asyn
   setTimeout(() => { c.exited = true; }, 5);
   assert.equal(await waitExit(c, 60000, { now: clock.now, sleep: async (ms) => { clock.t += ms; await new Promise((r) => setTimeout(r, 2)); } }), true);
   assert.equal(await waitExit(new FakeChild(), 1000, clock), false);
+});
+
+// ---- review round 2026-11-17: save, crash checks, sandbox, cleanup ------------------------------------------
+
+/** A map file as the editor writes it: the 512-byte HM3W header, then an MPQ header whose hash table (16 entries)
+ *  and block table (1 entry) follow it; `tag` makes two of them differ. `cut` bytes are missing at the end. */
+function fakeMap(tag = "", cut = 0) {
+  const buf = Buffer.alloc(512 + 32 + 16 * 16 + 16 + 64);
+  buf.write("HM3W", 0, "latin1");
+  buf.write(tag.slice(0, 200), 8, "latin1");
+  const o = 512;
+  buf.writeUInt32LE(0x1a51504d, o);
+  buf.writeUInt32LE(32, o + 4);
+  buf.writeUInt32LE(buf.length - o, o + 8);
+  buf.writeUInt32LE(32, o + 16); // hash table
+  buf.writeUInt32LE(32 + 256, o + 20); // block table
+  buf.writeUInt32LE(16, o + 24);
+  buf.writeUInt32LE(1, o + 28);
+  return cut ? buf.subarray(0, buf.length - cut) : buf;
+}
+
+test("isWholeMpq: a whole map is one, a cut one or a file without the header isn't; a real map from the fixtures is", () => {
+  const whole = fakeMap("x");
+  assert.equal(isWholeMpq(whole, whole.length), true);
+  assert.equal(isWholeMpq(whole, whole.length - 100), false, "the tables run past a file cut short");
+  const moved = Buffer.concat([Buffer.alloc(100), whole]);
+  assert.equal(isWholeMpq(moved, moved.length), false, "the header only at a multiple of 512");
+  assert.equal(isWholeMpq(Buffer.from("map a.w3m"), 9), false);
+  assert.equal(isWholeMpq(Buffer.alloc(0), 0), false);
+  const real = repoPath("tests", "fixtures", "we-compare", "camera-bounds.w3m");
+  assert.equal(fileIsWholeMpq(real), true, "control: a map the editor saved");
+  const dir = scratchDir("we-mpq-");
+  try {
+    const cut = join(dir, "cut.w3m");
+    const bytes = readFileSync(real);
+    writeFileSync(cut, bytes.subarray(0, Math.floor(bytes.length / 2)));
+    assert.equal(fileIsWholeMpq(cut), false, "half of the real map");
+    assert.equal(fileIsWholeMpq(join(dir, "none.w3m")), false, "no file");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Session: save waits while a Progress window is open, though the file stands still meanwhile", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  // The editor writes the first part at once, shows "Progress" for 8 s with the file still, writes the rest, closes it.
+  let polls = 0;
+  r.windows = () => {
+    const at = r.clock.t - t0;
+    // The first call is save's own look for the main window, before Ctrl+S.
+    if (++polls === 1) return [mainWin("a.w3m")];
+    if (at < 8000) {
+      // A whole archive already (the MPQ check alone can't tell): only the open window says it isn't done.
+      if (!existsSync(`${r.s.copy}.part`)) { writeFileSync(r.s.copy, fakeMap("first part")); writeFileSync(`${r.s.copy}.part`, ""); }
+      return [mainWin("a.w3m"), dialogWin(12, "Progress")];
+    }
+    if (!existsSync(`${r.s.copy}.done`)) { writeFileSync(r.s.copy, fakeMap("all of it")); writeFileSync(`${r.s.copy}.done`, ""); }
+    return [mainWin("a.w3m")];
+  };
+  const dest = join(r.dir, "out.w3m");
+  const res = await r.s.save(dest);
+  assert.equal(res.saved, true, JSON.stringify(res));
+  assert.deepEqual(readFileSync(dest), fakeMap("all of it"), "not the part written before the Progress window closed");
+  assert.deepEqual(res.waitedFor, ["Progress"]);
+  assert.ok(r.clock.t - t0 >= 10000, `${r.clock.t - t0} ms`);
+});
+
+test("Session: a save whose file stands still but isn't a whole MPQ is reported, not copied", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  let polls = 0;
+  r.windows = () => {
+    // The first call is save's own look for the main window, before Ctrl+S.
+    if (++polls === 2) writeFileSync(r.s.copy, fakeMap("cut", 300));
+    return [mainWin("a.w3m")];
+  };
+  const dest = join(r.dir, "out.w3m");
+  const res = await r.s.save(dest);
+  assert.equal(res.saved, false);
+  assert.match(res.error, /isn't a whole MPQ/);
+  assert.equal(existsSync(dest), false);
+});
+
+const crashWin = dialogWin(66, "Blizzard Error");
+
+test("Session: a click, drag or move reads the windows first: a crash dialog is found and nothing clicked", (t) => {
+  const r = rig(t);
+  r.s.editor = new FakeChild();
+  r.windows = [mainWin("a.w3m"), crashWin];
+  for (const cmd of ["click", "drag", "move"]) {
+    r.calls.length = 0;
+    assert.throws(() => r.s.act(cmd, "10,10"), (e) => e instanceof EditorCrashed);
+    assert.deepEqual(r.calls.filter(([c]) => c === cmd), [], `no ${cmd}`);
+    assert.deepEqual(r.calls[0], ["windows"]);
+  }
+  r.windows = [mainWin("a.w3m")];
+  r.calls.length = 0;
+  r.s.act("click", "10,10");
+  assert.deepEqual(r.calls.map(([c]) => c), ["windows", "click"], "control: without the dialog it clicks");
+});
+
+test("Session: --sleep reads the windows every second and stops at a crash dialog when it comes", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  r.windows = () => [mainWin("a.w3m"), ...(r.clock.t - t0 >= 2500 ? [crashWin] : [])];
+  await assert.rejects(r.s.sleepWatching(60000), (e) => e instanceof EditorCrashed);
+  assert.ok(r.clock.t - t0 <= 3000, `found after ${r.clock.t - t0} ms of a 60 s sleep`);
+  r.windows = [mainWin("a.w3m")];
+  const t1 = r.clock.t;
+  await r.s.sleepWatching(2500);
+  assert.equal(r.clock.t - t1, 2500, "control: a quiet sleep lasts its time exactly");
+  await r.s.sleepWatching(0);
+  assert.equal(r.clock.t - t1, 2500, "--sleep 0 doesn't wait");
+});
+
+test("Session: ensureLocale gives up on a reg that doesn't finish (killed), and on one that couldn't start", async (t) => {
+  const r = rig(t);
+  writeFileSync(join(r.pfx, "user.reg"), "WINE REGISTRY Version 2\n");
+  const t0 = r.clock.t;
+  await assert.rejects(r.s.ensureLocale(), /didn't finish within 120 s/);
+  assert.ok(r.clock.t - t0 >= 120000);
+  assert.deepEqual(r.ws, ["-k", "-w"], "the prefix killed and waited for");
+  r.onSpawn = (c) => setImmediate(() => c.emit("error", Object.assign(new Error("spawn bwrap ENOENT"), { code: "ENOENT" })));
+  await assert.rejects(r.s.ensureLocale(), /spawn bwrap ENOENT/);
+  // The control: a reg that writes the key and exits 0.
+  r.onSpawn = (c) => setImmediate(() => {
+    writeFileSync(join(r.pfx, "user.reg"), String.raw`[Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3] 1` + `\n"LOCALE"="enUS"\n`);
+    c.emit("exit", 0);
+  });
+  await r.s.ensureLocale();
+});
+
+test("Session: start kills a leftover wineserver of the prefix before the first Wine program; a failed spawn ends the editor", async (t) => {
+  const r = rig(t);
+  writeFileSync(join(r.pfx, "user.reg"), "");
+  r.onSpawn = (c, program) => {
+    if (program === "reg") setImmediate(() => {
+      writeFileSync(join(r.pfx, "user.reg"), String.raw`[Software\\Blizzard Entertainment\\Battle.net\\Launch Options\\W3] 1` + `\n"LOCALE"="enUS"\n`);
+      c.emit("exit", 0);
+    });
+  };
+  await r.s.start(r.maps["a.w3m"]);
+  assert.deepEqual(r.events.slice(0, 3), ["wineserver -k", "wineserver -w", "spawn reg"]);
+  assert.equal(r.events.at(-1), "spawn World Editor.exe");
+  assert.equal(r.s.running(), true);
+  r.children.at(-1).emit("error", new Error("spawn bwrap EAGAIN"));
+  assert.equal(r.s.running(), false, "an editor that never started isn't waited for as running");
+});
+
+test("Session: close types n into a dialog that stays at most 3 times, 5 s apart; the Warning is answered once and closes", async (t) => {
+  const r = rig(t, { timeout: 30 });
+  await r.s.start(r.maps["a.w3m"]);
+  // The main window ignores the close; an untitled box stays.
+  r.x11 = (cmd, ...rest) => { r.calls.push([cmd, ...rest]); return cmd === "windows" ? { windows: r.windows } : { pressed: true }; };
+  r.windows = [mainWin("a.w3m"), dialogWin(30, "")];
+  const res = await r.s.close();
+  assert.equal(res.closed, false);
+  assert.equal(res.timeout, true);
+  const typed = r.calls.filter(([c, , id]) => c === "key" && id === 30).length;
+  assert.equal(typed, 3, `typed ${typed} times in 30 s (every poll would be 60)`);
+  assert.deepEqual(res.answered ?? [], [], "a timeout lists nothing");
+  // The Warning goes with its first n.
+  const w = rig(t);
+  await w.s.start(w.maps["a.w3m"]);
+  let gone = false;
+  w.x11 = (cmd, ...rest) => {
+    w.calls.push([cmd, ...rest]);
+    if (cmd === "windows") return { windows: gone ? [] : [mainWin("a.w3m"), dialogWin(31, "Warning")] };
+    if (cmd === "key" && rest[1] === 31) gone = true;
+    return { pressed: true };
+  };
+  w.onWineserver = (args) => { if (args[0] === "-w") setImmediate(() => w.children.at(-1).emit("exit", 0)); };
+  const ok = await w.s.close();
+  assert.equal(ok.closed, true, JSON.stringify(ok));
+  assert.deepEqual(ok.answered, ["Warning"]);
+});
+
+test("Session: openMap answers Save changes? with No, picks the copy's row, and returns once the map loads", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  let phase = "main";
+  const open = dialogWin(40, "Open Document", [400, 100, 600, 800]);
+  r.x11 = (cmd, ...rest) => {
+    r.calls.push([cmd, ...rest]);
+    if (cmd === "windows") {
+      const w = [mainWin(phase === "loading" ? "a.w3m" : "a.w3m")];
+      if (phase === "asked") w.push(dialogWin(41, "Warning"));
+      if (phase === "list") w.push(open);
+      if (phase === "loading") w.push(dialogWin(42, "Progress"));
+      return { windows: w };
+    }
+    if (cmd === "key" && rest.at(-1) === "ctrl+o") phase = "asked";
+    else if (cmd === "key" && rest[1] === 41) phase = "list";
+    else if (cmd === "click" && rest[0] === `${400 + 482},${100 + 787}`) phase = "loading";
+    return { pressed: true };
+  };
+  const res = await r.s.openMap(r.maps["b.w3m"]);
+  assert.equal(res.loading, true);
+  assert.deepEqual(res.answered, ["Warning"]);
+  assert.deepEqual(r.calls.filter(([c, , id]) => c === "key" && id === 41).map((k) => k.at(-1)), ["n"], "No, once");
+  assert.ok(r.calls.some(([c, at]) => c === "click" && at === `${400 + 88},${100 + 105}`), "the list's first row");
+  assert.equal(readFileSync(res.copy, "utf8"), "map b.w3m");
+  assert.match(basename(res.copy), /^we-open-1-b\.w3m$/);
+  assert.equal(r.s.mapName, "we-open-1-b.w3m");
+  // The control: a list that never opens is an error (--map then restarts the editor).
+  r.x11 = (cmd, ...rest) => { r.calls.push([cmd, ...rest]); return cmd === "windows" ? { windows: [mainWin("a.w3m")] } : { pressed: true }; };
+  await assert.rejects(r.s.openMap(r.maps["b.w3m"]), /no "Open Document" list opened/);
+});
+
+test("Session: exportMinimap types a file in the work folder, copies the TGA it wrote, and removes its own", async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const exp = dialogWin(50, "Export Minimap", [500, 300, 300, 320]), saveAs = dialogWin(51, "Save As", [450, 250, 500, 400]);
+  let shown = [], typed = null;
+  r.x11 = (cmd, ...rest) => {
+    r.calls.push([cmd, ...rest]);
+    if (cmd === "windows") return { windows: [mainWin("a.w3m"), ...shown] };
+    if (cmd === "click" && rest[0] === `${4 + 61},${30 + 168}`) shown = [exp];
+    else if (cmd === "click" && rest[0] === `${500 + 39},${300 + 20}`) shown = [exp, saveAs];
+    else if (cmd === "type") typed = rest.at(-1);
+    else if (cmd === "key" && rest.at(-1) === "Return") shown = [exp];
+    else if (cmd === "click" && rest[0] === `${500 + 225},${300 + 291}`) {
+      writeFileSync(typed.slice(2).split("\\").join("/"), "TGA bytes");
+      shown = [];
+    }
+    return { pressed: true };
+  };
+  const dest = join(r.dir, "mini.tga");
+  const res = await r.s.exportMinimap(dest);
+  assert.equal(res.exported, true, JSON.stringify(res));
+  assert.equal(readFileSync(dest, "utf8"), "TGA bytes");
+  const own = typed.slice(2).split("\\").join("/");
+  assert.ok(own.startsWith(join(r.dir, "work")), own);
+  assert.equal(existsSync(own), false, "the work folder's copy is gone");
+  // The control: an error box after OK is reported, not answered.
+  const base = r.x11;
+  r.x11 = (cmd, ...rest) => {
+    if (cmd === "click" && rest[0] === `${500 + 225},${300 + 291}`) { r.calls.push([cmd, ...rest]); shown = [exp, dialogWin(52, "Error")]; return { pressed: true }; }
+    return base(cmd, ...rest);
+  };
+  const keys = r.calls.length;
+  const bad = await r.s.exportMinimap(dest);
+  assert.equal(bad.exported, false);
+  assert.deepEqual(bad.dialogs.map((d) => d.title), ["Error"]);
+  assert.ok(!r.calls.slice(keys).some(([c, , id]) => (c === "key" || c === "type") && id === 52), "nothing typed into it");
+});
+
+test("Session: viewItem clicks the item, waits for the view to settle (not a fixed 3 s), and reads the menu again", async (t) => {
+  const r = rig(t);
+  r.s.opts.mode = "hd";
+  await r.s.start(r.maps["a.w3m"]);
+  const menu = { id: 60, title: "", class: null, rect: [82, 52, 250, 500], pid: 5, overrideRedirect: true };
+  const lighting = VIEW_ITEMS.find((v) => v.item === "Lighting").y;
+  let menuOpen = false, on = true, clickedAt = null, settledAt = null, readAfter = null;
+  r.x11 = (cmd, ...rest) => {
+    r.calls.push([cmd, ...rest]);
+    if (cmd === "windows") return { windows: [mainWin("a.w3m"), ...(menuOpen ? [menu] : [])] };
+    if (cmd === "click" && rest[0] === `${4 + 78},${30 + 11}`) { menuOpen = true; if (clickedAt !== null && readAfter === null) readAfter = r.clock.t; }
+    else if (cmd === "click" && rest[0] === `${82 + 60},${52 + lighting}`) { on = !on; menuOpen = false; clickedAt = r.clock.t; }
+    else if (cmd === "key" && rest[0] === "Escape") menuOpen = false;
+    else if (cmd === "settle") { settledAt = r.clock.t; return { settled: true, ms: 1000 }; }
+    else if (cmd === "shot") {
+      const [file, , rect] = rest;
+      const [, , w, h] = rect.split(",").map(Number);
+      const rgba = new Uint8Array(w * h * 4).fill(240);
+      if (on) for (let y = lighting - 3; y < lighting + 3; y++) for (let x = 4; x < 12; x++) rgba.fill(10, (y * w + x) * 4, (y * w + x) * 4 + 3);
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, encodePng(w, h, rgba));
+    }
+    return { pressed: true };
+  };
+  const res = await r.s.viewItem("Lighting", "off");
+  assert.deepEqual(res, { item: "Lighting", state: "off", clicks: 1 });
+  assert.ok(settledAt !== null && settledAt > clickedAt, "the view settled after the click");
+  const settle = r.calls.find(([c]) => c === "settle");
+  assert.deepEqual(settle.slice(1, 3), ["--rect", r.s.viewRect(mainWin("a.w3m")).join(",")]);
+  assert.ok(readAfter - clickedAt < 3000, `read again ${readAfter - clickedAt} ms after the click (the fixed wait was 3000)`);
+});
+
+test("lavapipeIcds: every lvp_icd*.json of the loader's folders (Ubuntu's name and the per-architecture ones)", () => {
+  const listing = { "/a": ["nvidia_icd.json", "lvp_icd.x86_64.json", "lvp_icd.i686.json"], "/b": ["lvp_icd.json"] };
+  const list = (d) => { if (!listing[d]) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return listing[d]; };
+  assert.deepEqual(lavapipeIcds(["/a", "/none", "/b"], list), ["/a/lvp_icd.i686.json", "/a/lvp_icd.x86_64.json", "/b/lvp_icd.json"]);
+  assert.deepEqual(lavapipeIcds(["/none"], list), [], "control: none");
+});
+
+test("xvfbCommand: Xvfb under setpriv's death signal when it's there, else plainly", () => {
+  assert.deepEqual(xvfbCommand(["-displayfd", "3"], true), ["setpriv", ["--pdeathsig", "KILL", "--", "Xvfb", "-displayfd", "3"]]);
+  assert.deepEqual(xvfbCommand(["-displayfd", "3"], false), ["Xvfb", ["-displayfd", "3"]]);
+});
+
+test("wineserverPath: files/bin, else dist/bin (older Proton builds), else null", () => {
+  assert.equal(wineserverPath("/p", (f) => f === "/p/files/bin/wineserver"), "/p/files/bin/wineserver");
+  assert.equal(wineserverPath("/p", (f) => f === "/p/dist/bin/wineserver"), "/p/dist/bin/wineserver");
+  assert.equal(wineserverPath("/p", () => false), null);
+});
+
+test("Session: the sandbox mounts the machine read-only and only the farm, its prefix, the work folder, the runtime dir and /tmp writable", (t) => {
+  const r = rig(t);
+  mkdirSync(join(r.dir, "work"), { recursive: true });
+  mkdirSync(join(r.dir, "we", "install"), { recursive: true });
+  r.s.display = ":77";
+  const { bw, env } = r.s.sandboxed("x.exe", []);
+  assert.deepEqual(bw.slice(0, 3), ["--ro-bind", "/", "/"]);
+  assert.ok(!bw.some((a, i) => a === "--bind" && bw[i + 1] === "/"), "no writable /");
+  const writable = bw.flatMap((a, i) => (a === "--bind" ? [bw[i + 1]] : []));
+  assert.deepEqual(writable.filter((p) => p.startsWith(r.dir)).sort(), [join(r.dir, "we", "install"), join(r.dir, "we", "prefix"), join(r.dir, "work")].sort());
+  assert.ok(writable.includes("/tmp"));
+  assert.ok(!writable.includes(process.env.HOME), "not the home folder");
+  assert.ok(bw.includes("--die-with-parent") && bw.includes("--unshare-net"));
+  assert.ok(!bw.includes("--unshare-pid"), "the crash check reads the editor's /proc/<pid>");
+  assert.ok(bw.indexOf("--args") > bw.lastIndexOf("--bind"), "the read-only hardlinks (--args) come after the farm's writable mount");
+  assert.equal(env.DISPLAY, ":77");
+  assert.equal(env.XDG_CACHE_HOME, join(r.dir, "we", "prefix", "cache"), "caches in a writable folder, not the read-only home");
+});
+
+test("pruneArtefacts: the old minimap TGAs go, the newest dialog pictures stay, nothing else is touched", () => {
+  const dir = scratchDir("we-prune-");
+  try {
+    for (let i = 0; i < 5; i++) writeFileSync(join(dir, `dialog-save-${1000 + i}.png`), "p");
+    for (let i = 0; i < 5; i++) utimesSync(join(dir, `dialog-save-${1000 + i}.png`), 1000 + i, 1000 + i);
+    writeFileSync(join(dir, "minimap-123.tga"), "t");
+    for (const keep of ["editor.log", "mine.png", "minimap.tga", "dialog-notes.txt"]) writeFileSync(join(dir, keep), "k");
+    mkdirSync(join(dir, "maps"));
+    const removed = pruneArtefacts(dir, 2);
+    assert.deepEqual(removed.sort(), ["dialog-save-1000.png", "dialog-save-1001.png", "dialog-save-1002.png", "minimap-123.tga"]);
+    assert.deepEqual(readdirSync(dir).sort(), ["dialog-notes.txt", "dialog-save-1003.png", "dialog-save-1004.png", "editor.log", "maps", "mine.png", "minimap.tga"]);
+    assert.deepEqual(pruneArtefacts(join(dir, "none")), [], "no folder yet");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Session: the real spawnWine starts the run's log afresh, then adds to it; a failed spawn is an error on the child, not a crash", async (t) => {
+  const r = rig(t);
+  const s = r.s;
+  mkdirSync(join(r.dir, "work"), { recursive: true });
+  writeFileSync(s.log, "the run before\n");
+  // bwrap can't be found (PATH and the working folder don't exist): node reports an "error" event, which without
+  // spawnWine's listener would end the process.
+  s.sandboxed = () => ({ bw: ["--version"], env: { PATH: "/nonexistent" }, fdArgs: Buffer.alloc(0) });
+  const spawnOnce = () => new Promise((ok) => {
+    const child = Session.prototype.spawnWine.call(s, "x", []);
+    child.on("error", () => ok(child));
+  });
+  const first = await spawnOnce();
+  assert.ok(first.spawnError && first.exited, "marked on the child");
+  assert.equal(readFileSync(s.log, "utf8"), "", "the run before's log is gone");
+  writeFileSync(s.log, "this run's reg\n");
+  await spawnOnce();
+  assert.equal(readFileSync(s.log, "utf8"), "this run's reg\n", "the second program of the run adds to it");
 });
