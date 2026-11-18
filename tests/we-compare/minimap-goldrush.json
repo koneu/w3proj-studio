@@ -1,0 +1,20 @@
+[
+  {
+    "name": "mmsave-goldrush-sd",
+    "description": "GoldRush (smoketest_maps, W3Champions): the editor opens and saves it, Studio rebuilds the minimap; compared as pictures (war3mapMap.blp). Tolerance 13, not the 8 of the other minimap specs: a one tile strip of a texture between others is 2 pixels wide in the editor and 1 in Studio, which moves a 16-pixel square by up to 12 (5 squares of 256 in SD, 3 in HD; TESTING.md, Misc checks against the editor, 5)",
+    "input": { "map": "${MAIN}/smoketest_maps/26_w3c_251104_0950_GoldRush.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--click", "700,500"], ["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 13 }],
+    "limit": 20
+  },
+  {
+    "name": "mmsave-goldrush-hd",
+    "description": "the same in HD",
+    "input": { "map": "${MAIN}/smoketest_maps/26_w3c_251104_0950_GoldRush.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--click", "700,500"], ["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 13 }],
+    "limit": 20
+  }
+]
