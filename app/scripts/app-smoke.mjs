@@ -6045,6 +6045,82 @@ async function unreadableChapter(page, found) {
   }
 }
 
+/** A campaign chapter whose war3map.w3i is cut off (version 25; The Chosen Ones 1.0's Chapter 3, 325 bytes, kept raw by
+ *  the unpack), taken out of the .w3n and opened as a project of its own:
+ *  1. Its terrain editor opens read-only and says why up front: a line where the tool tabs would be, naming war3map.w3i.
+ *  2. The tools that edit refuse with that message (objects, tileset, ground), and nothing is written; a save neither.
+ *  3. A tool that only reads works (terrain_info).
+ *  4. Control: the same chapter inside a campaign project opens editable (its tool tabs, no such line).
+ *  Skipped without the .w3n (W3PROJ_CORPUS, else smoketest_maps of the main checkout). */
+async function truncatedChapter(page, found) {
+  const fail = (what) => found.push(`truncated chapter: ${what}`);
+  const w3n = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "campaign", "The Chosen Ones 1.0", "The Chosen Ones 1.0.w3n");
+  if (!existsSync(w3n)) { console.log(`truncated chapter: skipped, ${w3n} isn't there`); return; }
+  const dir = join(work, "truncated-chapter");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const chapterMap = join(dir, "Chapter 3.w3x"), project = join(dir, "chapter"), map = join(project, "map");
+  const cat = spawnSync(cli, ["cat", w3n, "Chapter 3 - The Chones Ones Campaign.w3x"], { maxBuffer: 1 << 26 });
+  if (cat.status !== 0) return fail(`taking the chapter out of the .w3n: ${String(cat.stderr).trim()}`);
+  writeFileSync(chapterMap, cat.stdout);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${lit(chapterMap)}, dir: ${lit(project)}, allowIncomplete: false, install: ${lit(game ?? gamePath(repo))} }); })()`);
+  if (!existsSync(join(map, "war3map.w3i")) || existsSync(join(map, "war3map.w3i.json"))) return fail("the chapter's war3map.w3i isn't kept raw (control: the codec can't read it)");
+  const TXT = "map/war3map.w3e.txt";
+  const pane = (sel) => `document.querySelector(".editor-pane:not([hidden]) ${sel}")`;
+  const drawn = (what) => until(what, () => page.evaluate(`!!${pane(".model-stage canvas")}`), 60000);
+  await page.evaluate(`(() => { window.__tcKept = { confirm: w3.window.confirm }; w3.window.confirm = async () => true; })()`);
+  try {
+    // ---- 1. Read-only, said up front ----
+    await page.evaluate(`w3.workspace.open(${lit(project)})`);
+    await until("the chapter project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(project)}`), 20000);
+    await page.evaluate(`w3.editors.open(${lit(TXT)})`);
+    await drawn("the chapter's terrain editor");
+    await settled(page);
+    const note = await page.evaluate(`${pane(".terrain-locked")}?.textContent ?? null`);
+    if (!note || !/read-only/.test(note) || !/war3map\.w3i can't be read/.test(note)) fail(`no read-only line up front: ${lit(note)}`);
+    if (await page.evaluate(`!!${pane(".terrain-tab")}`)) fail("the read-only terrain has its tool tabs");
+    // ---- 2. Edits refused, nothing written ----
+    const before = snapshot(map);
+    const tool = mcpTool(page);
+    const tileset = JSON.parse(await tool("terrain_info")).tileset;
+    if (typeof tileset !== "string") fail(`terrain_info gave no tileset: ${lit(tileset)}`);
+    for (const [name, args] of [
+      ["place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true }],
+      ["set_tileset", { tileset: tileset === "A" ? "L" : "A" }],
+      ["sculpt_terrain", { mode: "raise", amount: 96, left: -512, bottom: -512, right: 512, top: 512 }],
+    ]) {
+      const err = await tool(name, args).then(() => null, (e) => String(e.message ?? e));
+      if (!err || !/read-only/.test(err) || !/war3map\.w3i can't be read/.test(err)) fail(`${name} wasn't refused as read-only: ${lit(err)}`);
+    }
+    await settled(page);
+    if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the refused edits left the terrain unsaved");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    const after = snapshot(map);
+    const moved = [...new Set([...before.keys(), ...after.keys()])].filter((k) => before.get(k) !== after.get(k));
+    if (moved.length) fail(`the read-only chapter's files changed: ${moved.join(", ")}`);
+    // ---- 4. Control: inside its campaign the chapter edits as before ----
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.close(); })()`);
+    const camp = join(dir, "camp");
+    cpSync(project, join(camp, "maps", "Chapter 3.w3x"), { recursive: true });
+    writeFileSync(join(camp, "w3proj.toml"), readFileSync(join(FIXTURE, "w3proj.toml"), "utf8"));
+    mkdirSync(join(camp, "map"), { recursive: true });
+    writeFileSync(join(camp, "map", "war3campaign.w3f.json"), "{}");
+    await page.evaluate(`w3.workspace.open(${lit(camp)})`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${lit(camp)}`), 20000);
+    await page.evaluate(`w3.workspace.filesReady().then(() => null, () => null)`);
+    await page.evaluate(`w3.editors.open(${lit(`maps/Chapter 3.w3x/${TXT}`)}, "w3.terrainViewer")`);
+    await drawn("the chapter's terrain editor in its campaign");
+    await until("its tool tabs", () => page.evaluate(`!!${pane(".terrain-tab")}`), 30000).catch(() => fail("the chapter inside its campaign has no tool tabs"));
+    const campNote = await page.evaluate(`${pane(".terrain-locked")}?.textContent ?? null`);
+    if (campNote) fail(`the chapter inside its campaign is read-only: ${campNote}`);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__tcKept; if (k) w3.window.confirm = k.confirm; delete window.__tcKept; })()`).catch(() => {});
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.close(); })()`).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** The workbench's own state (branch workbench-polish):
  *  1. A project's tabs come back with their editors where they were: the text editor's selection and first line in
  *     sight go into the webview's storage when the tabs close, and come back from there.
@@ -15812,6 +15888,7 @@ async function run() {
         triggerMultiSelect,
         triggerParamColorTools,
         triggersAndAi,
+        truncatedChapter,
         turtleCliffSave,
         typedFieldSave,
         unitProperties,
@@ -16056,6 +16133,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "dataSafety", found);
   await unreadableChapter(page, found).catch((e) => found.push(`unreadable chapter: ${e.message}`));
   await leftOpen(page, "unreadableChapter", found);
+  await truncatedChapter(page, found).catch((e) => found.push(`truncated chapter: ${e.message}`));
+  await leftOpen(page, "truncatedChapter", found);
   await pathingImport(page, found).catch((e) => found.push(`pathing import: ${e.message}`));
   await leftOpen(page, "pathingImport", found);
   await pathingSquare(page, found).catch((e) => found.push(`pathing square: ${e.message}`));
