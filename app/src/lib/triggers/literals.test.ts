@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { literalProblem, realText, typedInitialValue } from "./literals";
+import { isTypedCode, literalProblem, realText, typedInitialValue } from "./literals";
 
 test("an integer parameter value the script can't hold (past 32 bits, not whole, an exponent) is refused; its edges are taken", () => {
   for (const typed of ["2147483648", "-2147483649", "99999999999", "0x80000000", "0xFFFFFFFF", "1.5", "1e5", "", "abc", "+5", "Infinity"]) {
@@ -35,4 +35,10 @@ test("a variable's initial value it can't hold is refused (integer past 32 bits,
   assert.deepEqual(typedInitialValue("string", "string", " a "), { value: " a " });
   assert.equal(realText(1e21), "1000000000000000000000.00");
   assert.equal(realText(-2.5), "-2.50");
+});
+
+test("a 4-character code typed for a code type is taken as it is, not read as a number", () => {
+  assert.equal(isTypedCode("unitcode", "hfoo"), true);
+  assert.equal(isTypedCode("abilcode", " AHbz "), true);
+  for (const [type, typed] of [["unitcode", "hfo"], ["unitcode", "hfooo"], ["integer", "hfoo"], ["unitcode", "'hfo'"], ["unitcode", "h\\oo"]]) assert.equal(isTypedCode(type, typed), false, `${type} ${typed}`);
 });

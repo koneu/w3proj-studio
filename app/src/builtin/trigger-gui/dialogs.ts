@@ -6,7 +6,7 @@ import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/s
 import { withColorTools } from "../../extensions/colortools";
 import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
-import { literalProblem } from "../../lib/triggers/literals";
+import { isTypedCode, literalProblem } from "../../lib/triggers/literals";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
 import { focusAfterClick, h } from "../../workbench/dom";
@@ -130,9 +130,10 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       // function's limits (_Limits).
       const base = data.types.get(type)?.base ?? type;
       const problem = (v: string): string | null => {
+        if (isTypedCode(type, v)) return null;
         if (base !== "integer" && base !== "real") return null;
         const bad = literalProblem(base, v);
-        if (bad) return bad;
+        if (bad) return /code$/.test(type) ? "Enter an object code of 4 characters, like hfoo." : bad;
         const n = Number(v.trim());
         const [min, max] = limits ?? [null, null];
         if (min !== null && n < min) return `The lowest value is ${min}.`;
