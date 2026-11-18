@@ -43,10 +43,10 @@ mkdirSync(cache, { recursive: true });
 const { build } = await import("esbuild");
 const bundle = join(cache, `melee-${process.pid}.mjs`);
 await build({
-  stdin: { contents: `export { meleeSetBlockers, readMeleeFacts, savedMelee } from "./src/lib/terrain/meleesave"; export { MELEE_MAP } from "./src/lib/terrain/owner"; export { REQUIRES_TFT } from "./src/lib/terrain/tftflag";`, resolveDir: app, loader: "ts" },
+  stdin: { contents: `export { meleeSetBlockers, readMeleeFacts, savedMelee } from "./src/lib/terrain/meleesave"; export { MELEE_MAP } from "./src/lib/terrain/owner"; export { REQUIRES_TFT } from "./src/lib/terrain/tftflag"; export { CUSTOM_TILESETS_FLAG } from "./src/lib/terrain/tilesetflag";`, resolveDir: app, loader: "ts" },
   bundle: true, format: "esm", platform: "node", outfile: bundle, logLevel: "warning",
 });
-const { meleeSetBlockers, readMeleeFacts, savedMelee, MELEE_MAP, REQUIRES_TFT } = await import(pathToFileURL(bundle).href);
+const { meleeSetBlockers, readMeleeFacts, savedMelee, MELEE_MAP, REQUIRES_TFT, CUSTOM_TILESETS_FLAG } = await import(pathToFileURL(bundle).href);
 rmSync(bundle, { force: true });
 
 // The game's tables, read once.
@@ -95,8 +95,10 @@ for (const line of listed) {
     placed = existsSync(units) ? JSON.parse(readFileSync(units, "utf8")).units ?? [] : [];
   } catch (e) { results.push({ name, skip: `unreadable: ${e}` }); continue; }
   const melee = (Number(info.flags) & MELEE_MAP) !== 0;
-  const cleared = { ...info, flags: Number(info.flags) & ~MELEE_MAP };
+  // Flag 0x0008 (custom tilesets, tilesetflag.ts) is turned over as well: a save must put the stored one back.
+  const cleared = { ...info, flags: (Number(info.flags) & ~MELEE_MAP) ^ CUSTOM_TILESETS_FLAG };
   const r = await savedMelee(ws, cleared, placed);
+  const tilesets = { stored: (Number(info.flags) & CUSTOM_TILESETS_FLAG) !== 0, studio: (r.flags & CUSTOM_TILESETS_FLAG) !== 0 };
   const studio = (r.flags & MELEE_MAP) !== 0;
   const why = showWhy && melee !== studio ? meleeSetBlockers(cleared, placed, await readMeleeFacts(ws, undefined, true)) : [];
   // The other direction: a map stored melee must keep its flag through a save.
@@ -104,7 +106,7 @@ for (const line of listed) {
   const kept = !melee || ((asSaved.flags & MELEE_MAP) !== 0);
   // Flag 0x4000 (Requires The Frozen Throne data, tftflag.ts) as stored and as Studio's save leaves it.
   const tft = { stored: (Number(info.flags) & REQUIRES_TFT) !== 0, studio: (asSaved.flags & REQUIRES_TFT) !== 0 };
-  results.push({ name, melee, studio, why, kept, tft });
+  results.push({ name, melee, studio, why, kept, tft, tilesets });
 }
 results.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -122,6 +124,9 @@ console.log(`other maps: Studio sets it on ${other.filter((r) => r.studio).lengt
 const tftMiss = done.filter((r) => r.tft.stored !== r.tft.studio);
 for (const r of tftMiss) if (listAll || showWhy) console.log(`${r.name}: flag 0x4000 stored ${r.tft.stored ? "on" : "off"}, Studio's save ${r.tft.studio ? "sets" : "clears"} it`);
 console.log(`flag 0x4000 (Requires The Frozen Throne data): Studio's save agrees on ${done.length - tftMiss.length} of ${done.length} maps (stored on ${done.filter((r) => r.tft.stored).length})`);
+const tilesetMiss = done.filter((r) => r.tilesets.stored !== r.tilesets.studio);
+for (const r of tilesetMiss) if (listAll || showWhy) console.log(`${r.name}: flag 0x0008 stored ${r.tilesets.stored ? "on" : "off"}, Studio's save of the flag turned over ${r.tilesets.studio ? "sets" : "clears"} it`);
+console.log(`flag 0x0008 (custom tilesets): Studio's save puts the stored bit back on ${done.length - tilesetMiss.length} of ${done.length} maps (stored on ${done.filter((r) => r.tilesets.stored).length})`);
 
 const now = Object.fromEntries(done.map((r) => [r.name, { melee: r.melee, studio: r.studio }]));
 if (saveTo) { writeFileSync(saveTo, JSON.stringify({ maps: now }, null, 1) + "\n"); console.log(`saved ${saveTo}`); }

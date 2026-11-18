@@ -338,7 +338,8 @@ test("with the custom tilesets flag 0 the start's ground is buildable by the til
     return (await savedMelee(ws, { flags: OFF }, [startMid])).flags;
   };
   assert.equal(await saved(0), MELEE, "drawn as Ldrt: buildable");
-  assert.equal(await saved(1), OFF, "control: with the flag set the file's Lrok, not buildable");
+  // (custom tilesets on also sets w3i flag 0x0008: tilesetflag.ts)
+  assert.equal(await saved(1), OFF | 0x0008, "control: with the flag set the file's Lrok, not buildable");
 });
 
 test("custom object data and interface files count only when they change something, in both directions", async () => {

@@ -85,10 +85,13 @@ export const CASES = {
   "tft-item": { units: [["shas", 1280, 1280, 27]] },
   "tft-dest": { doodads: [["LTbr", 1280, 1280]] },
   "tft-doodad": { doodads: [["ZPfw", 1280, 1280]] },
-  // Not in the spec: a tile of version 1 (Zdrt) worn by 25 corners, the custom tilesets flag on, left 0x4000 off, but
-  // the editor's save set w3i flag 0x0008 (we-drive 2026-11-17). Without the custom tilesets flag the editor reads the
-  // tileset's own list, so the tile is gone.
+  // A tile of version 1 (Zdrt) worn by 25 corners, the custom tilesets flag on: left 0x4000 off, but the editor's save
+  // set w3i flag 0x0008 (we-drive 2026-11-17). Without the custom tilesets flag the editor reads the tileset's own
+  // list, so the tile is gone. tests/we-compare/tileset-flag-we.json: 0x0008 follows the custom tilesets flag alone.
   "tft-tile-custom": { ground: [5, "Zdrt"], customTilesets: true, corners: [[50, 50, 54, 54, { texture: 5 }]] },
+  // tileset-flag-we.json: custom tilesets on with the tileset's own list (sets 0x0008), and off with 0x0008 stored (cleared).
+  "tileset-custom-own": { ground: [5, "Lgrd"], customTilesets: true },
+  "tileset-flag-clear": { flags: 0x0008 },
   "tft-tavern-off": off({ units: [["ntav", 1280, 1280, 27]] }),
   "tft-drop": { units: [["nfrp", 1280, 1280, 24, ["shas"]]] },
   "tft-drop-random": { units: [["nfrp", 1280, 1280, 24, ["YjI5"]]] },

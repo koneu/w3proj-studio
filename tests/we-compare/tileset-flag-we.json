@@ -1,0 +1,26 @@
+[
+  {
+    "name": "tileset-flag-zdrt",
+    "description": "w3i flag 0x0008 follows war3map.w3e's custom tilesets flag. flat.w3x (0x9c14) with custom tilesets on, Zdrt (version 1) in slot 5 worn by 25 corners: the editor's save sets 0x0008 (0x9c1c), not 0x4000 (we-drive 2026-11-18, branch we-compare-3; the same with the own list, Zdrt unused, Bdrt used). Inputs: tests/fixtures/we-specs/make-melee-valid.mjs (tft-tile-custom, tileset-*) into target/melee-valid/. Studio: lib/terrain/tilesetflag.ts through meleesave.ts, run by the map script's generation as on a save.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-tile-custom.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tileset-flag-own",
+    "description": "Custom tilesets on with the tileset's own list (nothing changed but the flag): sets 0x0008.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tileset-custom-own.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tileset-flag-clear",
+    "description": "Custom tilesets off with 0x0008 stored (0x9c1c): the save clears it (0x9c14).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tileset-flag-clear.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  }
+]
