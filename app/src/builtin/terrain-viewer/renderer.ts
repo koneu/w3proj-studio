@@ -576,6 +576,15 @@ export interface ObjectBatch {
   editorOnly?: boolean;
 }
 
+/** Whether a batch's models standing in HD water go into its depth picture (drawWaterDepth), so the water over them
+ *  is as shallow as it is to them. Not see-through previews, cliffs or the shoreline's waves; nor the editor's own
+ *  marks (start locations and their start buildings, `editorOnly`): the World Editor shows the start location's ring
+ *  under HD water, coloured by it as the ground there, where in the depth picture the water over the flat ring
+ *  thinned to nothing and the ring lay on top. */
+export function inWaterDepth(b: Pick<ObjectBatch, "group" | "tint" | "followGround" | "editorOnly">): boolean {
+  return !b.tint && !b.followGround && b.group !== "shoreline" && !b.editorOnly;
+}
+
 /** Whether a batch's objects cast HD's real shadows: not see-through previews, the shoreline's waves or the cliffs.
  *  The World Editor's HD view casts nothing from cliffs, nor from the ground itself: cliff.w3m's picture is the same
  *  with View > Shadows on and off (we-drive, 2026-11-09). */
@@ -1682,8 +1691,7 @@ export class TerrainRenderer {
     const wet = new Map<ObjectBatch, ObjectInstance[]>();
     for (const b of this.batches) {
       if (!this.batchShown(b) || !b.instances.length) continue;
-      // See-through previews and the editor's helpers don't hide the water behind them; cliffs and waves aren't models.
-      const found: ObjectInstance[] | undefined = wetWanted && !b.tint && !b.followGround && b.group !== "shoreline" ? [] : undefined;
+      const found: ObjectInstance[] | undefined = wetWanted && inWaterDepth(b) ? [] : undefined;
       const list = this.gatherInstances(b, b.followGround ? null : planes, this.instanceBuffers, { wet: found });
       if (list.runs.length) gathered.push([b, list]);
       if (found?.length) wet.set(b, found);
