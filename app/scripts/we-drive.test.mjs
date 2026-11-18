@@ -175,6 +175,13 @@ test("parseArgs: the looks are parsed up front, need a map before them, and are 
   assert.throws(() => parseArgs(["--map", "m.w3x", ...Array.from({ length: 17 }, () => ["--look", "1,2"]).flat()]), /at most 16/);
 });
 
+test("parseArgs: --looks-every-map is an option (every map gets the looks' cameras), not a step", () => {
+  const { opts, steps } = parseArgs(["--looks-every-map", "--map", "a.w3x", "--look", "1,2", "--map", "b.w3x", "--look", "1,2"]);
+  assert.equal(opts.looksEveryMap, true);
+  assert.deepEqual(steps.map(([s]) => s), ["--map", "--look", "--map", "--look"]);
+  assert.equal(parseArgs(["--map", "a.w3x"]).opts.looksEveryMap, undefined, "the first map only, by default");
+});
+
 test("parseArgs: --save takes the file to copy the saved map to, and needs a map before it", () => {
   assert.deepEqual(parseArgs(["--map", "m.w3x", "--wait-ready", "--save", "out.w3x", "--close"]).steps,
     [["--map", "m.w3x"], ["--wait-ready", null], ["--save", "out.w3x"], ["--close", null]]);

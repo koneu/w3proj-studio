@@ -136,12 +136,16 @@ test("HD's real shadows: the light in a shadow as the World Editor's pictures me
   near(inShadow(1.95, 0.2, 5.85) / lit(1.95, 0.2, 5.85), 1.64, 0.15, "shadow intensity 5.85");
 });
 
-test("HD's real shadows under the game's own lighting keep about half the light (map 03's footmen, we-drive)", () => {
-  // Lordaeron's HD terrain model at 06:00 (no ambient, shadow intensity 0.265): 0.50 of the lit ground's light in green
-  // under map 03's footmen, 0.54 and 0.60 under TwistedMeadows' trees (medians, branch render-fixes-5).
+test("HD's real shadows under the game's own lighting keep about 0.37 of the ground's light (map 03's footmen, we-drive)", () => {
+  // Lordaeron's HD terrain model at 06:00 (no ambient, shadow intensity 0.265). we-drive, branch we-shadows-1
+  // (2026-11-18, HD, game view off, Shadows on over off, the pixels taken back to linear light, medians of the darker
+  // half of each shadow): map 03's footmen 0.375 of the lit ground's light in green (Studio 0.55 before, 0.37 now);
+  // make-water-shadows.mjs (dirt under trees, footmen and a gryphon) 0.36 to 0.39 on Lordaeron Summer at dawn, noon and
+  // dusk and on Barrens at dawn and dusk (Studio 0.53 to 0.56 before, 0.36 to 0.38 now). The 0.50 of branch
+  // render-fixes-5 was the same shadow read through ACES's toe, which the picture's curve no longer has (hdTone).
   const l = hdLight({ dir: [-0.392, -0.169, 0.904], diffuse: [1.026, 1.026, 1.199], ambient: [-0.03, -0.03, -0.03], shadow: 0.265, fill: GAME_LIGHT_FILL });
   const at = (lit: number) => sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), l.fill ?? 0, lit);
-  near(at(0) / at(1), 0.55, 0.05, "with the game's fill");
+  near(at(0) / at(1), 0.375, 0.03, "with the game's fill");
   near(at(1), facing([0, 0, 1], l.dir, shadeWrap(2, l)) * l.diffuse[1], 1e-12, "lit: the fill changes nothing");
   // A map's own lighting model has none: the same light without it is nearly black in shadow.
   assert.ok(sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), 0, 0) / at(1) < 0.1);

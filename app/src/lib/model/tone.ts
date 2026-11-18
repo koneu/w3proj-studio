@@ -114,15 +114,31 @@ export const SUN_SHADE = { ambient: 1.87, lift: 2.2 };
  */
 export const GAME_LIGHT_FILL = 0.5;
 
+/**
+ * The share of the lit ground's light the game's own HD lighting leaves in the real shadows on the ground (sunLight),
+ * where GAME_LIGHT_FILL is the models'. GAME_LIGHT_FILL's 0.5 was fitted on the ground with ACES's toe in the curve
+ * (the editor's 0.50 under map 03's footmen, the curve inverted); without the toe (hdTone, 2026-11-12) the dark ground
+ * is linear, and the same fill made Studio's shadows lighter than the editor's. Measured (we-drive, branch
+ * we-shadows-1, 2026-11-18, HD, game view off, Shadows on over off; make-water-shadows.mjs on Lordaeron Summer and
+ * Barrens, Map Preferences' Time of Day dawn, noon and dusk): the ground under trees, footmen and a gryphon keeps 0.37
+ * of its light (linear, red and green; 0.33 to 0.38 over all six) at every hour and on both tilesets, where Studio kept
+ * 0.55. With the sunFacing share in shadow (about 0.06 at those suns) this fill gives the 0.37.
+ */
+export const GAME_SHADOW_FILL = 0.31;
+
 /** The light at a point of normal `n` that gets `lit` of the sun, from the light lit (ambient + diffuse × facing) and in
- *  full shadow (sunAmbient, sunFacing at 0, and the light's fill share of the lit light): between the two by `lit`. The
- *  ground's (objectLight is the models'). The shaders' `sunLight` does the same per channel. */
+ *  full shadow (sunAmbient, sunFacing at 0, and the light's fill share of the lit light, GAME_SHADOW_FILL of
+ *  GAME_LIGHT_FILL's): between the two by `lit`. The ground's (objectLight is the models'). The shaders' `sunLight`
+ *  does the same per channel. */
 export function sunLight(ambient: number, diffuse: number, n: readonly number[], l: readonly number[], wrap: number, fill: number, lit: number): number {
   const full = ambient + diffuse * facing(n, l, wrap);
-  const shade = ambient * sunAmbient(0) + diffuse * sunFacing(n, l, wrap, 0) + fill * full;
+  const shade = ambient * sunAmbient(0) + diffuse * sunFacing(n, l, wrap, 0) + fill * GROUND_FILL * full;
   const v = Math.min(1, Math.max(0, lit));
   return shade + (full - shade) * v;
 }
+
+/** The ground's fill against the light's (GAME_LIGHT_FILL, the models'). */
+const GROUND_FILL = GAME_SHADOW_FILL / GAME_LIGHT_FILL;
 
 /** The light on a model at a point of normal `n` that gets `lit` of the sun: the fill share (`fill`, the game's own
  *  lighting: GAME_LIGHT_FILL) of the light on flat ground (normal straight up) on every surface, lit or in shadow, and
@@ -171,7 +187,7 @@ float sunFacing(vec3 n, vec3 l, float lit) {
 float sunAmbient(float lit) { return mix(${glsl(SUN_SHADE.ambient)}, 1.0, clamp(lit, 0.0, 1.0)); }
 vec3 sunLight(vec3 ambient, vec3 diffuse, vec3 n, vec3 l, float lit) {
   vec3 full = ambient + diffuse * facing(n, l);
-  vec3 shade = ambient * sunAmbient(0.0) + diffuse * sunFacing(n, l, 0.0) + uSunFill * full;
+  vec3 shade = ambient * sunAmbient(0.0) + diffuse * sunFacing(n, l, 0.0) + uSunFill * ${glsl(GROUND_FILL)} * full;
   return mix(shade, full, clamp(lit, 0.0, 1.0));
 }
 vec3 objectLight(vec3 ambient, vec3 diffuse, vec3 n, vec3 l, float lit) {

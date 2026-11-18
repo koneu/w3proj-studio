@@ -1,7 +1,12 @@
 // Makes water-shadows.w3x for measuring HD model shadows over water against the World Editor's game view, from
 // flat.w3x (the editor's own new 64x64 Lordaeron Summer map, level 2, height 0):
 //
-//   node tests/fixtures/we-specs/make-water-shadows.mjs <w3proj cli> <game folder> [out folder]
+//   node tests/fixtures/we-specs/make-water-shadows.mjs <w3proj cli> <game folder> [out folder] [--time N] [--tileset T]
+//
+// --time N writes war3mapExtra.txt's TimeOfDay (Scenario > Map Preferences > Time of Day: 1 dawn, 2 noon, 3 dusk,
+// 4 midnight) and names the map water-shadows-t<N>.w3x; --tileset B (Barrens), A (Ashenvale), N (Northrend), ...
+// puts the map on that tileset's first six ground textures and its two plain cliffs (w3e and w3i), named
+// water-shadows-<T>[-t<N>].w3x.
 //
 // Two lakes on the flat ground (corner coordinates, x east, y north; the world is (corner - 32) * 128):
 //   shallow  corners x 26..34, y 30..38, 30 deep (level 120)
@@ -17,9 +22,28 @@ import { fileURLToPath } from "node:url";
 import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const [cli, game, outArg] = process.argv.slice(2, 5).map((p) => (p ? resolve(p) : p));
+const argv = process.argv.slice(2);
+const option = (name) => {
+  const i = argv.indexOf(name);
+  if (i < 0) return undefined;
+  const [, value] = argv.splice(i, 2);
+  return value;
+};
+const time = option("--time"), tileset = option("--tileset");
+const [cli, game, outArg] = argv.slice(0, 3).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-if (!game) { console.error("usage: make-water-shadows.mjs <w3proj cli> <game folder> [out folder]"); process.exit(2); }
+const usage = "usage: make-water-shadows.mjs <w3proj cli> <game folder> [out folder] [--time 1-4] [--tileset LETTER]";
+if (!game || (time !== undefined && !/^[1-4]$/.test(time)) || (tileset !== undefined && !/^[A-Z]$/.test(tileset))) { console.error(usage); process.exit(2); }
+// the plain ground (six textures) and cliffs of a tileset, by its letter
+const TILESETS = {
+  B: { ground: "Bdrt Bdrh Bdrr Bdrg Bdsr Bdsd", cliffs: "CBde CBgr" },
+  A: { ground: "Adrt Adrd Agrs Arck Agrd Avin", cliffs: "CAdi CAgr" },
+  N: { ground: "Ndrt Ndrd Nrck Ngrs Nice Nsnw", cliffs: "CNdi CNsn" },
+  F: { ground: "Fdrt Fdro Fdrg Frok Fgrs Fgrd", cliffs: "CFdi CFgr" },
+  W: { ground: "Wdrt Wdro Wsng Wrok Wgrs Wsnw", cliffs: "CWgr CWsn" },
+};
+if (tileset && !TILESETS[tileset]) { console.error(`unknown tileset ${tileset}: ${Object.keys(TILESETS).join(", ")}`); process.exit(2); }
+const outName = `water-shadows${tileset ? `-${tileset}` : ""}${time ? `-t${time}` : ""}.w3x`;
 const outDir = outArg || resolve(here, "..", "..", "..", "target", "water-shadows");
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -50,9 +74,19 @@ try {
       while (i + 1 < lines.length && lines[i + 1] !== "" && !lines[i + 1].startsWith("[")) i++;
       continue;
     }
-    out.push(lines[i]);
+    if (tileset && /^tileset /.test(lines[i])) out.push(`tileset ${tileset}`);
+    else if (tileset && /^ground /.test(lines[i])) out.push(`ground ${TILESETS[tileset].ground}`);
+    else if (tileset && /^cliffs /.test(lines[i])) out.push(`cliffs ${TILESETS[tileset].cliffs}`);
+    else out.push(lines[i]);
   }
   writeFileSync(w3e, out.join("\n"));
+  if (tileset) {
+    const w3iFile = join(dir, "map", "war3map.w3i.json");
+    const w3i = JSON.parse(readFileSync(w3iFile, "utf8"));
+    w3i.tileset = tileset;
+    writeFileSync(w3iFile, JSON.stringify(w3i, null, 2));
+  }
+  if (time) writeFileSync(join(dir, "map", "war3mapExtra.txt"), `[MapExtraInfo]\nTimeOfDay=${time}\n\n`);
 
   const unitsFile = join(dir, "map", "war3mapUnits.doo.json");
   const units = JSON.parse(readFileSync(unitsFile, "utf8"));
@@ -70,8 +104,8 @@ try {
   writeFileSync(dooFile, JSON.stringify(doo, null, 2));
 
   mkdirSync(outDir, { recursive: true });
-  run("pack", dir, "-o", join(outDir, "water-shadows.w3x"), "--force-stale");
-  console.log(`made ${join(outDir, "water-shadows.w3x")}`);
+  run("pack", dir, "-o", join(outDir, outName), "--force-stale");
+  console.log(`made ${join(outDir, outName)}`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
