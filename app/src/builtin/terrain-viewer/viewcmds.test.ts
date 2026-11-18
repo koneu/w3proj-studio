@@ -223,7 +223,7 @@ test("regionColors: each region filled in its colour inside a darker edge, small
   const rgba = regionColors([small, big], 8, 4, -128, -64);
   const px = (x: number, y: number) => [...rgba.slice((y * 8 + x) * 4, (y * 8 + x) * 4 + 4)];
   assert.deepEqual(px(0, 0).slice(0, 3), [255 * 0.3, 0, 0].map(Math.floor), "the big one's edge");
-  assert.deepEqual(px(5, 1), [255, 0, 0, 170], "the big one's inside");
+  assert.deepEqual(px(5, 1), [255, 0, 0, 140], "the big one's inside");
   assert.equal(px(2, 2)[2], 255, "the small one's inside, over the big one");
   assert.equal(px(2, 2)[0], 0);
   assert.equal(px(1, 1)[3], 235, "the small one's edge");
@@ -237,18 +237,34 @@ test("regionColors: each region filled in its colour inside a darker edge, small
 // A map of 2 x 1 tiles (8 x 4 pathing cells): the west tile is past the playable map.
 const EDGE = { tiles: [1, 0], tilesX: 2 };
 
-test("groundPathingColors: over the border a flat opaque grey, whatever the cells hold; inside as before", () => {
+test("groundPathingColors, SD: over the border pure white whatever the cells hold, inside magenta, as the editor's plain blend", () => {
   const cells = new Array(32).fill(0).map((_, i) => (i % 8 === 0 || i % 8 === 4 ? 0 : NO_WALK));
   const rgba = groundPathingColors(cells, EDGE);
-  assert.deepEqual([...rgba.subarray(0, 4)], [137, 138, 137, 255]); // cell 0: west tile, nothing blocked
-  assert.deepEqual([...rgba.subarray(3 * 4, 3 * 4 + 4)], [137, 138, 137, 255]);
   assert.deepEqual([...rgba.subarray(4 * 4, 4 * 4 + 4)], [0, 0, 0, 0]); // cell 4: east tile, free
-  assert.deepEqual([...rgba.subarray(5 * 4, 5 * 4 + 4)], [230, 40, 230, 150]);
+  // we-compare-8, SD, map 03: the border's ground 6, 17, 6 became 69, 76, 68; the dry lake bed 36, 110, 26 became 88, 84, 80.
+  // (The lake bed's own alpha came out 0.237, the border's 0.25: one alpha for both, 4 levels.)
+  const near = (got: number[], want: number[]) => assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= 4), `${got} against ${want}`);
+  near(overGround(rgba.subarray(0, 4), [6, 17, 6]), [69, 76, 68]); // cell 0: west tile, nothing blocked
+  near(overGround(rgba.subarray(3 * 4, 3 * 4 + 4), [6, 17, 6]), [69, 76, 68]);
+  near(overGround(rgba.subarray(5 * 4, 5 * 4 + 4), [36, 110, 26]), [88, 84, 80]);
 });
 
-test("regionColors: over the border the fill carries no darker edge and is stronger than inside", () => {
+test("regionColors, SD: the editor's plain blend over grass and the border; regions over Pathing - Ground", () => {
+  // we-compare-8, SD, map 03: yellow over grass 34, 109, 26 gave 155, 189, 14; over the border 6, 17, 6 gave 142, 147, 3,
+  // and over the border's Pathing - Ground 170, 174, 31 (the region over the pathing).
+  const yellow = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 255, blue: 0 } }], 8, 4, -128, -64, EDGE);
+  const near = (got: number[], want: number[]) => assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= 4), `${got} against ${want}`);
+  near(overGround(yellow.subarray((1 * 8 + 5) * 4), [34, 109, 26]), [155, 189, 14]);
+  near(overGround(yellow.subarray(0, 4), [6, 17, 6]), [142, 147, 3]);
+  const both = composeLayers([groundPathingColors(new Array(32).fill(0), EDGE), yellow])!;
+  near(overGround(both.subarray(0, 4), [6, 17, 6]), [170, 174, 31]);
+  // Control: the pathing over the region instead gives a blue far from it.
+  assert.ok(overGround(composeLayers([yellow, groundPathingColors(new Array(32).fill(0), EDGE)])!.subarray(0, 4), [6, 17, 6])[2] > 50);
+});
+
+test("regionColors: over the border the fill carries no darker edge", () => {
   const rgba = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64, EDGE);
-  assert.deepEqual([...rgba.subarray(0, 4)], [255, 0, 0, 194]); // the region's own corner cell, over the border
+  assert.deepEqual([...rgba.subarray(0, 4)], [255, 0, 0, 140]); // the region's own corner cell, over the border
   assert.deepEqual([...rgba.subarray(4 * 4, 4 * 4 + 4)].slice(3), [235]); // the rim inside the playable part stays dark
   const without = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
   assert.equal(without[3], 235); // control: without the border it is the rim
@@ -277,9 +293,9 @@ test("regionColors, linear: the fill's alpha and colour give the editor's pixels
   near(blend([1, 125, 0], fill(region(0, 0, 0))), [0, 86, 0]);
   // Over deep water the same blend: yellow 196, 199, 54 measured over (44, 68, 81).
   near(blend([44, 68, 81], fill(region(255, 255, 0))), [196, 199, 54]);
-  // Control: the old alpha-over fill is far from it.
-  const old = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
-  assert.ok(Math.abs(blend([1, 125, 0], [...old.subarray((1 * 8 + 3) * 4, (1 * 8 + 3) * 4 + 4)])[0] - 194) > 8);
+  // Control: SD's fill in SD's plain blend is far from it (the modes differ).
+  const sd = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
+  assert.ok(Math.abs(overGround(sd.subarray((1 * 8 + 3) * 4), [1, 125, 0])[0] - 194) > 8);
 });
 
 test("groundPathingColors, linear: pure magenta and blue at the editor's alpha; the border and the old colours as before", () => {
@@ -303,7 +319,7 @@ test("over the border in linear light: yellow region 194, 195, 0 alone, 210, 212
   near(blend(ground, path.subarray(0, 4)), [137, 138, 137]);
   near(blend(ground, composeLayers([region, path], true)!.subarray(0, 4)), [210, 212, 137]);
   // Control: Studio's earlier border colours (opaque grey, region alpha 194) gave 227, 227, 33 for both.
-  const old = composeLayers([regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 255, blue: 0 } }], 8, 4, -128, -64, EDGE), groundPathingColors(new Array(32).fill(0), EDGE)], true)!;
+  const old = composeLayers([new Uint8Array([255, 255, 0, 194]), new Uint8Array([137, 138, 137, 255])], true)!;
   assert.ok(blend(ground, old.subarray(0, 4)).some((v, i) => Math.abs(v - [210, 212, 137][i]) > 8));
 });
 
@@ -355,13 +371,13 @@ test("regions over the naval view's border: the region's colour lies over the br
   for (const [color, want] of [[{ red: 255, green: 255, blue: 0 }, [192, 164, 8]], [{ red: 255, green: 0, blue: 0 }, [192, 25, 8]]] as const) {
     const region = { left: 0, bottom: 0, right: 128, top: 128, color };
     const naval = navalColors(new Array(16).fill(0), edge);
-    const regions = regionColors([region], 4, 4, 0, 0, edge, false, true);
+    const regions = regionColors([region], 4, 4, 0, 0, edge);
     const out = composeLayers([naval, regions]);
     assert.ok(out);
     const seen = overGround(out, ground);
     for (let c = 0; c < 3; c++) assert.ok(Math.abs(seen[c] - want[c]) <= 3, `channel ${c}: ${seen[c]} vs ${want[c]}`);
-    // Without the flag the border keeps the stronger alpha, and over the brown it is further from the editor.
-    const plain = composeLayers([naval, regionColors([region], 4, 4, 0, 0, edge)]);
-    assert.ok(plain && Math.abs(overGround(plain, ground)[0] - want[0]) > 6);
+    // Control: the region under the brown is far from the editor.
+    const under = composeLayers([regions, naval]);
+    assert.ok(under && Math.abs(overGround(under, ground)[0] - want[0]) > 6);
   }
 });
