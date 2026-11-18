@@ -12607,7 +12607,11 @@ async function chapterObjects(page, found) {
       heading: document.querySelector(".obj-detail h2")?.textContent,
       inputs: document.querySelectorAll(".obj-detail .obj-table input, .obj-detail .obj-table select").length,
       colour: [...document.querySelectorAll(".obj-detail tr")].find((r) => r.textContent.includes("utco"))?.querySelector(".obj-campaign-value")?.textContent,
+      groups: [...document.querySelectorAll(".obj-list .obj-group > span:first-child")].map((e) => e.textContent.replace(/ \\(\\d+\\)$/, "")),
     }))()`);
+    // Between the map's own and the standard objects, as the World Editor's "Campaign Units" between its "Standard
+    // Units" and "Custom Units".
+    if (view.groups.join(", ") !== "Custom, Campaign, Modified standard") fail(`the chapter's Object Editor lists its groups as ${lit(view.groups)}`);
     if (!view.listed.some((t) => t.includes("c001") && t.includes("Campaign Grunt"))) fail(`the campaign group lists ${lit(view.listed)}`);
     if (view.heading !== "Campaign Grunt") fail(`the campaign object is headed ${lit(view.heading)}`);
     if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
