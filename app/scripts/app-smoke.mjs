@@ -2692,7 +2692,7 @@ async function mapInfoColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
-/** The Object Editor's list shows "Name - Editor Suffix": a custom unit with its own suffix (kept as a TRIGSTR with colour
+/** The Object Editor's list shows the name and the Editor Suffix with a space between, as the World Editor's does: a custom unit with its own suffix (kept as a TRIGSTR with colour
  *  codes), a modified standard ability with the game's, and the filter box matches the suffix. */
 async function objectListSuffix(page, found) {
   const fail = (what) => found.push(`object list suffix: ${what}`);
@@ -2713,11 +2713,11 @@ async function objectListSuffix(page, found) {
     const search = (text) => page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ${lit(text)}; s.dispatchEvent(new Event("input")); })()`);
     await search(""); // opening one object filters the list to it
     await until("the game data", async () => (await rowText(plain)) === "Plain", 30000);
-    if ((await rowText(unit)) !== "Suffixed - Smoke suffix") fail(`the custom unit shows ${lit(await rowText(unit))}`);
+    if ((await rowText(unit)) !== "Suffixed Smoke suffix") fail(`the custom unit shows ${lit(await rowText(unit))}`);
     await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3a", "ANfb")`);
     await until("the standard ability's row", async () => (await rowText("ANfb")) !== null, 30000);
     const std = await rowText("ANfb");
-    if (!/ - \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
+    if (!/^Firebolt \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
     // Control: a text that matches nothing takes the row away, so the row seen next is the filter's doing.
     await search("zzz no such object");
     if (!(await soon(async () => (await rowText("ANfb")) === null))) fail("the search box doesn't filter the list (control)");
@@ -5782,6 +5782,20 @@ async function resizeUnreadable(page, found) {
       await refused(/war3map\.w3r can't be read/, "an undecodable war3map.w3r");
       rmSync(w3r);
       writeFileSync(w3rJson, regions);
+      await page.evaluate(`w3.workspace.refresh()`);
+    }
+
+    // war3map.w3c, which the resize rewrites since it removes the cameras outside the new camera bounds: the same.
+    const w3cJson = join(map, "war3map.w3c.json"), w3c = join(map, "war3map.w3c");
+    const cameras = existsSync(w3cJson) ? readFileSync(w3cJson) : null;
+    if (!cameras) fail("the new map has no war3map.w3c.json (control)");
+    else {
+      rmSync(w3cJson);
+      writeFileSync(w3c, Buffer.from("not a camera file"));
+      await page.evaluate(`w3.workspace.refresh()`);
+      await refused(/war3map\.w3c can't be read/, "an undecodable war3map.w3c");
+      rmSync(w3c);
+      writeFileSync(w3cJson, cameras);
       await page.evaluate(`w3.workspace.refresh()`);
     }
 

@@ -178,7 +178,7 @@ export function resizeLoss(t: Terrain, change: Sides, removed: number): string[]
   const cut = ow * oh - kw * kh;
   const out: string[] = [];
   if (cut > 0) out.push(`${cut} tile${cut === 1 ? "" : "s"} of terrain (ground, cliffs, water, pathing, shadows)`);
-  if (removed > 0) out.push(`${removed} object${removed === 1 ? "" : "s"} (doodads on or past the new edge, units and items outside the playable area)`);
+  if (removed > 0) out.push(`${removed} object${removed === 1 ? "" : "s"} (doodads on or past the new edge, units and items outside the playable area, cameras outside the camera bounds)`);
   return out;
 }
 

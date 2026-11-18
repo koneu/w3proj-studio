@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraBounds, coordProblem, doodadStays, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
+import { cameraBounds, camerasAfterResize, coordProblem, doodadStays, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -458,6 +458,22 @@ test("Map Size refuses growth past ±32256; the map the World Editor ends at the
   const ns = { offsetX: -6144, offsetY: -4096, width: 97, height: 65, corners: [] } as unknown as Terrain;
   assert.equal(resizeProblem(ns, [0, 204, 0, 0], [6, 0, 4, 8]), null);
   assert.match(resizeProblem(ns, [0, 208, 0, 0], b) ?? "", /The right edge would reach 32768/);
+});
+
+test("Map Size keeps the camera objects inside the new camera bounds and removes the rest (we-compare resize-objects)", () => {
+  // The empty 64x64 map (offset -4096, borders 6 6 4 8) cut by 4 tiles on the left and on top, and grown by 4 on the
+  // left and at the bottom: the cameras the World Editor's save kept.
+  const map = { offsetX: -4096, offsetY: -4096, width: 65, height: 65, corners: [] } as unknown as Terrain;
+  const cams = [[0, 0], [-3800, 0], [0, 3800], [-3584, 0], [-5000, 0], [-3000, 0], [-2800, 0], [3000, 0], [-1000, 500]].map(([targetX, targetY]) => ({ targetX, targetY }));
+  const kept = (change: [number, number, number, number]) => {
+    const [w, h] = resizedSize(map, change);
+    const next = { ...map, offsetX: map.offsetX - change[0] * 128, offsetY: map.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
+    return camerasAfterResize(cams, cameraBounds(next, [6, 6, 4, 8])).map((c) => `${c.targetX},${c.targetY}`);
+  };
+  assert.deepEqual(kept([-4, 0, 0, -4]), ["0,0", "-1000,500"]);
+  assert.deepEqual(kept([4, 0, 4, 0]), ["0,0", "-3000,0", "-2800,0", "-1000,500"]);
+  assert.deepEqual(kept([0, 0, 0, 0]), ["0,0", "-2800,0", "-1000,500"], "control: the old bounds");
+  assert.deepEqual(camerasAfterResize([{ targetX: -2816, targetY: 2816 }], [-2816, -3328, 2816, 2816, -2816, 2816, 2816, -3328]).length, 1, "on a bound: kept");
 });
 
 test("Map Size moves a start location only when it's off the new map", () => {

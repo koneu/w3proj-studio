@@ -288,11 +288,12 @@ export interface TerrainEditorHandle {
   /** Changes the map's size and its unplayable border, both per side (left, right, bottom, top;
    *  `change` in tiles added + or removed −, `complements` the border widths in tiles). Saves the
    *  map first, rewrites terrain, placements (see resizeRemovals for what is removed), map info,
-   *  regions (clipped), pathing, shadows and minimap, then reopens the terrain editor. Growth past the coordinate
+   *  regions (clipped), camera objects (those outside the new camera bounds removed), pathing, shadows and minimap,
+   *  then reopens the terrain editor. Growth past the coordinate
    *  limit is refused (resize.ts coordProblem; the World Editor moves the playable edge out instead). */
   resizeMap(change: [number, number, number, number], complements: [number, number, number, number]): Promise<{ removed: number }>;
-  /** How many placed objects (special doodads included) `resizeMap` with these arguments would remove; changes
-   *  nothing. */
+  /** How many placed objects (special doodads included) and camera objects `resizeMap` with these arguments would
+   *  remove; changes nothing. */
   resizeRemovals(change: [number, number, number, number], complements: [number, number, number, number]): Promise<number>;
 }
 

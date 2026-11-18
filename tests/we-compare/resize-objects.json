@@ -1,0 +1,29 @@
+[
+  {
+    "limit": 40,
+    "name": "resize-objects-open",
+    "description": "The control for resize-objects-cut and -grow: resize-objects.w3m (tests/fixtures/we-specs/make-resize-objects.mjs: eight regions on the 32 grid and nine camera objects round the edges a cut and a growth make) opened and saved, no Map Size: the open and the save change neither file. (Regions off the 32 grid are rounded to it by the editor's open, to the nearest, halves up, which Studio doesn't: seen 2026-11-18 with an earlier input of this generator)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-objects.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3r", "as": "parsed" }, { "file": "war3map.w3c", "as": "parsed" }]
+  },
+  {
+    "limit": 40,
+    "name": "resize-objects-cut",
+    "description": "Map Size: the left and the top cut by 4 tiles each (one click on each inward arrow, to -3584 and 3584) on resize-objects.w3m: regions across the new edges are clipped to them, those left without area go; camera objects whose target is outside the new camera bounds go, the others stay where they were (2026-11-18: only 0, 0 and -1000, 500 stay; -2800 is past the new left bound -2304). Studio's resize_map left -4, top -4 (resize.ts camerasAfterResize)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-objects.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "444,536"], ["--sleep", "300"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
+    "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "left": -4, "top": -4 } }] },
+    "compare": [{ "file": "war3map.w3r", "as": "parsed" }, { "file": "war3map.w3c", "as": "parsed" }]
+  },
+  {
+    "limit": 40,
+    "name": "resize-objects-grow",
+    "description": "Map Size: the left and the bottom grown by 4 tiles each (one click on each outward arrow) on resize-objects.w3m: regions stay; camera objects outside the new camera bounds go though nothing was cut (2026-11-18: one at 3000, past the unchanged right bound, and the ones past the new left bound -3328 or the top go; one at -3000, outside the old bound -2816, stays). Studio's resize_map left 4, bottom 4",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-objects.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "444,536"], ["--sleep", "300"], ["--click", "463,333"], ["--sleep", "300"], ["--click", "608,467"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
+    "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "left": 4, "bottom": 4 } }] },
+    "compare": [{ "file": "war3map.w3r", "as": "parsed" }, { "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
+  }
+]

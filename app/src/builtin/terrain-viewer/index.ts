@@ -103,7 +103,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, camerasAfterResize, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -4411,7 +4411,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (!f && (files.has(lower) || files.has(`${lower}.json`))) out.push(`${name} couldn't be read when the terrain editor opened`);
             }
           }
-          for (const name of ["war3map.w3i", "war3map.w3r"]) {
+          for (const name of ["war3map.w3i", "war3map.w3r", "war3map.w3c"]) {
             const p = await mapDocProblem(w3, name);
             if (p) out.push(p);
           }
@@ -4478,13 +4478,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             || (doodad ? doodadStays(p.position[0], p.position[1], rect) : unitStays(p.position[0], p.position[1], half.get(p.id) ?? [0, 0], edge));
           return { rect, edge, stays };
         };
-        /** How many placed objects (special doodads included) a resize would remove; changes nothing. */
+        /** The map's camera objects (war3map.w3c), for a resize: null when the file is absent; unreadable throws. */
+        const resizeCameras = () => readMapDocStrict<{ cameras?: { targetX: number; targetY: number }[] }>(w3, "map/war3map.w3c.json");
+        /** How many placed objects (special doodads included) and camera objects a resize would remove; changes nothing. */
         const resizeRemovals = async (change: Sides, complements: Sides): Promise<number> => {
           const [w, h] = resizedSize(terrain, change);
           const next = { offsetX: terrain.offsetX - change[0] * 128, offsetY: terrain.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
           const { stays } = await resizeRules(next, complements);
           const specials = Array.isArray(dooFile?.doc.specials) ? resizeSpecials(dooFile.doc.specials as unknown[], terrain, change).removed : 0;
-          return (dooFile?.list.filter((p) => !stays(p, true)).length ?? 0) + (unitsFile?.list.filter((p) => !stays(p, false)).length ?? 0) + specials;
+          // An unreadable file counts nothing here: the resize itself refuses it, saying which (resizeReadProblems).
+          const cams = (await resizeCameras().catch(() => null))?.cameras ?? [];
+          const camsGone = cams.length - camerasAfterResize(cams, cameraBounds({ ...terrain, ...next }, complements)).length;
+          return (dooFile?.list.filter((p) => !stays(p, true)).length ?? 0) + (unitsFile?.list.filter((p) => !stays(p, false)).length ?? 0) + specials + camsGone;
         };
         const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           const next = resizeTerrain(terrain, change);
@@ -4549,6 +4554,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               r.bottom = Math.max(r.bottom, rect.bottom); r.top = Math.min(r.top, rect.top);
             }
             d.regions = list.filter((r) => r.right > r.left && r.top > r.bottom);
+          });
+          // Camera objects outside the new camera bounds go, as the World Editor's Map Size removes them (resize.ts
+          // camerasAfterResize). Absent: nothing to do; unreadable was refused before the resize.
+          await editDoc("war3map.w3c", (d) => {
+            const list = (d.cameras as { targetX: number; targetY: number }[] | undefined) ?? [];
+            const kept = camerasAfterResize(list, pb);
+            if (kept.length === list.length) return false;
+            removed += list.length - kept.length;
+            d.cameras = kept;
           });
           // Absent: none is made here. Unreadable since the check before the resize: it fails, and the files go back.
           const shd = await w3.workspace.readBytes("map/war3map.shd").catch((e) => { if (isNotFoundError(e)) return null; throw e; });
