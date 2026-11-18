@@ -116,6 +116,22 @@ fn only_wine_services_left(cmdlines: &[Vec<u8>]) -> bool {
         })
 }
 
+/// `end_idle_server` for the prefix of `exe`, if it is a Windows program in a Steam prefix; else nothing happens.
+#[cfg(unix)]
+pub fn end_idle_server_of(exe: &Path) -> bool {
+    is_windows_program(exe) && proton_for(exe).is_ok_and(|p| end_idle_server(&p))
+}
+
+/// For a program that Studio starts and doesn't wait on (the World Editor, the game): a thread waits for `child` to
+/// end, then ends the prefix's idle server as `tool_run` does. Returns the thread (the tests join it).
+#[cfg(unix)]
+pub fn end_idle_server_after(exe: PathBuf, mut child: std::process::Child) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        end_idle_server_of(&exe);
+    })
+}
+
 /// After a Windows program of ours has ended (also ended by a guard or a timeout): if nothing but Wine's own services
 /// is left in its prefix, stops that prefix's server with the build's `wineserver -k`, so it doesn't stay for good.
 /// If any other program runs in the prefix (the user's Battle.net, the game), nothing is touched: the prefix is the
@@ -310,6 +326,35 @@ mod tests {
         let _ = busy.kill();
         let _ = service.wait();
         let _ = busy.wait();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A program started and not waited on (the game): when it ends, the leftover server is stopped; not before.
+    #[cfg(unix)]
+    #[test]
+    fn the_server_is_ended_after_a_program_that_isnt_waited_on_exits() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, exe) = steam();
+        let p = proton_for(&exe).unwrap();
+        let bin = p.tool.join("files/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = root.join("k.log");
+        let server = bin.join("wineserver");
+        std::fs::write(&server, format!("#!/bin/sh\necho \"$1 $WINEPREFIX\" >> '{}'\n", log.display())).unwrap();
+        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prefix = p.compat_data.join("pfx");
+        let sleep = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|f| Path::new(f).is_file()).unwrap();
+        let fake = root.join("wineserver");
+        std::fs::copy(sleep, &fake).unwrap();
+        let mut service = Command::new(&fake).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        let child = Command::new(sleep).arg("1").spawn().unwrap();
+        let waiting = end_idle_server_after(exe.clone(), child);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!log.exists(), "the server was ended while the program ran");
+        waiting.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("-k {}", prefix.display()));
+        let _ = service.kill();
+        let _ = service.wait();
         std::fs::remove_dir_all(&root).unwrap();
     }
 
