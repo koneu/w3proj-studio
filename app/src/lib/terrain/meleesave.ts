@@ -9,7 +9,8 @@
 // start location only when it is surely invalid (startsSurelyInvalid).
 //
 // The same saves set or clear flag 0x4000, Requires The Frozen Throne data, by the placed units and items (tftflag.ts):
-// the flags these functions give can differ from the old ones in that bit alone.
+// and flag 0x0008 by the terrain's custom tilesets flag (tilesetflag.ts): the flags these functions give can differ
+// from the old ones in those bits alone.
 
 import type { W3Api } from "../../extensions/api";
 import { readIni } from "../formats/iniedit";
@@ -23,6 +24,7 @@ import { mapEdgeTiles, parseW3e, parseWaterOffsets, waterSurfaceAt, type Terrain
 import { ownGroundTiles } from "./tilesets";
 import { readTerrainBytes, terrainPath } from "./w3etext";
 import { placedNeedTft, tftFlagsAfter, typeVersions } from "./tftflag";
+import { tilesetFlagAfter } from "./tilesetflag";
 
 interface PlacedLike { id: string; player?: number; position?: readonly number[] }
 
@@ -309,12 +311,7 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   const find = (want: string) => files.find((p) => p.toLowerCase() === want.toLowerCase());
   const miscPath = find(MISC_TXT);
   const misc = miscPath ? await ws.readText(miscPath).catch(() => null) : null;
-  let ground = terrain ?? null;
-  if (terrain === undefined) {
-    const path = terrainPath(files);
-    const bytes = path ? await readTerrainBytes(path, { readText: () => ws.readText(path), readBytes: () => ws.readBytes(path) }).catch(() => null) : null;
-    try { ground = bytes ? parseW3e(bytes) : null; } catch { ground = null; }
-  }
+  const ground = terrain !== undefined ? terrain : await readGround(ws, files);
   const facts: MeleeFacts = { customConstants: misc !== null && hasCustomConstants(misc), terrain: ground };
   const versions = await readTypeVersions(ws);
   if (versions) facts.typeVersions = versions;
@@ -333,6 +330,13 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
     || (forSet && (facts.customData !== false || !facts.constantsKnown));
   if (!decided && ground) facts.around = await readSurroundings(ws, files, ground);
   return facts;
+}
+
+/** The project's saved terrain; null when there is none or it can't be read or parsed. */
+async function readGround(ws: MeleeFiles, files: readonly string[]): Promise<Terrain | null> {
+  const path = terrainPath(files);
+  const bytes = path ? await readTerrainBytes(path, { readText: () => ws.readText(path), readBytes: () => ws.readBytes(path) }).catch(() => null) : null;
+  try { return bytes ? parseW3e(bytes) : null; } catch { return null; }
 }
 
 /** The project's trigger file, parsed (null when there is none or it can't be read), and whether that is known: no
@@ -418,8 +422,9 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
  *  meleeBlockers, and back on only when meleeSetBlockers finds nothing; else the flag stays as it is. Flag 0x4000
  *  follows the placed units and items (tftflag.ts), when `facts.typeVersions` tells. */
 export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): { flags: number; reasons: string[] } {
-  // Requires The Frozen Throne data follows the placed units and items, whatever the Melee flag does.
-  const tft = (flags: number) => tftFlagsAfter(flags, placedNeedTft(placed, facts.typeVersions, info.itemTables), tftMayClear(facts));
+  // Requires The Frozen Throne data follows the placed units and items, whatever the Melee flag does; 0x0008 the
+  // terrain's custom tilesets flag.
+  const tft = (flags: number) => tilesetFlagAfter(tftFlagsAfter(flags, placedNeedTft(placed, facts.typeVersions, info.itemTables), tftMayClear(facts)), facts.terrain);
   if (!(info.flags & MELEE_MAP)) return { flags: tft(meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP), reasons: [] };
   const t = facts.terrain;
   const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed,
@@ -430,8 +435,8 @@ export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], f
 }
 
 /** meleeAfterSave with the facts read from the project. A map that isn't melee and has one of the reasons war3map.w3i
- *  and the units tell keeps its Melee flag without anything of the project being read (only the game's unit and item
- *  tables, for flag 0x4000). */
+ *  and the units tell keeps its Melee flag without the rest of the project being read (only the game's unit and item
+ *  tables, for flag 0x4000, and the terrain, for flag 0x0008, unless `terrain` is given). */
 export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readonly PlacedLike[], terrain?: Terrain | null): Promise<{ flags: number; reasons: string[] }> {
   const off = !(info.flags & MELEE_MAP);
   if (off && meleeBlockers(info, placed).length) {
@@ -446,7 +451,8 @@ export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readon
         mayClear = tftMayClear({ customData: false, triggersKnown: known, customTriggers: !!triggers && hasCustomTriggers(triggers) });
       }
     }
-    return { flags: tftFlagsAfter(info.flags, need, mayClear), reasons: [] };
+    const ground = terrain !== undefined ? terrain : await readGround(ws, ws.files().map((f) => f.path));
+    return { flags: tilesetFlagAfter(tftFlagsAfter(info.flags, need, mayClear), ground), reasons: [] };
   }
   return meleeAfterSave(info, placed, await readMeleeFacts(ws, terrain, off));
 }

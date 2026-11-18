@@ -13,6 +13,7 @@ import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { isFullPath, joinPath } from "../../lib/paths";
 import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { meleeFlagsAfter } from "../../lib/terrain/owner";
+import { tilesetFlagAfter } from "../../lib/terrain/tilesetflag";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
@@ -349,7 +350,8 @@ export function mapInfo(o: NewMapOptions, t: Terrain): unknown {
     cameraComplements: [...MARGINS],
     playableWidth: t.width - 1 - MARGINS[0] - MARGINS[1], playableHeight: t.height - 1 - MARGINS[2] - MARGINS[3],
     // A start under water is "in an invalid position": World Editor 7003's new maps on water aren't melee maps.
-    flags: meleeFlagsAfter({ flags: FLAGS }, [], waterSurfaceAt(t, sx, sy) !== null), tileset: o.tileset,
+    // Custom tilesets add flag 0x0008, as the World Editor's save does (tilesetflag.ts).
+    flags: tilesetFlagAfter(meleeFlagsAfter({ flags: FLAGS }, [], waterSurfaceAt(t, sx, sy) !== null), t), tileset: o.tileset,
     loadingScreen: { number: -1, crestRace: 64, model: "", text: "", title: "", subtitle: "" },
     gameDataSet: 0xffffffff,
     prologue: { path: "", text: "", title: "", subtitle: "" },

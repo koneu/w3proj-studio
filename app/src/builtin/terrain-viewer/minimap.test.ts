@@ -314,6 +314,22 @@ test("shownTextureMean: the mean of one colour per material (its first layer's t
   assert.equal(await shownTextureMean({ ...granary, geosets: [] }, color), null);
 });
 
+test("shownTextureMean: a material never seen (first layer alpha 0, no alpha track) doesn't count, as the HD pier ASpr's walk plane", async () => {
+  // ASpr (HD): diffuse, a glow (alpha track), the diffuse again at alpha 0 (the walk plane). The editor's dot is the mean
+  // of the first two (we-drive 2026-11-18). Colours made up.
+  const colors: Record<string, Rgb> = { diffuse: [100, 80, 60], glow: [250, 220, 130] };
+  const color = async (tex: { path: string }) => colors[tex.path] ?? null;
+  const pier = (walk: { alpha: number; alphaTrack?: unknown }) => ({
+    textures: [{ replaceableId: 0, path: "diffuse" }, { replaceableId: 0, path: "glow" }],
+    geosets: [{ materialId: 0 }, { materialId: 1 }, { materialId: 2 }],
+    materials: [{ layers: [{ textureIds: [0], alpha: 1 }] }, { layers: [{ textureIds: [1], alpha: 1, alphaTrack: {} }] }, { layers: [{ textureIds: [0], ...walk }] }],
+  });
+  assert.deepEqual(await shownTextureMean(pier({ alpha: 0 }), color), [175, 150, 95]);
+  // Controls: the same material seen (alpha 1), or with an alpha track (it may show), counts.
+  assert.deepEqual((await shownTextureMean(pier({ alpha: 1 }), color))!.map(Math.round), [150, 127, 83]);
+  assert.deepEqual((await shownTextureMean(pier({ alpha: 0, alphaTrack: {} }), color))!.map(Math.round), [150, 127, 83]);
+});
+
 test("minimapObjects: a model's colour is asked for as a mean for a dot and as the first texture's for a drawn shape", async () => {
   const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", MMRed: "0", MMGreen: "0", MMBlue: "0", pathTex });
   // A shape is a texture with gaps (a diagonal wall); a full rectangle (a gate, a tree) is a dot.

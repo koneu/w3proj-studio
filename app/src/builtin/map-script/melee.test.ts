@@ -24,7 +24,8 @@ function lake(size?: number): Uint8Array {
     // As stored: ground at -100 under water at 50 (raw values 0x2000 + 4 per unit), dry ground at 0.
     corners.push({ layer: 2, ramp: false, height: wet ? -100 : 0, rawHeight: 0x2000 + (wet ? -400 : 0), hasWater: wet, water: wet ? 50 : -2137.6, texture: 0, variation: 0, cliffVariation: 0, cliffTexture: 0, blight: false, boundary: false, rawWater: wet ? 0x2000 + 200 : 0, texExtra: 0 });
   }
-  return writeW3e({ version: 11, tileset: "L", customTilesets: false, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], width: w, height: h, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array(0) } as unknown as Terrain);
+  // Custom tilesets on, as the mini map's own terrain (its w3i has flag 0x0008, which the save keeps by this flag).
+  return writeW3e({ version: 11, tileset: "L", customTilesets: true, customTilesetsRaw: 1, groundTiles: ["Ldrt"], cliffTiles: ["CLdi"], width: w, height: h, offsetX: 0, offsetY: 0, corners, trailer: new Uint8Array(0) } as unknown as Terrain);
 }
 
 /** The mini map as a melee map with a neutral gold mine and Player 1's start at `start`, and the app's API around the

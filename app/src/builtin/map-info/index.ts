@@ -95,7 +95,8 @@ const FLAGS: [number, string][] = [
 ];
 /** Bits the editor sets itself; shown read-only. */
 const INTERNAL_FLAGS: [number, string][] = [
-  [0x0008, "Playable area was large and never shrunk"],
+  // The World Editor's save sets it exactly when war3map.w3e's custom tilesets flag is on (lib/terrain/tilesetflag.ts).
+  [0x0008, "Uses custom tilesets"],
   [0x0400, "Map properties dialog opened at least once"],
   [0x4000, "Requires The Frozen Throne data"],
 ];

@@ -75,12 +75,15 @@ export function textureOrder(model: { textures: readonly unknown[]; geosets: rea
  *  ruin (materials: its own texture, its own again, team colour with a second layer) is two thirds of the first
  *  texture's colour, a granary's (three materials, two textures) a third of the first and two thirds of the second
  *  (we-drive 2026-11-17, dots-more and dots-models: LSgr 84 where one of each texture said 94; the Sun Well, four
- *  materials of which three show one water texture, 0.75 of it). Not fitted: the HD Ashenvale pier ASpr (the same
- *  texture in two of its three materials; the editor's dot is the plain mean of its two textures). */
-export async function shownTextureMean(model: { textures: readonly { replaceableId: number; path: string }[]; geosets: readonly { materialId: number; lod?: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[] }[] }[] },
+ *  materials of which three show one water texture, 0.75 of it). A material that is never seen (its first layer's alpha
+ *  0 with no alpha track) doesn't count: the HD Ashenvale pier ASpr's walk plane, the diffuse texture again at alpha 0
+ *  beside the diffuse and a glow material, leaves the editor's dot the mean of the other two (we-drive 2026-11-18,
+ *  branch we-compare-3: core about 182, 152, 95 against 179.5, 149.5, 94.5; with the walk plane it would be 154). */
+export async function shownTextureMean(model: { textures: readonly { replaceableId: number; path: string }[]; geosets: readonly { materialId: number; lod?: number }[]; materials: readonly { layers: readonly { textureIds: readonly number[]; alpha?: number; alphaTrack?: unknown }[] }[] },
   colorOf: (tex: { replaceableId: number; path: string }) => Promise<Rgb | null>): Promise<Rgb | null> {
   const top = model.geosets.filter((g) => !g.lod);
-  const materials = [...new Set((top.length ? top : model.geosets).map((g) => g.materialId))];
+  const unseen = (m: number) => { const l = model.materials[m]?.layers[0]; return !!l && l.alpha === 0 && !l.alphaTrack; };
+  const materials = [...new Set((top.length ? top : model.geosets).map((g) => g.materialId))].filter((m) => !unseen(m));
   const shown = materials.map((m) => model.materials[m]?.layers[0]?.textureIds[0]).filter((t): t is number => t !== undefined);
   const colors: Rgb[] = [];
   const known = new Map<number, Rgb | null>();

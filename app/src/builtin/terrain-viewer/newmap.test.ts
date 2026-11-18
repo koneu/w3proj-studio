@@ -92,6 +92,12 @@ test("a new map on water isn't a melee map, as the World Editor's (its start is 
   assert.equal((mapInfo(choices({ water: "shallow" }), newTerrain(choices({ water: "shallow" }))) as { flags: number }).flags, 0x9c10, "only Melee goes");
 });
 
+test("a new map with custom tilesets has w3i flag 0x0008, as the World Editor's save gives it (tilesetflag.ts)", () => {
+  const flags = (o: NewMapOptions) => (mapInfo(o, newTerrain(o)) as { flags: number }).flags;
+  assert.equal(flags(choices({ customTiles: true })), 0x9c1c);
+  assert.equal(flags(choices({})), 0x9c14, "control: the tileset's own list");
+});
+
 /** Heights of a terrain's corners in world units, by rows. */
 const heightStats = (t: ReturnType<typeof newTerrain>) => {
   const z = t.corners.map((c) => (c.rawHeight - 0x2000) / 4);
