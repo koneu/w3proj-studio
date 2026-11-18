@@ -13009,6 +13009,97 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** The World Editor's stand-in for worldEditorSync: started with `<control folder> -launch -loadfile <map>` (the
+ *  folder by its wrapper), it says so in `started-<pid>`, copies the map named in `save-<pid>` over its map when that
+ *  file comes (whole and at once, as the editor's save: 13.8 MB stood whole 1.2 s after Ctrl+S, we-drive, branch
+ *  we-compare-2) and exits when `exit-<pid>` comes (at the latest after 3 minutes). */
+const WE_STANDIN = `import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const [ctl, ...args] = process.argv.slice(2);
+const map = args[args.indexOf("-loadfile") + 1];
+const me = String(process.pid);
+writeFileSync(join(ctl, "started-" + me), JSON.stringify({ args, map }));
+const end = Date.now() + 180000;
+const tick = () => {
+  const save = join(ctl, "save-" + me);
+  if (existsSync(save)) { const from = readFileSync(save, "utf8"); rmSync(save); copyFileSync(from, map); writeFileSync(join(ctl, "saved-" + me), ""); }
+  if (existsSync(join(ctl, "exit-" + me)) || Date.now() > end) process.exit(0);
+  setTimeout(tick, 100);
+};
+tick();
+`;
+
+/** Open in World Editor with a stand-in for the editor (WE_STANDIN, which takes the editor's -launch -loadfile): the
+ *  status bar's "● World Editor" mark while it runs, a save there synced into the project (project.syncOnWorldEditorSave
+ *  "always"), and the mark gone when it exits; with two open, it stays until both have exited. The real editor isn't
+ *  started (only we-drive starts it): that its save writes the -loadfile map is we-drive's --save. */
+async function worldEditorSync(page, found) {
+  const fail = (what) => found.push(`World Editor sync: ${what}`);
+  const dir = join(work, "we-sync");
+  rmSync(dir, { recursive: true, force: true });
+  const proj = join(dir, "proj"), changed = join(dir, "changed"), ctl = join(dir, "ctl"), saved = join(dir, "saved.w3x");
+  cpSync(FIXTURE, proj, { recursive: true });
+  cpSync(FIXTURE, changed, { recursive: true });
+  mkdirSync(ctl, { recursive: true });
+  mkdirSync(join(changed, "map", "war3mapImported"), { recursive: true });
+  writeFileSync(join(changed, "map", "war3mapImported", "we-saved.txt"), "saved in the World Editor\n");
+  const standin = join(dir, "standin.mjs");
+  writeFileSync(standin, WE_STANDIN);
+  const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
+  const exe = LINUX ? join(dir, "World Editor") : join(dir, "World Editor.cmd");
+  writeFileSync(exe, LINUX ? `#!/bin/sh\nexec ${sq(process.execPath)} ${sq(standin)} ${sq(ctl)} "$@"\n` : `@"${process.execPath}" "${standin}" "${ctl}" %*\r\n`);
+  if (LINUX) chmodSync(exe, 0o755);
+  const mark = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.project.we"]')?.textContent ?? null`);
+  const started = () => readdirSync(ctl).filter((n) => n.startsWith("started-")).map((n) => n.slice(8));
+  const before = await page.evaluate(`({ exe: w3.settings.get("worldEditor.path") ?? null, sync: w3.settings.get("project.syncOnWorldEditorSave") ?? null })`);
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${lit(proj)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(proj)}`));
+    await page.evaluate(`(async () => {
+      window.__weErrors = [];
+      window.__weKeptError = w3.window.showError;
+      w3.window.showError = (m, ...rest) => { window.__weErrors.push(String(m)); return window.__weKeptError(m, ...rest); };
+      await w3.settings.set("worldEditor.path", ${lit(exe)});
+      await w3.settings.set("project.syncOnWorldEditorSave", "always");
+    })()`);
+    const open = () => page.evaluate(`w3.commands.execute("w3.project.openInWorldEditor").then(() => null, (e) => String(e))`);
+    const err = await open();
+    if (err) return fail(`Open in World Editor: ${err}`);
+    const [first] = await until("the stand-in started", () => (started().length === 1 ? started() : null), 30000);
+    const { map } = JSON.parse(readFileSync(join(ctl, `started-${first}`), "utf8"));
+    if (resolve(map) !== resolve(join(proj, "build", "proj.edit.w3x"))) fail(`the editor was given ${lit(map)}, not the project's edit build`);
+    if (await mark() !== "● World Editor") fail(`with the editor open the status bar shows ${lit(await mark())}`);
+    // A save there: the map rewritten as the editor writes it, with a file the project hadn't.
+    const packed = await page.evaluate(`w3.backend.invoke("project_pack", { root: ${lit(changed)}, output: ${lit(saved)} }).then(() => null, (e) => String(e))`);
+    if (packed) return fail(`packing the map the editor "saves": ${packed}`);
+    writeFileSync(join(ctl, `save-${first}`), saved);
+    const synced = join(proj, "map", "war3mapImported", "we-saved.txt");
+    await until("the save synced into the project", () => existsSync(synced), 30000)
+      .catch(() => fail("the editor's save didn't reach the project"));
+    // A second editor on the map: closing the first leaves the mark, closing both ends it.
+    const err2 = await open();
+    if (err2) return fail(`Open in World Editor again: ${err2}`);
+    const second = (await until("the second stand-in started", () => (started().length === 2 ? started() : null), 30000)).find((p) => p !== first);
+    writeFileSync(join(ctl, `exit-${first}`), "");
+    // The backend looks at the editor once a second: time for a wrong "closed", nothing to wait for.
+    await sleep(3000);
+    if (await mark() !== "● World Editor") fail(`with one of two editors closed the status bar shows ${lit(await mark())}`);
+    writeFileSync(join(ctl, `exit-${second}`), "");
+    await until("the mark gone", async () => (await mark()) === "", 20000)
+      .catch(async () => fail(`after both editors closed the status bar still shows ${lit(await mark())}`));
+    const errors = await page.evaluate(`window.__weErrors`);
+    if (errors.length) fail(`errors shown: ${lit(errors)}`);
+  } finally {
+    for (const p of started()) writeFileSync(join(ctl, `exit-${p}`), "");
+    await page.evaluate(`(async () => {
+      if (window.__weKeptError) w3.window.showError = window.__weKeptError;
+      await w3.settings.set("worldEditor.path", ${lit(before.exe)} ?? undefined);
+      await w3.settings.set("project.syncOnWorldEditorSave", ${lit(before.sync)} ?? undefined);
+      await w3.editors.closeAll();
+    })()`).catch(() => {});
+  }
+}
+
 /** "Check with JassHelper" on a vJASS text (Trigger Editor), with the game's jasshelper.exe (through Proton on Linux):
  *  the text is compiled inside the map's script, so a library that requires another text's library and names a placed
  *  unit's global has no errors, where the same text alone has two (the control: what the check did before). An error
@@ -15705,6 +15796,7 @@ async function run() {
         waterPathing,
         wholeMapGround,
         workbenchState,
+        worldEditorSync,
       };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
@@ -15920,6 +16012,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "scriptGuard", found);
   await vjassCheck(page, found).catch((e) => found.push(`vJASS check: ${e.message}`));
   await leftOpen(page, "vjassCheck", found);
+  await worldEditorSync(page, found).catch((e) => found.push(`World Editor sync: ${e.message}`));
+  await leftOpen(page, "worldEditorSync", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
