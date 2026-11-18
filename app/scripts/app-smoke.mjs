@@ -38,6 +38,7 @@ import { ensureCli, smokeId } from "./appctl.mjs";
 import { checkFresh, staleAllowed } from "../../tests/binfresh.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 import { lit } from "./jslit.mjs";
+import { wineserverReport } from "../../tests/wineservers.mjs";
 
 const LINUX = process.platform === "linux";
 
@@ -3548,21 +3549,24 @@ async function borderFromInfo(page, k, offset, boundary, fail, toggle) {
     await until("tile 8 shaded once the w3i's west margin is 10", async () => (wide = await keeps()) < 0.3, 20000)
       .catch(() => fail(`border from the w3i: with the w3i's west margin at 10, tile 8 keeps ${wide.toFixed(3)} of its colour, not shaded as the editor's`));
     if (!marks && await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("border from the w3i: reading the w3i's margins marked the terrain as changed");
-    // The pathing layer drawn before the w3i's margin moved follows it: the same picture as the layer made fresh.
-    await writeInfo(original);
-    await until("tile 8 lit again before the layer", async () => (await keeps()) > 0.95, 20000);
-    await toggle("pathing");
-    const drawn = await settledMapPicture(page);
-    await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
-    // (The shade ratio isn't read with a layer on: the layer lies over it.)
-    await until("the picture changed with the margin", async () => (await pixelsApart(page, drawn, await mapPicture(page))) > 150, 20000);
-    const stale = await settledMapPicture(page);
-    await toggle("pathing");
-    await toggle("pathing");
-    const fresh = await settledMapPicture(page);
-    const apart = await pixelsApart(page, stale, fresh);
-    if (apart > 150) fail(`border from the w3i: the pathing layer drawn before the margin moved differs from a fresh one in ${apart} pixels`);
-    await toggle("pathing");
+    // A layer drawn before the w3i's margin moved follows it: the same picture as the layer made fresh. The ground
+    // pathing, naval and region layers share the border refresh.
+    for (const layer of ["pathing", "naval", "regions"]) {
+      await writeInfo(original);
+      await until(`tile 8 lit again before the ${layer} layer`, async () => (await keeps()) > 0.95, 20000);
+      await toggle(layer);
+      const drawn = await settledMapPicture(page);
+      await writeInfo(`${JSON.stringify({ ...info, cameraComplements: [10, ...info.cameraComplements.slice(1)] }, null, 2)}\n`);
+      // (The shade ratio isn't read with a layer on: the layer lies over it.)
+      await until(`the ${layer} picture changed with the margin`, async () => (await pixelsApart(page, drawn, await mapPicture(page))) > 150, 20000);
+      const stale = await settledMapPicture(page);
+      await toggle(layer);
+      await toggle(layer);
+      const fresh = await settledMapPicture(page);
+      const apart = await pixelsApart(page, stale, fresh);
+      if (apart > 150) fail(`border from the w3i: the ${layer} layer drawn before the margin moved differs from a fresh one in ${apart} pixels`);
+      await toggle(layer);
+    }
   } finally {
     await writeInfo(original);
   }
@@ -16685,6 +16689,8 @@ try {
   const found = await run();
   for (const p of found) console.error(`FAIL ${p}`);
   console.log(found.length ? `${found.length} problems` : "app smoke ok");
+  // Wine servers left running from this repository (reported, never killed: the prefix may be the user's).
+  for (const line of wineserverReport([repo, mainCheckout(repo)])) console.log(line);
   process.exit(found.length ? 1 : 0);
 } catch (e) {
   console.error(`FAIL ${e.message}`);

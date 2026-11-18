@@ -6,6 +6,7 @@
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import type { CameraObject } from "../../lib/terrain/cameras";
 import type { TerrainToolGroupInstance } from "../../extensions/services";
+import type { TerrainLook } from "./viewmodes";
 
 /** The camera objects the Camera Objects layer draws: those of a tool group that holds them (the
  *  Camera Editor, with its unsaved edits), else the saved file's. */
@@ -135,6 +136,14 @@ export type GridSize = "none" | "small" | "medium" | "large";
 /** The grid a new terrain view starts with, from the setting terrain.grid.default (anything else: large). */
 export function gridDefault(value: unknown): GridSize {
   return value === "none" || value === "small" || value === "medium" || value === "large" ? value : "large";
+}
+/** The View items a new terrain view starts with: the grid of the setting `terrain.grid.default` (`gridSetting`),
+ *  the camera bounds on, the other layers off, the terrain textured. */
+export function initialViewState(gridSetting: unknown) {
+  return {
+    grid: gridDefault(gridSetting), naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: true, info: true,
+    terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
+  };
 }
 /** Distance between grid lines: small is the pathing cell, medium the tile, large four tiles. */
 export const GRID_STEP: Record<GridSize, number> = { none: 0, small: 32, medium: 128, large: 512 };
