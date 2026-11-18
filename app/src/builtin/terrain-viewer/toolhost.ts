@@ -1,4 +1,4 @@
-import type { PlacedRef } from "./pickmatch";
+import type { PlacedRef } from "../../lib/terrain/pickmatch";
 import type { ReplaceTypes } from "./replace";
 import type { RandomHeights } from "../../lib/terrain/wholemap";
 import type { Shown, TerrainLook, ToggleLayer, ViewSet } from "./viewmodes";
@@ -18,6 +18,9 @@ export interface ViewCommands {
   viewSelection(step?: 1 | -1): string | null;
   viewEntireMap(): void;
   selectInPalette(): Promise<string | null>;
+  /** View In Object Manager (the World Editor's F1): the first selected object's row in the Object Manager, shown and
+   *  selected; the answer is why not. */
+  viewInObjectManager(): Promise<string | null>;
   /** A View item (Pathing - Naval and Ground, Height Map, Camera Objects, Camera Bounds, Regions, Light Ranges,
    *  Doodads, Units, Water, Blight): flips it and returns whether it's on now. In game view nothing changes, and the answer is why. */
   toggleLayer(layer: ToggleLayer | "water"): boolean | string;

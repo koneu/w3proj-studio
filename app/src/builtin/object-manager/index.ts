@@ -16,7 +16,7 @@ import { StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import {
-  ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, triggersUsing,
+  ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing,
   type KindData, type MapContents, type Node as TreeNode, type Target,
 } from "./data";
 
@@ -41,6 +41,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Expanded nodes by their path of labels (kept across refreshes). */
   const open = new Set<string>();
   let query = "", selected = "";
+  /** The next draw scrolls the selected row into sight (set by w3.objectManager.reveal). */
+  let scrollToSelected = false;
 
   const rootNow = () => w3.workspace.project()?.root ?? null;
   const guard = new ProjectGuard(rootNow());
@@ -118,18 +120,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The editors' services, each once one of its editors was in front (asked for only then: getting one can start its
    *  extension). What they hold, unsaved changes included, is the rows'; their edits, undo, redo and closing rebuild them. */
   const live: LiveSources = { terrain: null, triggers: null, sounds: null, objects: null };
-  const hooked = new Set<string>(), stops: Disposable[] = [];
+  const hooked = new Map<string, Promise<void>>(), stops: Disposable[] = [];
   /** The menu's commands still running (a rename waiting for its editor): what w3.objectManager.settle waits for. */
   const actions = new PendingWork();
   let disposed = false;
-  const hook = <T>(service: string, attach: (s: T) => Disposable) => {
-    if (hooked.has(service)) return;
-    hooked.add(service);
-    void w3.services.get<T>(service).then((s) => {
+  /** Resolves once the service is attached (or couldn't be had). */
+  const hook = <T>(service: string, attach: (s: T) => Disposable): Promise<void> => {
+    const was = hooked.get(service);
+    if (was) return was;
+    const p = w3.services.get<T>(service).then((s) => {
       if (disposed) return;
       stops.push(attach(s));
       reload();
     }, () => { hooked.delete(service); });
+    hooked.set(service, p);
+    return p;
   };
   const hookTerrain = () => hook<TerrainService>(TERRAIN_SERVICE, (t) => {
     live.terrain = t;
@@ -242,6 +247,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await load(true);
       return summary;
     }),
+    // View In Object Manager (the terrain editor's F1, as the World Editor's): the placed object's row, its groups opened,
+    // selected and scrolled to, the view shown. `ref` is { id, editorId, x, y }; false when no row is it.
+    w3.commands.register("w3.objectManager.reveal", async (ref?: { id?: unknown; editorId?: unknown; x?: unknown; y?: unknown }) => {
+      if (typeof ref?.x !== "number" || typeof ref.y !== "number") throw new Error("w3.objectManager.reveal takes { id, editorId, x, y } of a placed object.");
+      const want = { id: typeof ref.id === "string" ? ref.id : undefined, editorId: typeof ref.editorId === "number" ? ref.editorId : undefined, x: ref.x, y: ref.y };
+      const root = rootNow();
+      // The rows follow the open terrain editor (where the object may be unsaved) from now on.
+      if (root) await hookTerrain();
+      await load(true);
+      // Another project opened meanwhile: the object was the old one's.
+      if (rootNow() !== root || !tree) return false;
+      const path = placedPath(tree, want);
+      if (!path) return false;
+      query = ""; unusedOnly = false;
+      for (const key of path.slice(0, -1)) open.add(key);
+      selected = path[path.length - 1];
+      scrollToSelected = true;
+      await w3.views.show("objectManager");
+      w3.views.refresh(VIEW);
+      return true;
+    }),
     // A saved or changed file is read again (listeners run in order: forgotten before the rebuild is due).
     w3.workspace.onDidChange(() => { forgetSaved(); reload(); }),
     w3.workspace.onDidSave(() => { forgetSaved(); reload(); }),
@@ -300,6 +326,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           walk(tree ?? [], 0, "");
           rows.replaceChildren(...out);
+          if (scrollToSelected) {
+            scrollToSelected = false;
+            const row = rows.querySelector<HTMLElement>(".om-row.active");
+            // After the view is in the page, so there is something to scroll.
+            if (row) requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
+          }
         };
         /** The selected entry: what it is and the triggers that use it (click to open). */
         const showInfo = (n: TreeNode) => {

@@ -2,6 +2,7 @@
 // triggers use each thing (generated globals gg_…, object codes, variables).
 
 import { ownerOf } from "../../lib/terrain/owner";
+import { matchPlaced, type PlacedLike, type PlacedRef } from "../../lib/terrain/pickmatch";
 import { placedName, ident, type PlacedJson } from "../../lib/script/jass";
 import type { TriggerFile } from "../../lib/triggers/wtg";
 import { idsUsedBy } from "../../lib/objects/refs";
@@ -209,6 +210,23 @@ export function mapSummary(c: MapContents): [string, string][] {
 }
 
 /** The tree: groups by type, with counts. */
+/** The rows down to the placed object `ref` means (as the terrain editor finds it: lib/terrain/pickmatch), each by the
+ *  view's key ("/<label>/<label>…", the group's row first), or null when no placed row is it. */
+export function placedPath(tree: readonly Node[], ref: PlacedRef): string[] | null {
+  const rows: { keys: string[]; like: PlacedLike }[] = [];
+  const walk = (nodes: readonly Node[], keys: string[]) => {
+    for (const n of nodes) {
+      const here = [...keys, `${keys.at(-1) ?? ""}/${n.label}`];
+      const t = n.target;
+      if (n.placed && t?.kind === "point" && t.id !== undefined) rows.push({ keys: here, like: { id: t.id, editorId: t.editorId, position: [t.x, t.y] } });
+      if (n.children) walk(n.children, here);
+    }
+  };
+  walk(tree, []);
+  const i = matchPlaced(rows.map((r) => r.like), ref);
+  return i < 0 ? null : rows[i].keys;
+}
+
 export function buildTree(c: MapContents): Node[] {
   const OBJECT_EDITOR = (ext: string): GroupOpen => ({ label: "Open Object Editor", command: "w3.objectEditor.open", args: [ext] });
   const TAB = (group: ListItem["group"], label: string): GroupOpen => ({ label, command: "w3.terrain.groupItemAction", args: [group, null, "select"] });

@@ -62,3 +62,19 @@ test("in the terrain view Ctrl+Shift+B is Enforce Camera Bounds and Y Set Unifor
   assert.equal(command("y", inView), "w3.terrain.setUniformDoodadHeightsToMean");
   assert.equal(command("ctrl+shift+h", inView), "w3.terrain.toggleResetFixedHeights");
 });
+
+test("in the terrain view F1, Ctrl+F1 and Ctrl+P are the World Editor's View Selection keys; elsewhere Ctrl+P opens a file", () => {
+  // The World Editor's Edit > View Selection (we-drive, branch we-compare-5, 2026-11-18): View In Object Manager F1, View
+  // In Object Editor Ctrl+F1, Select In Tool Palette Ctrl+P.
+  const svc = new CommandService();
+  svc.contribute("core", { id: "workbench.quickOpen", title: "Go to File…", keybinding: "ctrl+p", when: "project" });
+  const terrain = JSON.parse(readFileSync(join(appSrc, "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { commands: { id: string; title: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
+  for (const c of terrain.contributes.commands) svc.contribute("x", c);
+  const bindings = defaultBindings(svc.contributions(), terrain.contributes.keybindings);
+  const command = (chord: string, ctx: Record<string, boolean>) => { const r = resolve(bindings, [chord], ctx); return r && "binding" in r ? r.binding.command : null; };
+  const inView = { terrainFocus: true, project: true, terrain: true };
+  assert.equal(command("f1", inView), "w3.terrain.selection.viewInObjectManager");
+  assert.equal(command("ctrl+f1", inView), "w3.terrain.selection.viewInObjectEditor");
+  assert.equal(command("ctrl+p", inView), "w3.terrain.selectInPalette");
+  assert.equal(command("ctrl+p", { project: true, terrain: true }), "workbench.quickOpen", "outside the terrain view it opens a file");
+});

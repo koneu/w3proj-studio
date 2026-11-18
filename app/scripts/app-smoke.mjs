@@ -7038,10 +7038,24 @@ async function viewCommands(page, fail, shots, size) {
   await run("w3.terrain.viewEntireMap");
   if (!(closeDistance < whole.camera.distance / 2)) bad(`the close view isn't closer than View Entire Map (${closeDistance} against ${whole.camera.distance})`);
   await picture("entire-map");
-  // Select In Tool Palette (the unit is selected again: deleting it took the selection away): the Objects tab opens, with the unit's type chosen.
-  await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
+  // View In Object Manager by its key, F1 as the World Editor's (Edit > View Selection): the Object Manager shows, the
+  // unit's row selected under its opened type.
+  const selectFootman = async () => {
+    await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
+    await settled(page);
+    await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+  };
+  await selectFootman();
+  await hands.chord("F1");
   await settled(page);
-  await run("w3.terrain.selectInPalette");
+  const omRow = async () => page.evaluate(`document.querySelector(".om-tree .om-row.active .tree-label")?.textContent ?? null`);
+  await until("F1's Object Manager row", async () => /^hfoo \d{4}$|^Footman \d{4}$/.test((await omRow()) ?? ""), 15000).catch(() => {});
+  const row = await omRow();
+  if (!/^(hfoo|Footman) \d{4}$/.test(row ?? "")) bad(`F1 on the selected footman: the Object Manager's selected row is ${lit(row)}`);
+  // Select In Tool Palette by its key, Ctrl+P as the World Editor's (the unit is selected again: deleting it took the
+  // selection away; the Object Manager took the keyboard): the Objects tab opens, with the unit's type chosen.
+  await selectFootman();
+  await hands.chord("Ctrl+P");
   await settled(page);
   const tab = await page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent`), hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
   if (tab !== "Objects") bad(`Select In Tool Palette left the "${tab}" tab open`);
