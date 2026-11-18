@@ -125,5 +125,15 @@ test("hasCustomTriggers counts what the World Editor's save counted (melee-flag-
   assert.equal(hasCustomTriggers(k1), false, "a renamed category");
   const k2 = plain(); trigger(k2).runOnInit = true; trigger(k2).description = "Mine";
   assert.equal(hasCustomTriggers(k2), false, "Run on Map Initialization, the description");
-  assert.equal(isDefaultTriggers(k1), false, "control: isDefaultTriggers still refuses what wasn't tried");
+  // Measured as not counting, and the editor's save decides afresh: they leave a map the default for setting the flag.
+  assert.equal(isDefaultTriggers(k1), true, "a renamed category");
+  assert.equal(isDefaultTriggers(k2), true, "Run on Map Initialization, the description");
+  assert.equal(isDefaultTriggers(f5), false, "control: Initially On off still isn't the default");
+});
+
+test("Concealed Hill's triggers (category 'Initialisierung', a deleted item counted) are the default: the map is stored melee", () => {
+  const f = defaultTriggerFile("(2)ConcealedHill.w3x");
+  f.items.find((i) => i.type === 4)!.name = "Initialisierung";
+  assert.equal(isDefaultTriggers(f), true);
+  assert.equal(hasCustomTriggers(f), false);
 });
