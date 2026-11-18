@@ -1,0 +1,57 @@
+[
+  {
+    "limit": 40,
+    "name": "building-ground-plane",
+    "description": "test.md 'The WE's own ground under buildings differs from bilinear': units stored at 999 on a plane rising 16 a tile east and 8 north (fixtures/we-specs/make-building-ground.mjs), opened and saved, SD. The editor saves a building on the highest of the four points 16 times its Scaling Value from its centre, turned with its facing (merchant 2 above the point under it at facings 0, 90, 270 and 2.121 at 45; farm 1.7; mercenary camp 1.6; a merchant with Scaling Value 2 4); the gold mine and anything without Art - Elevation - Sample Points (uept) on the point under it, a gold mine given 4 points like the merchant; Can Build On, the abilities, Placement Prevented By, the model and the placed scale play no part. Studio's save the same (objheights.ts unitGround over the skins' elevPts, collision, building and modelScale)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/building-ground.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "setting": ["game.graphicsMode", "sd"] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights", "tolerance": 0.01 }]
+  },
+  {
+    "limit": 40,
+    "name": "unit-ground-bumpy",
+    "description": "the same on ground of random corner heights 0..255, four of each type at random places and facings, SD: a building on the highest of its sample points (Sample Points 2: in front and behind; 4: a cross), any other unit with points on their mean at its collision size (sea turtles 48, hatchling turtles 32, red dragons and gryphons with 2 points at 48 and 8; custom: a footman given 4 points at 31, a turtle with collision 16 at 16, a turtle with Sample Radius 200 or Scaling Value 2 still at 48); 1 or 8 points, or 4 at collision 0, the point under it. Sample Points 3 (the siege engine hmtt, a merchant n110 and a footman h103 given 3) fit no rule found: Studio keeps them on the point under it (the twelve expected differences, units 105-112 and 121-124)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-ground-bumpy.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "setting": ["game.graphicsMode", "sd"] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights", "tolerance": 0.01, "expect": "differs",
+      "expectPaths": ["units[105].z", "units[106].z", "units[107].z", "units[108].z", "units[109].z", "units[110].z", "units[111].z", "units[112].z",
+        "units[121].z", "units[122].z", "units[123].z", "units[124].z"] }]
+  },
+  {
+    "limit": 40,
+    "name": "unit-ground-bumpy-hd",
+    "description": "unit-ground-bumpy in HD: a building's sample radius follows the Scaling Value of the graphics mode (the mercenary camp modelScale:hd 1.05: 16.8, the tavern 0.95: 15.2, where SD has 0.8 and 1), Studio's by game.graphicsMode",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/unit-ground-bumpy.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "steps": [
+        { "setting": ["script.generateOnSave", false] },
+        { "setting": ["game.graphicsMode", "hd"] },
+        { "terrain": true },
+        { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" },
+        { "sleep": 2000 }
+      ]
+    },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "unit-heights", "tolerance": 0.01, "expect": "differs",
+      "expectPaths": ["units[105].z", "units[106].z", "units[107].z", "units[108].z", "units[109].z", "units[110].z", "units[111].z", "units[112].z",
+        "units[121].z", "units[122].z", "units[123].z", "units[124].z"] }]
+  }
+]

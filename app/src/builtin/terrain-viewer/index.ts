@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
 import { givenNumber, placedValueProblem } from "./values";
-import { doodadGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { doodadGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -2863,11 +2863,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let unitMovesKnown = true;
         /** Units on the Ground on Save (objheights.ts savedUnitZ; setting terrain.units.groundOnSave): every object of
          *  war3mapUnits.doo goes to the height the World Editor's save writes for it, a ship in water to the surface,
-         *  anything else to the ground. Not an edit, as the doodads' rules on opening: no undo step; the save that runs
-         *  it writes it. One whose type isn't known (no skin; a start location has none, and goes to the ground) keeps
-         *  its height, and all do while the map's unit data can't be read. A height within unitZTolerance of the one
-         *  wanted is left as it is, so a map the World Editor saved isn't rewritten for the small differences of
-         *  Studio's ground from its own. True when one changed. */
+         *  anything else to the ground the editor works out for its type (unitGround: a building on the highest of the
+         *  points round it, a unit with sample points on their mean). Not an edit, as the doodads' rules on opening: no
+         *  undo step; the save that runs it writes it. One whose type isn't known (no skin; a start location has none,
+         *  and goes to the ground) keeps its height, and all do while the map's unit data can't be read. A height within
+         *  unitZTolerance of the one wanted is left as it is (0.01; 32 where unitGround has no rule), so a map the World
+         *  Editor saved isn't rewritten for rounding. True when one changed. */
         const groundUnitsForSave = (): boolean => {
           if (!unitsFile || !objCtx || !unitMovesKnown) return false;
           if (!switchedOn(w3, "terrain.units.groundOnSave", SWITCH_DEFAULTS["terrain.units.groundOnSave"])) return false;
@@ -2876,9 +2877,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (p.id !== "sloc" && !skinOf(p)) continue;
             const [x, y, z] = p.position;
             if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-            const moveType = moveTypeOf(p);
-            const want = savedUnitZ(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
-            if (Math.abs(want - z) <= unitZTolerance(moveType)) continue;
+            const skin = skinOf(p), moveType = skin?.moveType;
+            const ground = unitGround(terrain, x, y, p.angle, skin);
+            const want = savedUnitZ(moveType, ground ?? heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
+            if (Math.abs(want - z) <= unitZTolerance(ground !== null)) continue;
             p.position = [x, y, want];
             changed = true;
           }
