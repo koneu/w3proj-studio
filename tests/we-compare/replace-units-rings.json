@@ -1,0 +1,116 @@
+[
+  {
+    "limit": 40,
+    "name": "replace-units-rings-farm",
+    "description": "Replace Units footman -> farm beside other buildings' no-build (blue) rings than replace-units-overlap's barracks, gold mine and farm: an altar (10x10Simple), a town hall (16x16Simple), a tree of life (12x12TreeOfLife) and a necropolis (UndeadNecropolis, a ring 4 cells wide west and east) whose ring the farm reaches 16 into (r1 to r4), and a necropolis and a town hall whose rings it misses by 16 (r5, r6, the controls). Input tests/fixtures/we-compare/make-replace-units-rings-input.mjs; the editor's steps are replace-units-overlap-farm's",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-compare/replace-units-rings.w3m"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "u"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "260,41"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "288,274"
+        ],
+        [
+          "--sleep",
+          "3500"
+        ],
+        [
+          "--click",
+          "503,365"
+        ],
+        [
+          "--sleep",
+          "300"
+        ],
+        [
+          "--click",
+          "733,290"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--click",
+          "705,309"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ],
+        [
+          "--click",
+          "797,525"
+        ],
+        [
+          "--sleep",
+          "500"
+        ],
+        [
+          "--click",
+          "791,725"
+        ],
+        [
+          "--sleep",
+          "2000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "setting": [
+            "script.generateOnSave",
+            false
+          ]
+        },
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500));"
+        },
+        {
+          "mcp": "replace_objects",
+          "args": {
+            "kind": "units",
+            "swaps": {
+              "hfoo": "hhou"
+            }
+          }
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed"
+      }
+    ]
+  }
+]
