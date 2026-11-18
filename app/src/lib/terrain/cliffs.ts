@@ -216,10 +216,13 @@ export interface RampClick { done: "built" | "removed" | "none"; problem?: strin
  *  flags a line of three corners down the cliff, that corner and the two below it; on the corner just below a high
  *  one (the middle of such a line) the same line. On a plateau's corner, where the cliff falls away on two sides,
  *  both lines and the corners between them (a 3×3 block). A line beside a bend in the cliff (the next line's middle
- *  corner isn't on the low layer) isn't built: a ramp's side piece can't end there. A wider ramp is more clicks,
- *  or a drag, along the edge. A click on a line that is a ramp already does nothing in the World Editor; here it
- *  takes off the ramp it belongs to (all flagged corners joined to it), unless `keep` (a drag going over it). On a
- *  diagonal cliff, where no line fits, a step of it gets diagonalPatch's piece instead. */
+ *  corner isn't on the low layer) isn't built: a ramp's side piece can't end there; nor one from a high corner whose
+ *  neighbours along the cliff are both low (a lone corner sticking out). On a 45-degree diagonal cliff, which bends
+ *  at every corner, the high steps take nothing and a low step (high beside it along x, along y and between) the 3×3
+ *  block round it, for a click inside the tile those four corners make (spec ramp-diagonal.json, 2026-11-18). A wider
+ *  ramp is more clicks, or a drag, along the edge. A click on a line that is a ramp already does nothing in the World
+ *  Editor; here it takes off the ramp it belongs to (all flagged corners joined to it), unless `keep` (a drag going
+ *  over it). */
 export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog, keep = false): RampClick {
   const cx = Math.round((wx - t.offsetX) / 128), cy = Math.round((wy - t.offsetY) / 128);
   const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
@@ -237,6 +240,9 @@ export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog,
       const m = at(hx + dx + s * dy, hy + dy + s * dx);
       if (m && m.layer !== hi - 1) return null;
     }
+    // The cliff's edge goes on beside the high corner on one side at least: a lone corner sticking out (a diagonal
+    // cliff's tip) takes no line.
+    if (![1, -1].some((s) => at(hx + s * dy, hy + s * dx)?.layer === hi)) return null;
     return cells;
   };
   const found: [number, number][][] = [];
@@ -259,10 +265,22 @@ export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog,
     const l = line(cx - dx, cy - dy, [dx, dy]);
     if (l) found.push(l);
   }
-  // A diagonal cliff, where every line has a bend beside it: the corners of its cliff tiles round the corner.
+  // The low corner of a diagonal cliff's step (high beside it along x and along y, and between them), clicked inside
+  // the tile of those four corners: the 3×3 block round it, all its corners on the two levels. (we-drive 2026-11-18,
+  // the status bar's Point under the pointer on diamond.w3x: its low step 27,28 built from 27.16,28.09, 27.17,28.22 and
+  // 27.34,28.03, not from 26.93,28.01, 26.98,28.15 or 27.15,27.96.)
+  const gx = (wx - t.offsetX) / 128 - cx, gy = (wy - t.offsetY) / 128 - cy;
+  // Half a world unit of slack: the editor built for the low step 28,27 from 27.998, 27.27 (0.3 short of it in x), not
+  // from 28.198, 26.995 (0.6 short in y); below the status bar's reading, so the edge is no sharper than that.
+  const towards = (dx: number, dy: number) => gx * dx + gy * dy >= -0.5 / 128;
   if (!found.length) {
-    const patch = diagonalPatch(t, cx, cy);
-    if (patch) found.push(patch);
+    const up = (dx: number, dy: number) => at(cx + dx, cy + dy)?.layer === c.layer + 1;
+    for (const sx of [1, -1]) for (const sy of [1, -1]) {
+      if (found.length || !up(sx, 0) || !up(0, sy) || !up(sx, sy) || !towards(sx, 0) || !towards(0, sy)) continue;
+      const box: [number, number][] = [];
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) box.push([cx + i, cy + j]);
+      if (box.every(([x, y]) => { const l = at(x, y)?.layer; return l === c.layer || l === c.layer + 1; })) found.push(box);
+    }
   }
   if (!found.length) {
     const near = dirs.map(([dx, dy]) => at(cx + dx, cy + dy)).filter((n): n is Corner => !!n);
@@ -293,46 +311,6 @@ export function rampClick(t: Terrain, wx: number, wy: number, stroke: CornerLog,
     k.ramp = true;
   }
   return { done: "built" };
-}
-
-/** The Ramp tool's piece of a diagonal one-level cliff (a staircase of tiles each with one corner off the other
- *  three's layer) at corner (cx, cy), or null if the corner isn't a step of one. A step: a high corner whose two
- *  neighbours on the low side (one along x, one along y) are low while the corners diagonally beside it along the
- *  cliff are high, or a low corner the other way round. The piece is what slopeBand flags, the World Editor's shape
- *  of a ramp on a bent or diagonal cliff (measured 2026-11-06: every corner of the cliff tiles and the low ground one
- *  step on; Last Refuge's diagonal ramp has it too), for the cliff tiles round this corner only: a drag along the
- *  diagonal joins the pieces into a ramp. The editor's click on a diagonal isn't measured; its lines (rampClick) never
- *  fit there, as the cliff bends beside each. A bump (a corner sticking out of a straight cliff) is no step. */
-export function diagonalPatch(t: Terrain, cx: number, cy: number): [number, number][] | null {
-  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
-  const c = at(cx, cy);
-  if (!c) return null;
-  const level = (x: number, y: number) => at(x, y)?.layer;
-  let hi = -1;
-  for (const sx of [1, -1]) for (const sy of [1, -1]) {
-    if (hi >= 0) break;
-    const h = c.layer, l = c.layer - 1;
-    // A high step: low beside it towards (sx, sy), high along the cliff.
-    if (level(cx + sx, cy) === l && level(cx, cy + sy) === l && level(cx + sx, cy - sy) === h && level(cx - sx, cy + sy) === h) hi = h;
-    // A low step: high beside it away from (sx, sy), low along the cliff.
-    else if (level(cx - sx, cy) === h + 1 && level(cx, cy - sy) === h + 1 && level(cx - sx, cy + sy) === h && level(cx + sx, cy - sy) === h) hi = h + 1;
-  }
-  if (hi < 0) return null;
-  const lo = hi - 1;
-  const out = new Map<number, [number, number]>();
-  const add = (x: number, y: number) => out.set(y * t.width + x, [x, y]);
-  const low: [number, number][] = [];
-  for (const [tx, ty] of [[cx - 1, cy - 1], [cx, cy - 1], [cx - 1, cy], [cx, cy]]) {
-    const q: [number, number][] = [[tx, ty], [tx + 1, ty], [tx, ty + 1], [tx + 1, ty + 1]];
-    const ls = q.map(([x, y]) => level(x, y));
-    if (!ls.includes(hi) || !ls.includes(lo) || !ls.every((v) => v === hi || v === lo)) continue;
-    for (const [x, y] of q) {
-      add(x, y);
-      if (level(x, y) === lo) low.push([x, y]);
-    }
-  }
-  for (const [x, y] of low) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (level(x + dx, y + dy) === lo) add(x + dx, y + dy);
-  return [...out.values()];
 }
 
 /** A ramp on a cliff that bends, as the World Editor flags one: every corner of the cliff tiles, and the low
