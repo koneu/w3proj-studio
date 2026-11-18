@@ -297,6 +297,9 @@ mod tests {
     #[test]
     fn an_idle_server_is_stopped_with_the_builds_wineserver_and_a_busy_one_is_left() {
         use std::os::unix::fs::PermissionsExt;
+        // One at a time: a program started in one test while the other one has just written a file to run holds that
+        // file open for a moment (a forked child before its exec), which makes the other's start fail "Text file busy".
+        let _one_at_a_time = EXEC_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let (root, exe) = steam();
         let p = proton_for(&exe).unwrap();
         let bin = p.tool.join("files/bin");
@@ -334,6 +337,9 @@ mod tests {
     #[test]
     fn the_server_is_ended_after_a_program_that_isnt_waited_on_exits() {
         use std::os::unix::fs::PermissionsExt;
+        // One at a time: a program started in one test while the other one has just written a file to run holds that
+        // file open for a moment (a forked child before its exec), which makes the other's start fail "Text file busy".
+        let _one_at_a_time = EXEC_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let (root, exe) = steam();
         let p = proton_for(&exe).unwrap();
         let bin = p.tool.join("files/bin");
@@ -358,6 +364,7 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    static EXEC_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
     /// A Steam folder with one prefix (app id 4104009084) holding the game, and a Proton build.
