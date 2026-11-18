@@ -50,11 +50,39 @@ export function shiftInside(boxes: readonly RegionBox[], dx: number, dy: number,
   return [hold(dx, within.left - lo("left"), within.right - hi("right")), hold(dy, within.bottom - lo("bottom"), within.top - hi("top"))];
 }
 
+/** The grid region edges lie on (world units). */
+export const REGION_GRID = 32;
+
+/**
+ * An edge where the World Editor puts it: on the 32 grid, the nearest line, halves up (towards +x / +y). The editor's
+ * open does that to every region of a map and its save writes them so; a region whose edges meet on one line stays
+ * with no size (we-compare region-round, 2026-11-18: 16 -> 32, -16 -> 0, -1008 -> -992, 15.9 -> 0, 16.1 -> 32,
+ * -3600.75 -> -3616, 4095.5 -> 4096, 40..47 -> 32..32). Values that aren't finite are left as they are.
+ */
+export function regionEdgeOnGrid(v: number): number {
+  if (!Number.isFinite(v)) return v;
+  return Math.floor(v / REGION_GRID + 0.5) * REGION_GRID + 0;
+}
+
+/** `regions` with every edge on the grid as the World Editor's open puts it (regionEdgeOnGrid): the regions that move
+ *  are copies, the others the same objects; null when none moves. */
+export function regionsOnGrid<T extends RegionBox>(regions: readonly T[]): T[] | null {
+  let moved = false;
+  const out = regions.map((r) => {
+    if (REGION_EDGES.every((k) => regionEdgeOnGrid(r[k]) === r[k])) return r;
+    moved = true;
+    return { ...r, left: regionEdgeOnGrid(r.left), bottom: regionEdgeOnGrid(r.bottom), right: regionEdgeOnGrid(r.right), top: regionEdgeOnGrid(r.top) };
+  });
+  return moved ? out : null;
+}
+
 /** An edge typed for region `r` (`typed`: the field's text): the change, null when it is the value `r` has, or why it
- *  is refused (nothing changes then). `within`: the map's rectangle (regionBoxProblem). */
+ *  is refused (nothing changes then). The value goes onto the region grid (regionEdgeOnGrid), where the World Editor
+ *  would put it on opening the map. `within`: the map's rectangle (regionBoxProblem). */
 export function typedRegionEdge(r: RegionBox, key: RegionEdge, typed: string, within?: RegionArea | null): { change: Partial<RegionBox> } | { refused: string } | null {
-  const v = typed.trim() === "" ? NaN : Number(typed);
-  if (!storableFloat32(v)) return { refused: float32Text(LABEL[key]) };
+  const raw = typed.trim() === "" ? NaN : Number(typed);
+  if (!storableFloat32(raw)) return { refused: float32Text(LABEL[key]) };
+  const v = regionEdgeOnGrid(raw);
   const problem = regionBoxProblem({ left: r.left, bottom: r.bottom, right: r.right, top: r.top, [key]: v }, within);
   if (problem) return { refused: `${LABEL[key]}: ${problem}` };
   return v === r[key] ? null : { change: { [key]: v } };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_REGION_INDEX, nextRegionIndex, REGION_EDGES, regionBoxProblem, shiftInside, typedRegionEdge } from "./regions";
+import { MAX_REGION_INDEX, nextRegionIndex, REGION_EDGES, regionBoxProblem, regionEdgeOnGrid, regionsOnGrid, shiftInside, typedRegionEdge } from "./regions";
 
 const region = () => ({ left: -64, bottom: -32, right: 64, top: 96, name: "Area", index: 3 });
 
@@ -34,6 +34,45 @@ test("regionBoxProblem: add_region's rectangle is refused past the float, withou
   }
   assert.ok(regionBoxProblem({ left: 32, bottom: 0, right: 32, top: 32 }));
   assert.ok(regionBoxProblem({ left: 0, bottom: 40, right: 32, top: 32 }));
+});
+
+test("regionEdgeOnGrid: the nearest line of the 32 grid, halves up, as the World Editor's open and save (we-compare region-round, 2026-11-18)", () => {
+  // The editor's saved values for region-round.w3m's edges.
+  const seen: [number, number][] = [
+    [16, 32], [48, 64], [112, 128], [1008, 1024], [-1008, -992], [-112, -96], [-48, -32], [-16, 0],
+    [15.9, 0], [16.1, 32], [47.9, 32], [48.1, 64], [-16.1, -32], [-15.9, 0], [200, 192], [208, 224], [400, 416],
+    [40, 32], [50, 64], [300, 288], [500, 512], [-1000.25, -992], [-3600.75, -3616], [100.5, 96], [333.3, 320],
+    [-4090, -4096], [-4095.5, -4096], [4090, 4096], [4095.5, 4096], [47, 32], [600, 608], [700, 704], [-47, -32], [-40, -32],
+  ];
+  for (const [v, want] of seen) assert.equal(regionEdgeOnGrid(v), want, `${v}`);
+  assert.ok(Object.is(regionEdgeOnGrid(-10), 0), "a small negative edge gives 0, not -0");
+  for (const v of [0, 32, -4096, 3.4028234663852886e38, -3.4028234663852886e38]) assert.equal(regionEdgeOnGrid(v), v);
+  for (const v of [NaN, Infinity, -Infinity]) assert.ok(Object.is(regionEdgeOnGrid(v), v));
+});
+
+test("regionsOnGrid: copies of the regions that move, the others kept; null when none moves; edges meeting stay with no size", () => {
+  const on = { left: -64, bottom: -32, right: 64, top: 96, name: "On", index: 0 };
+  const off = { left: 40, bottom: 600, right: 47, top: 700, name: "Off", index: 1 };
+  const list = [on, off];
+  const got = regionsOnGrid(list)!;
+  assert.equal(got[0], on);
+  assert.deepEqual(got[1], { left: 32, bottom: 608, right: 32, top: 704, name: "Off", index: 1 });
+  assert.deepEqual(off, { left: 40, bottom: 600, right: 47, top: 700, name: "Off", index: 1 }, "the region read isn't changed in place");
+  assert.equal(regionsOnGrid([on]), null);
+  assert.equal(regionsOnGrid([]), null);
+});
+
+test("typedRegionEdge: a typed edge goes onto the region grid; one that lands on the opposite edge is refused", () => {
+  const r = region();
+  assert.deepEqual(typedRegionEdge(r, "right", "100"), { change: { right: 96 } });
+  // Onto the value the region has already: no change.
+  assert.equal(typedRegionEdge(r, "left", "-80"), null);
+  assert.equal(typedRegionEdge(r, "top", "111.9"), null);
+  assert.deepEqual(typedRegionEdge(r, "top", "112"), { change: { top: 128 } });
+  const got = typedRegionEdge(r, "left", "50");
+  assert.ok(got && "refused" in got && /left must be below right/.test(got.refused), JSON.stringify(got));
+  const map = { left: -4096, bottom: -4096, right: 4096, top: 4096 };
+  assert.deepEqual(typedRegionEdge(r, "right", "4100", map), { change: { right: 4096 } });
 });
 
 test("nextRegionIndex: one past the highest, refused (not wrapped to 0) past the file's u32", () => {
