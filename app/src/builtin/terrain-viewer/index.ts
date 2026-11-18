@@ -8,7 +8,7 @@ import { importOr, mapObjectData, readFile, readImport, savedObjects, typeName }
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
-import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
+import { matchPlaced, type PlacedLike, type PlacedRef } from "../../lib/terrain/pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { errorText, isNotFoundError } from "../../lib/oserror";
@@ -185,6 +185,7 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.viewSelectionPrevious", (v) => v.viewSelection(-1)],
   ["w3.terrain.viewEntireMap", (v) => { v.viewEntireMap(); return null; }],
   ["w3.terrain.selectInPalette", (v) => v.selectInPalette()],
+  ["w3.terrain.selection.viewInObjectManager", (v) => v.viewInObjectManager()],
   ["w3.terrain.toggleNavalPathing", (v) => why(v.toggleLayer("naval"))],
   ["w3.terrain.toggleHeightMap", (v) => why(v.toggleLayer("heights"))],
   ["w3.terrain.toggleCameraObjects", (v) => why(v.toggleLayer("cameras"))],
@@ -5193,6 +5194,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           showTab("objects");
           return null;
         };
+        /** The first selected object's row in the Object Manager (the World Editor's F1 opens its Object Manager on it). */
+        const viewInObjectManager = async (): Promise<string | null> => {
+          const first = selectedEntries()[0];
+          if (!first) return "Nothing is selected: click an object first.";
+          const editorId = (first as { editorId?: unknown }).editorId;
+          const ref = { id: first.id, editorId: typeof editorId === "number" ? editorId : undefined, x: first.position[0], y: first.position[1] };
+          const shown = await w3.commands.execute<boolean>("w3.objectManager.reveal", ref);
+          return shown ? null : "The Object Manager doesn't list this object.";
+        };
         // The layers share one picture over the ground; it is made again after edits and saves, once they stop.
         let layerSeq = 0, layerTimer: ReturnType<typeof setTimeout> | undefined;
         /** Shown while a layer is being worked out (the pathing of a big map takes seconds). */
@@ -5393,7 +5403,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const viewCommands: ViewCommands = {
           ready: () => ready(),
-          viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
+          viewSelection, viewEntireMap, selectInPalette, viewInObjectManager, toggleLayer, cycleRandomGroups, toggleGameView,
           keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || tabKeys([id]) || lateKeys([id], false)),
           listCommand: (cmd) => {
             const g = activeInst();

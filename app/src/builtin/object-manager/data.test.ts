@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, triggersUsing, type MapContents, type Node } from "./data";
+import { ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, placedPath, triggersUsing, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -231,4 +231,17 @@ test("Edit Object Properties selects a region or camera in its tab; the usage lo
   assert.deepEqual(triggersUsing(refs, find(/^Intro$/)), ["C"]);
   assert.deepEqual(triggersUsing(refs, find(/^Count$/)), ["A"]);
   assert.deepEqual(triggersUsing(refs, find(/^Regions/)), []);
+});
+
+test("View In Object Manager: the rows down to a placed object, by creation number, else by type and place", () => {
+  // The World Editor's F1 (Edit > View Selection > View In Object Manager) opens its Object Manager on the selected
+  // object: Units, the type's row opened, the object's row (we-drive, branch we-compare-5, 2026-11-18).
+  const farm = (editorId: number, x: number) => ({ id: "hhou", position: [x, 0], player: 0, editorId });
+  const tree = buildTree(contents({ units: [farm(1, 0), farm(2, 512), placed("hfoo", 0)], doodads: [{ id: "LTlt", position: [64, 64], editorId: 7 }] }));
+  const path = placedPath(tree, { id: "hhou", editorId: 2, x: 999, y: 999 });
+  assert.deepEqual(path, ["/Units (3)", "/Units (3)/hhou (2)", "/Units (3)/hhou (2)/hhou 0002"]);
+  // A ref without a creation number: by type and place.
+  assert.deepEqual(placedPath(tree, { id: "LTlt", x: 64, y: 64 }), ["/Destructables (1)", "/Destructables (1)/LTlt (1)", "/Destructables (1)/LTlt (1)/LTlt 0007"]);
+  assert.equal(placedPath(tree, { id: "hhou", x: 64, y: 64 }), null, "no farm there");
+  assert.equal(placedPath(tree, { id: "hkni", editorId: 1, x: 0, y: 0 }), null, "another type with that number");
 });

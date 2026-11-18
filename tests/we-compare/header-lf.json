@@ -1,0 +1,106 @@
+[
+  {
+    "name": "header-lf",
+    "description": "test.md 'The World Editor writes a CRLF line break after an LF-only custom script header': a JASS map whose custom script header is two comment lines joined by LF, with no break at its end; the editor's regenerated war3map.j against Studio's after a harmless doodad edit, byte for byte (text-exact keeps the line endings: the header's LF, then the editor's CRLF after it, lib/script/jass.ts headerLines)",
+    "input": {
+      "new": {
+        "name": "HeaderLf",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n// one\n// two"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text-exact"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text-exact"
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "header-lf-end",
+    "description": "header-lf with an LF at the header's end (\"// one\\n// two\\n\"): the editor's line break after it, against Studio's",
+    "input": {
+      "new": {
+        "name": "HeaderLfEnd",
+        "width": 64,
+        "height": 64
+      },
+      "steps": [
+        {
+          "mcp": "edit_text_file",
+          "args": {
+            "path": "map/war3map.wct.txt",
+            "find": "//== header (no text) ==",
+            "replace": "//== header ==\n// one\n// two\n"
+          }
+        }
+      ]
+    },
+    "studio": {
+      "settings": {
+        "mcp.writeTools": true
+      },
+      "steps": [
+        {
+          "mcp": "place_objects",
+          "args": {
+            "kind": "doodads",
+            "objects": [
+              {
+                "id": "LTlt",
+                "x": 2000,
+                "y": 2000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.j",
+        "as": "text-exact"
+      },
+      {
+        "file": "war3map.wct.txt",
+        "as": "text-exact"
+      }
+    ],
+    "limit": 30
+  }
+]

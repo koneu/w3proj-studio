@@ -10,7 +10,8 @@
     "views": [{ "id": "w3.objectManager.tree", "title": "Object Manager", "container": "objectManager" }],
     "commands": [
       { "id": "w3.objectManager.refresh", "title": "Object Manager: Refresh", "category": "Module" },
-      { "id": "w3.objectManager.summary", "title": "Object Manager: Map Summary", "category": "Module", "hidden": true }
+      { "id": "w3.objectManager.summary", "title": "Object Manager: Map Summary", "category": "Module", "hidden": true },
+      { "id": "w3.objectManager.reveal", "title": "Object Manager: Show a Placed Object", "category": "Module", "hidden": true }
     ]
   }
 }

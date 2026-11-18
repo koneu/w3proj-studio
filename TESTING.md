@@ -220,6 +220,32 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   Studio's own camera shows the ground (`clickGround`: its 3D view isn't the editor's) agrees on 69 of 75 (before 66):
   tree S60, S80, rock S60, rune S30, E45, N80 differ (the rock's and the tree's S60 also under the old rule: a click
   there misses in Studio's frame; the rune is a thin model). Only mesh (no cylinder): rune 20 of 25, tree and rock 24.
+- **Looks against Studio, branch we-compare-5** (2026-11-18; pictures, no spec; the maps were made from
+  edge-last-step.w3m with the release CLI, unpack, JSON, pack). **Building ground marks**: farm (HSMA), town hall (HTOW),
+  barracks (HMED), orc barracks (OMED) on flat ground, SD, `--view Shadows=off`, `--look x,y,1200`, each picture against
+  one of the same map without the buildings (changed pixels over 30): the marks' widths and south edges in the editor and
+  in Studio (`app-drive --set 'game.graphicsMode="sd"' --set terrain.shadows.visible=false --compare-ready lit`) within
+  1 to 12 px (town hall 385-776 against 388-783, barracks 440-749 both, south edges within 2 px): UberSplatData's Scale is
+  half the square's side (splats.ts). A placed building's own scale (war3mapUnits.doo, 0.2) changes neither model nor mark
+  in either. **Fog from the eye** (map 02c, linear 500 to 2200, `--compare-ready`, `--look 0,0,D`): the editor's game view
+  closes the fog in as the camera goes out, as Studio's (`--compare-ready game`): mean difference over the view's top
+  half 11.7 / 12.0 / 9.3 / 1.6 / 1.6 at D 800 / 1200 / 1650 / 2500 / 3500, all fog colour from 3500 on; at 5000 the
+  editor's ground ends a third down the view (black above, the sky's edge drawn), Studio's is fog. **Rain** (a region
+  over the map with RLhr, angx and angy 10): the editor's streaks are vertical in the world (from a camera 15 degrees down
+  they spread out from the middle; near it upright), Studio's all lean about 14 degrees one way (weather.ts tiltOf); the
+  editor's are thin and bright, Studio's wider and fainter; with the camera at 3000 instead of 1650 the editor shows a
+  fifth of the streak pixels (233 against 1090), Studio as many (its box grows with the view, weather.ts viewBox).
+  Ember rain (VWeo, angx -50) and wind (WOcw, WNcw) didn't show a direction in stills. **View Selection keys** (Edit >
+  View Selection with a unit selected): Cycle Main View Next ~, Previous Shift+~, View In Object Manager F1 (opens the
+  Object Manager on Units, the type's row opened down to the object), View In Object Editor Ctrl+F1 (opens the Object
+  Editor), Select In Tool Palette Ctrl+P (the palette's type becomes the unit's, "Brush: Units - Farm", nothing
+  selected). Studio binds the three in the terrain view (extension.json; commands.test.ts, app-smoke newMaps' view
+  commands). **Camera objects** (View > Camera Objects on, a camera seen from another): the editor draws a camera model,
+  a line from it to the target and a small box at the target, no field-of-view cone; Studio's marker
+  (cameras.ts cameraMarkers: arrowhead on the target, shaft, camera) has the same parts. **Unit looks** (HD, game view):
+  a footman placed with the knight's skin is a knight in both; a footman with a stored colour 5 is in the owner's red in
+  both; a custom footman with Allow Custom Team Color (utcc 1) and colour 5 is orange in both; a custom footman with
+  Tinting Color 255, 40, 40 (uclr, uclg, uclb) is all red in the editor and untinted in Studio (no object tint is drawn).
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
