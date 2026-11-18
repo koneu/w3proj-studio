@@ -67,7 +67,7 @@ import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, randomizeHeightField, resetHeightField, TOP_LEVEL } from "../../lib/terrain/wholemap";
 import { askResetHeight, randomSettings, type ResetHeightRequest } from "./resetheight";
 import { CornerUndo, MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
-import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -3816,7 +3816,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const tiles = tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
           const full = tiles.filter((n) => n < 0).length;
           if (full) void w3.window.showWarning(`This map can't take ${full} more ground tile${full === 1 ? "" : "s"}; its first tile stands in.`);
-          const cliffs = ground.cliffs.map((id) => Math.max(0, terrain.cliffTiles.indexOf(id)));
+          const { numbers: cliffs, lost } = cliffNumbers(ground, terrain.cliffTiles, MAX_CLIFF_TYPES);
+          if (lost) void w3.window.showWarning(`${lost} pasted corner${lost === 1 ? "" : "s"} use${lost === 1 ? "s" : ""} a cliff type this map lacks (or can't number past ${MAX_CLIFF_TYPES - 1}); the map's first cliff type stands in.`);
           return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
         };
         const placePaste = async (g: Vec3) => {
