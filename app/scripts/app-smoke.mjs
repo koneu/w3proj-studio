@@ -2747,7 +2747,7 @@ async function objectPickerSuffix(page, found) {
       await soon(async () => (await rowName("nmr3")) !== null, 5000);
       const name = await rowName("nmr3");
       // The value is the one the game's table holds (NeutralUnitStrings.txt, [nmr3]: " (Lordaeron Winter)").
-      if (name !== "Mercenary Camp - (Lordaeron Winter)") fail(`${label}: nmr3 shows ${lit(name)}`);
+      if (name !== "Mercenary Camp (Lordaeron Winter)") fail(`${label}: nmr3 shows ${lit(name)}`);
       const ids = await shownIds();
       if (!ids.includes("nmr3") || ids.includes("hfoo")) fail(`${label}: "lordaeron winter" finds ${lit(ids.slice(0, 8))}`);
       await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);

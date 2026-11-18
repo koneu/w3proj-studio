@@ -34,9 +34,10 @@ export function editorSuffix(o: MapObject, kind: Pick<KindData, "fields" | "defa
   return def ? plain(resolve(def)).trim() : "";
 }
 
-/** The list label: "Name - Suffix", the name alone without a suffix. */
+/** The list label: the name, a space and the suffix, as the World Editor's object lists show it for units and
+ *  abilities alike ("Circle of Power (medium)", "Repair (Human)": we-drive 2026-11-18); the name alone without one. */
 export function labelWithSuffix(name: string, suffix: string): string {
-  return suffix ? `${name} - ${suffix}` : name;
+  return suffix ? `${name} ${suffix}` : name;
 }
 
 /** Where a kind says which tilesets an object is made for. */
