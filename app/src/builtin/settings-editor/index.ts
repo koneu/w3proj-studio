@@ -86,6 +86,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const renderList = () => {
+          const issues = new Map(w3.settings.issues(target).map((i) => [i.key, i.message]));
           const all = w3.settings.declared().filter((s) => !filter || `${s.key} ${s.section} ${label(s.key)} ${s.property.description ?? ""}`.toLowerCase().includes(filter));
           const sections = new Map<string, SettingInfo[]>();
           for (const s of all) sections.set(s.section, [...(sections.get(s.section) ?? []), s]);
@@ -105,7 +106,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 return h(`div.settings-row${own !== undefined ? ".modified" : ""}`, {},
                   h("div.settings-head", {},
                     h("span.settings-label", {}, label(s.key)), h("code.muted", {}, s.key), ...marks,
+                    editable ? h("button.link-inline.settings-json-link", { title: `Show ${s.key} in the ${target} settings file`, onclick: () => w3.commands.execute("workbench.editSettingInJson", s.key, target).catch((e) => w3.window.showError(String(e))) }, "Edit in JSON") : null,
                     own !== undefined ? h("button.link-inline", { title: `Remove from ${target} settings`, onclick: () => w3.settings.set(s.key, undefined, target) }, "Reset") : null),
+                  issues.has(s.key) ? h("div.settings-issue", { style: "color: var(--w3-error, #f14c4c)" }, issues.get(s.key)!) : null,
                   s.property.description ? h("div.settings-desc.muted", {}, s.property.description) : null,
                   h("div.settings-control", {}, control(s, value, editable),
                     !editable ? h("span.muted", {}, "User setting — not per project") : own === undefined ? h("span.muted", {}, info.user !== undefined && target === "project" ? "inherited from user" : "default") : null),

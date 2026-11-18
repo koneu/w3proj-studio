@@ -267,6 +267,8 @@ export interface Settings {
   inspect(key: string): { defaultValue?: unknown; user?: unknown; project?: unknown };
   /** Every declared setting (workbench and extensions). */
   declared(): SettingInfo[];
+  /** Values in a layer's file that don't fit their declaration (type, enum, range). */
+  issues(target?: SettingsTarget): { key: string; message: string }[];
   onDidChange(listener: (key: string) => void): Disposable;
 }
 
