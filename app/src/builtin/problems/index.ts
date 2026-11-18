@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type CheckedGroup, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
-import { MANIFEST_FILE, MINIMAL_MANIFEST, addDisabled, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
+import { MANIFEST_FILE, MINIMAL_MANIFEST, addDisabled, applySeverity, disabledIds, isDisabled, noChecksConfig, readChecksConfig, type ChecksConfig } from "./checkconfig";
 import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -94,7 +94,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (isDisabled(cfg.config, check.id)) continue;
         // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
         const started = performance.now();
-        try { result.push({ check, problems: await check.run() }); } catch (e) {
+        try { result.push({ check, problems: (await check.run()).map((p) => ({ ...p, severity: applySeverity(cfg.config, check.id, p.severity) })) }); } catch (e) {
           result.push({ check, problems: [], error: String(e instanceof Error ? e.message : e) });
         }
         performance.measure(`problems:${check.id}`, { start: started, end: performance.now() });
@@ -113,7 +113,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const shown = visible(g);
         return { id: g.check.id, title: g.check.title, problems: shown, ignored: g.problems.length - shown.length, ...(g.error ? { error: g.error } : {}) };
       });
-      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck, disabled: [...config.disable], configError: configBad };
+      return { root, adopted: true, problems: all(), ignored: ignoredCount(), ignoreError: ignoreBad, checks: byCheck, disabled: disabledIds(config), configError: configBad };
     })().finally(() => {
       // The run's documents aren't kept: the next run reads the files as they are then.
       scope = new RunScope(w3, false);
@@ -224,7 +224,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ran && ignoredCount() ? h("button.problems-show-ignored", { title: "Lists the ignored reports too, each with an Un-ignore button", onclick: run(async () => { await w3.commands.execute("w3.problems.toggleIgnored"); }) }, `${showIgnored ? "Hide" : "Show"} ignored (${ignoredCount()})`) : null,
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${errors} error${errors === 1 ? "" : "s"}, ${total.length - errors} warning${total.length - errors === 1 ? "" : "s"}` : " No problems found.") : "")));
         if (ran && configBad) el.append(h("div.view-empty.problems-failed", {}, `${configBad}. No check is switched off until it is fixed.`));
-        else if (ran && config.disable.length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${config.disable.join(", ")}`));
+        else if (ran && disabledIds(config).length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${disabledIds(config).join(", ")}`));
         if (ran && ignoreBad) el.append(h("div.view-empty.problems-failed", {}, `${ignoreBad}. Nothing is hidden, and ignoring is off until it is fixed.`));
         if (!ran) {
           el.append(h("div.view-empty", {}, "Checks the map script, files used by object data, imported models' textures, placed objects and imports. Build runs them too."));

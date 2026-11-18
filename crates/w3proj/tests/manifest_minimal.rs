@@ -29,3 +29,17 @@ fn control_a_manifest_without_format_is_refused() {
     std::fs::write(dir.join(w3proj::project::MANIFEST), "[checks]\ndisable = [\"a\"]\n").unwrap();
     assert!(Manifest::load(&dir).is_err());
 }
+
+#[test]
+fn a_checks_severity_table_loads_and_survives_a_save() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("w3proj-severity-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    let text = "format = 1\n\n[checks]\ndisable = [\"a\"]\n\n[checks.severity]\nimports = \"warning\"\n\"melee/camps\" = \"off\"\n";
+    std::fs::write(dir.join(w3proj::project::MANIFEST), text).unwrap();
+    let m = Manifest::load(&dir).expect("manifest with [checks.severity] loads");
+    m.save(&dir).unwrap();
+    let after = std::fs::read_to_string(dir.join(w3proj::project::MANIFEST)).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(after.starts_with(text), "the app's [checks] settings stay as they are when Rust saves: {after}");
+}
