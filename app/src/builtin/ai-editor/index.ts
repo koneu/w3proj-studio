@@ -12,7 +12,7 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
-import { aiNumber, GAME_SPEED_LIMITS, HARVEST_WORKER_LIMITS, repeatWavesLimits } from "./numbers";
+import { aiNumber, GAME_SPEED_LIMITS, HARVEST_WORKER_LIMITS, repeatWavesLimits, rescaleChances } from "./numbers";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { StackSave } from "../../lib/undo";
@@ -613,7 +613,7 @@ class AiView {
       h("h3", {}, "Heroes Used"),
       ...[0, 1, 2].map((i) => this.field(`Hero ${i + 1}`, this.objectButton(ai.heroes[i], `Hero ${i + 1}`, ["w3u"], (id) => { ai.heroes[i] = id; }, true))),
       h("h3", {}, "Training Order"),
-      h("div.ai-orders", {}, ...HERO_ORDERS.map((o, i) => this.field(`Heroes ${o}`, this.num(`Heroes ${o}`, ai.heroChances[i], (v) => { ai.heroChances[i] = v; }, { min: 0, max: 100 }), " %"))),
+      h("div.ai-orders", {}, ...HERO_ORDERS.map((o, i) => this.field(`Heroes ${o}`, this.num(`Heroes ${o}`, ai.heroChances[i], (v) => { ai.heroChances.splice(0, 6, ...rescaleChances(ai.heroChances, i, v)); }, { min: 0, max: 100 }), " %"))),
       h("p.muted", {}, `Chances add up to ${ai.heroChances.reduce((a, b) => a + b, 0)} %.`),
       h("h3", {}, "Skill Selection"),
       h("div.ai-tabs.ai-subtabs", {}, ...[0, 1, 2].map((i) => h(`button${i === this.hero ? ".active" : ""}`, { onclick: () => { this.hero = i; this.render(); } },
