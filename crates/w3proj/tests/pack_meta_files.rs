@@ -68,6 +68,24 @@ fn the_packed_map_has_exactly_one_entry_fewer_than_an_unsigned_original() {
     assert_eq!(p, o - 1, "only (attributes) is gone");
 }
 
+/// A map with a "(weak signature)" (the old Blizzard signing): it is bookkeeping like (signature), not map data.
+#[test]
+fn a_weak_signature_is_not_kept_in_the_project_or_the_packed_map() {
+    let d = dir("weak");
+    let mut b = ArchiveBuilder::new(WriteOptions::default());
+    b.add("war3map.w3i", vec![28, 0, 0, 0]);
+    b.add("(weak signature)", vec![0u8; 64]);
+    let map = d.join("original.w3x");
+    std::fs::write(&map, b.write(b"HM3W\0\0\0\0").unwrap()).unwrap();
+    assert!(Archive::open(&map).unwrap().read("(weak signature)").is_ok(), "control: the original has one");
+    let codecs = Registry::empty();
+    project::unpack(&map, &d.join("proj"), &codecs, &UnpackOptions::default()).unwrap();
+    assert!(!d.join("proj").join("map").join("(weak signature)").exists(), "not in the project");
+    let out = d.join("packed.w3x");
+    project::pack(&d.join("proj"), Some(&out), &codecs).unwrap();
+    assert!(Archive::open(&out).unwrap().read("(weak signature)").is_err(), "not in the packed map");
+}
+
 /// The project holds none of the bookkeeping, so a project can't carry a stale (attributes) into a pack.
 #[test]
 fn unpack_writes_no_meta_file_into_the_project() {
