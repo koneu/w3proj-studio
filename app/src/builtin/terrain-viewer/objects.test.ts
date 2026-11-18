@@ -316,6 +316,25 @@ test("a type whose skin section is spelled in another case is drawn, from its ow
   assert.equal(withObjectArt(skins, [{ kind: "w3d", custom: [{ base: "Yosh", id: "D000", mods: [] }] }]).get("D000")?.file, "Doodads\\Ship");
 });
 
+test("in HD a doodad is drawn its defScale:hd times larger, as the World Editor's HD view; the plain defScale isn't drawn", async () => {
+  // we-drive, branch we-compare-8: RuinFountain (defScale 0.9, defScale:hd 1.45) 1.45 times as large, RibBones 1.75.
+  const slk = `ID;PWXL;N;E\r\nC;Y1;X1;K"doodID"\r\nC;Y2;X1;K"ZOfo"\r\nC;Y3;X1;K"LOrb"\r\nC;Y4;X1;K"YOsw"\r\nE\r\n`;
+  const files = {
+    ...gameTables(),
+    "Doodads\\DoodadSkins.txt": "[ZOfo]\r\nfile=Doodads\\Fountain\r\ndefScale=0.900\r\ndefScale:hd=1.45\r\n[LOrb]\r\nfile=Doodads\\Bones\r\ndefScale=1.000\r\ndefScale:hd=1.75\r\n[YOsw]\r\nfile=Doodads\\Well\r\ndefScale=0.900\r\n",
+    "Doodads\\Doodads.slk": slk,
+  };
+  const hd = await loadSkins(fakeGame(files, { "game.installDir": "/defscale", "game.graphicsMode": "hd" }));
+  assert.equal(hd.get("ZOfo")?.modelScale, 1.45);
+  assert.equal(hd.get("LOrb")?.modelScale, 1.75);
+  assert.equal(hd.get("YOsw")?.modelScale, 1, "without the key: as placed, not its defScale");
+  const sd = await loadSkins(fakeGame(files, { "game.installDir": "/defscale", "game.graphicsMode": "sd" }));
+  assert.equal(sd.get("ZOfo")?.modelScale, 1, "SD draws it as placed");
+  // The drawn matrix carries it: placement's scale is the placed one times the model's.
+  const at = placement({ id: "ZOfo", position: [0, 0, 0], angle: 0, scale: [2, 2, 2] } as unknown as Placed, hd.get("ZOfo")!.modelScale);
+  assert.ok(Math.abs(Math.hypot(at[0], at[1], at[2]) - 2.9) < 1e-6, `${at[0]}`);
+});
+
 test("a placed waygate is drawn in its own colour; a type that doesn't allow one in its owner's", async () => {
   // World Editor 2.0 (we-drive, 2026-11-10, a copy of cliff.w3m): a waygate with colour 4 yellow, one with 2 teal, a
   // waygate type with utcc 0 and colour 4 in Neutral Passive's, a footman type with utcc 1 and colour 6 green, a plain
