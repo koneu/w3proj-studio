@@ -801,6 +801,9 @@ test("Session: save answers a Reminder once, and copies the file once it stood s
   assert.deepEqual(res.answered, ["Reminder"]);
   assert.equal(r.calls.filter(([c, ...rest]) => c === "key" && rest.includes(9)).length, 1, "Return once, not on every poll");
   assert.deepEqual(readFileSync(dest), fakeMap("saved by the editor"));
+  // The one write seen: its size, and that it was a whole map then.
+  assert.deepEqual(res.writes.map((w) => [w.size, w.whole]), [[fakeMap("saved by the editor").length, true]]);
+  assert.ok(res.writes[0].ms >= 3000, `the write came after the Reminder (${res.writes[0].ms} ms)`);
 });
 
 test("Session: a save that writes nothing with no dialog open fails long before the timeout; a Reminder that stays is reported", async (t) => {

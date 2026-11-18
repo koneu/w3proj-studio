@@ -6,7 +6,10 @@
 // --time N writes war3mapExtra.txt's TimeOfDay (Scenario > Map Preferences > Time of Day: 1 dawn, 2 noon, 3 dusk,
 // 4 midnight) and names the map water-shadows-t<N>.w3x; --tileset B (Barrens), A (Ashenvale), N (Northrend), ...
 // puts the map on that tileset's first six ground textures and its two plain cliffs (w3e and w3i), named
-// water-shadows-<T>[-t<N>].w3x.
+// water-shadows-<T>[-t<N>].w3x. --depth D makes the shallow lake D deep (default 30; 1..60), named ...-d<D>.w3x;
+// --deep D the deep lake (default 100; 61..400), ...-D<D>.w3x; --low-flyers puts the gryphons at (-512, 448) and (1280, 256),
+// so their shadows lie in the lakes (named ...-g.w3x); --lake-trees adds a tree LTlt in each lake, at (-512, 0) and
+// (1408, 0), whose shadows (still, unlike the units', which move with their animations) fall on the water (...-T.w3x).
 //
 // Two lakes on the flat ground (corner coordinates, x east, y north; the world is (corner - 32) * 128):
 //   shallow  corners x 26..34, y 30..38, 30 deep (level 120)
@@ -29,11 +32,16 @@ const option = (name) => {
   const [, value] = argv.splice(i, 2);
   return value;
 };
-const time = option("--time"), tileset = option("--tileset");
+const time = option("--time"), tileset = option("--tileset"), depth = option("--depth"), deep = option("--deep");
+const lowFlyers = argv.includes("--low-flyers");
+if (lowFlyers) argv.splice(argv.indexOf("--low-flyers"), 1);
+const lakeTrees = argv.includes("--lake-trees");
+if (lakeTrees) argv.splice(argv.indexOf("--lake-trees"), 1);
+const inRange = (v, lo, hi) => v === undefined || (/^\d+$/.test(v) && +v >= lo && +v <= hi);
 const [cli, game, outArg] = argv.slice(0, 3).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-const usage = "usage: make-water-shadows.mjs <w3proj cli> <game folder> [out folder] [--time 1-4] [--tileset LETTER]";
-if (!game || (time !== undefined && !/^[1-4]$/.test(time)) || (tileset !== undefined && !/^[A-Z]$/.test(tileset))) { console.error(usage); process.exit(2); }
+const usage = "usage: make-water-shadows.mjs <w3proj cli> <game folder> [out folder] [--time 1-4] [--tileset LETTER] [--depth 1-60] [--deep 61-400] [--low-flyers]";
+if (!game || (time !== undefined && !/^[1-4]$/.test(time)) || (tileset !== undefined && !/^[A-Z]$/.test(tileset)) || !inRange(depth, 1, 60) || !inRange(deep, 61, 400)) { console.error(usage); process.exit(2); }
 // the plain ground (six textures) and cliffs of a tileset, by its letter
 const TILESETS = {
   B: { ground: "Bdrt Bdrh Bdrr Bdrg Bdsr Bdsd", cliffs: "CBde CBgr" },
@@ -43,7 +51,7 @@ const TILESETS = {
   W: { ground: "Wdrt Wdro Wsng Wrok Wgrs Wsnw", cliffs: "CWgr CWsn" },
 };
 if (tileset && !TILESETS[tileset]) { console.error(`unknown tileset ${tileset}: ${Object.keys(TILESETS).join(", ")}`); process.exit(2); }
-const outName = `water-shadows${tileset ? `-${tileset}` : ""}${time ? `-t${time}` : ""}.w3x`;
+const outName = `water-shadows${tileset ? `-${tileset}` : ""}${time ? `-t${time}` : ""}${depth ? `-d${depth}` : ""}${deep ? `-D${deep}` : ""}${lowFlyers ? "-g" : ""}${lakeTrees ? "-T" : ""}.w3x`;
 const outDir = outArg || resolve(here, "..", "..", "..", "target", "water-shadows");
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -52,7 +60,7 @@ const run = (...args) => {
 const N = 65;
 const rows = (f, sep = "") => Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, x) => f(x, N - 1 - r)).join(sep));
 // the surface is the stored level less 89.6, so levels of 120 and 190 are 30 and 100 deep over ground 0
-const WATER_SHALLOW = 120, WATER_DEEP = 190;
+const WATER_SHALLOW = depth ? 89.6 + Number(depth) : 120, WATER_DEEP = deep ? 89.6 + Number(deep) : 190;
 const lake = (x, y) => (y >= 30 && y <= 38 ? (x >= 26 && x <= 34 ? WATER_SHALLOW : x >= 38 && x <= 48 ? WATER_DEEP : 0) : 0);
 
 const scratch = mkdtempSync(join(tmpdir(), "we-specs-water-shadows-"));
@@ -63,7 +71,7 @@ try {
   const lines = readFileSync(w3e, "utf8").split("\n");
   const sections = {
     // the text keeps the water level in world units x 4
-    water: rows((x, y) => lake(x, y) * 4, " "),
+    water: rows((x, y) => Math.round(lake(x, y) * 4), " "),
     flags: rows((x, y) => (lake(x, y) ? "4" : "0")),
   };
   const out = [];
@@ -91,13 +99,13 @@ try {
   const unitsFile = join(dir, "map", "war3mapUnits.doo.json");
   const units = JSON.parse(readFileSync(unitsFile, "utf8"));
   const template = units.units[0];
-  const placed = [["hfoo", -1024, 0, 0], ["hfoo", -256, 256, 0], ["hfoo", 1024, 256, 0], ["hgry", 0, 640, 0], ["hgry", 1280, 640, 0]];
+  const placed = [["hfoo", -1024, 0, 0], ["hfoo", -256, 256, 0], ["hfoo", 1024, 256, 0], ...(lowFlyers ? [["hgry", -512, 448, 0], ["hgry", 1280, 256, 0]] : [["hgry", 0, 640, 0], ["hgry", 1280, 640, 0]])];
   placed.forEach(([id, x, y, z], k) => units.units.push({ ...template, id, skinId: id, position: [x, y, z], player: 0, editorId: k + 1, trailer: [0, 0] }));
   writeFileSync(unitsFile, JSON.stringify(units, null, 2));
 
   const dooFile = join(dir, "map", "war3map.doo.json");
   const doo = JSON.parse(readFileSync(dooFile, "utf8"));
-  [[-1024, 512], [256, -384]].forEach(([x, y], k) => doo.doodads.push({
+  [[-1024, 512], [256, -384], ...(lakeTrees ? [[-512, 0], [1408, 0]] : [])].forEach(([x, y], k) => doo.doodads.push({
     id: "LTlt", variation: 0, position: [x, y, 0], angle: 0, scale: [1, 1, 1], skinId: "LTlt", preFlags: 4294967295, flags: 2,
     life: 100, itemTable: -1, itemSets: [], editorId: 100 + k, trailer: [k, 0, 0], extras: [],
   }));

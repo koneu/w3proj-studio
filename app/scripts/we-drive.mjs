@@ -1271,6 +1271,9 @@ export class Session {
     // waitedFor: the windows the save waited out (the "Progress" window, an untitled one), for the step's line.
     const deadline = this.now() + this.opts.timeout * 1000, answered = [], asked = new Map(), waitedFor = new Set();
     let last = before, stillSince = 0, idleSince = this.now();
+    // How the file grew: each change of its time or size seen (every 500 ms), ms after the key and the size then, and
+    // whether it was a whole MPQ at that moment (what a watcher of the file, Studio's World Editor sync, would read).
+    const t0 = this.now(), writes = [];
     while (this.now() < deadline) {
       await this.wait(500);
       if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
@@ -1292,7 +1295,13 @@ export class Session {
       const stuck = questions.filter((d) => !asked.has(d.id) || this.now() - asked.get(d.id) > 10000);
       if (stuck.length) return { saved: false, dialogs: stuck.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("save") };
       const now = stamp();
-      if (now !== last) { last = now; stillSince = 0; idleSince = this.now(); continue; }
+      if (now !== last) {
+        last = now;
+        stillSince = 0;
+        idleSince = this.now();
+        if (now !== null && writes.length < 200) writes.push({ ms: this.now() - t0, size: Number(now.split(":")[1]), whole: fileIsWholeMpq(this.copy) });
+        continue;
+      }
       // Any window besides the main one and the run's modules (a question being answered, the "Progress" window, an
       // untitled one) means the editor is still at it: the file standing still meanwhile doesn't make it done.
       const busy = dialogs.filter((d) => !isReopenedModule(d.title));
@@ -1311,7 +1320,7 @@ export class Session {
           }
           mkdirSync(dirname(resolve(dest)), { recursive: true });
           copyFileSync(this.copy, resolve(dest));
-          return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered, waitedFor: [...waitedFor] };
+          return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered, waitedFor: [...waitedFor], writes };
         }
       }
     }
