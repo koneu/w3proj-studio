@@ -11,7 +11,7 @@ import { readTerrainBytes } from "../../lib/terrain/w3etext";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { buildMinimap, buildMinimapIcons, graphicsMode, minimapSettings } from "./minimapgen";
 import { buildPathingMap, readMapJson, specialsOf, type SpecialDoodad } from "./pathmap";
-import { doodadTypes, predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
+import { doodadTypes, predictShadows, readSpecialShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile } from "./placement";
 import type { Placed, loadSkins } from "./objects";
@@ -132,8 +132,10 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
     const failedModels = new Set<string>();
     const statsBefore: ShadowStats = { wanted: 0, unreadable: 0, failed: failedModels };
     const statsAfter: ShadowStats = { wanted: 0, unreadable: 0, failed: failedModels };
-    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsBefore);
-    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsAfter);
+    // The special doodads aren't edited: the same for both.
+    const specials = await readSpecialShadows(w3, s.specials, s.skins, s.read);
+    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsBefore, specials);
+    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3), statsAfter, specials);
     const verdicts = [shadowVerdict(statsBefore, s.baseDoodads.length, doodadTypes(s.skins)), shadowVerdict(statsAfter, s.doodads.length, doodadTypes(s.skins))];
     const refused = verdicts.find((v) => !v.write);
     if (refused) {
@@ -190,7 +192,8 @@ export async function fullShadows(w3: W3Api, opts: {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
   const stats: ShadowStats = { wanted: 0, unreadable: 0 };
-  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3), stats);
+  const specials = await readSpecialShadows(w3, specialsOf(dooFile?.doc), objects.skins, opts.read);
+  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3), stats, specials);
   const verdict = shadowVerdict(stats, dooFile?.list.length ?? 0, doodadTypes(objects.skins));
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
   const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;

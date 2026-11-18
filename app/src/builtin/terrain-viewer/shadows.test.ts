@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setGroundHeight, setLayer, type Terrain } from "../../lib/terrain/w3e";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { rampSides } from "../../lib/terrain/cliffs";
-import { castShadow, cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, terrainShadows, type ShadowMesh } from "./shadows";
+import { castShadow, cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, specialCellHeights, terrainShadows, type ShadowMesh } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
 function flat(): Terrain {
@@ -195,6 +195,32 @@ test("cliff tiles: the model named from the top-left corner on, read a quarter t
   // gives the cell (7/8, 7/8) 64 × 49/64.
   setGroundHeight(corner(t, 21, 21), 8 + 64);
   assert.equal(shadowCellHeights(t, (x, y) => (x === 20 && y === 20 ? plate : null))[83 * 256 + 83], 108 + 49);
+});
+
+test("a special doodad's tiles are read from its model as it is drawn, the flat ones too", () => {
+  // A plate 100 high over the model's +x half (x 0..192, y -192..192) of a 3 x 3 tile footprint: turned as specials are
+  // drawn (270°: specials.ts SPECIAL_FACING), its +x is the footprint's south, so the south row of tiles reads 100 and
+  // the north row nothing; turned 0 it would be the east column.
+  const plate = [0, -192, 100, 192, -192, 100, 192, 192, 100, 0, 192, 100];
+  const faces = [0, 1, 2, 0, 2, 3];
+  const south = -Math.PI / 2;
+  assert.ok(specialCellHeights(plate, faces, 3, 3, south, 1, 0).every((z) => z === 100), "south row");
+  assert.ok(specialCellHeights(plate, faces, 3, 3, south, 1, 2).every(Number.isNaN), "north row");
+  assert.ok(specialCellHeights(plate, faces, 3, 3, 0, 2, 1).every((z) => z === 100), "turned 0: the east column");
+  assert.ok(specialCellHeights(plate, faces, 3, 3, 0, 0, 1).every(Number.isNaN), "turned 0: not the west column");
+  // shadowCellHeights reads a special's tile even when it is flat (no cliff there), over the tile's lowest layer; the
+  // same heights without the mark that a special covers it leave a flat tile its ground.
+  const t = flat();
+  const cells = specialCellHeights(plate, faces, 3, 3, south, 1, 0);
+  const lookup = (x: number, y: number) => (x === 31 && y === 30 ? cells : null);
+  const marked = Object.assign((x: number, y: number) => lookup(x, y), { special: (x: number, y: number) => x === 31 && y === 30 });
+  const h = shadowCellHeights(t, marked);
+  assert.deepEqual([124, 125, 126, 127].map((x) => h[121 * 256 + x]), [100, 100, 100, 100]);
+  assert.deepEqual([124, 125, 126, 127].map((x) => shadowCellHeights(t, lookup)[121 * 256 + x]), [0, 0, 0, 0]);
+  // So such a tile casts: the cells north-east of it are dark (cells past the plate, beyond its own rise).
+  const shd = terrainShadows(t, DEFAULT_SUN, marked);
+  assert.equal(shd[124 * 256 + 128], 0xff, "a cell up the diagonal from the plate");
+  assert.equal(terrainShadows(t, DEFAULT_SUN, lookup)[124 * 256 + 128], 0, "not without the special");
 });
 
 test("a variation the shadow's cliff model doesn't have is counted round its variations", () => {

@@ -31,6 +31,8 @@
 //   --null-audio        give the editor an audio device that plays nowhere (Wine's ALSA driver on, ALSA's own config a
 //                       "null" device in the work folder; /dev/snd, PulseAudio and PipeWire stay hidden). Without it
 //                       the editor has no device and File > Preferences stops at "Unable to initialize audio device"
+//   --looks-every-map   every --map and --open gets all the run's --look cameras (default: the first map only), so a
+//                       --look after another map shows its camera there too (look n is row n in each map)
 //   --expect-layout     --wait-ready fails ("layout": why) when the main window isn't at 4,30 1352x937 or the tool
 //                       palette not at 1356,30: the layout spec clicks are measured in (we-compare passes it)
 //
@@ -382,6 +384,7 @@ export function parseArgs(argv) {
     else if (a === "--null-audio") opts.nullAudio = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
     else if (a === "--expect-layout") opts.expectLayout = true;
+    else if (a === "--looks-every-map") opts.looksEveryMap = true;
     else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
@@ -1611,7 +1614,7 @@ async function main() {
         if (step === "--map") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
-          const first = mapsStarted++ === 0, info = {};
+          const first = mapsStarted++ === 0 || !!opts.looksEveryMap, info = {};
           let via = mapAction(s.running()), fellBack = null;
           if (via === "open") {
             try {
@@ -1630,7 +1633,7 @@ async function main() {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
           mapsStarted++;
-          out({ step, map, via: "open", ...(await s.openMap(map, [])), display: s.display });
+          out({ step, map, via: "open", ...(await s.openMap(map, opts.looksEveryMap ? looks : [])), display: s.display });
         } else if (step === "--start") {
           await s.start(null);
           out({ step, display: s.display });

@@ -8,7 +8,10 @@ import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
-import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
+import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, specialCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
+import type { SpecialDoodad } from "./pathmap";
+import { SPECIAL_FACING, specialBase, specialFootprints, specialTiles, type Footprint, type TileRect } from "./specials";
+import type { W3Api } from "../../extensions/api";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { rampSides } from "../../lib/terrain/cliffs";
 
@@ -59,6 +62,8 @@ const cliffHeights = new ModeCache<Float32Array | null>();
 const cliffDirs = new ModeCache<Map<string, { cliff: string; ramp: string }>>();
 /** Ramp models' triangles for the shadows (rampCellHeights reads them per tile) by mode and path; null: unreadable. */
 const rampMeshes = new ModeCache<{ positions: number[]; faces: number[] } | null>();
+/** Special doodads' triangles for the shadows (specialCellHeights) by mode and path; null: unreadable. */
+const specialMeshes = new ModeCache<{ positions: number[]; faces: number[] } | null>();
 
 /** A model's most detailed triangles, in its own space. */
 function modelTriangles(model: ReturnType<typeof parseMdx>): { positions: number[]; faces: number[] } {
@@ -76,7 +81,7 @@ function modelTriangles(model: ReturnType<typeof parseMdx>): { positions: number
 const MAX_CLIFF_VARIATIONS = 16;
 
 /** Forgets the cliff heights read (with clearShadowMeshes). */
-function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); rampMeshes.clear(); }
+function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); rampMeshes.clear(); specialMeshes.clear(); }
 
 /** The cliff tiles' heights for the terrain's shadows: per tile, the model shadowCliffName names in its cliff type's
  *  folder (CliffTypes.slk `cliffModelDir`; the bottom-left corner's type and variation, a variation the name doesn't
@@ -84,7 +89,8 @@ function clearCliffHeights(): void { cliffHeights.clear(); cliffDirs.clear(); ra
  *  which have two, reads variation 1, make-shadow-probes.mjs shadow-cliffvar: 0 cells off, 383 with variation 0); a
  *  ramp side's tiles from its ramp model (shadowRampName). Undefined when the cliff types can't be read; a tile whose
  *  model can't be read is taken as ground (shadowCellHeights). */
-async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string): Promise<CliffCells | undefined> {
+async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string,
+  specials: readonly SpecialShadow[] = []): Promise<CliffCells | undefined> {
   const tw = t.width - 1, tiles: number[] = [];
   for (let ty = 0; ty < t.height - 1; ty++) {
     for (let tx = 0; tx < tw; tx++) {
@@ -94,12 +100,35 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
       if (cs.every((c) => c.layer - low <= 2)) tiles.push(ty * tw + tx);
     }
   }
-  if (!tiles.length) return undefined;
+  if (!tiles.length && !specials.length) return undefined;
+  // The special doodads' tiles, all of their footprints', read from their models (shadows.ts specialCellHeights).
+  const special = new Map<number, Float32Array>();
+  for (const sp of specials) {
+    const mesh = await specialMeshes.get(artMode, sp.path.toLowerCase(), async () => {
+      try {
+        const m = modelTriangles(parseMdx(await readFile(sp.path)));
+        return m.faces.length ? m : null;
+      } catch { return null; }
+    });
+    if (!mesh) continue;
+    const { x0, y0, x1, y1 } = sp.tiles, base = specialBase(t, sp.tiles);
+    for (let ty = Math.max(0, y0); ty <= Math.min(t.height - 2, y1); ty++) {
+      for (let tx = Math.max(0, x0); tx <= Math.min(tw - 1, x1); tx++) {
+        const cs = [t.corners[ty * t.width + tx], t.corners[ty * t.width + tx + 1], t.corners[(ty + 1) * t.width + tx], t.corners[(ty + 1) * t.width + tx + 1]];
+        // Over the footprint's lowest layer, where shadowCellHeights adds the tile's own.
+        const lift = base - (Math.min(...cs.map((c) => c.layer)) - 2) * 128;
+        special.set(ty * tw + tx, specialCellHeights(mesh.positions, mesh.faces, x1 - x0 + 1, y1 - y0 + 1, SPECIAL_FACING, tx - x0, ty - y0).map((z) => z + lift));
+      }
+    }
+  }
+  const withSpecials = (cells: (tx: number, ty: number) => Float32Array | null): CliffCells =>
+    Object.assign((tx: number, ty: number) => special.get(ty * tw + tx) ?? cells(tx, ty), { special: (tx: number, ty: number) => special.has(ty * tw + tx) });
+  if (!tiles.length) return withSpecials(() => null);
   const dirs = await cliffDirs.get(artMode, "CliffTypes", async () => {
     const rows = parseSlk(new TextDecoder().decode(await readFile("TerrainArt\\CliffTypes.slk")));
     return new Map(rows.filter((r) => r.cliffID && r.cliffModelDir).map((r) => [r.cliffID, { cliff: r.cliffModelDir, ramp: r.rampModelDir ?? "" }]));
   }).catch(() => null);
-  if (!dirs) return undefined;
+  if (!dirs) return special.size ? withSpecials(() => null) : undefined;
   const list = t.cliffTiles.map((id) => dirs.get(id));
   // A model that can't be read is kept as null for the mode (most are variations the cliff type doesn't have, read
   // again on every prediction otherwise): before and after of a save agree on it. clearShadowMeshes forgets it.
@@ -144,7 +173,7 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
     return n;
   };
   for (const i of tiles) {
-    if (byTile.has(i)) continue;
+    if (byTile.has(i) || special.has(i)) continue;
     const tx = i % tw, ty = (i - tx) / tw, bl = t.corners[ty * t.width + tx];
     const dir = (list[bl.cliffTexture] ?? list[0])?.cliff;
     if (!dir) continue;
@@ -153,7 +182,31 @@ async function shadowCliffs(t: Terrain, readFile: (path: string) => Promise<Uint
     const found = n ? await heights(`${stem}${shadowCliffVariation(bl.cliffVariation, n)}.mdx`) : null;
     if (found) byTile.set(i, found);
   }
-  return (tx, ty) => byTile.get(ty * tw + tx) ?? null;
+  return withSpecials((tx, ty) => byTile.get(ty * tw + tx) ?? null);
+}
+
+/** specialShadows with the footprints read (specials.ts specialFootprints; one that can't be read is one tile, as the
+ *  special is drawn then): what the shadow calculations pass predictShadows. */
+export async function readSpecialShadows(w3: W3Api, specials: readonly SpecialDoodad[], skins: Skins,
+  readFile: (path: string) => Promise<Uint8Array>): Promise<SpecialShadow[]> {
+  if (!specials.length) return [];
+  const sizes = await specialFootprints(w3, specials, readFile).catch(() => new Map<string, Footprint>());
+  return specialShadows(specials, skins, (id) => sizes.get(id));
+}
+
+/** A special doodad for the shadows: its model and the tiles its footprint covers (specials.ts specialTiles). */
+export interface SpecialShadow { path: string; tiles: TileRect }
+
+/** The special doodads (war3map.doo's second list) for predictShadows: those with a model in `skins`, by their footprint
+ *  (`footprint`: specials.ts specialFootprints; one tile when it isn't known, as they are drawn). */
+export function specialShadows(specials: readonly SpecialDoodad[], skins: Skins, footprint: (id: string) => Footprint | undefined): SpecialShadow[] {
+  const out: SpecialShadow[] = [];
+  for (const sp of specials) {
+    const skin = skins.get(sp.id);
+    if (!skin?.file) continue;
+    out.push({ path: `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? 0 : ""}.mdx`, tiles: specialTiles(sp, footprint(sp.id)) });
+  }
+  return out;
 }
 
 /** What a prediction could not use: `wanted` doodads whose model should cast a shadow, `unreadable` of those whose model
@@ -183,11 +236,12 @@ export function shadowVerdict(stats: ShadowStats, doodads: number, types: number
 
 /** `pause`: the terrain's part is done a few rows at a time, waiting for it in between (the terrain view, where it
  *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects).
- *  `artMode`: the graphics mode `readFile` reads in (game.graphicsMode), which the models' meshes are kept by. */
+ *  `artMode`: the graphics mode `readFile` reads in (game.graphicsMode), which the models' meshes are kept by.
+ *  `specials`: the special doodads (specialShadows), whose tiles are read from their models instead of the cliffs'. */
 export async function predictShadows(terrain: Terrain, doodads: Placed[], skins: Skins, baseOf: (id: string) => string | undefined,
   readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>, artMode: () => string = () => "",
-  stats?: ShadowStats): Promise<Uint8Array> {
-  const cliffs = await shadowCliffs(terrain, readFile, artMode);
+  stats?: ShadowStats, specials: readonly SpecialShadow[] = []): Promise<Uint8Array> {
+  const cliffs = await shadowCliffs(terrain, readFile, artMode, specials);
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause, cliffs) : terrainShadows(terrain, sun, cliffs);
   let since = performance.now();
   const failed = stats?.failed ?? new Set<string>();
