@@ -51,6 +51,22 @@ export async function mapDocProblem(w3: W3Api, name: string): Promise<string | n
   }
 }
 
+/** What a project whose map info is there but can't be read (`problem`, from mapDocProblem) is told: its terrain is
+ *  read-only, up front, rather than an edit refused when it's saved. */
+export function infoLockText(problem: string): string {
+  return `This map is read-only: ${problem}. Saving objects, start locations or the tileset writes that file, so the terrain isn't edited here. ` +
+    "A campaign chapter whose file is cut off (three chapters of The Chosen Ones) can be edited inside its campaign project.";
+}
+
+/** Why the terrain at `path` opens read-only: it is the project's own (`own`) and the project's war3map.w3i is there
+ *  but can't be read. Null when it can be edited: another terrain (a chapter's inside its campaign project), a map
+ *  info that reads, or none (absent is not unreadable). */
+export async function terrainInfoLock(w3: W3Api, path: string, own: string | null): Promise<string | null> {
+  if (!own || path !== own) return null;
+  const problem = await mapDocProblem(w3, "war3map.w3i");
+  return problem ? infoLockText(problem) : null;
+}
+
 /** Why the shadow map (war3map.shd) can't be read; null when it reads or is absent. */
 export async function shadowFileProblem(w3: W3Api): Promise<string | null> {
   return w3.workspace.readBytes("map/war3map.shd").then(() => null, (e) => (isNotFoundError(e) ? null : `war3map.shd can't be read (${errorText(e)})`));
