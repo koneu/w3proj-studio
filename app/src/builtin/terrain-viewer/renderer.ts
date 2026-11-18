@@ -551,7 +551,7 @@ export interface EffectSource {
 }
 
 /** The order object groups are drawn in; others come after, in the order they came. */
-export const GROUP_ORDER = ["cliffs", "shoreline", "doodads", "units"];
+export const GROUP_ORDER = ["cliffs", "specials", "shoreline", "doodads", "units"];
 
 /** The batches with one group's replaced, at the group's place in GROUP_ORDER. */
 export function withGroup<B extends { group: string }>(batches: readonly B[], group: string, replacement: readonly B[]): B[] {

@@ -2599,7 +2599,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
-            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
+            loader.load("specials", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
           specialsPlaced = specialPlaced;
@@ -2609,8 +2609,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ([...specialCliffTiles(terrain, rects)].join() !== cliffsHidden) void replanCliffs(false);
           drawnSpecials = sp.batches.flatMap((b) => b.instances.flatMap((i) => (i.pick ? [{ id: i.pick.id, x: i.world[12], y: i.world[13], z: i.world[14], model: i.pick.model }] : [])));
           for (const b of sp.batches) for (const inst of b.instances) delete inst.pick;
-          // Like the cliff models, they stand on a layer and follow the ground's height per vertex (specialBase).
-          renderer.setGroup("doodads", [...d.batches, ...sp.batches.map((b) => ({ ...b, followGround: true }))]);
+          // Like the cliff models, they stand on a layer and follow the ground's height per vertex (specialBase), and
+          // a group of their own: the World Editor's View > Doodads off keeps them, so no hole opens (we-drive,
+          // AutumnLeaves_S2, branch we-compare-8); they go with the cliffs.
+          renderer.setGroup("doodads", d.batches);
+          renderer.setGroup("specials", sp.batches.map((b) => ({ ...b, followGround: true })));
           // The start buildings inside the start locations' rings: drawn see-through without their particles
           // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
           // the units; a town hall that doesn't load is just left out.
@@ -5378,6 +5381,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             showShadowObjects();
           }
           hide("cliffs", !shown.cliffs);
+          hide("specials", !shown.cliffs);
           // The shoreline foam goes with the water.
           hide("shoreline", !shown.water);
           renderer.showWater = shown.water;

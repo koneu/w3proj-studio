@@ -3434,25 +3434,34 @@ async function specialDoodads(page, found) {
 }
 
 /** A special doodad on flat ground leaves its tiles without ground, as the World Editor does (cliffs.ts planCliffs,
- *  we-specials-5): seen from above with the doodads hidden, the middle of its footprint shows what is behind the ground
- *  (the black background of a map without fog), a spot three tiles east of it the ground. */
+ *  we-specials-5): seen from above with the cliffs hidden (the specials go with them), the middle of its footprint shows
+ *  what is behind the ground (the black background of a map without fog), a spot three tiles east of it the ground.
+ *  With the doodads hidden the special stays drawn, as the World Editor's View > Doodads off keeps it (branch
+ *  we-compare-8): no hole. */
 async function groundUnderSpecial(page, special, fail) {
   if (!special) return;
   const ed = "window.__spEd", box = [0.45, 0.45, 0.55, 0.55];
-  const toggle = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("doodads"))()`);
+  const toggle = (layer) => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer(${lit(layer)}))()`);
   const at = async (x, y) => {
     await page.evaluate(`${ed}.setView({ target: [${x}, ${y}, 0], yaw: -Math.PI / 2, pitch: Math.PI / 2 - 0.001, distance: 500 })`);
     return meanColour(page, await settledMapPicture(page), box);
   };
-  await toggle();
+  const sum = (c) => c[0] + c[1] + c[2];
+  await toggle("doodads");
+  try {
+    const kept = await at(special.x, special.y), ground = await at(special.x + 384, special.y);
+    if (!(sum(kept) >= 0.35 * sum(ground))) fail(`with the doodads hidden a special leaves a hole: its footprint's middle ${lit(kept.map(Math.round))}, ground beside it ${lit(ground.map(Math.round))}`);
+  } finally {
+    await toggle("doodads");
+  }
+  await toggle("cliffs");
   try {
     const hole = await at(special.x, special.y), ground = await at(special.x + 384, special.y);
-    const sum = (c) => c[0] + c[1] + c[2];
     if (!(sum(ground) > 60 && sum(hole) < 0.35 * sum(ground))) {
       fail(`the ground under a special on flat ground is drawn: its footprint's middle ${lit(hole.map(Math.round))}, ground beside it ${lit(ground.map(Math.round))}`);
     }
   } finally {
-    await toggle();
+    await toggle("cliffs");
   }
 }
 
@@ -3482,7 +3491,7 @@ async function borderShadeOfModels(page, k, doo, offset, fail) {
     }, 30000).catch(() => { throw new Error(`the specials across the edge aren't drawn: ${lit(specials)}`); });
     await until("both footmen drawn", async () => (await page.evaluate(`${ed}.drawnUnits().filter((u) => u.id === "hfoo").length`)) === 2, 30000);
     const looks = [
-      ...specials.map((s) => ({ what: `the special at ${Math.round(s.x)}`, x: s.x, y: s.y, z: s.z, group: "doodads", past: s.x < edgeX, black: false, distance: 1100 })),
+      ...specials.map((s) => ({ what: `the special at ${Math.round(s.x)}`, x: s.x, y: s.y, z: s.z, group: "cliffs", past: s.x < edgeX, black: false, distance: 1100 })),
       ...feet.map(([x, y]) => ({ what: `the footman at ${x}`, x, y, z: 0, group: "units", past: x < edgeX, black: true, distance: 600 })),
     ];
     for (const l of looks) {
