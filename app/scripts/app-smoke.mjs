@@ -3403,6 +3403,7 @@ async function specialDoodads(page, found) {
       if (!/\.mdx$/i.test(d.model)) fail(`${id} is drawn with the model "${d.model}"`);
     }
     if (list.some((s) => s.id === "ZZZZ")) fail("an id without a model is drawn");
+    await groundUnderSpecial(page, list.find((s) => s.id === "YCg1"), fail);
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt") || w3.editors.isDirty("map/war3map.doo.json")`)) fail("showing the specials marked the map as changed");
     const before = hash(join(k.root, "map", "war3map.doo.json"));
     await k.save();
@@ -3415,6 +3416,29 @@ async function specialDoodads(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
   } finally {
     await restoreWindow(page);
+  }
+}
+
+/** A special doodad on flat ground leaves its tiles without ground, as the World Editor does (cliffs.ts planCliffs,
+ *  we-specials-5): seen from above with the doodads hidden, the middle of its footprint shows what is behind the ground
+ *  (the black background of a map without fog), a spot three tiles east of it the ground. */
+async function groundUnderSpecial(page, special, fail) {
+  if (!special) return;
+  const ed = "window.__spEd", box = [0.45, 0.45, 0.55, 0.55];
+  const toggle = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("doodads"))()`);
+  const at = async (x, y) => {
+    await page.evaluate(`${ed}.setView({ target: [${x}, ${y}, 0], yaw: -Math.PI / 2, pitch: Math.PI / 2 - 0.001, distance: 500 })`);
+    return meanColour(page, await settledMapPicture(page), box);
+  };
+  await toggle();
+  try {
+    const hole = await at(special.x, special.y), ground = await at(special.x + 384, special.y);
+    const sum = (c) => c[0] + c[1] + c[2];
+    if (!(sum(ground) > 60 && sum(hole) < 0.35 * sum(ground))) {
+      fail(`the ground under a special on flat ground is drawn: its footprint's middle ${lit(hole.map(Math.round))}, ground beside it ${lit(ground.map(Math.round))}`);
+    }
+  } finally {
+    await toggle();
   }
 }
 

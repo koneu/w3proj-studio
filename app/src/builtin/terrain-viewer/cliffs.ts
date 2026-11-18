@@ -49,7 +49,7 @@ export interface CliffPlan {
   requests: CliffRequest[];
   /** Corner index → ground texture index: corners touching a cliff show its ground tile. */
   groundOverrides: Map<number, number>;
-  /** Cliff tiles left without a model (`hidden`): no ground is drawn there either. */
+  /** The tiles another model stands for (`hidden`, inside the map), cliff tiles or flat: no ground is drawn there. */
   hiddenTiles: number[];
 }
 
@@ -65,8 +65,11 @@ export function cliffList(t: Pick<Terrain, "cliffTiles">, types: ReadonlyMap<str
 export type CliffList = readonly (CliffType | undefined)[];
 
 /** `exists` tells whether a game path is present (to pick a variation that has a file). `hidden`: tiles (y ×
- *  (width-1) + x) another model stands for (special doodads): no cliff or ramp model there, and they are listed as
- *  the plan's `hiddenTiles` when they are cliff tiles, whose ground isn't drawn either. */
+ *  (width-1) + x) another model stands for (special doodads): no cliff or ramp model there, and no ground either, on
+ *  flat ground too (the plan's `hiddenTiles`). The World Editor leaves every tile of a special's footprint without
+ *  ground: on flat ground, where the cave or collapse model doesn't cover its tiles, the view shows through to what is
+ *  behind the ground (we-specials-5, 2026-11-18: the white quads of SD and the blue ones of HD at the footprint's edge,
+ *  the black inside of a cave; Studio drew the ground there). */
 export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (path: string) => boolean,
   hidden: ReadonlySet<number> = new Set()): CliffPlan {
   const list = cliffList(t, types);
@@ -92,7 +95,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
   // cliffs, L/H/X for ramp corners 0/1/2 layers up. Pure ramp tiles (all
   // corners flagged) stay sloped ground.
   const covered = new Set<number>();
-  const hiddenTiles: number[] = [];
+  const hiddenTiles = [...hidden].filter((i) => i >= 0 && i < tw * (t.height - 1));
   // The blocks (rampSides) a model of the cliff type's ramp folder exists for; the others are ordinary cliffs.
   rampSides(t, ({ x: bx, y: by, w: bw, outer, base, tiles }) => {
     const name = outer.map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base]).join("");
@@ -138,8 +141,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
       const z = (base - 2) * 128;
       // The models span one tile to the -x side of their origin (bottom-right corner).
       const world: Mat4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.offsetX + (x + 1) * 128, t.offsetY + y * 128, z, 1]);
-      if (hidden.has(y * tw + x)) hiddenTiles.push(y * tw + x);
-      else add(path, type, world, [y * tw + x]);
+      if (!hidden.has(y * tw + x)) add(path, type, world, [y * tw + x]);
     }
   }
   return { requests: [...byPath.values()], groundOverrides, hiddenTiles };

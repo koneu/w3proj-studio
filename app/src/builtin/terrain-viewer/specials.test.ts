@@ -119,6 +119,17 @@ test("the cliff models leave a special's tiles to it: no model there, and no gro
   assert.deepEqual(modelled(), [0, 1, 2, 3, 4, 5].map((y) => y * tw + 2));
   assert.deepEqual(modelled(hidden), [0, 3, 4, 5].map((y) => y * tw + 2));
   const plan = planCliffs(t, new Map(TYPES.map((c) => [c.cliffID, c])), () => true, hidden);
-  // Only cliff tiles are listed (tile (5, 5) is flat ground and stays drawn).
-  assert.deepEqual(plan.hiddenTiles?.sort((a, b) => a - b), [1 * tw + 2, 2 * tw + 2]);
+  // Flat tile (5, 5) loses its ground too, as in the World Editor (we-specials-5): the special stands for all its tiles.
+  assert.deepEqual(plan.hiddenTiles?.sort((a, b) => a - b), [1 * tw + 2, 2 * tw + 2, 5 * tw + 5]);
+  // Control: no specials, nothing hidden.
+  assert.deepEqual(planCliffs(t, new Map(TYPES.map((c) => [c.cliffID, c])), () => true).hiddenTiles, []);
+});
+
+test("a special on flat ground leaves its whole footprint without ground", () => {
+  const t = cliffMap(), tw = t.width - 1;
+  // A 2 × 2 tile special on the flat part of the map (no cliff there), and one reaching past its edge.
+  const hidden = specialCliffTiles(t, [{ x0: 3, y0: 3, x1: 4, y1: 4 }, { x0: 5, y0: 0, x1: 7, y1: 0 }]);
+  const plan = planCliffs(t, new Map(TYPES.map((c) => [c.cliffID, c])), () => true, hidden);
+  assert.deepEqual(plan.hiddenTiles.sort((a, b) => a - b), [0 * tw + 5, 3 * tw + 3, 3 * tw + 4, 4 * tw + 3, 4 * tw + 4]);
+  assert.equal(plan.requests.flatMap((r) => r.tiles).some((i) => plan.hiddenTiles.includes(i)), false, "no cliff model there");
 });
