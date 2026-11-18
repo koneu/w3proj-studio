@@ -1807,6 +1807,11 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Regions")?.querySelector("input")?.disabled`))) fail("the Regions box can be used in game view");
   // View > Shadows is greyed in game view, as in the World Editor.
   if (!(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Shadows")?.querySelector("input")?.disabled`))) fail("the Shadows box can be used in game view");
+  // Game view draws shadows with View > Shadows off, as the World Editor's does, and its greyed box shows them on.
+  const shadowsBox = () => page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Shadows")?.querySelector("input")?.checked`);
+  await page.evaluate(`w3.settings.set("terrain.shadows.visible", false)`);
+  await until("the Shadows setting off", async () => (await k.setting("terrain.shadows.visible")) === false, 5000).catch(() => {});
+  if (!(await state()).shadowsDrawn || !(await shadowsBox())) fail(`game view with View > Shadows off: shadows drawn ${(await state()).shadowsDrawn}, box ticked ${await shadowsBox()}`);
   const refused = await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("regions"))()`);
   if (typeof refused !== "string" || (await state()).regions) fail(`a layer toggle in game view: ${lit(refused)}`);
   // The start location can't be picked where it isn't drawn.
@@ -1827,6 +1832,10 @@ async function viewModes(page, found) {
   await until("game view off", async () => (s = await state()) && !s.gameView, 5000).catch(() => {});
   if (s.gameView || !s.shown.starts || (await k.setting("terrain.gameView")) !== false) fail("V again didn't turn game view off");
   if (!(await page.evaluate(`document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("the badge stays after game view");
+  // Out of game view View > Shadows counts again (it was left off above), then back to its default.
+  if ((await state()).shadowsDrawn || await shadowsBox()) fail(`View > Shadows off after game view: shadows drawn ${(await state()).shadowsDrawn}, box ticked ${await shadowsBox()}`);
+  await page.evaluate(`w3.settings.set("terrain.shadows.visible", undefined, "user")`);
+  await until("shadows on again", async () => (await state()).shadowsDrawn, 5000).catch(() => fail("View > Shadows back to its default didn't draw shadows"));
   // The new editor's view as the first one's was (its boxes were greyed until now).
   await stillView();
   await plainGridView(page);
@@ -12181,7 +12190,8 @@ async function shouldHaves(page, found) {
   }
   if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)})`)) fail("the terrain is unsaved after saving");
 
-  // Regions: Left typed as a number; then two selected with Shift+click take one sound in one undo step.
+  // Regions: Left typed as a number (off the grid: it lands on the nearest 32 line, as the World Editor puts it); then two
+  // selected with Shift+click take one sound in one undo step.
   await k.tool("add_region", { name: "First", left: -1024, bottom: -1024, right: -512, top: -512 });
   await k.tool("add_region", { name: "Second", left: 512, bottom: 512, right: 1024, top: 1024 });
   await settled(page);
@@ -12190,7 +12200,7 @@ async function shouldHaves(page, found) {
   const first = regions().find((r) => r.name === "First");
   await page.evaluate(`(() => { const s = document.querySelector('select[title="Go to a region"]'); s.value = ${lit(String(first.index))}; s.dispatchEvent(new Event("change")); })()`);
   await soon(() => page.evaluate(`!!document.querySelector(".terrain-region-left")`), 10000);
-  const typed = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-left"); if (!i) return false; i.value = "-1088"; i.dispatchEvent(new Event("change")); return true; })()`);
+  const typed = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-left"); if (!i) return false; i.value = "-1100"; i.dispatchEvent(new Event("change")); return true; })()`);
   if (!typed) fail("a selected region shows no Left box");
   const refused = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-right"); if (!i) return null; i.value = "-2000"; i.dispatchEvent(new Event("change")); return i.classList.contains("invalid"); })()`);
   if (refused !== true) fail(`a Right left of Left wasn't refused (${refused})`);
