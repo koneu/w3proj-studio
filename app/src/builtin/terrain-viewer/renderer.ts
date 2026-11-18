@@ -551,7 +551,7 @@ export interface EffectSource {
 }
 
 /** The order object groups are drawn in; others come after, in the order they came. */
-export const GROUP_ORDER = ["cliffs", "shoreline", "doodads", "units"];
+export const GROUP_ORDER = ["cliffs", "specials", "shoreline", "doodads", "units"];
 
 /** The batches with one group's replaced, at the group's place in GROUP_ORDER. */
 export function withGroup<B extends { group: string }>(batches: readonly B[], group: string, replacement: readonly B[]): B[] {
@@ -625,7 +625,7 @@ const WEATHER_NODES = [new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 
 
 /** The View toggles' picture. `top`: the part drawn after the water at the border (alpha over). `linear`: `tex` itself is
  *  drawn after the water too, blended in linear light over what is there (LINEAR_OVERLAY_FS). */
-interface ViewLayer { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture; linear?: boolean }
+interface ViewLayer { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture; top?: WebGLTexture; under?: WebGLTexture; linear?: boolean }
 
 export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
@@ -1221,12 +1221,16 @@ export class TerrainRenderer {
   }
 
   /** The View toggles' picture (one texel per pathing cell, rows from the south); null removes it. */
-  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0, top: Uint8Array | null = null, linear = false) {
+  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0, top: Uint8Array | null = null, linear = false, under: Uint8Array | null = null) {
     const gl = this.gl;
     // While showEverything lasts the layer lives in `held`; the picture taken doesn't show it.
     const slot = this.held ?? (this as unknown as NonNullable<TerrainRenderer["held"]>);
     if (!rgba) {
-      if (slot.viewLayer) { this.freeVao(slot.viewLayer.vao); gl.deleteTexture(slot.viewLayer.tex); if (slot.viewLayer.top) gl.deleteTexture(slot.viewLayer.top); }
+      if (slot.viewLayer) {
+        this.freeVao(slot.viewLayer.vao); gl.deleteTexture(slot.viewLayer.tex);
+        if (slot.viewLayer.top) gl.deleteTexture(slot.viewLayer.top);
+        if (slot.viewLayer.under) gl.deleteTexture(slot.viewLayer.under);
+      }
       slot.viewLayer = null;
       return;
     }
@@ -1237,6 +1241,9 @@ export class TerrainRenderer {
     // `top`: the part drawn after the water (over the border: Pathing - Ground and Regions show over water there).
     if (top) { slot.viewLayer.top ??= gl.createTexture()!; this.uploadOverlay(slot.viewLayer.top, top, width, height); }
     else if (slot.viewLayer.top) { gl.deleteTexture(slot.viewLayer.top); slot.viewLayer.top = undefined; }
+    // `under`: a part blended in linear light but under the water (HD's naval view: under the border's black water).
+    if (under) { slot.viewLayer.under ??= gl.createTexture()!; this.uploadOverlay(slot.viewLayer.under, under, width, height); }
+    else if (slot.viewLayer.under) { gl.deleteTexture(slot.viewLayer.under); slot.viewLayer.under = undefined; }
   }
 
   /** The w3i's camera complements (left, right, bottom, top, in tiles), which say where the playable map ends; null
@@ -1811,7 +1818,10 @@ export class TerrainRenderer {
       gl.bindVertexArray(layer.vao);
       gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
       gl.depthMask(true);
+      if (layer === this.viewLayer && this.viewLayer.under) this.drawLinearLayer(viewProj, this.viewLayer.under);
     }
+    // A layer drawn after the water whose `under` part still lies under it.
+    if (onGround && this.viewLayer?.linear && this.viewLayer.under) this.drawLinearLayer(viewProj, this.viewLayer.under);
 
     if (this.gridStep > 0 && onGround) this.drawGrid(viewProj);
 
@@ -2184,8 +2194,8 @@ export class TerrainRenderer {
     return this.sceneCopy.tex;
   }
 
-  /** The view layer's `tex`, blended over the picture in linear light (LINEAR_OVERLAY_FS). */
-  private drawLinearLayer(viewProj: Mat4) {
+  /** The view layer's `tex` (or another of its textures), blended over the picture in linear light (LINEAR_OVERLAY_FS). */
+  private drawLinearLayer(viewProj: Mat4, tex?: WebGLTexture) {
     const gl = this.gl, layer = this.viewLayer, t = this.terrain;
     if (!layer || gl.isContextLost()) return;
     const prog = (this.linearProg ??= compile(gl, OVERLAY_VS, LINEAR_OVERLAY_FS));
@@ -2196,7 +2206,7 @@ export class TerrainRenderer {
     gl.uniform4f(gl.getUniformLocation(prog, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
     gl.uniform1i(gl.getUniformLocation(prog, "uDst"), 1);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, layer.tex);
+    gl.bindTexture(gl.TEXTURE_2D, tex ?? layer.tex);
     gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
     gl.disable(gl.BLEND);
     gl.depthMask(false);

@@ -243,6 +243,18 @@ function shadowFields(get: (k: string) => string | undefined, kind: string): Par
   return out;
 }
 
+/** A doodad's model scale on top of its placed one: in HD its DoodadSkins.txt `defScale:hd`, else 1. The World Editor's
+ *  HD view draws a placed doodad that much larger (we-drive, branch we-compare-8, 2026-11-18, doodads placed at scale
+ *  1 against Studio's picture: RuinFountain ZOfo, defScale 0.9 and defScale:hd 1.45, came out 1.42 to 1.5 times as
+ *  large; RibBones LOrb, 1 and 1.75, 1.77 to 1.8, also at scale 2; Corn LPcr 1.1 about 1.07; AshenShrooms APms 0.65
+ *  smaller; a tree and doodads without the key alike). The plain defScale (the scale a new doodad gets) isn't drawn:
+ *  the editor's SD view shows ZOfo as Studio's. */
+export function doodadModelScale(get: (key: string) => string | undefined, mode: string): number {
+  if (mode !== "hd") return 1;
+  const v = Number(get("defscale:hd"));
+  return Number.isFinite(v) && v > 0 ? v : 1;
+}
+
 /** The skins from the tables' texts, in SKIN_TABLES' order. */
 function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   skinParses.count++;
@@ -269,7 +281,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
         numVar: Number(get("numvar") ?? 1) || 1,
         texId: Number(get("texid") ?? -1),
         texFile: get("texfile") ?? "",
-        modelScale: Number(get("modelscale") ?? 1) || 1,
+        modelScale: kind === "w3d" ? doodadModelScale((key) => sec.get(key), mode) : Number(get("modelscale") ?? 1) || 1,
         minScale: Number(get("minscale") ?? 1) || 1,
         maxScale: Number(get("maxscale") ?? 1) || 1,
         randScale: get("canplacerandscale") === "1",

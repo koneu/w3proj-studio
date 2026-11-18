@@ -6,6 +6,7 @@
 // rest). The list is not the tileset's own one (another order, more or fewer tiles), the w3e flag "custom-tilesets" is
 // 0 or 1: what the World Editor draws with 0 tells which slots it takes from the tileset's default list.
 //   rev6: the six own tiles in reverse order      more9: those and Wsnw Bdsr Ndrt      few3: Lgrs Lrok Ldrt
+//   more12: more9 and Nice Adrt Vgrs (slots 10 and 11 tell slot 0 from the own list taken round: Lgrs, Lgrd)
 //   rev6c: rev6 with the w3e's cliff list the other way round (CLgr CLdi; flat.w3x has CLdi CLgr): which list the
 //          editor's cliff type numbers follow
 // Names given: only those lists are made (the others stay as they are).
@@ -29,6 +30,7 @@ const run = (...args) => {
 const LISTS = {
   rev6: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"],
   more9: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt", "Wsnw", "Bdsr", "Ndrt"],
+  more12: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt", "Wsnw", "Bdsr", "Ndrt", "Nice", "Adrt", "Vgrs"],
   few3: ["Lgrs", "Lrok", "Ldrt"],
   rev6c: ["Lgrd", "Lgrs", "Lrok", "Ldrg", "Ldro", "Ldrt"],
 };

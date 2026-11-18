@@ -169,10 +169,13 @@ export const nextGrid = (current: GridSize): GridSize => GRID_ROUND[(GRID_ROUND.
 /** The World Editor's naval pathing colour: a half-transparent light red. Measured from its N view against the same
  *  view without it (we-drive, 2026-11-11): over land each channel came out as half the ground plus (255, 128, 128) / 2. */
 export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
-/** Over the map's edge (past the playable part) its naval view is a flat brown instead, the ground's texture and the
- *  edge's dark gone under it (we-drive, map 03's west edge, 2026-11-11: 108, 55, 15 all over; the darkened playable
- *  ground just inside came out as half of it plus half the light red, as anywhere else). */
-export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
+/** Over the map's edge (past the playable part) its naval view is a half-transparent brown over the border's dark
+ *  ground: each channel half the ground plus half (211.5, 93.5, 25.5), in plain sRGB (we-drive, branch we-compare-8,
+ *  2026-11-18, SD, View Entire Map, water on and off: map 03 over ground 6, 17, 6 gave 109, 55, 16; flat.w3x and the
+ *  empty Lordaeron Summer map over 21, 15, 10 gave 116, 54, 18; TerenasStand (Village) and EchoIsles the same rule,
+ *  half a unit off over 200 000 pixels each). The darkened playable ground just inside comes out as half of it plus half
+ *  the light red, as anywhere else. */
+export const NAVAL_EDGE: readonly number[] = [211, 93, 25, 128];
 
 /** The tiles past the playable map (the renderer's edgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
 export interface EdgeTiles { tiles: ArrayLike<number>; tilesX: number }
@@ -192,12 +195,17 @@ export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): 
   return rgba;
 }
 
-/** Over the map's edge (past the playable part) the World Editor's Pathing - Ground is a flat grey whatever the cells
- *  hold, water on or off (we-drive, border128x96, 2026-11-14: 137, 138, 137). */
-export const GROUND_EDGE: readonly number[] = [137, 138, 137, 255];
-/** Its regions are not dimmed there: the fill the playable part has, without the darker edge line (red 196, 27, 21 and
- *  yellow 194, 194, 6 for pure red and yellow, same measurement). */
-const REGION_EDGE_ALPHA = 194;
+/** The World Editor blends the View layers in plain sRGB in SD and in linear light in HD (we-drive, branch we-compare-8,
+ *  2026-11-18, map 03 with a yellow and a red region, View Entire Map, both modes): `linear` below means HD.
+ *  SD: regions 0.55 over grass, water and the border (yellow over grass 34, 109, 26 gave 155, 189, 14; over the border
+ *  6, 17, 6 gave 142, 147, 3), drawn over the water and over Pathing - Ground (yellow over the border's pathing 170, 174,
+ *  31); Pathing - Ground 0.25 (pure white over the border: 69, 76, 68; pure magenta over the dry lake bed: 88, 84, 80
+ *  from 36, 110, 26), under the water inside the playable part. HD: the alphas of REGION_FILL_ALPHA and
+ *  GROUND_PATHING_ALPHA in linear light, over the water (the earlier HD measurements, again: 194, 195, 0; 137, 138, 137). */
+export const SD_LAYER_ALPHA = { regions: 140, pathing: 64 } as const;
+/** Over the map's edge (past the playable part) the World Editor's Pathing - Ground in SD is pure white at its alpha
+ *  whatever the cells hold, water on or off. */
+export const GROUND_EDGE: readonly number[] = [255, 255, 255, SD_LAYER_ALPHA.pathing];
 /** Linear-light blend over the border (we-drive, regedge, 2026-11-15): pathing over the border is pure white at the
  *  pathing's alpha (137, 138, 137 over black ground) and a region has the playable part's fill without its rim (pure yellow
  *  194, 195, 0 alone, 210, 212, 137 under the pathing: the two blends one after the other, regions first). */
@@ -209,9 +217,6 @@ const GROUND_EDGE_LINEAR: readonly number[] = [255, 255, 255, 66];
  *  where nothing walks and pure blue where nothing can be built; regions under the pathing: red over grass 194, 86, 0,
  *  with the blue 170, 75, 137, both as the two blends one after the other give). The colour functions below give these when asked for `linear`. */
 export const REGION_FILL_ALPHA = 136;
-/** A region over the naval view's brown border: the editor's yellow there is 192, 164, 8 and red 192, 25, 8 over the
- *  brown 108, 55, 15 (we-compare-6, TESTING.md); a plain alpha-over in sRGB at 0.55 gives 189, 165, 7 and 189, 25, 7. */
-export const REGION_NAVAL_EDGE_ALPHA = 140;
 export const GROUND_PATHING_ALPHA = 66;
 
 /** Whether pathing cell `i` (row-major, `edge.tilesX * 4` wide, rows from the south) lies on a tile past the playable map. */
@@ -237,15 +242,16 @@ export function splitEdge(rgba: Uint8Array, edge: EdgeTiles): { inside: Uint8Arr
  *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). Deep
  *  water's cells are magenta too. The editor lays the layer over the water at every depth, deep water included
  *  (we-drive, a flat map of eight depths down to 1300, 2026-11-14: the same purple all over; an earlier run on a copy of
- *  (2)EchoIsles' south shore had seen deep water hide it), and View > Water off shows it too. `linear`: the colours
- *  and alpha of its linear-light blend (GROUND_PATHING_ALPHA), else the old alpha-over ones. */
+ *  (2)EchoIsles' south shore had seen deep water hide it), and View > Water off shows it too: that is HD. `linear`: the
+ *  colours and alpha of HD's linear-light blend (GROUND_PATHING_ALPHA), else SD's plain alpha-over (SD_LAYER_ALPHA). */
 export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
+  const alpha = linear ? GROUND_PATHING_ALPHA : SD_LAYER_ALPHA.pathing;
   for (let i = 0; i < cells.length; i++) {
     if (edgeCell(edge, i)) { rgba.set(linear ? GROUND_EDGE_LINEAR : GROUND_EDGE, i * 4); continue; }
     const c = cells[i];
-    if (c & NO_WALK) rgba.set(linear ? [255, 0, 255, GROUND_PATHING_ALPHA] : [230, 40, 230, 150], i * 4);
-    else if (c & NO_BUILD) rgba.set(linear ? [0, 0, 255, GROUND_PATHING_ALPHA] : [40, 90, 255, 140], i * 4);
+    if (c & NO_WALK) rgba.set([255, 0, 255, alpha], i * 4);
+    else if (c & NO_BUILD) rgba.set([0, 0, 255, alpha], i * 4);
   }
   return rgba;
 }
@@ -253,10 +259,12 @@ export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles |
 export interface RegionBox { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }
 
 /** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
- *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top. */
-export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false, overNaval = false): Uint8Array {
+ *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top.
+ *  Over the border the fill has no darker edge. `linear`: HD's alpha (REGION_FILL_ALPHA), else SD's (SD_LAYER_ALPHA). */
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(width * height * 4);
   const cell = 32;
+  const fill = linear ? REGION_FILL_ALPHA : SD_LAYER_ALPHA.regions;
   const area = (r: RegionBox) => (r.right - r.left) * (r.top - r.bottom);
   for (const r of [...regions].sort((a, b) => area(b) - area(a))) {
     if (![r.left, r.right, r.bottom, r.top].every(Number.isFinite)) continue;
@@ -266,9 +274,9 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const i = y * width + x;
-        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, overNaval ? REGION_NAVAL_EDGE_ALPHA : linear ? REGION_FILL_ALPHA : REGION_EDGE_ALPHA], i * 4); continue; }
+        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, fill], i * 4); continue; }
         const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
-        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : 170], i * 4);
+        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, fill], i * 4);
       }
     }
   }

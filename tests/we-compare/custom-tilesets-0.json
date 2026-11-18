@@ -36,6 +36,15 @@
     "limit": 20
   },
   {
+    "name": "ct0-minimap-more12-0",
+    "description": "custom-tilesets 0 with a list of 12 (make-custom-tilesets.mjs more12): slots 6 to 11 past the tileset's six; slots 10 and 11 tell its first tile (Ldrt, Studio's w3e.ts drawnGroundTiles) from the own list taken round (Lgrs, Lgrd) and from the file's own tiles (Adrt, Vgrs) (branch we-compare-8)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-more12-0.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 6 }],
+    "limit": 20
+  },
+  {
     "name": "ct0-save-rev6-0",
     "description": "custom-tilesets 0, the file's ground list the tileset's own reversed: opened and saved with no edit. The editor's save writes the tileset's own list whole (Ldrt Ldro Ldrg Lrok Lgrs Lgrd) as the ground list, the flag and the cliff list kept (we-drive 2026-11-16, branch ct0-slots). MATCH: Studio's save writes the own list too (w3e.ts savedTerrain) when the terrain view is open and its save runs, as Ctrl+S does; the spec's Studio side opens the view and makes an empty edit (as doodad-life) so that save runs. Without the view open the file is repacked as it is",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
