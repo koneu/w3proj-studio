@@ -26,6 +26,13 @@ export function literalProblem(base: string, typed: string): string | null {
   return Math.abs(Number(t)) > FLOAT32_MAX ? "A real is from -3.4e38 to 3.4e38 (a 32-bit float)." : null;
 }
 
+/** Whether `typed` is an object code (rawcode: exactly 4 characters, like hfoo) typed for a parameter of a code type
+ *  (unitcode, abilcode …). war3map.wtg keeps it as that text, as the object pickers give it, and the map script writes
+ *  it as 'hfoo' (an integer underneath), so it isn't read as a number. */
+export function isTypedCode(type: string, typed: string): boolean {
+  return /code$/.test(type) && /^.{4}$/.test(typed.trim()) && !/['\\]/.test(typed);
+}
+
 /** A variable's typed initial value (type `type`, its base type `base`) as war3map.wtg stores it: null for the
  *  default (an empty box, but for strings), or why it is refused. Reals are kept with two decimals (realText). */
 export function typedInitialValue(base: string, type: string, typed: string): { value: string | null } | { refused: string } {

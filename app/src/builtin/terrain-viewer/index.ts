@@ -4245,6 +4245,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const err = massEdit(group, k, input.value.trim());
                 input.classList.toggle("invalid", !!err);
                 input.title = err ? `${err}\n\n${title}` : title;
+                if (err) w3.window.showWarning(err);
                 if (!err) input.value = "";
               },
             });

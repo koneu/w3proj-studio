@@ -153,3 +153,12 @@ test("the list label is the name with the Editor Suffix, own value else the game
   assert.equal(labelWithSuffix("Circle of Power", "(medium)"), "Circle of Power (medium)", "the World Editor's list: a space, no dash");
   assert.equal(labelWithSuffix("Footman", ""), "Footman");
 });
+
+test("the object lists (list_objects) carry a suffix field, a custom object's own only", () => {
+  const unsf = { id: "unsf", label: "Name - Editor Suffix", repeat: 0 } as FieldMeta;
+  const k = { ...kind, fields: [unsf], defaultValue: (id: string) => (id === "hfoo" ? "Std" : undefined) };
+  const listed = mapObjectList({ custom: [{ base: "hfoo", id: "h000", mods: [] }, { base: "hfoo", id: "h001", mods: [{ field: "unsf", value: "Mine" }] }], original: [{ base: "hfoo", mods: [] }] }, k, resolve);
+  assert.deepEqual(listed.map((o) => o.suffix), [undefined, "Mine", "Std"]);
+  const game = gameObjectList({ ...k, baseIds: ["hfoo", "hpea"], facets: () => ({}), westring: (v: string) => v }, (s) => s);
+  assert.deepEqual(game.map((o) => o.suffix), ["Std", undefined]);
+});

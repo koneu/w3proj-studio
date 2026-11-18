@@ -92,7 +92,7 @@ function modelNote(path: string | undefined, variations: number, stored: Readonl
 
 /** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
  *  all tilesets have "*". `stored`: from modelPacks, to check models. */
-export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false) {
+export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue"> & Partial<Pick<KindData, "fields" | "westring">>, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false) {
   const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
   const fits = (id: string) => {
     if (!tileset || !field) return true;
@@ -110,8 +110,9 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
     const facets = kind.facets(id);
     const low = scale && Number(value(id, scale[0])), high = scale && Number(value(id, scale[1]));
     const path = room && value(id, room);
+    const suffix = kind.fields ? editorSuffix({ base: id }, { fields: kind.fields, defaultValue: kind.defaultValue }, (v) => kind.westring?.(v) ?? v) : "";
     return {
-      id, name: clean(kind.names.get(id) ?? id), ...(facets.category ? { category: facets.category } : {}),
+      id, name: clean(kind.names.get(id) ?? id), ...(suffix ? { suffix } : {}), ...(facets.category ? { category: facets.category } : {}),
       ...(stored && model ? modelNote(value(id, model), Number(variation && value(id, variation)) || 1, stored) : {}),
       ...(low && high ? { sizeRange: [low, high] } : {}),
       // Not known isn't the same as none.
@@ -122,10 +123,18 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
 }
 
 /** One line per object the map adds or changes. */
-export function mapObjectList(file: MapObjects, kind: Kind, resolve: Resolve) {
-  const line = (o: MapObject, custom: boolean) => ({
-    id: o.id ?? o.base, ...(custom ? { base: o.base } : {}), name: objectName(o, kind, resolve), custom, changes: modsOf(o).length,
-  });
+export function mapObjectList(file: MapObjects, kind: Kind & Partial<Pick<KindData, "fields" | "defaultValue">>, resolve: Resolve) {
+  // The Editor Suffix: a changed game object's falls back to the game's; a custom one's own only (its base's would mislead).
+  const suffixOf = (o: MapObject, custom: boolean) => {
+    if (!kind.fields || !kind.defaultValue) return "";
+    return editorSuffix(o, { fields: kind.fields, defaultValue: custom ? () => undefined : kind.defaultValue }, resolve);
+  };
+  const line = (o: MapObject, custom: boolean) => {
+    const suffix = suffixOf(o, custom);
+    return {
+      id: o.id ?? o.base, ...(custom ? { base: o.base } : {}), name: objectName(o, kind, resolve), ...(suffix ? { suffix } : {}), custom, changes: modsOf(o).length,
+    };
+  };
   return [...(file.custom ?? []).map((o) => line(o, true)), ...(file.original ?? []).map((o) => line(o, false))];
 }
 
