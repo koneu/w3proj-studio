@@ -177,6 +177,19 @@ export function restoreTiles(t: Terrain, s: ReturnType<typeof tileSnapshot>) {
   t.customTilesetsRaw = s.raw;
 }
 
+/** This map's cliff type number for each of a fragment's cliff ids. A corner can only name 0 to `max - 1`, so an id the
+ *  map lacks, or one past that, has no number: it gets 0, and `lost` counts the corners of the fragment that use such an id. */
+export function cliffNumbers(g: FragmentGround, mapList: readonly string[], max: number) {
+  let lost = 0;
+  const numbers = g.cliffs.map((id, n) => {
+    const at = mapList.indexOf(id);
+    if (at >= 0 && at < max) return at;
+    lost += g.corners.filter((c) => c.cliffTexture === n).length;
+    return 0;
+  });
+  return { numbers, lost };
+}
+
 /** Puts ground on the map, with corner (0, 0) at corner `origin`; what falls off the map is left out. The
  *  border marks stay the map's own. `tiles` and `cliffs` give this map's number for the fragment's. */
 export function stampGround(t: Terrain, g: FragmentGround, origin: readonly [number, number], tiles: readonly number[], cliffs: readonly number[]) {

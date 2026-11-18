@@ -340,6 +340,91 @@ test("on a straight edge each click is one line, on a plateau's corner a 3x3 blo
   assert.deepEqual(flagged(tall), []);
 });
 
+/** A 12x12 window with a 45-degree one-level cliff: level 3 where `high(x, y)`, 2 elsewhere. */
+const stairs = (high: (x: number, y: number) => boolean) => land(Array.from({ length: 12 }, (_, n) => {
+  const y = 11 - n;
+  return Array.from({ length: 12 }, (_, x) => (high(x, y) ? "3" : "2")).join("");
+}));
+/** Every run of flags along x or y climbs at most one level, one way (no tile across two levels, no 2,3,2). */
+const climbsOnce = (t: Terrain) => {
+  for (const [dx, dy] of [[1, 0], [0, 1]]) for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+    const ls: number[] = [];
+    for (let k = 0; x + k * dx < t.width && y + k * dy < t.height && t.corners[(y + k * dy) * t.width + x + k * dx].ramp; k++) ls.push(t.corners[(y + k * dy) * t.width + x + k * dx].layer);
+    if (ls.length < 2) continue;
+    assert.ok(Math.max(...ls) - Math.min(...ls) <= 1, `run from ${x},${y} along ${dx},${dy}: ${ls}`);
+    assert.ok(ls.every((l, k) => !k || l >= ls[k - 1]) || ls.every((l, k) => !k || l <= ls[k - 1]), `run from ${x},${y} along ${dx},${dy} goes up and down: ${ls}`);
+  }
+};
+
+test("a Ramp click on a diagonal cliff builds the corners of its cliff tiles round the corner, in each of its four turns", () => {
+  // Level 3 to the south-west of x + y = 10; corner 5,5 is a step of it, 6,5 the low step beside it.
+  const sw = () => stairs((x, y) => x + y <= 10);
+  const t = sw();
+  assert.deepEqual(rampClick(t, 5 * 128 + 20, 5 * 128 - 30, log), { done: "built" });
+  assert.deepEqual(ramps(t), [
+    "............",
+    "............",
+    "............",
+    "............",
+    ".....##.....",
+    "....####....",
+    "....####....",
+    ".....##.....",
+    "............",
+    "............",
+    "............",
+    "............",
+  ]);
+  climbsOnce(t);
+  const low = sw();
+  assert.equal(rampClick(low, 6 * 128, 5 * 128, log).done, "built", "the low step");
+  climbsOnce(low);
+  // The four turns of the cliff: the same piece, turned.
+  for (const [name, high, [x, y]] of [
+    ["north-east", (x: number, y: number) => x + y >= 12, [6, 6]],
+    ["north-west", (x: number, y: number) => y - x >= 1, [4, 5]],
+    ["south-east", (x: number, y: number) => x - y >= 1, [5, 4]],
+  ] as const) {
+    const k = stairs(high);
+    assert.equal(rampClick(k, x * 128, y * 128, log).done, "built", name);
+    assert.equal(flagged(k).length, flagged(t).length, `${name}: as many corners`);
+    climbsOnce(k);
+  }
+  // A drag down the diagonal (a click at each corner it passes) joins the pieces into one ramp; a click takes it off.
+  const d = sw();
+  for (let x = 3; x <= 7; x++) assert.equal(rampClick(d, x * 128, (10 - x) * 128, log, true).done, "built", `drag at ${x}`);
+  climbsOnce(d);
+  for (let x = 3; x <= 7; x++) assert.ok(d.corners[(10 - x) * d.width + x].ramp && d.corners[(10 - x) * d.width + x + 1].ramp, `the high and low step at ${x}`);
+  assert.equal(rampClick(d, 5 * 128, 5 * 128, log).done, "removed");
+  assert.deepEqual(flagged(d), []);
+  // Not a step: the plateau, and the low ground off the cliff (two corners out, far out).
+  for (const [x, y] of [[3, 3], [9, 9], [7, 5]]) assert.equal(rampClick(sw(), x * 128, y * 128, log).done, "none", `${x},${y}`);
+});
+
+test("a Ramp drag down Last Refuge's diagonal cliff flags about what its ramp has", () => {
+  // smoketest_maps/blizzard/(2)LastRefuge_S2_v1.5.w3x, corners x 22-38, y 25-30 (wholemap.test.ts LAST_REFUGE): the
+  // levels as the map has them, the flags taken off, then a drag down the cliff's high edge.
+  const rows = [
+    "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
+    "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
+    "2. 2. 2. 2. 2. 2r 2r 2r 2r 3r 3r 3. 3. 3. 2. 2. 2.",
+    "2. 2. 2. 2. 2. 2r 2r 2r 3r 3r 3. 3. 3. 3. 2. 2. 2.",
+    "2. 2. 2. 2. 2. 2r 2r 3r 3r 3. 3. 3. 3. 3. 3. 2. 2.",
+    "2. 2. 2. 2. 2. 2r 2r 3r 3. 3. 3. 3. 3. 3. 3. 2. 2.",
+  ].map((r) => r.split(" "));
+  const t = land(rows.map((r) => r.map((c) => c[0]).join("")));
+  const map = new Set(rows.flatMap((r, n) => r.flatMap((c, k) => (c[1] === "r" ? [`${k},${rows.length - 1 - n}`] : []))));
+  // The high edge, x 22-38 → 0-16, y 25-30 → 0-5: the first level-3 corner of each row.
+  for (let y = 0; y < t.height; y++) {
+    const x = t.corners.slice(y * t.width, (y + 1) * t.width).findIndex((c) => c.layer === 3);
+    rampClick(t, x * 128, y * 128, log, true);
+  }
+  climbsOnce(t);
+  const ours = new Set(flagged(t));
+  const both = [...ours].filter((k) => map.has(k)).length;
+  assert.ok(both >= 0.75 * map.size && ours.size <= map.size * 1.25, `${both} of the map's ${map.size} flags, ${ours.size} in all`);
+});
+
 test("a click on a ramp still takes it off", () => {
   const t = edge();
   toggleRamp(t, 3 * 128, 2.5 * 128, 2, log, true);
