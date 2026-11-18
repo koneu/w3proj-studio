@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
+import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, cliffNumbers, snapped, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
 import { drawnGroundTiles, paintSlot, parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
 
 const tree = (x: number, y: number, z = 0, angle = 0) => ({ list: "doodads" as const, entry: { id: "LTlt", position: [x, y, z], angle, scale: [1, 1, 1], life: 100 } });
@@ -287,4 +287,19 @@ test("a turned fragment keeps waiting for the same types", () => {
   const typesReady = Promise.resolve([]);
   const f = { ...fragmentOf([{ list: "units", entry: { position: [0, 0, 0], angle: 0 } }], () => 0), typesReady };
   for (const turn of ["mirrorX", "cw"] as const) assert.equal(turnFragment(f, turn).typesReady, typesReady);
+});
+
+test("cliff numbers: an id the map lacks, or listed past the 15 a corner can name, becomes 0 and is counted", () => {
+  const from = land(3, 1);
+  from.cliffTiles = ["CLdi", "CLgr", "CLro"];
+  from.corners[0].cliffTexture = 1;
+  from.corners[1].cliffTexture = 2;
+  from.corners[2].cliffTexture = 15; // no cliff
+  const g = groundOf(from, { x0: 0, y0: 0, x1: 2, y1: 0 }, [0, 0]);
+  assert.deepEqual(cliffNumbers(g, ["CLro", "CLdi"], 15), { numbers: [1, 0, 0], lost: 1 }, "CLgr is missing");
+  const long = Array.from({ length: 17 }, (_, i) => `X${i}`);
+  long[16] = "CLro";
+  assert.deepEqual(cliffNumbers(g, ["CLdi", "CLgr", ...long], 15).lost, 1, "CLro sits at 18: nothing can name it");
+  assert.ok(cliffNumbers(g, ["CLdi", "CLgr", ...long], 15).numbers.every((n) => n < 15));
+  assert.equal(cliffNumbers(g, ["CLdi", "CLgr", "CLro"], 15).lost, 0);
 });
