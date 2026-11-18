@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runLayerJobs } from "./layerjobs";
+import { newestOnly, runLayerJobs } from "./layerjobs";
 
 /** The label and the refreshes, as the terrain viewer keeps them. */
 function viewer() {
@@ -62,4 +62,42 @@ test("no late layers: the label is only ever set hidden (and shown for a late on
   const withLate: boolean[] = [];
   assert.equal(await runLayerJobs(() => [Promise.resolve()], () => true, (b) => withLate.push(b)), null);
   assert.deepEqual(withLate, [true, false], "control: a late layer does put the label up");
+});
+
+test("newestOnly: an older load that finishes after a newer one doesn't apply", async () => {
+  const jobs = [later(), later()].map((j, i) => ({ ...j, value: `load ${i}` }));
+  let n = 0;
+  const applied: string[] = [];
+  const reload = newestOnly(() => { const j = jobs[n++]; return j.p.then(() => j.value); }, (v) => applied.push(v));
+  const first = reload(), second = reload();
+  jobs[1].done();
+  await second;
+  jobs[0].done();
+  await first;
+  assert.deepEqual(applied, ["load 1"]);
+  // Control: one load alone does apply, also after a failed one.
+  const lone = newestOnly(() => Promise.resolve("only"), (v) => applied.push(v));
+  await lone();
+  assert.deepEqual(applied, ["load 1", "only"]);
+});
+
+test("newestOnly: a failed newest load drops the older one too, and nothing applies after close", async () => {
+  const applied: string[] = [];
+  const slow = later();
+  let n = 0;
+  const reload = newestOnly(() => (n++ === 0 ? slow.p.then(() => "old") : Promise.reject(new Error("unreadable"))), (v) => applied.push(v));
+  const first = reload(), second = reload();
+  await second;
+  slow.done();
+  await first;
+  assert.deepEqual(applied, [], "the old light doesn't come back when the newer read failed");
+  const log: string[] = [];
+  let open = true;
+  const closing = newestOnly<string>(() => Promise.resolve("late"), (v) => { log.push(v); }, () => open);
+  const run = closing();
+  open = false;
+  await run;
+  const throwing = newestOnly<string>(() => { throw new Error("at once"); }, (v) => { log.push(v); });
+  await throwing();
+  assert.deepEqual(log, [], "nothing after close, nor from a load that threw at once");
 });

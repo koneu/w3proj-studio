@@ -4,7 +4,7 @@ import { applySky } from "../../lib/terrain/atmosphere";
 import { borderShade } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { castsSunShadow, edgeMode, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, inWaterDepth, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
 import { decode, HD_WATER_DEFAULTS, hdReflectScale, hdSky, hdWaterAt } from "./hdwater";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
@@ -16,6 +16,15 @@ test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline 
   assert.equal(castsSunShadow({ group: "shoreline", instances: one }), false);
   assert.equal(castsSunShadow({ group: "units", instances: one, tint: [1, 1, 1, 0.5] }), false, "a start building's see-through look");
   assert.equal(castsSunShadow({ group: "units", instances: [] }), false);
+});
+
+test("HD water's depth picture takes units and doodads, not the start locations: their ring lies under the water", () => {
+  assert.equal(inWaterDepth({ group: "units" }), true, "control: a naga in the lake");
+  assert.equal(inWaterDepth({ group: "doodads" }), true);
+  assert.equal(inWaterDepth({ group: "units", editorOnly: true }), false, "a start location (sloc): the World Editor draws its ring under HD water");
+  assert.equal(inWaterDepth({ group: "units", tint: [1, 1, 1, 0.5], editorOnly: true }), false);
+  assert.equal(inWaterDepth({ group: "cliffs", followGround: true }), false);
+  assert.equal(inWaterDepth({ group: "shoreline" }), false);
 });
 
 test("past the playable map cliffs and specials shade as the ground, placed models go black (doodads as the ground in HD)", () => {

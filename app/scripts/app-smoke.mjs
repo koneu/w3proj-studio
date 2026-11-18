@@ -3353,16 +3353,21 @@ async function flyingHeights(page, found) {
     const after = await drawn("hgry");
     if (Math.abs(after.z - (ground + 128 + 240)) > 1) fail(`with the ground raised by 128 the gryphon is drawn at ${after.z}, not ${ground + 128 + 240}`);
     // HD water shows what's under its surface by the water in front of it: a naga swimming in a lake goes into the
-    // water's depth picture of the models, the gryphon flying over the lake doesn't; with the water hidden there's none.
+    // water's depth picture of the models, the gryphon flying over the lake doesn't; nor does a start location in the
+    // lake, whose ring the World Editor shows under the water (inWaterDepth); with the water hidden there's none.
     if ((await page.evaluate(`w3.settings.get("game.graphicsMode")`)) !== "sd") {
       // (The tool doesn't change a terrain with unsaved edits: the raise above.)
       await k.save();
       await k.tool("set_water", { mode: "lake", left: 1024, bottom: -1024, right: 2048, top: 1024 });
-      await k.tool("place_objects", { objects: [{ id: "nmyr", x: 1536, y: 0, player: 1 }, { id: "hgry", x: 1536, y: 256, player: 1 }], ignoreRoom: true });
+      await k.tool("place_objects", { objects: [{ id: "nmyr", x: 1536, y: 0, player: 1 }, { id: "hgry", x: 1536, y: 256, player: 1 }, { id: "sloc", x: 1536, y: -192, player: 1 }], ignoreRoom: true });
       const depth = () => page.evaluate(`window.__flyEd?.waterDepth?.() ?? null`);
       await k.look(1536, 0);
+      await until("the naga and the start location drawn", async () => !!(await drawn("nmyr")) && !!(await drawn("sloc")), 20000)
+        .catch(() => fail("the naga or the start location in the lake isn't drawn"));
       await until("the naga in the water's depth picture", async () => (await depth())?.models === 1, 20000)
-        .catch(async () => fail(`looking at a naga and a gryphon over a lake, the water's depth picture is ${lit(await depth())}, not one model`));
+        .catch(async () => fail(`looking at a naga, a gryphon over a lake and a start location in it, the water's depth picture is ${lit(await depth())}, not one model`));
+      await new Promise((r) => setTimeout(r, 500));
+      if ((await depth())?.models !== 1) fail(`the water's depth picture came to ${lit(await depth())}: the start location went in (its ring would lie on the water)`);
       const water = `[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Water")?.querySelector("input")`;
       if (await page.evaluate(`${water}?.checked`) !== true) fail("the Water box isn't there, or not on");
       else {

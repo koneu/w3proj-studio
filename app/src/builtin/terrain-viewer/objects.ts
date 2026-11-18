@@ -14,7 +14,7 @@ import { worldSphere } from "../../lib/model/frustum";
 import { skinTextures } from "../../lib/model/replaceable";
 import { bounds, hdSlots, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { artValue } from "../../lib/objects/artset";
+import { artValue, reforgedArt } from "../../lib/objects/artset";
 import { SKIN_KINDS, SkinIds } from "../../lib/objects/skinids";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
@@ -35,6 +35,9 @@ export interface Skin {
   /** Object data file the type belongs to: w3d, w3b, w3u or w3t. */
   kind: string;
   file: string;
+  /** The 3.0 art (DE) only, when the entry names no `file:de` and its HD art (`file:hd`) is another model: that model,
+   *  read when `file`'s isn't stored (reforgedArt). */
+  reforgedFile?: string;
   numVar: number;
   /** Replaceable texture this type swaps in (trees, cliffs). */
   texId: number;
@@ -258,9 +261,11 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
       const get = (k: string) => artValue((key) => sec.get(key), k, mode);
       const file = get("file");
       if (!file) continue;
+      const reforged = reforgedArt((key) => sec.get(key), "file", mode);
       own.set(id, {
         kind,
         file,
+        ...(reforged && reforged.toLowerCase() !== file.toLowerCase() ? { reforgedFile: reforged } : {}),
         numVar: Number(get("numvar") ?? 1) || 1,
         texId: Number(get("texid") ?? -1),
         texFile: get("texfile") ?? "",
@@ -338,7 +343,8 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         const m = art.find((x) => x.field === field);
         if (!m) continue;
         const n = Number(m.value);
-        if (key === "file" || key === "texFile" || key === "uberSplat" || key === "moveType") skin[key] = String(m.value);
+        if (key === "file") { skin.file = String(m.value); delete skin.reforgedFile; }
+        else if (key === "texFile" || key === "uberSplat" || key === "moveType") skin[key] = String(m.value);
         else if (key === "unitShadow" || key === "buildingShadow") skin[key] = shadowName(String(m.value));
         else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
@@ -372,6 +378,16 @@ export function modelPath(skin: Pick<Skin, "file" | "numVar">, variation: number
 export function drawsParticles(m: Pick<Model, "particleEmitters2" | "ribbons">): boolean {
   return m.ribbons.length > 0 || m.particleEmitters2.some((e) => e.segmentAlpha.some((a) => a > 0));
 }
+
+/** The 3.0 art's (DE) other model of a placed object (Skin.reforgedFile), read when its own isn't stored. */
+export function reforgedModelPath(skin: Pick<Skin, "reforgedFile" | "numVar">, variation: number): string | undefined {
+  return skin.reforgedFile ? modelPath({ file: skin.reforgedFile, numVar: skin.numVar }, variation) : undefined;
+}
+
+const reforgedRequest = (skin: Skin, variation: number): { reforged?: string } => {
+  const reforged = reforgedModelPath(skin, variation);
+  return reforged ? { reforged } : {};
+};
 
 /** The model to read when a variation's file isn't stored: the type's file without a number. The classic game
  *  keeps some types of several variations in one file (the City wall endcap YSw5: numVar 2, but only
@@ -416,6 +432,8 @@ export interface ModelRequest {
   path: string;
   /** Read instead when `path` isn't stored (plainModelPath). */
   plain?: string;
+  /** Read when neither `path` nor `plain` is stored: the type's HD art in the 3.0 art set (reforgedModelPath). */
+  reforged?: string;
   /** Replaceable texture id → path (e.g. a tree type's own texture). */
   replaceable: Record<number, string>;
   instances: ObjectInstance[];
@@ -587,10 +605,9 @@ export class ObjectLoader {
       let again = false;
       const read = (p: string) => this.readFile(p).catch((e: unknown) => { again ||= !isMissing(e); throw e; });
       const load = m = this.track((async () => {
-        const model = parseModel(await read(req.path).catch((e: unknown) => {
-          if (req.plain) return read(req.plain);
-          throw e;
-        }));
+        const model = parseModel(await read(req.path)
+          .catch((e: unknown) => { if (req.plain) return read(req.plain); throw e; })
+          .catch((e: unknown) => { if (req.reforged) return read(req.reforged); throw e; }));
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of its "Stand" animation.
         gpu.props = req.props ?? [];
@@ -616,7 +633,7 @@ export class ObjectLoader {
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
     const replaceable = skinTextures(skin);
-    return this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), replaceable, props: skin.animProps, instances: [] });
+    return this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), ...reforgedRequest(skin, variation), replaceable, props: skin.animProps, instances: [] });
   }
 
   /** Loads each requested model; failed ones are reported by index. The batches keep the order of
@@ -690,7 +707,7 @@ export class ObjectLoader {
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = own?.replaceable ?? skinTextures(skin);
-        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(paint ? { paint } : {}), ...(own?.retexture ? { retexture: own.retexture, retextureKey: own.key } : {}) }, items: [] };
+        entry = { req: { path, plain: plainModelPath(skin), ...reforgedRequest(skin, p.variation), replaceable, props, instances: [], ...(paint ? { paint } : {}), ...(own?.retexture ? { retexture: own.retexture, retextureKey: own.key } : {}) }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

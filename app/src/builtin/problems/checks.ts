@@ -662,6 +662,16 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
     const k = kinds.get(kind), base = c?.base ?? id, f = k?.fieldById.get(field);
     return k && f ? k.defaultValue(base, f, 0, artMode) : undefined;
   };
+  /** The 3.0 art's other model of a type the map doesn't give a model of its own (reforgedDefault), as a file path. */
+  const reforgedModel = (id: string, kind: string, variation: number): string | undefined => {
+    const c = custom.get(id), field = ART[kind].model;
+    if (c?.mods.has(field)) return undefined;
+    const k = kinds.get(kind), f = k?.fieldById.get(field);
+    const model = k && f ? k.reforgedDefault?.(c?.base ?? id, f) : undefined;
+    if (!model || model === "_") return undefined;
+    const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!, "de") : 1) || 1;
+    return `${model.replace(/\.(mdl|mdx)$/i, "")}${variations > 1 ? variation : ""}.mdx`;
+  };
   const found = new Map<string, (typeof MODES)[number][]>();
   /** The supported modes that can't load a model (modesWithout): the map's plain copy counts for every mode, its
    *  Reforged version (`_HD.w3mod\…`) only for Reforged; then the game's Classic file, then the mode's folder. */
@@ -695,6 +705,9 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
         const stem = model.replace(/\.(mdl|mdx)$/i, "");
         const path = `${stem}${variations > 1 ? p.variation ?? 0 : ""}.mdx`;
         if (!(await missingIn(path)).includes(mode)) continue;
+        // The 3.0 art reads the type's HD model when its own isn't stored (reforgedArt: EW00's RuinsWall0).
+        const reforged = mode.art === "de" ? reforgedModel(p.id, kind, p.variation ?? 0) : undefined;
+        if (reforged && reforged.toLowerCase() !== path.toLowerCase() && !(await missingIn(reforged)).includes(mode)) continue;
         m ??= missing.get(p.id) ?? { items: [], paths: new Set(), modes: new Set() };
         m.paths.add(path);
         m.modes.add(mode.name);
