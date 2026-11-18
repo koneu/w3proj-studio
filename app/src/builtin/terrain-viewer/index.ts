@@ -4003,7 +4003,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const modeHint = h("span.terrain-place-hint");
 
         const rotateSelected = (deg: number) => {
-          const entries = selectedEntries();
+          // A building (a unit type with a pathing texture) keeps its facing: the World Editor's turn keys leave a
+          // farm, a town hall, a gold mine and a tavern at 270 while a peasant beside them turns (we-compare
+          // building-turn-*, nudge-keys-we, branch we-compare-9).
+          const entries = selectedEntries().filter((e) => isDoodadType(e.id) || !buildingCells.get(e.id));
           if (!entries.length) return;
           const before = entries.map(poseOf);
           const rules = doodadRules();
