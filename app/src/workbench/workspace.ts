@@ -8,6 +8,7 @@ import { PendingWork } from "../lib/settle";
 /** A file's size and last write (ms); `hash`: of its contents, where asked for (`statHashed`). */
 export interface Stamp { size: number; modified: number; hash?: string }
 import { timeLimit } from "./timelimit";
+import { validateSetting } from "./settingsvalidate";
 
 /** What tells two recent projects apart: as `fileKey`, case counts only off a Windows root, so on Linux
  *  `/home/u/Map` and `/home/u/map` are two projects, both listed. A `\` is a separator only on Windows. */
@@ -428,6 +429,28 @@ export class SettingsService implements Settings {
 
   declared(): SettingInfo[] {
     return [...this.schema.values()];
+  }
+
+  /** What in a layer's file doesn't fit the declarations (type, enum, range): one message per key. Keys nobody
+   *  declares are left alone (their extension may be off). Such a value is still used as written. */
+  issues(target: SettingsTarget = "user"): { key: string; message: string }[] {
+    const out: { key: string; message: string }[] = [];
+    for (const [key, value] of Object.entries(target === "project" ? this.project : this.user)) {
+      const decl = this.schema.get(key);
+      if (!decl) continue;
+      const message = validateSetting(key, decl.property, value);
+      if (message) out.push({ key, message });
+      else if (target === "project" && decl.property.scope === "user") out.push({ key, message: `${key} is a user setting; the project's value is ignored.` });
+    }
+    return out;
+  }
+
+  /** Tells the user what a layer's file has wrong (after it is read and the extensions declared their settings). */
+  warnIssues(target: SettingsTarget = "user") {
+    const list = this.issues(target);
+    if (!list.length) return;
+    const name = target === "project" ? PROJECT_SETTINGS : "settings.json";
+    this.warn(`${name}: ${list.map((i) => i.message).join(" ")} See the Settings editor.`);
   }
 
   /** Why each layer's file can't be written: it is there but couldn't be read. Such a file is never written over
