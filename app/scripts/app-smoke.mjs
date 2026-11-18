@@ -4874,6 +4874,28 @@ async function heightsLimits(page, found) {
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   const draggedOff = await dragTarget();
   if (!(draggedOff > br)) fail(`the same drag with Enforce Camera Bounds off left the camera at ${draggedOff}, not past the bound ${br}`);
+  // A camera already past the bound (typed there with the switch off) dragged with it on: a drag that ends inside takes
+  // it there, one that ends outside leaves it, outward or inward alike (the World Editor, we-drive 2026-11-18: a camera
+  // at 3100 dragged in to 2716.3; one at 3100 dragged out and one at 3000 dragged to about 2940 stayed). The switch is
+  // off before and after. 600 past the bound: 20 pixels of this view are about 270 units.
+  const past = br + 600;
+  const outsideDrag = async (px) => {
+    await typeTargetX(past);
+    await k.run("w3.terrain.toggleEnforceCameraBounds");
+    await k.look(past, 0);
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x, y: c.y }, { x: c.x + px, y: c.y }, 30);
+    await k.save();
+    const x = savedCams().at(-1)?.targetX;
+    await k.run("w3.terrain.toggleEnforceCameraBounds");
+    return x;
+  };
+  const inward = await outsideDrag(-350);
+  if (!(inward < br - 50)) fail(`a camera at ${past}, past the camera bound ${br}, dragged inward to well inside with Enforce Camera Bounds on is at ${inward} (the World Editor takes it in)`);
+  const outward = await outsideDrag(350);
+  if (outward !== past) fail(`a camera at ${past} dragged further out with Enforce Camera Bounds on is at ${outward}, wanted it left at ${past}`);
+  const shortIn = await outsideDrag(-20);
+  if (shortIn !== past) fail(`a camera at ${past} dragged a little inward, still past the bound ${br}, is at ${shortIn}, wanted it left at ${past}`);
   if ((await typeTargetX(br + 250)) !== br + 250) fail(`a Target X typed past the camera bounds with Enforce Camera Bounds off left the camera at ${savedCams().at(-1)?.targetX}, not ${br + 250}`);
   cams = await camFrom(br + 200, "Set from view");
   if (cams.at(-1) !== br + 200) fail(`Set from view with Enforce Camera Bounds off left the camera at ${cams.at(-1)}, not ${br + 200} (${await k.toasts()})`);
