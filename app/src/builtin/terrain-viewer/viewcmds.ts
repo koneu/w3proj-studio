@@ -210,7 +210,7 @@ const GROUND_EDGE_LINEAR: readonly number[] = [255, 255, 255, 66];
  *  with the blue 170, 75, 137, both as the two blends one after the other give). The colour functions below give these when asked for `linear`. */
 export const REGION_FILL_ALPHA = 136;
 /** A region over the naval view's brown border: the editor's yellow there is 192, 164, 8 and red 192, 25, 8 over the
- *  brown 108, 55, 15 (we-drive, 2026-11-18); a plain alpha-over in sRGB at 0.55 gives 189, 165, 7 and 189, 25, 7. */
+ *  brown 108, 55, 15 (we-compare-6, TESTING.md); a plain alpha-over in sRGB at 0.55 gives 189, 165, 7 and 189, 25, 7. */
 export const REGION_NAVAL_EDGE_ALPHA = 140;
 export const GROUND_PATHING_ALPHA = 66;
 
