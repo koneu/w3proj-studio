@@ -790,6 +790,33 @@ an archery target, a totem, a barn, a banner): the alpha test changes one cell i
 differs by 104 cells elsewhere (the cage 49): the probe can't tell whether holes count. (8) `doodad-pick-we` again: rock
 80 off east, west, north and south picked in both.
 
+**Cliff ground tiles, HD shadow scale, ramp floats, building turns, trigger folds** (branch we-compare-9, 2026-11-18).
+(1) **The save adds the cliffs' ground tiles** (`cliff-ground.json`, 12 inputs from `make-cliff-ground.mjs`, no edit): the
+editor appends CliffTypes.slk's groundTile of every cliff type a cliff tile is drawn with (the tile's bottom-left corner;
+15 or past the list the first type) that the ground list lacks, under custom-tilesets 0 (after the tileset's own list)
+and 1, past 16 entries too, in the order the types are first met row by row from the south (CFdi south and CAdi north
+give Fdrt Adrt); a type only listed, only on flat corners or only on the top corners of cliff tiles adds nothing.
+TurtleRock v2.0 (17 cliff types listed, only CLdi drawn) comes back from the editor's save with its six ground tiles.
+Studio: tilecleanup.ts `cliffGroundInUse`, w3e.ts `savedTerrain`; app-smoke turtleCliffSave now expects Fgrs and Wsnw
+after its CFgr and CWsn strokes. (2) **HD Calculate Shadows bakes at the drawn
+size** (`shadow-defscale.json`): ZOfo, BOth, NSct (defScale:hd 1.45, 1.35, 1.5) shade about twice the cells of their
+placed size, exactly Studio's with the skin's modelScale (shadowmap.ts predictShadows); the cage LOce (0.75) 36 cells
+against Studio's 29 now (58 before), RibBones LOrb 10 against 8, DSah 2 cells of 234 off. In SD the same models differ
+for other reasons (ZOfo 84 against Studio's 99, BOth 201 against 224, LOrb 42 against 6). (3) **A floating doodad on a
+ramp's middle corner** (`ramp-float.json`, `make-ramp-float.mjs`): the water is compared with the lifted ground (water 32
+over a corner lifted to 64 leaves a lily pad on the ground at 64, 80 floats it); w3e.ts `floatingLevelAt`. (4) **The
+turn keys leave buildings** (`building-turn.json`, `nudge-keys-we.json`): KP_Multiply turns a footman and a peasant 5
+degrees a press, never a farm, town hall, gold mine or tavern (KP_8 moved the farm and tavern 64, so they were
+selected); index.ts `rotateSelected`. The number pad's 8 4 2 7 1 3 match on a tree, LPcr, a footman and a farm. A town
+hall or gold mine whose footprint already reaches past the playable part isn't nudged at all (KP_8 refused; Studio moves
+it 64). The editor saves building-turn-tavern.w3m (an RoC .w3m with a tavern) as units subversion 11 with item tables and
+hero attributes, the gold mine one as 9. (5) **Trigger folds** (`trigger-folds.json`): with the Trigger Editor opened
+(F4) and closed, the save writes the category of the first trigger (opened on its own) as expanded 1, the others as
+stored; without it, as stored (a fresh editor: a spec after one that opened the Trigger Editor saw 1 too). Studio's
+Trigger Editor opens on the header with the file's folds (a known difference, expectPaths). (6) `doodad-water-z` again:
+Snap Doodads on Load puts a lily pad on its corner's water when that corner is wet and the water above its ground, else
+on the ground.
+
 **Water shadows, HD saves, chapter objects, Open in World Editor** (branch we-compare-2, 2026-11-18, HD). (1) **Real
 shadows on water**: `make-water-shadows.mjs --depth D --deep D --low-flyers --lake-trees` (lakes 12, 30, 45 deep beside
 100 or 200 deep ones, gryphons and trees whose shadows fall in them), one we-drive run per batch of maps with
