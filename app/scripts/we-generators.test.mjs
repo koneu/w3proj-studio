@@ -31,6 +31,7 @@ test("an unknown mode exits 2 and writes nothing", () => {
     ["make-import-modes.mjs", "--out"], ["make-import-modes.mjs", "--oops"],
     ["make-shadow-probes.mjs", ".", "shadow-slope"],
     ["make-melee-valid.mjs", "--out"], ["make-melee-valid.mjs", "--case"], ["make-melee-valid.mjs", "--case", "x"], ["make-melee-valid.mjs", "--case", "../x={}"],
+    ["make-special-wpm.mjs", "grid"], ["make-special-wpm.mjs", "gird", "YCr1"], ["make-special-wpm.mjs", "grid", "../x"], ["make-special-wpm.mjs", "grid", "YCr1", "x"],
   ];
   for (const [script, ...args] of bad) {
     const r = run(script, ...args);
@@ -42,7 +43,7 @@ test("an unknown mode exits 2 and writes nothing", () => {
 test("control: a known mode is not refused (it gets as far as the missing tools)", () => {
   // The cli here is node itself, so the unpack step fails (exit 1, not 2); nothing is written before it.
   const before = snapshot();
-  for (const [script, ...args] of [["make-camps.mjs", "b"], ["make-camps.mjs", "far", "1700,2800"], ["make-fence.mjs", "dest"], ["make-neutral-facing.mjs", "neg"], ["make-doodad-snap.mjs", "misc"], ["make-custom-tilesets.mjs", "few3"], ["make-minimap-tiles.mjs", "impulse"]]) {
+  for (const [script, ...args] of [["make-camps.mjs", "b"], ["make-camps.mjs", "far", "1700,2800"], ["make-fence.mjs", "dest"], ["make-neutral-facing.mjs", "neg"], ["make-doodad-snap.mjs", "misc"], ["make-custom-tilesets.mjs", "few3"], ["make-minimap-tiles.mjs", "impulse"], ["make-special-wpm.mjs", "grid", "YCr1"]]) {
     const r = run(script, ...args);
     assert.notEqual(r.status, 2, `${script} ${args.join(" ")}: refused\n${r.stderr}`);
   }

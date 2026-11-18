@@ -1,0 +1,20 @@
+[
+  {
+    "name": "special-wpm",
+    "description": "Special doodads (caves YCr1, LCc0, the collapse YCp1) on tiles with a lone high corner, on flat ground (eight places of that corner under each) and in front of and on a plateau's face (bugs.md 'Pathing residuals after special stamping'). special-wpm.w3x from make-special-wpm.mjs. The editor stamps a special's pathing only once the view has come near it since the map opened: saved straight after the open, the specials in the south-east (out of the opening view) keep the bare terrain's pathing, 488 cells (2026-11-18, the same cells in two runs). So the view is scrolled east and south first (the arrow keys held). Then neither side edits; the World Editor's save makes the pathing map itself, Studio's rebuild_map its own. The real maps behind the item, RustyCreek S2 v1.3 (60 cells) and Eversong S2 v1.1 (8), re-saved by the editor gave Studio's wpm exactly: their stored files were saved with those specials not yet seen",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/special-wpm.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "Right@2500"], ["--key", "Down@2500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3map.wpm", "as": "wpm" }],
+    "limit": 60
+  },
+  {
+    "name": "special-wpm-grid-YCr1",
+    "description": "37 city caves YCr1 on flat ground (special-wpm-grid-YCr1.w3x from make-special-wpm.mjs grid YCr1): one without a lone high corner, 36 with one at each corner of the footprint and of the ring round it. The view scrolled east and south first, as special-wpm (without it the five specials south-east of the opening view, sites 3-6 and 13, keep the bare terrain's pathing; scrolled north-west instead, the same five: 2026-11-18)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/special-wpm-grid-YCr1.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--key", "Right@2500"], ["--key", "Down@2500"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3map.wpm", "as": "wpm" }],
+    "limit": 60
+  }
+]
