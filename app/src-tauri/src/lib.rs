@@ -809,6 +809,9 @@ fn world_editor_open(app: AppHandle, watches: State<Watches>, exe: String, map: 
                 let _ = app.emit("w3://world-editor-exited", serde_json::json!({ "map": map, "root": root }));
                 let w = app.state::<Watches>();
                 w.0.lock().unwrap().retain(|p| p != &map_path);
+                // A Wine server with nothing but its services left in the prefix is ended, as after tool_run.
+                #[cfg(unix)]
+                proton::end_idle_server_of(Path::new(&exe));
                 break;
             }
         }
@@ -827,7 +830,13 @@ fn game_test_map(exe: String, map: String, args: Option<Vec<String>>) -> CmdResu
     let args = args.unwrap_or_else(|| ["-mapdiff", "1", "-testmapprofile", "WorldEdit", "-fixedseed", "1"].map(String::from).to_vec());
     check_test_map_args(&args)?;
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    launch(&exe, &map, &args).map(|_| ())
+    // The game isn't waited on, but the Wine server it leaves in the prefix is ended after it (proton.rs).
+    let child = launch(&exe, &map, &args)?;
+    #[cfg(unix)]
+    proton::end_idle_server_after(PathBuf::from(&exe), child);
+    #[cfg(not(unix))]
+    drop(child);
+    Ok(())
 }
 
 /// Whether `args` are Test Map flags the World Editor passes, each with a value it allows (a profile is any name

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
+import { initialViewState } from "./viewcmds";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
 const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "extension.json"), "utf8")) as {
@@ -71,6 +72,8 @@ test("the object placer starts as a fresh World Editor's Tools menu: Randomly Ro
 });
 
 test("the terrain view starts with the grid of its setting (large) and the camera bounds", () => {
-  const source = readFileSync(repoPath("app", "src", "builtin", "terrain-viewer", "index.ts"), "utf8");
-  assert.match(source, /const viewState = \{\s*grid: gridDefault\(w3\.settings\.get\("terrain\.grid\.default", "large"\)\),[^}]*cameraBounds: true,/);
+  assert.equal(initialViewState(declared("terrain.grid.default")).grid, "large");
+  assert.equal(initialViewState(undefined).cameraBounds, true);
+  assert.equal(initialViewState("small").grid, "small", "the setting decides");
+  assert.equal(initialViewState("none").grid, "none");
 });
