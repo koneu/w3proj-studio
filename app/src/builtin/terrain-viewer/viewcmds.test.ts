@@ -149,13 +149,14 @@ test("navalColors: as the World Editor, red where ships can't sail (land, the ed
   assert.deepEqual(px(3), [255, 128, 128, 128]);
   assert.deepEqual(px(1), [0, 0, 0, 0]);
   assert.deepEqual(px(2), [0, 0, 0, 0]);
-  // The map's edge: flat brown over everything, water or land, on the tiles the terrain marks as past the playable map
+  // The map's edge: one brown over everything, water or land, on the tiles the terrain marks as past the playable map
   // (2 by 1 tiles, 8 by 4 cells; the west tile marked). The marks count, not the w3i's border: HillsbradCreek's
   // border carries them too (9216 corners), and its lake there shows black only as the black water lies over it.
   const grid = Array.from({ length: 32 }, (_, i) => [land, shallow, deep, border][i % 4]);
   const edged = navalColors(grid, { tiles: [1, 0], tilesX: 2 });
   const at = (x: number, y: number) => [...edged.subarray((y * 8 + x) * 4, (y * 8 + x) * 4 + 4)];
-  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) assert.deepEqual(at(x, y), [108, 55, 15, 255], `edge cell ${x},${y}`);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) assert.deepEqual(at(x, y), at(0, 0), `edge cell ${x},${y}`);
+  assert.ok(at(0, 0)[3] > 0, "the edge is coloured");
   assert.deepEqual(at(5, 2), [0, 0, 0, 0], "sailable water inside stays clear");
   assert.deepEqual(at(6, 3), [0, 0, 0, 0]);
   assert.deepEqual(at(4, 0), [255, 128, 128, 128], "land inside stays red");
@@ -330,17 +331,37 @@ test("a new view's grid comes from the setting, large when it is missing or wron
   assert.equal(gridDefault("huge"), "large");
 });
 
-test("regions over the naval view's border: the region's colour lies over the brown, near the editor's 192, 164, 8 (yellow) and 192, 25, 8 (red)", () => {
+/** A layer's first pixel laid over a ground colour (the renderer's plain alpha-over). */
+const overGround = (rgba: Uint8Array, ground: readonly number[]) => [0, 1, 2].map((c) => rgba[c] * rgba[3] / 255 + ground[c] * (1 - rgba[3] / 255));
+
+test("the naval view over the border is a see-through brown: the editor's colours over the darkened border ground of four maps", () => {
+  // we-drive, branch we-compare-8 (SD, View Entire Map): the border's ground with the naval view off, then on.
   const edge = { tiles: [1], tilesX: 1 };
+  const naval = navalColors(new Array(16).fill(0), edge);
+  for (const [name, ground, want] of [
+    ["map 03", [6.4, 16.7, 6.0], [109.0, 55.1, 15.8]],
+    ["flat.w3x and the empty map", [20.7, 15.1, 10.0], [116.1, 54.3, 17.8]],
+    ["TerenasStand (Village)", [6.9, 13.5, 7.7], [109.2, 53.5, 16.6]],
+    ["EchoIsles, water off", [20.1, 15.2, 10.3], [115.8, 54.3, 17.9]],
+  ] as const) {
+    const out = overGround(naval, ground);
+    for (let c = 0; c < 3; c++) assert.ok(Math.abs(out[c] - want[c]) <= 1, `${name} channel ${c}: ${out[c].toFixed(1)} vs ${want[c]}`);
+  }
+});
+
+test("regions over the naval view's border: the region's colour lies over the brown, near the editor's 192, 164, 8 (yellow) and 192, 25, 8 (red)", () => {
+  // flat.w3x (we-compare-6): its border ground is 20.7, 15.1, 10.0 (we-compare-8).
+  const edge = { tiles: [1], tilesX: 1 }, ground = [20.7, 15.1, 10.0];
   for (const [color, want] of [[{ red: 255, green: 255, blue: 0 }, [192, 164, 8]], [{ red: 255, green: 0, blue: 0 }, [192, 25, 8]]] as const) {
     const region = { left: 0, bottom: 0, right: 128, top: 128, color };
     const naval = navalColors(new Array(16).fill(0), edge);
     const regions = regionColors([region], 4, 4, 0, 0, edge, false, true);
     const out = composeLayers([naval, regions]);
     assert.ok(out);
-    for (let c = 0; c < 3; c++) assert.ok(Math.abs(out[c] - want[c]) <= 6, `channel ${c}: ${out[c]} vs ${want[c]}`);
+    const seen = overGround(out, ground);
+    for (let c = 0; c < 3; c++) assert.ok(Math.abs(seen[c] - want[c]) <= 3, `channel ${c}: ${seen[c]} vs ${want[c]}`);
     // Without the flag the border keeps the stronger alpha, and over the brown it is further from the editor.
     const plain = composeLayers([naval, regionColors([region], 4, 4, 0, 0, edge)]);
-    assert.ok(plain && Math.abs(plain[0] - want[0]) > 10);
+    assert.ok(plain && Math.abs(overGround(plain, ground)[0] - want[0]) > 6);
   }
 });

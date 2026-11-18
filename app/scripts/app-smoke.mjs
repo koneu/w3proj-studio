@@ -6827,8 +6827,9 @@ async function viewCommands(page, fail, shots, size) {
   const [edge0, edge1] = [await meanColour(page, far.plain, edgeBox), await meanColour(page, naval, edgeBox)];
   const [water0, water1] = [await meanColour(page, far.plain, waterBox), await meanColour(page, naval, waterBox)];
   const round = (c) => c.map(Math.round).join(",");
-  // The editor's 108, 55, 15 (viewcmds.ts NAVAL_EDGE), drawn over the edge's dark, not under it.
-  if (edge1.some((v, i) => Math.abs(v - [108, 55, 15][i]) > 12) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's flat brown: ${round(edge0)} became ${round(edge1)}`);
+  // The editor's half of the edge's dark plus half of 211.5, 93.5, 25.5 (viewcmds.ts NAVAL_EDGE), drawn over the dark, not under it.
+  const navalWant = edge0.map((v, i) => v / 2 + [211.5, 93.5, 25.5][i] / 2);
+  if (edge1.some((v, i) => Math.abs(v - navalWant[i]) > 6) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's see-through brown: ${round(edge0)} became ${round(edge1)}, not ${round(navalWant)}`);
   if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
   // Pathing - Ground over the map's edge is the editor's flat grey (we-drive, border128x96, 2026-11-14: 137, 138, 137),
   // water on and off, drawn over the border's dark and its water (Studio's was purple, and gone under deep water).

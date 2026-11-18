@@ -169,10 +169,13 @@ export const nextGrid = (current: GridSize): GridSize => GRID_ROUND[(GRID_ROUND.
 /** The World Editor's naval pathing colour: a half-transparent light red. Measured from its N view against the same
  *  view without it (we-drive, 2026-11-11): over land each channel came out as half the ground plus (255, 128, 128) / 2. */
 export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
-/** Over the map's edge (past the playable part) its naval view is a flat brown instead, the ground's texture and the
- *  edge's dark gone under it (we-drive, map 03's west edge, 2026-11-11: 108, 55, 15 all over; the darkened playable
- *  ground just inside came out as half of it plus half the light red, as anywhere else). */
-export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
+/** Over the map's edge (past the playable part) its naval view is a half-transparent brown over the border's dark
+ *  ground: each channel half the ground plus half (211.5, 93.5, 25.5), in plain sRGB (we-drive, branch we-compare-8,
+ *  2026-11-18, SD, View Entire Map, water on and off: map 03 over ground 6, 17, 6 gave 109, 55, 16; flat.w3x and the
+ *  empty Lordaeron Summer map over 21, 15, 10 gave 116, 54, 18; TerenasStand (Village) and EchoIsles the same rule,
+ *  half a unit off over 200 000 pixels each). The darkened playable ground just inside comes out as half of it plus half
+ *  the light red, as anywhere else. */
+export const NAVAL_EDGE: readonly number[] = [211, 93, 25, 128];
 
 /** The tiles past the playable map (the renderer's edgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
 export interface EdgeTiles { tiles: ArrayLike<number>; tilesX: number }
@@ -210,7 +213,8 @@ const GROUND_EDGE_LINEAR: readonly number[] = [255, 255, 255, 66];
  *  with the blue 170, 75, 137, both as the two blends one after the other give). The colour functions below give these when asked for `linear`. */
 export const REGION_FILL_ALPHA = 136;
 /** A region over the naval view's brown border: the editor's yellow there is 192, 164, 8 and red 192, 25, 8 over the
- *  brown 108, 55, 15 (we-compare-6, TESTING.md); a plain alpha-over in sRGB at 0.55 gives 189, 165, 7 and 189, 25, 7. */
+ *  brown 116, 54, 18 of flat.w3x (we-compare-6, TESTING.md); a plain alpha-over in sRGB at 0.55 gives 192, 165, 8 and
+ *  192, 24, 8. */
 export const REGION_NAVAL_EDGE_ALPHA = 140;
 export const GROUND_PATHING_ALPHA = 66;
 
