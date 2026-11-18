@@ -17,7 +17,7 @@ import { PROBLEMS_SERVICE, TERRAIN_SERVICE, type CheckedGroup, type ProblemsServ
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { MELEE_MAP } from "../lib/terrain/owner";
 import { terrainPath } from "../lib/terrain/w3etext";
-import { MANIFEST_FILE, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
+import { MANIFEST_FILE, applySeverity, disabledIds, isDisabled, readChecksConfig } from "../builtin/problems/checkconfig";
 import { DEFAULT_UNIT_SIZE } from "../builtin/terrain-viewer/pathcheck";
 import { meleeReport, pathReport, projectLadderLook, projectWalkSource, type WalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { mapObjectData, readFile } from "../builtin/terrain-viewer/projectfiles";
@@ -79,7 +79,7 @@ export async function check(job: CheckJob): Promise<CheckReport> {
   const report: CheckReport = { rows: [], ignored: 0, ignoreError: null, sections: [], disabled: [], messages };
   const rows = report.rows;
   const cfg = await readChecksConfig(() => w3.workspace.readText(MANIFEST_FILE), () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(MANIFEST_FILE) }));
-  report.disabled = [...cfg.config.disable];
+  report.disabled = disabledIds(cfg.config);
   if (cfg.error) rows.push({ severity: "warning", check: "problems", location: MANIFEST_FILE, message: `${cfg.error}; no check is switched off until it is fixed` });
 
   if (!asked || asked.has("problems")) {
@@ -136,7 +136,7 @@ export async function check(job: CheckJob): Promise<CheckReport> {
       try {
         const m = await meleeReport(w3, await ground(), unitSize);
         report.melee = m;
-        for (const f of m.findings.filter((f) => !isDisabled(cfg.config, `melee/${f.rule}`))) rows.push({ severity: f.severity, check: `melee/${f.rule}`, ...(f.at ? { location: at(f.at) } : {}), message: f.fix ? `${f.message} Fix: ${f.fix}` : f.message });
+        for (const f of m.findings.filter((f) => !isDisabled(cfg.config, `melee/${f.rule}`))) rows.push({ severity: applySeverity(cfg.config, `melee/${f.rule}`, f.severity), check: `melee/${f.rule}`, ...(f.at ? { location: at(f.at) } : {}), message: f.fix ? `${f.message} Fix: ${f.fix}` : f.message });
         report.sections.push({ section: "melee", ran: true, ...(why ? { note: why } : {}) });
       } catch (e) {
         rows.push({ severity: "error", check: "melee", message: `the check failed: ${text(e)}` });
