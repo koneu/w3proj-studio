@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import type { CliffType } from "./cliffs";
-import { applyTileList, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
+import { applyTileList, cliffGroundInUse, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 
 const type = (cliffID: string, groundTile: string) => ({ cliffID, groundTile, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: "", texFile: "" }) as CliffType;
 const TYPES = new Map([type("CLdi", "Ldrt"), type("CLgr", "Lgrs"), type("CLro", "Lrok")].map((c) => [c.cliffID, c]));
@@ -248,4 +248,30 @@ test("the custom tiles flag follows the list: the tileset's own list is 0, anoth
   applyTileList(u, p2.tiles, p2.map, TYPES, own);
   assert.equal(u.customTilesetsRaw, 1);
   assert.equal(u.customTilesets, true);
+});
+
+test("cliffGroundInUse: the ground tiles of the cliff types drawn, by a cliff tile's bottom-left corner, met from the south (we-compare cliff-ground-*)", () => {
+  // Only listed (no cliff), or only on flat corners: nothing.
+  const t = flat();
+  corner(t, 1, 1).cliffTexture = 2;
+  assert.deepEqual(cliffGroundInUse(t, TYPES), []);
+  // A mesa of CLro: its ground tile; corner 15 (or past the list) counts as the first type, CLdi.
+  mesa(t, 2);
+  assert.deepEqual(cliffGroundInUse(t, TYPES), ["Lrok"]);
+  corner(t, 3, 3).cliffTexture = 15;
+  assert.deepEqual(cliffGroundInUse(t, TYPES), ["Ldrt", "Lrok"]);
+  // cliff-ground-north-low: the type only on the mesa's top corners (bottom-left of no cliff tile) isn't drawn.
+  const low = flat();
+  mesa(low, 1);
+  for (const [x, y] of [[3, 5], [4, 5], [5, 5], [5, 4], [5, 3]]) corner(low, x, y).cliffTexture = 2;
+  assert.deepEqual(cliffGroundInUse(low, TYPES), ["Lgrs"]);
+  // cliff-ground-two: the order is the first tile's from the south, not the cliff list's.
+  const two = flat();
+  corner(two, 2, 6).layer = 3;
+  for (const [x, y] of [[1, 5], [2, 5], [1, 6], [2, 6]]) corner(two, x, y).cliffTexture = 0;
+  corner(two, 6, 2).layer = 3;
+  for (const [x, y] of [[5, 1], [6, 1], [5, 2], [6, 2]]) corner(two, x, y).cliffTexture = 2;
+  assert.deepEqual(cliffGroundInUse(two, TYPES), ["Lrok", "Ldrt"]);
+  // The cliff types not read yet: nothing.
+  assert.deepEqual(cliffGroundInUse(two, new Map()), []);
 });

@@ -151,9 +151,18 @@ const MAX_GROUND_LIST = 16;
 /** The terrain as a save writes it. With the flag 0 the World Editor's save writes the tileset's own list, whole, as
  *  the file's ground list, whatever the file's was (another order, 3 or 9 tiles), and a corner on a slot past its end
  *  gets slot 0, its first tile: what each slot was drawn with stays. The flag and the cliff list stay (we-compare
- *  custom-tilesets-0, ct0-save-*, 2026-11-16). `t` itself when nothing changes (the flag set, the tileset's list
- *  unknown, or already its list with no corner past it); `t` is never changed. */
-export function savedTerrain(t: Terrain, own: readonly string[] | undefined): Terrain {
+ *  custom-tilesets-0, ct0-save-*, 2026-11-16). `cliffGround`, the ground tiles of the cliff types cliffs are drawn with
+ *  (tilecleanup.ts cliffGroundInUse), go at the list's end where it lacks them, with either flag, past 16 too: the
+ *  World Editor's save adds them so (we-compare cliff-ground-*, branch we-compare-9; example map 29's CAdi gives Adrt).
+ *  `t` itself when nothing changes (the flag set or the tileset's list unknown, or already its list with no corner past
+ *  it, and no cliff ground missing); `t` is never changed. */
+export function savedTerrain(t: Terrain, own: readonly string[] | undefined, cliffGround: readonly string[] = []): Terrain {
+  const listed = ownListSaved(t, own);
+  const missing = cliffGround.filter((g, i) => !listed.groundTiles.includes(g) && cliffGround.indexOf(g) === i);
+  if (!missing.length) return listed;
+  return { ...listed, groundTiles: [...listed.groundTiles, ...missing] };
+}
+function ownListSaved(t: Terrain, own: readonly string[] | undefined): Terrain {
   if (t.customTilesetsRaw !== 0 || !own?.length) return t;
   const n = own.length;
   const sameList = t.groundTiles.length === n && t.groundTiles.every((g, i) => g === own[i]);

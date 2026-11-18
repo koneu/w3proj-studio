@@ -42,6 +42,28 @@ export function cliffTypeUse(t: Terrain, types: ReadonlyMap<string, CliffType>):
   return use;
 }
 
+/** The ground tiles (CliffTypes.slk groundTile) of the cliff types cliffs are drawn with, once each, in the order of
+ *  their first cliff tile, the tiles taken row by row from the south (y 0) and west to east: a tile as cliffTypeUse
+ *  counts it. The World Editor's save adds those the ground list lacks at its end, in this order (we-compare
+ *  cliff-ground-*, branch we-compare-9: a type only listed, or only on flat corners or on the top corners of cliff
+ *  tiles, adds nothing; two types add the one met first from the south first, whatever their cliff list order;
+ *  savedTerrain). Empty when the game's cliff types aren't known. */
+export function cliffGroundInUse(t: Terrain, types: ReadonlyMap<string, Pick<CliffType, "groundTile">>): string[] {
+  const list = t.cliffTiles.map((id) => types.get(id));
+  const out: string[] = [];
+  if (!list.length) return out;
+  const at = (x: number, y: number) => t.corners[y * t.width + x];
+  for (let y = 0; y < t.height - 1; y++) {
+    for (let x = 0; x < t.width - 1; x++) {
+      const bl = at(x, y), cs = [bl, at(x, y + 1), at(x + 1, y + 1), at(x + 1, y)];
+      if (cs.every((c) => c.layer === bl.layer) || cs.every((c) => c.ramp)) continue;
+      const ground = (list[bl.cliffTexture] ?? list[0])?.groundTile;
+      if (ground && !out.includes(ground)) out.push(ground);
+    }
+  }
+  return out;
+}
+
 /** The tiles nothing uses, by index. */
 export function unusedTiles(use: TileUse): number[] {
   return use.ground.flatMap((n, i) => (n === 0 && use.cliffs[i] === 0 ? [i] : []));

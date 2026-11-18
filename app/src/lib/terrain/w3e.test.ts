@@ -241,3 +241,26 @@ test("savedTerrain: with the flag 0 the save writes the tileset's own list, corn
     assert.equal(savedTerrain(t, own), t);
   }
 });
+
+test("savedTerrain: the cliffs' ground tiles the list lacks go at its end, with either flag (we-compare cliff-ground-*)", () => {
+  const terrain = (tiles: string[], raw: number): Terrain => {
+    const t = tiny(12);
+    t.groundTiles = tiles;
+    t.customTilesetsRaw = raw;
+    t.customTilesets = raw !== 0;
+    return t;
+  };
+  // cliff-ground-used: the flag 0, the own list written, then Adrt.
+  const ct0 = terrain([...OWN_L].reverse(), 0);
+  assert.deepEqual(savedTerrain(ct0, OWN_L, ["Lgrs", "Adrt"]).groundTiles, [...OWN_L, "Adrt"]);
+  // cliff-ground-nolgrs1, -two, -full: the flag set, after the file's list in the given order, past 16 too.
+  const ct1 = terrain(["Ldrt", "Ldro", "Lgrd"], 1);
+  assert.deepEqual(savedTerrain(ct1, OWN_L, ["Fdrt", "Ldrt", "Adrt", "Fdrt"]).groundTiles, ["Ldrt", "Ldro", "Lgrd", "Fdrt", "Adrt"]);
+  const sixteen = terrain(Array.from({ length: 16 }, (_, i) => `T${i.toString(16).padStart(3, "0")}`), 1);
+  const full = savedTerrain(sixteen, OWN_L, ["Adrt"]);
+  assert.deepEqual([full.groundTiles.length, full.groundTiles[16]], [17, "Adrt"]);
+  assert.deepEqual(parseW3e(writeW3e(full)).groundTiles, full.groundTiles);
+  // The terrain itself isn't changed; nothing missing is the same object.
+  assert.equal(ct1.groundTiles.length, 3);
+  assert.equal(savedTerrain(ct1, OWN_L, ["Ldro"]), ct1);
+});
