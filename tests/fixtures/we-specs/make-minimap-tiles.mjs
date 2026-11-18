@@ -7,6 +7,7 @@
 //   rand   every corner one of the six textures by a seeded random number: 4096 tiles with mostly four different corners
 //   blobs  the same in squares of 4 x 4 corners (a tile on a square's edge has two to four textures): terrain-like
 //   impulse  Lgrs everywhere with Lrok at a few corners (one, two, four, nine): what one corner draws
+//   blight  Lgrs in the north half, Ldrt in the south, the west half blighted: Export Minimap's Include Blight
 // (the text rows of war3map.w3e.txt run from the north)
 // Names given: only those maps are made.
 import { spawnSync } from "node:child_process";
@@ -55,6 +56,13 @@ const MAPS = {
     patterns.forEach((p, k) => { for (const [dx, dy] of p) grid[12 + 24 * Math.floor(k / 3) + dy][10 + 20 * (k % 3) + dx] = 3; });
     return grid;
   },
+  // Quarters for Export Minimap's Include Blight: Lgrs in the north half, Ldrt in the south, the west half blighted
+  // (FLAGS below), so each texture shows blighted and not.
+  blight: () => Array.from({ length: N }, (_, y) => new Array(N).fill(y < 32 ? 4 : 0)),
+};
+/** Corner flags per map (rows from the north, one character per corner as war3map.w3e.txt writes them: 2 is blight). */
+const FLAGS = {
+  blight: () => Array.from({ length: N }, () => Array.from({ length: N }, (_, x) => (x < 32 ? 2 : 0))),
 };
 requireValid(only.every((n) => Object.hasOwn(MAPS, n)), `unknown map ${only.filter((n) => !Object.hasOwn(MAPS, n)).join(" ")}; usage: make-minimap-tiles.mjs <w3proj cli> <game folder> [${Object.keys(MAPS).join(" | ")}]…`);
 for (const [name, make] of Object.entries(MAPS)) {
@@ -74,6 +82,11 @@ for (const [name, make] of Object.entries(MAPS)) {
     const grid = make();
     // Rows of the text run from the north (its first row is the map's top).
     lines.splice(at, 1, "[texture]", ...grid.map((row) => row.map((t) => t.toString(16)).join("")));
+    if (FLAGS[name]) {
+      const f = lines.findIndex((l) => l.startsWith("[flags]"));
+      if (f < 0 || lines[f] !== "[flags] all 0") throw new Error("flat.w3x's w3e text has no plain [flags] all 0 line");
+      lines.splice(f, 1, "[flags]", ...FLAGS[name]().map((row) => row.join("")));
+    }
     writeFileSync(file, lines.join("\n"));
     const w3i = join(dir, "map", "war3map.w3i.json");
     const info = JSON.parse(readFileSync(w3i, "utf8"));

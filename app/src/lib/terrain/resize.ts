@@ -9,6 +9,7 @@
 
 import { randomVariation, type Corner, type Terrain } from "./w3e";
 import { inArea, type Area } from "./area";
+import { viewInCameraBounds } from "./cameras";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -159,6 +160,16 @@ export const doodadStays = (x: number, y: number, rect: Area) => x > rect.left &
  *  between 616 (kept) and 1258. Start locations aren't asked: they are moved. */
 export const unitStays = (x: number, y: number, half: readonly [number, number], playable: Area) =>
   x - half[0] >= playable.left && x + half[0] <= playable.right && y - half[1] >= playable.bottom && y + half[1] <= playable.top;
+
+/** The camera objects Map Size keeps: those whose target lies inside the new camera bounds (`bounds`, war3map.w3i's
+ *  eight numbers as cameraBounds writes them), the others go, wherever they were before; the kept ones don't move (we-compare
+ *  resize-objects-cut and -grow, 2026-11-18, the empty 64 × 64 map: cut by 4 tiles on the left and on top, only the
+ *  cameras at 0, 0 and -1000, 500 stayed, one at -2800 that the new left bound -2304 left outside went; grown by 4 on the
+ *  left and at the bottom, one at -3000 that the old bound -2816 had left outside stayed, one at 3000 past the unchanged
+ *  right bound went; a plain open and save kept all nine). On a bound counts as inside (not measured). */
+export function camerasAfterResize<T extends { targetX: number; targetY: number }>(cameras: readonly T[], bounds: readonly number[]): T[] {
+  return cameras.filter((c) => viewInCameraBounds(bounds, c.targetX, c.targetY));
+}
 
 /** Where a start location at x, y is after Map Size (we-drive 2026-11-14, a 64 × 64 map's start at 0, -256 cut by 32
  *  tiles on each side and on two): one strictly inside the new map (`rect`, as doodadStays) stays where it is, also past

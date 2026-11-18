@@ -20,7 +20,7 @@ interface Entry {
   /** A built-in entry the caller adds (a random item): listed first, found by words only, no facets or fields. */
   extra?: boolean;
   name: string;
-  /** What a row shows: the name with the Editor Suffix ("Mercenary Camp - (Lordaeron Winter)"); the name for sorting stays plain. */
+  /** What a row shows: the name with the Editor Suffix ("Mercenary Camp (Lordaeron Winter)", as the World Editor lists it); the name for sorting stays plain. */
   label: string;
   facets: Record<string, string>;
   haystack: string;

@@ -107,6 +107,10 @@
 //                       the stored war3map.shd byte for byte); the melee notice wants --save-accept Warning
 //   --export-minimap FILE   File > Export Minimap… with the dialog's defaults (256, terrain, water, doodads, Playable
 //                       Area Only); the TGA it writes is copied to FILE. Another dialog is reported, not answered
+//   --export-options LIST  the boxes the next --export-minimap has ticked, the others unticked: terrain, water, blight,
+//                       pathing, doodads, units, regions, icons, camps, playable (e.g. "terrain,water,blight,doodads,playable");
+//                       the boxes that differ from the dialog's defaults are clicked, and a picture of the dialog is
+//                       printed as "optionsShot"
 //   --type TEXT         type TEXT into the open dialog (else the main window), Shift where a character needs it; printable
 //                       ASCII only (a text with another character types nothing and fails)
 //   --close             quit without saving: closes the main window and answers "don't save" questions
@@ -163,6 +167,23 @@ const VIEW_MENU = { x: 78, y: 11 };
  *  button and OK (measured 2026-11-13). The dialog opens with the editor's defaults: 256, terrain, water, doodads,
  *  Playable Area Only. */
 const EXPORT_MINIMAP = { file: { x: 14, y: 11 }, item: { x: 61, y: 168 }, imageFile: { x: 39, y: 20 }, ok: { x: 225, y: 291 } };
+/** The dialog's option boxes from its corner (x 16, a row 18 px; measured 2026-11-18 at 508,346) and which are ticked
+ *  when it opens. */
+export const EXPORT_BOXES = Object.freeze({
+  terrain: [108, true], water: [126, true], blight: [144, false], pathing: [162, false], doodads: [180, true],
+  units: [198, false], regions: [216, false], icons: [234, false], camps: [252, false], playable: [270, true],
+});
+/** --export-options' list: the boxes to have ticked (the others unticked), e.g. "terrain,water,blight,doodads,playable". */
+export function parseExportOptions(v) {
+  const names = String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const bad = names.filter((n) => !Object.hasOwn(EXPORT_BOXES, n));
+  if (bad.length) throw new Error(`--export-options: unknown box ${bad.join(", ")} (${Object.keys(EXPORT_BOXES).join(", ")})`);
+  return Object.fromEntries(Object.keys(EXPORT_BOXES).map((k) => [k, names.includes(k)]));
+}
+/** The boxes to click so the dialog's defaults become `options`: [x, y] from the dialog's corner. */
+export function exportBoxClicks(options) {
+  return Object.entries(EXPORT_BOXES).filter(([k, [, on]]) => options && options[k] !== on).map(([, [y]]) => [16, y]);
+}
 /** The check-mark column of the open View menu, from the menu's corner, and a row's half height. */
 const VIEW_CHECK = { x: 2, w: 18, half: 8 };
 /**
@@ -215,7 +236,7 @@ const MAX_LOOKS = 16;
 /** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
 const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
  *  "Layout"). */
@@ -397,7 +418,7 @@ export function parseArgs(argv) {
     throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
   }
   // --drag-mod belongs to the next --drag; each --drag is parsed (and refused) here.
-  let pendingMod = null, pendingButton = null;
+  let pendingMod = null, pendingButton = null, pendingExport = null;
   for (let i = 0; i < steps.length; i++) {
     const [step, v] = steps[i];
     if (step === "--drag-button") {
@@ -408,6 +429,12 @@ export function parseArgs(argv) {
       if (!DRAG_MODS.includes(v)) throw new Error(`--drag-mod wants ${DRAG_MODS.join(", ")}`);
       pendingMod = v;
       steps.splice(i--, 1);
+    } else if (step === "--export-options") {
+      pendingExport = parseExportOptions(v);
+      steps.splice(i--, 1);
+    } else if (step === "--export-minimap") {
+      steps[i] = [step, { file: v, ...(pendingExport ? { options: pendingExport } : {}) }];
+      pendingExport = null;
     } else if (step === "--drag") {
       steps[i] = [step, { ...parseDrag(v), ...(pendingMod ? { mod: pendingMod } : {}), ...(pendingButton && pendingButton !== 1 ? { button: pendingButton } : {}) }];
       pendingMod = null;
@@ -421,6 +448,7 @@ export function parseArgs(argv) {
   }
   if (pendingMod) throw new Error("--drag-mod needs a --drag after it");
   if (pendingButton) throw new Error("--drag-button needs a --drag after it");
+  if (pendingExport) throw new Error("--export-options needs an --export-minimap after it");
   // Every look's camera goes into the map before the editor starts: parsed (and refused) here, numbered by order.
   const looks = steps.filter(([s]) => s === "--look").map(([, v]) => parseLook(v));
   if (looks.length > MAX_LOOKS) throw new Error(`at most ${MAX_LOOKS} --look steps in one run`);
@@ -1332,7 +1360,7 @@ export class Session {
    * "Save As" box), OK writes it, and the TGA is copied to `dest`. Done when the file stood still for 2 s and the
    * dialog has closed; another dialog is reported with a picture of the screen, not answered.
    */
-  async exportMinimap(dest) {
+  async exportMinimap(dest, options = null) {
     const { main } = this.mainOrThrow();
     const waitFor = async (title) => {
       for (let i = 0; i < 40; i++) {
@@ -1356,6 +1384,12 @@ export class Session {
     this.x("type", "--window", saveAs.id, winePath(file));
     this.x("key", "--window", saveAs.id, "Return");
     for (let i = 0; i < 20 && this.windows().dialogs.some((w) => w.title === "Save As"); i++) await this.wait(250);
+    // --export-options: the boxes that differ from the dialog's defaults, then a picture of the dialog to check them by.
+    let optionsShot = null;
+    if (options) {
+      for (const [x, y] of exportBoxClicks(options)) { this.x("click", at(dialog.rect, { x, y })); await this.wait(250); }
+      optionsShot = this.dialogShot("export-options");
+    }
     this.x("click", at(dialog.rect, EXPORT_MINIMAP.ok));
     const deadline = this.now() + this.opts.timeout * 1000;
     let last = null, stillSince = 0;
@@ -1375,7 +1409,7 @@ export class Session {
           const bytes = statSync(file).size;
           // The work folder's TGA was only the editor's place to write: it doesn't pile up over runs.
           rmSync(file, { force: true });
-          return { exported: true, file: resolve(dest), bytes };
+          return { exported: true, file: resolve(dest), bytes, ...(optionsShot ? { optionsShot } : {}) };
         }
       }
     }
@@ -1710,7 +1744,7 @@ async function main() {
           await s.wait(300);
           out({ step, typed: arg.length, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--export-minimap") {
-          const r = await s.exportMinimap(arg);
+          const r = await s.exportMinimap(arg.file, arg.options ?? null);
           out({ step, ...r });
           if (!r.exported) { failed = true; break; }
         } else if (step === "--click" || step === "--double-click") {

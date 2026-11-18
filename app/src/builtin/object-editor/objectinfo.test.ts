@@ -149,6 +149,7 @@ test("the list label is the name with the Editor Suffix, own value else the game
   assert.equal(editorSuffix({ base: "AHbz", mods: [{ field: "ansf", level: 2, value: "L2" }] }, k(ansf), res), "Level 1", "level 1 shows");
   assert.equal(editorSuffix({ base: "AHbz", mods: [{ field: "ansf", level: 1, value: "Mine" }] }, k(ansf), res), "Mine");
   assert.equal(editorSuffix({ base: "hfoo" }, { fields: [field("unam", "Name")], defaultValue: () => "x" }, res), "", "no such field");
-  assert.equal(labelWithSuffix("Footman", "Std"), "Footman - Std");
+  assert.equal(labelWithSuffix("Footman", "Std"), "Footman Std");
+  assert.equal(labelWithSuffix("Circle of Power", "(medium)"), "Circle of Power (medium)", "the World Editor's list: a space, no dash");
   assert.equal(labelWithSuffix("Footman", ""), "Footman");
 });

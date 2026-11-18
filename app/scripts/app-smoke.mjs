@@ -2692,7 +2692,7 @@ async function mapInfoColorTools(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
-/** The Object Editor's list shows "Name - Editor Suffix": a custom unit with its own suffix (kept as a TRIGSTR with colour
+/** The Object Editor's list shows the name and the Editor Suffix with a space between, as the World Editor's does: a custom unit with its own suffix (kept as a TRIGSTR with colour
  *  codes), a modified standard ability with the game's, and the filter box matches the suffix. */
 async function objectListSuffix(page, found) {
   const fail = (what) => found.push(`object list suffix: ${what}`);
@@ -2713,11 +2713,11 @@ async function objectListSuffix(page, found) {
     const search = (text) => page.evaluate(`(() => { const s = ${ed}.querySelector(".obj-search"); s.value = ${lit(text)}; s.dispatchEvent(new Event("input")); })()`);
     await search(""); // opening one object filters the list to it
     await until("the game data", async () => (await rowText(plain)) === "Plain", 30000);
-    if ((await rowText(unit)) !== "Suffixed - Smoke suffix") fail(`the custom unit shows ${lit(await rowText(unit))}`);
+    if ((await rowText(unit)) !== "Suffixed Smoke suffix") fail(`the custom unit shows ${lit(await rowText(unit))}`);
     await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3a", "ANfb")`);
     await until("the standard ability's row", async () => (await rowText("ANfb")) !== null, 30000);
     const std = await rowText("ANfb");
-    if (!/ - \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
+    if (!/^Firebolt \(Neutral Hostile\)$/.test(std ?? "")) fail(`the modified standard ability shows ${lit(std)}`);
     // Control: a text that matches nothing takes the row away, so the row seen next is the filter's doing.
     await search("zzz no such object");
     if (!(await soon(async () => (await rowText("ANfb")) === null))) fail("the search box doesn't filter the list (control)");
@@ -2747,7 +2747,7 @@ async function objectPickerSuffix(page, found) {
       await soon(async () => (await rowName("nmr3")) !== null, 5000);
       const name = await rowName("nmr3");
       // The value is the one the game's table holds (NeutralUnitStrings.txt, [nmr3]: " (Lordaeron Winter)").
-      if (name !== "Mercenary Camp - (Lordaeron Winter)") fail(`${label}: nmr3 shows ${lit(name)}`);
+      if (name !== "Mercenary Camp (Lordaeron Winter)") fail(`${label}: nmr3 shows ${lit(name)}`);
       const ids = await shownIds();
       if (!ids.includes("nmr3") || ids.includes("hfoo")) fail(`${label}: "lordaeron winter" finds ${lit(ids.slice(0, 8))}`);
       await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
@@ -4874,6 +4874,28 @@ async function heightsLimits(page, found) {
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   const draggedOff = await dragTarget();
   if (!(draggedOff > br)) fail(`the same drag with Enforce Camera Bounds off left the camera at ${draggedOff}, not past the bound ${br}`);
+  // A camera already past the bound (typed there with the switch off) dragged with it on: a drag that ends inside takes
+  // it there, one that ends outside leaves it, outward or inward alike (the World Editor, we-drive 2026-11-18: a camera
+  // at 3100 dragged in to 2716.3; one at 3100 dragged out and one at 3000 dragged to about 2940 stayed). The switch is
+  // off before and after. 600 past the bound: 20 pixels of this view are about 270 units.
+  const past = br + 600;
+  const outsideDrag = async (px) => {
+    await typeTargetX(past);
+    await k.run("w3.terrain.toggleEnforceCameraBounds");
+    await k.look(past, 0);
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x, y: c.y }, { x: c.x + px, y: c.y }, 30);
+    await k.save();
+    const x = savedCams().at(-1)?.targetX;
+    await k.run("w3.terrain.toggleEnforceCameraBounds");
+    return x;
+  };
+  const inward = await outsideDrag(-350);
+  if (!(inward < br - 50)) fail(`a camera at ${past}, past the camera bound ${br}, dragged inward to well inside with Enforce Camera Bounds on is at ${inward} (the World Editor takes it in)`);
+  const outward = await outsideDrag(350);
+  if (outward !== past) fail(`a camera at ${past} dragged further out with Enforce Camera Bounds on is at ${outward}, wanted it left at ${past}`);
+  const shortIn = await outsideDrag(-20);
+  if (shortIn !== past) fail(`a camera at ${past} dragged a little inward, still past the bound ${br}, is at ${shortIn}, wanted it left at ${past}`);
   if ((await typeTargetX(br + 250)) !== br + 250) fail(`a Target X typed past the camera bounds with Enforce Camera Bounds off left the camera at ${savedCams().at(-1)?.targetX}, not ${br + 250}`);
   cams = await camFrom(br + 200, "Set from view");
   if (cams.at(-1) !== br + 200) fail(`Set from view with Enforce Camera Bounds off left the camera at ${cams.at(-1)}, not ${br + 200} (${await k.toasts()})`);
@@ -5760,6 +5782,20 @@ async function resizeUnreadable(page, found) {
       await refused(/war3map\.w3r can't be read/, "an undecodable war3map.w3r");
       rmSync(w3r);
       writeFileSync(w3rJson, regions);
+      await page.evaluate(`w3.workspace.refresh()`);
+    }
+
+    // war3map.w3c, which the resize rewrites since it removes the cameras outside the new camera bounds: the same.
+    const w3cJson = join(map, "war3map.w3c.json"), w3c = join(map, "war3map.w3c");
+    const cameras = existsSync(w3cJson) ? readFileSync(w3cJson) : null;
+    if (!cameras) fail("the new map has no war3map.w3c.json (control)");
+    else {
+      rmSync(w3cJson);
+      writeFileSync(w3c, Buffer.from("not a camera file"));
+      await page.evaluate(`w3.workspace.refresh()`);
+      await refused(/war3map\.w3c can't be read/, "an undecodable war3map.w3c");
+      rmSync(w3c);
+      writeFileSync(w3cJson, cameras);
       await page.evaluate(`w3.workspace.refresh()`);
     }
 

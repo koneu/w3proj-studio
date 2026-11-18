@@ -176,10 +176,10 @@ test("what a resize loses is named: tiles of ground and the objects it removes",
   const left = resizeLoss(t, [-32, 0, 0, 0], 2);
   assert.equal(left.length, 2);
   assert.match(left[0], /^2048 tiles of terrain/);
-  assert.equal(left[1], "2 objects (doodads on or past the new edge, units and items outside the playable area)");
+  assert.equal(left[1], "2 objects (doodads on or past the new edge, units and items outside the playable area, cameras outside the camera bounds)");
   assert.match(resizeLoss(t, [-32, 0, -32, 0], 0)[0], /^3072 tiles/, "an L-shaped cut: 4096 minus 32 x 32 kept");
   assert.equal(resizeLoss(t, [0, -32, 0, 0], 0).length, 1, "nothing removed: no object line");
-  assert.deepEqual(resizeLoss(t, [32, 0, 0, 0], 1), ["1 object (doodads on or past the new edge, units and items outside the playable area)"],
+  assert.deepEqual(resizeLoss(t, [32, 0, 0, 0], 1), ["1 object (doodads on or past the new edge, units and items outside the playable area, cameras outside the camera bounds)"],
     "growing can remove a unit that the new border leaves outside the playable area");
 });
 

@@ -81,7 +81,7 @@ test("game rows show 'Name - Editor Suffix', and the suffix is searched; the sor
     westring: (v: string) => (v === "WES_X" ? "|cffff0000(Dalaran)|r" : v),
   } as unknown as KindData;
   const list = pickerList(k, { custom: [{ id: "h000", base: "nmr0", name: "Mine" }] });
-  assert.deepEqual(list.entries.map((e) => e.label), ["Mercenary Camp", "Mercenary Camp - (Lordaeron Winter)", "Mercenary Camp - (Dalaran)", "Mine"]);
+  assert.deepEqual(list.entries.map((e) => e.label), ["Mercenary Camp", "Mercenary Camp (Lordaeron Winter)", "Mercenary Camp (Dalaran)", "Mine"]);
   assert.deepEqual(list.entries.map((e) => e.id), ["nmer", "nmr0", "nmr3", "h000"]);
   list.setQuery("winter");
   assert.deepEqual(list.entries.filter((e) => list.matches(e)).map((e) => e.id), ["nmr0"]);
