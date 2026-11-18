@@ -44,6 +44,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(projectItem, weItem, buildItem, testItem);
   /** World Editors opened from here and not closed yet: the mark stays until the last one has closed. */
   let editorsOpen = 0;
+  /** Editors running per edit build: while one has the file open it isn't packed again (its watcher would report that
+   *  as the editor's save, and an unsynced save in it would be overwritten). */
+  const openOn = new Map<string, number>();
 
   const root = () => {
     const p = w3.workspace.project();
@@ -314,10 +317,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       root();
       const exe = program("worldEditor.path", "World Editor.exe");
       const map = editBuild();
-      await pack(map);
+      if (!openOn.get(map)) await pack(map);
       await w3.backend.invoke("world_editor_open", { exe, map, root: root() });
       out.append(`World Editor opened ${map}; saving there syncs back into the project`);
       editorsOpen++;
+      openOn.set(map, (openOn.get(map) ?? 0) + 1);
       weItem.text = "● World Editor";
       w3.window.showInfo("Opened in the World Editor. Save there (Ctrl+S) and the project is updated.");
     }),
@@ -376,6 +380,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     .listen<{ map: string }>("w3://world-editor-exited", ({ map }) => {
       out.append(`World Editor closed (${map})`);
       editorsOpen = Math.max(0, editorsOpen - 1);
+      const n = (openOn.get(map) ?? 0) - 1;
+      if (n > 0) openOn.set(map, n); else openOn.delete(map);
       if (!editorsOpen) weItem.text = "";
     })
     .then((d) => ctx.subscriptions.push(d));
