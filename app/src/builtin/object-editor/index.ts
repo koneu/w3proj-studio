@@ -518,17 +518,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }, `Clean up (${unchanged.length})`)
             : undefined;
           visible = [...custom, ...standard];
-          const out = [
-            head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o))),
-            head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o))),
-          ];
-          // A chapter map's campaign's objects: shown to look at, edited in the campaign.
+          const out = [head("custom", `Custom (${custom.length})`), ...custom.map((o) => rowOf(o, own(o), false, selection.has(o)))];
+          // A chapter map's campaign's objects: shown to look at, edited in the campaign. Between the map's own custom
+          // objects and the standard ones, as the World Editor's chapter Object Editor puts its "Campaign Units" between
+          // "Standard Units" and "Custom Units" (we-drive, branch we-compare-2).
           if (campaignError) out.push(head("campaign-error", "Campaign: its object data can't be read", { title: campaignError, cls: ".obj-campaign-error" }));
           else if (campaign) {
             const theirs = named((o) => labelOf(o, campaignName(o), campaignStr)), items = listed(campaignListed(), theirs, named(campaignName));
             out.push(head("campaign", `Campaign (${items.length})`, { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` }),
               ...items.map((o) => rowOf(o, theirs(o), true, campaignShown === o)));
           }
+          out.push(head("standard", `Modified standard (${standard.length})`, { action: cleanUp }), ...standard.map((o) => rowOf(o, own(o), false, selection.has(o))));
           putRows(out);
         };
 

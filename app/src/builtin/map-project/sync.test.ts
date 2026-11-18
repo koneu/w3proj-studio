@@ -11,7 +11,7 @@ const TWO = "/home/u/maps/Two";
 const MAP = "/home/u/maps/One/build/One.edit.w3x";
 
 /** `during`: what happens while the backend unpacks (or the deletion question waits, with `wouldDelete`). */
-function fakeApp(opts: { during?: (switchTo: (root: string) => void) => void; wouldDelete?: boolean; strays?: string[] } = {}) {
+function fakeApp(opts: { during?: (switchTo: (root: string) => void) => void; wouldDelete?: boolean; strays?: string[]; keptClassic?: string[] } = {}) {
   let current: { root: string; name: string; default_output: string } | null = { root: ONE, name: "One", default_output: `${ONE}/One.w3x` };
   const switchTo = (root: string) => { current = { root, name: root, default_output: `${root}/x.w3x` }; };
   const log: string[] = [];
@@ -38,7 +38,7 @@ function fakeApp(opts: { during?: (switchTo: (root: string) => void) => void; wo
           log.push(`unpack into ${a.dir}`);
           if (opts.wouldDelete && a.refuseDeletes) throw "WOULD_DELETE: [\"map/gone.txt\"]";
           if (!opts.wouldDelete) opts.during?.(switchTo);
-          return { files: [], unnamed: [], errors: [], written: 3, deleted: 1, unchanged: 0, strays: opts.strays };
+          return { files: [], unnamed: [], errors: [], written: 3, deleted: 1, unchanged: 0, strays: opts.strays, kept_classic: opts.keptClassic };
         }
         throw new Error(cmd);
       },
@@ -72,6 +72,13 @@ function fakeApp(opts: { during?: (switchTo: (root: string) => void) => void; wo
 
 /** What the sync did to the app (not what it said). */
 const acts = (log: string[]) => log.filter((l) => /^(closeAll|refresh|restore|command w3\.script|info Project)/.test(l));
+
+test("a Classic file the sync kept over its HD version's bytes is said in the message and the output", async () => {
+  const app = fakeApp({ keptClassic: ["map/war3mapImported/both.mdx"] });
+  await app.sync();
+  assert.ok(app.log.includes("info Project synced: 3 files updated, 1 removed. Kept the project's Classic version of map/war3mapImported/both.mdx: the map had its HD file's bytes in its place (the World Editor in HD mode saves so)."), app.log.join("\n"));
+  assert.ok(app.log.some((l) => l.startsWith("out ") && l.includes("Classic file") && l.endsWith("map/war3mapImported/both.mdx")), app.log.join("\n"));
+});
 
 test("a sync into the open project closes, refreshes and restores its tabs and adopts its script", async () => {
   const app = fakeApp();

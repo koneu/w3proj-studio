@@ -677,6 +677,39 @@ editor shades them for the box turned inward and leaves them lit for the closed,
 plain inclusive or exclusive test (treating the edge as outside: 32 off, a tolerance of 1e-4: 41) nor a top-left rule;
 probably the editor's floating-point rounding on lines exactly through an edge: not reproduced.
 
+**Water shadows, HD saves, chapter objects, Open in World Editor** (branch we-compare-2, 2026-11-18, HD). (1) **Real
+shadows on water**: `make-water-shadows.mjs --depth D --deep D --low-flyers --lake-trees` (lakes 12, 30, 45 deep beside
+100 or 200 deep ones, gryphons and trees whose shadows fall in them), one we-drive run per batch of maps with
+`--looks-every-map`, cameras `--look 300,250,2600` (shallow) and `1400,200,2400` (deep), Shadows on and off; Studio
+`--compare-ready lit`, `--camera we:…`, `terrain.shadows.visible`. Units animate and waves move between the two pictures,
+so per-pixel medians scatter by 0.05 to 0.14 (the same Studio build twice); the measure that held is the mean linear
+light on over off over the shadow's core (where both pictures' blurred ratio is under 0.8), on the trees' still shadows.
+The editor keeps green / blue 0.51 / 0.76 at 12 deep, 0.55 / 0.85 at 30, 0.68 / 0.89 at 45 (the bed's shadow seen
+through alone gives that), 0.51 to 0.57 / 0.73 to 0.75 at 100 and 200 deep. Studio's one WATER_SHADE at every depth gave
+0.47 / 0.66, 0.53 / 0.79, 0.58 / 0.83 and 0.58 to 0.66 / 0.78 to 0.81 (0.07 off on average); now (renderer.ts
+`waterShadowKeep`: nothing taken of the water's own colour and reflection up to 45 deep, WATER_SHADE 0.9 / 0.5 / 0.72
+from 100, smoothstep between) 0.51 / 0.73, 0.62 / 0.89, 0.68 / 0.92, 0.49 to 0.57 / 0.70 to 0.76 (0.03). Red isn't
+readable in deep water (the editor's has 0.013 linear, Studio's 0.025); shallow red is the bed's (Studio's ground is
+brighter, lowprio-bugs). (2) **The HD-mode save and Classic files** (`make-import-modes.mjs`, `--save` twice): of
+import-modes-units, the editor writes `_HD.w3mod\war3mapImported\both.mdx` (the HD Peasant, 4372702 bytes) under the
+plain `war3mapImported\both.mdx` (the Easter Rabbit, 56886): the import a placed unit (hpea) uses as its model; every
+import of import-modes-list (none used) comes back byte for byte. A sync keeps the project's file then
+(project.rs `keep_classic_over_hd`, report `kept_classic`; on the editor's real save the Rabbit stays). The save of the
+13.8 MB map stood whole 1.2 s after Ctrl+S, one write seen at 500 ms polls (`--save` prints `writes` now), so Studio's
+1.5 s wait before it syncs a World Editor save is enough there. (3) **The chapter Object Editor** (make-campaign.mjs
+tiny-objects; `--campaign`, F7, Ctrl+O, the name typed, Return, the chapter row 620,283, Ctrl+M, then F6 and the Units
+tab 147,198; a run whose Object Editor the editor restored at start showed the first map's data, `--close-modules`
+after Ctrl+M and a click at 700,120 before F6 fixed it): a root **Campaign Units (1)** in blue between Standard Units
+and Custom Units (0), Human > Melee > Units > Campaign Footman, all blue. Studio lists its Campaign group between
+Custom and Modified standard now (it was last; app-smoke chapterObjects). A double-click on the first field with the
+campaign unit chosen (258,706, then 380,243) opened "Edit Unit Value - Ability" (Abilities - Default Active Ability),
+so the editor seems to let a chapter change a campaign object (the Campaign Editor covered the pictures; where the change
+goes wasn't followed); Delete opened nothing. (4) **Open in World Editor**: app-smoke `worldEditorSync` with a stand-in
+editor (WE_STANDIN: takes `-launch -loadfile`, rewrites the map whole, exits on a signal) proves the mark, the sync of a
+save with "always" and the mark's end; with two editors open it now stays until both have closed. The real editor
+through Proton isn't started by the app in a test (only we-drive starts it, through `proton run` in its own sandbox);
+that its save goes to the `-loadfile` map is what `--save` copies.
+
 **Map preferences** (branch map-settings-we, 2026-11-14; specs `tests/we-compare/map-prefs.json`; saves of
 empty_map_on_newest_world_editor.w3m after each switch): the Trigger Editor's JassHelper menu (F4, menu 200,111: Enable
 JassHelper 232,131, vJass 219,148, debug mode 236,165, optimizer 229,182; a click on 200,111 closes it, `--key Escape`
