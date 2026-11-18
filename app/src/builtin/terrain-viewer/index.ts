@@ -2448,7 +2448,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // The project's terrain shows its war3map.shd (classic graphics), with the cells unsaved edits change
         // predicted; a game map's view only the objects' own shadows (see viewshadows.ts).
         renderer.shadowLook = shadowLookFor(renderer.tone);
-        renderer.showShadows = switchedOn(w3, "terrain.shadows.visible", true);
+        // Game view draws them whatever View > Shadows says, as the World Editor's Lock to Game View Settings does
+        // (we-drive SD, (2)LastRefuge's opening view, 2026-11-18: Shadows off and on the same picture with game view
+        // on, the same as Shadows on without it; Shadows off without it 2.8, 7.9, 1.5 lighter on the mean).
+        const shadowsShown = () => gameViewOn() || switchedOn(w3, "terrain.shadows.visible", true);
+        renderer.showShadows = shadowsShown();
         const viewShadows = new ViewShadows({
           terrain, target: renderer, redraw: loadRedraw,
           readBaked: async (): Promise<Baked> => {
@@ -2489,8 +2493,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Saving (or a rebuild after a tool's edit) wrote the shadow map: it's what's stored now.
         const stopShadowSaves = w3.workspace.onDidSave((path) => { if (path.toLowerCase() === "map/war3map.shd") void viewWork.track(viewShadows.reloadBaked()); });
         const stopShadowSetting = w3.settings.onDidChange((key) => {
-          if (key !== "terrain.shadows.visible") return;
-          renderer.showShadows = switchedOn(w3, "terrain.shadows.visible", true);
+          if (key !== "terrain.shadows.visible" && key !== "terrain.gameView") return;
+          renderer.showShadows = shadowsShown();
           viewSyncs.forEach((f) => f());
           redraw();
         });
@@ -5457,7 +5461,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -5480,7 +5484,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  out when `forced` (View > Shadows in the World Editor). */
         const switchBox = (label: string, title: string, key: string, standard: boolean, forced = false) => {
           const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void setSwitch(w3, key, box.checked); keysToMap(); } });
-          viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
+          // A forced switch shows what game view draws: on (Shadows, the only one).
+          viewSyncs.push(() => { box.checked = (forced && gameViewOn()) || switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
           const el = h("label.model-toggle", { title }, box, ` ${label}`);
           if (forced) greyTip(el, () => (gameViewOn() ? FORCED_NOTE : null));
           return el;
