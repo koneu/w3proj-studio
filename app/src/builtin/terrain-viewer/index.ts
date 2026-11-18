@@ -83,7 +83,7 @@ import { HD_WATER_DEFAULTS } from "./hdwater";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
-import { clearShadowMeshes, predictShadows } from "./shadowmap";
+import { clearShadowMeshes, predictShadows, readSpecialShadows } from "./shadowmap";
 import { playerRaces, startPreviews, startPreviewKey, START_PREVIEW_ALPHA } from "./startpreview";
 import { DAY_SECONDS, stepHour } from "./daycycle";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
@@ -2435,9 +2435,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const read = (p: string) => readFile(w3, doc, p, terrain.tileset).then((buf) => decodeImage(buf, p));
             return textureCandidates(path).reduce<Promise<DecodedImage>>((p, c) => p.catch(() => read(c)), Promise.reject(new Error("no candidates")));
           },
-          predict: editable ? (t, doodads, pause) => {
+          predict: editable ? async (t, doodads, pause) => {
             const sun = { azimuth: w3.settings.get<number>("terrain.shadows.sunAzimuth") ?? 225, elevation: w3.settings.get<number>("terrain.shadows.sunElevation") ?? 30 };
-            return predictShadows(t, doodads, objCtx?.skins ?? new Map(), (id) => objCtx?.bases.get(id), (p) => readFile(w3, doc, p), sun, pause, artMode);
+            const skins = objCtx?.skins ?? new Map();
+            // The special doodads aren't edited here: the saved state's prediction and the edits' read the same ones.
+            const specials = await readSpecialShadows(w3, specialsOf(dooFile?.doc), skins, (p) => readFile(w3, doc, p, terrain.tileset));
+            return predictShadows(t, doodads, skins, (id) => objCtx?.bases.get(id), (p) => readFile(w3, doc, p), sun, pause, artMode, undefined, specials);
           } : null,
         });
         void artLoad(viewShadows.reloadBaked());

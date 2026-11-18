@@ -6,7 +6,7 @@ import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { newTerrain, type NewMapOptions } from "./newmap";
 import { loadSkins, withObjectArt, type Placed } from "./objects";
-import { doodadTypes, predictShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
+import { doodadTypes, predictShadows, shadowVerdict, specialShadows, type ShadowStats } from "./shadowmap";
 import { terrainShadows } from "./shadows";
 import { writeDerived } from "./derive";
 
@@ -66,6 +66,35 @@ test("doodads the skin table says cast no shadow (shadow=0, as corn) stay out of
   assert.deepEqual(asked, [], "corn's model isn't even read");
   assert.deepEqual(await predict("D000"), rock, "corn whose object data turns its shadow on casts");
   assert.equal(shadowed(await predict("D001")), 0, "a rock whose object data turns it off doesn't");
+});
+
+test("a special doodad's footprint is read from its model: a tall one on flat ground casts, placed in the footprint's middle", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[YCr2]\nfile=Doodads\\Terrain\\Cave\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const w3 = { settings: { get: () => "sd-special-shadow-test" }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const terrain = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  const tower = towerModel();
+  const asked: string[] = [];
+  const read = async (p: string) => { asked.push(p); if (/\.mdx$/i.test(p)) return tower; throw new Error(`no ${p}`); };
+  // Placed by its footprint's bottom-left tile (10, 10), 3 x 3 tiles: the tower (100 wide) stands in the middle tile.
+  const specials = specialShadows([{ id: "YCr2", x: 10, y: 10 }], skins, () => ({ width: 12, height: 12 }));
+  assert.deepEqual(specials, [{ path: "Doodads\\Terrain\\Cave.mdx", tiles: { x0: 10, y0: 10, x1: 12, y1: 12 } }]);
+  const mode = () => "sd-special-shadow-test";
+  const ground = terrainShadows(terrain);
+  const shd = await predictShadows(terrain, [], skins, () => undefined, read, undefined, undefined, mode, undefined, specials);
+  assert.deepEqual(asked, ["Doodads\\Terrain\\Cave.mdx"]);
+  // The tower's cells (the middle tile's, cells 44 to 47) stand 1000 high: the cells north-east of it are dark, far.
+  const w = (terrain.width - 1) * 4;
+  assert.equal(shd[50 * w + 50], 0xff, "next to it");
+  assert.equal(shd[70 * w + 70], 0xff, "24 steps off (1000 / (80/3) is 37)");
+  assert.equal(shd[46 * w + 46], 0, "its own top is lit");
+  assert.equal(shd[40 * w + 40], 0, "south-west of it lit");
+  assert.equal(shd.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0) > 100, true);
+  // Without the special the ground is flat and lit.
+  assert.deepEqual(await predictShadows(terrain, [], skins, () => undefined, read, undefined, undefined, mode), ground);
 });
 
 test("an alpha-tested geoset whose texture is clear casts nothing in HD and whole in Classic, as the editor's calculation", async () => {

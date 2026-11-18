@@ -35,7 +35,7 @@ export function shadowCellHeights(t: Terrain, cliffs?: CliffCells): Float32Array
     for (let tx = 0; tx < t.width - 1; tx++) {
       const bl = corner(tx, ty), br = corner(tx + 1, ty), tl = corner(tx, ty + 1), tr = corner(tx + 1, ty + 1);
       const isCliff = !(bl.layer === br.layer && bl.layer === tl.layer && bl.layer === tr.layer) && !(bl.ramp && br.ramp && tl.ramp && tr.ramp);
-      const cells = isCliff ? cliffs?.(tx, ty) ?? null : null;
+      const cells = isCliff || cliffs?.special?.(tx, ty) ? cliffs?.(tx, ty) ?? null : null;
       const h00 = bl.height + lift(tx, ty), h10 = br.height + lift(tx + 1, ty), h01 = tl.height + lift(tx, ty + 1), h11 = tr.height + lift(tx + 1, ty + 1);
       const base = (Math.min(bl.layer, br.layer, tl.layer, tr.layer) - 2) * 128;
       const g00 = groundHeight(bl), g10 = groundHeight(br), g01 = groundHeight(tl), g11 = groundHeight(tr);
@@ -61,8 +61,9 @@ function splitTile(h00: number, h10: number, h01: number, h11: number, u: number
 }
 
 /** A cliff tile's heights for shadowCellHeights: the 16 cell centres (row by row from the south, `v * 4 + u`), in the
- *  model's z over the tile's lowest layer; NaN where none is known; null: none for the tile. */
-export type CliffCells = (tileX: number, tileY: number) => Float32Array | null;
+ *  model's z over the tile's lowest layer; NaN where none is known; null: none for the tile. `special`: the tiles a
+ *  special doodad covers (specialCellHeights), read from it whether they are cliff tiles or not. */
+export type CliffCells = ((tileX: number, tileY: number) => Float32Array | null) & { special?: (tileX: number, tileY: number) => boolean };
 
 /** The variation of shadowCliffName's model a tile takes: its own, counted round the name's `count` variations when
  *  the name has fewer (the drawn model instead falls back to the highest one there is). Real maps (we-drive, branch
@@ -119,20 +120,46 @@ function blockCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>
   for (let j = 0; j < 4; j++) {
     for (let i = 0; i < 4; i++) {
       // For one tile: its (u, v) at the model's (1 - v, u); the model's x runs from -128 to 0.
-      const px = -(tileY * 128 + (j + 0.5) * 32), py = tileX * 128 + (i + 0.5) * 32;
-      let best = NaN;
-      for (let f = 0; f + 2 < faces.length; f += 3) {
-        const a = faces[f] * 3, b = faces[f + 1] * 3, c = faces[f + 2] * 3;
-        const ax = positions[a], ay = positions[a + 1], bx = positions[b], by = positions[b + 1], cx = positions[c], cy = positions[c + 1];
-        const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-        if (Math.abs(area) < 1e-9) continue;
-        const w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) / area;
-        const w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / area;
-        if (w0 < -1e-6 || w1 < -1e-6 || 1 - w0 - w1 < -1e-6) continue;
-        const z = w0 * positions[a + 2] + w1 * positions[b + 2] + (1 - w0 - w1) * positions[c + 2];
-        if (!(z <= best)) best = z;
-      }
-      out[j * 4 + i] = best;
+      out[j * 4 + i] = highestAt(positions, faces, -(tileY * 128 + (j + 0.5) * 32), tileX * 128 + (i + 0.5) * 32);
+    }
+  }
+  return out;
+}
+
+/** The highest of a model's triangles over the point (px, py) of its own space; NaN where none is. */
+function highestAt(positions: ArrayLike<number>, faces: ArrayLike<number>, px: number, py: number): number {
+  let best = NaN;
+  for (let f = 0; f + 2 < faces.length; f += 3) {
+    const a = faces[f] * 3, b = faces[f + 1] * 3, c = faces[f + 2] * 3;
+    const ax = positions[a], ay = positions[a + 1], bx = positions[b], by = positions[b + 1], cx = positions[c], cy = positions[c + 1];
+    const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (Math.abs(area) < 1e-9) continue;
+    const w0 = ((bx - px) * (cy - py) - (by - py) * (cx - px)) / area;
+    const w1 = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / area;
+    if (w0 < -1e-6 || w1 < -1e-6 || 1 - w0 - w1 < -1e-6) continue;
+    const z = w0 * positions[a + 2] + w1 * positions[b + 2] + (1 - w0 - w1) * positions[c + 2];
+    if (!(z <= best)) best = z;
+  }
+  return best;
+}
+
+/** A special doodad's model's heights at the 16 cell centres of one tile of its footprint (CliffCells), in the model's z
+ *  (over the footprint's lowest layer, specials.ts specialBase): the highest of its triangles over each point, the model
+ *  placed as it is drawn (specials.ts specialPlacements: its origin in the middle of the footprint `w` × `h` tiles,
+ *  turned by `angle`), not a quarter turn round as cliff models are read. `tileX`, `tileY`: the tile in the footprint
+ *  (0 to w - 1, 0 to h - 1). we-drive (branch we-shadows-1, 2026-11-18, HD, Calculate Shadows): (2)LastRefuge without
+ *  its doodads, with and without its cave YCr2 (3 × 3 tiles at tile 60, 85): the cave lights 26 cells and darkens 2 of
+ *  the notch it fills; read so, all of the footprint's tiles (the flat ones too), the cave's 28 cells are the editor's,
+ *  where the cliff models under it left them off, the ground there 44, the model only on the cliff tiles 6 and turned
+ *  0, 90 or 180 degrees 33 to 75; moved 16 units any way 6 to 14. */
+export function specialCellHeights(positions: ArrayLike<number>, faces: ArrayLike<number>, w: number, h: number, angle: number, tileX: number, tileY: number): Float32Array {
+  const out = new Float32Array(16).fill(NaN);
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      // The point from the model's origin, turned back by its angle into the model's own space.
+      const dx = tileX * 128 + (i + 0.5) * 32 - w * 64, dy = tileY * 128 + (j + 0.5) * 32 - h * 64;
+      out[j * 4 + i] = highestAt(positions, faces, dx * ca + dy * sa, -dx * sa + dy * ca);
     }
   }
   return out;
