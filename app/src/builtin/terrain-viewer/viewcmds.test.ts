@@ -329,3 +329,18 @@ test("a new view's grid comes from the setting, large when it is missing or wron
   assert.equal(gridDefault(undefined), "large");
   assert.equal(gridDefault("huge"), "large");
 });
+
+test("regions over the naval view's border: the region's colour lies over the brown, near the editor's 192, 164, 8 (yellow) and 192, 25, 8 (red)", () => {
+  const edge = { tiles: [1], tilesX: 1 };
+  for (const [color, want] of [[{ red: 255, green: 255, blue: 0 }, [192, 164, 8]], [{ red: 255, green: 0, blue: 0 }, [192, 25, 8]]] as const) {
+    const region = { left: 0, bottom: 0, right: 128, top: 128, color };
+    const naval = navalColors(new Array(16).fill(0), edge);
+    const regions = regionColors([region], 4, 4, 0, 0, edge, false, true);
+    const out = composeLayers([naval, regions]);
+    assert.ok(out);
+    for (let c = 0; c < 3; c++) assert.ok(Math.abs(out[c] - want[c]) <= 6, `channel ${c}: ${out[c]} vs ${want[c]}`);
+    // Without the flag the border keeps the stronger alpha, and over the brown it is further from the editor.
+    const plain = composeLayers([naval, regionColors([region], 4, 4, 0, 0, edge)]);
+    assert.ok(plain && Math.abs(plain[0] - want[0]) > 10);
+  }
+});

@@ -22,7 +22,7 @@ import { doodadGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, paste
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { gridDefault, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { textureCandidates } from "../../lib/model/texpath";
@@ -5242,10 +5242,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const linear = !on.naval && !on.heights;
             const show = () => {
               if (!latest()) return;
-              // Regions and Pathing - Ground over the border lie over the water too (the editor's); the naval view keeps its own.
+              // Regions and Pathing - Ground over the border lie over the water too, and over the naval view's brown (the editor's).
               // In linear light the whole layer is drawn after the water, border included, so there is nothing to split.
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
-              const top = !on.naval && !linear ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
+              const top = !linear ? [parts[0], parts[1]].map((p) => (p ? splitEdge(p, edge) : null)) : null;
               const rgba = composeLayers(top ? [top[0]?.inside ?? null, top[1]?.inside ?? null, parts[2], parts[3]] : parts, linear);
               const over = top ? composeLayers([top[1]?.over ?? null, top[0]?.over ?? null]) : null;
               if (rgba || over) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, over, linear); else renderer.setViewLayer(null);
@@ -5253,7 +5253,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear, on.naval); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
@@ -5404,6 +5404,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const no = refusedInGameView() ?? (shownByTab(layer) ? TAB_LAYERS[layer]!.note : null);
           if (no) return no;
           viewState[layer] = !viewState[layer];
+          // Pathing - Ground and Naval are one switch in the editor: one on turns the other off.
+          if (viewState[layer]) Object.assign(viewState, pathingSwitch(layer));
           applyView();
           return viewState[layer];
         };

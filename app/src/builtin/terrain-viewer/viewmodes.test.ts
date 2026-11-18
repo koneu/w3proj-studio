@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { WHEEL_ZOOM } from "./wheelzoom";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, pathingSwitch, shownView, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand, selectionEditOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
@@ -265,4 +265,10 @@ test("camera bounds: the w3i's four corners in the order round, a line along the
   }
   // A huge map stays within the cap.
   assert.ok(lineAlong(corners, 1, 1000).length <= 1004);
+});
+
+test("pathingSwitch: Ground and Naval pathing are one switch, as in the World Editor", () => {
+  assert.deepEqual(pathingSwitch("naval"), { pathing: false });
+  assert.deepEqual(pathingSwitch("pathing"), { naval: false });
+  assert.deepEqual(pathingSwitch("regions"), {});
 });
