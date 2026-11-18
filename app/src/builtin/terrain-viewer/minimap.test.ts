@@ -333,16 +333,23 @@ test("modelTextureColor: with `mean` a model whose geosets show no texture still
   assert.deepEqual(await modelTextureColor(skin, read, false), [87, 88, 82]);
 });
 
-test("minimapObjects: a destructable placed dead (life 0) isn't drawn, as on the editor's minimap", async () => {
-  // SnowareBay's 205 Northrend tree walls are placed dead: the editor's export shows 77 of them, none of the 54
-  // standing alone beside each other (why isn't known: minimapgen.ts).
-  const rows = new Map([["NTtw", { showInMM: "1", useMMColor: "1", MMRed: "32", MMGreen: "48", MMBlue: "32", pathTex: "PathTextures\\4x4Default.tga" }]]);
+test("minimapObjects: a destructable placed dead (life 0) is a dot of its row's pathTexDeath, the tile it stands in without one", async () => {
+  // SnowareBay's 205 Northrend tree walls are placed dead (pathTexDeath "_"): the editor draws each as a one tile dot,
+  // which at 1.6 pixels a tile only shows next to other dots (we-drive 2026-11-18: the same walls alive give the same
+  // dots; with this rule Studio's set equals the editor's on a map of nothing but them).
+  const tex = "PathTextures\\4x4Default.tga";
+  const rows = new Map([
+    ["NTtw", { showInMM: "1", useMMColor: "1", MMRed: "32", MMGreen: "48", MMBlue: "32", pathTex: tex, pathTexDeath: "_" }],
+    ["rock", { showInMM: "1", useMMColor: "1", MMRed: "1", MMGreen: "2", MMBlue: "3", pathTex: tex, pathTexDeath: tex }],
+  ]);
   const objects = await minimapObjects([
     { id: "NTtw", position: [0, 0, 0], life: 0 },
     { id: "NTtw", position: [128, 0, 0], life: 100 },
     { id: "NTtw", position: [256, 0, 0] },
-  ], { rows, bases: new Map(), modelColor: async () => null, footprint: async () => 1 });
-  assert.deepEqual(objects.map((o) => o.x), [128, 256]);
+    { id: "rock", position: [384, 0, 0], life: 0 },
+  ], { rows, bases: new Map(), modelColor: async () => null, footprint: async () => 4, cells: async () => [4, 4] });
+  assert.deepEqual(objects.map((o) => o.x), [0, 128, 256, 384]);
+  assert.deepEqual(objects.map((o) => o.size), [0, 4, 4, 4]);
 });
 
 /** An MDX model holding nothing but these textures (replaceable id, path). */
