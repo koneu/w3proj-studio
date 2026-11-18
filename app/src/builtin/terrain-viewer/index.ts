@@ -2,7 +2,7 @@ import { fogOf } from "../../lib/model/fog";
 import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
-import { runLayerJobs } from "./layerjobs";
+import { newestOnly, runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, infoLockText, mapDocProblem, shadowFileProblem, terrainInfoLock, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
 import { importOr, mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
@@ -1808,14 +1808,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
         renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false);
-        const reloadLighting = () => void viewWork.track(loadMapLighting(w3, terrain.tileset).then((l) => {
+        // Only the newest load applies: an older one finishing late (a save during a slow read, a tileset switch)
+        // would put back the old light.
+        const startLighting = newestOnly(() => loadMapLighting(w3, terrain.tileset), (l) => {
           lighting = l;
           lightBox.title = `The map's day/night lighting (${l.source}); off: an even light`;
           lightSelect.title = "Time of day";
           applyLight();
           // The map's wave flags decide where shoreline foam goes.
           void replanShore();
-        }, () => {}));
+        }, () => !disposed);
+        const reloadLighting = () => void viewWork.track(startLighting());
         // Saved lighting, map properties (light environment) or lighting models change the light.
         const stopLightWatch = w3.workspace.onDidSave((p) => { if (/war3map\.w3[li](\.json)?$|\.mdl$/i.test(p)) reloadLighting(); });
         reloadLighting();
