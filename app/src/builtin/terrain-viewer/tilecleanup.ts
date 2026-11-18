@@ -84,7 +84,8 @@ export function planRemoval(tiles: readonly string[], remove: readonly number[],
 /** Gives the terrain a new ground tile list: `map` takes each old index to its new one. Corners are repainted,
  *  cliff types follow (a type that stays keeps its cliffs; a removed one's cliffs take the cliff type of the tile
  *  that replaced its ground tile, else that of the corner's ground, else the first), the stored cliff list is the
- *  new ground list's cliff types in its order then the old entries whose ground tile wasn't removed, and the custom tiles flag follows the list (`own`: the tileset's own
+ *  new ground list's cliff types in its order then the old entries whose ground tile wasn't removed (a mere reorder
+ *  keeps the cliff list unchanged), and the custom tiles flag follows the list (`own`: the tileset's own
  *  list, see customTilesFlag). */
 export function applyTileList(t: Terrain, tiles: readonly string[], map: (oldIndex: number) => number, types: ReadonlyMap<string, CliffType>, own: readonly string[] | undefined): void {
   const beforeGround = [...t.groundTiles], beforeCliffs = [...t.cliffTiles];
@@ -94,7 +95,10 @@ export function applyTileList(t: Terrain, tiles: readonly string[], map: (oldInd
   const byGround = new Map([...types.values()].map((c) => [c.groundTile, c.cliffID]));
   const derived = tiles.flatMap((g) => { const id = byGround.get(g); return id ? [id] : []; });
   const removed = new Set(beforeGround.filter((g) => !tiles.includes(g)));
-  const cliffs = [...derived, ...beforeCliffs.filter((id) => !derived.includes(id) && !removed.has(types.get(id)?.groundTile ?? ""))];
+  // A reorder (the same tiles, none added or removed) keeps the cliff list as it is: rebuilt from the ground order it
+  // would bring back a cliff type the user removed in the Cliffs… panel.
+  const reorder = tiles.length === beforeGround.length && [...tiles].sort().join() === [...beforeGround].sort().join();
+  const cliffs = reorder ? beforeCliffs : [...derived,...beforeCliffs.filter((id) => !derived.includes(id) && !removed.has(types.get(id)?.groundTile ?? ""))];
   // Refused before anything changes: a list grown past what a corner can name (a list that long already may stay).
   if (cliffs.length > MAX_CLIFF_TYPES && cliffs.length > beforeCliffs.length) {
     throw new Error(`These ground tiles would make the cliff list ${cliffs.length} long (${cliffs.join(", ")}), but a corner can name only ${MAX_CLIFF_TYPES}: remove cliff types first.`);
