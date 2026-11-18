@@ -13,7 +13,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
-import { nextRegionIndex, regionBoxProblem, typedRegionEdge } from "../../lib/terrain/regions";
+import { nextRegionIndex, regionBoxProblem, shiftInside, typedRegionEdge } from "../../lib/terrain/regions";
 import { worldRect } from "../../lib/terrain/resize";
 
 const FILE = "map/war3map.w3r";
@@ -405,7 +405,8 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         const [sx, sy] = drag.start;
         Object.assign(draft!, { left: snap(Math.min(sx, x)), right: snap(Math.max(sx, x)), bottom: snap(Math.min(sy, y)), top: snap(Math.max(sy, y)) });
       } else if (drag.kind === "move") {
-        const dx = snap(x - drag.start[0]), dy = snap(y - drag.start[1]);
+        // Held inside the map, as the World Editor stops a region at its edge (shiftInside).
+        const [dx, dy] = shiftInside([...drag.origs.values()], snap(x - drag.start[0]), snap(y - drag.start[1]), worldRect(ed.terrain));
         for (const [r, b] of drag.origs) Object.assign(r, { left: b.left + dx, right: b.right + dx, bottom: b.bottom + dy, top: b.top + dy });
       } else {
         const g = drag.grab, r = selected!;
