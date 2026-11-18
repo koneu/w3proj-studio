@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { drawnGroundTiles, drawnSlot, heightAt, paintSlot, rampLift, replaceSlots, replaceTileNames, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
+import { drawnGroundTiles, drawnSlot, floatingLevelAt, heightAt, paintSlot, rampLift, replaceSlots, replaceTileNames, GROUND_HEIGHT_MAX, GROUND_HEIGHT_MIN, groundFits, parseW3e, savedTerrain, settleDrawnList, setGroundHeight, setLayer, setWaterLevel, w3eWriteProblem, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** A terrain from rows of corners, the north row first: each a layer, "R" for a ramp corner; the height is the layer's. */
 function layered(rows: string[]): Terrain {
@@ -29,6 +29,17 @@ test("a ramp's middle corner is half a layer up where it climbs along one axis b
   assert.equal(rampLift(crooked, 1, 1), 0, "no straight tile");
   // Control: with the tile north-west of it made straight (3, 2 over 3, 2) the crooked one lifts.
   assert.equal(rampLift(layered(["3  2  2", "3R 2R 2R", "2  2  2"]), 1, 1), 64, "a straight tile beside the climb");
+});
+
+test("a floating doodad on a ramp's middle corner compares the water with the lifted ground (we-compare ramp-float-open)", () => {
+  const t = layered(["3  3  3  3  3", "3  3R 3R 3R 3", "2  2R 2R 2R 2", "2  2R 2R 2R 2"]);
+  const wet = (x: number, y: number, water: number) => Object.assign(t.corners[y * t.width + x], { hasWater: true, water });
+  wet(2, 1, 32);
+  wet(2, 0, 32);
+  wet(1, 1, 80);
+  assert.equal(floatingLevelAt(t, 256, 128), null, "32 under the lifted 64: on the ground");
+  assert.equal(floatingLevelAt(t, 256, 0), 32, "the corner below, not lifted: on the water (the control)");
+  assert.equal(floatingLevelAt(t, 128, 128), 80, "80 over the lifted 64: on the water");
 });
 
 /** A 2 × 2-corner terrain of `version`, every field in range. */

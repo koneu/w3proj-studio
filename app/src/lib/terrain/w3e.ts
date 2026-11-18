@@ -465,13 +465,15 @@ export function heightAt(t: Terrain, wx: number, wy: number): number {
  *  doodad-water-z (2026-11-16, SD, make-doodad-water-z.mjs; open and Select All + Numpad 6 alike): a corner without
  *  the water flag doesn't count, a level-3 corner at ground 0 under water at -49.6 doesn't, a doodad halfway between a
  *  wet and a dry corner takes the east (north) one, levels -59.6, -29.6, 0.4, 30.4 by column go by the nearest
- *  column; the 3522 doodads of (2)EchoIsles fit it, as the original and as the editor saved them. */
+ *  column; the 3522 doodads of (2)EchoIsles fit it, as the original and as the editor saved them. A ramp's middle
+ *  corner counts with its lift (rampLift): water 32 over a lifted corner at 0 (drawn at 64) leaves the doodad on the
+ *  ground, 80 floats it (we-compare ramp-float-open, branch we-compare-9). */
 export function floatingLevelAt(t: Terrain, wx: number, wy: number): number | null {
   const fx = (wx - t.offsetX) / 128, fy = (wy - t.offsetY) / 128;
   if (!Number.isFinite(fx) || !Number.isFinite(fy)) return null;
   const x = Math.min(Math.max(Math.round(fx), 0), t.width - 1), y = Math.min(Math.max(Math.round(fy), 0), t.height - 1);
   const c = t.corners[y * t.width + x];
-  return c && c.hasWater && c.water > c.height ? c.water : null;
+  return c && c.hasWater && c.water > c.height + rampLift(t, x, y) ? c.water : null;
 }
 
 /** How far up the slope the pick looks (world units): 0.125 of a tile. */

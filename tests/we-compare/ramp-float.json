@@ -1,0 +1,6 @@
+[
+  {"name":"ramp-float-open","description":"ramp-float.w3x (make-ramp-float.mjs): lily pads on and beside a ramp's middle corners (drawn 64 up, rampLift) whose water is 32 (between the ground 0 and the lifted 64), 80 or -20, opened and saved after an empty edit: is the ramp's lift part of the corner's ground when its water is compared with it (floatingLevelAt)? Branch we-compare-9","input":{"map":"${REPO}/tests/fixtures/we-specs/ramp-float.w3x"},
+   "we":{"mode":"sd","saveAccept":["Warning"],"steps":[]},
+   "studio":{"steps":[{"terrain":true},{"eval":"const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); await new Promise((r) => setTimeout(r, 1500)); window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });"},{"sleep":2000}]},
+   "compare":[{"file":"war3map.doo","as":"parsed","ignore":["version","doodads[].preFlags","doodads[].editorId","doodads[].trailer","doodads[].extras"],"tolerance":0.01}],"limit":40}
+]
