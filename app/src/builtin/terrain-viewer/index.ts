@@ -3,7 +3,7 @@ import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
-import { deriveFromProject, editMapDoc, fullShadows, mapDocProblem, shadowFileProblem, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { deriveFromProject, editMapDoc, fullShadows, infoLockText, mapDocProblem, shadowFileProblem, terrainInfoLock, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
 import { importOr, mapObjectData, readFile, readImport, savedObjects, typeName } from "./projectfiles";
 import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
@@ -402,6 +402,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     /** Sets the flags `follow` names on its objects of war3map.doo (the map script's GAME_PLACED, map-script
      *  followFlags); false when it holds no war3map.doo. */
     followFlags: (follow: FollowFlags) => Promise<boolean>;
+    /** Why it is read-only although it is the project's own terrain (its war3map.w3i can't be read); null: editable. */
+    locked: string | null;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -448,7 +450,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         await editor.ready();
         // Taking a change in place can end in reopening: then it's the next one's turn.
         if (find() === editor) {
-          if (use === "edit") refuseLostView(path ?? projectTerrain(w3));
+          if (use === "edit") {
+            refuseLostView(path ?? projectTerrain(w3));
+            if (editor.locked) throw new Error(editor.locked);
+          }
           return editor;
         }
       } else await new Promise((done) => setTimeout(done, 100));
@@ -475,6 +480,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const { root } = requireProject(w3);
     // Every object tool comes through here (remove_objects without liveEditor too).
     refuseLostView(projectTerrain(w3));
+    // A project whose map info can't be read is read-only, as its terrain editor (infoLockText).
+    const infoProblem = await mapDocProblem(w3, "war3map.w3i");
+    if (infoProblem) throw new Error(infoLockText(infoProblem));
     let before: Placed[] = [];
     const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
@@ -769,7 +777,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
       requireProject(w3);
       // A dry run only reads; the change itself is refused on a lost view (before and after the question).
-      const { handle } = await liveEditor("read");
+      const { handle, locked } = await liveEditor("read");
       const sets = await handle.tilesets();
       const set = sets.find((s) => s.id === tileset);
       if (!set) throw new Error(`"${tileset}" isn't a tileset. They are: ${sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
@@ -779,6 +787,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const plan = { tileset: set.id, name: set.name, tiles: before.map((from, i) => ({ from, to: tiles[i] })), keptFromOtherTilesets: kept };
       if (dryRun === true) return plan;
       refuseLostView(projectTerrain(w3));
+      if (locked) throw new Error(locked);
       const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
       await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
       refuseLostView(projectTerrain(w3));
@@ -799,7 +808,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (border !== undefined && !(Array.isArray(border) && border.length === 4 && border.every((n) => Number.isInteger(n) && n >= 0))) throw new Error("border must be [left, right, bottom, top].");
       requireProject(w3);
       // A dry run only reads; the resize itself is refused on a lost view (before and after the question).
-      const { handle } = await liveEditor("read");
+      const { handle, locked } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
       // Growth past the coordinate limit is refused (resizeProblem), not cut to it.
@@ -817,6 +826,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
+      if (locked) throw new Error(locked);
       const checkpointed = await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
       refuseLostView(projectTerrain(w3));
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
@@ -965,6 +975,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("rebuild_map", async () => {
       // Only the derived files are written, without the GPU: it works on a lost view too.
       const editor = await liveEditor("read");
+      if (editor.locked) throw new Error(editor.locked);
       // In the rebuilds' turn, which write the same files.
       await rebuilding.run(() => editor.derive());
       return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
@@ -1590,6 +1601,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
+        /** Why the project's own terrain opens read-only: its map info (war3map.w3i) is there but can't be read, as the
+         *  cut-off version-25 files of three Chosen Ones chapters opened as projects of their own. Saving objects, start
+         *  locations or the tileset writes that file, so nothing is edited, rather than an edit refused at its save. A
+         *  chapter inside its campaign project isn't the project's own terrain and edits as before. Null: editable. */
+        const lockedText = doc.readOnly ? null : await terrainInfoLock(w3, doc.path, projectTerrain(w3));
         const canvas = h("canvas.model-canvas");
         /** The keys go back to the map (after a toolbar control was used). Once now and once after the event: WebKitGTK
          *  (Linux) focuses a checkbox or button after its click handlers ran, which would take the keys back. */
@@ -1804,7 +1820,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         reloadLighting();
 
         // ---- editing ------------------------------------------------------------------
-        const editable = !doc.readOnly;
+        const editable = !doc.readOnly && !lockedText;
         // The World Editor's Advanced switches for this kind of work; the settings are shared by every terrain editor.
         const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]);
         const resetFixedOn = () => switchedOn(w3, "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]);
@@ -1860,6 +1876,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The undo step a held key is building; a repeat joins it. */
         let keyStep: Edit | null = null;
         const pushEdit = (e: Edit) => {
+          // A read-only terrain takes no edit: one that got this far (the edits refuse before they change anything) is
+          // taken back, with no undo step and nothing unsaved.
+          if (!editable) {
+            e.undo();
+            changed(e);
+            void w3.window.showWarning(lockedText ?? "This terrain is read-only.");
+            return;
+          }
           // A stroke commits here, not through changed(): the view layers follow every edit.
           refreshLayersSoon();
           notifyGroups(e);
@@ -4395,7 +4419,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return out;
         };
         const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
-          if (!editable) throw new Error("This map is read-only.");
+          if (!editable) throw new Error(lockedText ?? "This map is read-only.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
           // A file the resize must rewrite that is there but can't be read would be left at the old size (a half-resized
@@ -5552,7 +5576,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); keysToMap(); } }, "⛶"),
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
               h("span.muted", {}, dragHint, cameraHint)),
-            ...(editable ? [tabsEl, groupBar] : []),
+            ...(editable ? [tabsEl, groupBar] : lockedText ? [h("div.terrain-locked", { role: "status" }, lockedText)] : []),
             h("div.model-stage", {}, canvas, labelLayer, gameBadge, minimapPanel.el, glLost)),
           side));
         // Keys bound under terrainFocus are the map's while it has the keyboard (Ctrl+R: Regions, not Reload Window): the
@@ -6029,7 +6053,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
-          handle, ready, screenshot: takeScreenshot,
+          handle, ready, screenshot: takeScreenshot, locked: lockedText,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();
@@ -6073,8 +6097,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return true;
           },
         };
-        // A read-only editor (a game map) never derives: it isn't the project's.
-        if (editable) openedBy.set(doc.path, record);
+        // A read-only editor of a game map never derives: it isn't the project's. The project's own terrain locked by
+        // its map info is listed all the same, for the tools that only read (edits refuse there: liveEditor).
+        if (editable || lockedText) openedBy.set(doc.path, record);
         /** A change from outside, in place: nothing is torn down, so what's loaded stays. Only a
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {

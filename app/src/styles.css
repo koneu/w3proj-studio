@@ -588,6 +588,7 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .painter-bar > .terrain-tilemgr { flex-basis: 100%; }
 .terrain-tabs { align-items: flex-end; }
 .terrain-tabs-gap { flex: 1; }
+.terrain-locked { padding: 4px 8px; font-size: 12px; color: var(--warning); border-bottom: 1px solid var(--border); }
 .terrain-tabs > button:not(.terrain-tab) { margin-bottom: 3px; }
 .terrain-sel-expr { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; }
 .terrain-sel-expr.invalid, .terrain-filter.invalid { outline: 1px solid var(--error); }
