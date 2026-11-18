@@ -4,7 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { rangeOf, type FieldRange } from "./limits";
-import { artValue } from "./artset";
+import { artValue, reforgedArt } from "./artset";
 import { isSkinFileOf, SkinIds } from "./skinids";
 import { listItem, parseIni, parseIniRaw, parseSlk, unquote, westring } from "../formats/text";
 
@@ -91,6 +91,9 @@ export interface KindData {
   /** Inherited value of a field (level is 1-based for repeating fields, else 0). `artMode`: the graphics mode whose
    *  art fields to read ("sd", "hd", "de"; see artset.ts), else the one set (`game.graphicsMode`). */
   defaultValue(baseId: string, f: FieldMeta, level: number, artMode?: string): string | undefined;
+  /** An art field's other value in the 3.0 art (DE): the HD art of an entry without its own DE one (reforgedArt),
+   *  read by the game when the first one's file isn't stored. Single values only. */
+  reforgedDefault?(baseId: string, f: FieldMeta): string | undefined;
 }
 
 /** English words of table rows: their internal name and comment columns, which no locale changes.
@@ -390,6 +393,12 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
       if (f.repeat > 0) col += String(level);
       const v = row[col];
       return v === undefined || v === "-" || v === "_" ? undefined : v;
+    },
+    reforgedDefault(baseId, f) {
+      if (f.slk !== "Profile" || f.repeat > 0 || f.index > 0) return undefined;
+      const get = profileOf(baseId);
+      const raw = get ? reforgedArt(get, f.field.toLowerCase(), "de") : undefined;
+      return raw === undefined ? undefined : unquote(raw);
     },
   };
 }

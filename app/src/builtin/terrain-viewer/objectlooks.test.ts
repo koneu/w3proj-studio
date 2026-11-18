@@ -68,6 +68,24 @@ test("a type of several variations whose numbered file isn't stored is drawn fro
   assert.deepEqual(out.problems, []);
 });
 
+test("the 3.0 art draws the Exterior Wall (EW00) from its HD model when its plain Classic file isn't stored", async () => {
+  const wallSkin: Skin = { ...nagaSkin, kind: "w3d", file: "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0", reforgedFile: "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall", moveType: undefined };
+  const stored = "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall.mdx";
+  const read: string[] = [];
+  const loader = new ObjectLoader(fakeGl(), (path) => {
+    read.push(path);
+    return path === stored ? Promise.resolve(mdxOfSequences([["Stand", 0, 1000]])) : Promise.reject(new Error(`not found: ${path}`));
+  }, () => {});
+  const out = await loader.load("doodads", [{ ...placed(0), id: "EW00" }], new Map([["EW00", wallSkin]]), () => 0);
+  assert.deepEqual(read, ["Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0.mdx", stored]);
+  assert.notEqual(out.batches[0]?.gpu.model.name, "Placeholder");
+  assert.deepEqual(out.problems, []);
+  // Control: without the HD art the plain file alone is tried, and the wall is reported missing.
+  const bare = new ObjectLoader(fakeGl(), (path) => Promise.reject(new Error(`not found: ${path}`)), () => {});
+  const { reforgedFile: _, ...classic } = wallSkin;
+  assert.equal((await bare.load("doodads", [{ ...placed(0), id: "EW00" }], new Map([["EW00", classic]]), () => 0)).problems.length, 1);
+});
+
 test("a Reforged model's empty placeholder emitters count as no effects, so the classic ones stand in", () => {
   const emitter = (segmentAlpha: number[]) => ({ segmentAlpha }) as unknown as ParticleEmitter2;
   // The HD Lordaeron brazier (LObr): two emitters, colours and alphas all 0, beside its PopcornFX fire.

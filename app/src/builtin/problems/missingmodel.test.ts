@@ -26,7 +26,7 @@ const TEXT: Record<string, string> = {
     ["dfil", "file", "Profile", "-1", "0", "0", "art", "", "1", "model"],
     ["dvar", "numVar", "Profile", "-1", "0", "0", "art", "", "2", "int"],
   ]),
-  "Doodads/Doodads.slk": slk([["doodID", "comment"], ["EW00", "Exterior Wall"], ["HDGO", "HD Gone"], ["DEGO", "DE Gone"], ["LRef", "Reforged Only"]]),
+  "Doodads/Doodads.slk": slk([["doodID", "comment"], ["EW00", "Exterior Wall"], ["HDGO", "HD Gone"], ["DEGO", "DE Gone"], ["DEWN", "DE Own Gone"], ["LRef", "Reforged Only"]]),
   "Doodads/DoodadSkins.txt": [
     // Classic's model is in no folder; the HD and DE art is in both Reforged sets.
     "[EW00]", "numVar=1", "file=Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0", "file:hd=Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall",
@@ -34,6 +34,8 @@ const TEXT: Record<string, string> = {
     "[HDGO]", "numVar=1", "file=Doodads\\Plain\\Rock", "file:hd=Doodads\\Gone\\HdRock",
     // Only the DE art names a model no folder has.
     "[DEGO]", "numVar=1", "file=Doodads\\Plain\\Rock", "file:de=Doodads\\Gone\\DeRock",
+    // Its own DE art is in no folder, its HD art is: DE doesn't fall back to HD past a file:de of its own.
+    "[DEWN]", "numVar=1", "file=Doodads\\Plain\\Rock", "file:de=Doodads\\Gone\\DeRock", "file:hd=Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall",
     // One path for every mode, stored only in the Reforged sets (two variations).
     "[LRef]", "numVar=2", "file=Doodads\\Reforged\\Bridge",
   ].join("\n"),
@@ -112,6 +114,20 @@ test("DE (3.0) alone lacks the model: the Reforged replacement only without Clas
   assert.deepEqual(labels(p), ["Replace with a Classic game model…", "Remove the 1 placed"]);
   const [q] = await project(4, ["DEGO"]).graphics();
   assert.deepEqual(labels(q), ["Replace with a Classic game model…", "Replace with a Reforged game model…", "Remove the 1 placed"]);
+});
+
+test("DE reads EW00's HD art when its plain Classic model isn't stored: missing in Classic only", async () => {
+  // The game's _DE.w3mod holds RuinTomb\…\ExteriorWall (and ExteriorTower, for ET00): the DE set keeps the HD model.
+  assert.deepEqual((await project(4, ["EW00"]).graphics()).map((x) => x.message), []);
+  const [p, ...rest] = await project(7, ["EW00"]).graphics();
+  assert.equal(rest.length, 0);
+  assert.match(p.message, /^Exterior Wall \(EW00\): no model in Classic graphics, invisible there/);
+  // Control: a type with its own file:de that no folder has is still reported, though its HD art is stored.
+  const [q] = await project(4, ["DEWN"]).graphics();
+  assert.match(q?.message ?? "", /^DE Own Gone \(DEWN\): no model in Reforged \(DE\) graphics/);
+  // A map's own model for the type is what DE reads: the HD art of the game's entry no longer stands in.
+  const w3d = { original: [{ base: "EW00", mods: [{ field: "dfil", value: "war3mapImported\\Lost.mdl" }] }] };
+  assert.match((await project(4, ["EW00"], w3d).graphics())[0]?.message ?? "", /no model in Reforged \(DE\) graphics/);
 });
 
 test("a model the Reforged sets hold at the type's one path: Convert and Import as before", async () => {

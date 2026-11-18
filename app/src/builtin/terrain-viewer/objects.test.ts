@@ -371,6 +371,20 @@ test("a type with only Classic and HD models has one in the 3.0 art (DE) too: th
   assert.equal((await of("sd")).get("nogm")?.file, "units\\creeps\\Ogre\\Ogre");
 });
 
+test("the 3.0 art keeps the HD model of an entry without file:de beside its plain one (EW00), only in DE", async () => {
+  const files = { ...gameTables(), "Doodads\\DoodadSkins.txt": "[EW00]\r\nnumVar=1\r\nfile=Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0\r\nfile:hd=Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall\r\n[LOwn]\r\nfile=Doodads\\A\r\nfile:hd=Doodads\\B\r\nfile:de=Doodads\\C\r\n" };
+  const of = async (mode: string) => loadSkins(fakeGame(files, { "game.installDir": "/reforged-art", "game.graphicsMode": mode }));
+  const de = await of("de");
+  assert.equal(de.get("EW00")?.file, "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0");
+  assert.equal(de.get("EW00")?.reforgedFile, "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall");
+  assert.equal(de.get("LOwn")?.reforgedFile, undefined, "its own DE art: nothing else");
+  assert.equal((await of("sd")).get("EW00")?.reforgedFile, undefined);
+  assert.equal((await of("hd")).get("EW00")?.reforgedFile, undefined);
+  // A map's own model replaces both.
+  const mapped = withObjectArt(de, [{ kind: "w3d", original: [{ base: "EW00", mods: [{ field: "dfil", value: "war3mapImported\\W.mdl" }] }] }]);
+  assert.equal(mapped.get("EW00")?.reforgedFile, undefined);
+});
+
 test("a reloaded game's changed table is seen, and a table that couldn't be read isn't kept as empty", async () => {
   const files = gameTables(), settings = { "game.installDir": "/cache-c", "game.graphicsMode": "hd" }, broken = new Set<string>();
   const w3 = fakeGame(files, settings, broken);
