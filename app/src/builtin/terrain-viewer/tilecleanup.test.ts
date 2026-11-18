@@ -166,17 +166,38 @@ test("a ground list change that would grow the cliff list past 15 is refused wit
   const many = new Map([...TYPES, ...Array.from({ length: 15 }, (_, i) => [`C${String(i).padStart(3, "0")}`, `G${String(i).padStart(3, "0")}`] as const)
     .map(([id, g]) => [id, { ...TYPES.get("CLdi")!, cliffID: id, groundTile: g }] as const)]);
   const fifteen = Array.from({ length: 15 }, (_, i) => `C${String(i).padStart(3, "0")}`);
-  const t = flat(["Ldrt", "Lgrd"]);
+  const t = flat(["Lgrd"]);
   t.cliffTiles = [...fifteen];
-  // Ldrt's CLdi would be a 16th entry.
-  assert.throws(() => applyTileList(t, ["Lgrd", "Ldrt"], (i) => 1 - i, many, undefined), /cliff list 16 long/);
-  assert.deepEqual([t.groundTiles, t.cliffTiles], [["Ldrt", "Lgrd"], fifteen], "nothing changed");
+  // Adding Ldrt: its CLdi would be a 16th entry.
+  assert.throws(() => applyTileList(t, ["Lgrd", "Ldrt"], (i) => i, many, undefined), /cliff list 16 long/);
+  assert.deepEqual([t.groundTiles, t.cliffTiles], [["Lgrd"], fifteen], "nothing changed");
   // Control: a list of 16 already (CLdi in it) can be reordered.
   const u = flat(["Ldrt", "Lgrd"]);
   u.cliffTiles = [...fifteen, "CLdi"];
   applyTileList(u, ["Lgrd", "Ldrt"], (i) => 1 - i, many, undefined);
   assert.equal(u.cliffTiles.length, 16);
   assert.deepEqual(u.groundTiles, ["Lgrd", "Ldrt"]);
+});
+
+test("reordering the ground tiles keeps the cliff list: a cliff type removed from it doesn't come back", () => {
+  // CLgr (Lgrs's) was removed in the Cliffs… panel; the mesa is CLro, type 1 of CLdi, CLro.
+  const t = flat();
+  t.cliffTiles = ["CLdi", "CLro"];
+  mesa(t, 1);
+  const before = t.corners.map((c) => t.groundTiles[c.texture]);
+  // Lgrs moves to the front.
+  const order = [1, 0, 2, 3], inverse = new Map(order.map((old, nw) => [old, nw]));
+  applyTileList(t, order.map((i) => t.groundTiles[i]), (old) => inverse.get(old) ?? old, TYPES, undefined);
+  assert.deepEqual(t.groundTiles, ["Lgrs", "Ldrt", "Lrok", "Lgrd"]);
+  assert.deepEqual(t.cliffTiles, ["CLdi", "CLro"], "no CLgr, same order");
+  assert.equal(corner(t, 3, 3).cliffTexture, 1, "the mesa stays CLro");
+  assert.deepEqual(t.corners.map((c) => t.groundTiles[c.texture]), before, "every corner shows what it showed");
+  // Control: removing a tile still rebuilds the list from the ground order.
+  const u = flat();
+  u.cliffTiles = ["CLro", "CLdi"];
+  const plan = planRemoval(u.groundTiles, [3], new Map(), tileUse(u, TYPES));
+  applyTileList(u, plan.tiles, plan.map, TYPES, undefined);
+  assert.deepEqual(u.cliffTiles, ["CLdi", "CLgr", "CLro"]);
 });
 
 test("Remove Tile as the World Editor's Modify Tileset does it (we-drive 2026-11-17, plateau.w3x with a stripe of each of the six tiles)", () => {
