@@ -103,6 +103,17 @@ test("viewChecks reads the View menu's check marks from a picture of its check c
   assert.ok(VIEW_ITEMS.every((v, i) => i === 0 || v.y - VIEW_ITEMS[i - 1].y >= 16), "the rows don't overlap");
 });
 
+test("parseArgs: --export-options belongs to the next --export-minimap, which clicks only the boxes off their defaults", () => {
+  const { steps } = parseArgs(["--map", "m.w3x", "--export-options", "terrain,water,blight,doodads,playable", "--export-minimap", "a.tga", "--export-minimap", "b.tga"]);
+  assert.deepEqual(steps.map(([s]) => s), ["--map", "--export-minimap", "--export-minimap"]);
+  assert.equal(steps[1][1].file, "a.tga");
+  assert.deepEqual(drive.exportBoxClicks(steps[1][1].options), [[16, 144]], "only Include Blight is clicked");
+  assert.equal(steps[2][1].options, undefined, "the second export has the dialog's defaults");
+  assert.deepEqual(drive.exportBoxClicks(drive.parseExportOptions("units")).map(([, y]) => y), [108, 126, 180, 198, 270]);
+  assert.throws(() => parseArgs(["--map", "m.w3x", "--export-options", "blight"]), /needs an --export-minimap/);
+  assert.throws(() => parseArgs(["--map", "m.w3x", "--export-options", "fog", "--export-minimap", "a.tga"]), /unknown box fog/);
+});
+
 test("parseArgs: the day and night fixed by default; --compare-ready refuses a turning day", () => {
   assert.equal(parseArgs(["--start"]).opts.dayNight, "fixed");
   assert.equal(parseArgs(["--day-night", "cycle", "--start"]).opts.dayNight, "cycle");
