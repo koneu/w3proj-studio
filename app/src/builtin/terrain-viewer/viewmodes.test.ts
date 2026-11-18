@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { WHEEL_ZOOM } from "./wheelzoom";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
-import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
+import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand, selectionEditOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
 
@@ -137,8 +137,15 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
   assert.deepEqual(cameraKey(key("ArrowLeft")), { pan: [-CAMERA_STEPS.pan, 0] });
   const fast = cameraKey(key("ArrowRight", { shiftKey: true })) as { pan: [number, number] };
   assert.ok(Math.abs(fast.pan[0] - CAMERA_STEPS.pan * CAMERA_STEPS.fast) < 1e-12 && fast.pan[1] === 0);
-  // The number pad's arrows, with Num Lock on (digits) or off (arrow keys).
-  assert.deepEqual(cameraKey({ ...key("8"), code: "Numpad8" }), pan);
+  // The number pad with Num Lock off comes as the arrows (the webview names them so) and pans. With it on, its digits
+  // move no camera, plain, with Shift or with Ctrl: they are the selection's nudge, and with nothing selected the World
+  // Editor does nothing (we-drive 2026-11-18, flat.w3x: KP_6, KP_8, Ctrl+KP_2/4/8 left the picture as it was; off, KP_6
+  // panned and Ctrl+KP_8 zoomed).
+  assert.deepEqual(cameraKey({ ...key("ArrowUp"), code: "Numpad8" }), pan);
+  for (const mods of [{}, { shiftKey: true }, { ctrlKey: true }, { ctrlKey: true, shiftKey: true }]) {
+    for (const d of ["2", "4", "6", "8"]) assert.equal(cameraKey({ ...key(d, mods), code: `Numpad${d}` }), null, `numpad ${d} ${JSON.stringify(mods)}`);
+  }
+  assert.deepEqual(selectionEditOf(bound({ ...key("8"), code: "Numpad8" })), { nudge: [0, 8] }, "numpad 8 is the nudge");
   assert.equal(cameraKey({ ...key("8"), code: "Digit8" }), null, "the digit row isn't an arrow");
   const zoomIn = cameraKey(key("ArrowUp", { ctrlKey: true })) as { zoom: number };
   const zoomOut = cameraKey(key("ArrowDown", { ctrlKey: true })) as { zoom: number };
@@ -219,7 +226,7 @@ test("View and camera keys the webview calls Unidentified (WebKitGTK) go by the 
   assert.equal(viewKeyCommand(unnamed("KeyV")), "w3.terrain.toggleGameView");
   assert.equal(viewKeyCommand(unnamed("KeyL", { ctrlKey: true, shiftKey: true })), "w3.terrain.toggleLightRanges");
   assert.deepEqual(cameraKey(unnamed("ArrowLeft")), { pan: [-CAMERA_STEPS.pan, 0] });
-  assert.deepEqual(cameraKey(unnamed("Numpad8")), { pan: [0, CAMERA_STEPS.pan] });
+  assert.equal(cameraKey(unnamed("Numpad8")), null, "the number pad's digit (Num Lock on) is the nudge, no camera key");
   assert.equal(viewKeyCommand(unnamed("KeyG")), "w3.terrain.cycleGrid");
 });
 

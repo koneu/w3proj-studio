@@ -197,7 +197,9 @@ export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: 
  * view about 5°, its left side away for Left. Studio with these steps at the same camera (app-drive --camera
  * we:center,2200): 53 (at 1/17.5) and 261 (at 4.4 times that) before they were tuned to these; zoom 12.7% at 1.12.
  * Alt with an arrow, Insert, Delete, Page Up and Down, Home and End don't move the camera (with something selected the
- * Page keys, Home and End change it: selectionkeys.ts; so do the number pad's 8 2 4 6, which nudge it). The pointer at the
+ * Page keys, Home and End change it: selectionkeys.ts; so do the number pad's 8 2 4 6, which nudge it). The number pad
+ * pans only as the arrows it is with Num Lock off: with it on, its digits (plain, Shift, Ctrl) move no camera when
+ * nothing is selected (we-drive 2026-11-18, flat.w3x), so they have no camera binding. The pointer at the
  * view's edge scrolls it too (edgeScroll, below). The zoom keys are exactly the wheel's step (WHEEL_ZOOM, 1.1, branch
  * key-zoom: a key press and a notch back give the same picture) about the same point; the view does both by zoomStep.
  * Held, they step once per key repeat: 400 ms held zoomed once, 1500 ms 22 times (the display's repeat starts after
@@ -208,7 +210,7 @@ export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: WHEEL_ZOOM, turn: (5
 const PAN = CAMERA_STEPS.pan, FAST = CAMERA_STEPS.pan * CAMERA_STEPS.fast;
 
 /** What each camera command does (the World Editor's Camera - Translate, Translate Fast, Zoom and Rotate; their keys:
- *  the arrows and the number pad's, with Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn). */
+ *  the arrows, with Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn). */
 export const CAMERA_COMMANDS: Readonly<Record<string, CameraMove>> = {
   "w3.terrain.camera.panUp": { pan: [0, PAN] },
   "w3.terrain.camera.panDown": { pan: [0, -PAN] },
