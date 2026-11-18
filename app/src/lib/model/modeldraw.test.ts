@@ -174,3 +174,19 @@ test("a model whose node ids have a gap is posed like any other", () => {
   assert.equal(gpu.stats.nodes, 2);
   assert.equal(gpu.nodeWorld[5]?.length, 16);
 });
+
+test("a paint multiplies the layers' colour and leaves the opacity and the blending alone (a unit's Tinting Color)", () => {
+  const colours = (opts: DrawOpts) => {
+    const out: number[][] = [];
+    const { gl } = recordingGl();
+    const recording = new Proxy(gl as unknown as Record<string, unknown>, {
+      get: (t, k) => (k === "uniform4f" ? (loc: string, ...v: number[]) => { if (loc === "uColor") out.push(v.map((x) => +x.toFixed(3))); } : t[k as string]),
+    }) as unknown as WebGL2RenderingContext;
+    const gpu = new ModelGpu(recording, model(0));
+    gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+    gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, opts);
+    return out;
+  };
+  assert.deepEqual(colours({ paint: [1, 40 / 255, 40 / 255] }), [[1, 0.157, 0.157, 1]]);
+  assert.deepEqual(colours({}), [[1, 1, 1, 1]], "without one: as before (control)");
+});

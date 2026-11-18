@@ -76,6 +76,10 @@ export interface Skin {
   /** Units: a placed one's own colour (war3mapUnits.doo `color`) is drawn (UnitSkin.txt `customTeamColor`, field `utcc`,
    *  Allow Custom Team Color: the waygate's). */
   customColor?: boolean;
+  /** Units: Tinting Color (UnitSkin.txt `red`, `green`, `blue`, fields `uclr`, `uclg`, `uclb`, 0-255; absent: 255). */
+  red?: number;
+  green?: number;
+  blue?: number;
   /** Doodads: the World Editor draws its click helper by the model (Doodads.slk `useClickHelper`, field `duch`: fires,
    *  traps, flies, dust, …, whose models are mostly particles; see CLICK_HELPER). */
   clickHelper?: boolean;
@@ -124,6 +128,14 @@ const PLAYER_COLORS = 24;
  *  stored colour in the owner's. */
 export const drawnTeam = (skin: Skin, owner: number, color?: number): number =>
   skin.customColor && color !== undefined && Number.isInteger(color) && color >= 0 && color < PLAYER_COLORS ? color : skin.teamColor ?? owner;
+
+/** The colour a type's model is multiplied by (its Tinting Color as 0-1), absent when it is the model's own (255, 255, 255).
+ *  The World Editor draws a footman with 255, 40, 40 all red (we-compare looks, branch we-compare-5). */
+export function paintOf(skin: Pick<Skin, "red" | "green" | "blue">): [number, number, number] | undefined {
+  const part = (v: number | undefined) => (v === undefined || !Number.isFinite(v) ? 1 : Math.min(255, Math.max(0, v)) / 255);
+  const paint: [number, number, number] = [part(skin.red), part(skin.green), part(skin.blue)];
+  return paint[0] === 1 && paint[1] === 1 && paint[2] === 1 ? undefined : paint;
+}
 
 /** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
 export const RANDOM_KINDS: readonly (readonly [string, string])[] = [["uDNR", "w3u"], ["bDNR", "w3u"], ["iDNR", "w3t"]];
@@ -221,6 +233,10 @@ function shadowFields(get: (k: string) => string | undefined, kind: string): Par
   const team = Number(get("teamcolor"));
   if (get("teamcolor")?.trim() && Number.isInteger(team) && team >= 0) out.teamColor = team;
   if (get("customteamcolor")?.trim() === "1") out.customColor = true;
+  for (const k of ["red", "green", "blue"] as const) {
+    const v = get(k)?.trim(), n = Number(v);
+    if (v && Number.isFinite(n) && n !== 255) out[k] = n;
+  }
   return out;
 }
 
@@ -290,7 +306,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   w3u: {
     file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt", moveHeight: "umvh",
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb", teamColor: "utco",
-    customColor: "utcc",
+    customColor: "utcc", red: "uclr", green: "uclg", blue: "uclb",
   },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch", floats: "dflt" },
@@ -334,7 +350,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
         else if (key === "elevRadius") { if (Number.isFinite(n) && n > 0) skin.elevRadius = n; else delete skin.elevRadius; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
-          || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
+          || key === "red" || key === "green" || key === "blue" || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
       }
       // A custom type stands on the point under it, whatever its Elevation Sample Radius (Skin.elevRadius).
       if (custom.has(o)) delete skin.elevRadius;
@@ -411,6 +427,8 @@ export interface ModelRequest {
   /** What tells this request's `retexture` from another's of the same model (a cliff type's id): loaded models are
    *  shared by path, replaceable textures, look and this. */
   retextureKey?: string;
+  /** Drawn in this colour (paintOf). */
+  paint?: [number, number, number];
 }
 
 /** A read that failed because the file isn't there (the game's words, see workbench/game.ts): for good. Any other
@@ -615,7 +633,7 @@ export class ObjectLoader {
           inst.bounds = local;
           inst.sphere = worldSphere(inst.world, local);
         }
-        loaded[index] = { group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined };
+        loaded[index] = { group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined, ...(req.paint ? { paint: req.paint } : {}) };
       } catch (e) {
         failed.push({ index, error: `${req.path}: ${(e as Error).message ?? e}` });
       }
@@ -667,11 +685,12 @@ export class ObjectLoader {
       const more = looksOf?.(p, skin).filter((l) => !skin.animProps?.includes(l)) ?? [];
       const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
       const own = texturesOf?.(p, skin);
-      const key = `${path}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}`;
+      const paint = paintOf(skin);
+      const key = `${path}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}|${paint ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = own?.replaceable ?? skinTextures(skin);
-        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(own?.retexture ? { retexture: own.retexture, retextureKey: own.key } : {}) }, items: [] };
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [], ...(paint ? { paint } : {}), ...(own?.retexture ? { retexture: own.retexture, retextureKey: own.key } : {}) }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

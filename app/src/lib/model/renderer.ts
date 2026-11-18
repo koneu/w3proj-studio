@@ -624,6 +624,8 @@ export interface DrawOptions {
   heightMap?: HeightMap;
   /** Multiplies colour and opacity (r, g, b, a in 0–1); every layer is then blended (ghost previews). */
   tint?: [number, number, number, number];
+  /** Multiplies the layers' colour only (r, g, b in 0-1), nothing else: a unit's Tinting Color. */
+  paint?: [number, number, number];
   /** Blends the shaded colour toward rgb by amount (r, g, b, amount in 0–1), e.g. red for "can't place". */
   mix?: [number, number, number, number];
   /** Draw over everything (no depth test), e.g. a preview that must stay visible. */
@@ -985,12 +987,13 @@ export class ModelGpu {
     let contiguous = true;
     for (let i = 1; i < runs.length; i++) if (runs[i].first !== runs[i - 1].first + runs[i - 1].count) contiguous = false;
     const tint = opts.tint ?? [1, 1, 1, 1];
+    const paint = opts.paint ?? [1, 1, 1];
     const teamRgb = (team: number) => TEAM_COLORS[team]?.[1] ?? TEAM_COLORS[0][1];
 
     for (const { g, layer, blended, mode, alpha, color, texMatrix, texIndex } of this.classified()) {
       if ((pass === "opaque" && blended) || (pass === "blended" && !blended)) continue;
       if (alpha <= 0.01) continue;
-      gl.uniform4f(u.uColor, color[0] * tint[0], color[1] * tint[1], color[2] * tint[2], alpha * tint[3]);
+      gl.uniform4f(u.uColor, color[0] * tint[0] * paint[0], color[1] * tint[1] * paint[1], color[2] * tint[2] * paint[2], alpha * tint[3]);
       gl.uniformMatrix3fv(u.uTexMatrix, false, texMatrix);
       gl.uniform1f(u.uCoord, layer.coordId === 1 ? 1 : 0);
       const tex = m.textures[texIndex];

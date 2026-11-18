@@ -570,6 +570,8 @@ export interface ObjectBatch {
   followGround?: boolean;
   /** Drawn see-through with this colour and alpha, among the blended layers (start buildings). */
   tint?: [number, number, number, number];
+  /** Every layer's colour is multiplied by this (r, g, b in 0-1; a unit's Tinting Color), nothing else changes. */
+  paint?: [number, number, number];
   /** Only the editor shows it (start locations, start buildings): left out in game view (`showEditorOnly`). */
   editorOnly?: boolean;
 }
@@ -1635,7 +1637,7 @@ export class TerrainRenderer {
       }
     }
     if (this.showWeather) for (const w of this.weather) {
-      const box = w.box ?? viewBox(this.target[0], this.target[1], this.distance);
+      const box = w.box ?? viewBox(this.target[0], this.target[1]);
       const world = placeWeather(w.effect, box, w.box ? this.groundHeight((box.left + box.right) / 2, (box.bottom + box.top) / 2) : this.target[2]);
       w.particles.step(dt, WEATHER_CLOCK, WEATHER_NODES, world);
       items.push({ particles: w.particles, textures: [w.texture], world });
@@ -1872,7 +1874,7 @@ export class TerrainRenderer {
         if (b.tint && pass === "opaque") continue;
         const mode = edgeMode(b, this.tone);
         const shade = edge && (edges.get(mode) ?? edges.set(mode, { ...edge, mode }).get(mode));
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun, edge: shade });
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, paint: b.paint, tone: this.tone, sun, edge: shade });
       }
     }
     if (this.showEffects || this.showWeather) {

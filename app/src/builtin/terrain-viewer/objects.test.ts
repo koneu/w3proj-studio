@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { waitUntil } from "../../lib/testhelpers/testutil";
-import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addElevationRadii, addMoveTypes, drawnTeam, loadSkins, paintOf, objectsInRect, placeholderInstances, placement, scaleRange, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -411,4 +411,16 @@ test("a click picks a start location by its model in the editor's view (not in g
   const sources = batches.flatMap((b) => b.instances.map((i) => ({ group: b.group, inst: i })));
   assert.deepEqual(selectableObjects(sources, new Set()).map((o) => o.p), [start, unit], "Select All includes the start location");
   assert.deepEqual(selectableObjects(sources, new Set(["units"])), [], "a hidden group is left out (control)");
+});
+
+test("a unit's Tinting Color paints its model: the table's, the map's own, and none when it is 255, 255, 255", async () => {
+  const files = { ...gameTables(), "Units\\UnitSkin.txt": "[hfoo]\r\nfile=Units\\Footman\r\nred=255\r\ngreen=255\r\nblue=255\r\n[hkni]\r\nfile=Units\\Knight\r\nred=235\r\ngreen=255\r\nblue=255\r\n" };
+  const skins = await loadSkins(fakeGame(files, { "game.installDir": "/paint", "game.graphicsMode": "hd" }));
+  assert.equal(paintOf(skins.get("hfoo")!), undefined, "255, 255, 255 is the model's own");
+  assert.deepEqual(paintOf(skins.get("hkni")!), [235 / 255, 1, 1]);
+  // The custom footman of the look comparison: Tinting Color 255, 40, 40 (uclr, uclg, uclb).
+  const out = withObjectArt(skins, [{ kind: "w3u", custom: [{ base: "hfoo", id: "h000", mods: [{ field: "uclg", value: 40 }, { field: "uclb", value: 40 }] }] }]);
+  assert.deepEqual(paintOf(out.get("h000")!), [1, 40 / 255, 40 / 255]);
+  assert.equal(paintOf(out.get("hfoo")!), undefined, "its base is untouched");
+  assert.equal(paintOf({ red: 999, green: -5, blue: NaN })?.join(), "1,0,1", "out of range is clamped, not a number is none");
 });
