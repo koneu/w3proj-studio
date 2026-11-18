@@ -155,14 +155,14 @@ export async function minimapObjects(doodads: readonly (Pick<Placed, "id" | "pos
   const { rows, bases } = tables;
   const objects: MinimapObject[] = [];
   for (const d of doodads) {
-    // A destructable placed dead (life 0 %) is mostly left out of the World Editor's minimap: of SnowareBay's 205 dead
-    // Northrend tree walls the export shows 77, nearly all on higher ground (ground height 250 and up: 85 %; below
-    // 200: 8 %), where the others show nothing at all. What decides it isn't known (2026-11-13), so none are drawn.
-    if (d.life === 0) continue;
     const type = rows.has(d.id) ? d.id : bases.get(d.id)?.base ?? "";
     const r = rows.get(type);
     if (r?.showInMM !== "1") continue;
-    const pathTex = bases.get(d.id)?.pathTex ?? r.pathTex;
+    // A destructable placed dead (life 0 %) is a dot like the others, of its row's pathTexDeath (the tree walls have
+    // none: "_", the tile they stand in). Most of SnowareBay's 205 dead Northrend tree walls don't show on the
+    // editor's export because a dot of one tile (or of 4 x 4 cells off a tile's edge) is faint at 1.6 pixels a tile,
+    // not because they are left out (we-drive 2026-11-18, the same walls with life 100 give the same dots).
+    const pathTex = bases.get(d.id)?.pathTex ?? (d.life === 0 && r.pathTexDeath !== undefined ? r.pathTexDeath : r.pathTex);
     const file = pathTex && !/^(_|none)$/i.test(pathTex.trim()) ? (/\.\w{3}$/i.test(pathTex) ? pathTex : `${pathTex}.tga`) : "";
     const mask = file ? await tables.pathMask?.(file) : null;
     // Gates, walls and rock spires are drawn as their texture's cells; a texture that is one full square (trees,
