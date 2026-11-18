@@ -956,6 +956,7 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   (3) *Geoset animation colours*: AzsharaStatue's geoset 2 (RedRock texture) holds only the static colour (0.31, 0.78, 0.86) and
   the editor draws it **gold**: the static colour is stored blue, green, red like the colour track's keys (Studio read it red,
   green, blue, grey stone); `renderer.ts` turns both now (`modeldraw.test.ts`; the statue is gold in Studio's picture).
+  (Corrected by Picture parity 5: only the keys are turned; the gold is the statue's texture, its static-coloured pedestal is teal.)
   This makes ShimmeringPortal's static glow colour (0.467, 0, 0.992) pink-red where it was violet, and the portal rim of map 16
   was already pinker than the editor's: the rim's cause is not the static colour (the glow's alpha track, key times 3333
   and 10333, lies outside its Stand 14967-15300).
@@ -978,6 +979,33 @@ with doodads, custom doodad types and units added by the release CLI, the editor
   so the camera fit at short range is what differs, not the Ruins Fountain's scale (ZOfo, scale 1). Rising Water (IZrw,
   `RisingWaterDoodad.mdx`: one blend layer with the 24 `ReplaceableTextures\Water\WaterNN` frames, alpha track key 3567 = 1
   inside its Stand 3500-8500) is bluer and more opaque in the editor than Studio's green, light water; not looked into further.
+- **Picture parity 5** (branch we-specials-5, 2026-11-18; we-drive `--compare-ready` / `--compare-ready-unlit` against
+  app-drive `--compare-ready game|unlit` and `--camera we:`, pic-compare; test models made with lib/model/classic.ts
+  `toClassicMdx` or by rewriting an MDX's texture entries, imported into copies of flat.w3x / specials-look.w3x under the
+  game model's path, which the editor draws in SD and HD alike):
+  (1) *Specials on flat ground*: the white (SD) / blue (HD) quads are **holes in the ground**, not the model. The YCc3 model
+  with layer 0's texture made solid red and YCc2's layer 1 solid blue: every model triangle took the colour, the quads stayed
+  white or black; a low side view shows them flat on the ground, white as the SD game view's background above the horizon.
+  The editor leaves every tile of a special's footprint without ground, flat tiles too (cliffs.ts `planCliffs` hiddenTiles);
+  where the model doesn't cover its tiles one sees what is behind the ground (SD game view white, without game view black;
+  HD (42, 69, 82) under a skybox, Studio black). The black inside of HD caves is the same hole. specials-look, SD game view,
+  `192,-1600,900`, region 330,400,240,140: mean absolute difference 97.7 to 0.1 (HD 52 to 54: the hole's colour); the plateau
+  view and AutumnLeaves' LCc0 (HD) show the same shapes. In HD the cave's placeholder geoset (material 0) with its diffuse
+  made red showed no red at all: the editor seems not to draw it (not followed up).
+  (2) *Geoset colours*: copies of one mushroom (SD and HD): a colour track's key (1, 0, 0) is blue, (0, 0, 1) red; a static
+  colour (1, 0, 0) red, a static (0, 0, 1) under a key (0, 1, 0) green: only keys are blue, green, red (renderer.ts;
+  modeldraw.test.ts). AzsharaStatue's pedestal (static (0.31, 0.78, 0.86)) is teal, the statue gold by its texture.
+  ShimmeringPortal's rim (static (0.47, 0, 0.99)) is violet again: map 16 `-2000,1600,3000`, region 500,0,180,110 mean
+  difference (17, -4, -23) to (-7, -4, 2).
+  (3) *Geoset tracks without a key in Stand*: not reproduced. ShroomsBlue's own two alpha tracks on copies of its mushroom,
+  and tracks with keys only before, after or at the start of Stand (all sequences NonLooping, and Stand looping): the editor
+  (SD) shows and hides exactly as Studio (static alpha where Stand has no key, a key at Stand's start held); the real
+  ShroomsBlue shows its mushroom in both. Earlier pictures of the cap alone were not SD's.
+  (4) *Rising Water* (HD model: one blend layer, alpha 0.5, ORM roughness 33, metallic 0, EnvironmentMap slot): with the
+  layer's alpha set to 1 in a copy the editor's water is much more opaque, so the alpha is used; on a dirt map red and green
+  match Studio's within 5 and the editor's blue is 31-43 higher, the same at the top and bottom of the view (not a Fresnel
+  term): the HD material shading (environment light) Studio's model shader doesn't have, not this model's data.
+  The Ruins Fountain (ZOfo) has `defScale:hd=1.45` in DoodadSkins.txt (125 against 80 px at 3000 in (c) above): not tested.
 - **Border shade** (branch border-shade-models, 2026-11-13; copies of empty_map_on_newest_world_editor.w3m made with
   app-drive's MCP tools and packed with the CLI: a tree, a hay cart, a footman, claws of attack, a start location and a
   YCl2 three tiles inside (x -2944) and three tiles past the west edge (x -3712), a raised plateau and a lake across the
