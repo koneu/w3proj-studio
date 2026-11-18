@@ -3,6 +3,10 @@
 //   [checks]
 //   disable = ["imports", "melee/camps"]   # check ids (the Problems view's, `melee/<rule>` for check_melee, or "melee")
 //
+//   [checks.severity]                      # a check's findings all reported as "error" or "warning"; "off" is like disable
+//   imports = "warning"
+//   "melee/camps" = "error"
+//
 // A disabled Problems check isn't run; a disabled melee rule's findings aren't listed. This is for whole checks;
 // the per-report ignore (.w3proj/problems-ignore.json) is for single reports of a check that stays on.
 // Only this one section is read (the rest of the manifest is Rust's, which leaves it alone when writing). A section
@@ -14,8 +18,10 @@ export const MANIFEST_FILE = "w3proj.toml";
  *  (tests/fixtures/manifest-minimal-checks/w3proj.toml is this plus a disable, loaded by crates/w3proj tests). */
 export const MINIMAL_MANIFEST = "format = 1\n";
 
-export interface ChecksConfig { disable: string[] }
-export const noChecksConfig = (): ChecksConfig => ({ disable: [] });
+export type SeverityOverride = "error" | "warning" | "off";
+export const SEVERITIES: readonly SeverityOverride[] = ["error", "warning", "off"];
+export interface ChecksConfig { disable: string[]; /** check id -> severity its findings get ("off": not run, as in disable) */ severity: Record<string, SeverityOverride> }
+export const noChecksConfig = (): ChecksConfig => ({ disable: [], severity: {} });
 
 /** `line` without a trailing comment (a # outside a string). */
 function stripComment(line: string): string {
@@ -49,16 +55,30 @@ function strings(text: string): string[] {
 /** The `[checks]` section of a manifest's text. Throws with the reason when it is there but unusable. */
 export function parseChecksConfig(text: string): ChecksConfig {
   const config = noChecksConfig();
-  let inChecks = false;
+  let inChecks = false, inSeverity = false;
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = stripComment(lines[i]).trim();
     if (!line) continue;
     const header = /^\[\[?\s*([^\]]*?)\s*\]\]?$/.exec(line);
-    if (header) { inChecks = header[1] === "checks" && !line.startsWith("[["); continue; }
+    if (header) {
+      const table = !line.startsWith("[[");
+      inChecks = header[1] === "checks" && table;
+      inSeverity = header[1].replace(/\s+/g, "") === "checks.severity" && table;
+      continue;
+    }
+    if (inSeverity) {
+      const sv = /^([A-Za-z0-9_-]+|"([^"]*)"|'([^']*)')\s*=\s*(?:"([^"]*)"|'([^']*)')$/.exec(line);
+      if (!sv) throw new Error(`[checks.severity] line ${i + 1} isn't check = "error" | "warning" | "off"`);
+      const id = sv[2] ?? sv[3] ?? sv[1], level = sv[4] ?? sv[5];
+      if (!(SEVERITIES as readonly string[]).includes(level)) throw new Error(`[checks.severity] ${id}: "${level}" isn't one of ${SEVERITIES.join(", ")}`);
+      config.severity[id] = level as SeverityOverride;
+      continue;
+    }
     if (!inChecks) continue;
     const kv = /^([A-Za-z0-9_-]+|"[^"]*")\s*=\s*(.*)$/.exec(line);
     if (!kv) throw new Error(`[checks] line ${i + 1} isn't a key = value`);
+    if (kv[1] === "severity") throw new Error(`[checks] line ${i + 1}: severity is a table of its own, [checks.severity]`);
     if (kv[1] !== "disable") continue;
     let value = kv[2];
     // A list may run over several lines.
@@ -71,8 +91,18 @@ export function parseChecksConfig(text: string): ChecksConfig {
   return config;
 }
 
-/** Whether a check id is switched off: itself, or (for a melee rule) all of "melee". */
-export const isDisabled = (c: ChecksConfig, id: string) => c.disable.includes(id) || (id.startsWith("melee/") && c.disable.includes("melee"));
+const ids = (id: string) => (id.startsWith("melee/") ? [id, "melee"] : [id]);
+/** The severity override for a check id: its own, or (for a melee rule) the one of all of "melee". */
+export const severityOverride = (c: ChecksConfig, id: string): SeverityOverride | undefined => ids(id).map((i) => c.severity[i]).find((v) => v !== undefined);
+/** Whether a check id is switched off: itself, or (for a melee rule) all of "melee", by disable or severity "off". */
+export const isDisabled = (c: ChecksConfig, id: string) => ids(id).some((i) => c.disable.includes(i)) || severityOverride(c, id) === "off";
+/** Everything the project switched off, for reports. */
+export const disabledIds = (c: ChecksConfig) => [...new Set([...c.disable, ...Object.keys(c.severity).filter((k) => c.severity[k] === "off")])];
+/** `severity` as the project's override has it (kept when there is none or the check is off, which isn't run). */
+export function applySeverity<T extends string>(c: ChecksConfig, id: string, severity: T): T | "error" | "warning" {
+  const o = severityOverride(c, id);
+  return o === "error" || o === "warning" ? o : severity;
+}
 
 /** Reads the project's config: none when the manifest has no [checks] (or no file); an `error` when it is unusable. */
 export async function readChecksConfig(read: () => Promise<string>, exists: () => Promise<boolean>): Promise<{ config: ChecksConfig; error: string | null }> {

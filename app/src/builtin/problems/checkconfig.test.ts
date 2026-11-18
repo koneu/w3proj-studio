@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
-import { MINIMAL_MANIFEST, addDisabled, isDisabled, parseChecksConfig, readChecksConfig } from "./checkconfig";
+import { MINIMAL_MANIFEST, addDisabled, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
 import { activate } from "./index";
 import { readFixture } from "../../lib/testhelpers/testutil";
 
@@ -29,10 +29,10 @@ test("a [checks] section that can't be read is an error, not an empty list", asy
 });
 
 test("a melee rule is switched off by its own id or by melee", () => {
-  assert.equal(isDisabled({ disable: ["melee/camps"] }, "melee/camps"), true);
-  assert.equal(isDisabled({ disable: ["melee/camps"] }, "melee/mines"), false);
-  assert.equal(isDisabled({ disable: ["melee"] }, "melee/mines"), true);
-  assert.equal(isDisabled({ disable: ["melee"] }, "imports"), false);
+  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {} }, "melee/camps"), true);
+  assert.equal(isDisabled({ disable: ["melee/camps"], severity: {} }, "melee/mines"), false);
+  assert.equal(isDisabled({ disable: ["melee"], severity: {} }, "melee/mines"), true);
+  assert.equal(isDisabled({ disable: ["melee"], severity: {} }, "imports"), false);
 });
 
 function harness(files: Record<string, string>, ids: string[]) {
@@ -128,4 +128,52 @@ test("control: without [checks] every check runs; a broken [checks] runs them al
   const r = await b.service.runChecked();
   assert.deepEqual(b.ran, ["mine-a", "mine-b"]);
   assert.match(r.configError ?? "", /\[checks\]/);
+});
+
+test("[checks.severity] sets a check's severity; off acts as disable; melee rules fall back to melee", () => {
+  const toml = `format = 1\n[checks]\ndisable = ["a"]\n\n[checks.severity]\n# why\nimports = "warning"  # soft\n"melee/camps" = 'error'\nmelee = "warning"\nslow = "off"\n\n[pack]\nimports = "error"\n`;
+  const c = parseChecksConfig(toml);
+  assert.deepEqual(c.disable, ["a"], "the disable list still works next to it");
+  assert.deepEqual(c.severity, { imports: "warning", "melee/camps": "error", melee: "warning", slow: "off" });
+  assert.equal(applySeverity(c, "imports", "error"), "warning");
+  assert.equal(applySeverity(c, "other", "error"), "error", "control: no override keeps the severity");
+  assert.equal(applySeverity(c, "melee/camps", "warning"), "error", "a rule's own entry wins");
+  assert.equal(applySeverity(c, "melee/tech", "error"), "warning", "else the one of melee");
+  assert.equal(severityOverride(c, "other"), undefined);
+  assert.ok(isDisabled(c, "slow") && isDisabled(c, "a") && !isDisabled(c, "imports"));
+  assert.deepEqual(disabledIds(c), ["a", "slow"]);
+  assert.deepEqual(parseChecksConfig("format = 1\n").severity, {}, "control");
+});
+
+test("a [checks.severity] that can't be read is an error and nothing is overridden", async () => {
+  for (const bad of ['[checks.severity]\nimports = "info"\n', '[checks.severity]\nimports = 3\n', "[checks.severity]\nnonsense\n", '[checks]\nseverity = { imports = "warning" }\n']) {
+    assert.throws(() => parseChecksConfig(bad), Error, bad);
+    const r = await readChecksConfig(async () => bad, async () => true);
+    assert.deepEqual(r.config.severity, {});
+    assert.match(r.error ?? "", /can't be used for its \[checks\]/, bad);
+  }
+});
+
+test("addDisabled leaves a [checks.severity] table alone", () => {
+  const toml = '[checks.severity]\nimports = "warning"\n';
+  const out = addDisabled(toml, "x");
+  assert.ok(out.startsWith(toml));
+  const c = parseChecksConfig(out);
+  assert.deepEqual(c.disable, ["x"]);
+  assert.deepEqual(c.severity, { imports: "warning" });
+  const both = addDisabled('[checks]\ndisable = ["a"]\n[checks.severity]\nimports = "warning"\n', "b");
+  assert.deepEqual(parseChecksConfig(both).severity, { imports: "warning" });
+  assert.deepEqual(parseChecksConfig(both).disable, ["a", "b"]);
+});
+
+test("the Problems service reports a check at the severity the project sets, and off checks aren't run", async () => {
+  const toml = 'format = 1\n[checks.severity]\nmine-a = "error"\nmine-b = "off"\n';
+  const h = harness({ "w3proj.toml": toml }, ["mine-a", "mine-b", "mine-c"]);
+  const r = await h.service.runChecked();
+  const sev = (id: string) => r.checks.find((c) => c.id === id)?.problems.map((p) => p.severity);
+  assert.deepEqual(sev("mine-a"), ["error"], "raised to error");
+  assert.deepEqual(sev("mine-c"), ["warning"], "control: untouched check keeps its severity");
+  assert.equal(sev("mine-b"), undefined, "off: not run");
+  assert.deepEqual(h.ran.sort(), ["mine-a", "mine-c"]);
+  assert.deepEqual(r.disabled, ["mine-b"]);
 });

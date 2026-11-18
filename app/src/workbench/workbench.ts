@@ -99,10 +99,10 @@ export class Workbench {
         if (isGame(p)) throw new Error("game files are read-only");
         await this.workspace.writeText(p, t);
         // Settings edited as JSON take effect on save, and so do keys.
-        if (p === this.settings.settingsPath()) await this.settings.load(p);
+        if (p === this.settings.settingsPath()) { await this.settings.load(p); this.settings.warnIssues("user"); }
         if (p === this.keybindings.filePath()) await this.keybindings.load(p);
         const project = this.workspace.project();
-        if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
+        if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) { await this.settings.loadProject(project.root); this.settings.warnIssues("project"); }
       },
       key: (p) => this.workspace.key(p),
       // A game file needs no project list. A project file whose list can't be read doesn't open (its editor couldn't
@@ -204,6 +204,7 @@ export class Workbench {
     } catch (e) {
       this.log.append(`could not scan user extensions: ${e}`);
     }
+    this.settings.warnIssues("user");
     await this.host.fire("onStartup");
     await this.host.fire("*");
     await this.views.showContainer("explorer");
@@ -530,6 +531,20 @@ export class Workbench {
       if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.workspace.writeText(PROJECT_SETTINGS, "{}\n");
       await this.workspace.refresh();
       await this.editors.open(PROJECT_SETTINGS, "w3.textEditor");
+    }, { category: "Preferences" });
+    // The Settings editor's "Edit in JSON": the file opens with the setting's line selected. A setting not in the
+    // file yet is written there first, with the value in effect, so there is a line to edit.
+    c("workbench.editSettingInJson", "Edit Setting in JSON", async (key: string, target: "user" | "project" = "user") => {
+      const info = this.settings.inspect(key);
+      if (target === "project" ? info.project === undefined : info.user === undefined) {
+        if (target === "project") await this.commands.execute("workbench.openProjectSettings");
+        await this.settings.set(key, this.settings.get(key), target);
+      }
+      const file = target === "project" ? this.settings.projectSettingsPath() : this.settings.settingsPath();
+      if (!file) throw new Error("Open a project first.");
+      let at = 0;
+      try { at = Math.max(0, (await invoke<string>("fs_read_text", { path: file })).indexOf(JSON.stringify(key))); } catch { /* opens at the top */ }
+      await this.commands.execute("w3.text.revealAt", target === "project" ? PROJECT_SETTINGS : file, at);
     }, { category: "Preferences" });
     c("workbench.openKeybindingsFile", "Open Keyboard Shortcuts (JSON)", async () => {
       const p = this.keybindings.filePath();

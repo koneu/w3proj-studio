@@ -526,6 +526,17 @@ disable = ["imports", "melee/camps"]   # a Problems check id (the groups in the 
                                        # rule as melee/<rule>, or "melee" for check_melee as a whole
 ```
 
+A check's severity can be set in a `[checks.severity]` table of its own: `"error"` or `"warning"` (every finding of
+that check is reported at that severity, in the view, in `w3proj check` and so in its exit code), or `"off"` (the same
+as listing it in `disable`). Ids are the same as for `disable`; a melee rule without its own entry takes the one of
+`melee`. `info` isn't a Problems severity, so it is refused like any other unknown value:
+
+```toml
+[checks.severity]
+imports = "warning"
+"melee/camps" = "error"
+```
+
 A disabled Problems check isn't run; the view says what the project switched off. A `[checks]` that can't be read
 switches nothing off and is reported. This is for whole checks; `.w3proj/problems-ignore.json` (the Ignore buttons)
 puts single reports of a check that stays on aside, and both apply together. The Problems view's "Disable this

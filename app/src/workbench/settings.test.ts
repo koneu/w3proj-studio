@@ -153,3 +153,21 @@ test("readSettingsFile tells absent from unreadable", async () => {
   unknown.add(USER);
   assert.match((await readSettingsFile(USER)).problem ?? "", /can't be checked/);
 });
+
+test("hand-edited values that don't fit their declaration are listed per layer; unknown keys and fitting values are not", async () => {
+  const { s, warned } = fresh();
+  s.contribute("x", "X", { "x.n": { type: "integer", minimum: 1, maximum: 5 }, "x.mode": { type: "string", enum: ["a", "b"] }, "x.path": { type: "string", scope: "user" } });
+  disk.set(USER, JSON.stringify({ "x.n": 9, "x.mode": "a", "other.unknown": 1 }));
+  disk.set(PROJECT, JSON.stringify({ "x.mode": "c", "x.path": "/p" }));
+  await s.load(USER);
+  await s.loadProject(ROOT);
+  assert.deepEqual(s.issues("user").map((i) => i.key), ["x.n"]);
+  assert.match(s.issues("user")[0].message, /at most 5/);
+  assert.deepEqual(s.issues("project").map((i) => i.key), ["x.mode", "x.path"]);
+  assert.match(s.issues("project")[1].message, /user setting/);
+  s.warnIssues("user");
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /settings\.json: x\.n must be at most 5/);
+  await s.set("x.n", 3);
+  assert.deepEqual(s.issues("user"), []);
+});
