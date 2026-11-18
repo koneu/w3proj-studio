@@ -28,11 +28,9 @@ export const MOST_PARTICLES = 6000;
 
 const number = (row: Record<string, string>, key: string) => Number(row[key]) || 0;
 
-/** Tilted by the row's angles about the x and y axes. */
-function tiltOf(ax: number, ay: number): Mat4 {
-  const [sx, cx, sy, cy] = [Math.sin(ax), Math.cos(ax), Math.sin(ay), Math.cos(ay)];
-  return new Float32Array([cy, 0, -sy, 0, sx * sy, cx, sx * cy, 0, cx * sy, -sx, cx * cy, 0, 0, 0, 0, 1]);
-}
+/** Straight down. The row's angx and angy are not drawn: the World Editor's streaks are vertical in the world with
+ *  both at 10 (we-compare looks, branch we-compare-5), where leaning them by the angles made them all lean one way. */
+const STRAIGHT_DOWN: Mat4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
 /** The effect of a Weather.slk row. */
 export function weatherEffect(row: Record<string, string>): WeatherEffect {
@@ -59,10 +57,10 @@ export function weatherEffect(row: Record<string, string>): WeatherEffect {
     geosets: [], geosetAnims: [], nodes: [emitter.node], pivots: new Float32Array(3), particleEmitters2: [emitter], ribbons: [],
     textureAnims: [], skipped: [], warnings: [],
   };
-  const tilt = tiltOf((number(row, "angx") * Math.PI) / 180, (number(row, "angy") * Math.PI) / 180);
+  const tilt = STRAIGHT_DOWN;
   return {
     model, texture: `${row.texDir}\\${row.texFile}`, height: number(row, "height"), particles: number(row, "particles"),
-    tilt, drift: [tilt[8] * speed * lifespan, tilt[9] * speed * lifespan],
+    tilt, drift: [0, 0],
   };
 }
 
@@ -81,8 +79,9 @@ export function placeWeather(w: WeatherEffect, box: WeatherBox, z: number): Mat4
   return world;
 }
 
-/** The box of a weather that follows the view, as wide as what's seen from `distance`. */
-export function viewBox(x: number, y: number, distance: number): WeatherBox {
-  const half = Math.max(GAME_VIEW, distance * 1.8) / 2;
+/** The box of a weather that follows the view: a game view's size however far the camera is, as in the World Editor
+ *  (we-compare looks: from 3000 instead of 1650 it shows a fifth of the streaks, not as many). */
+export function viewBox(x: number, y: number): WeatherBox {
+  const half = GAME_VIEW / 2;
   return { left: x - half, right: x + half, bottom: y - half, top: y + half };
 }

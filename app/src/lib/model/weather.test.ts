@@ -38,25 +38,22 @@ test("a small region has as thick a rain, a big one is capped", () => {
   assert.ok(Math.abs(e.emissionRate * e.lifespan - MOST_PARTICLES) < 1e-6);
 });
 
-test("it starts at its height over the ground, and upwind", () => {
-  const still = weatherEffect({ ...rain, angx: "0", angy: "0" });
-  const at = placeWeather(still, box(1000), 50);
+test("it starts at its height over the ground", () => {
+  const at = placeWeather(weatherEffect(rain), box(1000), 50);
   assert.deepEqual([at[12], at[13], at[14]], [0, 0, 818]);
-  const w = weatherEffect(rain), world = placeWeather(w, box(1000), 0);
-  // Halfway through its fall a particle is over the box's middle.
-  const half = w.model.particleEmitters2[0].speed * 0.45;
-  assert.ok(Math.abs(world[12] + world[8] * half) < 1e-3);
-  assert.ok(Math.abs(world[13] + world[9] * half) < 1e-3);
 });
 
-test("the tilt keeps particles falling at the row's speed", () => {
-  const { tilt } = weatherEffect(rain);
-  assert.ok(Math.abs(Math.hypot(tilt[8], tilt[9], tilt[10]) - 1) < 1e-6);
-  assert.ok(tilt[10] > 0.9, "mostly straight down for rain");
+test("rain falls straight down whatever angx and angy say", () => {
+  for (const [angx, angy] of [["15", "15"], ["10", "10"], ["-50", "0"]]) {
+    const { tilt, drift } = weatherEffect({ ...rain, angx, angy });
+    assert.deepEqual([tilt[8], tilt[9], tilt[10]], [0, 0, 1]);
+    assert.deepEqual(drift, [0, 0]);
+  }
 });
 
-test("the box follows the view, and is never less than a game view", () => {
-  assert.equal(viewBox(100, 0, 500).right - viewBox(100, 0, 500).left, GAME_VIEW);
-  assert.ok(viewBox(0, 0, 4000).right > GAME_VIEW / 2);
-  assert.equal(viewBox(100, 50, 500).left, 100 - GAME_VIEW / 2);
+test("the box is a game view's size at any distance", () => {
+  const wide = (x: number, y: number) => viewBox(x, y).right - viewBox(x, y).left;
+  assert.equal(wide(100, 0), GAME_VIEW);
+  assert.equal(viewBox(100, 50).left, 100 - GAME_VIEW / 2);
+  assert.equal(viewBox(0, 0).top - viewBox(0, 0).bottom, GAME_VIEW);
 });
