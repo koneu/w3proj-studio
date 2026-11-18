@@ -269,7 +269,14 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   fixedStart says; with fixedStart 1 it takes Melee off (owner.ts already). Studio puts the start at the w3i's start
   instead (startlocations.ts `startToAdd`). **AI Editor**: u05_mint.wai's Attacking tab shows Minimum Forces "First Hero
   Only" (the bytes HAIA; Attacking tab 403,234). **Level over flat ground** types cliff corners: cliff-type-stencil.json
-  ran OK again (cliff-type-level-2: 15 corners).
+  ran OK again (cliff-type-level-2: 15 corners). **Regions with the naval view** (flat.w3x with a yellow region across
+  the south border and a red one across the west, View Entire Map, W, then Ctrl+R, P, N; box means): P and N are one
+  switch in the editor (N turns Pathing - Ground off, P Naval). Naval alone: flat land 200, 114, 91 (ground 144, 100, 54),
+  border 116, 54, 18. With regions: yellow over the playable land 230, 191, 41 and over the border 192, 164, 8, red over
+  the border 192, 25, 8 (regions alone over the border: yellow 149, 146, 5, red 148, 7, 5). Studio (app-drive, the same
+  toggles): naval alone 206, 131, 83 and 113, 61, 15; with regions yellow over land 239, 177, 64, but over the border the
+  region is gone under the brown (108, 55, 15). No simple linear or sRGB blend of one colour fits the editor's three
+  channels; the heights view wasn't tried.
 
 **Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
 and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
