@@ -20,7 +20,7 @@ export const repeatWavesLimits = (waves: number) => ({ min: 0, max: waves });
  *  all five at 0: shared equally). Whole numbers always. */
 export function rescaleChances(chances: readonly number[], index: number, value: number): number[] {
   const rest = Math.max(0, 100 - value);
-  const others = chances.map((c, i) => (i === index ? -1 : i)).filter((i) => i >= 0);
+  const others = chances.map((_, i) => i).filter((i) => i !== index);
   const held = others.reduce((a, i) => a + chances[i], 0);
   const exact = others.map((i) => (held > 0 ? (chances[i] * rest) / held : rest / others.length));
   const out = chances.slice();
