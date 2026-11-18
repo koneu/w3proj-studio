@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aiNumber } from "./numbers";
+import { aiNumber, GAME_SPEED_LIMITS, repeatWavesLimits } from "./numbers";
+
+test("AI Editor: game speed 1 to 25 and Repeat Waves up to the wave count, as the World Editor holds them", () => {
+  assert.deepEqual(aiNumber("1", "Game Speed", GAME_SPEED_LIMITS), { value: 1 });
+  assert.deepEqual(aiNumber("25", "Game Speed", GAME_SPEED_LIMITS), { value: 25 });
+  assert.ok("refused" in aiNumber("0", "Game Speed", GAME_SPEED_LIMITS));
+  assert.ok("refused" in aiNumber("26", "Game Speed", GAME_SPEED_LIMITS));
+  assert.deepEqual(aiNumber("2", "Repeat Waves", repeatWavesLimits(2)), { value: 2 });
+  assert.deepEqual(aiNumber("0", "Repeat Waves", repeatWavesLimits(2)), { value: 0 });
+  assert.ok("refused" in aiNumber("3", "Repeat Waves", repeatWavesLimits(2)));
+  assert.ok("refused" in aiNumber("2", "Repeat Waves", repeatWavesLimits(1)));
+});
 
 test("AI Editor: a .wai number (u32) is taken whole or refused, never rounded or clamped", () => {
   // control: valid values pass unchanged, the type's edges too

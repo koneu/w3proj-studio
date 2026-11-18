@@ -12,7 +12,7 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
-import { aiNumber } from "./numbers";
+import { aiNumber, GAME_SPEED_LIMITS, HARVEST_WORKER_LIMITS, repeatWavesLimits } from "./numbers";
 import { generateAiScript } from "../../lib/ai/script";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { StackSave } from "../../lib/undo";
@@ -710,7 +710,7 @@ class AiView {
         town(b),
         this.field("Workers", this.select(mode, [["all", "All"], ["na", "All Not Attacking"], ["fixed", "Fixed Value"]], (v) => {
           b.workers = v === "all" ? ALL : v === "na" ? -2 >>> 0 : 5;
-        }), mode === "fixed" ? this.num("Workers", b.workers, (v) => { b.workers = v; }, { min: 0, max: 100 }) : null),
+        }), mode === "fixed" ? this.num("Workers", b.workers, (v) => { b.workers = v; }, HARVEST_WORKER_LIMITS) : null),
         this.condEditor(b));
     }
     const t = this.ai.targets[s.i];
@@ -757,7 +757,7 @@ class AiView {
     const waves = h("div.ai-section", {},
       h("h3", {}, "Attack Waves"),
       this.field("Initial Delay", this.num("Initial Delay", ai.initialDelay, (v) => { ai.initialDelay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the first wave attacks")),
-      this.field("Repeat Waves", this.num("Repeat Waves", ai.repeatWaves, (v) => { ai.repeatWaves = v; }, { min: 0 }), h("span.muted", {}, " waves repeated after the last one")),
+      this.field("Repeat Waves", this.num("Repeat Waves", ai.repeatWaves, (v) => { ai.repeatWaves = v; }, repeatWavesLimits(ai.waves.length)), h("span.muted", {}, " waves repeated after the last one")),
       this.field("Minimum Forces", this.select(ai.minForces, [[FIRST_HERO_ONLY, "First Hero Only"], ...groupChoices], (v) => { ai.minForces = v; })),
       h("div.ai-list.ai-scroll", {}, h("table.ai-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Attack Group"), h("th", {}, "Delay"))),
@@ -802,7 +802,7 @@ class AiView {
     const withCurrent = (list: [number, string][], v: number) => (list.some(([x]) => x === v) ? list : [...list, [v, String(v)] as [number, string]]);
     return h("div.ai-page.ai-scroll", {},
       h("p.muted", {}, "Settings for the World Editor's test game (stored with the AI; running a test game isn't supported here)."),
-      this.field("Game Speed", this.num("Game Speed", ai.gameSpeed, (v) => { ai.gameSpeed = v; }, { min: 0 }), h("span.muted", {}, " × regular game speed")),
+      this.field("Game Speed", this.num("Game Speed", ai.gameSpeed, (v) => { ai.gameSpeed = v; }, GAME_SPEED_LIMITS), h("span.muted", {}, " × regular game speed")),
       this.field("Game Options", h("div", {},
         this.check("Disable Fog of War", (ai.gameOptions & 1) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 1 : ai.gameOptions & ~1; }, "Option bit 1"),
         this.check("Disable Victory/Defeat Conditions", (ai.gameOptions & 2) !== 0, (on) => { ai.gameOptions = on ? ai.gameOptions | 2 : ai.gameOptions & ~2; }, "Option bit 2"))),
