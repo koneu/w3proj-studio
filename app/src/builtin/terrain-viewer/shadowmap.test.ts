@@ -68,6 +68,26 @@ test("doodads the skin table says cast no shadow (shadow=0, as corn) stay out of
   assert.equal(shadowed(await predict("D001")), 0, "a rock whose object data turns it off doesn't");
 });
 
+test("in HD a doodad's shadow is baked at its drawn size, defScale:hd times the placed scale (we-compare shadow-defscale-hd)", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOrk]\nfile=Doodads\\Rock\nshadow=1\n[ZOfo]\nfile=Doodads\\Rock\nshadow=1\ndefScale:hd=2",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const skinsIn = async (mode: string) => loadSkins({ settings: { get: () => mode }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api);
+  const terrain = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  const tower = towerModel();
+  const read = async (p: string) => { if (/\.mdx$/i.test(p)) return tower; throw new Error(`no ${p}`); };
+  const at = (id: string, s: number): Placed => ({ id, variation: 0, position: [terrain.offsetX + 16 * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [s, s, s] });
+  const predict = async (mode: string, id: string, s: number) => predictShadows(terrain, [at(id, s)], await skinsIn(mode), () => undefined, read, undefined, undefined, () => mode);
+  const ground = terrainShadows(terrain);
+  const shadowed = (m: Uint8Array) => m.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0);
+  const twice = await predict("hd", "ZOfo", 1);
+  assert.deepEqual(twice, await predict("hd", "LOrk", 2), "HD: defScale:hd 2 at scale 1 casts as scale 2");
+  assert.ok(shadowed(twice) > shadowed(await predict("hd", "LOrk", 1)), "the control: scale 1 casts less");
+  // SD doesn't draw defScale:hd: as placed.
+  assert.deepEqual(await predict("sd", "ZOfo", 1), await predict("sd", "LOrk", 1));
+});
+
 test("a special doodad's footprint is read from its model: a tall one on flat ground casts, placed in the footprint's middle", async () => {
   const files: Record<string, string> = {
     "Doodads\\DoodadSkins.txt": "[YCr2]\nfile=Doodads\\Terrain\\Cave\nshadow=1",
