@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aiNumber, GAME_SPEED_LIMITS, repeatWavesLimits } from "./numbers";
+import { aiNumber, GAME_SPEED_LIMITS, repeatWavesLimits, rescaleChances } from "./numbers";
+
+test("AI Editor: setting one hero chance rescales the other five so the six keep summing to 100", () => {
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+  // control: the default already sums to 100 and setting a box to its own value changes nothing
+  assert.deepEqual(rescaleChances([17, 17, 16, 17, 17, 16], 0, 17), [17, 17, 16, 17, 17, 16]);
+  assert.deepEqual(rescaleChances([50, 10, 10, 10, 10, 10], 0, 75), [75, 5, 5, 5, 5, 5]);
+  assert.deepEqual(rescaleChances([20, 20, 20, 20, 20, 0], 5, 50), [10, 10, 10, 10, 10, 50]);
+  assert.deepEqual(rescaleChances([0, 0, 0, 0, 0, 100], 5, 40), [12, 12, 12, 12, 12, 40], "others at 0 share equally");
+  assert.deepEqual(rescaleChances([100, 0, 0, 0, 0, 0], 0, 100), [100, 0, 0, 0, 0, 0]);
+  for (const [i, v] of [[1, 33], [3, 0], [2, 99], [4, 7]] as const) {
+    const out = rescaleChances([17, 17, 16, 17, 17, 16], i, v);
+    assert.equal(sum(out), 100, `${out}`);
+    assert.equal(out[i], v);
+    assert.ok(out.every(Number.isInteger));
+  }
+});
 
 test("AI Editor: game speed 1 to 25 and Repeat Waves up to the wave count, as the World Editor holds them", () => {
   assert.deepEqual(aiNumber("1", "Game Speed", GAME_SPEED_LIMITS), { value: 1 });

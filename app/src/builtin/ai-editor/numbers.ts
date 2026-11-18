@@ -14,3 +14,20 @@ export function aiNumber(typed: string, label: string, limits: { min?: number; m
 export const HARVEST_WORKER_LIMITS = { min: 1, max: 100 };
 export const GAME_SPEED_LIMITS = { min: 1, max: 25 };
 export const repeatWavesLimits = (waves: number) => ({ min: 0, max: waves });
+
+/** The six hero chances after box `index` is set to `value` (0 to 100): the World Editor keeps them summing to 100, so
+ *  the other five share what is left in proportion to what they held (largest remainder, ties to the earlier box;
+ *  all five at 0: shared equally). Whole numbers always. */
+export function rescaleChances(chances: readonly number[], index: number, value: number): number[] {
+  const rest = Math.max(0, 100 - value);
+  const others = chances.map((_, i) => i).filter((i) => i !== index);
+  const held = others.reduce((a, i) => a + chances[i], 0);
+  const exact = others.map((i) => (held > 0 ? (chances[i] * rest) / held : rest / others.length));
+  const out = chances.slice();
+  out[index] = value;
+  others.forEach((i, k) => { out[i] = Math.floor(exact[k]); });
+  let left = rest - others.reduce((a, i) => a + out[i], 0);
+  const order = others.map((_, k) => k).sort((a, b) => (exact[b] - Math.floor(exact[b])) - (exact[a] - Math.floor(exact[a])) || a - b);
+  for (const k of order) { if (left <= 0) break; out[others[k]]++; left--; }
+  return out;
+}
