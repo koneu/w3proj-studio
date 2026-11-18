@@ -102,7 +102,7 @@ pub const KNOWN: &[&str] = &[
     "war3campImported\\ui.toc",
 ];
 
-pub const META_FILES: &[&str] = &["(listfile)", "(attributes)", "(signature)"];
+pub const META_FILES: &[&str] = &["(listfile)", "(attributes)", "(signature)", "(weak signature)"];
 
 /// Archive names for the game's stored paths ("War3.w3mod:_HD.w3mod:Units/X.mdx"): the path
 /// a map would use to replace the file, for each art set ("Units\\X.mdx", "_HD.w3mod\\Units\\X.mdx").
