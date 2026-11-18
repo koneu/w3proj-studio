@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planMoves } from "./moves";
+import { planMoves, takenOnDisk } from "./moves";
 
 const none = () => false;
 
@@ -38,4 +38,17 @@ test("what the project needs stays", () => {
   assert.match(planMoves(["map"], "other", none).problem!, /has to stay/);
   assert.match(planMoves(["w3proj.toml"], "other", none).problem!, /has to stay/);
   assert.equal(planMoves(["map/w3proj.toml"], "other", none).problem, null);
+});
+
+test("takenOnDisk asks the disk, not the file list", async () => {
+  const moves = [["a/x.txt", "b/x.txt"], ["a/y.txt", "b/y.txt"]] as const;
+  const asked: string[] = [];
+  const disk = new Set(["b/y.txt"]);
+  const ask = async (p: string) => { asked.push(p); return disk.has(p); };
+  assert.equal(await takenOnDisk(moves, ask), "b/y.txt already exists.");
+  assert.deepEqual(asked, ["b/x.txt", "b/y.txt"]);
+  // Control: nothing there, no problem.
+  assert.equal(await takenOnDisk(moves, async () => false), null);
+  // Can't be told: not free.
+  assert.match((await takenOnDisk(moves, async () => { throw new Error("denied"); }))!, /b\/x\.txt can't be checked: denied/);
 });

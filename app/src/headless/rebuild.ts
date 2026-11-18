@@ -54,8 +54,9 @@ const PART_FILES: Record<Part, string[]> = {
   minimap: ["map/war3mapMap.blp", "map/war3map.mmp", "map/war3map.mmp.json"],
   script: ["map/war3map.j", "map/war3map.lua"],
 };
-/** Written along with the script when a save would write them (the Melee flag, lib/terrain/meleesave). */
-const SIDE_FILES = ["map/war3map.w3i.json"];
+/** Written along with the script when a save would write them (the Melee flag, lib/terrain/meleesave; the
+ *  destructables' flag "placed by the game", which follows the script: map-script followFlags). */
+const SIDE_FILES = ["map/war3map.w3i.json", "map/war3map.doo.json", "map/war3map.doo"];
 
 const same = (a: Uint8Array | null, b: Uint8Array | null) => a === b || (!!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]));
 const text = (e: unknown) => (e instanceof Error ? e.message : String(e));

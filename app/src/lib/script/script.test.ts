@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseTriggerData } from "../triggers/triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "../triggers/wtg";
-import { destructablesSection, type DestructableJson } from "./destructables";
+import { destructablesSection, flagsToFollow, followedFlags, type DestructableJson } from "./destructables";
 import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGroupsSection } from "./drops";
 import { banner, generateScript, generateSections, HEADER_SECTION, header, ident, literal, parseSoundLabels, placedName, scriptSoundDurations, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
 import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
@@ -595,7 +595,32 @@ const dests = (list: DestructableJson[], extra: object = {}) => destructablesSec
 
 test("a destructable nobody needs isn't in the script", () => {
   assert.equal(dests([dest()], { referenced: new Set() }), "");
-  assert.equal(dests([dest({ flags: 2 })]), "");
+  assert.equal(dests([dest({ flags: 2 })], { referenced: new Set() }), "");
+});
+
+test("a named destructable is in the script whatever its flags, as the World Editor's (we-compare dest-flags)", () => {
+  // The editor's script created the destructables a trigger names given flags 2, 3 and 6 too (and its save cleared
+  // GAME_PLACED on them): the flag follows the script, it doesn't decide it.
+  has(dests([dest({ flags: 2 })]), "    set gg_dest_x = BlzCreateDestructableWithSkin( 'LTlt', 1.0, 2.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest({ flags: 3 })]), "    set gg_dest_x = BlzCreateDestructableWithSkin( 'LTlt', 1.0, 2.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest({ flags: 6 })]), "    set gg_dest_x = BlzCreateDestructableZWithSkin( 'LTlt', 1.0, 2.0, 3.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest({ flags: 2, itemSets: [[{ id: "ratc", chance: 100 }]] })], { referenced: new Set() }), "    call TriggerAddAction( t, function Doodad000000_DropItems )");
+});
+
+test("GAME_PLACED follows the script as the World Editor's save sets it: off where it creates one, on elsewhere", () => {
+  // we-compare dest-flags: given 0, 1, 2, 3, 4 and 6, not named: 2 (6 for 4; bit 0 is the playable-area flag, kept);
+  // named: 0, or 4.
+  const named = { referenced: new Set(["gg_dest_LTlt_0001"]), globalName: (d: DestructableJson) => `gg_dest_${d.id}_${String(d.editorId).padStart(4, "0")}` };
+  const all = [0, 1, 2, 3, 4, 6].map((flags, k) => dest({ flags, editorId: k + 2 }));
+  assert.deepEqual(flagsToFollow(named, all, () => true), [{ index: 0, flags: 2 }, { index: 1, flags: 3 }, { index: 4, flags: 6 }]);
+  const one = [0, 1, 2, 3, 4, 6].map((flags) => dest({ flags }));
+  assert.deepEqual(flagsToFollow(named, one, () => true), [{ index: 2, flags: 0 }, { index: 3, flags: 1 }, { index: 5, flags: 4 }]);
+  // Drops count as named: an item set, or an item table the map has.
+  const drops = [dest({ flags: 2, editorId: 9, itemSets: [[{ id: "ratc", chance: 100 }]] }), dest({ flags: 2, editorId: 9, itemTable: 5 }), dest({ flags: 2, editorId: 9, itemTable: 6 })];
+  assert.deepEqual(flagsToFollow({ ...named, itemTables: new Set([5]) }, drops, () => true), [{ index: 0, flags: 0 }, { index: 1, flags: 0 }]);
+  // A plain doodad's bit is "solid" (pathmap): it keeps its flags, named or not; so does an unknown type.
+  assert.deepEqual(flagsToFollow(named, [dest({ id: "LTlt", flags: 0, editorId: 7 }), dest({ flags: 2 })], (id) => id !== "LTlt"), []);
+  assert.deepEqual(followedFlags(1, false, false), 1);
 });
 
 test("destructables by version, height and state", () => {

@@ -8,10 +8,14 @@
 // Without --case it makes the CASES below; --case makes others (for measuring), the JSON as a CASES entry:
 //   off        true: the w3i's Melee flag cleared (0x9c10), to see whether the editor's save puts it back
 //   doodads    [[id, dx, dy]]: doodads or destructables at the start + (dx, dy)
-//   units      [[id, dx, dy, player]]: units or items (player 24: Neutral Hostile, the default; 27 is Neutral Passive) at the start + (dx, dy)
+//   units      [[id, dx, dy, player, drops]]: units or items (player 24: Neutral Hostile, the default; 27 is Neutral Passive) at the start + (dx, dy);
+//              drops: item ids of one drop set (each 100%)
 //   start      [dx, dy]: moves the start location
 //   corners    [[x0, y0, x1, y1, { layer, flags, texture, water, height }]]: corners (inclusive, the map's corner
 //              indices; the start's is 32, 30) set to these values; cliff corners get Grass Cliff as Apply Cliff leaves it
+//   ground     [index, tileId]: the w3e's ground tile at that index of its list replaced
+//   customTilesets  true: with `ground`, the w3e's custom tilesets flag set (else the editor reads the tileset's list)
+//   flags      bits ored into the w3i's flags (0x4000: Requires The Frozen Throne data)
 // The pathing map, shadows and minimap are made again (w3proj rebuild), as the editor makes its own on open.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -71,6 +75,24 @@ export const CASES = {
   // Melee still on, as Studio's set_water lays it out (water level 0, wet flag); both saves must take Melee off.
   "start-deep": { corners: [[30, 28, 34, 32, { layer: 0, flags: 4 }]] },
   "start-shallow": { corners: [[30, 28, 34, 32, { layer: 1, flags: 4 }]] },
+  // tests/we-compare/tft-flag-we.json: w3i flag 0x4000 (Requires The Frozen Throne data). Melee stays on; each thing
+  // stands at (1280, 1024), far from the start. The game's tables give each type a version (0, 1 The Frozen Throne,
+  // 2 Reforged).
+  "tft-tavern": { units: [["ntav", 1280, 1280, 27]] },
+  "tft-creep": { units: [["nanb", 1280, 1280]] },
+  "tft-unit-v2": { units: [["sfoo", 1280, 1280]] },
+  "tft-unit-v0": { units: [["nfrp", 1280, 1280]] },
+  "tft-item": { units: [["shas", 1280, 1280, 27]] },
+  "tft-dest": { doodads: [["LTbr", 1280, 1280]] },
+  "tft-doodad": { doodads: [["ZPfw", 1280, 1280]] },
+  // Not in the spec: a tile of version 1 (Zdrt) worn by 25 corners, the custom tilesets flag on, left 0x4000 off, but
+  // the editor's save set w3i flag 0x0008 (we-drive 2026-11-17). Without the custom tilesets flag the editor reads the
+  // tileset's own list, so the tile is gone.
+  "tft-tile-custom": { ground: [5, "Zdrt"], customTilesets: true, corners: [[50, 50, 54, 54, { texture: 5 }]] },
+  "tft-tavern-off": off({ units: [["ntav", 1280, 1280, 27]] }),
+  "tft-drop": { units: [["nfrp", 1280, 1280, 24, ["shas"]]] },
+  "tft-drop-random": { units: [["nfrp", 1280, 1280, 24, ["YjI5"]]] },
+  "tft-clear": { flags: 0x4000 },
 };
 
 const run = (...args) => {
@@ -132,10 +154,11 @@ function make(name, c) {
     const start = units.units[0];
     if (c.start) start.position = [START[0] + c.start[0], START[1] + c.start[1], 0];
     let n = 1;
-    for (const [id, dx, dy, player = 24] of c.units ?? []) {
+    for (const [id, dx, dy, player = 24, drops] of c.units ?? []) {
       units.units.push({
         ...start, id, skinId: id, position: [START[0] + dx, START[1] + dy, 0], angle: 0, player, flags: 2,
         hp: -1, mana: -1, level: 1, gold: id === "ngol" ? 12500 : 0, targetAcquisition: -1, editorId: n++, trailer: [0, 0],
+        ...(drops ? { itemSets: [drops.map((d) => ({ id: d, chance: 100 }))] } : {}),
       });
     }
     writeFileSync(unitsFile, JSON.stringify(units, null, 2));
@@ -148,9 +171,20 @@ function make(name, c) {
       writeFileSync(dooFile, JSON.stringify(doo, null, 2));
     }
     if (c.corners?.length) editTerrain(join(map, "war3map.w3e.txt"), c.corners);
+    if (c.ground) {
+      const w3e = join(map, "war3map.w3e.txt");
+      const lines = readFileSync(w3e, "utf8").split("\n");
+      const at = lines.findIndex((l) => l.startsWith("ground "));
+      const tiles = lines[at].split(" ").slice(1);
+      tiles[c.ground[0]] = c.ground[1];
+      lines[at] = `ground ${tiles.join(" ")}`;
+      if (c.customTilesets) lines[lines.findIndex((l) => l.startsWith("custom-tilesets "))] = "custom-tilesets 1";
+      writeFileSync(w3e, lines.join("\n"));
+    }
     const infoFile = join(map, "war3map.w3i.json");
     const info = JSON.parse(readFileSync(infoFile, "utf8"));
     if (c.off) info.flags &= ~4;
+    if (c.flags) info.flags |= c.flags;
     // A start location for another player: that player in the w3i too (a copy of player 1, its start there).
     for (const u of units.units.slice(1).filter((u) => u.id === "sloc")) {
       info.players.push({ ...info.players[0], id: u.player, start: [u.position[0], u.position[1]] });

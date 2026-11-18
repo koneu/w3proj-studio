@@ -4,7 +4,7 @@ import { joinPath } from "../../lib/paths";
 import { clickSelection } from "../../lib/selection";
 import { projectWithFiles } from "../../lib/formats/mapdoc";
 import { formatBytes, h } from "../../workbench/dom";
-import { planMoves } from "./moves";
+import { planMoves, takenOnDisk } from "./moves";
 
 interface Node {
   name: string;
@@ -124,6 +124,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const { moves, problem } = planMoves(paths, folder, exists);
     if (problem) throw new Error(problem);
     if (!moves.length) return;
+    // The list may be behind the disk: the real targets are asked too.
+    const taken = await takenOnDisk(moves, (p) => w3.workspace.exists(p));
+    if (taken) throw new Error(taken);
     const files = moves.flatMap(([from]) => filesUnder(from));
     const busy = unsaved(files);
     if (busy.length) throw new Error(`Save or close ${busy.join(", ")} first.`);

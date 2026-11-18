@@ -903,3 +903,4 @@ fn verify_finds_no_map_in_an_empty_folder_and_says_so() {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     assert!(text(&o).contains("1 ok"), "{}", text(&o));
 }
+

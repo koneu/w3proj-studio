@@ -1,0 +1,90 @@
+[
+  {
+    "name": "tft-tavern",
+    "description": "w3i flag 0x4000 (Requires The Frozen Throne data). A tavern (ntav, version 1 in UnitData.slk) placed for Neutral Passive at (1280, 1024), far from the start, on the melee flat.w3x: the editor's save sets 0x4000 (we-drive 2026-11-17, branch fix-bugs-w3i). Inputs of this file: tests/fixtures/we-specs/make-melee-valid.mjs (its tft-* cases) into target/melee-valid/. Studio: lib/terrain/tftflag.ts through meleesave.ts, run by the map script's generation as on a save.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-tavern.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-creep",
+    "description": "A creep of version 1 (nanb, Neutral Hostile): sets 0x4000.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-creep.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-unit-v2",
+    "description": "A unit of version 2 (sfoo, Reforged): sets 0x4000.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-unit-v2.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-unit-v0",
+    "description": "The control: a unit of version 0 (nfrp) leaves 0x4000 off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-unit-v0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-item",
+    "description": "An item of version 1 (shas) in war3mapUnits.doo: sets 0x4000.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-item.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-dest",
+    "description": "A destructable of version 1 (LTbr, a barrel): leaves 0x4000 off (destructables don't count).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-dest.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-doodad",
+    "description": "A doodad of version 1 (ZPfw, no pathing): leaves 0x4000 off (doodads don't count).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-doodad.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-tavern-off",
+    "description": "The tavern on the map with Melee cleared: the save puts Melee back on and sets 0x4000 (the two are independent).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-tavern-off.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-drop",
+    "description": "A frog (nfrp, version 0) whose drop set holds an item of version 1 (shas): sets 0x4000.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-drop.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-drop-random",
+    "description": "The frog with a random item (YjI5: permanent, level 5) in its drop set: leaves 0x4000 off.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-drop-random.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-clear",
+    "description": "flat.w3x with 0x4000 already set and nothing of version 1 or 2 placed: the save clears it.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-clear.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  }
+]

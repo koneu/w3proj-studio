@@ -266,6 +266,11 @@ export class WorkspaceService {
   readBytes(p: string) {
     return readBytes(this.resolve(p));
   }
+  /** Whether the disk has something at the project path now (a file or a folder), whatever the file list says. Rejects
+   *  when that can't be told (a folder above it can't be looked into). */
+  exists(p: string) {
+    return invoke<boolean>("fs_exists", { path: this.resolve(p) });
+  }
   /** The file's size and time as the disk has them now; null when it doesn't exist. */
   stat(p: string) {
     return invoke<Stamp | null>("fs_stat", { path: this.resolve(p) });

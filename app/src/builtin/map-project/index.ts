@@ -121,6 +121,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.commands.execute("w3.script.settle").catch(() => {});
     // Likewise pathing, shadows and the minimap, which follow a terrain edit a few seconds later.
     await w3.commands.execute("w3.terrain.settle").catch(() => {});
+    // The destructables' flag "placed by the game" as the script in the build has it (the extension can be off).
+    await w3.commands.execute("w3.script.followFlags").catch(() => {});
     if (check) {
       const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
       const checked = problems ? await w3.window.withProgress("Checking for problems", () => problems.runChecked()) : null;

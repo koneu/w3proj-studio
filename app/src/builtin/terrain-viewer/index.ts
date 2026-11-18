@@ -47,6 +47,7 @@ import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "./pathmap";
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
+import type { FollowFlags } from "../../lib/script/destructables";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
@@ -127,6 +128,9 @@ const LOADING_FRAME_MS = 250;
 /** How long a picture waits for models and textures at most: a backend call that never answers
  *  mustn't hang the screenshot tool. What isn't in by then is left out. */
 const PICTURE_WAIT_MS = 120_000;
+/** How long the destructables' flags (followFlags) wait for a terrain editor's objects before the file is written
+ *  without it. */
+const FOLLOW_READY_MS = 5_000;
 /** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
 const SHADOW_EDIT_DELAY = 700;
 /** Which key on the keyboard an event is of, whatever Shift made of it (A and a), so that a held key's release is found. */
@@ -289,6 +293,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       clearTimeout(rebuildTimer);
       await runRebuild();
     }),
+    // Not in the manifest: the Map Script extension, after making the script, has the project's open terrain editor set
+    // its destructables' flags (map-script followFlags). True when that editor holds war3map.doo (the file is its).
+    w3.commands.register("w3.terrain.followDestructableFlags", async (follow?: unknown, root?: unknown) => {
+      if (typeof follow !== "function" || typeof root !== "string") return false;
+      // The flags are worked out for the project at `root`: an editor of another one (opened meanwhile) isn't touched.
+      const editor = ownEditor();
+      return editor && editor.root === root ? editor.followFlags(follow as FollowFlags) : false;
+    }),
     // Not in the manifest (no palette entry): the app smoke calls it so a step reads the models again.
     w3.commands.register("w3.terrain.clearShadowCache", () => clearShadowMeshes()),
     // Part of the workbench's settled(): every open terrain editor's view at rest (objects, models, a frame drawn).
@@ -387,6 +399,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     derive: (before?: RebuildFrom) => Promise<void>;
     /** What Export Minimap draws, as the editor has it now (unsaved edits included). */
     minimapSource: () => Promise<ExportSource>;
+    /** Sets the flags `follow` names on its objects of war3map.doo (the map script's GAME_PLACED, map-script
+     *  followFlags); false when it holds no war3map.doo. */
+    followFlags: (follow: FollowFlags) => Promise<boolean>;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -1876,6 +1891,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A finished terrain stroke as one undo step; objects on the edited
          *  ground follow it (doodads with a fixed height, flag 4, keep theirs). */
+        /** The tile lists as they were before the first tile an edit added under custom-tilesets 0 (ensureTile); the
+         *  commit that follows takes it, so its undo puts the lists back (the flag, and the list drawn). */
+        let pendingTiles: ReturnType<typeof tileSnapshot> | null = null;
         const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }, pasted = false): boolean => {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
@@ -1900,9 +1918,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const zBefore = follow.map((p) => p.position[2]);
           const zAfter = follow.map((p) => groundFor(p.id, p.position[0], p.position[1]));
           const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
+          const tilesBefore = pendingTiles;
+          pendingTiles = null;
+          const tilesAfter = tilesBefore ? tileSnapshot(terrain) : null;
+          const putTiles = (s: ReturnType<typeof tileSnapshot> | null) => { if (!s) return; restoreTiles(terrain, s); void syncTileList(); minimapStale.set(); };
           pushEdit({
-            undo: () => { st.undo(); if (moved) setZ(zBefore); },
-            redo: () => { st.redo(); if (moved) setZ(zAfter); },
+            undo: () => { st.undo(); putTiles(tilesBefore); if (moved) setZ(zBefore); },
+            redo: () => { putTiles(tilesAfter); st.redo(); if (moved) setZ(zAfter); },
             terrain: true, objects: moved,
           });
           if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); } else refloat();
@@ -2119,6 +2141,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Index of a ground tile type, adding it to the map's list if needed
          *  (null when the list is full). At once, with no wait: see placePaste. */
         const ensureTile = (id: string): number | null => {
+          const snap = tileSnapshot(terrain);
+          const slot = addTile(id);
+          // Under flag 0 the list is the tileset's own: the edit's undo gives the lists back (see pendingTiles).
+          if (snap.raw === 0 && !pendingTiles && (snap.raw !== terrain.customTilesetsRaw || snap.ground.join() !== terrain.groundTiles.join())) pendingTiles = snap;
+          return slot;
+        };
+        const addTile = (id: string): number | null => {
           // The slot drawn as the tile: with the flag 0 by the tileset's own list, not the file's (paintSlot).
           const own = ownTiles?.get(terrain.tileset);
           const listed = terrain.groundTiles.length;
@@ -2157,7 +2186,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  puts the tile lists back as they were before, so a run that replaced nothing leaves no tile added (nor the
          *  list settled or the flag changed). Call it with no wait in between, as placePaste does. */
         const tryEnsureTile = (id: string): { slot: number | null; takeBack(): void } => {
-          const before = tileSnapshot(terrain);
+          const before = tileSnapshot(terrain), hadPending = pendingTiles;
           const slot = ensureTile(id);
           return {
             slot,
@@ -2165,6 +2194,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const now = tileSnapshot(terrain);
               if (now.raw === before.raw && now.ground.join() === before.ground.join() && now.cliffs.join() === before.cliffs.join()) return;
               restoreTiles(terrain, before);
+              pendingTiles = hadPending;
               void syncTileList();
               minimapStale.set();
             },
@@ -3799,7 +3829,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           // From here to the end there is no wait: the lists are taken right before the tiles are added, so putting them
           // back can't drop a tile another edit added in between.
-          const tiles = tileSnapshot(terrain);
+          const tiles = tileSnapshot(terrain), hadPending = pendingTiles;
           const stamped = placeGround(f, g);
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
@@ -3811,6 +3841,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             keyPress = null;
             const added = terrain.groundTiles.length !== tiles.ground.length;
             restoreTiles(terrain, tiles);
+            pendingTiles = hadPending;
             // The side list's rows and counts for the tiles that went again.
             if (added) void syncTileList();
             return;
@@ -5989,6 +6020,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redraw();
           }
         };
+        /** Set once this editor is handed to the workbench (resolve returned): before that its tab has no editor to save,
+         *  so a save asked for while it opens would be lost (followFlags). */
+        let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
           handle, ready, screenshot: takeScreenshot,
@@ -6001,6 +6035,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? [], terrain, undefined, minimapStale.take(), unsaved);
           },
           minimapSource: exportSource,
+          followFlags: async (follow) => {
+            // Still opening (or its open failed): the file is the caller's to write, and an editor still opening reads it
+            // again once it's there (the workbench's missed saves). The workbench sets the tab's editor right after resolve
+            // returns: a macrotask later it has it, so the save below reaches it.
+            if (!handed) return false;
+            await new Promise((done) => setTimeout(done, 0));
+            // Its objects still being read (a big map, a slow disk) don't hold the script's queue, which other work waits
+            // on: past a moment the file is the caller's too, and the editor takes it when its objects are in.
+            let timer = 0;
+            const placed = await Promise.race([ready().then(() => true), new Promise<false>((done) => { timer = window.setTimeout(() => done(false), FOLLOW_READY_MS); })]);
+            clearTimeout(timer);
+            if (!placed) return false;
+            if (disposed || !dooFile || !editable || openedBy.get(doc.path) !== record || w3.workspace.project()?.root !== record.root) return false;
+            const f = dooFile;
+            const changes = follow(f.list as unknown as Parameters<FollowFlags>[0]);
+            // Not an edit of the user's: no undo step. The file follows the script as the World Editor's save writes it.
+            for (const c of changes) (f.list[c.index] as Placed & { flags?: number }).flags = c.flags;
+            const clean = !mark.isDirty(at) && !w3.editors.isDirty(doc.path);
+            // Flags taken while it had unsaved edits, which were undone since: the editor is clean, the file behind.
+            const saved = savedDoodads;
+            const behind = clean && !!saved && saved.length === f.list.length
+              && f.list.some((p, i) => (p as Placed & { flags?: number }).flags !== (saved[i] as Placed & { flags?: number }).flags);
+            if (!changes.length && !behind) return true;
+            objectsTouched = true;
+            // Saved now unless there are unsaved edits, which the save of them shouldn't be taken for: their save writes
+            // the flags along (and runs this again). Should they be undone instead, the next run (packing follows the
+            // flags again: w3.script.followFlags) finds the file behind and saves.
+            if (clean) {
+              doc.setDirty(true);
+              await w3.editors.save(doc.path);
+            }
+            return true;
+          },
         };
         // A read-only editor (a game map) never derives: it isn't the project's.
         if (editable) openedBy.set(doc.path, record);
@@ -6176,7 +6243,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     let melee = false;
                     if (typeof info.flags === "number") {
                       const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
-                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; remelee = !after.reasons.length; melee = true; }
+                      if (after.flags !== info.flags) {
+                        // Flag 0x4000 (Requires The Frozen Throne data) can change alone: only a changed Melee bit is told.
+                        if ((after.flags ^ info.flags) & MELEE_MAP) { unmelee = after.reasons; remelee = !after.reasons.length; }
+                        info.flags = after.flags; melee = true;
+                      }
                     }
                     return changes.length > 0 || priorities || melee;
                   });
@@ -6260,6 +6331,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderer.dispose();
           },
         };
+        handed = true;
         return editorApi;
       },
     }),

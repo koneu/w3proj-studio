@@ -31,6 +31,8 @@ export interface MeleeInfo {
   gameDataSet?: number;
   upgrades?: readonly unknown[];
   techs?: readonly unknown[];
+  /** The map's random item tables (for flag 0x4000, tftflag.ts). */
+  itemTables?: unknown;
   /** The map's war3mapMisc.txt sets a value (customConstants); not in war3map.w3i, the caller tells. */
   customConstants?: boolean;
 }
