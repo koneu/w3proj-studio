@@ -15,6 +15,9 @@ interface UnpackReport {
   unchanged: number;
   /** Files with a "\" in their name that the sync left alone (from the project root). */
   strays?: string[];
+  /** Classic files the sync kept as the project had them: the map held their _HD.w3mod version's bytes under the plain
+   *  name, as the World Editor in HD mode saves an import a unit uses (from the project root). */
+  kept_classic?: string[];
 }
 
 interface PackReport {
@@ -39,6 +42,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const buildItem = w3.statusBar.add({ id: "w3.project.build", text: "", command: "w3.project.pack", priority: 99 });
   const testItem = w3.statusBar.add({ id: "w3.project.test", text: "", command: "w3.project.testMap", priority: 98 });
   ctx.subscriptions.push(projectItem, weItem, buildItem, testItem);
+  /** World Editors opened from here and not closed yet: the mark stays until the last one has closed. */
+  let editorsOpen = 0;
 
   const root = () => {
     const p = w3.workspace.project();
@@ -74,6 +79,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     for (const f of r.unnamed) out.append(`  unnamed (not packed): ${f}`);
     for (const [f, e] of r.errors) out.append(`  unreadable: ${f}: ${e}`);
     for (const f of r.strays ?? []) out.append(`  kept (a "\\" in the name, not deleted): ${f}`);
+    for (const f of r.kept_classic ?? []) out.append(`  kept the project's Classic file (the map had its _HD.w3mod version's bytes in its place): ${f}`);
   };
 
   /** Unpacks, asking before writing an incomplete (protected) map, and with `askDeletes` before deleting files of the
@@ -188,7 +194,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (moved()) return;
     await w3.commands.execute("w3.script.adopt").catch(() => {});
     if (moved()) return;
-    w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
+    const kept = r.kept_classic?.length
+      ? ` Kept the project's Classic version of ${r.kept_classic.length === 1 ? r.kept_classic[0] : `${r.kept_classic.length} files (see Output)`}: the map had its HD file's bytes in its place (the World Editor in HD mode saves so).`
+      : "";
+    w3.window.showInfo((r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.") + kept);
     // Files with a "\" in their name the sync left alone: offered to be moved where they belong (it checks the
     // open project itself).
     if (r.strays?.length) await offerStrayMoves(w3, dir, out);
@@ -308,6 +317,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await pack(map);
       await w3.backend.invoke("world_editor_open", { exe, map, root: root() });
       out.append(`World Editor opened ${map}; saving there syncs back into the project`);
+      editorsOpen++;
       weItem.text = "● World Editor";
       w3.window.showInfo("Opened in the World Editor. Save there (Ctrl+S) and the project is updated.");
     }),
@@ -365,7 +375,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   w3.backend
     .listen<{ map: string }>("w3://world-editor-exited", ({ map }) => {
       out.append(`World Editor closed (${map})`);
-      weItem.text = "";
+      editorsOpen = Math.max(0, editorsOpen - 1);
+      if (!editorsOpen) weItem.text = "";
     })
     .then((d) => ctx.subscriptions.push(d));
 

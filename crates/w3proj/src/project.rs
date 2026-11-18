@@ -167,6 +167,10 @@ pub struct UnpackReport {
     /// deleted and left alone instead, from the project root with `/` between folders (the app offers
     /// to move them where they belong). A folder kept for one ends in `/`.
     pub strays: Vec<String>,
+    /// Classic files the sync kept as the project had them (`keep_classic_over_hd`), from the project root with `/`
+    /// between folders: the map held the bytes of their `_HD.w3mod/` version under the plain name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept_classic: Vec<String>,
 }
 
 impl UnpackReport {
@@ -711,8 +715,51 @@ fn old_manifest(project: &Path) -> Result<Option<Manifest>> {
     })
 }
 
+/// The graphics mode folder whose version of a file the World Editor in HD mode saves under the plain name.
+const HD_FOLDER: &str = "_HD.w3mod/";
+
+/// Classic files a sync keeps as the project has them: a plain file (no mode folder) of `files` whose bytes are those
+/// of its `_HD.w3mod/` version in the same map, where the project's own copy (in `map_dir`) differs. The World Editor
+/// in HD mode saves so: an import a placed unit uses as its model, held plain (Classic) and below `_HD.w3mod\`, is
+/// written back with the HD file's bytes under the plain name (we-drive, HD, branch we-compare-2, 2026-11-18:
+/// make-import-modes.mjs import-modes-units, `war3mapImported\both.mdx`; the same map's imports no unit uses are
+/// written back unchanged). Synced as it is, the project would lose its Classic model. `files` gets the project's
+/// bytes back for those; returns their paths (relative to `map/`). A project copy that isn't there is nothing to
+/// keep; one that can't be read stops the sync.
+fn keep_classic_over_hd(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<Vec<String>> {
+    let mut kept = Vec::new();
+    let twins: Vec<(String, String)> = files
+        .keys()
+        .filter_map(|k| k.strip_prefix(HD_FOLDER).map(|plain| (plain.to_string(), k.clone())))
+        .collect();
+    for (plain, hd) in twins {
+        let (Some(new), Some(hd_bytes)) = (files.get(&plain), files.get(&hd)) else { continue };
+        if new != hd_bytes {
+            continue;
+        }
+        let own = match fs::read(map_dir.join(&plain)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(Error::Project(format!(
+                    "{} can't be read ({e}): the map holds its _HD.w3mod version's bytes under its name, and without the \
+                     project's copy the sync can't tell whether that replaces it. The sync stopped before writing this project",
+                    map_dir.join(&plain).display()
+                )))
+            }
+        };
+        if own != *new {
+            files.insert(plain.clone(), own);
+            kept.push(plain);
+        }
+    }
+    Ok(kept)
+}
+
 /// `top`: the project itself (gets git files), not a chapter map inside a campaign.
 fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackReport> {
+    // Before anything is written: a project copy that can't be read stops the sync here.
+    let kept = keep_classic_over_hd(&project.join(MAP_DIR), &mut ex.files)?;
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -744,6 +791,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         }
     }
     let mut report = ex.report;
+    report.kept_classic.extend(kept.into_iter().map(|p| format!("{MAP_DIR}/{p}")));
     sync_dir(&project.join(MAP_DIR), MAP_DIR, &ex.files, &mut report)?;
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
@@ -779,6 +827,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         report.unchanged += r.unchanged;
         report.deleted += r.deleted;
         report.strays.extend(r.strays.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
+        report.kept_classic.extend(r.kept_classic.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
     }
     remove_empty_dirs(&maps_dir);
     // What couldn't be named: replaced as a whole (not counted), strays aside.

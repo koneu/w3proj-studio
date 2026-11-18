@@ -641,6 +641,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
             for s in &report.strays {
                 println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
+            for s in &report.kept_classic {
+                println!("  kept the project's {s}: the map had its _HD.w3mod version's bytes in its place (the World Editor in HD mode saves so)");
+            }
         }
         Cmd::Pack { project, output, keep_unused_strings, force_stale, keep_script, game } => {
             if !force_stale {

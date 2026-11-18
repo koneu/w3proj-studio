@@ -368,3 +368,52 @@ fn a_saves_temporary_file_is_not_packed_or_synced() {
     let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
     assert!(ignore.lines().any(|l| l == ".*.tmp"), "{ignore}");
 }
+
+/// The World Editor in HD mode saves an import a unit uses with its `_HD.w3mod\` version's bytes under the plain
+/// (Classic) name (we-drive, branch we-compare-2): a sync keeps the project's Classic file and says so. Only where the
+/// map's plain file is byte for byte its HD twin and the project's differs; a new file, a real change, the lower-case
+/// `_hd.w3mod` (plain SD to the editor) and an unreadable project copy are not kept.
+#[test]
+fn a_classic_file_the_world_editor_overwrote_with_its_hd_version_is_kept() {
+    let dir = workdir("keep-classic");
+    let root = new_project(&dir);
+    let map = root.join("map");
+    let imported = map.join("war3mapImported");
+    fs::create_dir_all(&imported).unwrap();
+    fs::write(imported.join("both.mdx"), b"classic rabbit").unwrap();
+    fs::write(imported.join("lower.mdx"), b"classic lower").unwrap();
+    fs::write(imported.join("changed.mdx"), b"classic old").unwrap();
+    let hd: &[u8] = b"hd peasant";
+    let r = project::write_files(
+        &root,
+        extracted(&root, "Map", &[
+            ("war3map.j", SCRIPT),
+            ("war3mapImported/both.mdx", hd),
+            ("_HD.w3mod/war3mapImported/both.mdx", hd),
+            ("war3mapImported/new.mdx", hd),
+            ("_HD.w3mod/war3mapImported/new.mdx", hd),
+            ("war3mapImported/lower.mdx", hd),
+            ("_hd.w3mod/war3mapImported/lower.mdx", hd),
+            ("war3mapImported/changed.mdx", b"classic new"),
+            ("_HD.w3mod/war3mapImported/changed.mdx", hd),
+        ]),
+    )
+    .unwrap();
+    assert_eq!(r.kept_classic, ["map/war3mapImported/both.mdx"]);
+    assert_eq!(fs::read(imported.join("both.mdx")).unwrap(), b"classic rabbit");
+    assert_eq!(fs::read(map.join("_HD.w3mod/war3mapImported/both.mdx")).unwrap(), hd, "the HD file is synced");
+    assert_eq!(fs::read(imported.join("new.mdx")).unwrap(), hd, "nothing to keep for a file the project hadn't");
+    assert_eq!(fs::read(imported.join("lower.mdx")).unwrap(), hd, "_hd.w3mod is no HD folder to the editor");
+    assert_eq!(fs::read(imported.join("changed.mdx")).unwrap(), b"classic new", "a real change is synced");
+    // A project copy that is there but can't be read (a folder in its place here) stops the sync before it writes.
+    fs::remove_file(imported.join("both.mdx")).unwrap();
+    fs::create_dir(imported.join("both.mdx")).unwrap();
+    let before = fs::read(map.join("war3map.j")).unwrap();
+    let err = project::write_files(
+        &root,
+        extracted(&root, "Map", &[("war3map.j", b"changed"), ("war3mapImported/both.mdx", hd), ("_HD.w3mod/war3mapImported/both.mdx", hd)]),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("can't be read"), "{err}");
+    assert_eq!(fs::read(map.join("war3map.j")).unwrap(), before, "nothing was written");
+}
