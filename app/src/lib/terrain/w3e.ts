@@ -151,9 +151,18 @@ const MAX_GROUND_LIST = 16;
 /** The terrain as a save writes it. With the flag 0 the World Editor's save writes the tileset's own list, whole, as
  *  the file's ground list, whatever the file's was (another order, 3 or 9 tiles), and a corner on a slot past its end
  *  gets slot 0, its first tile: what each slot was drawn with stays. The flag and the cliff list stay (we-compare
- *  custom-tilesets-0, ct0-save-*, 2026-11-16). `t` itself when nothing changes (the flag set, the tileset's list
- *  unknown, or already its list with no corner past it); `t` is never changed. */
-export function savedTerrain(t: Terrain, own: readonly string[] | undefined): Terrain {
+ *  custom-tilesets-0, ct0-save-*, 2026-11-16). `cliffGround`, the ground tiles of the cliff types cliffs are drawn with
+ *  (tilecleanup.ts cliffGroundInUse), go at the list's end where it lacks them, with either flag, past 16 too: the
+ *  World Editor's save adds them so (we-compare cliff-ground-*, branch we-compare-9; example map 29's CAdi gives Adrt).
+ *  `t` itself when nothing changes (the flag set or the tileset's list unknown, or already its list with no corner past
+ *  it, and no cliff ground missing); `t` is never changed. */
+export function savedTerrain(t: Terrain, own: readonly string[] | undefined, cliffGround: readonly string[] = []): Terrain {
+  const listed = ownListSaved(t, own);
+  const missing = cliffGround.filter((g, i) => !listed.groundTiles.includes(g) && cliffGround.indexOf(g) === i);
+  if (!missing.length) return listed;
+  return { ...listed, groundTiles: [...listed.groundTiles, ...missing] };
+}
+function ownListSaved(t: Terrain, own: readonly string[] | undefined): Terrain {
   if (t.customTilesetsRaw !== 0 || !own?.length) return t;
   const n = own.length;
   const sameList = t.groundTiles.length === n && t.groundTiles.every((g, i) => g === own[i]);
@@ -456,13 +465,15 @@ export function heightAt(t: Terrain, wx: number, wy: number): number {
  *  doodad-water-z (2026-11-16, SD, make-doodad-water-z.mjs; open and Select All + Numpad 6 alike): a corner without
  *  the water flag doesn't count, a level-3 corner at ground 0 under water at -49.6 doesn't, a doodad halfway between a
  *  wet and a dry corner takes the east (north) one, levels -59.6, -29.6, 0.4, 30.4 by column go by the nearest
- *  column; the 3522 doodads of (2)EchoIsles fit it, as the original and as the editor saved them. */
+ *  column; the 3522 doodads of (2)EchoIsles fit it, as the original and as the editor saved them. A ramp's middle
+ *  corner counts with its lift (rampLift): water 32 over a lifted corner at 0 (drawn at 64) leaves the doodad on the
+ *  ground, 80 floats it (we-compare ramp-float-open, branch we-compare-9). */
 export function floatingLevelAt(t: Terrain, wx: number, wy: number): number | null {
   const fx = (wx - t.offsetX) / 128, fy = (wy - t.offsetY) / 128;
   if (!Number.isFinite(fx) || !Number.isFinite(fy)) return null;
   const x = Math.min(Math.max(Math.round(fx), 0), t.width - 1), y = Math.min(Math.max(Math.round(fy), 0), t.height - 1);
   const c = t.corners[y * t.width + x];
-  return c && c.hasWater && c.water > c.height ? c.water : null;
+  return c && c.hasWater && c.water > c.height + rampLift(t, x, y) ? c.water : null;
 }
 
 /** How far up the slope the pick looks (world units): 0.125 of a tile. */

@@ -32,7 +32,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
-import { applyTileList, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
+import { applyTileList, cliffGroundInUse, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { applyCliffRemoval, cliffEntryUse, cliffListWith, planCliffRemoval } from "./clifflist";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { autoCycleLine, cycledId, startAutoCycle, type RandomGroup } from "../../lib/terrain/randomplace";
@@ -555,8 +555,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const was = await applyTilesetWater(w3, parseW3e(bytes));
       const refused = toolWaterRefusal(w3, was, terrain, touched);
       if (refused) throw new Error(refused);
-      // With the flag 0 the tileset's own list, as the World Editor's save writes it (savedTerrain).
-      const files = [{ path, text: w3eToText(writeW3e(savedTerrain(terrain, own.get(terrain.tileset)))) }];
+      // With the flag 0 the tileset's own list, and the cliffs' ground tiles, as the World Editor's save writes it (savedTerrain).
+      const cliffGround = cliffGroundInUse(terrain, new Map(handle.gameCliffTypes().map((c) => [c.id, c] as const)));
+      const files = [{ path, text: w3eToText(writeW3e(savedTerrain(terrain, own.get(terrain.tileset), cliffGround))) }];
       states.before = { terrain: was, doodads: [] };
       states.after = { terrain, doodads: [] };
       for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
@@ -2275,6 +2276,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const cliffInfo = h("div.muted", {}, "Loading cliffs…");
         /** Cliff types and the game's file list, once loaded. */
         let cliffData: { types: Map<string, CliffType>; exists: (p: string) => boolean } | null = null;
+        /** The ground tiles of the cliff types a terrain's cliffs are drawn with (savedTerrain adds the missing ones);
+         *  none while the cliff types aren't read. */
+        const cliffGroundOf = (t: Terrain) => (cliffData ? cliffGroundInUse(t, cliffData.types) : []);
         /** Bumped per re-plan so a slow older one can't overwrite a newer one. */
         let cliffGen = 0;
         /** The special doodads as last drawn, the tiles they cover (same order), and their cliff textures and heights
@@ -3999,7 +4003,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const modeHint = h("span.terrain-place-hint");
 
         const rotateSelected = (deg: number) => {
-          const entries = selectedEntries();
+          // A building (a unit type with a pathing texture) keeps its facing: the World Editor's turn keys leave a
+          // farm, a town hall, a gold mine and a tavern at 270 while a peasant beside them turns (we-compare
+          // building-turn-*, nudge-keys-we, branch we-compare-9).
+          const entries = selectedEntries().filter((e) => isDoodadType(e.id) || !buildingCells.get(e.id));
           if (!entries.length) return;
           const before = entries.map(poseOf);
           const rules = doodadRules();
@@ -4541,7 +4548,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await savePlacedFile(w3, f);
           }
           markMapEdge(next, complements, true);
-          await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset))), doc);
+          await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
             info.cameraBounds = cameraBounds(next, complements);
@@ -6277,8 +6284,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const snap = await saveSnapshot(mark, {
               at: () => at,
               take: () => ({
-                // With the flag 0 the tileset's own list, as the World Editor's save writes it (the terrain kept).
-                w3e: writeW3e(savedTerrain(terrain, ownTiles?.get(terrain.tileset))),
+                // With the flag 0 the tileset's own list, and the cliffs' ground tiles the list lacks, as the World
+                // Editor's save writes it (the terrain kept).
+                w3e: writeW3e(savedTerrain(terrain, ownTiles?.get(terrain.tileset), cliffGroundOf(terrain))),
                 placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [],
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,
                 doodads: dooFile ? structuredClone(dooFile.list) : null,

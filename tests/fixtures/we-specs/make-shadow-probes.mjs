@@ -26,6 +26,7 @@
 //   (not committed: 7 cells of the ramps' shadows aren't Studio's yet)
 // shadow-cliffvar.w3x (input of tests/we-compare/shadow-terrain.json's shadow-cliffvar): see `cliffvar`
 // shadow-rocks.w3x: doodads on flat ground, see DOODAD_MAPS (not committed).
+// shadow-defscale.w3x (input of tests/we-compare/shadow-defscale.json): doodads with a defScale:hd, see DOODAD_MAPS.
 // shadow-boxes.w3x: box models imported into the map (war3mapImported\box-<name>.mdx, Classic MDX made with the app's
 //   toClassicMdx), custom doodads D000.. of LRrk using them, see BOXES (not committed: 8 of the editor's 235 cells,
 //   on projected triangles' edges, aren't Studio's).
@@ -116,6 +117,13 @@ const DOODAD_MAPS = {
     for (let k = 0; k < 8; k++) spots.push({ id: "LRrk", x: -3584 + (k % 4) * 2048 + k * 4, y: -1536 - Math.floor(k / 4) * 1024 + k * 4, angle: 270, variation: 0 });
     return spots;
   },
+  // Doodads whose DoodadSkins.txt has a defScale:hd (the HD view draws them that much larger, objects.ts
+  // doodadModelScale): RuinFountain ZOfo 1.45, BOth 1.35, NSct 1.5, and LRrk (none) as the control; angle 270,
+  // variation 0, 3072 apart (tests/we-compare/shadow-defscale.json). Left out, as they differ by more than the scale
+  // (branch we-compare-9): the cage LOce 0.75 (29 cells against the editor's 36), RibBones LOrb 1.75 (8 against 10),
+  // DSah 1.4 (2 cells of 234).
+  "shadow-defscale": () => ["ZOfo", "BOth", "NSct", "LRrk"].map((id, i) => (
+    { id, x: -3072 + (i % 2) * 4096, y: 2048 - Math.floor(i / 2) * 3072, angle: 270, variation: 0 })),
   // One box each (BOXES, D000..D007 in that order) at angle 0, four a row 2048 apart; then the closed box at 30 and 45.
   "shadow-boxes": () => [
     ...Object.keys(BOXES).map((_, i) => ({ id: `D00${i}`, x: -3072 + (i % 4) * 2048, y: 2048 - Math.floor(i / 4) * 2048, angle: 0, variation: 0 })),

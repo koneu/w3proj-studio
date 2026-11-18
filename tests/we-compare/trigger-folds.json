@@ -1,0 +1,10 @@
+[
+  {"name":"trigger-folds-closed","description":"trigger-folds.w3x (make-trigger-folds.mjs: categories Other and Initialization, both stored with expanded 0, the first trigger in Initialization) saved by a fresh editor without the Trigger Editor opened: both keep expanded 0 (TESTING branch we-compare-7; the control of trigger-folds-opened). items[0].name is the map's name, which we-drive's copy gives its own (branch we-compare-9)","input":{"map":"${REPO}/tests/fixtures/we-specs/trigger-folds.w3x"},
+   "we":{"freshEditor":true,"saveAccept":["Warning"],"steps":[["--sleep","500"]]},
+   "studio":{"steps":[{"sleep":500}]},
+   "compare":[{"file":"war3map.wtg","as":"parsed","ignore":["items[0].name"]}],"limit":40},
+  {"name":"trigger-folds-opened","description":"trigger-folds.w3x with the Trigger Editor opened (F4), closed, the map saved: does the World Editor's save write the category it opened on its own (the first trigger's, TESTING branch we-compare-7) as expanded 1? Yes: Initialization (items[2]) is saved with 1, Other stays 0 (branch we-compare-9, 2026-11-18). Studio's Trigger Editor opens on the map's header with the file's folds, so its save keeps 0: a known difference of the view, not data","input":{"map":"${REPO}/tests/fixtures/we-specs/trigger-folds.w3x"},
+   "we":{"saveAccept":["Warning"],"steps":[["--key","F4"],["--sleep","3000"],["--close-modules"],["--sleep","500"]]},
+   "studio":{"steps":[{"open":"map/war3map.wtg.json"},{"sleep":1500}]},
+   "compare":[{"file":"war3map.wtg","as":"parsed","ignore":["items[0].name"],"expect":"differs","expectPaths":["items[2].expanded"]}],"limit":40}
+]

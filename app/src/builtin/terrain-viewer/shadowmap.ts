@@ -259,7 +259,13 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     const mesh = await modelMesh(path, readFile, artMode, failed);
     // Only a model that couldn't be read is unreadable; one read with nothing to cast is used (as nothing).
     if (stats) { stats.wanted++; if (mesh === null) stats.unreadable++; }
-    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun, heights);
+    // The model's own scale on top of the placed one, as it is drawn: in HD its defScale:hd (objects.ts
+    // doodadModelScale). The World Editor's HD Calculate Shadows bakes the shadow of the model at that size
+    // (we-compare shadow-defscale-hd, branch we-compare-9: the cage LOce 0.75 shades about half the cells, the
+    // RuinFountain ZOfo 1.45 about twice as many).
+    const k = skin.modelScale;
+    const scale: [number, number, number] = [d.scale[0] * k, d.scale[1] * k, d.scale[2] * k];
+    if (mesh && mesh !== NO_FACES) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale }, sun, heights);
   }
   return out;
 }
