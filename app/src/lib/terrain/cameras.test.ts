@@ -211,6 +211,10 @@ test("typedCameraValue: what the World Editor's Camera Properties would move (we
     ["zOffset", ["-4096.5", "4097", "10000000", "-10000000"], ["-4096", "-300", "4096"]],
     ["nearZ", ["-5", "9500.5", "10000000", "4999.5", "5000", "6000"], ["0", "0.5", "4999", "100"]],
     ["farZ", ["0", "1", "10", "50", "-50", "100.5", "100", "100000.5", "10000000"], ["101", "5000", "100000"]],
+    // we-drive 2026-11-18 (branch we-compare-4): DoF Distance 0 to 10000, DoF Scale 0 to 1000, Pos Absolute Z ±4096.
+    ["dofDistance", ["-100", "-0.5", "10000.5", "10000000"], ["0", "0.3", "10000"]],
+    ["dofScale", ["-5", "1000.5", "10000000"], ["0", "0.25", "1000"]],
+    ["posAbsoluteZ", ["-4096.5", "4097", "123456", "-10000000"], ["-4096", "-300", "4096"]],
   ];
   for (const [key, bad, good] of table) {
     for (const typed of bad) refused(key, typed);
@@ -231,18 +235,18 @@ test("typedCameraValue: what the World Editor's Camera Properties would move (we
 
 test("typedCameraValue agrees with every Camera Properties value recorded from the World Editor (camera-region-limits-we.json)", () => {
   const rec = JSON.parse(readFixture("we-specs", "camera-region-limits-we.json")) as { cameras: { field: CameraField; typed: number; we: number; moved?: boolean }[] };
-  assert.equal(rec.cameras.length, 39, "the recording's rows");
+  assert.equal(rec.cameras.length, 51, "the recording's rows");
   // Every row names a field Studio has, and the recording covers the fields it can type (not targetX/targetY).
   for (const row of rec.cameras) assert.ok(CAMERA_FIELDS.some(([k]) => k === row.field), `unknown field ${row.field}`);
   assert.deepEqual([...new Set(rec.cameras.map((r) => r.field))].sort(),
-    ["angleOfAttack", "distance", "farZ", "fieldOfView", "nearZ", "roll", "rotation", "zOffset"]);
+    ["angleOfAttack", "distance", "dofDistance", "dofScale", "farZ", "fieldOfView", "nearZ", "posAbsoluteZ", "roll", "rotation", "zOffset"]);
   let kept = 0, changed = 0;
   for (const row of rec.cameras) {
-    const c = { targetX: 0, targetY: 0, zOffset: 1, rotation: 91, angleOfAttack: 305, distance: 1650, roll: 1, fieldOfView: 71, farZ: 5000, nearZ: 100 };
+    const c = { targetX: 0, targetY: 0, zOffset: 1, rotation: 91, angleOfAttack: 305, distance: 1650, roll: 1, fieldOfView: 71, farZ: 5000, nearZ: 100, dofDistance: 1, dofScale: 1, posAbsoluteZ: 1 };
     const got = typedCameraValue([c], [c], row.field, String(row.typed));
     const editorKept = row.we === row.typed && !row.moved;
     if (editorKept) { kept++; assert.ok(!("refused" in got), `${row.field} = ${row.typed}: the editor kept it, Studio refused: ${"refused" in got ? got.refused : ""}`); }
     else { changed++; assert.ok("refused" in got, `${row.field} = ${row.typed}: the editor changed it (to ${row.we}), Studio took it`); }
   }
-  assert.deepEqual({ kept, changed }, { kept: 12, changed: 27 });
+  assert.deepEqual({ kept, changed }, { kept: 15, changed: 36 });
 });

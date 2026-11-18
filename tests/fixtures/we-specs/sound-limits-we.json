@@ -1,0 +1,25 @@
+{
+  "note": "Sound Properties values typed in the World Editor's Sound Editor (F5) and what its save held (we-drive, 2026-11-18, branch we-compare-4, tests/fixtures/we-compare/sound-order.w3m: the sounds Delta, alpha, Charlie and bravo, each opened with Return on its row, typed into, OK, one Ctrl+S, war3map.w3s read back). Distances were typed with 3D sound ticked (they are greyed otherwise). 'we' is the stored value afterwards. The editor never refused anything: a value past its limits went to the nearest end when the box was left or OK pressed. 'minusDropped': a '-' typed into that box is dropped, so the row says nothing about negatives. The dialog has no cone fields. Studio refuses every row that is not kept as typed, and takes every kept one (numbers.test.ts).",
+  "sounds": [
+    { "field": "volume", "typed": 200, "we": 127 },
+    { "field": "volume", "typed": 128, "we": 127 },
+    { "field": "volume", "typed": 0, "we": 0 },
+    { "field": "volume", "typed": -5, "we": 5, "minusDropped": true },
+    { "field": "fadeInRate", "typed": 99999, "we": 127 },
+    { "field": "fadeInRate", "typed": 0, "we": 1 },
+    { "field": "fadeOutRate", "typed": 5000000000, "we": 127 },
+    { "field": "pitch", "typed": 100, "we": 2 },
+    { "field": "pitch", "typed": 0, "we": 0.1 },
+    { "field": "pitch", "typed": 0.001, "we": 0.1 },
+    { "field": "pitch", "typed": -2, "we": 0.1 },
+    { "field": "minDistance", "typed": 99999999, "we": 100000 },
+    { "field": "minDistance", "typed": 0, "we": 0 },
+    { "field": "minDistance", "typed": -100, "we": 100, "minusDropped": true },
+    { "field": "maxDistance", "typed": 99999999, "we": 100000 },
+    { "field": "maxDistance", "typed": 0, "we": 0 },
+    { "field": "maxDistance", "typed": -100, "we": 100, "minusDropped": true },
+    { "field": "distanceCutoff", "typed": 99999999, "we": 100000 },
+    { "field": "distanceCutoff", "typed": 0, "we": 0 },
+    { "field": "distanceCutoff", "typed": -100, "we": 100, "minusDropped": true }
+  ]
+}

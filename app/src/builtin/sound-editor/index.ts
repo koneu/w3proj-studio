@@ -5,7 +5,7 @@
 // game sound label keep their settings unset (the label's values apply), as
 // the World Editor stores them.
 
-import { soundNumber } from "./numbers";
+import { SOUND_LIMITS, soundNumber } from "./numbers";
 import type { StoredNumber } from "../../lib/formats/numbers";
 import { withColorTools } from "../../extensions/colortools";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
@@ -702,20 +702,20 @@ class SoundEditor {
       );
     }
     parts.push(
-      row("Volume", num("volume", "Volume", { unset: -1, min: 0, max: 127, kind: "i32", hint: "default" }), h("span.muted", {}, " 0–127")),
-      row("Fade in / out rate", num("fadeInRate", "Fade in rate", { kind: "u32" }), " / ", num("fadeOutRate", "Fade out rate", { kind: "u32" })),
+      row("Volume", num("volume", "Volume", { unset: -1, ...SOUND_LIMITS.volume, kind: "i32", hint: "default" }), h("span.muted", {}, " 0–127")),
+      row("Fade in / out rate", num("fadeInRate", "Fade in rate", { ...(music ? {} : SOUND_LIMITS.fadeInRate), kind: "u32" }), " / ", num("fadeOutRate", "Fade out rate", { ...(music ? {} : SOUND_LIMITS.fadeOutRate), kind: "u32" })),
     );
     if (!music) {
       const unsetHint = labelled ? "label" : "default";
       parts.push(
-        row("Pitch", num("pitch", "Pitch", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint }), " variance ", num("pitchVariance", "Pitch variance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
+        row("Pitch", num("pitch", "Pitch", { unset: UNSET, ...SOUND_LIMITS.pitch, kind: "f32", hint: unsetHint }), " variance ", num("pitchVariance", "Pitch variance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
         row("Priority", num("priority", "Priority", { unset: -1, kind: "i32" })),
       );
       if (s.flags & THREE_D) {
         parts.push(
           h("h4", {}, "3D sound"),
-          row("Distances (min / max)", num("minDistance", "Minimum distance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint }), " / ", num("maxDistance", "Maximum distance", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
-          row("Distance cutoff", num("distanceCutoff", "Distance cutoff", { unset: UNSET, min: 0, kind: "f32", hint: unsetHint })),
+          row("Distances (min / max)", num("minDistance", "Minimum distance", { unset: UNSET, ...SOUND_LIMITS.minDistance, kind: "f32", hint: unsetHint }), " / ", num("maxDistance", "Maximum distance", { unset: UNSET, ...SOUND_LIMITS.maxDistance, kind: "f32", hint: unsetHint })),
+          row("Distance cutoff", num("distanceCutoff", "Distance cutoff", { unset: UNSET, ...SOUND_LIMITS.distanceCutoff, kind: "f32", hint: unsetHint })),
           row("Cone (inside / outside angle)", num("coneInside", "Inside cone angle", { unset: UNSET, min: 0, max: 360, kind: "f32", hint: unsetHint }), " / ", num("coneOutside", "Outside cone angle", { unset: UNSET, min: 0, max: 360, kind: "f32", hint: unsetHint })),
           row("Outside cone volume", num("coneOutsideVolume", "Outside cone volume", { min: -1, max: 127, kind: "i32" })),
         );

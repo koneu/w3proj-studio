@@ -39,7 +39,19 @@
     { "field": "farZ", "typed": 50, "we": 101 },
     { "field": "farZ", "typed": 100.5, "we": 101 },
     { "field": "farZ", "typed": 10000000, "we": 100000 },
-    { "field": "farZ", "typed": 100000, "we": 100000 }
+    { "field": "farZ", "typed": 100000, "we": 100000 },
+    { "field": "dofDistance", "typed": -100, "we": 0, "note": "branch we-compare-4, 2026-11-18, the same map: cameras 1 to 4, the three fields typed into one dialog each, one save" },
+    { "field": "dofDistance", "typed": 10000000, "we": 10000 },
+    { "field": "dofDistance", "typed": 99999999999, "we": 10000 },
+    { "field": "dofDistance", "typed": 0.3, "we": 0.3 },
+    { "field": "dofScale", "typed": -5, "we": 0 },
+    { "field": "dofScale", "typed": 10000000, "we": 1000 },
+    { "field": "dofScale", "typed": 0.25, "we": 0.25 },
+    { "field": "dofScale", "typed": 1000.5, "we": 1000 },
+    { "field": "posAbsoluteZ", "typed": -10000000, "we": -4096 },
+    { "field": "posAbsoluteZ", "typed": 10000000, "we": 4096 },
+    { "field": "posAbsoluteZ", "typed": 123456, "we": 4096 },
+    { "field": "posAbsoluteZ", "typed": -300, "we": -300 }
   ],
   "regions": [
     "A drag that starts outside the map (east, south, west black) makes no region.",
