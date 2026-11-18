@@ -275,3 +275,9 @@ export function lineAlong(corners: readonly (readonly [number, number])[], step 
   }
   return out;
 }
+
+/** Pathing - Ground (P) and Pathing - Naval (N) are one switch in the World Editor (we-drive, 2026-11-18): the one just
+ *  turned on switches the other off. The changes to make to the view state for `layer` turned on. */
+export function pathingSwitch(layer: string): { naval?: false; pathing?: false } {
+  return layer === "naval" ? { pathing: false } : layer === "pathing" ? { naval: false } : {};
+}

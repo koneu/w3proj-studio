@@ -209,6 +209,9 @@ const GROUND_EDGE_LINEAR: readonly number[] = [255, 255, 255, 66];
  *  where nothing walks and pure blue where nothing can be built; regions under the pathing: red over grass 194, 86, 0,
  *  with the blue 170, 75, 137, both as the two blends one after the other give). The colour functions below give these when asked for `linear`. */
 export const REGION_FILL_ALPHA = 136;
+/** A region over the naval view's brown border: the editor's yellow there is 192, 164, 8 and red 192, 25, 8 over the
+ *  brown 108, 55, 15 (we-drive, 2026-11-18); a plain alpha-over in sRGB at 0.55 gives 189, 165, 7 and 189, 25, 7. */
+export const REGION_NAVAL_EDGE_ALPHA = 140;
 export const GROUND_PATHING_ALPHA = 66;
 
 /** Whether pathing cell `i` (row-major, `edge.tilesX * 4` wide, rows from the south) lies on a tile past the playable map. */
@@ -251,7 +254,7 @@ export interface RegionBox { left: number; bottom: number; right: number; top: n
 
 /** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
  *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top. */
-export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false): Uint8Array {
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false, overNaval = false): Uint8Array {
   const rgba = new Uint8Array(width * height * 4);
   const cell = 32;
   const area = (r: RegionBox) => (r.right - r.left) * (r.top - r.bottom);
@@ -263,7 +266,7 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const i = y * width + x;
-        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : REGION_EDGE_ALPHA], i * 4); continue; }
+        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, overNaval ? REGION_NAVAL_EDGE_ALPHA : linear ? REGION_FILL_ALPHA : REGION_EDGE_ALPHA], i * 4); continue; }
         const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
         rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, linear ? REGION_FILL_ALPHA : 170], i * 4);
       }
