@@ -261,7 +261,7 @@ runs in two worktrees don't share settings; none of these tools starts the game 
   it stayed (Studio's rule, app-smoke heightsLimits). **Map Size** (`tests/we-compare/resize-objects.json`): regions are
   clipped to the new map, those left without area go; camera objects whose target is outside the new camera bounds go,
   after a growth too (resize.ts `camerasAfterResize`); the editor's open rounds region edges to the 32 grid (nearest,
-  halves up: -1000 to -992, -3600 to -3584, 100 to 96), Studio keeps them. **Replace Units beside rings**
+  halves up: -1000 to -992, -3600 to -3584, 100 to 96), Studio when it writes the file (branch we-compare-7 below). **Replace Units beside rings**
   (`replace-units-rings.json`): an altar's, town hall's, tree of life's and necropolis' blue ring refuse a farm that
   reaches 16 into it, as the barracks' does. **A map with no start location unit** (the empty map's sloc removed, the
   player's start at 1280, -1536, fixedStart 1 and 0): the save makes one at a random place on the 64 grid (-2688, 2304;
@@ -736,6 +736,28 @@ editor shades them for the box turned inward and leaves them lit for the closed,
 plain inclusive or exclusive test (treating the edge as outside: 32 off, a tolerance of 1e-4: 41) nor a top-left rule;
 probably the editor's floating-point rounding on lines exactly through an edge: not reproduced.
 
+**Specials' pathing, region edges, game view shadows, trigger categories, a third cliff type** (branch we-compare-7,
+2026-11-18, SD). (1) **A special's pathing is stamped only once the view has come near it** (`tests/we-compare/
+special-wpm.json`, inputs `make-special-wpm.mjs` and `make-special-wpm.mjs grid YCr1`): saved right after the open,
+the editor's wpm keeps the bare terrain's pathing under the specials south-east of the opening view (whole specials or
+some of their tiles; 488 cells of special-wpm.w3x, the same cells in two runs; the same five of 37 sites of the YCr1,
+LCc0 and YCp1 grids alike, a lone high corner anywhere or nowhere); scrolled there first (`--key Right@2500`,
+`--key Down@2500`) its wpm is Studio's exactly, and scrolled north-west instead the five stay bare. Re-saved by the
+editor, RustyCreek S2 v1.3 and Eversong S2 v1.1 give Studio's wpm exactly (their stored files differ in 60 and 8 cells):
+the stored residuals are specials the mapper's editor hadn't shown yet, not a rule; Studio stamps every special (the
+editor's picture once all were seen). (2) **Region edges** (`region-round.json`, input `make-region-round.mjs`): the
+editor's open puts every edge on the 32 grid, the nearest line with halves up (16 -> 32, -16 -> 0, -1008 -> -992, 15.9
+-> 0, 16.1 -> 32, -3600.75 -> -3616, 4095.5 -> 4096), and its save writes them so; edges that meet (40..47) leave a
+region with no size, kept. Studio rounds whenever it writes war3map.w3r (an MCP edit, the Regions tab's save; the tab
+reads them rounded; a typed edge too): regions.ts `regionEdgeOnGrid`; a file it doesn't write keeps its values.
+(3) **Lock to Game View Settings draws shadows** whatever View > Shadows says ((2)LastRefuge's opening view: game view
+with Shadows off and on the same picture, the same as Shadows on without it; Shadows off without it 2.8, 7.9, 1.5
+lighter on the mean): Studio's game view too (`shadowsShown`, app-smoke viewModes). (4) **Trigger categories**: a
+category stored with `expanded` 0 opens collapsed in the Trigger Editor, one with 1 open; the category of the trigger
+the editor selects on opening (the first) opens whatever it says; a save without the Trigger Editor opened keeps the
+values. (5) **Example map 29's third cliff type** (CLdi CLgr CAdi, CAdi used): the editor's save keeps all three and
+adds Adrt, CAdi's ground tile, to the ground list (seventh entry); Studio's save leaves the list as it is.
+
 **Water shadows, HD saves, chapter objects, Open in World Editor** (branch we-compare-2, 2026-11-18, HD). (1) **Real
 shadows on water**: `make-water-shadows.mjs --depth D --deep D --low-flyers --lake-trees` (lakes 12, 30, 45 deep beside
 100 or 200 deep ones, gryphons and trees whose shadows fall in them), one we-drive run per batch of maps with
@@ -1192,7 +1214,7 @@ app-smoke `mcpLimits`; the Map Properties, Map Size and trigger rows: `numbers.t
 | camera target typed | camera bounds | terrain-cameras `typeValue` | measured, kept: with Enforce Camera Bounds on put on the bound (camera-bounds) |
 | camera values typed (all 13 fields of the Cameras tab) | a 32-bit float; an empty field or text is no value; and what the World Editor's Camera Properties would move (`CAMERA_RANGES`: distance 0.5 to 100000, rotation, angle of attack and roll 0 to 360, field of view 5 to 120, Z offset ±4096, near 0 to 9500, far 101 to 100000, far at least 1 above near, DoF Distance 0 to 10000, DoF Scale 0 to 1000, Pos Absolute Z ±4096; recorded in `tests/fixtures/we-specs/camera-region-limits-we.json`, we-drive 2026-11-16 and 2026-11-18) | `cameras.ts` `typedCameraValue` | refused: "Not changed: Distance to the target must be a number from -3.4e38 to 3.4e38" (app-smoke `cameraEditing`) |
 | Sound Editor numbers typed | the field's stored type; and what the World Editor's Sound Properties would move (`SOUND_LIMITS`: volume 0 to 127, fade rates 1 to 127 (sounds; music's dialog unmeasured), pitch 0.1 to 2, distances 0 to 100000; recorded in `tests/fixtures/we-specs/sound-limits-we.json`, we-drive 2026-11-18). The editor's dialog has no cone fields: the cone angles keep 0 to 360 | `sound-editor/numbers.ts` | refused with why, the box shows the value kept (app-smoke `soundNumbersRefused`) |
-| region edges typed, `add_region` | a 32-bit float; left below right, bottom below top; inside the map (the editor makes no region outside it) | `regions.ts` `typedRegionEdge`, `regionBoxProblem` | refused, the field marked and a toast (app-smoke `atmosphereTools`) |
+| region edges typed, `add_region` | a 32-bit float, put on the 32 grid first (`regionEdgeOnGrid`); left below right, bottom below top; inside the map (the editor makes no region outside it) | `regions.ts` `typedRegionEdge`, `regionBoxProblem` | refused, the field marked and a toast (app-smoke `atmosphereTools`) |
 | new region's number (drawn, `add_region`) | up to 2^32-1 | `regions.ts` `nextRegionIndex` | refused, not wrapped to 0 |
 | any f32 field of a codec-backed file on write (w3c, w3r, doo, w3i, …) | the f32 range | format engine `write_prim` | refused: the save or canonicalize fails, nothing written (was stored as infinity); integer fields were already refused past their width |
 | object position typed (Selection panel, Edit all x/y), `move_object` | inside the map's corners; a 32-bit float | `values.ts` `placedValueProblem` | refused: "Not changed: x ... is off the map"; `place_objects` skips one off the map with that reason, also with ignoreRoom |

@@ -13,7 +13,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
-import { nextRegionIndex, regionBoxProblem, shiftInside, typedRegionEdge } from "../../lib/terrain/regions";
+import { nextRegionIndex, regionBoxProblem, regionEdgeOnGrid, regionsOnGrid, shiftInside, typedRegionEdge } from "../../lib/terrain/regions";
 import { worldRect } from "../../lib/terrain/resize";
 
 const FILE = "map/war3map.w3r";
@@ -47,6 +47,8 @@ async function editRegions(w3: W3Api, title: string, change: (doc: RegionsDoc) =
     const text = await read(path);
     const doc: RegionsDoc = text === null ? { format: "w3proj.regions/1", version: 5, regions: [] } : JSON.parse(text);
     change(doc);
+    // Every region on the grid, as the World Editor's open puts them and its save writes them (regionEdgeOnGrid).
+    doc.regions = regionsOnGrid(doc.regions) ?? doc.regions;
     return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
   });
 }
@@ -57,7 +59,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (typeof name !== "string" || !name.trim()) throw new Error("add_region needs a name.");
       // Inside the map as the terrain file has it (no terrain file: nothing to hold it to); a terrain file that can't be read refuses.
       const facts = await terrainFacts(w3);
-      const problem = regionBoxProblem({ left, bottom, right, top }, facts && worldRect(facts));
+      // On the region grid (regionEdgeOnGrid) before the checks: where the World Editor puts the edges.
+      const box = { left, bottom, right, top } as Record<"left" | "bottom" | "right" | "top", unknown>;
+      for (const k of ["left", "bottom", "right", "top"] as const) if (typeof box[k] === "number") box[k] = regionEdgeOnGrid(box[k] as number);
+      const problem = regionBoxProblem(box, facts && worldRect(facts));
       if (problem) throw new Error(`Not added: ${problem}`);
       await editRegions(w3, `Add region ${name}`, (doc) => {
         if (doc.regions.some((r) => r.name.toLowerCase() === name.trim().toLowerCase())) throw new Error(`There's already a region "${name}".`);
@@ -65,7 +70,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (typeof index !== "number") throw new Error(`Not added: ${index.refused}`);
         const [red, green, blue] = PALETTE[doc.regions.length % PALETTE.length];
         doc.regions.push({
-          left: Number(left), bottom: Number(bottom), right: Number(right), top: Number(top), name: name.trim(),
+          left: box.left as number, bottom: box.bottom as number, right: box.right as number, top: box.top as number, name: name.trim(),
           index, weather: NO_WEATHER, sound: "",
           color: { red, green, blue, alpha: 255 }, ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
         });
@@ -157,6 +162,9 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
+    // On the grid as the World Editor's open puts them (regionEdgeOnGrid); the file changes with the next save of the
+    // regions, as the editor's save writes them.
+    doc.regions = regionsOnGrid(doc.regions) ?? doc.regions;
     names.saved(doc.regions);
   };
   const load = read().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
@@ -298,6 +306,8 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
           return;
         }
         if (t) update(r, t.change);
+        // A value that lands on the grid line the edge is on already: the field shows that line again.
+        else input.value = String(r[key]);
       });
       return h("label.terrain-region-boundrow", {}, h("span.muted", {}, `${label} `), input);
     };

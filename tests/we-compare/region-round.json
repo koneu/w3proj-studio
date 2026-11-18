@@ -1,0 +1,23 @@
+[
+  {
+    "name": "region-round",
+    "description": "Regions off the 32 grid (region-round.w3m from make-region-round.mjs: halves both signs, 15.9 and 16.1 past the grid, 8 wide, two edges rounding to one line, fractions, edges at the map's border, edges that meet) opened and saved (bugs.md 'The WE rounds region edges to the 32 grid'). The World Editor's open puts every edge on the grid (nearest line, halves up) and its save writes them so, also regions left with no size (2026-11-18). Studio rounds them whenever it writes war3map.w3r (regions.ts regionEdgeOnGrid): here set_weather to none on one region, which rewrites the file. A file Studio doesn't write keeps its values",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/region-round.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "set_weather", "args": { "region": "thin", "effect": "none" } }] },
+    "compare": [{ "file": "war3map.w3r", "as": "parsed" }],
+    "limit": 60
+  },
+  {
+    "name": "region-round-tab",
+    "description": "As region-round, Studio's side through the terrain editor's Regions tab: it reads the regions onto the grid as the editor's open does, and a rename there and back (two edits) makes the save write all of them",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/region-round.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [
+      { "terrain": true },
+      { "eval": "for (const [from, to] of [['thin', 'thin2'], ['thin2', 'thin']]) { const why = await w3.commands.execute('w3.terrain.groupItemAction', 'regions', from, 'rename', to); if (why) throw new Error(why); }" }
+    ] },
+    "compare": [{ "file": "war3map.w3r", "as": "parsed" }],
+    "limit": 60
+  }
+]
