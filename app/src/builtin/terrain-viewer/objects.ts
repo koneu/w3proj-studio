@@ -94,6 +94,13 @@ export interface Skin {
    *  whatever its data says (we-compare doodad-open-z, 2026-11-16: custom copies of the stone wall LTw0 with radius
    *  0, 25, 50, 100, 200 and none changed all stood on the point under them). */
   elevRadius?: number;
+  /** Units: Art - Elevation - Sample Points (UnitSkin.txt `elevPts`, field `uept`), the points round a unit the World
+   *  Editor puts it on the ground by (objheights.ts unitGround); absent for none. */
+  elevPts?: number;
+  /** Units: Pathing - Collision Size (UnitBalance.slk `collision`, field `ucol`). */
+  collision?: number;
+  /** Units: Stats - Is a Building (UnitBalance.slk `isbldg`, field `ubdg`). */
+  building?: boolean;
 }
 
 /**
@@ -166,6 +173,17 @@ export function addMoveTypes(skins: Map<string, Skin>, rows: readonly Record<str
   }
 }
 
+/** Puts the unit balance table's collision sizes and building marks on the skins. */
+export function addUnitBalance(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
+  for (const r of rows) {
+    const skin = r.unitBalanceID ? skins.get(r.unitBalanceID) : undefined;
+    if (skin?.kind !== "w3u") continue;
+    const collision = Number(r.collision);
+    if (r.collision?.trim() && Number.isFinite(collision)) skin.collision = collision;
+    if (r.isbldg?.trim() === "1") skin.building = true;
+  }
+}
+
 /** A type's skin with nothing set but its kind and model: what every other field is when no table gives it. */
 export const plainSkin = (kind: string, file: string): Skin =>
   ({ kind, file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
@@ -180,7 +198,7 @@ const DRAWN_KINDS: [string, string, string][] = [
 const SKIN_FILES: [string, string][] = DRAWN_KINDS.map(([kind]) => [SKIN_KINDS[kind].files[0], kind]);
 
 /** Every game table the skins are made from, in the order they're read. */
-const SKIN_TABLES = [...new Set([...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, ...DRAWN_KINDS.map(([, table]) => table)])];
+const SKIN_TABLES = [...new Set([...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, ...DRAWN_KINDS.map(([, table]) => table), "Units\\UnitBalance.slk"])];
 
 /** The skins last made, with what they were made from: reading the tables again is cheap (the game's
  *  files are kept, see workbench/game.ts), parsing them isn't (tens of ms, on each reload of the
@@ -288,6 +306,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
         fixedRot: Number(get("fixedrot") ?? -1) >= 0 ? Number(get("fixedrot")) : null,
         uberSplat: get("ubersplat") ?? "",
         ...shadowFields(get, kind),
+        ...(kind === "w3u" && Number(get("elevpts")) > 0 ? { elevPts: Number(get("elevpts")) } : {}),
       });
     }
     // Types whose section is spelled in another case (doodad Yosh: [YOsh]) under their own id too.
@@ -302,6 +321,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   }
   for (const f of UNIT_FUNC) addAnimProps(out, tables.get(f) ?? "");
   addMoveTypes(out, rows("Units\\UnitData.slk"));
+  addUnitBalance(out, rows("Units\\UnitBalance.slk"));
   addClickHelpers(out, rows("Doodads\\Doodads.slk"));
   addElevationRadii(out, rows("Units\\DestructableData.slk"));
   // Start locations have no skin entry; the World Editor draws them with this model
@@ -323,7 +343,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   w3u: {
     file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt", moveHeight: "umvh",
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb", teamColor: "utco",
-    customColor: "utcc", red: "uclr", green: "uclg", blue: "uclb",
+    customColor: "utcc", red: "uclr", green: "uclg", blue: "uclb", elevPts: "uept", collision: "ucol", building: "ubdg",
   },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch", floats: "dflt" },
@@ -367,6 +387,9 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
         else if (key === "elevRadius") { if (Number.isFinite(n) && n > 0) skin.elevRadius = n; else delete skin.elevRadius; }
+        else if (key === "elevPts") { if (Number.isInteger(n) && n > 0) skin.elevPts = n; else delete skin.elevPts; }
+        else if (key === "building") { if (n === 1) skin.building = true; else delete skin.building; }
+        else if (key === "collision") { if (Number.isFinite(n)) skin.collision = n; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
           || key === "red" || key === "green" || key === "blue" || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
       }

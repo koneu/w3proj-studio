@@ -817,6 +817,26 @@ Trigger Editor opens on the header with the file's folds (a known difference, ex
 Snap Doodads on Load puts a lily pad on its corner's water when that corner is wet and the water above its ground, else
 on the ground.
 
+**Units' ground, two lighting slots, replace rings, a two-level pit** (branch we-compare-10, 2026-11-19). (1) **The
+save's ground for war3mapUnits.doo** (`building-ground.json`, inputs from `make-building-ground.mjs`: a plane rising 16 a
+tile east and 8 north, and random corner heights with four of each type at random places and facings, SD and HD; and
+the 11 smoketest_maps opened and saved): Art - Elevation - Sample Points (UnitSkin.txt elevPts, uept) 2 or 4 puts the
+object on points round it, the first in its facing, the others evenly spread; a building (isbldg) on the highest, 16
+times its Scaling Value of the graphics mode from its centre (not the Sample Radius, collision, placed scale or model),
+any other unit on their mean at its collision size; none, 1 or 8 points (foot units, the gold mine, items) the point
+under it. All 2019 objects with a rule fit within 0.01 (the 161 buildings off before were this; a ground height past
+2048 comes back 4096 lower, so the plane stays under it). Sample Points 3 (siege engines) fits no rule tried (evenly
+spread or a triangle, mean or highest): kept on Studio's 32 tolerance. A custom type's Skin fields (uept, usca, umdl)
+come back in war3mapSkin.w3u, not war3map.w3u. Studio: objheights.ts `unitGround`. (2) **war3map.w3l's slots** (cliff.w3m
+with each slot's sun and ambient one static colour, `--compare-ready`): the ground and the doodads take the second slot's
+colour, footmen the first's (MDL colours are b, g, r); lighting.ts `ownLightFile`. (3) **Replace Units, the new
+building's blue** (`replace-units-newring.json`): the altar's no-build ring 32 into a farm's red keeps the footman, a ring
+that just meets it doesn't. (4) **A two-level pit** (flat.w3x with corners 28..36 at layer 0, `--compare-ready`, 06:00,
+`--look 0,0,1650`): in SD the wall facing east is near black in both (mean 31, 25, 19 against Studio's 29, 22, 19) and the
+south-facing wall lit in both; in HD the editor's east-facing wall is 40, 32, 21, Studio's 83, 66, 39; the editor's
+two-level walls are one smooth face where Studio's step in a zigzag. View Selection with doodads and units at equal x
+can't be made in the editor: its d and u modes select only doodads or only units (above, edge-group-nudge).
+
 **Water shadows, HD saves, chapter objects, Open in World Editor** (branch we-compare-2, 2026-11-18, HD). (1) **Real
 shadows on water**: `make-water-shadows.mjs --depth D --deep D --low-flyers --lake-trees` (lakes 12, 30, 45 deep beside
 100 or 200 deep ones, gryphons and trees whose shadows fall in them), one we-drive run per batch of maps with

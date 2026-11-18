@@ -335,6 +335,38 @@ test("in HD a doodad is drawn its defScale:hd times larger, as the World Editor'
   assert.ok(Math.abs(Math.hypot(at[0], at[1], at[2]) - 2.9) < 1e-6, `${at[0]}`);
 });
 
+test("units get their elevation sample points, collision size and building mark, and a map's own fields win, custom types too", async () => {
+  // What objheights.ts unitGround puts a unit on the ground by (we-compare building-ground, branch we-compare-10): UnitSkin.txt
+  // elevPts, UnitBalance.slk collision and isbldg; the mercenary camp's Scaling Value by the graphics mode.
+  const balance = 'ID;PWXL;N;E\r\nC;Y1;X1;K"unitBalanceID"\r\nC;X2;K"isbldg"\r\nC;X3;K"collision"\r\n'
+    + 'C;Y2;X1;K"ngme"\r\nC;X2;K1\r\nC;X3;K50\r\nC;Y3;X1;K"ntrt"\r\nC;X2;K0\r\nC;X3;K48\r\nC;Y4;X1;K"ngol"\r\nC;X2;K1\r\nC;X3;K50\r\nE\r\n';
+  const files = {
+    ...gameTables(),
+    "Units\\UnitSkin.txt": "[ngme]\r\nfile=Merchant\r\nelevPts=4\r\nelevRad=50\r\n[ntrt]\r\nfile=Turtle\r\nelevPts=4\r\nelevRad=100\r\n"
+      + "[ngol]\r\nfile=GoldMine\r\nelevRad=50\r\n[nmer]\r\nfile=Camp\r\nelevPts=4\r\nmodelScale:hd=1.05\r\nmodelScale:sd=0.8\r\n",
+    "Units\\UnitBalance.slk": balance,
+  };
+  const sd = await loadSkins(fakeGame(files, { "game.installDir": "/elevation", "game.graphicsMode": "sd" }));
+  assert.deepEqual([sd.get("ngme")?.elevPts, sd.get("ngme")?.collision, sd.get("ngme")?.building], [4, 50, true]);
+  assert.deepEqual([sd.get("ntrt")?.elevPts, sd.get("ntrt")?.collision, sd.get("ntrt")?.building], [4, 48, undefined]);
+  assert.deepEqual([sd.get("ngol")?.elevPts, sd.get("ngol")?.building], [undefined, true], "the gold mine has no sample points");
+  assert.equal(sd.get("nmer")?.modelScale, 0.8);
+  const hd = await loadSkins(fakeGame(files, { "game.installDir": "/elevation", "game.graphicsMode": "hd" }));
+  assert.equal(hd.get("nmer")?.modelScale, 1.05);
+  // A map's own (custom n103: a gold mine given 4 points; n106: a turtle with collision 16; n100: a merchant with 0;
+  // a farm-like custom with Is a Building off).
+  const out = withObjectArt(sd, [{ kind: "w3u", original: [{ base: "ntrt", mods: [{ field: "ubdg", value: 1 }] }],
+    custom: [{ base: "ngol", id: "n103", mods: [{ field: "uept", value: 4 }] }, { base: "ntrt", id: "n106", mods: [{ field: "ucol", value: 16 }] },
+      { base: "ngme", id: "n100", mods: [{ field: "uept", value: 0 }] }, { base: "ngme", id: "n111", mods: [{ field: "ubdg", value: 0 }] }] }]);
+  assert.equal(out.get("n103")?.elevPts, 4);
+  assert.equal(out.get("n106")?.collision, 16);
+  assert.equal(out.get("n106")?.elevPts, 4, "the base's points");
+  assert.equal(out.get("n100")?.elevPts, undefined);
+  assert.equal(out.get("n111")?.building, undefined);
+  assert.equal(out.get("ntrt")?.building, true, "a changed standard unit");
+  assert.equal(sd.get("ntrt")?.building, undefined, "the game's skins stay as they were");
+});
+
 test("a placed waygate is drawn in its own colour; a type that doesn't allow one in its owner's", async () => {
   // World Editor 2.0 (we-drive, 2026-11-10, a copy of cliff.w3m): a waygate with colour 4 yellow, one with 2 teal, a
   // waygate type with utcc 0 and colour 4 in Neutral Passive's, a footman type with utcc 1 and colour 6 green, a plain

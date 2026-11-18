@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadGround, ELEVATION_RADIUS_UNKNOWN, ELEVATION_SAMPLE_OFFSET, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { doodadGround, ELEVATION_RADIUS_UNKNOWN, ELEVATION_SAMPLE_OFFSET, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitGround, unitZTolerance } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
 import { floatingLevelAt, heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -131,6 +131,63 @@ test("savedUnitZ: the World Editor saves every unit on the ground, a ship in wat
     [undefined, -512, -1408, -128], [undefined, 1280, 1280, 256], [undefined, -2176, 640, 0],
   ];
   for (const [m, x, y, z] of cases) assert.equal(saved(m, x, y), Math.fround(z), `${m} at ${x}, ${y}`);
+});
+
+/** The ground of tests/fixtures/we-specs/unit-ground-bumpy.w3x (make-building-ground.mjs): every corner at a random
+ *  height 0..255 from mulberry32 with the seed 20261118, in corner order from the south-west. */
+function bumpyTerrain() {
+  let seed = 20261118;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const heights = Array.from({ length: 65 * 65 }, () => Math.floor(random() * 256));
+  const rows = Array.from({ length: 65 }, (_, r) => Array.from({ length: 65 }, (_, x) => String(4 * heights[(64 - r) * 65 + x])).join(" "));
+  return parseW3e(w3eFromText(["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt", "cliffs CLdi", "corners 65 65", "offset -4096 -4096",
+    "[height]", ...rows, "[water] all 0", "[water-bits] all 0", "[texture] all 0", "[variation] all 0",
+    "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags] all 0"].join("\n")));
+}
+
+// we-compare building-ground (branch we-compare-10, 2026-11-18): the World Editor's saves of unit-ground-bumpy.w3x, every
+// unit stored at 999 before. [type, x, y, facing, the height the editor wrote]; the types as UnitSkin.txt and
+// UnitBalance.slk give them in SD (and HD where marked).
+test("unitGround: a building on the highest of its sample points, a unit on their mean, as the World Editor saves them", () => {
+  const terrain = bumpyTerrain();
+  const merchant = { elevPts: 4, collision: 50, building: true, modelScale: 1 };
+  const cases: [string, { elevPts?: number; collision?: number; building?: boolean; modelScale?: number }, number, number, number, number][] = [
+    ["goblin merchant", merchant, -250, -2356, 0.82030475, 205.11852],
+    ["town hall", { elevPts: 4, collision: 176, building: true, modelScale: 1 }, -2420, -2263, 1.7104226, 215.86775],
+    ["tavern", merchant, 315, -1828, 0.2268928, 204.7872],
+    ["farm (Scaling Value 0.85)", { ...merchant, collision: 72, modelScale: 0.85 }, 1379, -2705, 2.6005406, 165.76613],
+    ["mercenary camp (SD 0.8)", { ...merchant, modelScale: 0.8 }, -1878, -1843, 4.24115, 121.46303],
+    ["mercenary camp (HD 1.05)", { ...merchant, modelScale: 1.05 }, -1878, -1843, 4.24115, 126.0839],
+    ["merchant with Sample Points 2", { ...merchant, elevPts: 2 }, -1864, 192, 1.2217305, 96.66147],
+    ["sea turtle (collision 48)", { elevPts: 4, collision: 48, modelScale: 0.8 }, 2388, -1793, 3.3161256, 156.10303],
+    ["hatchling turtle (collision 32)", { elevPts: 4, collision: 32, modelScale: 0.4 }, 792, -1304, 0.6806784, 114.34363],
+    ["red dragon (2 points, collision 48)", { elevPts: 2, collision: 48, modelScale: 0.7 }, -2883, -743, 4.9218283, 197.82028],
+    ["gryphon rider (2 points, collision 8)", { elevPts: 2, collision: 8, modelScale: 1.2 }, 1364, -753, 3.0543263, 88.49722],
+    ["footman given Sample Points 4", { elevPts: 4, collision: 31 }, -1408, 736, 4.066617, 116.60849],
+    ["footman", { collision: 31 }, -2714, -2733, 3.3335788, 108.63904],
+    ["gold mine (no sample points)", { collision: 50, building: true }, 1769, -2336, 1.0471976, 95.23828],
+  ];
+  for (const [name, type, x, y, facing, z] of cases) {
+    const ground = unitGround(terrain, x, y, facing, type);
+    assert.ok(ground !== null && Math.abs(ground - z) < 0.01, `${name}: ${ground} against the editor's ${z}`);
+  }
+  // Control: the point under the town hall is 11 below the editor's height.
+  assert.ok(Math.abs(heightAt(terrain, -2420, -2263) - 215.86775) > 10);
+  // Sample Points 3 (the siege engines hmtt, hrtt, ...): no rule found, the save leaves a stored height near the ground alone.
+  assert.equal(unitGround(terrain, -347, 1781, 3.7873645, { elevPts: 3, collision: 32 }), null);
+  assert.equal(unitZTolerance(false), 32);
+  assert.equal(unitZTolerance(true), 0.01);
+  // 1 and 8 points, and 4 at a collision size of 0, are the point under it (custom footmen h101, h104, h102).
+  for (const type of [{ elevPts: 1, collision: 31 }, { elevPts: 8, collision: 31 }, { elevPts: 4, collision: 0 }]) {
+    assert.equal(unitGround(terrain, 100, 200, 1, type), heightAt(terrain, 100, 200), JSON.stringify(type));
+  }
+  // An unknown type stands on the point under it.
+  assert.equal(unitGround(terrain, 100, 200, 1, undefined), heightAt(terrain, 100, 200));
 });
 
 // we-drive 2026-11-12 again, in a prefix of its own (the item checked by default): an empty 64 x 64 map whose ground rises

@@ -38,6 +38,17 @@ async function readMapDoc<T>(w3: W3Api, name: string): Promise<T | null> {
 
 interface Lights { terrainModel: string; unitModel: string; terrainEnabled: number; unitEnabled: number }
 
+/** The map's own lighting model file that lights `kind`, or null (that slot off or empty). The codec names war3map.w3l's
+ *  slots terrainModel (the first) and unitModel (the second), but the World Editor lights the units by the first and
+ *  the ground and doodads by the second, as its script hands them to SetDayNightModels (lib/script/setup.ts
+ *  dayNightModels). we-drive (branch we-compare-10, 2026-11-19, SD game view, cliff.w3m with the first slot's sun and
+ *  ambient one colour and the second's another): the ground and the doodads took the second's colour, three footmen
+ *  the first's. */
+export function ownLightFile(lights: Partial<Lights> | null | undefined, kind: "terrain" | "unit"): string | null {
+  const [file, enabled] = kind === "terrain" ? [lights?.unitModel, lights?.unitEnabled] : [lights?.terrainModel, lights?.terrainEnabled];
+  return file && enabled ? file : null;
+}
+
 export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLighting> {
   const [info, lights, data] = await Promise.all([
     readMapDoc<{ lightEnvironment?: string; flags?: number; waterTint?: number[]; water?: unknown }>(w3, "war3map.w3i"),
@@ -48,8 +59,8 @@ export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLi
   const notes: string[] = [];
   const own = { terrain: false, unit: false };
   const pick = async (kind: "terrain" | "unit", section: string): Promise<LightModel | null> => {
-    const file = lights?.[`${kind}Model`];
-    if (file && lights?.[`${kind}Enabled`]) {
+    const file = ownLightFile(lights, kind);
+    if (file) {
       try {
         const m = readLightMdl(await w3.workspace.readText(`map/${file}`));
         notes.push(`${kind}: the map's own (${m.name})`);

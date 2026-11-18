@@ -51,19 +51,53 @@ export function savedUnitZ(moveType: string | undefined, ground: number, surface
   return moveType?.toLowerCase() === "float" && surface !== null && surface > ground ? surface : ground;
 }
 
-/** Movement types whose saved height in maps the World Editor saved isn't always savedUnitZ's: buildings ("_"), flying
- *  and amphibious units. Over the 24 maps of smoketest_maps (3020 placed objects, 2026-11-13) every foot, horse and
- *  hover unit, start location and item stood within 0.001 of it (the editor counts in 32-bit numbers), but 161 of 427
- *  buildings were off by up to 17.5 (neutral buildings mostly: taverns, merchants, camps), 10 of 26 flyers by up to 1.3
- *  and 26 of 226 amphibious units by up to 4.3 (near shores). The editor's own ground for those isn't known here. */
-const LOOSE = new Set(["_", "fly", "amph"]);
+/** What of a unit type decides the ground the World Editor puts it on (Skin's fields of the same names). */
+export interface ElevationType {
+  /** Art - Elevation - Sample Points (UnitSkin.txt `elevPts`, field `uept`); absent for none. */
+  elevPts?: number;
+  /** Pathing - Collision Size (UnitBalance.slk `collision`, field `ucol`). */
+  collision?: number;
+  /** Stats - Is a Building (UnitBalance.slk `isbldg`, field `ubdg`). */
+  building?: boolean;
+  /** Art - Scaling Value in the graphics mode in use (UnitSkin.txt `modelScale`, `modelScale:hd`, field `usca`). */
+  modelScale?: number;
+}
 
-/** How far from savedUnitZ a unit's stored height may be and still be left as it is by a save, so that a map the
- *  World Editor saved isn't rewritten for differences of Studio's ground from the editor's: 32 for the movement types
- *  in LOOSE (more than the 17.5 seen, less than a unit stored at 0 on a plateau or a ship on the sea bed, which needs
- *  deeper water than DEEP_WATER), 0.01 for any other. */
-export function unitZTolerance(moveType: string | undefined): number {
-  return moveType && LOOSE.has(moveType.toLowerCase()) ? 32 : 0.01;
+/** A building's sample radius at a Scaling Value of 1. */
+const BUILDING_SAMPLE = 16;
+
+/** The ground the World Editor's save writes for an object of war3mapUnits.doo, before savedUnitZ's water rule, or
+ *  null where that isn't known (Sample Points 3: no rule found). we-compare building-ground (branch we-compare-10,
+ *  2026-11-18; make-building-ground.mjs: a plane rising 16 a tile east and 8 north, and a map of random corner heights
+ *  with four of each type at random places and facings; and the 11 smoketest_maps the editor saved, 2152 objects):
+ *  a type with Sample Points 2 or 4 is put on points round it, the first in its facing, the others evenly spread
+ *  (Sample Points 2: in front and behind; 4: a cross turned with it); a building on the highest of them, at 16 times its
+ *  Scaling Value from its centre (the goblin merchant 16, the farm 13.6, the mercenary camp 12.8 in SD and 16.8 in HD,
+ *  a merchant with Scaling Value 2 at 32; neither the Sample Radius uerd, the collision size, the placed scale nor
+ *  the model counts); any other unit on their mean, at its collision size (turtles 48 and 32, gryphons 8 with 2
+ *  points, red dragons 48 with 2; a footman given 4 points 31; model scale and Sample Radius play no part). A type
+ *  with none, 1 or 8 (foot units, the gold mine, items, start locations; custom footmen with 1 and 8) stands on the
+ *  point under it (heightAt). A custom type goes by its own fields. `facing` is the placed angle in radians. */
+export function unitGround(t: Terrain, x: number, y: number, facing: number, type: ElevationType | undefined): number | null {
+  const n = type?.elevPts ?? 0;
+  if (n === 3) return null;
+  if (n !== 2 && n !== 4) return heightAt(t, x, y);
+  const scale = Number.isFinite(type?.modelScale) ? type!.modelScale! : 1;
+  const r = type?.building ? BUILDING_SAMPLE * scale : Number.isFinite(type?.collision) ? Math.max(0, type!.collision!) : 0;
+  const angle = Number.isFinite(facing) ? facing : 0;
+  const heights = Array.from({ length: n }, (_, k) => {
+    const a = angle + (k * 2 * Math.PI) / n;
+    return heightAt(t, x + r * Math.cos(a), y + r * Math.sin(a));
+  });
+  return type?.building ? Math.max(...heights) : heights.reduce((s, h) => s + h, 0) / n;
+}
+
+/** How far from savedUnitZ (over unitGround) a unit's stored height may be and still be left as it is by a save: 0.01
+ *  (the editor counts in 32-bit numbers: its saves stand within 0.001 of the rule), 32 where unitGround doesn't know
+ *  the editor's ground (Sample Points 3: more than the 7.6 seen off the point under it, less than a unit stored at 0
+ *  on a plateau or a ship on the sea bed, which needs deeper water than DEEP_WATER). */
+export function unitZTolerance(known: boolean): number {
+  return known ? 0.01 : 32;
 }
 
 /** Whether a placed object's drawn height comes from its movement type rather than the height the placement file
