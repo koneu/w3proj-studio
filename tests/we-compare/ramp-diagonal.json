@@ -1,0 +1,838 @@
+[
+  {
+    "name": "ramp-diag-control",
+    "description": "the control in the same editor: plateau.w3x (make-plateau.mjs), one click at 750,630 on its straight south face: the line 32, 25..27 in both, so the palette clicks below pick the Ramp",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/plateau.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "750,630"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              750,
+              630
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-high",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 571,602 (Point 28.82,27.52, 128 up: the plateau beside the high step 29,27): nothing in either (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "571,602"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              571,
+              602
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-low-front",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 522,628 (Point 27.83,27.35, nearest the low step 28,27 but west of it, outside the tile it makes with its high neighbours 29,27, 28,28, 29,28): nothing in either (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "522,628"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              522,
+              628
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-low-front2",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 472,609 (Point 26.81,27.82, on the low ground: nearest the low step 27,28, but south-west of it): nothing in either (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "472,609"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              472,
+              609
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-low-step",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 490,591 (Point 27.16,28.09, nearest the low step 27,28, inside the tile it makes with its high corners east, north and north-east): the 3x3 block round it, 26..28 x 27..29, in both (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "490,591"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              490,
+              591
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-low-step2",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 536,637 (Point 28.12,27.13, nearest the low step 28,27, inside its tile): the block 27..29 x 26..28 in both (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "536,637"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              536,
+              637
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-high2",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 627,655 (aimed at the high step 30,26): nothing in either (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "627,655"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              627,
+              655
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-tip",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, one click at 748,773 (nearest the south tip 32,24, a lone high corner: both corners beside it along the cliff, 31,24 and 33,24, are low): nothing in either; a line needs the cliff edge to go on beside its high corner on one side at least (on a plateau's corner one side does) (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--click",
+          "748,773"
+        ],
+        [
+          "--sleep",
+          "800"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "click",
+              748,
+              773
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-drag",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, a drag along the SW face over its high steps from 519,551 (28,28) to 685,713 (31,25), 1.5 s: nothing in either (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--drag",
+          "519,551:685,713@1500"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "drag",
+              519,
+              551,
+              685,
+              713
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "ramp-diag-across",
+    "description": "diamond.w3x (make-plateau.mjs diamond: level 3 on the corners with |x-32|+|y-32|<=8, four 45-degree faces of single corner steps); the Ramp (palette 1505,311), size 3, a drag across the SW face from the top, 581,502 (29,29), to the low ground, 400,680 (26,26), 1.5 s: it passes up the cliff by the low step 27,28, whose 3x3 block both flag (we-drive 2026-11-18, branch we-compare-4; Point = the status bar under the pointer, in corners: 32 + world/128)",
+    "input": {
+      "map": "${REPO}/tests/fixtures/we-specs/diamond.w3x"
+    },
+    "we": {
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": [
+        [
+          "--key",
+          "t"
+        ],
+        [
+          "--click",
+          "1456,569"
+        ],
+        [
+          "--click",
+          "1505,311"
+        ],
+        [
+          "--drag",
+          "581,502:400,680@1500"
+        ],
+        [
+          "--sleep",
+          "1000"
+        ]
+      ]
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "ui": [
+            [
+              "tab",
+              "Terrain"
+            ],
+            [
+              "view",
+              "we"
+            ],
+            [
+              "tool",
+              "Ramp"
+            ],
+            [
+              "size",
+              3
+            ],
+            [
+              "drag",
+              581,
+              502,
+              400,
+              680
+            ]
+          ]
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.wpm",
+        "as": "wpm"
+      },
+      {
+        "file": "war3map.w3e",
+        "as": "w3e"
+      }
+    ],
+    "limit": 40
+  }
+]

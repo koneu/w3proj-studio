@@ -68,12 +68,15 @@ export const cameraFieldName = (key: CameraField) => (CAMERA_FIELDS.find(([k]) =
  * distance 0 and -100 gave 0.5, 0.3 gave 0.5, 1000000 gave 100000; Rotation, Angle of Attack and Roll -50 gave 0, 400
  * and 500 gave 360, 360.5 gave 360; FoV 0 and 4.5 gave 5, 180 and 200 gave 120, 119.9 stayed; Z Offset 10000000 gave
  * 4096, -10000000 gave -4096, -300 stayed; Near Clipping -5 gave 0, 10000000 gave 9500, 4999 stayed; Far Clipping 0, 1,
- * 10, 50 and -50 gave 101, 10000000 gave 100000). Studio refuses such a value instead (decision 2026-11-15). The
- * depth-of-field values and Pos Absolute Z weren't measured and keep only the float's range.
+ * 10, 50 and -50 gave 101, 10000000 gave 100000; branch we-compare-4, 2026-11-18: DoF Distance -100 gave 0, 10000000
+ * and 99999999999 gave 10000, 0.3 stayed; DoF Scale -5 gave 0, 10000000 and 1000.5 gave 1000, 0.25 stayed; Pos
+ * Absolute Z ±10000000 and 123456 gave ±4096, -300 stayed). Studio refuses such a value instead (decision 2026-11-15).
+ * Local Pitch, Yaw and Roll (the dialog has them too) aren't fields here.
  */
 export const CAMERA_RANGES: Partial<Record<CameraField, readonly [number, number]>> = {
   distance: [0.5, 100000], rotation: [0, 360], angleOfAttack: [0, 360], roll: [0, 360], fieldOfView: [5, 120],
   zOffset: [-4096, 4096], nearZ: [0, 9500], farZ: [101, 100000],
+  dofDistance: [0, 10000], dofScale: [0, 1000], posAbsoluteZ: [-4096, 4096],
 };
 /** The least the far clipping lies beyond the near: the editor moves one to keep it (near 6000 over far 5000 gave far
  *  6001; far 150 then near 200 gave near 149; near 100 with far 100.5 gave far 101). */

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { soundNumber } from "./numbers";
+import { readFixture } from "../../lib/testhelpers/testutil";
+import { SOUND_LIMITS, soundNumber } from "./numbers";
 
 test("Sound Editor: a number the .w3s can't hold is refused, never rounded, clamped or wrapped", () => {
   // control: valid values pass unchanged, the edges too
@@ -30,4 +31,25 @@ test("Sound Editor: a number the .w3s can't hold is refused, never rounded, clam
   assert.ok("refused" in soundNumber("i32", "2147483648", "Priority"));
   assert.ok("refused" in soundNumber("i32", "1.5", "Priority"));
   assert.match((soundNumber("i32", "128", "Volume", { min: 0, max: 127 }) as { refused: string }).refused, /Volume must be a whole number from 0 to 127/);
+});
+
+test("SOUND_LIMITS agree with every Sound Properties value recorded from the World Editor (sound-limits-we.json)", () => {
+  const rec = JSON.parse(readFixture("we-specs", "sound-limits-we.json")) as { sounds: { field: keyof typeof SOUND_LIMITS; typed: number; we: number; minusDropped?: boolean }[] };
+  const kinds = { volume: "i32", fadeInRate: "u32", fadeOutRate: "u32", pitch: "f32", minDistance: "f32", maxDistance: "f32", distanceCutoff: "f32" } as const;
+  assert.deepEqual(Object.keys(SOUND_LIMITS).sort(), Object.keys(kinds).sort());
+  let kept = 0, changed = 0;
+  for (const row of rec.sounds) {
+    assert.ok(row.field in SOUND_LIMITS, `unknown field ${row.field}`);
+    if (row.minusDropped) continue;
+    const got = soundNumber(kinds[row.field], String(row.typed), row.field, SOUND_LIMITS[row.field]);
+    if (row.we === row.typed) { kept++; assert.ok(!("refused" in got), `${row.field} = ${row.typed}: the editor kept it, Studio refused`); }
+    else { changed++; assert.ok("refused" in got, `${row.field} = ${row.typed}: the editor changed it (to ${row.we}), Studio took it`); }
+  }
+  assert.deepEqual({ kept, changed }, { kept: 4, changed: 12 });
+  // The ends themselves go through (controls), a step past them doesn't.
+  for (const [field, { min, max }] of Object.entries(SOUND_LIMITS) as [keyof typeof SOUND_LIMITS, { min: number; max: number }][]) {
+    for (const v of [min, max]) assert.ok(!("refused" in soundNumber(kinds[field], String(v), field, { min, max })), `${field} ${v}`);
+    const step = kinds[field] === "f32" ? 0.01 : 1;
+    for (const v of [min - step, max + step]) assert.ok("refused" in soundNumber(kinds[field], String(v), field, { min, max }), `${field} ${v}`);
+  }
 });

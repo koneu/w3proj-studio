@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_REGION_INDEX, nextRegionIndex, REGION_EDGES, regionBoxProblem, typedRegionEdge } from "./regions";
+import { MAX_REGION_INDEX, nextRegionIndex, REGION_EDGES, regionBoxProblem, shiftInside, typedRegionEdge } from "./regions";
 
 const region = () => ({ left: -64, bottom: -32, right: 64, top: 96, name: "Area", index: 3 });
 
@@ -70,4 +70,23 @@ test("regionBoxProblem and typedRegionEdge: a region outside the map is refused 
   assert.deepEqual(typedRegionEdge(r, "left", "-4096", map), { change: { left: -4096 } });
   // The shape rules still come first.
   assert.match(regionBoxProblem({ left: 32, bottom: 0, right: 0, top: 32 }, map) ?? "", /left must be below right/);
+});
+
+test("shiftInside: a region dragged past the map's edge stops with its edge on the map's, as the World Editor's (we-drive 2026-11-18)", () => {
+  const map = { left: -4096, bottom: -4096, right: 4096, top: 4096 };
+  // flat.w3x: 3296..3552 dragged about 850 east (the pointer off the map) ended at 3840..4096, its size kept.
+  const r = { left: 3296, right: 3552, bottom: -224, top: 160 };
+  assert.deepEqual(shiftInside([r], 864, 0, map), [544, 0]);
+  // A move that fits is left as it is (the editor's 448 east), and so are both axes at once past two edges.
+  assert.deepEqual(shiftInside([r], 448, -32, map), [448, -32]);
+  assert.deepEqual(shiftInside([r], 900, -9000, map), [544, -3872]);
+  assert.deepEqual(shiftInside([{ left: -4000, right: -3900, bottom: 3900, top: 4000 }], -500, 500, map), [-96, 96]);
+  // Several regions move by one shift, held by the one nearest the edge.
+  assert.deepEqual(shiftInside([r, { left: 0, right: 32, bottom: 0, top: 32 }], 864, 0, map), [544, 0]);
+  // A region already past the edge (from the file) isn't pushed further out, and can come back in.
+  const out = { left: 4000, right: 4200, bottom: 0, top: 32 };
+  assert.deepEqual(shiftInside([out], 64, 0, map), [0, 0]);
+  assert.deepEqual(shiftInside([out], -320, 0, map), [-320, 0]);
+  // Without the map's rectangle nothing is held.
+  assert.deepEqual(shiftInside([r], 864, 0, null), [864, 0]);
 });

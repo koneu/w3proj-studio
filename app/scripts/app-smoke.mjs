@@ -13645,7 +13645,8 @@ async function aiNumbersRefused(page, found) {
 }
 
 /** The Sound Editor refuses numbers a .w3s can't hold (app/src/builtin/sound-editor/numbers.ts): a volume typed as 1.5, 128 or -2
- *  is refused with why, the box shows the value kept, the sound isn't changed; 77 is taken (control, one change). */
+ *  is refused with why, the box shows the value kept, the sound isn't changed; 77 is taken (control, one change). Past the
+ *  World Editor's Sound Properties limits (SOUND_LIMITS) too: a pitch of 2.5 and a fade-in rate of 0; a pitch of 2 is taken. */
 async function soundNumbersRefused(page, found) {
   try {
   const fail = (what) => found.push(`Sound Editor numbers: ${what}`);
@@ -13680,6 +13681,21 @@ async function soundNumbersRefused(page, found) {
     await typeInto(page, field, "77");
     await settled(page);
     if (await page.evaluate(`${field}.value`) !== "77" || !(await dirty())) fail("77 wasn't taken (control)");
+    // The World Editor's Sound Properties limits (SOUND_LIMITS): a pitch of 2.5 and a fade-in rate of 0 are refused, 2 is taken.
+    const pitch = `[...document.querySelectorAll("input.snd-num")].find((i) => i.closest(".snd-field")?.querySelector("label")?.textContent === "Pitch")`;
+    const fade = `[...document.querySelectorAll("input.snd-num")].find((i) => i.closest(".snd-field")?.querySelector("label")?.textContent.startsWith("Fade in"))`;
+    for (const [box, bad, want] of [[pitch, "2.5", /Pitch must be a number from 0\.1 to 2\./], [fade, "0", /Fade in rate must be a whole number from 1 to 127\./]]) {
+      await k.clearToasts();
+      const before = await page.evaluate(`${box}?.value ?? "no box"`);
+      await typeInto(page, box, bad);
+      await settled(page);
+      const said = await k.toasts();
+      if (!want.test(said)) fail(`typed ${bad} said "${said}"`);
+      if (await page.evaluate(`${box}.value`) !== before) fail(`typed ${bad} shows ${await page.evaluate(`${box}.value`)}, not the kept ${before}`);
+    }
+    await typeInto(page, pitch, "2");
+    await settled(page);
+    if (await page.evaluate(`${pitch}.value`) !== "2") fail("a pitch of 2 wasn't taken (control)");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }

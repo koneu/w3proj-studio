@@ -345,84 +345,55 @@ const stairs = (high: (x: number, y: number) => boolean) => land(Array.from({ le
   const y = 11 - n;
   return Array.from({ length: 12 }, (_, x) => (high(x, y) ? "3" : "2")).join("");
 }));
-/** Every run of flags along x or y climbs at most one level, one way (no tile across two levels, no 2,3,2). */
-const climbsOnce = (t: Terrain) => {
-  for (const [dx, dy] of [[1, 0], [0, 1]]) for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
-    const ls: number[] = [];
-    for (let k = 0; x + k * dx < t.width && y + k * dy < t.height && t.corners[(y + k * dy) * t.width + x + k * dx].ramp; k++) ls.push(t.corners[(y + k * dy) * t.width + x + k * dx].layer);
-    if (ls.length < 2) continue;
-    assert.ok(Math.max(...ls) - Math.min(...ls) <= 1, `run from ${x},${y} along ${dx},${dy}: ${ls}`);
-    assert.ok(ls.every((l, k) => !k || l >= ls[k - 1]) || ls.every((l, k) => !k || l <= ls[k - 1]), `run from ${x},${y} along ${dx},${dy} goes up and down: ${ls}`);
-  }
-};
 
-test("a Ramp click on a diagonal cliff builds the corners of its cliff tiles round the corner, in each of its four turns", () => {
-  // Level 3 to the south-west of x + y = 10; corner 5,5 is a step of it, 6,5 the low step beside it.
-  const sw = () => stairs((x, y) => x + y <= 10);
-  const t = sw();
-  assert.deepEqual(rampClick(t, 5 * 128 + 20, 5 * 128 - 30, log), { done: "built" });
-  assert.deepEqual(ramps(t), [
-    "............",
-    "............",
-    "............",
-    "............",
-    ".....##.....",
-    "....####....",
-    "....####....",
-    ".....##.....",
-    "............",
-    "............",
-    "............",
-    "............",
-  ]);
-  climbsOnce(t);
-  const low = sw();
-  assert.equal(rampClick(low, 6 * 128, 5 * 128, log).done, "built", "the low step");
-  climbsOnce(low);
-  // The four turns of the cliff: the same piece, turned.
-  for (const [name, high, [x, y]] of [
-    ["north-east", (x: number, y: number) => x + y >= 12, [6, 6]],
-    ["north-west", (x: number, y: number) => y - x >= 1, [4, 5]],
-    ["south-east", (x: number, y: number) => x - y >= 1, [5, 4]],
+test("a Ramp click on a 45-degree diagonal cliff: the 3x3 block round a low step clicked up on the cliff, else nothing", () => {
+  // The World Editor on diamond.w3x (level 3 on |x-32|+|y-32| <= 8; spec ramp-diagonal.json, we-drive 2026-11-18):
+  // clicks landing (status bar Point) at 27.16,28.09, 27.17,28.22 and 27.34,28.03 flagged 26..28 x 27..29,
+  // the block round the low step 27,28; at 28.12,27.13, 28.00,27.27 and 28.32,27.20 the block round 28,27. Nearer
+  // those corners but outside the tile they make with their high neighbours (26.93,28.01; 27.15,27.96; 26.98,28.15;
+  // 28.20,26.995; 27.83,27.35), on the high steps, the plateau and the low ground, nothing. Here the same face 22 corners on: high where x + y >= 12, the
+  // low steps on x + y = 11.
+  const sw = () => stairs((x, y) => x + y >= 12);
+  const yes: [number, number, string][] = [[5.16, 6.09, "5,6"], [5.17, 6.22, "5,6"], [5.34, 6.03, "5,6"], [6.12, 5.13, "6,5"], [6.0, 5.27, "6,5"], [6.32, 5.2, "6,5"]];
+  for (const [x, y, c] of yes) {
+    const t = sw();
+    assert.equal(rampClick(t, x * 128, y * 128, log).done, "built", `${x},${y}`);
+    const [cx, cy] = c.split(",").map(Number);
+    const box = [];
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) box.push(`${cx + i},${cy + j}`);
+    assert.deepEqual(flagged(t), box, `${x},${y}`);
+  }
+  for (const [x, y] of [[4.93, 6.01], [5.15, 5.96], [4.98, 6.15], [6.2, 4.995], [5.83, 5.35], [5, 5], [4, 4], [6, 6], [3, 3]]) {
+    const t = sw();
+    assert.equal(rampClick(t, x * 128, y * 128, log).done, "none", `${x},${y}`);
+    assert.deepEqual(flagged(t), [], `${x},${y}`);
+  }
+  // Every high step, from anywhere round it, builds nothing in each of the four turns.
+  for (const [name, high, step] of [
+    ["south-west", (x: number, y: number) => x + y <= 10, (x: number, y: number) => x + y === 10],
+    ["north-east", (x: number, y: number) => x + y >= 12, (x: number, y: number) => x + y === 12],
+    ["north-west", (x: number, y: number) => y - x >= 1, (x: number, y: number) => y - x === 1],
+    ["south-east", (x: number, y: number) => x - y >= 1, (x: number, y: number) => x - y === 1],
   ] as const) {
-    const k = stairs(high);
-    assert.equal(rampClick(k, x * 128, y * 128, log).done, "built", name);
-    assert.equal(flagged(k).length, flagged(t).length, `${name}: as many corners`);
-    climbsOnce(k);
+    for (let y = 2; y <= 9; y++) for (let x = 2; x <= 9; x++) {
+      if (!step(x, y)) continue;
+      for (const [ox, oy] of [[0, 0], [0.3, 0.2], [-0.3, 0.2], [0.2, -0.3], [-0.2, -0.3]]) {
+        const t = stairs(high);
+        assert.equal(rampClick(t, (x + ox) * 128, (y + oy) * 128, log).done, "none", `${name}: ${x},${y} off ${ox},${oy}`);
+      }
+    }
   }
-  // A drag down the diagonal (a click at each corner it passes) joins the pieces into one ramp; a click takes it off.
-  const d = sw();
-  for (let x = 3; x <= 7; x++) assert.equal(rampClick(d, x * 128, (10 - x) * 128, log, true).done, "built", `drag at ${x}`);
-  climbsOnce(d);
-  for (let x = 3; x <= 7; x++) assert.ok(d.corners[(10 - x) * d.width + x].ramp && d.corners[(10 - x) * d.width + x + 1].ramp, `the high and low step at ${x}`);
-  assert.equal(rampClick(d, 5 * 128, 5 * 128, log).done, "removed");
-  assert.deepEqual(flagged(d), []);
-  // Not a step: the plateau, and the low ground off the cliff (two corners out, far out).
-  for (const [x, y] of [[3, 3], [9, 9], [7, 5]]) assert.equal(rampClick(sw(), x * 128, y * 128, log).done, "none", `${x},${y}`);
-});
-
-test("a Ramp drag down Last Refuge's diagonal cliff flags about what its ramp has", () => {
-  // smoketest_maps/blizzard/(2)LastRefuge_S2_v1.5.w3x, corners x 22-38, y 25-30 (wholemap.test.ts LAST_REFUGE): the
-  // levels as the map has them, the flags taken off, then a drag down the cliff's high edge.
-  const rows = [
-    "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
-    "2. 2. 2. 2. 2. 2. 2. 2r 2r 2r 3r 3. 3. 2. 2. 2. 2.",
-    "2. 2. 2. 2. 2. 2r 2r 2r 2r 3r 3r 3. 3. 3. 2. 2. 2.",
-    "2. 2. 2. 2. 2. 2r 2r 2r 3r 3r 3. 3. 3. 3. 2. 2. 2.",
-    "2. 2. 2. 2. 2. 2r 2r 3r 3r 3. 3. 3. 3. 3. 3. 2. 2.",
-    "2. 2. 2. 2. 2. 2r 2r 3r 3. 3. 3. 3. 3. 3. 3. 2. 2.",
-  ].map((r) => r.split(" "));
-  const t = land(rows.map((r) => r.map((c) => c[0]).join("")));
-  const map = new Set(rows.flatMap((r, n) => r.flatMap((c, k) => (c[1] === "r" ? [`${k},${rows.length - 1 - n}`] : []))));
-  // The high edge, x 22-38 → 0-16, y 25-30 → 0-5: the first level-3 corner of each row.
-  for (let y = 0; y < t.height; y++) {
-    const x = t.corners.slice(y * t.width, (y + 1) * t.width).findIndex((c) => c.layer === 3);
-    rampClick(t, x * 128, y * 128, log, true);
-  }
-  climbsOnce(t);
-  const ours = new Set(flagged(t));
-  const both = [...ours].filter((k) => map.has(k)).length;
-  assert.ok(both >= 0.75 * map.size && ours.size <= map.size * 1.25, `${both} of the map's ${map.size} flags, ${ours.size} in all`);
+  // A low step of another turn builds its block too: high to the south-west, low step 6,5 clicked towards 5,4.
+  const other = stairs((x, y) => x + y <= 10);
+  assert.equal(rampClick(other, 5.8 * 128, 4.8 * 128, log).done, "built");
+  assert.deepEqual(flagged(other), ["5,4", "6,4", "7,4", "5,5", "6,5", "7,5", "5,6", "6,6", "7,6"]);
+  // The diamond's tip: corner 5,6 high, 4,6 and 6,6 beside it low; the line down from it would fit beside.
+  const tip = stairs((x, y) => Math.abs(x - 5) + Math.abs(y - 10) <= 4);
+  const r = rampClick(tip, 5 * 128, 6 * 128, log);
+  assert.equal(r.done, "none");
+  assert.ok(r.problem, "says why");
+  assert.deepEqual(flagged(tip), []);
+  // A plateau's corner (one neighbour along the cliff high) still builds: the 3x3 test above.
 });
 
 test("a click on a ramp still takes it off", () => {

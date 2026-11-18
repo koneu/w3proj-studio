@@ -35,6 +35,21 @@ export function regionBoxProblem(box: Record<RegionEdge, unknown>, within?: Regi
   return null;
 }
 
+/**
+ * The shift (dx, dy) a drag moves the regions `boxes` by, held so they stay inside the map's rectangle `within`: the
+ * World Editor stops a region dragged past the map's edge with its edge on the map's (we-drive 2026-11-18, branch
+ * we-compare-4, flat.w3x: 3296..3552 dragged 850 east, the pointer off the map, ended 3840..4096, twice; the size
+ * kept). A region already past the edge (from the file) isn't pushed further out, and can be moved back in.
+ */
+export function shiftInside(boxes: readonly RegionBox[], dx: number, dy: number, within?: RegionArea | null): [number, number] {
+  if (!within || !boxes.length) return [dx, dy];
+  // Within [lo, hi], widened to take in 0 (no move) when the boxes are past an edge already.
+  const hold = (d: number, lo: number, hi: number) => Math.min(Math.max(d, Math.min(lo, 0)), Math.max(hi, 0));
+  const lo = (k: "left" | "bottom") => Math.min(...boxes.map((b) => b[k]));
+  const hi = (k: "right" | "top") => Math.max(...boxes.map((b) => b[k]));
+  return [hold(dx, within.left - lo("left"), within.right - hi("right")), hold(dy, within.bottom - lo("bottom"), within.top - hi("top"))];
+}
+
 /** An edge typed for region `r` (`typed`: the field's text): the change, null when it is the value `r` has, or why it
  *  is refused (nothing changes then). `within`: the map's rectangle (regionBoxProblem). */
 export function typedRegionEdge(r: RegionBox, key: RegionEdge, typed: string, within?: RegionArea | null): { change: Partial<RegionBox> } | { refused: string } | null {
