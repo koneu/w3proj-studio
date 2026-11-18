@@ -13081,8 +13081,14 @@ async function worldEditorSync(page, found) {
     await until("the save synced into the project", () => existsSync(synced), 30000)
       .catch(() => fail("the editor's save didn't reach the project"));
     // A second editor on the map: closing the first leaves the mark, closing both ends it.
+    // The second open leaves the edit build alone (the first editor has it open: a repack would show there as a save).
+    const build = join(proj, "build", "proj.edit.w3x");
+    const stamp = () => statSync(build).mtimeMs;
+    const built = stamp();
+    await sleep(1200);
     const err2 = await open();
     if (err2) return fail(`Open in World Editor again: ${err2}`);
+    if (stamp() !== built) fail("a second Open in World Editor packed the edit build again, under the editor that has it open");
     const second = (await until("the second stand-in started", () => (started().length === 2 ? started() : null), 30000)).find((p) => p !== first);
     writeFileSync(join(ctl, `exit-${first}`), "");
     // The backend looks at the editor once a second: time for a wrong "closed", nothing to wait for.
