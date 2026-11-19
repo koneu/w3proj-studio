@@ -732,3 +732,50 @@ test("expectCorners is checked when the spec is read: w3e and differs only, know
   // compareFile refuses it on another kind too (a spec made without parseSpec).
   assert.equal(compareFile("war3map.w3i", "parsed", { json: {} }, { json: { a: 1 } }, 10, 0, [], [], null, [rule]).status, "ERROR");
 });
+
+// ---------------------------------------------------------------- the renderer of the editor processes
+
+test("--renderer auto: gpu for hd/de and full runs, software otherwise; the spec field forces; an explicit flag wins", () => {
+  const pick = (o) => core.chooseRenderer(o);
+  assert.equal(pick({ mode: "sd" }), "software");
+  assert.equal(pick({ mode: "hd" }), "gpu");
+  assert.equal(pick({ mode: "de" }), "gpu");
+  assert.equal(pick({ mode: "sd", fullRun: true }), "gpu");
+  // The spec's field beats auto, in both directions.
+  assert.equal(pick({ mode: "hd", specRenderer: "software" }), "software");
+  assert.equal(pick({ mode: "sd", specRenderer: "gpu" }), "gpu");
+  assert.equal(pick({ mode: "hd", fullRun: true, specRenderer: "software" }), "software");
+  // An explicit flag (or W3PROJ_WE_RENDERER) beats everything.
+  assert.equal(pick({ asked: "software", mode: "hd", fullRun: true }), "software");
+  assert.equal(pick({ asked: "gpu", mode: "sd", specRenderer: "software" }), "gpu");
+  assert.throws(() => pick({ asked: "fast" }), /software, gpu or auto/);
+  // parseArgs: default auto, the flag, a bad value.
+  assert.equal(run.parseArgs(["a.json"]).renderer, process.env.W3PROJ_WE_RENDERER || "auto");
+  assert.equal(run.parseArgs(["--renderer", "gpu", "a.json"]).renderer, "gpu");
+  assert.throws(() => run.parseArgs(["--renderer", "fast", "a.json"]), /wants software, gpu or auto/);
+});
+
+test("a full run is the whole spec folder or a shard of it", () => {
+  const all = ["/s/a.json", "/s/b.json", "/s/c.json"];
+  assert.equal(core.isFullRun(all, all), true);
+  assert.equal(core.isFullRun([...all].reverse(), all), true);
+  assert.equal(core.isFullRun(["/s/a.json", "/s/b.json"], all), false);
+  assert.equal(core.isFullRun(["/s/a.json"], all, { index: 1, count: 3 }), true);
+  assert.equal(core.isFullRun([], []), false);
+});
+
+test("no hardware driver: we-drive's skip message is recognised (software fallback), other skips are not", () => {
+  const msg = "no hardware Vulkan driver for --renderer gpu (a manifest other than lavapipe's in /usr/share/vulkan/icd.d)";
+  assert.equal(core.gpuMissing(msg), msg);
+  assert.equal(core.gpuMissing("no lavapipe Vulkan driver (lvp_icd*.json)"), null);
+  assert.equal(core.gpuMissing(undefined), null);
+});
+
+test("we.renderer is software or gpu, we.why is text, and a spec with another renderer is another editor process", () => {
+  const spec = (we) => core.parseSpecFile(JSON.stringify({ name: "r", input: { new: { name: "x", width: 32, height: 32 } }, we, compare: [{ file: "war3map.w3i" }] }), "r.json", {});
+  assert.equal(spec({ mode: "hd", renderer: "software", why: "picture" })[0].we.renderer, "software");
+  assert.equal(spec({})[0].we.renderer, null);
+  assert.throws(() => spec({ renderer: "fast" }), /we.renderer is software or gpu/);
+  assert.throws(() => spec({ why: 3 }), /we.why is text/);
+  assert.notEqual(core.weGroupKey(spec({ mode: "hd" })[0]), core.weGroupKey(spec({ mode: "hd", renderer: "software" })[0]));
+});

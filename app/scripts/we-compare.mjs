@@ -10,6 +10,9 @@
 //                   the whole run: N waits for that slot, auto takes the first free one of --slots. Without it, slot 0
 //                   (or W3PROJ_WE_SLOT) as before, the lock taken by each we-drive process
 //   --slots LIST    the slots --slot auto picks from, in order (default 0,1,2)
+//   --renderer R    software|gpu|auto (default auto, or W3PROJ_WE_RENDERER): the we-drive renderer. auto: gpu for hd/de specs and
+//                   for a full run (the whole tests/we-compare folder or a --shard), else software; a spec's we.renderer
+//                   forces its own; software or gpu given here wins over all. No hardware driver: software, one line
 //   --shard i/n     run part i of n of the spec files named (whole files, dealt out by their spec counts:
 //                   we-compare-core shardFiles); n runs with the same files and --slot auto cover them all, at once
 //   --game DIR      the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
@@ -105,7 +108,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { applyRoundtrip, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { applyRoundtrip, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
 import { currentSlot, parseSlot, takeAllSlots, takeFreeSlot, takeLock } from "./we-setup.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -114,7 +117,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const say = (m) => console.error(`we-compare: ${m}`);
 
 export function parseArgs(argv) {
-  const o = { work: null, game: null, json: null, limit: null, we: true, strictIgnore: false, files: [] };
+  const o = { work: null, game: null, json: null, limit: null, we: true, strictIgnore: false, files: [], renderer: process.env.W3PROJ_WE_RENDERER || "auto" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -135,12 +138,14 @@ export function parseArgs(argv) {
     } else if (a === "--no-we") o.we = false;
     else if (a === "--strict-ignore") o.strictIgnore = true;
     else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs: a binary older than its sources is used anyway
+    else if (a === "--renderer") o.renderer = value();
     else if (a === "--keep-prefs") o.keepPrefs = true;
     else if (a === "--restart-per-map") o.restart = true;
     else if (a === "-h" || a === "--help") o.help = true;
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a} (see the top of we-compare.mjs)`);
     else o.files.push(resolve(a));
   }
+  if (!["auto", "software", "gpu"].includes(o.renderer)) throw new Error(`--renderer (or W3PROJ_WE_RENDERER) wants software, gpu or auto, not "${o.renderer}"`);
   if (o.slots && o.slot !== "auto") throw new Error("--slots is the list --slot auto takes a free slot of: give --slot auto too");
   if (o.slot === "auto") o.slots ??= DEFAULT_SLOTS;
   return o;
@@ -326,11 +331,13 @@ async function runStudio(specs, opts, game) {
  */
 async function runWorldEditor(specs, opts, game) {
   const { mode, saveAccept, prefs } = specs[0].we;
+  let renderer = chooseRenderer({ asked: opts.renderer, specRenderer: specs[0].we.renderer, mode, fullRun: opts.fullRun });
+  const auto = opts.renderer === "auto";
   let rest = specs.filter((s) => !s.error);
   while (rest.length) {
     // --expect-layout: the first --wait-ready on a main window or tool palette of another size or place than the
     // spec coordinates were measured in stops the process with one message (weOutcome gives it to every spec).
-    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
+    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), "--renderer", renderer, ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
     // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
     // fails), the map before it was saved, so nothing is asked. --close after the last map, around a spec with
     // we.freshEditor or we.expectCrash (weDriveSteps). --restart-per-map (opts.restart) is the old way, an editor
@@ -352,6 +359,9 @@ async function runWorldEditor(specs, opts, game) {
     const outs = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     // we-drive's own lines, for a look afterwards (what each step answered, a crash on close).
     try { appendFileSync(join(opts.work, "we-drive", "steps.jsonl"), lines.map((l) => `${l}\n`).join("")); } catch { /* the log is a help only */ }
+    // auto asked for gpu and this machine has no hardware driver: software, one line, never a failure.
+    const noGpu = auto && renderer === "gpu" ? gpuMissing(outs.find((o) => o.skipped)?.skipped) : null;
+    if (noGpu) { say(`no hardware Vulkan driver, using the software renderer (${noGpu})`); renderer = "software"; continue; }
     if (outs.some((o) => o.skipped)) { for (const s of rest) s.error = `the World Editor can't run here: ${outs.find((o) => o.skipped).skipped}`; return; }
     say(`the World Editor part took ${Math.round((Date.now() - t0) / 1000)} s (exit ${code})`);
     // After a failure the process stopped; the specs behind it that haven't run go again in the next process.
@@ -516,6 +526,8 @@ async function main() {
   if (o.shard) say(`shard ${o.shard.index}/${o.shard.count}: ${files.length} of ${o.files.length} spec files`);
   const specs = parsed.filter((p) => files.includes(p.file)).flatMap((p) => p.list);
   if (!specs.length) { say("no spec to run in this shard"); return 0; }
+  // A full run (the whole spec folder, or a shard) takes the GPU renderer under --renderer auto.
+  o.fullRun = isFullRun(o.files, readdirSync(join(repo, "tests", "we-compare")).filter((n) => n.endsWith(".json")).map((n) => join(repo, "tests", "we-compare", n)), o.shard);
   const dup = duplicateName(specs);
   if (dup) throw new Error(`two specs are named ${dup} (names are folders: any case)`);
   // A missing input (most are made by a generator into target/) is that spec's error; the others still run.
