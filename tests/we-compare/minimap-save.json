@@ -82,7 +82,7 @@
   },
   {
     "name": "mmsave-dots-models-hd",
-    "description": "the same map in HD: the editor draws the grey 183 dot for a doodad whose model is stored only below _DE.w3mod (EOcr, LCpa, LRsr, UO*, YO*), Studio's minimap leaves that layer out (minimapgen withoutDeLayer)",
+    "description": "the same map in HD: the editor draws the grey 183 dot for a doodad whose model is stored only below _DE.w3mod (EOcr, LCpa, LRsr, UO*, YO*), Studio's minimap leaves that layer out in HD, saved and exported alike (minimapgen minimapBase; until branch we-compare-12 only Export Minimap did). The 16-pixel blocks within 14 don't tell one dot's colour (a model's colour passed here too): minimap.test.ts holds the rule, TESTING.md 'Branch we-compare-12' the per-dot reading",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots-models.w3x" },
     "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
