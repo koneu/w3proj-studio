@@ -210,8 +210,10 @@ void main() {
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
     highp vec2 p = vec2(vWorld.x, -vWorld.y);
     vec2 lean = (texture(uWave, p / uWaveSize.x + uWaveShift.xy).rg + texture(uWave, p / uWaveSize.y + uWaveShift.zw).rg - 2.0 * uWaveMean) * 2.0;
-    // A tileset with a sky of its own reflects it alike in every direction (hdwater.ts HD_SKY_FLAT; uSkyFlat.w 1).
-    vec3 sky = (mix(hdSky(vec3(view.xy, -view.z)), uSkyFlat.rgb, uSkyFlat.w) + uWaveLight * hdWaveLean(lean, view)) * uReflect.x;
+    // A tileset with a sky of its own reflects it alike in every direction, with weaker waves (hdwater.ts HD_SKY_FLAT:
+    // uSkyFlat.w the waves' share, 0 for the others).
+    bool flatSky = uSkyFlat.w > 0.0;
+    vec3 sky = ((flatSky ? uSkyFlat.rgb : hdSky(vec3(view.xy, -view.z))) + uWaveLight * (flatSky ? uSkyFlat.w : 1.0) * hdWaveLean(lean, view)) * uReflect.x;
     // The tileset's deep colour, towards its shallow colour in shallow water (the same where it has none).
     vec3 own = w.y * mix(srgbDec(uHdWater), srgbDec(uHdShallow), hdShallowAt(depth));
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its own colour and reflection in deep
@@ -1966,7 +1968,7 @@ export class TerrainRenderer {
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdShallow"), hdWaterShallow(this.terrain.tileset, !!this.waterTint));
       gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uReflect"), hdReflectScale(this.hdWater));
       const flatSky = hdSkyFlat(this.terrain.tileset);
-      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uSkyFlat"), flatSky ? [...flatSky, 1] : [0, 0, 0, 0]);
+      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uSkyFlat"), flatSky ? [...flatSky.sky, flatSky.waves] : [0, 0, 0, 0]);
       // The waves' normal map, drifted to where it is now (a texture is always bound to the sampler).
       const wave = this.waterWave;
       gl.activeTexture(gl.TEXTURE0 + WATER_WAVE_UNIT);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decode, HD_REFLECT_DEPTH, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, HD_WAVE_LIGHT, HD_WAVE_RED, HD_WAVES,
-  hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
+  hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
@@ -130,7 +130,12 @@ test("Outland's deep water reflects a dark red sky alike in every direction: the
   // View Entire Map of the eight-band map over Outland (we-drive, HD, 2026-11-17): bands 96 to 800 deep in the editor
   // 23, 10, 11 / 22, 12, 14 / 23, 11, 12; Lordaeron's sky at that view gave 62, 63, 59 (Studio's picture).
   assert.equal(hdSkyFlat("L"), null);
-  assert.deepEqual(hdSkyFlat("o"), [...HD_SKY_FLAT.O], "a lower case tileset letter too");
+  assert.deepEqual(hdSkyFlat("o"), HD_SKY_FLAT.O, "a lower case tileset letter too");
+  // Its waves are a fifth as strong: the full wave light over so dark a sky cut a quarter of the pixels at black.
+  const lean = (flat: FlatSky | null, l: number) => hdWaterPixel([0, 0, 0], 200, deep("O"), [0, 0.5, -0.85], undefined, undefined, l, flat).map(decode);
+  const swing = (flat: FlatSky | null) => lean(flat, 0.1)[1] - lean(flat, 0)[1];
+  assert.ok(Math.abs(swing(hdSkyFlat("O")) - HD_SKY_FLAT.O.waves * HD_WAVE_LIGHT[1] * 0.1) < 1e-9, "the waves' share of HD_WAVE_LIGHT");
+  assert.ok(lean(hdSkyFlat("O"), -0.1)[1] > 0, "a wave's trough stays above black");
   const view = [0.3, 0.55, -0.78];
   const plain = hdWaterPixel([0, 0, 0], 800, deep("O"), view);
   assert.ok(plain.every((v) => v > 20), `control: Lordaeron's sky over Outland's black water is bright: ${plain.map(Math.round)}`);
@@ -138,6 +143,8 @@ test("Outland's deep water reflects a dark red sky alike in every direction: the
   // wt-O.w3x's 200 deep band through `--look 0,-2600,1500,304,70,R` (branch we-compare-13, 2026-11-19), boxes of the
   // editor's pictures: the middle (400, 300, 400 x 250), the left (0, 300, 300 x 250) and the right (884, 300, 300 x 250).
   // Red stays 22 to 25 in all; green and blue are the environment map's faces (straight-edged patches of 7 to 21).
+  // The bed is left out here: Studio's picture shows some of Outland's red ground through that water (29 red in the
+  // middle box, the 800 deep band 24), the editor's none (open).
   const looks: [number, number[][]][] = [
     [0, [[23, 10, 9], [24, 8, 6], [25, 21, 20]]],
     [90, [[23, 13, 13], [23, 20, 21], [22, 10, 8]]],
