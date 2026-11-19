@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decode, HD_REFLECT_DEPTH, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, HD_WAVE_LIGHT, HD_WAVE_RED, HD_WAVES,
-  hdReflectScale, hdShallowAt, hdSky, hdSkyTint, HD_SKY_TINT, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
+  hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
@@ -126,18 +126,46 @@ test("HD water reflects a sky that is brighter in the west: the editor's water l
   assert.ok(west[0] - east[0] > 20, `west ${west.map(Math.round)} against east ${east.map(Math.round)}`);
 });
 
-test("Outland's deep water reflects a dark red sky: the editor's 23, 10, 11 where Lordaeron's sky gave 62, 63, 59", () => {
+test("Outland's deep water reflects a dark red sky alike in every direction: the editor's 23, 13, 13", () => {
   // View Entire Map of the eight-band map over Outland (we-drive, HD, 2026-11-17): bands 96 to 800 deep in the editor
-  // 23, 10, 11 / 22, 12, 14 / 23, 11, 12; the model without the tint at that view gave 62, 63, 59 (Studio's picture).
-  assert.deepEqual(hdSkyTint("L"), [1, 1, 1]);
-  assert.deepEqual(hdSkyTint("o"), [...HD_SKY_TINT.O], "a lower case tileset letter too");
+  // 23, 10, 11 / 22, 12, 14 / 23, 11, 12; Lordaeron's sky at that view gave 62, 63, 59 (Studio's picture).
+  assert.equal(hdSkyFlat("L"), null);
+  assert.deepEqual(hdSkyFlat("o"), [...HD_SKY_FLAT.O], "a lower case tileset letter too");
   const view = [0.3, 0.55, -0.78];
   const plain = hdWaterPixel([0, 0, 0], 800, deep("O"), view);
-  const dark = hdWaterPixel([0, 0, 0], 800, deep("O"), view, undefined, undefined, 0, hdSkyTint("O"));
   assert.ok(plain.every((v) => v > 20), `control: Lordaeron's sky over Outland's black water is bright: ${plain.map(Math.round)}`);
-  assert.ok(dark[0] > dark[1] && dark[0] > dark[2], `dark and red: ${dark.map(Math.round)}`);
-  assert.ok(dark.every((v, i) => v < plain[i] * 0.7), `darker than the plain sky in every channel: ${dark.map(Math.round)} against ${plain.map(Math.round)}`);
-  assert.deepEqual(hdWaterPixel([0, 0, 0], 800, deep("L"), view, undefined, undefined, 0, hdSkyTint("L")), hdWaterPixel([0, 0, 0], 800, deep("L"), view), "the other tilesets are untouched");
+  within(hdWaterPixel([0, 0, 0], 800, deep("O"), view, undefined, undefined, 0, hdSkyFlat("O")), [23, 11, 12], 2.5, "View Entire Map, 800 deep");
+  // wt-O.w3x's 200 deep band through `--look 0,-2600,1500,304,70,R` (branch we-compare-13, 2026-11-19), boxes of the
+  // editor's pictures: the middle (400, 300, 400 x 250), the left (0, 300, 300 x 250) and the right (884, 300, 300 x 250).
+  // Red stays 22 to 25 in all; green and blue are the environment map's faces (straight-edged patches of 7 to 21).
+  const looks: [number, number[][]][] = [
+    [0, [[23, 10, 9], [24, 8, 6], [25, 21, 20]]],
+    [90, [[23, 13, 13], [23, 20, 21], [22, 10, 8]]],
+    [180, [[23, 10, 11], [23, 16, 17], [24, 18, 18]]],
+    [270, [[23, 10, 11], [24, 18, 18], [23, 10, 9]]],
+  ];
+  const reds: number[] = [];
+  for (const [rotation, boxes] of looks) {
+    // we-drive's studioCamera for that look (the target 0.0993 of the distance back, the ground 161.6 down).
+    const r = (rotation * Math.PI) / 180;
+    const cam = { target: [-149 * Math.cos(r), -2600 - 149 * Math.sin(r), -161.5], distance: 1369, yaw: ((rotation + 180) * Math.PI) / 180, pitch: 0.99833, fov: 0.71663 };
+    boxes.forEach((editor, i) => {
+      const x0 = [400, 0, 884][i], y0 = 300, w = i ? 300 : 400, flat = [0, 0, 0], lordaeron = [0, 0, 0];
+      for (let a = 0; a < 5; a++) {
+        for (let b = 0; b < 5; b++) {
+          const v = ray(cam, x0 + (w / 5) * (a + 0.5), y0 + 50 * (b + 0.5));
+          hdWaterPixel([0, 0, 0], 200, deep("O"), v, undefined, undefined, 0, hdSkyFlat("O")).forEach((c, k) => { flat[k] += c / 25; });
+          hdWaterPixel([0, 0, 0], 200, deep("O"), v).forEach((c, k) => { lordaeron[k] += c / 25; });
+        }
+      }
+      within(flat.slice(0, 1), editor.slice(0, 1), 3, `rotation ${rotation}, box ${i}, red`);
+      within(flat, editor, 9, `rotation ${rotation}, box ${i}`);
+      reds.push(lordaeron[0]);
+    });
+  }
+  // Control: Lordaeron's sky (what a tint of it gave) changes with the direction where the editor's red doesn't.
+  assert.ok(Math.max(...reds) > 1.6 * Math.min(...reds), `Lordaeron's sky's red ${reds.map(Math.round)}`);
+  assert.deepEqual(hdWaterPixel([0, 0, 0], 800, deep("L"), view, undefined, undefined, 0, hdSkyFlat("L")), hdWaterPixel([0, 0, 0], 800, deep("L"), view), "the other tilesets are untouched");
 });
 
 test("the reflection follows the view: the editor's opening camera turned to the four sides over 200 deep water", () => {

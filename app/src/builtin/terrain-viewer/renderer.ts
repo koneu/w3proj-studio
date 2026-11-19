@@ -14,7 +14,7 @@ import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
 import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
 import { ViewDepth } from "../../lib/model/viewdepth";
-import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdReflectScale, hdSkyTint, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
+import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdReflectScale, hdSkyFlat, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -168,7 +168,7 @@ uniform float uLight;
 // (hdReflectScale), and the waves: the game's water normal map uWave, its two layers' sizes (world units per repeat)
 // and where they have drifted to (uWaveSize, uWaveShift), its mean red and green uWaveMean and the light a wave adds
 // (uWaveLight: hdWaveLight; 0 without the map).
-uniform vec3 uHdWater; uniform vec3 uHdShallow; uniform sampler2D uBed; uniform vec2 uReflect; uniform vec3 uSkyTint;
+uniform vec3 uHdWater; uniform vec3 uHdShallow; uniform sampler2D uBed; uniform vec2 uReflect; uniform vec4 uSkyFlat;
 uniform sampler2D uWave; uniform highp vec2 uWaveSize; uniform highp vec4 uWaveShift; uniform vec2 uWaveMean; uniform vec3 uWaveLight;
 // HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
 // the eye uEye looking along uForward with the projection's near and far planes (uNearFar).
@@ -210,7 +210,8 @@ void main() {
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
     highp vec2 p = vec2(vWorld.x, -vWorld.y);
     vec2 lean = (texture(uWave, p / uWaveSize.x + uWaveShift.xy).rg + texture(uWave, p / uWaveSize.y + uWaveShift.zw).rg - 2.0 * uWaveMean) * 2.0;
-    vec3 sky = (hdSky(vec3(view.xy, -view.z)) + uWaveLight * hdWaveLean(lean, view)) * uReflect.x * uSkyTint;
+    // A tileset with a sky of its own reflects it alike in every direction (hdwater.ts HD_SKY_FLAT; uSkyFlat.w 1).
+    vec3 sky = (mix(hdSky(vec3(view.xy, -view.z)), uSkyFlat.rgb, uSkyFlat.w) + uWaveLight * hdWaveLean(lean, view)) * uReflect.x;
     // The tileset's deep colour, towards its shallow colour in shallow water (the same where it has none).
     vec3 own = w.y * mix(srgbDec(uHdWater), srgbDec(uHdShallow), hdShallowAt(depth));
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its own colour and reflection in deep
@@ -1964,7 +1965,8 @@ export class TerrainRenderer {
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdShallow"), hdWaterShallow(this.terrain.tileset, !!this.waterTint));
       gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uReflect"), hdReflectScale(this.hdWater));
-      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uSkyTint"), hdSkyTint(this.terrain.tileset));
+      const flatSky = hdSkyFlat(this.terrain.tileset);
+      gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uSkyFlat"), flatSky ? [...flatSky, 1] : [0, 0, 0, 0]);
       // The waves' normal map, drifted to where it is now (a texture is always bound to the sampler).
       const wave = this.waterWave;
       gl.activeTexture(gl.TEXTURE0 + WATER_WAVE_UNIT);
