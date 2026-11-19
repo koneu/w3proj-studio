@@ -5,6 +5,7 @@ import { testMapArgs, testMapOptions } from "./testmap";
 import { checkOpenedProject, offerStrayMoves } from "./strays";
 import { dropUnusedStrings } from "./prunestrings";
 import { namesToStringTable } from "./namestrings";
+import { blocksPacking, countProblems } from "../../lib/problemcount";
 import { deleteQuestion, wouldDelete } from "../../lib/syncdeletes";
 
 interface UnpackReport {
@@ -147,10 +148,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
       const checked = problems ? await w3.window.withProgress("Checking for problems", () => problems.runChecked()) : null;
       const found = checked?.problems ?? [];
-      const errors = found.filter((p) => p.severity === "error").length;
-      if (found.length || checked?.ignored) out.append(`problems before packing: ${errors} errors, ${found.length - errors} warnings${checked?.ignored ? `, ${checked.ignored} ignored, see .w3proj/problems-ignore.json` : ""}`);
+      const counted = countProblems(found), errors = counted.errors;
+      if (found.length || checked?.ignored) out.append(`problems before packing: ${counted.errors} errors, ${counted.warnings} warnings${counted.infos ? `, ${counted.infos} infos` : ""}${checked?.ignored ? `, ${checked.ignored} ignored, see .w3proj/problems-ignore.json` : ""}`);
       if (checked?.ignoreError) out.append(`${checked.ignoreError}; nothing was left out of the problems above`);
-      if (errors) {
+      if (blocksPacking(counted)) {
         const c = await w3.window.showWarning(`The map has ${errors} error${errors === 1 ? "" : "s"} (see Problems). Pack anyway?`, "Pack anyway", "Show Problems", "Cancel");
         if (c === "Show Problems") await w3.commands.execute("w3.problems.show");
         if (c !== "Pack anyway") return false;
