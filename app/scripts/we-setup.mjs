@@ -385,8 +385,9 @@ export async function takeFreeSlot(slots, say, { timeoutMs = 60 * 60 * 1000, pol
       const release = await takeLock(say, 0, { slot, wait: false });
       if (release) return { slot, release };
     }
-    if (Date.now() - start > timeoutMs) throw new Error(`every World Editor slot of ${slots.join(",")} is still busy`);
+    // Said before the timeout is looked at: on a loaded machine one pass over the slots can outlast a short timeout.
     if (!told) { say(`every World Editor slot of ${slots.join(",")} is busy: waiting for one`); told = true; }
+    if (Date.now() - start > timeoutMs) throw new Error(`every World Editor slot of ${slots.join(",")} is still busy`);
     await sleep(pollMs);
   }
 }
