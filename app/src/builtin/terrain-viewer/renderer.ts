@@ -1343,7 +1343,7 @@ export class TerrainRenderer {
    *  no textured ground). */
   private edgeShade(textured: boolean): EdgeShade | null {
     if (!textured || !this.showBorder || !this.border) return null;
-    // Four texels a tile (borderShade: one per pathing cell's corner).
+    // Four texels a tile (borderShade: one per pathing cell's corner or middle; the one at 4 t + 2 lies in tile t).
     return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel" };
   }
 
@@ -1853,7 +1853,7 @@ export class TerrainRenderer {
       // The border is part of the map, and fades with it. What a tool shows has to stay readable.
       setFog(gl, (name) => gl.getUniformLocation(this.overlayProg as WebGLProgram, name), layer === this.border ? fog : null);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
-      // The border's texels sit on the pathing cells' corners (borderRect), the layers' on the cells.
+      // The border's texels sit on the pathing cells' corners or middles (borderRect), the layers' on the cells.
       const rect = layer === this.border ? this.borderRect() : [t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128];
       gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), rect[0], rect[1], rect[2], rect[3]);
       gl.activeTexture(gl.TEXTURE0);
