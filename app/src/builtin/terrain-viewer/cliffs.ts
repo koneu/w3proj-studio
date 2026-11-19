@@ -50,12 +50,23 @@ export function tilesetDefaultCliff(tileset: string, types: ReadonlyMap<string, 
 /** The cliff type number (in `list`, cliffList's) the World Editor's cliff palette starts on: the tileset's default
  *  cliff (tilesetDefaultCliff) wherever it is in the w3e's cliff list (we-compare water-brush-swapped, 2026-11-13: Grass
  *  Cliff under CLdi CLgr and CLgr CLdi; branch we-compare-14: CLgr third in CLdi CWsn CLgr, second in CKdt CLgr CLdi
- *  CYsq). The editor appends it to a list without it (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer); Studio then
- *  takes the first entry with the second texture, as before. -1 when the map has neither. */
+ *  CYsq). The editor appends it to a list without it (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer: Studio's
+ *  strokes do that first, defaultCliffToAdd); without it here (a full list, the game's types not read) the first entry
+ *  with the second texture. -1 when the map has neither. */
 export function weDefaultCliffType(list: CliffList, tileset = "", types: ReadonlyMap<string, CliffType> = new Map()): number {
   const id = tilesetDefaultCliff(tileset, types);
   const at = id === null ? -1 : list.findIndex((c) => c?.cliffID === id);
   return at >= 0 ? at : list.findIndex((c) => !!c && /_cliff1$/i.test(c.texFile));
+}
+
+/** The cliff id a stroke on the palette's default cliff type appends to the w3e's cliff list (`ids`) first: the
+ *  tileset's default cliff (tilesetDefaultCliff) when the list lacks it and has room (`max` entries, the numbers a corner
+ *  can name). The World Editor's water brush on Lordaeron Summer with the list CAgr CLdi saved CAgr CLdi CLgr and typed
+ *  the rim with CLgr (2), while an open and save alone kept CAgr CLdi (we-compare water-cliff-append, branch
+ *  we-compare-14 and -15). Null when nothing is to be added. */
+export function defaultCliffToAdd(ids: readonly string[], tileset: string, types: ReadonlyMap<string, CliffType>, max: number): string | null {
+  const id = tilesetDefaultCliff(tileset, types);
+  return id === null || ids.includes(id) || ids.length >= max ? null : id;
 }
 
 /** A cliff model and the tiles (y × (width-1) + x) it covers. */

@@ -78,6 +78,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let stroke: {
     s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number]; px?: [number, number];
     stepped?: { at: [number, number]; px: [number, number]; next?: { g: [number, number]; px: [number, number] } };
+    /** Takes the cliff type the stroke's start appended (claimDefaultCliffType) back out when the stroke changes nothing. */
+    takeBack?: () => void;
   } | null = null;
 
   /** The World Editor's Enforce Water Height Limits (the terrain editor's switch, on unless set off). */
@@ -166,12 +168,12 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     heightTick();
     clearInterval(holding);
     if (!stroke) return;
-    const s = stroke.s;
+    const s = stroke.s, takeBack = stroke.takeBack;
     stroke = null;
     // New cliffs and water take the chosen cliff type (or their ground tile's); painting ground re-types nothing.
     const chosen = isLayerTool(s.label as Tool) ? chosenCliffType() : undefined;
     const retyped = retypeCliffs(terrain, s, ed.cliffGroundTiles(), chosen);
-    if (!s.finish(terrain)) return;
+    if (!s.finish(terrain)) { takeBack?.(); return; }
     ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
   };
 
@@ -508,7 +510,11 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           if (why) void w3.window.showWarning(why);
           return;
         }
-        stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY] };
+        // On the palette's default a cliff list without the tileset's default cliff gets it first, as the World
+        // Editor's water brush (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer; claimDefaultCliffType).
+        const claim = isLayerTool(tool) && tool !== "dry" && cliffType === "default" ? ed.claimDefaultCliffType() : null;
+        if (claim) layer.cliffType = claim.type >= 0 ? claim.type : undefined;
+        stroke = { s: new Stroke(tool), target: c ? c.rawHeight : 0x2000, layer, last: performance.now(), px: [p.event.clientX, p.event.clientY], takeBack: claim?.takeBack };
         if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g, [p.event.clientX, p.event.clientY]);
         else applyAt(g);
       };

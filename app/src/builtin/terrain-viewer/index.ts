@@ -31,7 +31,7 @@ import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
-import { cliffList, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
+import { cliffList, defaultCliffToAdd, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 import { applyTileList, cliffGroundInUse, cliffTypeUse, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { applyCliffRemoval, cliffEntryUse, cliffListWith, planCliffRemoval } from "./clifflist";
 import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, savedScaleRange, scaleRange, unitsEntryKind, withObjectArt, type Placed, type Skin, type Stray } from "./objects";
@@ -1934,6 +1934,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             st.undo();
             const hits = waterLimitHits(word(), after);
             if (hits.length) {
+              // A tile or cliff type the refused edit added goes with it (claimDefaultCliffType, ensureTile).
+              if (pendingTiles) { restoreTiles(terrain, pendingTiles); pendingTiles = null; void syncTileList(); minimapStale.set(); }
               if (st.cliffs) replanCliffs(); else void replanShore();
               renderer.terrainChanged();
               redraw();
@@ -2092,6 +2094,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const list = cliffListWith(terrain.cliffTiles, id, cliffTypesForEdit());
           changeCliffList(() => { terrain.cliffTiles = list; });
           return list.length - 1;
+        };
+        /** The palette's default cliff type for a stroke, the tileset's default cliff appended to a list without it
+         *  first (defaultCliffToAdd). The addition is the stroke's: commitTerrain takes it into its undo step through
+         *  pendingTiles and gives it back when it refuses the stroke; `takeBack` removes it when no stroke follows. */
+        const claimDefaultCliffType = (): { type: number; takeBack(): void } => {
+          const types = cliffData?.types;
+          const type = () => weDefaultCliffType(cliffList(terrain, types ?? new Map()), terrain.tileset, types);
+          const id = editable && types ? defaultCliffToAdd(terrain.cliffTiles, terrain.tileset, types, MAX_CLIFF_TYPES) : null;
+          if (id === null) return { type: type(), takeBack: () => {} };
+          const before = tileSnapshot(terrain), hadPending = pendingTiles;
+          terrain.cliffTiles.push(id);
+          pendingTiles ??= before;
+          const added = terrain.cliffTiles.join();
+          void syncTileList();
+          return {
+            type: type(),
+            takeBack: () => {
+              // Only the list this claim made: a later change of it (an undo, Cliffs…) is left alone.
+              if (terrain.cliffTiles.join() !== added) return;
+              restoreTiles(terrain, before);
+              pendingTiles = hadPending;
+              void syncTileList();
+            },
+          };
         };
         /** Takes entry `index` out of the map's cliff list (one undo step); corners on it get `replacement` (required
          *  when it's in use), the later entries' corners follow their entry. The removed id; throws when refused. */
@@ -4809,6 +4835,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pushEdit: (e) => pushEdit(e),
           cliffGroundTiles: () => (cliffData ? cliffList(terrain, cliffData.types).map((c) => c?.groundTile ?? "") : []),
           defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map()), terrain.tileset, cliffData?.types),
+          claimDefaultCliffType: () => claimDefaultCliffType(),
           gameCliffTypes: () => (cliffData ? [...cliffData.types.values()].map((c) => ({ id: c.cliffID, groundTile: c.groundTile })) : []),
           cliffTypeUse: () => (cliffData ? cliffEntryUse(terrain, cliffData.types) : null),
           addCliffType: (id) => addCliffType(id),

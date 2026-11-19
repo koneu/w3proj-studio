@@ -26,7 +26,12 @@ const dry = process.argv.includes("--dry");
 // border (x -1024..1024, y -4096..-2816) and a red one across the west border over land (x -4096..-2560, y 1024..2048).
 const shore = process.argv.includes("--shore");
 if (dry && shore) { console.error("make-water-tilesets.mjs: --dry and --shore are two different maps"); process.exit(2); }
-const only = process.argv.slice(5).filter((a) => a !== "--dry" && a !== "--shore");
+// --cliffs ID,ID…: that cliff list instead of the tileset's first two (with --dry: <out>/nv-<char>-<ID>-<ID>….w3x), for
+// the water brush's cliff type on a list without the tileset's own (water-cliff-append: CAgr,CLdi on Lordaeron).
+const cliffsAt = process.argv.indexOf("--cliffs");
+const cliffList = cliffsAt >= 0 ? (process.argv[cliffsAt + 1] ?? "").split(",").filter(Boolean) : null;
+if (cliffList && !cliffList.length) { console.error("make-water-tilesets.mjs: --cliffs wants a list, e.g. CAgr,CLdi"); process.exit(2); }
+const only = process.argv.slice(5).filter((a, i, all) => a !== "--dry" && a !== "--shore" && a !== "--cliffs" && all[i - 1] !== "--cliffs");
 if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry | --shore] [tileset char…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
@@ -42,7 +47,7 @@ mkdirSync(out, { recursive: true });
 for (const ch of TILESETS) {
   if (only.length && !only.includes(ch)) continue;
   const ground = tiles.filter((id) => id.startsWith(ch)).slice(0, 6);
-  const own = cliffs.filter(([, g]) => g.startsWith(ch)).slice(0, 2).map(([id]) => id);
+  const own = cliffList ?? cliffs.filter(([, g]) => g.startsWith(ch)).slice(0, 2).map(([id]) => id);
   if (ground.length < 2 || own.length < 2) { console.log(`${ch}: skipped (${ground.length} tiles, ${own.length} cliffs)`); continue; }
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
   try {
@@ -51,6 +56,10 @@ for (const ch of TILESETS) {
     const w3i = join(dir, "map", "war3map.w3i.json");
     const info = JSON.parse(readFileSync(w3i, "utf8"));
     info.tileset = ch;
+    // The w3i flag 0x0008 follows the w3e's custom tilesets flag (set to 1 below), as the editor's save leaves it
+    // (tilesetflag.ts): without it an open and save alone differs there (water-cliff-append-open, 2026-11-19). Only the
+    // --cliffs maps: the wt-, nv- and ws- maps of the specs were made without it.
+    if (cliffList) info.flags = (info.flags | 0x0008) >>> 0;
     writeFileSync(w3i, JSON.stringify(info));
     const file = join(dir, "map", "war3map.w3e.txt");
     const lines = readFileSync(file, "utf8").split("\n");
@@ -97,7 +106,8 @@ for (const ch of TILESETS) {
       section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
     }
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}.w3x`), "--force-stale");
+    const suffix = cliffList ? `-${cliffList.join("-")}` : "";
+    run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}${suffix}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

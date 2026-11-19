@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hdSlots } from "../../lib/model/renderer";
-import { cliffList, cliffRetexture, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
+import { cliffList, cliffRetexture, defaultCliffToAdd, planCliffs, weDefaultCliffType, type CliffType } from "./cliffs";
 
 const CITY = { texDir: "TerrainArt\\CityScape", texFile: "City_Cliff1" };
 
@@ -65,11 +65,30 @@ test("the water brush's cliff type is the tileset's natural cliff, wherever the 
   assert.equal(pick("A", ["CAgr", "CAdi"]), 0);
   assert.equal(pick("L", ["CLdi", "CWsn", "CLgr"]), 2, "the tileset's own, not the first natural second texture (CWsn)");
   assert.equal(pick("L", ["CKdt", "CLgr", "CLdi", "CYsq"]), 1);
-  // The editor appends CLgr to a list without it; Studio keeps the first with the second texture there.
+  // A list without the tileset's own: the first with the second texture until a stroke appends it (defaultCliffToAdd).
   assert.equal(pick("L", ["CAgr", "CLdi"]), 0);
   assert.equal(pick("D", []), -1);
   // Control: the old rule (first …_Cliff1) took Manmade Walls on Dungeon.
   assert.equal(weDefaultCliffType(cliffList({ cliffTiles: ["CDdi", "CDsq"] }, types)), 1);
+});
+
+test("a stroke on the default cliff type appends the tileset's default cliff to a list without it", () => {
+  const row = (cliffID: string, cliffModelDir: string, texFile: string): CliffType =>
+    ({ cliffID, cliffModelDir, rampModelDir: "CliffTrans", texDir: "TerrainArt\\X", texFile, groundTile: "Xdrt" });
+  const types = new Map([row("CLdi", "Cliffs", "Lords_Cliff0"), row("CLgr", "Cliffs", "Lords_Cliff1"), row("CAgr", "Cliffs", "Ashen_Cliff1"),
+    row("CAdi", "Cliffs", "Ashen_Cliff0"), row("CDdi", "Cliffs", "Cave_Cliff0"), row("CDsq", "CityCliffs", "Cave_Cliff1")].map((c) => [c.cliffID, c]));
+  // we-compare water-cliff-append (branch we-compare-15): CAgr CLdi on Lordaeron Summer saved as CAgr CLdi CLgr, the
+  // water's rim typed 2.
+  const list = ["CAgr", "CLdi"];
+  assert.equal(defaultCliffToAdd(list, "L", types, 15), "CLgr");
+  assert.equal(weDefaultCliffType(cliffList({ cliffTiles: [...list, "CLgr"] }, types), "L", types), 2);
+  assert.equal(defaultCliffToAdd(["CDsq"], "D", types, 15), "CDdi", "Dungeon's natural walls, not its …Cliff1");
+  // Nothing to add: the list has it, wherever; a full list; a tileset with no cliff type of its own.
+  assert.equal(defaultCliffToAdd(["CLdi", "CLgr"], "L", types, 15), null);
+  assert.equal(defaultCliffToAdd(["CLgr", "CAgr"], "L", types, 15), null);
+  assert.equal(defaultCliffToAdd(list, "L", types, 2), null, "no room left: the list keeps its entries");
+  assert.equal(defaultCliffToAdd(list, "Q", types, 15), null);
+  assert.equal(defaultCliffToAdd([], "A", types, 15), "CAgr", "an empty list gets it too");
 });
 
 const LORDAERON = new Map([["CLdi", "Ldrt", "Lords_Cliff0"], ["CLgr", "Lgrs", "Lords_Cliff1"]].map(([cliffID, groundTile, texFile]) =>

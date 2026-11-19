@@ -237,6 +237,10 @@ export interface TerrainEditorHandle {
   cliffGroundTiles(): string[];
   /** The cliff type number the World Editor's cliff palette starts on, for new cliffs and water (-1: none known). */
   defaultCliffType(): number;
+  /** For a stroke on the palette's default cliff type: appends the tileset's default cliff to a cliff list without it
+   *  (as the World Editor's water brush does), then defaultCliffType's number. The next commitTerrain takes the addition
+   *  into its undo step (and gives it back when it is refused); `takeBack` removes it when no stroke is committed. */
+  claimDefaultCliffType(): { type: number; takeBack(): void };
   /** Every cliff type the game defines (CliffTypes.slk) and the ground tile it belongs to; empty until read. */
   gameCliffTypes(): { id: string; groundTile: string }[];
   /** Per entry of the w3e's cliff list: corners naming it, and cliff tiles drawn with it. Null until the game's cliff
