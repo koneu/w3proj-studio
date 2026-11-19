@@ -54,7 +54,9 @@
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
 //                       Another --map while the editor runs opens the map in it (as --open; if that fails, the editor is
 //                       stopped and started again with the map: "via": "open" or "restart" says which); after a --close
-//                       it starts the editor again. One display, one lock, one setup for several maps (we-compare.mjs);
+//                       it starts the editor again. A module window still open from the map before (the Trigger
+//                       Editor, which no close shuts here) restarts the editor instead of the open ("modulesLeft"
+//                       names it): an open one changes the next map's save and takes the keys meant for the map. One display, one lock, one setup for several maps (we-compare.mjs);
 //                       the --look cameras go into the first map only
 //   --campaign FILE     put a copy of this campaign (.w3n) where the Campaign Editor's Open dialog lists it (the prefix's
 //                       Documents/Warcraft III/Campaigns): F7, Ctrl+O, --type its file name (no path: the dialog refuses
@@ -305,10 +307,16 @@ export function questionDialogs(unknown) {
 
 /**
  * What --map does: "start" when no editor is running, "open" (File > Open in the running editor, with a restart as the
- * fallback when that fails) when one is. `running`: an editor was started and hasn't exited.
+ * fallback when that fails) when one is, "restart" when one is but a module window of the map before is still open
+ * (`dialogs`: the editor's dialogs now). The Trigger Editor ignores every close here (WM_DELETE_WINDOW, Alt+F4, its
+ * File > Close Module; checked 2026-11-19), and an open one carries into the next map: that map's wtg is saved with
+ * the opened copy's file name as its map category and that category expanded (var-code), and --key goes to the
+ * module instead of the main window (the water specs' "t" never reached the terrain palette: cliff type 15 in every
+ * wet corner). `running`: an editor was started and hasn't exited.
  */
-export function mapAction(running) {
-  return running ? "open" : "start";
+export function mapAction(running, dialogs = []) {
+  if (!running) return "start";
+  return dialogs.some((d) => isReopenedModule(d.title)) ? "restart" : "open";
 }
 
 /**
@@ -1767,7 +1775,12 @@ async function main() {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
           const first = mapsStarted++ === 0 || !!opts.looksEveryMap, info = {};
-          let via = mapAction(s.running()), fellBack = null;
+          const running = s.running();
+          const dialogs = running ? s.windows().dialogs : [];
+          let via = mapAction(running, dialogs), fellBack = null;
+          const left = via === "restart" ? dialogs.filter((d) => isReopenedModule(d.title)).map((d) => d.title) : [];
+          // A module window the map before left open: a new editor for this map, so nothing of it carries over.
+          if (via === "restart") s.killEditor();
           if (via === "open") {
             try {
               Object.assign(info, await s.openMap(map, first ? looks : []));
@@ -1780,7 +1793,7 @@ async function main() {
             }
           }
           if (via !== "open") await s.start(map, first ? looks : []);
-          out({ step, map, via, ...(fellBack ? { openFailed: fellBack } : {}), ...info, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
+          out({ step, map, via, ...(fellBack ? { openFailed: fellBack } : {}), ...(left.length ? { modulesLeft: left } : {}), ...info, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
         } else if (step === "--open") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
@@ -1888,7 +1901,11 @@ async function main() {
           const mods = s.windows().dialogs.filter((d) => isReopenedModule(d.title));
           for (const d of mods) s.x("close", d.id);
           await s.wait(1000);
-          out({ step, closed: mods.map((d) => d.title) });
+          // "closed" are the ones asked; the Trigger Editor ignores the close: "stayed" names what is still open (the
+          // next --map restarts the editor for it).
+          const ids = new Set(s.windows().dialogs.map((d) => d.id));
+          const stayed = mods.filter((d) => ids.has(d.id)).map((d) => d.title);
+          out({ step, closed: mods.map((d) => d.title), ...(stayed.length ? { stayed } : {}) });
         } else if (step === "--windows") {
           const w = s.windows();
           const brief = (x) => ({ title: x.title, rect: x.rect });

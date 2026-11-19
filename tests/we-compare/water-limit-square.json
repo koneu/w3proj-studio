@@ -1,7 +1,7 @@
 [
   {
     "name": "water-limit-square-deep",
-    "description": "the ground lift of Enforce Water Height Limits (water-limit-low) with the square brush: Deep Water, square (1424,624), size 3 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere); Enforce Water Limits on (we-drive pins it): the same lift in both editors, here and with Shallow size 1 (2026-11-14, two runs)",
+    "description": "the ground lift of Enforce Water Height Limits (water-limit-low) with the square brush: Deep Water, square (1424,624), size 3 at the middle of low-ground-b.w3x (ground at -2000 world units everywhere); Enforce Water Limits on (we-drive pins it): the same lift in both editors, here and with Shallow size 1 (2026-11-14, two runs). The shape stays for the editor's session: each spec sets it back to the circle after its stroke",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/low-ground-b.w3x" },
     "we": {
       "saveAccept": ["Warning", "Error"],
@@ -11,7 +11,8 @@
         ["--click", "1441,310"],
         ["--click", "1424,624"],
         ["--click", "748,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {
@@ -36,7 +37,8 @@
         ["--click", "1473,310"],
         ["--click", "1424,624"],
         ["--click", "748,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {

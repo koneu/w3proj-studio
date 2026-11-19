@@ -1,7 +1,7 @@
 [
   {
     "name": "water-square-shallow",
-    "description": "the palette's square brush shape (Shape, 1424,624; the circle is 1392,624): Shallow Water size 3 at the middle of slope.w3x (748,500), as water-brush-slope-shallow with the square shape: the square of half side 4 (79 corners change against 47 round) is the same in both editors, as in the other three specs (2026-11-14, two runs)",
+    "description": "the palette's square brush shape (Shape, 1424,624; the circle is 1392,624): Shallow Water size 3 at the middle of slope.w3x (748,500), as water-brush-slope-shallow with the square shape: the square of half side 4 (79 corners change against 47 round) is the same in both editors, as in the other three specs (2026-11-14, two runs). The shape stays for the editor's session: each spec sets it back to the circle after its stroke (water-dungeon and water-cliff-append, later in one editor, drew square strokes when it didn't, branch we-shared-state)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/slope.w3x" },
     "we": {
       "saveAccept": ["Warning"],
@@ -11,7 +11,8 @@
         ["--click", "1473,310"],
         ["--click", "1424,624"],
         ["--click", "748,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {
@@ -36,7 +37,8 @@
         ["--click", "1441,310"],
         ["--click", "1424,624"],
         ["--click", "748,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {
@@ -61,7 +63,8 @@
         ["--click", "1473,310"],
         ["--click", "1424,624"],
         ["--click", "748,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {
@@ -86,7 +89,8 @@
         ["--click", "1473,310"],
         ["--click", "1424,624"],
         ["--click", "848,500"],
-        ["--sleep", "1500"]
+        ["--sleep", "1500"],
+        ["--click", "1392,624"]
       ]
     },
     "studio": {

@@ -788,3 +788,16 @@ test("we.renderer is software or gpu, we.why is text, and a spec with another re
   assert.throws(() => spec({ why: 3 }), /we.why is text/);
   assert.notEqual(core.weGroupKey(spec({ mode: "hd" })[0]), core.weGroupKey(spec({ mode: "hd", renderer: "software" })[0]));
 });
+
+test("a palette setting that stays for the editor's session (the brush shape) is set back by the spec that sets it, else the spec is refused", () => {
+  const steps = (...clicks) => [["--key", "t"], ...clicks.map((c) => ["--click", c]), ["--sleep", "1500"]];
+  assert.deepEqual(core.togglesLeft(steps("1456,569", "1424,624", "748,500")).map((t) => t.awayIs), ["square"]);
+  assert.deepEqual(core.togglesLeft(steps("1424,624", "748,500", "1392,624")), [], "set back after the stroke");
+  assert.deepEqual(core.togglesLeft(steps("1392,624", "748,500")), [], "control: the circle alone");
+  assert.deepEqual(core.togglesLeft(steps("748,500")), [], "control: no shape click");
+  assert.deepEqual(core.togglesLeft(steps("1392,624", "1424,624", "748,500")).length, 1, "the last shape click counts");
+  const we = (s) => ({ ...good(), we: { steps: s } });
+  assert.throws(() => parseSpec(we(steps("1424,624", "748,500")), "/s"), /brush shape square \(--click 1424,624\).*click 1392,624/);
+  assert.throws(() => parseSpec(we(["--key t", "--click 1424,624"]), "/s"), /brush shape square/, "the string form of a step too");
+  assert.doesNotThrow(() => parseSpec(we(steps("1424,624", "748,500", "1392,624")), "/s"));
+});
