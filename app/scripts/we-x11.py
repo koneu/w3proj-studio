@@ -14,9 +14,10 @@ its own), through python-xlib and its XTest extension. Every command prints one 
                                                        AltGr reaches, refuses the whole text), Shift where a character needs it
   we-x11.py --display :N click X,Y [--button 1|3] [--double] [--window ID]   click at a screen position
   we-x11.py --display :N move X,Y [--window ID]        move the pointer
-  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--window ID] [--dry]
+  we-x11.py --display :N drag X1,Y1 X2,Y2 [--button 1|2|3] [--ms N] [--steps N] [--mod alt|shift|ctrl] [--hold MS] [--window ID] [--dry]
                                                        press at one point, move to the other in steps over MS (default
-                                                       400), release; MOD held all the while; --dry only prints the
+                                                       400), release; MOD held all the while; --hold MS keeps the
+                                                       pointer still MS after the press and before the release; --dry only prints the
                                                        pointer path (needs no display). click, move and drag with a
                                                        --window that is gone or unmapped do nothing ("pressed": false)
   we-x11.py --display :N shot FILE [--rect X,Y,W,H]    picture of the screen (or a part of it) as PNG; a rect is clipped to
@@ -388,7 +389,10 @@ def drag_path(a, b, steps):
     return [(a[0] + (b[0] - a[0]) * i // steps, a[1] + (b[1] - a[1]) * i // steps) for i in range(1, steps + 1)]
 
 
-def drag(d, a, b, button=1, ms=400, steps=20, mod=None):
+def drag(d, a, b, button=1, ms=400, steps=20, mod=None, hold=0):
+    """Press at a, move to b in `steps` over `ms`, release. `hold` (ms) keeps the pointer still with the button down at
+    a before the first motion and at b before the release: the World Editor reads the pointer once a frame, so at a
+    capped frame rate a press followed at once by motion is seen somewhere along the path, not at a."""
     from Xlib import X
     from Xlib.ext import xtest
     import time
@@ -402,10 +406,11 @@ def drag(d, a, b, button=1, ms=400, steps=20, mod=None):
             time.sleep(0.05)
         xtest.fake_input(d, X.ButtonPress, button)
         d.sync()
+        time.sleep(hold / 1000)
         for p in drag_path(a, b, steps):
             time.sleep(ms / 1000 / max(1, steps))
             move(d, *p)
-        time.sleep(0.05)
+        time.sleep(max(0.05, hold / 1000))
     finally:
         xtest.fake_input(d, X.ButtonRelease, button)
         if modkey is not None:
@@ -623,7 +628,7 @@ def main(argv):
             return max(0, int(rest[rest.index(name) + 1])) / 1000
         except (ValueError, IndexError):
             return 0
-    waits = {"key": peek("--hold"), "settle": peek("--timeout") or 10, "drag": peek("--ms")}
+    waits = {"key": peek("--hold"), "settle": peek("--timeout") or 10, "drag": peek("--ms") + 2 * peek("--hold")}
     if cmd == "frames":
         try:
             waits["frames"] = max(0, int(rest[0])) / 1000
@@ -700,6 +705,7 @@ def main(argv):
         button = num("--button", "1")
         ms = num("--ms", "400")
         steps = num("--steps", "20")
+        hold = max(0, num("--hold", "0"))
         mod = opt("--mod")
         if mod and mod.lower() not in MODS:
             raise SystemExit("drag: unknown --mod %r (known: %s)" % (mod, ", ".join(sorted(MODS))))
@@ -707,7 +713,7 @@ def main(argv):
         b = parse_point(arg(1, "X1,Y1 X2,Y2"), "drag")
         if window_gone({"drag": [a, b], "button": button}):
             return 0
-        drag(d, a, b, button, ms, steps, mod)
+        drag(d, a, b, button, ms, steps, mod, hold)
         out({"drag": [a, b], "button": button})
     elif cmd == "shot":
         rect = opt("--rect")

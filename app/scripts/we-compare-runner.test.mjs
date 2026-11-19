@@ -298,6 +298,9 @@ test("ui keys get a real code; clicks outside the editor's view and bad actions 
   assert.ok(ui([["click", 748, 500], ["drag", 600, 500, 730, 930], ["size", 3], ["key", "d"]]), "control: inside the view; a drag may end past it");
   assert.throws(() => ui([["click", 100, 500]]), /outside the editor's terrain view/);
   assert.throws(() => ui([["drag", 100, 500, 600, 500]]), /starts outside/);
+  assert.ok(ui([["drag", 600, 500, 900, 500, 3000]]), "a drag's time");
+  for (const ms of [10, 2.5, 60001]) assert.throws(() => ui([["drag", 600, 500, 900, 500, ms]]), /MS \(the drag's time\)/, String(ms));
+  assert.throws(() => ui([["drag", 600, 500, 900, 500, 3000, 1]]), /wants X, Y, X2, Y2\[, MS\]/);
   assert.throws(() => ui([["size", "big"]]), /wants a number/);
   assert.throws(() => ui([["wiggle"]]), /unknown ui action/);
 });

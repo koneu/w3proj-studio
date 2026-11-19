@@ -145,12 +145,13 @@ export class Hands {
     await this.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY });
     await sleep(50);
   }
-  async drag(from, to, steps = 12) {
+  /** Presses at `from`, moves to `to` in `steps` moves `stepMs` apart, lets go. */
+  async drag(from, to, steps = 12, stepMs = 30) {
     await this.mouse("mouseMoved", from.x, from.y);
     await this.mouse("mousePressed", from.x, from.y, 1);
     for (let i = 1; i <= steps; i++) {
       await this.mouse("mouseMoved", from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps, 1);
-      await sleep(30);
+      await sleep(stepMs);
     }
     await this.mouse("mouseReleased", to.x, to.y);
     await sleep(100);

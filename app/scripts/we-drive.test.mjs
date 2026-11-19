@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as drive from "./we-drive.mjs";
 import { weOutcome } from "./we-compare-core.mjs";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, DEFAULT_FRAME_CAP, EditorCrashed, fileIsWholeMpq, gpuIcds, isCrashDialog, isWholeMpq, lavapipeIcds, renderEnv, vulkanDriver, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, DEFAULT_DRAG_HOLD, DEFAULT_FRAME_CAP, EditorCrashed, fileIsWholeMpq, gpuIcds, isCrashDialog, isWholeMpq, lavapipeIcds, renderEnv, vulkanDriver, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -122,12 +122,19 @@ test("parseArgs: the day and night fixed by default; --compare-ready refuses a t
 });
 
 test("parseArgs: --drag takes its two positions (and a duration) as one value; --drag-mod belongs to the next drag", () => {
-  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", { from: "375,200", to: "570,255", ms: 400 }], ["--key", "ctrl+c"]]);
-  assert.deepEqual(parseArgs(["--drag-mod", "alt", "--drag", "1,2:3,4@900", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 900, mod: "alt" }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  const H = DEFAULT_DRAG_HOLD;
+  assert.equal(H, 250);
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", { from: "375,200", to: "570,255", ms: 400, hold: H }], ["--key", "ctrl+c"]]);
+  assert.deepEqual(parseArgs(["--drag-mod", "alt", "--drag", "1,2:3,4@900", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 900, mod: "alt", hold: H }], ["--drag", { from: "5,6", to: "7,8", ms: 400, hold: H }]]);
   for (const bad of ["1,2", "1,2:3", "1,2:3,4@5", "1,2:3,4@x", "-1,2:3,4", ""]) assert.throws(() => parseArgs(["--drag", bad]), /--drag/, bad);
   assert.throws(() => parseArgs(["--drag-mod", "meta", "--drag", "1,2:3,4"]), /--drag-mod wants/);
+  // --drag-hold belongs to the next drag only; 0 is the press moved at once.
+  assert.deepEqual(parseArgs(["--drag-hold", "0", "--drag-mod", "shift", "--drag", "1,2:3,4", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, mod: "shift", hold: 0 }], ["--drag", { from: "5,6", to: "7,8", ms: 400, hold: H }]]);
+  assert.deepEqual(parseArgs(["--drag-hold", "600", "--drag", "1,2:3,4"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, hold: 600 }]]);
+  for (const bad of ["-1", "x", "", "10001"]) assert.throws(() => parseArgs(["--drag-hold", bad, "--drag", "1,2:3,4"]), /--drag-hold wants/, bad);
+  assert.throws(() => parseArgs(["--drag-hold", "250"]), /--drag-hold needs a --drag after it/);
   assert.throws(() => parseArgs(["--drag-mod", "alt"]), /needs a --drag/);
-  assert.deepEqual(parseArgs(["--drag-button", "3", "--drag", "1,2:3,4", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, button: 3 }], ["--drag", { from: "5,6", to: "7,8", ms: 400 }]]);
+  assert.deepEqual(parseArgs(["--drag-button", "3", "--drag", "1,2:3,4", "--drag", "5,6:7,8"]).steps, [["--drag", { from: "1,2", to: "3,4", ms: 400, button: 3, hold: H }], ["--drag", { from: "5,6", to: "7,8", ms: 400, hold: H }]]);
   assert.throws(() => parseArgs(["--drag-button", "4", "--drag", "1,2:3,4"]), /--drag-button wants/);
   assert.throws(() => parseArgs(["--drag-button", "2"]), /needs a --drag/);
 });

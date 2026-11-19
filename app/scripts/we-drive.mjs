@@ -102,6 +102,9 @@
 //                       let go (a box select, a doodad move)
 //   --drag-mod MOD      hold alt, shift or ctrl during the next --drag (e.g. Alt-move on the Select tab)
 //   --drag-button N     the next --drag uses mouse button 2 (middle) or 3 (right) instead of the left one
+//   --drag-hold MS      the next --drag keeps the pointer still MS with the button down after the press and before the
+//                       release (default 250, DEFAULT_DRAG_HOLD; 0: moves at once, the editor's per-frame reading of the
+//                       pointer then decides where a box or stroke starts and ends, as drag-stroke-quick measures)
 //   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
 //   --wheel N[@X,Y]     turn the mouse wheel over the terrain view (its middle, or at X,Y of the display): N notches,
 //                       positive zooms in
@@ -262,7 +265,7 @@ const MAX_LOOKS = 16;
 /** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
 const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--wait-window", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--drag-hold", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--wait-window", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (docs/testing/editor-tooling.md
  *  "Layout"). */
@@ -408,6 +411,16 @@ export function parseDrag(arg) {
 
 export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 
+/**
+ * How long a --drag keeps the pointer still with the button down, after the press and before the release (ms), when
+ * no --drag-hold is given. The editor takes the pointer's place once a frame, not from the press and release
+ * themselves: a box select pressed and moved at once began where the pointer was at the next frame, and ended where
+ * it was at the last one before the release (edge-group-nudge's unit box, 20 moves over 400 ms, one run each: cap 10
+ * selected the footman only, uncapped the farm only, held 250 ms both; branch we-timed-specs, 2026-11-19). 250 ms is
+ * two frames and a half at the default cap of 10.
+ */
+export const DEFAULT_DRAG_HOLD = 250;
+
 /** we-drive's work folder when --work isn't given: target/we-drive of this checkout for slot 0, target/we-drive-slotN for N. */
 export const defaultWork = (slot) => join(repo, "target", slot ? `we-drive-slot${slot}` : "we-drive");
 
@@ -462,10 +475,14 @@ export function parseArgs(argv) {
     throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
   }
   // --drag-mod belongs to the next --drag; each --drag is parsed (and refused) here.
-  let pendingMod = null, pendingButton = null, pendingExport = null;
+  let pendingMod = null, pendingButton = null, pendingExport = null, pendingHold = null;
   for (let i = 0; i < steps.length; i++) {
     const [step, v] = steps[i];
-    if (step === "--drag-button") {
+    if (step === "--drag-hold") {
+      if (!/^\d{1,5}$/.test(v ?? "") || Number(v) > 10000) throw new Error("--drag-hold wants MS, 0 to 10000");
+      pendingHold = Number(v);
+      steps.splice(i--, 1);
+    } else if (step === "--drag-button") {
       if (!["1", "2", "3"].includes(v)) throw new Error("--drag-button wants 1, 2 or 3");
       pendingButton = Number(v);
       steps.splice(i--, 1);
@@ -480,11 +497,13 @@ export function parseArgs(argv) {
       steps[i] = [step, { file: v, ...(pendingExport ? { options: pendingExport } : {}) }];
       pendingExport = null;
     } else if (step === "--drag") {
-      steps[i] = [step, { ...parseDrag(v), ...(pendingMod ? { mod: pendingMod } : {}), ...(pendingButton && pendingButton !== 1 ? { button: pendingButton } : {}) }];
+      steps[i] = [step, { ...parseDrag(v), ...(pendingMod ? { mod: pendingMod } : {}), ...(pendingButton && pendingButton !== 1 ? { button: pendingButton } : {}), hold: pendingHold ?? DEFAULT_DRAG_HOLD }];
       pendingMod = null;
       pendingButton = null;
+      pendingHold = null;
     }
   }
+  if (pendingHold !== null) throw new Error("--drag-hold needs a --drag after it");
   // A number that isn't one would wait forever (NaN never passes a deadline) or not at all.
   for (const [step, v] of steps) {
     if (step === "--sleep") positiveNumber("--sleep", v, { orEqual: true });
@@ -1875,9 +1894,9 @@ async function main() {
           await s.wait(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--drag") {
-          s.act("drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []));
+          s.act("drag", arg.from, arg.to, "--ms", arg.ms, ...(arg.mod ? ["--mod", arg.mod] : []), ...(arg.button ? ["--button", arg.button] : []), "--hold", arg.hold ?? DEFAULT_DRAG_HOLD);
           await s.wait(300);
-          out({ step, from: arg.from, to: arg.to, ms: arg.ms, ...(arg.mod ? { mod: arg.mod } : {}), ...(arg.button ? { button: arg.button } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
+          out({ step, from: arg.from, to: arg.to, ms: arg.ms, hold: arg.hold ?? DEFAULT_DRAG_HOLD, ...(arg.mod ? { mod: arg.mod } : {}), ...(arg.button ? { button: arg.button } : {}), dialogs: s.windows().dialogs.map((d) => d.title) });
         } else if (step === "--move") {
           if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
           s.act("move", arg);

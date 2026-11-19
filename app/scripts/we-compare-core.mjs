@@ -46,7 +46,9 @@ export function checkUiActions(actions, where = "ui") {
     else if (kind === "click") { if (!(a.length === 2 && a.every(num))) bad("wants X, Y"); if (!inWeView(a[0], a[1])) bad("is outside the editor's terrain view (156,79 to 1340,923)"); }
     // A drag starts in the view; it may end past its edge (a box selection held on past it, edge-group-nudge), on the display.
     else if (kind === "drag") {
-      if (!(a.length === 4 && a.every(num))) bad("wants X, Y, X2, Y2");
+      // An optional fifth number: the drag's time in ms (20 moves, as we-drive's --drag X,Y:X,Y@MS), else 20 moves 30 ms apart.
+      if (!((a.length === 4 || a.length === 5) && a.every(num))) bad("wants X, Y, X2, Y2[, MS]");
+      if (a.length === 5 && !(Number.isInteger(a[4]) && a[4] >= 20 && a[4] <= 60000)) bad("wants its MS (the drag's time) 20 to 60000");
       if (!inWeView(a[0], a[1])) bad("starts outside the editor's terrain view (156,79 to 1340,923)");
       if (!(a[2] >= 0 && a[3] >= 0 && a[2] < 1600 && a[3] < 1000)) bad("ends outside the editor's 1600x1000 display");
     }

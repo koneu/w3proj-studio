@@ -6,7 +6,7 @@
 //
 // Actions: tab NAME (the terrain editor's tab, "Terrain"); view SPEC (the terrain view at the editor's size, the camera "we" or "we:X,Y[,distance…]" as app-drive's
 // --camera); tool PREFIX (the toolbar button whose title starts so: "Paint:", "−2:"); texture TILE (a ground tile in the
-// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2 (the left button, at editor positions inside its view);
+// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2[,MS] (the left button, at editor positions inside its view; MS the drag's time, 20 moves, else 30 ms a move);
 // sleep MS. Needs window.__driveEd (the "terrain" step). Positions and tool names are those of the page, not a copy.
 
 import { Hands, sleep } from "./cdp.mjs";
@@ -76,7 +76,9 @@ export async function uiStep(page, actions) {
       await sleep(200);
       await settled();
     } else if (kind === "drag") {
-      await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20);
+      // a[4]: the drag's time (as the editor's --drag @MS): the painter re-applies a held brush at most every
+      // HEIGHT_TICK (40 ms), so moves 30 ms apart drop some, and which ones (the stroke's end too) went by the timing.
+      await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30);
       await sleep(500);
       await settled();
     } else if (kind === "sleep") await sleep(a[0]);
