@@ -4,6 +4,7 @@ import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 import { testMapArgs, testMapOptions } from "./testmap";
 import { checkOpenedProject, offerStrayMoves } from "./strays";
 import { dropUnusedStrings } from "./prunestrings";
+import { namesToStringTable } from "./namestrings";
 import { deleteQuestion, wouldDelete } from "../../lib/syncdeletes";
 
 interface UnpackReport {
@@ -123,6 +124,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** `check`: run the Problems checks first and ask before packing a map with errors. */
   const pack = async (output: string | null, check = false): Promise<PackReport | null> => {
+    if (!(await prepare(check))) return null;
+    const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
+    for (const w of r.warnings ?? []) out.append(`warning: ${w}`);
+    out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
+    return r;
+  };
+  /** What a pack does to the project before the backend packs it: every editor saved, the script, the terrain's derived
+   *  files and the destructables' flags settled, the World Editor's save's string rules applied. False: not to be
+   *  packed (the user said so at the problems' question). */
+  const prepare = async (check: boolean): Promise<boolean> => {
     // What's open in editors goes into the build too.
     const saved = await w3.editors.saveAll();
     if (saved) out.append(`saved ${saved} editor${saved === 1 ? "" : "s"} before packing`);
@@ -142,8 +153,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (errors) {
         const c = await w3.window.showWarning(`The map has ${errors} error${errors === 1 ? "" : "s"} (see Problems). Pack anyway?`, "Pack anyway", "Show Problems", "Cancel");
         if (c === "Show Problems") await w3.commands.execute("w3.problems.show");
-        if (c !== "Pack anyway") return null;
+        if (c !== "Pack anyway") return false;
       }
+    }
+    // Plain players' and forces' names become strings, in the project too, as the World Editor's save gives them. Not
+    // doing so never stops the build: the names just stay plain.
+    try {
+      const named = await namesToStringTable(w3);
+      if (named.kept) out.append(`players' and forces' plain names kept as they are: ${named.kept}`);
+      if (named.added.length) {
+        out.append(`gave ${named.added.length} plain player or force name${named.added.length === 1 ? "" : "s"} a string of war3map.wts (${named.added.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
+        // war3map.w3i is one of the script's inputs.
+        await w3.commands.execute("w3.script.settle").catch(() => {});
+      }
+    } catch (e) {
+      out.append(`players' and forces' plain names kept as they are: ${e instanceof Error ? e.message : String(e)}`);
     }
     // Strings nothing refers to leave war3map.wts, in the project too, as the World Editor drops them on every save.
     // Not doing so never stops the build: the strings just stay.
@@ -161,10 +185,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     } catch (e) {
       out.append(`unused strings kept in war3map.wts: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
-    for (const w of r.warnings ?? []) out.append(`warning: ${w}`);
-    out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
-    return r;
+    return true;
   };
 
   /** `askDeletes`: ask before removing files the map doesn't have (not when the user agreed to replace them already,
@@ -295,6 +316,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
       if (map) await sync(map, opts?.replace !== true, dir);
     }),
+
+    // What a pack does to the project before it packs, without packing (we-compare packs through the backend after it).
+    w3.commands.register("w3.project.preparePack", async () => { await prepare(false); }),
 
     w3.commands.register("w3.project.pack", async () => {
       const r = await pack(null, true);

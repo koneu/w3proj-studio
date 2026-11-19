@@ -4544,7 +4544,7 @@
  },
  {
   "name": "mapsize-start-off",
-  "description": "Map Size on 96 x 64 with the start moved to (5248, -2048): right cut by 8 (map edge 5120): the start is off the map: made anew at random by the World Editor (ignored), moved by Studio",
+  "description": "Map Size on 96 x 64 with the start moved to (5248, -2048): right cut by 8 (map edge 5120): the start is off the map: made anew at random by the World Editor (ignored), moved by Studio. The input is not melee (its start's town hall square reaches past the playable edge); both saves make it melee again, the start being valid where it ends up (the editor's random one, Studio's on the camera bound, 3840, -2048). Studio's differed in the flag alone until branch we-compare-16: we-compare packed without the script's settle (the Melee flag follows the save 800 ms later), which the app's own pack waits for (saveForPack now runs w3.project.preparePack)",
   "input": {
    "new": {
     "name": "msstartoff",

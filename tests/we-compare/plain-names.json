@@ -1,0 +1,20 @@
+[
+  {
+    "limit": 40,
+    "name": "plain-names-a",
+    "description": "plain-names-a.w3m (tests/fixtures/we-specs/make-plain-names.mjs: three players named Plain player 1, empty, Plain player 3, one force named Plain force; the table holds 1 Player 1 and 2 Force 1) opened and saved: the editor gives the plain names strings 3, 4 (players) and 5 (the force), the empty name stays (2026-11-19, branch we-compare-16). Studio's pack does the same (map-project namestrings.ts, lib/formats/infostrings.ts namesToStrings). The string table is compared by the new strings' lines (STRING 3 is the editor's first line, after the BOM, so its texts stand for it): the editor also drops 1 and 2, which nothing refers to after its save writes the script again; Studio keeps 2, which the map's script still names",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plain-names-a.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text", "lines": "^(STRING [45]|Plain (player|force).*)$" }]
+  },
+  {
+    "limit": 40,
+    "name": "plain-names-b",
+    "description": "plain-names-b.w3m (players named empty, Plain player 2, TRIGSTR_001; custom forces named Plain force A, empty, Plain force C) opened and saved: the player's plain name becomes 3, the forces' 4 and 5 (players first, then forces, each in their order), the empty names and the reference stay (2026-11-19, branch we-compare-16)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plain-names-b.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text", "lines": "^(STRING [45]|Plain (player|force).*)$" }]
+  }
+]

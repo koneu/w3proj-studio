@@ -451,15 +451,25 @@ test("a missing input map is that spec's error, naming the generator that makes 
   assert.doesNotMatch(plain, /made by/);
 });
 
-test("saving for the pack: an editor left unsaved or a failed terrain rebuild stops the spec", async () => {
-  const fake = ({ dirtyAfter = [], settle = async () => {} } = {}) => {
+test("saving for the pack: the app's pack preparation runs; an editor left unsaved or a failed terrain rebuild stops the spec", async () => {
+  const fake = ({ dirtyAfter = [], settle = async () => {}, prepare = async () => {} } = {}) => {
     const tabs = [{ path: "map/a.txt", dirty: true }, { path: "map/b.txt", dirty: false }];
-    const w3 = { editors: { saveAll: async () => { for (const t of tabs) t.dirty = dirtyAfter.includes(t.path); return 1; } }, commands: { execute: async (id) => { assert.equal(id, "w3.terrain.settle"); return settle(); } } };
-    return [w3, { editors: { tabs } }];
+    const ran = [];
+    const w3 = { editors: { saveAll: async () => { for (const t of tabs) t.dirty = dirtyAfter.includes(t.path); return 1; } }, commands: { execute: async (id) => {
+      ran.push(id);
+      if (id === "w3.project.preparePack") return prepare();
+      assert.equal(id, "w3.terrain.settle");
+      return settle();
+    } } };
+    return [w3, { editors: { tabs } }, ran];
   };
-  await run.saveForPack(...fake());
+  const ok = fake();
+  await run.saveForPack(ok[0], ok[1]);
+  // The script due from the last save and the string rules of the app's own pack come before the backend packs.
+  assert.deepEqual(ok[2], ["w3.project.preparePack", "w3.terrain.settle"]);
   await assert.rejects(run.saveForPack(...fake({ dirtyAfter: ["map/a.txt"] })), /unsaved changes in map\/a\.txt/);
   await assert.rejects(run.saveForPack(...fake({ settle: async () => { throw new Error("derive failed"); } })), /derived files weren't written: derive failed/);
+  await assert.rejects(run.saveForPack(...fake({ prepare: async () => { throw new Error("no such command"); } })), /pack's preparation failed: no such command/);
 });
 
 test("parsed compares: a World Editor save the codecs don't give back is ERROR for that file", () => {

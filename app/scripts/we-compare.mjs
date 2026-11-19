@@ -182,6 +182,10 @@ async function studioStep(page, step, ctx) {
  */
 export async function saveForPack(w3, wb) {
   await w3.editors.saveAll();
+  // What the app's own pack does first (map-project prepare): the script due from the last save (the Melee flag
+  // follows with it), the destructables' flags, the World Editor's save's string rules (players' and forces' plain
+  // names become strings, unused strings go). Without it a spec's last save could reach the pack without them.
+  try { await w3.commands.execute("w3.project.preparePack"); } catch (e) { throw new Error(`the pack's preparation failed: ${e?.message ?? e}`); }
   const dirty = wb.editors.tabs.filter((t) => t.dirty).map((t) => t.path);
   if (dirty.length) throw new Error(`the save left unsaved changes in ${dirty.join(", ")} (its save failed)`);
   try { await w3.commands.execute("w3.terrain.settle"); } catch (e) { throw new Error(`the terrain's derived files weren't written: ${e?.message ?? e}`); }

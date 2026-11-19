@@ -2,11 +2,11 @@
   {
     "limit": 40,
     "name": "resize-strings-open",
-    "description": "The control for resize-strings-border: resize-strings.w3m (tests/fixtures/we-specs/make-resize-objects.mjs <empty map> <cli> strings: plain texts in every text field of war3map.w3i, crest race 3, game data set 1) opened and saved, no Map Size: the map's and the loading screen's texts stay plain, crest race and game data set as they were. Known (2026-11-19): the editor's save alone gives the player's and the force's plain names strings (TRIGSTR_003, _004; Studio keeps them plain) and takes Melee off for the game data set 1 (Studio's save of an unchanged map writes no w3i)",
+    "description": "The control for resize-strings-border: resize-strings.w3m (tests/fixtures/we-specs/make-resize-objects.mjs <empty map> <cli> strings: plain texts in every text field of war3map.w3i, crest race 3, game data set 1) opened and saved, no Map Size: the map's and the loading screen's texts stay plain, crest race and game data set as they were. The editor's save alone gives the player's and the force's plain names strings (TRIGSTR_003, _004) and takes Melee off for the game data set 1: Studio's pack the same since branch we-compare-16 (map-project namestrings.ts; the w3i it writes then gets the Melee flag of a save)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-strings.w3m" },
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "steps": [{ "mcp": "save_project" }] },
-    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"], "expect": "differs", "expectPaths": ["players[].name", "forces[].name", "flags"] }]
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
   },
   {
     "limit": 60,
