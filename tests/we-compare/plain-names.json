@@ -16,5 +16,14 @@
     "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
     "studio": { "steps": [{ "mcp": "save_project" }] },
     "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text", "lines": "^(STRING [45]|Plain (player|force).*)$" }]
+  },
+  {
+    "limit": 40,
+    "name": "plain-names-c",
+    "description": "plain-names-c.w3m (make-plain-names.mjs c: players named Twin, Twin, Player 1, twin; custom forces named Twin, Force 1, Lone; the packed table holds only 2 Force 1, which the script's comment names) opened and saved: the editor saved the players TRIGSTR 3, 3, 4, 5 and the forces 3, 2, 6: a name whose text (case and all) the table has, or an earlier name of the save took, refers to that string (2026-11-19, branch we-compare-17; studio-paths-matrix-masks showed it first: player 9 and force 2, both Horde, one string). Studio: infostrings.ts namesToStrings with the table. The whole table is compared",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plain-names-c.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text" }]
   }
 ]

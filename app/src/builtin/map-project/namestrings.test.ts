@@ -66,7 +66,7 @@ const info = (files: Record<string, string>) => JSON.parse(files[INFO]) as { nam
 test("plain names become strings 3, 4, 5 after the table's 1 and 2, in one edit, the tables before the w3i", async () => {
   const files = project();
   const { w3, writes, records } = fakeW3(files);
-  assert.deepEqual(await namesToStringTable(w3), { added: [3, 4, 5], kept: null });
+  assert.deepEqual(await namesToStringTable(w3), { added: [3, 4, 5], reused: 0, kept: null });
   assert.deepEqual(info(files).players.map((p) => p.name), ["TRIGSTR_003", "", "TRIGSTR_004"]);
   assert.deepEqual(info(files).forces.map((f) => f.name), ["TRIGSTR_005"]);
   assert.equal(info(files).name, "Just another Warcraft III map", "the map's name stays plain");
@@ -76,7 +76,7 @@ test("plain names become strings 3, 4, 5 after the table's 1 and 2, in one edit,
   assert.deepEqual(writes, ["map/war3map.wts", INFO]);
   assert.equal(records.length, 1, "one undoable edit");
   // Done: nothing left to do, no second edit.
-  assert.deepEqual(await namesToStringTable(w3), { added: [], kept: null });
+  assert.deepEqual(await namesToStringTable(w3), { added: [], reused: 0, kept: null });
   assert.equal(records.length, 1);
 });
 
@@ -96,9 +96,31 @@ test("the control: names all references or empty change nothing", async () => {
   files[INFO] = JSON.stringify({ players: [{ name: "TRIGSTR_001" }, { name: "" }], forces: [{ name: "TRIGSTR_002" }] });
   const before = { ...files };
   const { w3, writes } = fakeW3(files);
-  assert.deepEqual(await namesToStringTable(w3), { added: [], kept: null });
+  assert.deepEqual(await namesToStringTable(w3), { added: [], reused: 0, kept: null });
   assert.deepEqual(writes, []);
   assert.deepEqual(files, before);
+});
+
+test("a name whose text the table has, or an earlier name took, refers to that string (plain-names-c)", async () => {
+  // plain-names-c: the table holds 2 "Force 1"; the editor saved 3, 3, 4, 5 and 3, 2, 6.
+  const files = project();
+  files["map/war3map.wts"] = "﻿" + block(2, "Force 1");
+  files[INFO] = JSON.stringify({ players: [{ name: "Twin" }, { name: "Twin" }, { name: "Player 1" }, { name: "twin" }], forces: [{ name: "Twin" }, { name: "Force 1" }, { name: "Lone" }] });
+  const { w3, records } = fakeW3(files);
+  assert.deepEqual(await namesToStringTable(w3), { added: [3, 4, 5, 6], reused: 3, kept: null });
+  assert.deepEqual(info(files).players.map((p) => p.name), ["TRIGSTR_003", "TRIGSTR_003", "TRIGSTR_004", "TRIGSTR_005"]);
+  assert.deepEqual(info(files).forces.map((f) => f.name), ["TRIGSTR_003", "TRIGSTR_002", "TRIGSTR_006"]);
+  const table = new StringTable(files["map/war3map.wts"]);
+  assert.deepEqual([...table.entries()], [[2, "Force 1"], [3, "Twin"], [4, "Player 1"], [5, "twin"], [6, "Lone"]]);
+  assert.equal(records.length, 1);
+  // Only names the table has already: the w3i changes, the table doesn't, still one edit.
+  const only = project();
+  only[INFO] = JSON.stringify({ players: [{ name: "Player 1" }], forces: [{ name: "Force 1" }] });
+  const o = fakeW3(only);
+  assert.deepEqual(await namesToStringTable(o.w3), { added: [], reused: 2, kept: null });
+  assert.deepEqual(o.writes, [INFO]);
+  assert.equal(only["map/war3map.wts"], WTS);
+  assert.deepEqual([...info(only).players, ...info(only).forces].map((x) => x.name), ["TRIGSTR_001", "TRIGSTR_002"]);
 });
 
 test("no war3map.wts: one is made with the new strings", async () => {
@@ -140,7 +162,7 @@ test("an unsaved editor, no edit log, a raw w3i: nothing written, and why", asyn
   delete raw[INFO];
   raw["map/war3map.w3i"] = "binary";
   const c = fakeW3(raw);
-  assert.deepEqual(await namesToStringTable(c.w3), { added: [], kept: null });
+  assert.deepEqual(await namesToStringTable(c.w3), { added: [], reused: 0, kept: null });
   assert.deepEqual([...a.writes, ...b.writes, ...c.writes], []);
 });
 

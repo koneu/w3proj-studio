@@ -19,26 +19,29 @@ import { StringTable } from "../../lib/formats/wts";
 const WTS = "map/war3map.wts";
 const INFO_JSON = "map/war3map.w3i.json";
 
-/** `added`: the new strings' numbers; `kept`: why nothing was looked at (unsaved editors, no edit log), else null. */
-export interface NameStringsOutcome { added: number[]; kept: string | null }
+/** `added`: the new strings' numbers; `reused`: how many names now refer to a string the table had already (or one
+ *  added for an earlier name); `kept`: why nothing was looked at (unsaved editors, no edit log), else null. */
+export interface NameStringsOutcome { added: number[]; reused: number; kept: string | null }
 
 /** See the top. Throws when a file it needs can't be read, or the project changes meanwhile: nothing is changed. */
 export async function namesToStringTable(w3: W3Api): Promise<NameStringsOutcome> {
   const root = w3.workspace.project()?.root;
-  if (!root) return { added: [], kept: "no project is open" };
+  if (!root) return { added: [], reused: 0, kept: "no project is open" };
   // The numbers taken are searched in the listed files: only once every file is listed.
   await w3.workspace.filesReady();
   if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
   const listed = () => w3.workspace.files().map((f) => f.path);
-  if (!listed().some((p) => p.toLowerCase() === INFO_JSON)) return { added: [], kept: null };
+  if (!listed().some((p) => p.toLowerCase() === INFO_JSON)) return { added: [], reused: 0, kept: null };
   const unsaved = w3.editors.unsavedPaths();
-  if (unsaved.length) return { added: [], kept: `${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes` };
+  if (unsaved.length) return { added: [], reused: 0, kept: `${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes` };
   const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE).catch(() => null);
-  if (!edits) return { added: [], kept: "the edit log (the MCP extension) is off" };
+  if (!edits) return { added: [], reused: 0, kept: "the edit log (the MCP extension) is off" };
   let added: InfoString[] = [];
+  let plain = 0;
   const done = await edits.edit("Strings for Players' and Forces' Names", async (read) => {
     if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
     added = [];
+    plain = 0;
     // Absent is nothing to do; there but unreadable (or not JSON) throws.
     const text = await read(INFO_JSON);
     if (text === null) return [];
@@ -46,14 +49,16 @@ export async function namesToStringTable(w3: W3Api): Promise<NameStringsOutcome>
     try { info = JSON.parse(text); } catch { throw new Error(`${INFO_JSON} is there but can't be read`); }
     if (!info || typeof info !== "object" || Array.isArray(info)) throw new Error(`${INFO_JSON} is there but can't be read`);
     // Nothing plain: nothing else is read.
-    if (!namesToStrings(JSON.parse(text) as Record<string, unknown>, 1).length) return [];
+    plain = namesToStrings(JSON.parse(text) as Record<string, unknown>, 1).length;
+    if (!plain) return [];
     const wts = await read(WTS);
     const taken = await stringNumbersTaken(w3, listed());
     for (const [n] of wts === null ? [] : new StringTable(wts).entries()) taken.add(n);
     let max = 0;
     for (const n of taken) max = Math.max(max, n);
     if (w3.workspace.project()?.root !== root) throw new Error("the project changed meanwhile");
-    added = namesToStrings(info as Record<string, unknown>, max + 1);
+    // A name whose text the table has already refers to that string (a name met twice to one string).
+    added = namesToStrings(info as Record<string, unknown>, max + 1, wts === null ? [] : new StringTable(wts).entries());
     // The tables first, then the file that refers to their new strings.
     const out: { path: string; text: string }[] = [];
     for (const path of listed().filter(isLocaleWts)) {
@@ -68,5 +73,5 @@ export async function namesToStringTable(w3: W3Api): Promise<NameStringsOutcome>
     out.push({ path: INFO_JSON, text: canonical });
     return out;
   });
-  return { added: done ? added.map((s) => s.num) : [], kept: null };
+  return done ? { added: added.map((s) => s.num), reused: plain - added.length, kept: null } : { added: [], reused: 0, kept: null };
 }

@@ -161,8 +161,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     try {
       const named = await namesToStringTable(w3);
       if (named.kept) out.append(`players' and forces' plain names kept as they are: ${named.kept}`);
-      if (named.added.length) {
-        out.append(`gave ${named.added.length} plain player or force name${named.added.length === 1 ? "" : "s"} a string of war3map.wts (${named.added.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
+      if (named.reused) out.append(`${named.reused} plain player or force name${named.reused === 1 ? "" : "s"} now refer${named.reused === 1 ? "s" : ""} to a string of war3map.wts with the same text, as the World Editor's save does`);
+      if (named.added.length || named.reused) {
+        if (named.added.length) out.append(`gave ${named.added.length} plain player or force name${named.added.length === 1 ? "" : "s"} a string of war3map.wts (${named.added.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
         // war3map.w3i is one of the script's inputs.
         await w3.commands.execute("w3.script.settle").catch(() => {});
       }
