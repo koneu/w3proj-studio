@@ -1,0 +1,56 @@
+[
+  {
+    "limit": 40,
+    "name": "paste-negative-reals-on",
+    "description": "Paste Ability of an object holding negative reals, with Allow negative real values on as File > Preferences writes it ([Object Editor] Allow Negative Values=true; the box asks 'Are you sure you want to allow negative values?' first; 2026-11-19): negative-reals.w3x (tests/fixtures/we-specs/make-negative-reals.mjs: custom Heal A000, Cooldown -3, -1.5, 2, Casting Time -0.5, Cast Range -100), the Object Editor (F6) on Abilities, End and six Right keys select the custom Heal, Edit > Copy Ability, Edit > Paste Ability, the Object ID dialog's default id (A001) taken with Return: A001 comes with every negative unchanged, as Studio's Ctrl+C, Ctrl+V (objectedit.ts pastedObject)",
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "we": {
+      "mode": "sd",
+      "freshEditor": true,
+      "prefs": { "Object Editor": { "Allow Negative Values": "true" } },
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "235,274"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "193,171"], ["--sleep", "800"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "195,188"], ["--sleep", "2000"],
+        ["--key", "Return"], ["--sleep", "2000"], ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "settings": { "objectEditor.allowNegativeReals": true },
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3a', 'A000'); for (let i = 0; i < 100 && !document.querySelector('.obj-list'); i++) await new Promise((r) => setTimeout(r, 100)); const list = document.querySelector('.obj-list'); list.focus(); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 1000)); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 2000)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3a", "as": "parsed" }]
+  },
+  {
+    "limit": 40,
+    "name": "paste-negative-reals-off",
+    "description": "The same with Allow negative real values off (Allow Negative Values=false): the editor's Paste Ability keeps the negatives too (2026-11-19), and Studio's paste, with its setting off",
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "we": {
+      "mode": "sd",
+      "freshEditor": true,
+      "prefs": { "Object Editor": { "Allow Negative Values": "false" } },
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "235,274"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "193,171"], ["--sleep", "800"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "195,188"], ["--sleep", "2000"],
+        ["--key", "Return"], ["--sleep", "2000"], ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "settings": { "objectEditor.allowNegativeReals": false },
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3a', 'A000'); for (let i = 0; i < 100 && !document.querySelector('.obj-list'); i++) await new Promise((r) => setTimeout(r, 100)); const list = document.querySelector('.obj-list'); list.focus(); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 1000)); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 2000)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3a", "as": "parsed" }]
+  }
+]
