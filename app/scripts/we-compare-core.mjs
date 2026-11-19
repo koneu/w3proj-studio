@@ -147,9 +147,11 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (we.mode !== undefined && !["sd", "hd", "de"].includes(we.mode)) throw new Error(`${where}: we.mode is sd, hd or de`);
   if (we.from !== undefined && !["input", "studio"].includes(we.from)) throw new Error(`${where}: we.from is input (the spec's map) or studio (the map Studio saved: does the editor open and re-save it unchanged?)`);
   if (we.saveAccept !== undefined && !(Array.isArray(we.saveAccept) && we.saveAccept.every((t) => typeof t === "string" && t && !t.includes(",")))) throw new Error(`${where}: we.saveAccept is a list of dialog titles`);
-  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "save", "steps", "freshEditor", "expectCrash", "prefs"].includes(k));
+  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "save", "steps", "freshEditor", "expectCrash", "prefs", "renderer", "why"].includes(k));
   if (unknownWe.length) throw new Error(`${where}: unknown we.${unknownWe.join(", we.")}`);
   for (const k of ["freshEditor", "expectCrash"]) if (we[k] !== undefined && typeof we[k] !== "boolean") throw new Error(`${where}: we.${k} is true or false`);
+  if (we.renderer !== undefined && !["software", "gpu"].includes(we.renderer)) throw new Error(`${where}: we.renderer is software or gpu (the editor's renderer for this spec, whatever we-compare's --renderer auto would pick)`);
+  if (we.why !== undefined && typeof we.why !== "string") throw new Error(`${where}: we.why is text (a comment: why the renderer is forced)`);
   if (we.save !== undefined && !["plain", "shadows"].includes(we.save)) throw new Error(`${where}: we.save is plain (Ctrl+S) or shadows (File > Calculate Shadows and Save Map)`);
   const prefs = parsePrefs(we.prefs, `${where}: we.prefs`);
   const studio = raw.studio ?? {};
@@ -220,7 +222,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     input: parsedInput,
     we: {
       mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))),
-      save: we.save ?? "plain", freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs,
+      save: we.save ?? "plain", freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs, renderer: we.renderer ?? null,
     },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
@@ -870,7 +872,30 @@ export function weDriveSteps(specs, { restart = false, mapOf, saveOf }) {
 
 /** The key of a spec's World Editor process: specs share one (one editor) only with the same mode, dialogs the save
  *  answers and pinned prefs (each is an option of the whole we-drive process). */
-export const weGroupKey = (s) => JSON.stringify([s.we.mode, s.we.saveAccept, s.we.prefs ?? []]);
+export const weGroupKey = (s) => JSON.stringify([s.we.mode, s.we.saveAccept, s.we.prefs ?? [], s.we.renderer ?? null]);
+
+/**
+ * Which renderer a we-drive process gets (`--renderer` of we-drive): `asked` is we-compare's --renderer (or
+ * W3PROJ_WE_RENDERER): "software" or "gpu" always wins, "auto" (the default) goes by the spec: its `we.renderer` (a
+ * picture measured on lavapipe forces "software"), else gpu for HD graphics (mode hd, de) and for a full run (many
+ * specs: the whole spec folder or a shard), else software, the renderer the measurements were made with.
+ */
+export function chooseRenderer({ asked = "auto", specRenderer = null, mode = "sd", fullRun = false } = {}) {
+  if (asked === "software" || asked === "gpu") return asked;
+  if (asked !== "auto") throw new Error(`--renderer wants software, gpu or auto, not "${asked}"`);
+  if (specRenderer) return specRenderer;
+  return mode === "hd" || mode === "de" || fullRun ? "gpu" : "software";
+}
+
+/** A full run: the files named are every spec file of `dir`'s listing, or the run is a shard of such. */
+export function isFullRun(files, listing, shard = null) {
+  if (shard) return true;
+  const all = new Set(listing);
+  return all.size > 0 && files.length >= all.size && [...all].every((f) => files.includes(f));
+}
+
+/** The line to print when auto asked for gpu and we-drive said it has no hardware driver (a run goes on with software), else null. */
+export const gpuMissing = (skipped) => (typeof skipped === "string" && /no hardware Vulkan driver/.test(skipped) ? skipped : null);
 
 /** One spec's result as text: a line per file, then its first differences. */
 export function formatReport(result, limit = 10, { strictIgnore = false } = {}) {
