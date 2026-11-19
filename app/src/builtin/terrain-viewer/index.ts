@@ -4808,7 +4808,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           pushEdit: (e) => pushEdit(e),
           cliffGroundTiles: () => (cliffData ? cliffList(terrain, cliffData.types).map((c) => c?.groundTile ?? "") : []),
-          defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map())),
+          defaultCliffType: () => weDefaultCliffType(cliffList(terrain, cliffData?.types ?? new Map()), terrain.tileset, cliffData?.types),
           gameCliffTypes: () => (cliffData ? [...cliffData.types.values()].map((c) => ({ id: c.cliffID, groundTile: c.groundTile })) : []),
           cliffTypeUse: () => (cliffData ? cliffEntryUse(terrain, cliffData.types) : null),
           addCliffType: (id) => addCliffType(id),

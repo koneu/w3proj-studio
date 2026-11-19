@@ -46,6 +46,32 @@ test("new cliffs and water start on the cliff type the World Editor's palette st
   assert.equal(weDefaultCliffType(cliffList(terrain(["CLno", "CLgr"]), types)), 1, "after a type the game doesn't define");
 });
 
+test("the water brush's cliff type is the tileset's natural cliff, wherever the map's cliff list has it", () => {
+  // CliffTypes.slk's rows (w3proj game slk TerrainArt/CliffTypes.slk --col cliffID,cliffModelDir,texFile).
+  const row = (cliffID: string, cliffModelDir: string, texFile: string): CliffType =>
+    ({ cliffID, cliffModelDir, rampModelDir: "CliffTrans", texDir: "TerrainArt\\X", texFile, groundTile: "Xdrt" });
+  const types = new Map([row("CLdi", "Cliffs", "Lords_Cliff0"), row("CLgr", "Cliffs", "Lords_Cliff1"), row("CAgr", "Cliffs", "Ashen_Cliff1"),
+    row("CAdi", "Cliffs", "Ashen_Cliff0"), row("CWgr", "Cliffs", "Lordw_Cliff0"), row("CWsn", "Cliffs", "Lordw_Cliff1"),
+    row("CYdi", "Cliffs", "City_Cliff0"), row("CYsq", "CityCliffs", "City_Cliff1"), row("CDdi", "Cliffs", "Cave_Cliff0"),
+    row("CDsq", "CityCliffs", "Cave_Cliff1"), row("CGdi", "Cliffs", "GCliff0"), row("CGsq", "CityCliffs", "GCliff1"),
+    row("CKdi", "Cliffs", "Citadel_Cliff0"), row("CKdt", "CityCliffs", "Citadel_Cliff1")].map((c) => [c.cliffID, c]));
+  const pick = (tileset: string, cliffTiles: string[]) => weDefaultCliffType(cliffList({ cliffTiles }, types), tileset, types);
+  // we-compare water-dungeon and its probes (branch we-compare-14): the editor typed the water's rim with these.
+  assert.equal(pick("D", ["CDdi", "CDsq"]), 0, "Dungeon: Natural Walls, not Cave_Cliff1's Manmade Walls");
+  assert.equal(pick("G", ["CGdi", "CGsq"]), 0);
+  assert.equal(pick("K", ["CKdi", "CKdt"]), 0);
+  assert.equal(pick("L", ["CLdi", "CLgr"]), 1);
+  assert.equal(pick("L", ["CLgr", "CLdi"]), 0);
+  assert.equal(pick("A", ["CAgr", "CAdi"]), 0);
+  assert.equal(pick("L", ["CLdi", "CWsn", "CLgr"]), 2, "the tileset's own, not the first natural second texture (CWsn)");
+  assert.equal(pick("L", ["CKdt", "CLgr", "CLdi", "CYsq"]), 1);
+  // The editor appends CLgr to a list without it; Studio keeps the first with the second texture there.
+  assert.equal(pick("L", ["CAgr", "CLdi"]), 0);
+  assert.equal(pick("D", []), -1);
+  // Control: the old rule (first …_Cliff1) took Manmade Walls on Dungeon.
+  assert.equal(weDefaultCliffType(cliffList({ cliffTiles: ["CDdi", "CDsq"] }, types)), 1);
+});
+
 const LORDAERON = new Map([["CLdi", "Ldrt", "Lords_Cliff0"], ["CLgr", "Lgrs", "Lords_Cliff1"]].map(([cliffID, groundTile, texFile]) =>
   [cliffID, { cliffID, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: "TerrainArt\\LordaeronSummer", texFile, groundTile } as CliffType]));
 const ids = (list: ReturnType<typeof cliffList>) => list.map((c) => c?.cliffID);

@@ -34,12 +34,28 @@ export interface CliffType {
   groundTile: string;
 }
 
-/** The cliff type number (in `list`, cliffList's) the World Editor's cliff palette starts on: the tileset's second cliff
- *  texture (texFile …_Cliff1). Seen: Grass Cliff on Lordaeron Summer, with the w3e's cliff list either way round
- *  (we-compare water-brush-swapped, 2026-11-13; the status bar says "Grass Cliff" on a new map), and CAgr on Ashenvale
- *  (tests/fixtures/water-brush/ash-shallow.w3e). -1 when the map has no such cliff. */
-export function weDefaultCliffType(list: CliffList): number {
-  return list.findIndex((c) => !!c && /_cliff1$/i.test(c.texFile));
+/** The cliff type the World Editor's water brush and cliff palette start on for a tileset (its letter, as the cliff
+ *  ids' second one): of the tileset's own cliff types (`types`, CliffTypes.slk), the first natural one (cliffModelDir
+ *  Cliffs, not CityCliffs) with the second texture (texFile …Cliff1), else the first natural one, else the first with
+ *  the second texture. Seen (we-compare, the water brush's cliff type): Grass Cliff CLgr on Lordaeron Summer, CAgr on
+ *  Ashenvale, and on Dungeon, Underground and Black Citadel the natural CDdi, CGdi, CKdi, not their …Cliff1 (CDsq,
+ *  CGsq, CKdt: CityCliffs; water-dungeon, branch we-compare-14). Null when the tileset has none. */
+export function tilesetDefaultCliff(tileset: string, types: ReadonlyMap<string, CliffType>): string | null {
+  const own = [...types.values()].filter((c) => c.cliffID[1] === tileset);
+  const natural = (c: CliffType) => /^cliffs$/i.test(c.cliffModelDir);
+  const second = (c: CliffType) => /cliff1$/i.test(c.texFile);
+  return (own.find((c) => natural(c) && second(c)) ?? own.find(natural) ?? own.find(second))?.cliffID ?? null;
+}
+
+/** The cliff type number (in `list`, cliffList's) the World Editor's cliff palette starts on: the tileset's default
+ *  cliff (tilesetDefaultCliff) wherever it is in the w3e's cliff list (we-compare water-brush-swapped, 2026-11-13: Grass
+ *  Cliff under CLdi CLgr and CLgr CLdi; branch we-compare-14: CLgr third in CLdi CWsn CLgr, second in CKdt CLgr CLdi
+ *  CYsq). The editor appends it to a list without it (CAgr CLdi became CAgr CLdi CLgr on Lordaeron Summer); Studio then
+ *  takes the first entry with the second texture, as before. -1 when the map has neither. */
+export function weDefaultCliffType(list: CliffList, tileset = "", types: ReadonlyMap<string, CliffType> = new Map()): number {
+  const id = tilesetDefaultCliff(tileset, types);
+  const at = id === null ? -1 : list.findIndex((c) => c?.cliffID === id);
+  return at >= 0 ? at : list.findIndex((c) => !!c && /_cliff1$/i.test(c.texFile));
 }
 
 /** A cliff model and the tiles (y × (width-1) + x) it covers. */

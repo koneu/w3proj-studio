@@ -1,0 +1,58 @@
+[
+  {
+    "limit": 40,
+    "name": "water-dungeon",
+    "description": "Tileset water on the Dungeon tileset: nv-D.w3x (tests/fixtures/we-specs/make-water-tilesets.mjs <cli> <game> <out> --dry D: flat.w3x on Dungeon's first six tiles and cliffs CDdi CDsq, dry flat ground), Shallow Water size 3 at the opening camera's 748,500, then Deep Water size 3 at 900,650: the saved w3e and w3i as Studio's. The editor types the water's rim with Natural Walls CDdi (0), where Studio took Cave_Cliff1's CDsq (1) and added its ground Dsqd until branch we-compare-14 (cliffs.ts tilesetDefaultCliff)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-D.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "800"],
+        ["--click", "1441,310"],
+        ["--click", "1456,569"],
+        ["--click", "900,650"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 748, 500], ["tool", "Deep:"], ["size", 3], ["click", 900, 650]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  },
+  {
+    "limit": 40,
+    "name": "water-black-citadel",
+    "description": "The same two water strokes on Black Citadel (nv-K.w3x, make-water-tilesets.mjs … --dry K: cliffs CKdi CKdt): the editor types the rim with the natural Dirt Cliff CKdi (0), not Citadel_Cliff1's CityCliffs CKdt (2026-11-19)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-K.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"],
+        ["--click", "1456,569"],
+        ["--click", "1473,310"],
+        ["--click", "748,500"],
+        ["--sleep", "800"],
+        ["--click", "1441,310"],
+        ["--click", "1456,569"],
+        ["--click", "900,650"],
+        ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Shallow:"], ["size", 3], ["click", 748, 500], ["tool", "Deep:"], ["size", 3], ["click", 900, 650]] },
+        { "sleep": 1000 }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  }
+]
