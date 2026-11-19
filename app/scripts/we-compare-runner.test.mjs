@@ -583,6 +583,15 @@ test("checkoutFiles: the files a --type text or an eval names in the checkouts; 
   assert.match(msg, /^no file at .*Rabbit\.mdx \(made by node tests\/fixtures\/we-specs\/make-import-modes\.mjs/);
 });
 
+test("an --open step's map is a path as input.map's, and one of the files the spec needs", () => {
+  const vars = { REPO: "/r", MAIN: "/m" };
+  const s = parseSpec({ ...good(), we: { steps: [["--open", "${REPO}/target/paste-cliff/b.w3x"], "--open c.w3x", ["--key", "${REPO}/x"]] } }, "/s", vars);
+  // Each is waited for; only --open's path is filled in.
+  assert.deepEqual(s.we.steps, [["--open", join("/r", "target", "paste-cliff", "b.w3x")], ["--wait-ready"], ["--open", resolve("/s", "c.w3x")], ["--wait-ready"], ["--key", "${REPO}/x"]]);
+  assert.deepEqual(s.files.sort(), [join("/r", "target", "paste-cliff", "b.w3x"), resolve("/s", "c.w3x")].sort());
+  assert.throws(() => parseSpec({ ...good(), we: { steps: [["--open", "${NOPE}/b.w3x"]] } }, "/s", vars), /unknown \$\{NOPE\}/);
+});
+
 test("we options: freshEditor, expectCrash and prefs are checked; prefs key the editor group; an unknown we key is refused", () => {
   const s = parseSpec({ ...good(), we: { freshEditor: true, expectCrash: true, prefs: { Misc: { "Enforce Water Limits": "false", "Undo Limit": 0 } } } }, "/s");
   assert.equal(s.we.freshEditor, true);

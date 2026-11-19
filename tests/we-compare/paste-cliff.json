@@ -1,0 +1,130 @@
+[
+  {
+    "name": "paste-cliff-lacking",
+    "description": "test.md 'Pasting ground whose cliff type the map lacks': ground copied in one map and pasted into another whose cliff list lacks the cliff's type. Input paste-cliff-src.w3x (tests/fixtures/we-specs/make-melee-valid.mjs <cli> <game> --out DIR --case 'cliffsrc={\"corners\":[[30,30,34,34,{\"layer\":3}]]}': flat.w3x, cliffs CLdi CLgr, a plateau one level up with its cliff corners typed 1, CLgr); the second map nv-L-CAgr-CLdi.w3x (make-water-tilesets.mjs <cli> <game> <out> --dry --cliffs CAgr,CLdi L). The World Editor: the terrain palette (t) with nothing applied is the selection brush; a drag round the plateau (546,243 to 954,708 at the opening camera: the middles of tiles 27, 36 and 35, 25, by the projection of docs/testing/cameras-and-views.md), Ctrl+C, the second map opened in the same editor, Ctrl+V, a click at 722,444 (the ground point 31.5, 31 tiles: the copied area's middle, so the plateau lands where it was copied, corners 30 to 34). Measured 2026-11-19 (branch we-compare-18): the editor keeps the corners' cliff number as it was (1, CLdi in this list: no lookup by name), appends nothing and says nothing. Studio (the Select tab's Area, the same drag, w3.terrain.copy / paste across the two projects, the same click; see paste-cliff-same-number for the pixel) looks the type up by name: CLgr is missing, the first type (0, CAgr) stands in and a warning says so (fragment.ts cliffNumbers); it also adds that type's ground Agrs to the ground list (header.ground[6], which the editor leaves). Expected differences: the 40 cliff corners, 1 against 0, and the ground list",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/paste-cliff-src.w3x" },
+    "we": {
+      "freshEditor": true,
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--drag", "546,243:954,708@1200"], ["--sleep", "800"], ["--key", "ctrl+c"], ["--sleep", "500"],
+        ["--open", "${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x"], ["--sleep", "500"],
+        ["--key", "ctrl+v"], ["--sleep", "500"], ["--move", "722,444"], ["--sleep", "500"], ["--click", "722,444"], ["--sleep", "1500"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "[...document.querySelectorAll('.terrain-group-tools button.chip')].find((b) => b.textContent === 'Area').click(); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["drag", 546, 243, 954, 708]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.copy'); const dir = w3.workspace.project().root + '-target'; await w3.backend.invoke('project_unpack', { map: '${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x', dir, allowIncomplete: false }); await w3.editors.closeAll(); await w3.workspace.open(dir); for (let i = 0; i < 100 && w3.workspace.project()?.root !== dir; i++) await new Promise((r) => setTimeout(r, 100)); if (w3.workspace.project()?.root !== dir) throw new Error('the second map did not open');" },
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["click", 722, 444]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["header.ground[6]"], "expectCorners": [{ "fields": ["cliffType"], "we": 1, "studio": 0, "corners": [40, 40] }] }
+    ],
+    "limit": 20
+  },
+  {
+    "name": "paste-cliff-other-number",
+    "description": "As paste-cliff-lacking into nv-L-CLgr-CLdi.w3x (make-water-tilesets.mjs <cli> <game> <out> --dry --cliffs CLgr,CLdi L): the map has CLgr, at 0. The editor still writes the number it copied (1, CLdi here); Studio finds CLgr by name (0). Expected difference: the 40 cliff corners, 1 against 0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/paste-cliff-src.w3x" },
+    "we": {
+      "freshEditor": true,
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--drag", "546,243:954,708@1200"], ["--sleep", "800"], ["--key", "ctrl+c"], ["--sleep", "500"],
+        ["--open", "${REPO}/tests/fixtures/we-specs/nv-L-CLgr-CLdi.w3x"], ["--sleep", "500"],
+        ["--key", "ctrl+v"], ["--sleep", "500"], ["--move", "722,444"], ["--sleep", "500"], ["--click", "722,444"], ["--sleep", "1500"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "[...document.querySelectorAll('.terrain-group-tools button.chip')].find((b) => b.textContent === 'Area').click(); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["drag", 546, 243, 954, 708]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.copy'); const dir = w3.workspace.project().root + '-target'; await w3.backend.invoke('project_unpack', { map: '${REPO}/tests/fixtures/we-specs/nv-L-CLgr-CLdi.w3x', dir, allowIncomplete: false }); await w3.editors.closeAll(); await w3.workspace.open(dir); for (let i = 0; i < 100 && w3.workspace.project()?.root !== dir; i++) await new Promise((r) => setTimeout(r, 100)); if (w3.workspace.project()?.root !== dir) throw new Error('the second map did not open');" },
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["click", 722, 444]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectCorners": [{ "fields": ["cliffType"], "we": 1, "studio": 0, "corners": [40, 40] }] }
+    ],
+    "limit": 20
+  },
+  {
+    "name": "paste-cliff-past-14",
+    "description": "As paste-cliff-lacking into nv-L-16-CLgr-last.w3x (make-water-tilesets.mjs <cli> <game> <out> --dry --cliffs CLdi,CFdi,CFgr,CWgr,CWsn,CBde,CBgr,CNdi,CNsn,CAgr,CAdi,CCgr,CCdi,CYdi,CYsq,CLgr L, renamed): sixteen cliff types, CLgr the 16th (15), which no corner can name. The editor writes 1 (CFdi here), adds that type's ground Fdrt to the ground list (header.ground[6]) and says nothing; Studio puts the first type (0, CLdi, whose Ldrt the list has) and warns. Expected differences: the 40 cliff corners, 1 against 0, and the ground list. Each spec of this file has an editor of its own (freshEditor), so each copies and pastes at the same opening camera",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/paste-cliff-src.w3x" },
+    "we": {
+      "freshEditor": true,
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--drag", "546,243:954,708@1200"], ["--sleep", "800"], ["--key", "ctrl+c"], ["--sleep", "500"],
+        ["--open", "${REPO}/tests/fixtures/we-specs/nv-L-16-CLgr-last.w3x"], ["--sleep", "500"],
+        ["--key", "ctrl+v"], ["--sleep", "500"], ["--move", "722,444"], ["--sleep", "500"], ["--click", "722,444"], ["--sleep", "1500"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "[...document.querySelectorAll('.terrain-group-tools button.chip')].find((b) => b.textContent === 'Area').click(); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["drag", 546, 243, 954, 708]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.copy'); const dir = w3.workspace.project().root + '-target'; await w3.backend.invoke('project_unpack', { map: '${REPO}/tests/fixtures/we-specs/nv-L-16-CLgr-last.w3x', dir, allowIncomplete: false }); await w3.editors.closeAll(); await w3.workspace.open(dir); for (let i = 0; i < 100 && w3.workspace.project()?.root !== dir; i++) await new Promise((r) => setTimeout(r, 100)); if (w3.workspace.project()?.root !== dir) throw new Error('the second map did not open');" },
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["click", 722, 444]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e", "expect": "differs", "expectPaths": ["header.ground[6]"], "expectCorners": [{ "fields": ["cliffType"], "we": 1, "studio": 0, "corners": [40, 40] }] }
+    ],
+    "limit": 20
+  },
+  {
+    "name": "paste-cliff-same-number",
+    "description": "The control of paste-cliff-lacking: into nv-L.w3x (make-water-tilesets.mjs <cli> <game> <out> --dry L: cliffs CLdi CLgr, as the source's), where the number and the name agree: both programs give the corners CLgr (1), the plateau pasted at the same tiles (corners 30 to 34, where it was copied). The drag's ends and the click lie on tile middles: with the drag 560,250 to 950,700 (its west end 0.17 tile from a tile's edge) and clicks at 750,500 or 765,515 the editor's paste landed one tile apart from run to run (3 of 8 runs at 765,515, fresh editors too), the area it selects changing with it; Studio's always at the same place. MATCH (2026-11-19, two runs)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/paste-cliff-src.w3x" },
+    "we": {
+      "freshEditor": true,
+      "saveAccept": ["Warning"],
+      "steps": [
+        ["--key", "t"], ["--sleep", "800"], ["--drag", "546,243:954,708@1200"], ["--sleep", "800"], ["--key", "ctrl+c"], ["--sleep", "500"],
+        ["--open", "${REPO}/tests/fixtures/we-specs/nv-L.w3x"], ["--sleep", "500"],
+        ["--key", "ctrl+v"], ["--sleep", "500"], ["--move", "722,444"], ["--sleep", "500"], ["--click", "722,444"], ["--sleep", "1500"], ["--key", "Escape"], ["--sleep", "300"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "[...document.querySelectorAll('.terrain-group-tools button.chip')].find((b) => b.textContent === 'Area').click(); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["drag", 546, 243, 954, 708]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.copy'); const dir = w3.workspace.project().root + '-target'; await w3.backend.invoke('project_unpack', { map: '${REPO}/tests/fixtures/we-specs/nv-L.w3x', dir, allowIncomplete: false }); await w3.editors.closeAll(); await w3.workspace.open(dir); for (let i = 0; i < 100 && w3.workspace.project()?.root !== dir; i++) await new Promise((r) => setTimeout(r, 100)); if (w3.workspace.project()?.root !== dir) throw new Error('the second map did not open');" },
+        { "terrain": true },
+        { "ui": [["tab", "Select"], ["view", "we"]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));" },
+        { "ui": [["click", 722, 444]] },
+        { "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3e", "as": "w3e" }
+    ],
+    "limit": 20
+  }
+]
