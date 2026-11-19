@@ -9,7 +9,7 @@
     "freshEditor": true,
     "steps": [
       ["--key", "F5"],
-      ["--sleep", "2500"],
+      ["--wait-window", "Sound Editor"],
       ["--click", "150,192"],
       ["--key", "Home"],
       ["--sleep", "500"],

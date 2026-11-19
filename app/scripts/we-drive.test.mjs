@@ -1204,3 +1204,48 @@ test("Session: the real spawnWine starts the run's log afresh, then adds to it; 
   await spawnOnce();
   assert.equal(readFileSync(s.log, "utf8"), "this run's reg\n", "the second program of the run adds to it");
 });
+
+test("Session: idle waits for a dialog to appear and fill, asking the helper for the pictures", { skip: LINUX_ONLY }, async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  // A dialog opens at 1 s and its list is drawn until 1.6 s (its picture's hash changes); the main window never counts.
+  r.windows = () => {
+    const dt = r.clock.t - t0;
+    const main = { ...mainWin("a.w3m"), md5: "never read" };
+    if (dt < 1000) return [main];
+    return [main, { ...dialogWin(9, "Sound Editor"), md5: `list${Math.min(Math.floor((dt - 1000) / 100), 6)}` }];
+  };
+  // (The dialog's first sign comes after 1 s: a quiet editor before it is why --idle has a minimum.)
+  const res = await r.s.idle("the Sound Editor", { minMs: 1200 });
+  const dt = r.clock.t - t0;
+  assert.ok(dt >= 2000 && dt < 2300, `idle came ${dt} ms after the start: 400 ms after the last change at 1.6 s`);
+  assert.ok(res.polls > 20);
+  assert.ok(r.calls.filter(([c]) => c === "windows").every((c) => c.includes("--pics")), "pictures asked in the same call as the list");
+  // A window set that keeps changing: the error names what it waited for.
+  let n = 0;
+  r.windows = () => [mainWin("a.w3m"), dialogWin(9, `Progress ${n++}`)];
+  await assert.rejects(r.s.idle("the Trigger Editor to open", { timeoutMs: 2000 }), /waiting for the Trigger Editor to open: the windows \(.*Progress \d+/);
+});
+
+test("Session: idle with a window title waits for that window, and the error names it", { skip: LINUX_ONLY }, async (t) => {
+  const r = rig(t);
+  await r.s.start(r.maps["a.w3m"]);
+  const t0 = r.clock.t;
+  r.windows = () => [mainWin("a.w3m"), ...(r.clock.t - t0 >= 3000 ? [dialogWin(9, "Sound Editor")] : [])];
+  await r.s.idle('a window titled "Sound Editor"', { window: "Sound Editor", minMs: 0 });
+  assert.ok(r.clock.t - t0 >= 3400, "400 ms after the window came, not after the start");
+  r.windows = () => [mainWin("a.w3m")];
+  await assert.rejects(r.s.idle('a window titled "Object Editor"', { window: "Object Editor", timeoutMs: 1000 }), /waiting for a window titled "Object Editor"/);
+});
+
+test("parseArgs: --wait-window takes a title, --idle none", () => {
+  const o = parseArgs(["--key", "F5", "--wait-window", "Sound Editor", "--idle"]);
+  assert.deepEqual(o.steps, [["--key", "F5"], ["--wait-window", "Sound Editor"], ["--idle", null]]);
+  assert.throws(() => parseArgs(["--wait-window"]));
+});
+
+test("parseArgs: --idle is a step without a value", () => {
+  const o = parseArgs(["--key", "F5", "--idle", "--sleep", "100"]);
+  assert.deepEqual(o.steps.map(([s]) => s), ["--key", "--idle", "--sleep"]);
+});
