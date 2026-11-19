@@ -1,0 +1,39 @@
+[
+  {
+    "limit": 40,
+    "name": "cliff-append-up1",
+    "description": "Increase One size 3 at the opening camera's 748,500 on nv-L-CAgr-CLdi.w3x (water-cliff-append's map: Lordaeron Summer, the cliff list CAgr CLdi without the tileset's Grass Cliff CLgr), in a fresh editor with the palette's cliff type as it starts: the editor appends CLgr to the list (CAgr CLdi CLgr) and types the cliff with it, as its water brush (2026-11-19, branch we-compare-16); Studio on the palette's default the same (cliffs.ts defaultCliffToAdd, the terrain viewer's claimDefaultCliffType)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x" },
+    "we": {
+      "freshEditor": true,
+      "saveAccept": ["Warning"],
+      "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "748,500"], ["--sleep", "1500"]]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 3], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  },
+  {
+    "limit": 40,
+    "name": "cliff-append-up1-first",
+    "description": "Increase One size 3 at 748,500 on nv-L-CAgr-CLdi.w3x with the palette's first cliff type thumb (1409,367) clicked first: the same (CAgr CLdi CLgr): the palette's thumbs are the tileset's cliff types (Grass Cliff first), not the map's list (2026-11-19, branch we-compare-16)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--click", "748,500"], ["--sleep", "1500"]]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["size", 3], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  },
+  {
+    "limit": 40,
+    "name": "cliff-append-up1-dirt",
+    "description": "the control: Increase One size 3 at 748,500 on nv-L-CAgr-CLdi.w3x with the Dirt Cliff thumb (1441,367), which the list has (CLdi): nothing is appended, the list stays CAgr CLdi (2026-11-19, branch we-compare-16)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x" },
+    "we": {
+      "saveAccept": ["Warning"],
+      "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1441,367"], ["--click", "748,500"], ["--sleep", "1500"]]
+    },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["cliff", "Dirt"], ["size", 3], ["click", 748, 500]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.w3e", "as": "w3e" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  }
+]
