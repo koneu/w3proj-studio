@@ -10,12 +10,26 @@
 //
 // Options:
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path)
-//   --work DIR          scratch folder (default: target/we-drive of this checkout): map copies, the editor's log
+//   --work DIR          scratch folder (default: target/we-drive of this checkout, target/we-drive-slotN on slot N):
+//                       map copies, the editor's log
+//   --slot N            the World Editor slot (default W3PROJ_WE_SLOT, else 0): slot N > 0 has a farm, a Wine prefix
+//                       and a lock of its own (we-setup.mjs slotPaths), so editors on two slots run at once. Its first
+//                       start sets the slot up (the farm's hardlinks, a new prefix, the terms answered)
+//   --alone             take every slot's lock (in ascending order, waiting for the other runs), so no other editor
+//                       runs meanwhile: for --fps, whose numbers a second editor lowers (TESTING.md "Several editors")
 //   --timeout S         how long --wait-ready and --close wait (default 300)
 //   --screen WxH        the hidden display's size (default 1600x1000; the positions below are measured there). The
 //                       editor sizes its main window by the display, the terrain view following it, which gives
 //                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
+//   --frame-cap N       at most N frames a second for the editor's views (DXVK's limit; default 10, or
+//                       W3PROJ_WE_FRAME_CAP; 0 = none, the old behaviour). The editor redraws all the time, and under
+//                       lavapipe each frame costs the CPU (TESTING.md "Editor CPU"): settled pictures are the same
+//                       bytes, but --fps counts at most N, and what times frames (an animation's phase) can differ
+//   --renderer R        software (default, or W3PROJ_WE_RENDERER): Mesa's lavapipe, the same pictures on every
+//                       machine; gpu: the machine's Vulkan driver (NVIDIA presents into Xvfb since driver 595), a
+//                       fraction of the CPU, but pictures a few levels apart from lavapipe's (texture filtering).
+//                       --wait-ready's "render" names the driver the editor really loaded
 //   --keyboard LAYOUT   the display's keyboard layout (setxkbmap, e.g. de) before the editor starts. --key names keysyms,
 //                       so under de the key named z is the physical key US keyboards call Y
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
@@ -99,7 +113,16 @@
 //   --view-menu         the View menu's items, their shortcuts and check marks (read from a picture of the open menu)
 //   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
 //                       With game view on the items above it are greyed: their marks then read as unchecked
-//   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
+//   --fps MS            how often the terrain view's picture changes during MS (it animates day and night); another
+//                       editor running at the same time lowers it (use --alone), and the frame cap bounds it (printed
+//                       as "frameCap"; --frame-cap 0 for the editor's own rate)
+//   --idle              wait until the editor is quiet (the window set and the pictures of the palettes, dialogs and menus unchanged for 400 ms, at
+//                       least 150 ms, at most --timeout (default 300 s): an error names what it waited
+//                       for); prints the time and the busy part. Replaces a --sleep after a key or click that opens
+//                       something (we-idle.mjs)
+//   --wait-window TITLE wait until a window whose title contains TITLE is open (a dialog or palette) and has stood still for
+//                       400 ms, at most --timeout (default 300 s): an error names the title. For the window a key or click
+//                       just opened (F5 the Sound Editor), instead of a --sleep of its guessed opening time
 //   --sleep MS          wait (the windows read every second meanwhile: a crash dialog stops the run when it comes)
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
@@ -121,10 +144,10 @@
 // the next run's start kills the prefix's leftover wineserver first.
 //
 // Isolation (fixed, not options): the editor runs from the farm of we-setup.mjs (shared by all worktrees, one run at a
-// time by its lock), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
+// time per slot by the slot's lock; --slot), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
 // farm, its prefix, the work folder, the runtime dir and /tmp (writableDirs), and the user's Steam prefix (the real
 // install included) and every hardlink of the farm read-only within those. It shows nothing on the user's screen (a display of its
-// own, 1600x1000), renders through lavapipe (the NVIDIA driver can't present into Xvfb), and plays no sound: Wine's
+// own, 1600x1000), renders through lavapipe (--renderer) at most 10 frames a second (--frame-cap), and plays no sound: Wine's
 // audio drivers are off, PulseAudio and PipeWire are pointed at nothing, and their sockets and /dev/snd are hidden.
 // Before each start the editor's preferences in that prefix get no first-start questions, no interface sounds, the
 // graphics mode and the day and night setting (editorPrefs); the install's text locale goes into its registry.
@@ -139,10 +162,11 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
+import { currentSlot, existingSlots, farmDir, gameDir, linkedFiles, missing, parseSlot, prefixDir, setup, shimPath, takeAllSlots, takeLock, userCompatData } from "./we-setup.mjs";
 import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
 import { ensureCli } from "./appctl.mjs";
 import { decodePng } from "./pic-compare.mjs";
+import { waitQuiet } from "./we-idle.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
@@ -236,7 +260,7 @@ const MAX_LOOKS = 16;
 /** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
 const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--wait-window", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
  *  "Layout"). */
@@ -261,7 +285,7 @@ export function parsePref(v) {
   if (!m || m[2] !== m[2].trim()) throw new Error(`--pref wants Section/Key=value ("Misc/Enforce Water Limits=false"), not ${JSON.stringify(v)}`);
   return { section: m[1], key: m[2], value: m[3] };
 }
-const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
+const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close", "--idle"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
 const OPEN_DIALOG = "Open Document";
@@ -376,8 +400,13 @@ export function parseDrag(arg) {
 
 export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 
+/** we-drive's work folder when --work isn't given: target/we-drive of this checkout for slot 0, target/we-drive-slotN for N. */
+export const defaultWork = (slot) => join(repo, "target", slot ? `we-drive-slot${slot}` : "we-drive");
+
 export function parseArgs(argv) {
-  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
+  const envCap = process.env.W3PROJ_WE_FRAME_CAP;
+  const opts = { game: null, work: null, timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [], renderer: process.env.W3PROJ_WE_RENDERER || "software",
+    frameCap: envCap !== undefined && envCap !== "" ? parseFrameCap(envCap, "W3PROJ_WE_FRAME_CAP") : DEFAULT_FRAME_CAP };
   let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
@@ -388,6 +417,8 @@ export function parseArgs(argv) {
     };
     if (a === "--game") opts.game = resolve(value());
     else if (a === "--work") opts.work = resolve(value());
+    else if (a === "--slot") opts.slot = parseSlot(value(), "--slot");
+    else if (a === "--alone") opts.alone = true;
     else if (a === "--timeout") opts.timeout = positiveNumber("--timeout", value());
     else if (a === "--mode") opts.mode = value();
     else if (a === "--save-accept") opts.saveAccept.push(...value().split(",").filter(Boolean));
@@ -402,6 +433,8 @@ export function parseArgs(argv) {
       opts.keyboard = layout;
     }
     else if (a === "--keep-prefs") opts.keepPrefs = true;
+    else if (a === "--frame-cap") opts.frameCap = parseFrameCap(value());
+    else if (a === "--renderer") opts.renderer = value();
     else if (a === "--null-audio") opts.nullAudio = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
     else if (a === "--expect-layout") opts.expectLayout = true;
@@ -412,6 +445,9 @@ export function parseArgs(argv) {
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown argument ${a} (see the top of we-drive.mjs)`);
   }
+  // The slot's own work folder by default, so runs on two slots don't share one (slot 0: target/we-drive as before).
+  opts.work ??= defaultWork(opts.slot ?? currentSlot());
+  if (!["software", "gpu"].includes(opts.renderer)) throw new Error(`--renderer (or W3PROJ_WE_RENDERER) wants software or gpu, not "${opts.renderer}"`);
   if (opts.expectLayout && opts.screen && (opts.screen[0] !== SIZE[0] || opts.screen[1] !== SIZE[1])) throw new Error("--expect-layout checks the layout of the 1600x1000 display: leave out --screen");
   for (const [step, v] of steps) if (step === "--numlock" && !["on", "off", "status"].includes(v)) throw new Error("--numlock wants on, off or status");
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
@@ -516,7 +552,7 @@ export function protonFor(game) {
 }
 
 /**
- * Mesa's software Vulkan (lavapipe; the NVIDIA driver can't present into Xvfb): every lvp_icd*.json manifest in the
+ * Mesa's software Vulkan (lavapipe, `--renderer software`: the same pictures on every machine): every lvp_icd*.json manifest in the
  * loader's folders, as distributions name it "lvp_icd.json" (Ubuntu) or per architecture ("lvp_icd.x86_64.json",
  * Debian 12, Fedora). All of them go to the loader, which takes the one of the editor's architecture. [] when none.
  */
@@ -528,6 +564,49 @@ export function lavapipeIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
     for (const n of [...names].sort()) if (/^lvp_icd.*\.json$/.test(n)) found.push(posix.join(d, n));
   }
   return found;
+}
+
+/** The Vulkan drivers' manifests other than lavapipe's (NVIDIA's, Mesa's hardware ones): what `--renderer gpu` gives
+ *  the loader, so a machine without a usable GPU fails to start rather than falling back to software unseen. */
+export function gpuIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
+  const found = [];
+  for (const d of dirs) {
+    let names;
+    try { names = list(d); } catch { continue; }
+    for (const n of [...names].sort()) if (/\.json$/.test(n) && !/^lvp_icd/.test(n)) found.push(posix.join(d, n));
+  }
+  return found;
+}
+
+/** The default frames a second of the editor's views (`--frame-cap`; W3PROJ_WE_FRAME_CAP overrides, 0 = uncapped). */
+export const DEFAULT_FRAME_CAP = 10;
+
+/** `--frame-cap`'s value: a whole number of frames a second, 0 for none. */
+export function parseFrameCap(v, what = "--frame-cap") {
+  const s = String(v ?? "").trim();
+  if (!/^\d{1,4}$/.test(s)) throw new Error(`${what} wants a whole number of frames a second (0: no cap), not "${v}"`);
+  return Number(s);
+}
+
+/**
+ * The rendering part of the editor's environment: which Vulkan drivers the loader sees (`renderer` "software":
+ * lavapipe, "gpu": the hardware ones) and DXVK's frame limit (`frameCap` > 0: DXVK_FRAME_RATE; 0 sets it to 0, which
+ * DXVK reads as no limit, so a cap in the caller's own environment doesn't leak in). TESTING.md "Editor CPU".
+ */
+export function renderEnv({ renderer = "software", frameCap = DEFAULT_FRAME_CAP } = {}, icds = { software: lavapipeIcds, gpu: gpuIcds }) {
+  if (!["software", "gpu"].includes(renderer)) throw new Error(`--renderer wants software or gpu, not "${renderer}"`);
+  const files = icds[renderer]().join(":");
+  return { VK_ICD_FILENAMES: files, VK_DRIVER_FILES: files, DXVK_FRAME_RATE: String(frameCap) };
+}
+
+/** Which Vulkan driver a process has loaded, from its /proc/PID/maps text: "lavapipe", "nvidia" (its ICD is
+ *  libGLX_nvidia), "other" for another Mesa driver (libvulkan_*), null for none (yet). --wait-ready reports it. */
+export function vulkanDriver(maps) {
+  const text = String(maps ?? "");
+  if (/\/libvulkan_lvp\.so/.test(text)) return "lavapipe";
+  if (/\/libGLX_nvidia\.so/.test(text)) return "nvidia";
+  if (/\/libvulkan_[a-z0-9]+\.so/.test(text)) return "other";
+  return null;
 }
 
 /** Whether util-linux's setpriv is there (it is on every usual distribution). */
@@ -857,6 +936,14 @@ export class Session {
     }
   }
 
+  /** How the editor renders: the asked renderer and frame cap, and the Vulkan driver its main window's process has
+   *  loaded (null when /proc can't tell), so a run on the GPU that fell back to software shows. */
+  renderInfo(main) {
+    let driver = null;
+    try { if (main?.pid) driver = vulkanDriver(readFileSync(`/proc/${main.pid}/maps`, "utf8")); } catch { /* gone or not ours */ }
+    return { renderer: this.opts.renderer ?? "software", frameCap: this.opts.frameCap ?? DEFAULT_FRAME_CAP, driver };
+  }
+
   /** The folders the editor's processes may write (everything else of the machine is mounted read-only): the farm
    *  (its copied CASC indices, shmem and ecache; its hardlinks are mounted read-only again after it), the farm's Wine
    *  prefix, the run's work folder (the map copies the editor saves over, the minimap it exports), the runtime dir
@@ -898,8 +985,7 @@ export class Session {
       STEAM_COMPAT_CLIENT_INSTALL_PATH: this.proton.steamRoot,
       SteamAppId: this.proton.appId,
       SteamGameId: this.proton.appId,
-      VK_ICD_FILENAMES: lavapipeIcds().join(":"),
-      VK_DRIVER_FILES: lavapipeIcds().join(":"),
+      ...renderEnv({ renderer: this.opts.renderer, frameCap: this.opts.frameCap }),
       WINEDEBUG: "-all",
       // English system dialogs whatever the user's language, so their buttons' keys are known ("n" is No).
       LANG: "en_US.UTF-8",
@@ -981,7 +1067,7 @@ export class Session {
     let code = null;
     child.on("exit", (c) => { code = c; child.exited = true; });
     child.on("error", (e) => { child.spawnError = e; child.exited = true; });
-    // Bounded: it runs under the machine-wide lock, and a Wine that hangs (a stale wineserver) must not hold it forever.
+    // Bounded: it runs under the slot's lock, and a Wine that hangs (a stale wineserver) must not hold it forever.
     if (!(await waitExit(child, LOCALE_MS, this.clock))) {
       this.killPrefix(child);
       throw new Error(`couldn't set the editor's locale in the prefix: reg didn't finish within ${LOCALE_MS / 1000} s (killed; see ${this.log})`);
@@ -1017,8 +1103,10 @@ export class Session {
         throw new Error(`the editor before didn't exit within ${EXIT_WAIT_MS / 1000} s of its close (see ${this.log})`);
       }
     }
-    // A wineserver of the prefix still running now is a stale one (we-drive holds the machine-wide lock): a run before
-    // that was killed past its cleanup (SIGKILL, OOM). The next Wine program would join it.
+    // A wineserver of the prefix still running now is a stale one (we-drive holds the slot's lock): a run before
+    // that was killed past its cleanup (SIGKILL, OOM). The next Wine program would join it. Only this slot's: Wine
+    // finds a prefix's server by the prefix folder (/tmp/.wine-<uid>/server-<dev>-<inode> of pfx), and WINEPREFIX is
+    // this slot's (wineserver()), so another slot's editor and wineserver are never reached.
     this.wineserver(["-k"], EXIT_WAIT_MS);
     this.wineserver(["-w"], EXIT_WAIT_MS);
     // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
@@ -1060,11 +1148,11 @@ export class Session {
 
   /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
    *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
-  windows() {
-    const all = this.x("windows").windows;
+  windows(flags = []) {
+    const all = this.x("windows", ...flags).windows;
     const crash = crashDialogs(all, programOfPid);
     if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
-    return classify(all);
+    return { ...classify(all), all };
   }
 
   /** A pointer action (click, drag, move) of a step: the window list is read first, so a crash dialog that came up
@@ -1083,6 +1171,22 @@ export class Session {
       await this.wait(Math.min(1000, left));
       if (this.editor) this.windows();
     }
+  }
+
+  /** Waits until the editor is quiet (we-idle.mjs): the window set and the pictures of the palettes, dialogs and menus unchanged for 400 ms, at
+   *  least `minMs`, at most `timeoutMs`, then an error naming `what`. A crash dialog on the way is handled by
+   *  windows() as everywhere. */
+  idle(what, opts = {}) {
+    return waitQuiet({
+      what, clock: this.clock, timeoutMs: (this.opts.timeout ?? 300) * 1000, ...opts,
+      sample: () => {
+        // One helper call: the window list with a hash of each window's picture (not the main window's: its terrain
+        // view redraws all the time, measured 52 changes a second in SD with the day fixed).
+        const w = this.windows(["--pics"]);
+        const key = [w.main, ...w.palettes, ...w.dialogs, ...w.menus].filter(Boolean).map((x) => `${x.title}@${x.rect.join(",")}`).join(" | ");
+        return { key, pic: w.all.map((x) => x.md5 ?? "").join(" "), ready: opts.window ? [...w.dialogs, ...w.palettes].some((x) => x.title.includes(opts.window)) : true };
+      },
+    });
   }
 
   /** The crash dialog was seen: a picture of the screen (read from the X server, nothing sent to the dialog), then the
@@ -1270,7 +1374,7 @@ export class Session {
             const layout = layoutProblem(main, palettes);
             if (layout) return { ready: false, layout, main: main.rect, palettes: palettes.map((p) => ({ title: p.title, rect: p.rect })), screen: this.dialogShot("layout") };
           }
-          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
+          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls, render: this.renderInfo(main) };
         }
       } else readySince = 0;
       if (this.now() > deadline) {
@@ -1609,9 +1713,12 @@ async function main() {
     return 0;
   }
   const out = (o) => console.log(JSON.stringify(o));
+  // The slot decides the farm, the prefix and the lock together (we-setup slotPaths): set before any of them is read.
+  if (opts.slot !== undefined) process.env.W3PROJ_WE_SLOT = String(opts.slot);
   const game = gameDir(opts.game ?? undefined);
   let why = missing(game);
-  if (!why && !lavapipeIcds().length) why = `no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
+  if (!why && opts.renderer === "gpu" && !gpuIcds().length) why = `no hardware Vulkan driver for --renderer gpu (a manifest other than lavapipe's in ${ICD_DIRS.join(" or ")})`;
+  if (!why && opts.renderer !== "gpu" && !lavapipeIcds().length) why =`no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
   if (!why) {
     try {
       const { tool } = protonFor(game);
@@ -1627,7 +1734,9 @@ async function main() {
   textLocale(readFileSync(join(game, ".build.info"), "utf8"));
   // The lock first: setting up may rebuild the farm (another game build), which must not happen under another run's
   // live editor, nor in two fresh runs at once.
-  const release = await takeLock((m) => console.error(`we-drive: ${m}`));
+  // --alone: every slot's lock (no other editor runs meanwhile), else the slot's own.
+  const sayLock = (m) => console.error(`we-drive: ${m}`);
+  const release = opts.alone ? await takeAllSlots(sayLock, { slots: [...new Set([...existingSlots(), currentSlot()])] }) : await takeLock(sayLock);
   let s = null;
   const stopAll = () => {
     try { s?.stop(); } finally { release(); }
@@ -1788,7 +1897,17 @@ async function main() {
           out({ step, ...(await s.gameView(arg)) });
         } else if (step === "--fps") {
           const { main } = s.mainOrThrow();
-          out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
+          // Never more changes a second than the frame cap: it goes with the count (--frame-cap 0 for the editor's own rate).
+          out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")), frameCap: opts.frameCap });
+        } else if (step === "--idle") {
+          // The editor's own work after the step before (a window opening, a list filling): quiet CPU and an unchanged
+          // window set, 30 s at most. Replaces most of the --sleep steps.
+          const r = await s.idle("the editor to go quiet");
+          out({ step, ...r });
+        } else if (step === "--wait-window") {
+          // The window the step before opened: it is there (title contains ARG) and has stood still for 400 ms.
+          const r = await s.idle(`a window titled "${arg}"`, { window: arg });
+          out({ step, window: arg, ...r });
         } else if (step === "--sleep") {
           await s.sleepWatching(Number(arg));
           out({ step });

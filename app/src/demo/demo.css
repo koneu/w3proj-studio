@@ -1,0 +1,22 @@
+/* Only the web demo loads this (demo.html). */
+.demo-banner {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 30px;
+  z-index: 100000;
+  max-width: 560px;
+  padding: 6px 10px;
+  font: 11px/1.4 system-ui, sans-serif;
+  color: #fff;
+  background: rgba(0, 90, 160, 0.92);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* With no editor open, the editor area shows a made-up picture where the terrain would be (nothing of the game). */
+.editor-empty {
+  background: #1e2630 url("./terrain-preview.svg") center / contain no-repeat;
+}
+.editor-empty .watermark, .editor-empty .hint { position: relative; top: 150px; color: rgba(255, 255, 255, 0.55); }

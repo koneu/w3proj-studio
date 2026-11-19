@@ -1,6 +1,7 @@
 /target
 node_modules/
 /app/dist/
+/app/dist-demo/
 /app/src-tauri/gen/
 # the release CLI copied in for a release bundle (tauri.release.conf.json, .github/workflows/release.yml)
 /app/src-tauri/binaries/

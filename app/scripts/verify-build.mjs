@@ -46,7 +46,7 @@ export function testerCommands(built, runs, tester) {
     env,
     appDrive: `node scripts/app-drive.mjs --app "${built.exe}" --work "${join(base, "drive")}" <steps>`,
     appSmoke: `W3_APP_BIN="${built.exe}"${built.cli ? ` W3PROJ_BIN="${built.cli}"` : ""} W3_SMOKE_ID=${built.id}.${tester} W3_SMOKE_DIR="${join(base, "smoke")}" node scripts/app-smoke.mjs --only=<check>`,
-    weCompare: `node scripts/we-compare.mjs --app "${built.exe}" --work "${join(base, "we-compare")}" <spec.json>`,
+    weCompare: `node scripts/we-compare.mjs --app "${built.exe}" --work "${join(base, "we-compare")}" --slot auto <spec.json>`,
   };
 }
 

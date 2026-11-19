@@ -10433,8 +10433,13 @@ async function paletteMouse(page, found) {
  *  asked and texture since HD water has waves (branch water-waves-we): the game's ReplaceableTextures\Water\Water_Normal.blp
  *  (without that read: 116, 141, 139 again, measured alone 2026-11-14). The panel asked 20 alone (15 in the full part,
  *  its tile colours kept) since gates and walls are drawn as their pathing texture's cells: the texture was asked for
- *  its cells and again for its size; read once for both (branch game-reads-alone), 19 alone again. */
-const GAME_READS_RECORDED = { reads: 117, asked: 142, textures: 140 };
+ *  its cells and again for its size; read once for both (branch game-reads-alone), 19 alone again. One more asked
+ *  since the skins take Units\UnitBalance.slk's collision sizes and building marks (objects.ts SKIN_TABLES, b1cb0a28,
+ *  units on the ground on save): once per skins load, served from the cache (another loader read it), so no more read.
+ *  One more texture since HD draws the border's shade over a copy of the picture (renderer.ts drawHdBorder's
+ *  copyScene, 349c45f0): one per view and size, as HD water's (measured alone 2026-11-19 by bisecting, branch
+ *  fix-reads-once: 117, 143, 141). */
+const GAME_READS_RECORDED = { reads: 117, asked: 143, textures: 141 };
 const PANEL_READS_MAX = { reads: 9, asked: 19 };
 
 async function gameReadsOnce(page, found) {

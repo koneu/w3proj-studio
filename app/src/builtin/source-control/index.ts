@@ -5,7 +5,7 @@
 // backend (git_status, git_show, git_size; tool_run for init/add/commit).
 
 import { goToNextChunk, goToPreviousChunk, MergeView, getChunks } from "@codemirror/merge";
-import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, type Branch, type Change, type Commit, type CommitFile } from "./git";
+import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, takeSide, type Branch, type Side, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { isFullPath } from "../../lib/paths";
@@ -144,6 +144,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const withClosedEditors = async (run: () => Promise<void>) => {
     if (!(await w3.editors.closeAllAsking())) return;
     try { await run(); } finally { await w3.workspace.refresh(); await refresh(); }
+  };
+
+  /** Resolves a conflicted file by taking one side whole; the editor of that file is closed first. */
+  const resolveWith = async (c: Change, side: Side) => {
+    if (c.status !== "C") return;
+    await w3.editors.close(c.path);
+    try { await takeSide(git, side, c.path); } finally { await w3.workspace.refresh(); await refresh(); }
   };
 
   const switchBranch = async () => {
@@ -309,6 +316,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 { label: "Open Changes", run: open },
                 { label: "Open File", disabled: c.status === "D", run: () => w3.editors.open(c.path).catch(failed) },
                 "-",
+                ...(c.status === "C" ? [
+                  { label: "Accept Current (ours)", run: () => void resolveWith(c, "ours").catch(failed) },
+                  { label: "Accept Incoming (theirs)", run: () => void resolveWith(c, "theirs").catch(failed) },
+                  "-" as const,
+                ] : []),
                 { label: "Discard Changes…", disabled: c.status === "C", run: () => void discard([c]).catch(failed) },
               ]);
             },

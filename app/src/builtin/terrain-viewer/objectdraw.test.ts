@@ -127,11 +127,11 @@ test("a model whose read failed in passing is read again by the next load; one t
   }, () => {});
   const skins = new Map([["D000", skin("w3d", 1, 1)], ["D001", { ...skin("w3d", 1, 1), file: "Doodads\\Gone\\Gone" }], ["D002", { ...skin("w3d", 1, 1), file: "Doodads\\Broken\\Broken" }]]);
   const all = [placed("D000", [1, 1, 1]), placed("D001", [1, 1, 1]), placed("D002", [1, 1, 1])];
-  const first = await loader.load("doodads", all, skins, () => 0, undefined, undefined, false);
+  const first = await loader.load("doodads", all, skins, () => 0, { placeholders: false });
   assert.equal(first.problems.length, 3);
   busy = false;
   reads.length = 0;
-  const second = await loader.load("doodads", all, skins, () => 0, undefined, undefined, false);
+  const second = await loader.load("doodads", all, skins, () => 0, { placeholders: false });
   assert.deepEqual(reads, ["Doodads\\Test\\Test.mdx"], "only the one that failed in passing");
   assert.deepEqual(second.problems.map((p) => p.items[0].id).sort(), ["D001", "D002"]);
 });

@@ -41,8 +41,8 @@ test("a unit given the swim look stands in its model's Stand Swim, apart from th
   const model = mdxOfSequences([["Stand", 0, 1000], ["Stand Ready", 2000, 3000], ["Stand Swim", 4000, 5000], ["Walk Swim", 6000, 7000], ["Stand Ready Swim", 8000, 9000]]);
   const loader = new ObjectLoader(fakeGl(), () => Promise.resolve(model), () => {});
   const land = placed(0), water = placed(1000);
-  const out = await loader.load("units", [land, water], new Map([["nmyr", nagaSkin]]), () => 0, undefined, undefined, true, undefined,
-    (p) => (p === water ? ["swim"] : []));
+  const out = await loader.load("units", [land, water], new Map([["nmyr", nagaSkin]]), () => 0,
+    { looksOf: (p) => (p === water ? ["swim"] : []) });
   assert.equal(out.batches.length, 2, "one model per look");
   const look = (p: Placed) => {
     const b = out.batches.find((x) => x.instances.some((i) => i.pick?.placed === p))!;

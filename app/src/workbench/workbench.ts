@@ -143,6 +143,7 @@ export class Workbench {
     this.editors.activate = fire;
     this.views.run = (c) => this.run(c);
     this.editors.confirm = (m, ...a) => this.notifications.show("warning", m, a);
+    this.editors.showMenu = (at, items) => showContextMenu(at, items);
     followGraphicsMode({ get: () => this.settings.get<string>("game.graphicsMode"), onDidChange: (l) => this.settings.onDidChange(l),
       follow: () => this.editors.followGraphicsMode(), save: (p) => this.editors.saveFile(p), reopen: (p) => this.editors.reopenClean(p),
       ask: (m, ...a) => this.notifications.show("info", m, a) });
@@ -477,6 +478,9 @@ export class Workbench {
     c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j", menu: "View:1:2" });
     c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File", menu: "File:3:1", when: "save" });
     c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File", menu: "File:3:2", when: "editor" });
+    c("workbench.closeOthers", "Close Other Editors", () => this.editors.closeRelative(undefined, "others"), { category: "File", when: "editor" });
+    c("workbench.closeToTheRight", "Close Editors to the Right", () => this.editors.closeRelative(undefined, "right"), { category: "File", when: "editor" });
+    c("workbench.closeAll", "Close All Editors", () => this.editors.closeRelative(undefined, "all"), { category: "File", when: "editor" });
     c("workbench.reopenWith", "Reopen Editor With…", async () => {
       const path = this.editors.activePath();
       if (!path) return;

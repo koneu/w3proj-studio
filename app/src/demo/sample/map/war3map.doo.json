@@ -1,0 +1,60 @@
+{
+  "format": "w3proj.doodads/1",
+  "magic": "W3do",
+  "version": 8,
+  "subversion": 11,
+  "skinIds": true,
+  "doodads": [
+    {
+      "id": "ATtr",
+      "variation": 1,
+      "position": [
+        64.0,
+        -64.0,
+        0.0
+      ],
+      "angle": 1.5,
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "skinId": "ATtr",
+      "flags": 2,
+      "life": 100,
+      "itemTable": -1,
+      "itemSets": [],
+      "editorId": 0
+    },
+    {
+      "id": "LOtr",
+      "variation": 0,
+      "position": [
+        -64.0,
+        32.0,
+        16.5
+      ],
+      "angle": 0.0,
+      "scale": [
+        0.75,
+        0.75,
+        1.25
+      ],
+      "skinId": "LOtr",
+      "flags": 2,
+      "life": 255,
+      "itemTable": -1,
+      "itemSets": [],
+      "editorId": 1
+    }
+  ],
+  "specialVersion": 0,
+  "specials": [
+    {
+      "id": "YTlc",
+      "z": 0,
+      "x": 3,
+      "y": 2
+    }
+  ]
+}

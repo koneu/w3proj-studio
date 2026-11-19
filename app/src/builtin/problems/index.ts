@@ -15,6 +15,7 @@ import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
 import { resultsStale } from "./projectkey";
 import { RunScope } from "./runscope";
+import { countProblems, describeCounts } from "../../lib/problemcount";
 
 interface Group { check: ProblemCheck; problems: Problem[]; error?: string }
 
@@ -57,8 +58,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   const updateStatus = () => {
     if (!ran || !w3.workspace.project()) { status.text = ""; return; }
-    const errors = all().filter((p) => p.severity === "error").length, warnings = all().length - errors;
-    status.text = `✕ ${errors}  ⚠ ${warnings}`;
+    const { errors, warnings, infos } = countProblems(all());
+    status.text = `✕ ${errors}  ⚠ ${warnings}${infos ? `  ⓘ ${infos}` : ""}`;
     status.tooltip = "Problems of the project (click to show)";
   };
 
@@ -214,7 +215,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.views.register("w3.problems.list", {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open a project to check it.")); return; }
-        const total = all(), errors = total.filter((p) => p.severity === "error").length;
+        const total = all(), counted = countProblems(total);
         el.append(h("div.camp-side-actions", {},
           h("button", { disabled: !!running, onclick: run(() => service.run()) }, running ? "Checking…" : ran ? "Check again" : "Check now"),
           groups.some((g) => g.check.id === "placements" && g.problems.some((p) => / unknown object type /.test(p.message)))
@@ -222,7 +223,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ran && !ignoreBad && questLibraryOffered(ignore, groups.flatMap((g) => visible(g).map((p) => ({ check: g.check.id, about: aboutOf(p) }))))
             ? h("button.problems-ignore-library", { title: "The Orc bonus chapters carry a quest library whose triggers nothing runs. Ignores these reports (here and in later runs); other triggers are still reported. Undo it from Show ignored.", onclick: run(() => changeIgnore((f) => ({ ...f, rules: [...f.rules, BONUS_QUEST_LIBRARY] }))) }, "Ignore the bonus campaign quest library") : null,
           ran && ignoredCount() ? h("button.problems-show-ignored", { title: "Lists the ignored reports too, each with an Un-ignore button", onclick: run(async () => { await w3.commands.execute("w3.problems.toggleIgnored"); }) }, `${showIgnored ? "Hide" : "Show"} ignored (${ignoredCount()})`) : null,
-          h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${errors} error${errors === 1 ? "" : "s"}, ${total.length - errors} warning${total.length - errors === 1 ? "" : "s"}` : " No problems found.") : "")));
+          h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${describeCounts(counted)}` : " No problems found.") : "")));
         if (ran && configBad) el.append(h("div.view-empty.problems-failed", {}, `${configBad}. No check is switched off until it is fixed.`));
         else if (ran && disabledIds(config).length) el.append(h("div.view-empty.problems-disabled", { title: "Set in the [checks] section of w3proj.toml (disable = [...])" }, `Switched off by the project (w3proj.toml): ${disabledIds(config).join(", ")}`));
         if (ran && ignoreBad) el.append(h("div.view-empty.problems-failed", {}, `${ignoreBad}. Nothing is hidden, and ignoring is off until it is fixed.`));
@@ -247,7 +248,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(h("div.tree", {}, ...shown.map((p) => h(`div.problem-row.${p.severity}${p.reveal ? ".clickable" : ""}${hidden(g, p) ? ".ignored" : ""}`, {
             title: [p.message, p.location].filter(Boolean).join("\n"),
             onclick: p.reveal ? run(() => w3.commands.execute(p.reveal!.command, ...(p.reveal!.args ?? []))) : undefined,
-          }, h("span.problem-icon", {}, p.severity === "error" ? "✕" : "⚠"),
+          }, h("span.problem-icon", {}, p.severity === "error" ? "✕" : p.severity === "info" ? "ⓘ" : "⚠"),
             h("span.problem-text", {}, p.message, p.location ? h("small.muted", {}, ` ${p.location}`) : null,
               ...(p.fixes?.length ? [h("span.problem-fixes", {}, ...p.fixes.map((f) => h("button.problem-fix", {
                 title: f.title ?? "",

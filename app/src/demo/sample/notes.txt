@@ -1,0 +1,5 @@
+Ideas for the sample map
+------------------------
+- a small hub with a market
+- a timer that spawns a wave every 60 seconds
+- a quest log with three entries

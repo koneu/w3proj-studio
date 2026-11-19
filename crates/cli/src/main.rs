@@ -450,7 +450,7 @@ enum Cmd {
     /// map's war3map.w3i has the Melee flag or it looks like a ladder map (2+ starts and a gold mine),
     /// and check_path when --path gives its points. w3proj.toml's [checks] disable = ["id", ...]
     /// switches checks off (a Problems check id, "melee/<rule>" or "melee"); a [checks.severity] table
-    /// (id = "error" | "warning" | "off") sets their severity. Runs the
+    /// (id = "error" | "warning" | "info" | "off") sets their severity. Runs the
     /// app's own code in Node.js (22 or newer; W3PROJ_NODE names another node); writes nothing.
     Check {
         project: PathBuf,

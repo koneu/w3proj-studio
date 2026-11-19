@@ -103,3 +103,18 @@ export function diffTarget(rest: string): { rev: string | null; path: string } {
   const m = /^@([0-9a-f]{4,64}):(.*)$/.exec(rest);
   return m ? { rev: m[1], path: m[2] } : { rev: null, path: rest };
 }
+
+/** Which side of a merge conflict to keep: ours is the current branch, theirs the merged one. */
+export type Side = "ours" | "theirs";
+
+/** Resolves one conflicted file by taking a side whole. The side that deleted the file deletes
+ *  it (git rm); otherwise its version is checked out and staged. `git` runs one git command
+ *  and returns its output (or throws). */
+export async function takeSide(git: (...args: string[]) => Promise<string>, side: Side, path: string): Promise<void> {
+  // Unmerged entries: "<mode> <sha> <stage>\t<path>"; stage 2 is ours, 3 is theirs.
+  const stages = new Set((await git("ls-files", "-u", "--", path)).split("\n").map((l) => /^\d+ [0-9a-f]+ (\d)\t/.exec(l)?.[1]).filter(Boolean));
+  if (!stages.size) throw new Error(`${path} has no conflict to resolve.`);
+  if (!stages.has(side === "ours" ? "2" : "3")) { await git("rm", "--quiet", "-f", "--", path); return; }
+  await git("checkout", `--${side}`, "--", path);
+  await git("add", "--", path);
+}
