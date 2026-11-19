@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
-import { borderShade } from "../../lib/terrain/area";
+import { BORDER_ALPHA, borderShade, hdBorderKeep } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { castsSunShadow, edgeMode, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, HD_WATER_EDGE_KEEP, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
 import { decode, HD_WATER_DEFAULTS, hdReflectScale, hdSky, hdWaterAt } from "./hdwater";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
@@ -63,6 +63,14 @@ test("HD water's dark edge goes by the playable rectangle round the tiles the bo
   assert.deepEqual(playRect(t, mapEdgeTiles(t)), [-512 + 256, -384 + 128, -512 + 7 * 128, -384 + 4 * 128]);
   // Nothing playable: an empty rectangle in the middle, so all of the water is dark.
   assert.deepEqual(playRect(t, new Uint8Array(48).fill(1)), [0, 0, 0, 0]);
+});
+
+test("HD water past its dark edge keeps the border's HD share of its colour and reflection, not black", () => {
+  // we-drive and app-drive, ws-L and ws-A from make-water-tilesets.mjs --shore, game view (branch we-compare-15): past
+  // the edge the editor's 96 deep water was 2.4, 2.9, 7.2 (Lordaeron) and 2.1, 2.7, 6.9 (Ashenvale); Studio's black
+  // water gave 1, 0, 0 and 0, 0, 0, with this share 2.3, 3.4, 4.3 and 1.6, 2.8, 4.6.
+  assert.equal(HD_WATER_EDGE_KEEP, hdBorderKeep(BORDER_ALPHA / 255));
+  assert.ok(HD_WATER_EDGE_KEEP > 0.018 && HD_WATER_EDGE_KEEP < 0.019, String(HD_WATER_EDGE_KEEP));
 });
 
 test("the border shade's texel in a tile's middle is shaded exactly where the tile lies past the playable map", () => {

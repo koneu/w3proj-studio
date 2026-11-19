@@ -47,6 +47,9 @@ export function waterShadowKeep(depth: number, lit: number): [number, number, nu
  *  sides alike (we-drive, 2026-11-13, a copy of the empty map with lakes across each edge, from above at 1200: half its
  *  colour 39 to 46 pixels inside, a tenth 24 to 29; about a pixel a unit there). */
 export const HD_WATER_EDGE = [10, 42] as const;
+/** What HD water keeps of its own colour and reflection past HD_WATER_EDGE: the border's HD shade (area.ts
+ *  hdBorderKeep, 0.0185), not black (TESTING.md, branch we-compare-15). */
+export const HD_WATER_EDGE_KEEP = hdBorderKeep(BORDER_ALPHA / 255);
 
 /** The playable map's rectangle (left, bottom, right, top in world units) round the tiles `edge` leaves (1 per tile
  *  past it, rows from the south); an empty one in the map's middle when there are none. */
@@ -65,7 +68,7 @@ import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { borderShade, darkWaterCorners } from "../../lib/terrain/area";
+import { BORDER_ALPHA, borderShade, darkWaterCorners, hdBorderKeep } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -156,9 +159,9 @@ void main() { vUv = aUv; vDepth = aDepth; vDark = aDark; vWorld = aPos; gl_Posit
 const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
-// Past the playable map the water is black: classic, vDark per corner (darkWaterCorners), fading over a tile; HD by the
-// pixel, hard, inside the playable rectangle uPlayRect (left, bottom, right, top: hdWaterEdge). uEdgeDark 0 when the
-// border isn't shown.
+// Past the playable map the water is dark: classic black, vDark per corner (darkWaterCorners), fading over a tile; HD by
+// the pixel, hard, inside the playable rectangle uPlayRect (left, bottom, right, top: hdWaterEdge), down to the border's
+// HD share (HD_WATER_EDGE_KEEP). uEdgeDark 0 when the border isn't shown.
 uniform float uEdgeDark; uniform highp vec4 uPlayRect;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
 // Classic: how bright the light makes the water (waterLight; the map's water tint is in the ramp: waterRamp).
@@ -221,7 +224,7 @@ void main() {
     // seen through stays the border's dark ground).
     vec3 shade = mix(vec3(1.0), mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0))), smoothstep(${WATER_SHADE_DEPTHS.map((v) => v.toFixed(1)).join(", ")}, depth));
     highp vec2 inside = min(vWorld.xy - uPlayRect.xy, uPlayRect.zw - vWorld.xy);
-    float lit = 1.0 - (1.0 - smoothstep(${HD_WATER_EDGE[0].toFixed(1)}, ${HD_WATER_EDGE[1].toFixed(1)}, min(inside.x, inside.y))) * uEdgeDark;
+    float lit = mix(1.0, ${HD_WATER_EDGE_KEEP.toFixed(5)}, (1.0 - smoothstep(${HD_WATER_EDGE[0].toFixed(1)}, ${HD_WATER_EDGE[1].toFixed(1)}, min(inside.x, inside.y))) * uEdgeDark);
     vec3 through = w.x * bed * (1.0 - w.z * uReflect.y);
     vec3 water = (own * (1.0 - w.z * uReflect.y) + w.z * sky) * shade * lit;
     // The bed came fogged already: the fog goes over the water's part only.
