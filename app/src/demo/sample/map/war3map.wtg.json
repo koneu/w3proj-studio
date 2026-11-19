@@ -1,0 +1,140 @@
+{
+  "reforged": true,
+  "version": 7,
+  "counts": [
+    {"count":1,"deleted":[]},
+    {"count":1,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]}
+  ],
+  "unknown": 0,
+  "variables": [
+    {"name":"fooCount","type":"integer","unknown":1,"isArray":false,"arraySize":1,"initialized":true,"initialValue":"3","id":1,"parent":-1},
+    {"name":"fooList","type":"string","unknown":1,"isArray":true,"arraySize":4,"initialized":false,"initialValue":"","id":5,"parent":1}
+  ],
+  "items": [
+    {"type":4,"id":1,"name":"Foo Setup","isComment":0,"expanded":1,"parent":-1},
+    {
+      "type": 8,
+      "name": "Foo Init",
+      "description": "Made up.",
+      "isComment": 0,
+      "id": 2,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": false,
+      "parent": 1,
+      "ecas": [
+        {
+          "kind": 0,
+          "name": "MapFooStart",
+          "enabled": true,
+          "params": [],
+          "children": []
+        },
+        {
+          "kind": 1,
+          "name": "IsFooReady",
+          "enabled": true,
+          "params": [
+            {"type":0,"value":"1"},
+            {"type":2,"value":"GetFooValue","call":{"kind":3,"name":"GetFooValue","hasParams":true,"params":[{"type":0,"value":"2"}],"trailer":0}}
+          ],
+          "children": []
+        },
+        {
+          "kind": 2,
+          "name": "DoFooThing",
+          "enabled": true,
+          "params": [
+            {"type":3,"value":"\"hello\""},
+            {"type":0,"value":"1.5"}
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "type": 8,
+      "name": "Foo Branch",
+      "description": "",
+      "isComment": 0,
+      "id": 3,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": true,
+      "parent": 1,
+      "ecas": [
+        {
+          "kind": 0,
+          "name": "FooTimerEvent",
+          "enabled": true,
+          "params": [
+            {"type":0,"value":"5"}
+          ],
+          "children": []
+        },
+        {
+          "kind": 2,
+          "name": "IfThenElseMultiple",
+          "enabled": true,
+          "params": [],
+          "children": [
+            {
+              "kind": 1,
+              "group": 0,
+              "name": "IsFooReady",
+              "enabled": true,
+              "params": [
+                {"type":0,"value":"1"},
+                {"type":0,"value":"2"}
+              ],
+              "children": []
+            },
+            {
+              "kind": 2,
+              "group": 1,
+              "name": "DoFooThing",
+              "enabled": true,
+              "params": [
+                {"type":3,"value":"\"yes\""},
+                {"type":0,"value":"2.5"}
+              ],
+              "children": []
+            },
+            {
+              "kind": 2,
+              "group": 2,
+              "name": "LogFoo",
+              "enabled": true,
+              "params": [
+                {"type":1,"value":"fooList","index":{"type":1,"value":"fooCount"}}
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": 16,
+      "name": "A note",
+      "description": "Only a comment.",
+      "isComment": 1,
+      "id": 4,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": false,
+      "parent": 1,
+      "ecas": []
+    },
+    {"type":64,"id":5,"name":"fooList","parent":1}
+  ]
+}
