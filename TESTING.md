@@ -141,7 +141,7 @@ falls short, rather than copying their insides into a scratch file.
 | apply testers' verdicts to the open points | `node scripts/openpoints-close.mjs <verdicts-file> [--dry-run]` (repo root): lines `<id>: PASS \| FAIL \| DIFFERS \| NOT DONE — <text>`. PASS removes the item block; FAIL/DIFFERS add a one-line item to `bugs.md` "From verification" pointing at the old one; NOT DONE adds `(not done: reason, date)`, the second moves the item to `user.md` (game/Windows/user) or `onhold.md`. Unknown ids refuse the whole run; changed files are copied to `openpoints/.backup/<timestamp>/` first. Tested in `app/scripts/openpoints.test.mjs` |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
 | check the save's Melee-flag rule against the game's maps | `node scripts/melee-corpus.mjs [--filter TEXT] [--why] [--save F] [--baseline F]` (in `app/`): clears each game map's Melee flag and runs `savedMelee` (meleesave.ts); a map stored melee should get it back, others not. `--why` names the reasons for each miss, `--baseline` lists maps whose result changed (exit 1 if an agreement was lost) |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--clipboard FILE` (the editor's clipboard text, which Wine hands to X with LF line ends whatever the editor put in), `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--move X,Y`, `--wheel N[@X,Y]`, `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog; printable ASCII only), `--campaign FILE` (a copy of the .w3n where the Campaign Editor's Open dialog lists it: F7, Ctrl+O, `--type` its bare file name, Return; the dialog refuses `/` and `:`), `--numlock on\|off\|status` (Num Lock as the X server holds it: pressed only when it differs), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs`, `--null-audio` (Wine's ALSA driver on with ALSA's config a lone null device: the editor has an audio device that plays nowhere, so File > Preferences opens; nothing else is let near the sound hardware), `--pref Section/Key=value` (see "Preferences"), `--expect-layout` (`--wait-ready` fails when the main window or tool palette isn't where spec clicks were measured), `--looks-every-map` (every `--map`/`--open` gets the run's `--look` cameras, not only the first: look n is row n in each). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--clipboard FILE` (the editor's clipboard text, which Wine hands to X with LF line ends whatever the editor put in), `--key KEY[@MS]` (@MS holds it), `--click X,Y`, `--double-click X,Y`, `--drag X,Y:X,Y[@MS]` (with `--drag-mod alt|shift|ctrl` or `--drag-button 2|3` before it), `--move X,Y`, `--wheel N[@X,Y]`, `--windows`, `--close-modules`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--open FILE` (opens a map in the running editor: Ctrl+O, the copy's row in the editor's Open list; `--map` on a running editor does this, restarting if it fails; "via" in the step's line says which), `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--export-minimap FILE` (File > Export Minimap with the dialog's defaults, the TGA copied to FILE), `--type TEXT` (into the open dialog; printable ASCII only), `--campaign FILE` (a copy of the .w3n where the Campaign Editor's Open dialog lists it: F7, Ctrl+O, `--type` its bare file name, Return; the dialog refuses `/` and `:`), `--numlock on\|off\|status` (Num Lock as the X server holds it: pressed only when it differs), `--close`; options `--screen WxH` (another view size), `--mode sd\|hd\|de`, `--day-night fixed\|cycle` (fixed by default), `--timeout S`, `--work DIR`, `--save-accept T1,T2`, `--keep-prefs`, `--null-audio` (Wine's ALSA driver on with ALSA's config a lone null device: the editor has an audio device that plays nowhere, so File > Preferences opens; nothing else is let near the sound hardware), `--pref Section/Key=value` (see "Preferences"), `--expect-layout` (`--wait-ready` fails when the main window or tool palette isn't where spec clicks were measured), `--looks-every-map` (every `--map`/`--open` gets the run's `--look` cameras, not only the first: look n is row n in each), `--slot N` (another World Editor slot: editors on two slots run at once), `--alone` (every slot's lock: no other editor meanwhile, for `--fps`; see "Several editors"). An unknown or malformed argument is refused before anything starts. Needs the install's English text (enUS in `.build.info`), else it says so and starts nothing. `--look` waits until two pictures a frame apart are the same (at most 10 s). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 | run a built binary that may be older than its sources | `tests/binfresh.mjs` refuses a `w3proj` or app binary older than a tracked source it is built from (CLI: `crates/`, Cargo files; app: also `app/src-tauri`, `app/src`, `index.html`, the vite/TS configs, the npm packages), as we-compare and the `make-*.mjs` generators use them: rebuild, or pass `--allow-stale` (where the tool parses its own flags) / `W3_ALLOW_STALE=1`. mtimes are compared, so a fresh checkout refuses a binary built before it |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh` and
@@ -291,8 +291,10 @@ It never starts the game itself.
   inside those; `--die-with-parent` takes Proton along when we-drive is killed, and each start kills a leftover
   wineserver of the prefix first; the editor opens the
   CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
-  at a time, machine-wide: the lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
-  every worktree and every `W3PROJ_WE_DIR`; a second run says once who holds it and since when, and waits
+  at a time per **slot** (`--slot N` of we-drive, we-compare and we-setup, or `W3PROJ_WE_SLOT`; see "Several editors"
+  below): slot 0's lock is `$XDG_RUNTIME_DIR/w3proj-we.lock` (else the temp dir, with the user name), shared by
+  every worktree and every `W3PROJ_WE_DIR`, slot N's `w3proj-we-slotN.lock` beside it, with a farm and prefix of its own
+  in `target/we-slotN` (`W3PROJ_WE_DIR/slotN`); a second run on a slot says once who holds it and since when, and waits
   (`takeLock`'s timeout; a dead pid is taken over). we-drive takes the lock before it sets the farm up, which may rebuild it
   for another game build; `setup` refuses to replace a farm another live run holds, and the folder must pass `guardedWeDir`
   (inside this repository or the main checkout, not holding or inside the game folder). `we-setup.mjs --snapshot` and `--compare` show the
@@ -544,7 +546,7 @@ It never starts the game itself.
   brighter than the editor's light (green about 233 against 123). The rest of the colour difference to Studio was
   the HD picture's tone (`lib/model/tone.ts`).
 
-### Verification rounds: one build, many testers, one World Editor session
+### Verification rounds: one build, many testers, World Editor slots
 
 **One build per round**: `node scripts/verify-build.mjs [--commit REV] [--tester NAME] [--json] [--no-cli] [--force]` (in `app/`)
 `git archive`s the commit into `target/verify/<short-sha>/` of the main checkout, runs `npm ci`, builds the smoke app
@@ -554,7 +556,8 @@ turns (a lock folder next to it). It prints the binary, the CLI and the command 
 
 - app-drive: `node scripts/app-drive.mjs --app <binary> --work <own folder> <steps>`
 - app-smoke: `W3_APP_BIN=<binary> W3PROJ_BIN=<cli> W3_SMOKE_DIR=<own folder> node scripts/app-smoke.mjs --only=<check>`
-- we-compare: `node scripts/we-compare.mjs --app <binary> --work <own folder> <spec.json>`
+- we-compare: `node scripts/we-compare.mjs --app <binary> --work <own folder> --slot auto <spec.json>` (the first free
+  World Editor slot: testers' editors run at once, see "Several editors")
 
 **Pruning**: each build is about 3.8 GB, so before building a new commit `verify-build` deletes the older ones and
 keeps the newest N (`--keep N`, default 2, `0` = keep all): `target/verify/<sha>` and `target/verify-runs/<sha>`, nothing
@@ -574,7 +577,7 @@ we-drive): the common check "do the same in the World Editor and in Studio, save
 package 6) names the input map (copied; `${MAIN}` is the main checkout), the World Editor's steps (we-drive's steps
 between "map ready" and the save), Studio's steps (`mcp`, `eval`, `sleep`, `open`, `terrain`, `setting`, `command`; the
 project is the input unpacked, or a `new_map` made by steps), and the files to compare. All specs of one mode go to
-**one we-drive process**: one display, one setup, one lock and ONE editor (each next map is opened in it, `--map` on the
+**one we-drive process**: one display, one setup, one slot's lock and ONE editor (each next map is opened in it, `--map` on the
 running editor; `--restart-per-map` is the old editor start per map, for timing). Measured 2026-11-13, 4 small maps, warm: 75 s
 by restart, 47 s by open (an extra map costs about 9 s instead of 18 s; the start of a cold prefix is longer). Both saves are unpacked with the release CLI's codecs and compared per file: `parsed`
 (the codecs' JSON, field by field: `doodads[3].angle: WE 4.71, Studio 0`, with the count of fields and of differing
@@ -614,12 +617,45 @@ Studio's settings that it changed, the `w3.window` functions its evals stubbed a
 back; a Studio save that leaves an editor unsaved, or a failed terrain rebuild, fails the spec. A World Editor crash
 while closing after the save is a warning in the report, the save kept.
 Exit 0 as expected, 1 not (or MISSING), 2 something couldn't run (ERROR included), 3 `--no-we` (nothing compared, NOT
-COMPARED); the JSON report is `<work>/report.json`. The work folder is locked (`we-compare.lock`): give parallel runs
-their own `--work`. Kinds that can give a false DIFFERS between two random draws: `w3e-variation` (a value worn by
+COMPARED); the JSON report is `<work>/report.json`. The work folder is locked (`we-compare.lock`): parallel runs need
+their own `--work` (the default is the slot's, `target/we-compare-slotN`: see "Several editors"). Kinds that can give a false DIFFERS between two random draws: `w3e-variation` (a value worn by
 about 5% of a texture's corners sits on the cut), `doodad-places` (a doodad at a 64 square's edge), `w3e-spread`
 (a rare offset drawn in one run only): rerun before calling it a finding. Unit tests: `we-compare.test.mjs`,
 `we-compare-w3e.test.mjs`, `we-compare-runner.test.mjs`. It isn't in the gate (the gate has no World Editor step); run it by hand with a
 `W3PROJ_WE_DIR` of its own and `we-setup.mjs --clean` afterwards.
+
+**Several editors** (branch we-slots, 2026-11-19): World Editors run at once on **slots**. Slot 0 is the farm, prefix
+and lock there always were (nothing moves without `--slot`); slot N > 0 has `target/we-slotN` of the main checkout
+(`W3PROJ_WE_DIR/slotN`) and the lock `w3proj-we-slotN.lock`, both from `we-setup.mjs` `slotPaths`, so a farm is never
+paired with another slot's lock. Its first start sets it up under its lock: farm hardlinks (a second, 1 s), a new prefix
+(0.36 GB), the welcome answered (38 s in all). `we-setup.mjs --slot N --clean` removes it. `we-drive --slot N`;
+`we-compare --slot N|auto [--slots 0,1,2]` holds the slot's lock for the whole run (its we-drive processes take it over
+from it: `W3PROJ_WE_LOCK_HOLDER`, their parent only), `auto` the first free one; work folders default per slot
+(`target/we-drive-slotN`, `target/we-compare-slotN`) and `report.json` is in the run's work folder. A full run in n
+parts: n runs of `we-compare --slot auto --shard i/n <all spec files>` (i = 1..n, the same files in each): whole files
+dealt out by spec count (`shardFiles`: a file's specs stay in order in one editor), every file in exactly one part
+(the 120 spec files of `tests/we-compare/`, 484 specs: 242 + 242 for n = 2, 162 + 161 + 161 for n = 3).
+What the editors share, checked: the **display** is each run's own Xvfb (`-displayfd` picks a free number; runs at once
+got :2 and :3), so **Num Lock** and the clipboard are per display; **wineserver**: Wine finds a prefix's server by the
+prefix folder (`/tmp/.wine-<uid>/server-<dev>-<inode>` of `pfx`: one per slot seen), and every `wineserver -k`/`-w` of
+we-drive runs with its slot's `WINEPREFIX` (unit test: a fake wineserver logs only its slot's prefix); fsync's shared
+memory is `/dev/shm/wine-<inode>-fsync` of the same folder (one per running slot seen; the inode alone, but every slot's
+prefix sits beside its farm, which must be on the install's file system); **Documents/Warcraft III** (preferences, the Open list, Campaigns), Proton's
+`pfx.lock`, the caches (`XDG_CACHE_HOME`) and `we-rofs.so` are per slot folder; the network namespace is each sandbox's
+own (`--unshare-net`), so no port can clash; `$XDG_RUNTIME_DIR` holds only the slots' locks. Unit tests:
+`we-slots.test.mjs`. **A/B** (slot 1 measured, slot 2 busy with an HD game view of TwistedMeadows, drags, held keys and
+`--fps`; slot 0 ran another session's specs throughout, so "alone" means one other editor, not none): a settled view of
+cliff.w3m (HD game view, `--look center` and `0,0,1500`) gave the same PNG bytes alone and in parallel (2 + 2 runs); an
+animated one (HillsbradCreek, birds and fog) differs between any two runs: box means alone against alone within 0.34
+per channel, alone against parallel within 0.75, mean absolute pixel difference 2.3 to 5.7 against 3.6 to 5.5. **`--fps`
+is not parallel-safe**: HillsbradCreek's opening view changed 1.4 to 1.6 times a second alone (3 runs, 20 s each) and
+0.8 to 0.9 with the second editor busy, the helper's grabs 53 against 45 a second: run it with `we-drive --alone`
+(every slot's lock, taken in ascending order). File-diff specs: two we-compare runs started together with `--slot auto --slots 1,2` got slots 1 and 2 (slot 0
+ran another session's specs too): camera-farz.json + nudge-keys-we.json (3 specs: a held `Right@600`, `--numlock on`,
+number-pad nudges) and paste-centre.json + edge-group-nudge.json (4 specs: 1200 ms drags, 70 number-pad presses) all
+MATCH (World Editor parts 267 s and 724 s). Parallel-safe: file-diff specs and pictures
+of a settled view; a spec whose World Editor part times something (a frame rate, an animation) gets `"serial": true`:
+we-compare runs it last on slot 0 with every slot's lock held (none is marked yet).
 
 Saved-file specs of package D (branch we-specs-d, 2026-11-14; `ramp-wpm`, `boundary-wpm`, `doodad-snap-custom`, `map-size-38x42`, `paint-variation`; inputs and generators `make-doodad-snap.mjs`, `make-odd-size.mjs` in `tests/fixtures/we-specs/`): compare kind `w3e-variation` (per texture the corner count and the ground variations that 5% of its corners wear: the draw is random). The editor's palette: Blight 1552,111, Boundary 1552,143, Remove Boundary 1552,175, Ramp 1505,311. Known differences recorded as `expect: differs`: its Blight brush also turns corners round it to the map's second ground tile (`boundary-flags-wpm`'s w3e). Boundary matches since branch boundary-we (2026-11-14): its brush is centred on the lower-left corner of the tile under the pointer, not the nearest corner (16 size-1 clicks at 0.2 to 0.8 of a tile, sizes 2, 3, 5: 5, 13, 49 corners round that corner), and its wpm makes a tile whose lower-left corner is painted 0xce, the border's byte, over a cliff or water alike, 0xee when blighted; Remove Boundary frees it. A palette tile (Boundary, Blight) picked after a water brush leaves the water brush on: the next click paints water too, so a spec picks the water last.
 
