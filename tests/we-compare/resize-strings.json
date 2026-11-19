@@ -1,0 +1,20 @@
+[
+  {
+    "limit": 40,
+    "name": "resize-strings-open",
+    "description": "The control for resize-strings-border: resize-strings.w3m (tests/fixtures/we-specs/make-resize-objects.mjs <empty map> <cli> strings: plain texts in every text field of war3map.w3i, crest race 3, game data set 1) opened and saved, no Map Size: the map's and the loading screen's texts stay plain, crest race and game data set as they were. Known (2026-11-19): the editor's save alone gives the player's and the force's plain names strings (TRIGSTR_003, _004; Studio keeps them plain) and takes Melee off for the game data set 1 (Studio's save of an unchanged map writes no w3i)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-strings.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"], "expect": "differs", "expectPaths": ["players[].name", "forces[].name", "flags"] }]
+  },
+  {
+    "limit": 60,
+    "name": "resize-strings-border",
+    "description": "Map Size with only Modify Camera Bounds ticked (resize-bounds-border's clicks) on resize-strings.w3m: the name, suggested players, description, author, the loading screen's title, subtitle and text, the player's and the force's name become strings 3 to 11 in that order, the prologue's texts stay plain, crest race 3 becomes 128, game data set 1 stays (2026-11-19; resize.ts infoAfterResize). The string table is compared by the new strings' lines: the editor also drops strings 1 and 2 (Player 1, Force 1), which nothing refers to after its save writes the script again; Studio keeps string 2, which the editor's war3map.j still names (Studio doesn't replace a script it didn't write)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-strings.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
+    "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "border": [7, 6, 4, 9] } }] },
+    "compare": [{ "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text", "lines": "^(STRING ([4-9]|1[01])|Just another Warcraft III map|Beliebig|Nondescript|Unknown|Loading (title|subtitle|text)|Plain (player|force))$" }]
+  }
+]

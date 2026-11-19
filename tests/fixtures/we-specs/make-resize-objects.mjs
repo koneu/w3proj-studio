@@ -6,6 +6,10 @@
 // "bounds" writes resize-bounds.w3m instead (tests/we-compare/resize-bounds.json): no regions, camera objects on and
 // beside the bounds a cut of 4 tiles on the left and on top makes (x -2304, y 2304), which a change of the camera
 // bounds alone by one arrow click on each of those sides makes too, and on and beside the right bound that stays (2816).
+// "strings" writes resize-strings.w3m (tests/we-compare/resize-strings.json): the bounds variant's map with plain texts
+// in every text field of war3map.w3i (loading screen and prologue texts, a player's and a force's name besides the
+// map's name, author, description and suggested players, which the empty map has as plain text already), the loading
+// screen crest race 3 and the game data set 1: what Map Size does to them.
 //
 // Regions (named by what a cut of 4 tiles on the left and on top, to -3584 and 3584, does to them): one inside, one
 // across the new left edge, one wholly in the cut part on the left, one across the new top edge, one in the north-west
@@ -23,8 +27,9 @@ import { requireFresh } from "../../binfresh.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const [empty, cli] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
 const variant = process.argv[4];
-if (!cli || (variant !== undefined && variant !== "bounds")) { console.error("usage: make-resize-objects.mjs <empty map> <w3proj cli> [bounds]"); process.exit(2); }
-const bounds = variant === "bounds";
+if (!cli || (variant !== undefined && variant !== "bounds" && variant !== "strings")) { console.error("usage: make-resize-objects.mjs <empty map> <w3proj cli> [bounds | strings]"); process.exit(2); }
+const strings = variant === "strings";
+const bounds = variant === "bounds" || strings;
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -71,7 +76,17 @@ try {
     localPitch: 0, localYaw: 0, localRoll: 0, dofDistance: 0, dofScale: 0, posAbsoluteZ: 0, name, trailer: 0,
   }));
   writeFileSync(camerasFile, JSON.stringify(cameras, null, 2));
-  run("pack", dir, "-o", join(here, bounds ? "resize-bounds.w3m" : "resize-objects.w3m"), "--force-stale");
+  if (strings) {
+    const infoFile = join(map, "war3map.w3i.json");
+    const info = JSON.parse(readFileSync(infoFile, "utf8"));
+    Object.assign(info.loadingScreen, { crestRace: 3, text: "Loading text", title: "Loading title", subtitle: "Loading subtitle" });
+    Object.assign(info.prologue, { text: "Prologue text", title: "Prologue title", subtitle: "Prologue subtitle" });
+    info.gameDataSet = 1;
+    info.players[0].name = "Plain player";
+    info.forces[0].name = "Plain force";
+    writeFileSync(infoFile, JSON.stringify(info, null, 2));
+  }
+  run("pack", dir, "-o", join(here, strings ? "resize-strings.w3m" : bounds ? "resize-bounds.w3m" : "resize-objects.w3m"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

@@ -240,12 +240,6 @@
     "as": "parsed",
     "ignore": [
      "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet",
      "players[0].start"
     ]
    },
@@ -1268,13 +1262,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -1809,13 +1797,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -2350,13 +2332,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -2891,13 +2867,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -3440,13 +3410,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -3965,13 +3929,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -4121,13 +4079,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -4281,12 +4233,6 @@
     "as": "parsed",
     "ignore": [
      "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet",
      "players[0].start"
     ]
    },
@@ -4447,12 +4393,6 @@
     "as": "parsed",
     "ignore": [
      "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet",
      "players[0].start"
     ]
    },
@@ -4592,13 +4532,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -4718,12 +4652,6 @@
     "as": "parsed",
     "ignore": [
      "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet",
      "players[0].start"
     ]
    },
@@ -4945,13 +4873,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -5045,13 +4967,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {
@@ -5145,13 +5061,7 @@
     "file": "war3map.w3i",
     "as": "parsed",
     "ignore": [
-     "saves",
-     "name",
-     "author",
-     "description",
-     "suggestedPlayers",
-     "loadingScreen.crestRace",
-     "gameDataSet"
+     "saves"
     ]
    },
    {

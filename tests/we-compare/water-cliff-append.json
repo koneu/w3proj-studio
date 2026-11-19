@@ -11,7 +11,7 @@
   {
     "limit": 40,
     "name": "water-cliff-append",
-    "description": "Shallow Water size 3 at the opening camera's 748,500, then Deep Water size 3 at 900,650 (water-dungeon's strokes) on nv-L-CAgr-CLdi.w3x: the editor appends the tileset's default cliff CLgr to the list (CAgr CLdi CLgr) and types the rim with it (2), as Studio since branch we-compare-15 (cliffs.ts weDefaultCliffType, the terrain painter's chosenCliffType)",
+    "description": "Shallow Water size 3 at the opening camera's 748,500, then Deep Water size 3 at 900,650 (water-dungeon's strokes) on nv-L-CAgr-CLdi.w3x: the editor appends the tileset's default cliff CLgr to the list (CAgr CLdi CLgr) and types the rim with it (2), as Studio since branch we-compare-15 (cliffs.ts defaultCliffToAdd, the terrain viewer's claimDefaultCliffType)",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/nv-L-CAgr-CLdi.w3x" },
     "we": {
       "saveAccept": ["Warning"],

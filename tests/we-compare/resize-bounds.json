@@ -15,7 +15,7 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-bounds.w3m" },
     "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "444,536"], ["--sleep", "300"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
     "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "left": -4, "top": -4 } }] },
-    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }]
+    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text" }]
   },
   {
     "limit": 40,
@@ -24,6 +24,6 @@
     "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-bounds.w3m" },
     "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
     "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "border": [7, 6, 4, 9] } }] },
-    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }, { "file": "war3map.w3e", "as": "w3e" }]
+    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }, { "file": "war3map.wts", "as": "text" }, { "file": "war3map.w3e", "as": "w3e" }]
   }
 ]

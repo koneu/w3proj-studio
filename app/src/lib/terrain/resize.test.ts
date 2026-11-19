@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraBounds, camerasAfterResize, coordProblem, doodadStays, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
+import { cameraBounds, camerasAfterResize, coordProblem, doodadStays, infoAfterResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -182,6 +182,41 @@ test("Map Size gives a map without a camera zoom the World Editor's 1250; one se
   assert.equal(resizedCameraZoom({ default: 1650, max: 3000, min: 0 }), null);
   assert.equal(resizedCameraZoom({ default: 0, max: 0, min: 400 }), null);
   assert.equal(resizedCameraZoom(undefined), null, "an older w3i has no camera zoom");
+});
+
+test("Map Size gives the w3i's plain texts strings of their own, numbered in the World Editor's order", () => {
+  // tests/fixtures/we-specs/resize-strings.w3m (make-resize-objects.mjs strings) and what the editor saved after Map Size
+  // (we-compare resize-strings-border, 2026-11-19): strings 3 to 11, the prologue left plain.
+  const info = {
+    name: "Just another Warcraft III map", author: "Unknown", description: "Nondescript", suggestedPlayers: "Beliebig",
+    loadingScreen: { number: -1, crestRace: 3, model: "", text: "Loading text", title: "Loading title", subtitle: "Loading subtitle" },
+    gameDataSet: 1,
+    prologue: { path: "", text: "Prologue text", title: "Prologue title", subtitle: "Prologue subtitle" },
+    players: [{ id: 0, name: "Plain player" }], forces: [{ flags: 0, name: "Plain force" }],
+  };
+  const added = infoAfterResize(info, 3);
+  assert.deepEqual(added.map((s) => [s.num, s.text]), [[3, "Just another Warcraft III map"], [4, "Beliebig"], [5, "Nondescript"], [6, "Unknown"],
+    [7, "Loading title"], [8, "Loading subtitle"], [9, "Loading text"], [10, "Plain player"], [11, "Plain force"]]);
+  assert.deepEqual([info.name, info.suggestedPlayers, info.description, info.author], ["TRIGSTR_003", "TRIGSTR_004", "TRIGSTR_005", "TRIGSTR_006"]);
+  assert.deepEqual([info.loadingScreen.title, info.loadingScreen.subtitle, info.loadingScreen.text], ["TRIGSTR_007", "TRIGSTR_008", "TRIGSTR_009"]);
+  assert.equal(info.players[0].name, "TRIGSTR_010");
+  assert.equal(info.forces[0].name, "TRIGSTR_011");
+  assert.deepEqual(info.prologue, { path: "", text: "Prologue text", title: "Prologue title", subtitle: "Prologue subtitle" });
+  assert.equal(info.loadingScreen.crestRace, 128);
+  assert.equal(info.gameDataSet, 1, "a game data set of 1 stays");
+  // resize-bounds.w3m (the empty map): empty texts and references stay; crest race 64 and game data set -1 as the editor left them.
+  const empty = {
+    name: "Just another Warcraft III map", author: "", description: "TRIGSTR_007", suggestedPlayers: "Beliebig",
+    loadingScreen: { crestRace: 64, text: "", title: "", subtitle: "" }, gameDataSet: 4294967295,
+    players: [{ name: "TRIGSTR_001" }], forces: [{ name: "TRIGSTR_002" }],
+  };
+  assert.deepEqual(infoAfterResize(empty, 12), [{ num: 12, text: "Just another Warcraft III map" }, { num: 13, text: "Beliebig" }]);
+  assert.equal(empty.author, "");
+  assert.equal(empty.description, "TRIGSTR_007");
+  assert.equal(empty.loadingScreen.crestRace, 128);
+  assert.equal(empty.gameDataSet, 0);
+  assert.equal(infoAfterResize({ name: "A" }, 1000)[0].num, 1000);
+  assert.deepEqual(infoAfterResize({}, 1), [], "a w3i without those fields: nothing");
 });
 
 test("adding on the left and bottom moves the offset, not the world position", () => {

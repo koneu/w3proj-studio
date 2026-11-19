@@ -54,9 +54,11 @@ import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
-import { isUprooted, MELEE_MAP, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
-import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
+import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
+import { StringTable } from "../../lib/formats/wts";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { campsOf } from "./meleecheck";
@@ -103,7 +105,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, camerasAfterResize, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, camerasAfterResize, applyResizePathing, doodadStays, infoAfterResize, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, startAfterResize, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -116,6 +118,8 @@ const reportOnce = (w3: W3Api, what: string, e: unknown) => {
 
 /** How long a resize or its undo waits for the rebuild due from the last edit. */
 const SETTLE_LIMIT = 5 * 60_000;
+/** The string table a resize adds the w3i's texts to (infoAfterResize). */
+const RESIZE_WTS = "map/war3map.wts";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
@@ -4537,7 +4541,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const camsGone = cams.length - camerasAfterResize(cams, cameraBounds({ ...terrain, ...next }, complements)).length;
           return (dooFile?.list.filter((p) => !stays(p, true)).length ?? 0) + (unitsFile?.list.filter((p) => !stays(p, false)).length ?? 0) + specials + camsGone;
         };
+        /** The first string number a resize gives the w3i's plain texts (infoAfterResize): after every number the map's
+         *  files refer to, the languages' tables have (stringNumbersTaken) and war3map.wts holds. Throws when one of those
+         *  is there but can't be read: before anything is written. */
+        const resizeFirstString = async (): Promise<number> => {
+          await w3.workspace.filesReady();
+          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => {
+            if (isNotFoundError(e)) return null;
+            throw new Error(`${RESIZE_WTS} is there but can't be read (${errorText(e)}), so the map's texts can't be given string numbers.`);
+          });
+          const taken = await stringNumbersTaken(w3, w3.workspace.files().map((f) => f.path));
+          for (const [n] of wts === null ? [] : new StringTable(wts).entries()) taken.add(n);
+          let max = 0;
+          for (const n of taken) max = Math.max(max, n);
+          return max + 1;
+        };
+        /** Adds the strings infoAfterResize made to war3map.wts (made when absent) and to every language's table, each
+         *  read as it is now: a number something else took meanwhile for another text throws (addLocaleStrings), and the
+         *  resize's files go back. The languages' tables first: a resize that stops after them leaves unused strings there. */
+        const addResizeStrings = async (added: { num: number; text: string }[]) => {
+          if (!added.length) return;
+          for (const path of w3.workspace.files().map((f) => f.path).filter(isLocaleWts)) {
+            const text = await w3.workspace.readText(path);
+            const out = addLocaleStrings(path, text, added);
+            if (out !== text) await w3.workspace.writeText(path, out);
+          }
+          const wts = await w3.workspace.readText(RESIZE_WTS).catch((e) => { if (isNotFoundError(e)) return null; throw e; });
+          await w3.workspace.writeText(RESIZE_WTS, addLocaleStrings(RESIZE_WTS, wts ?? "﻿", added));
+          if (wts === null) await w3.workspace.refresh();
+        };
         const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+          // Read before anything is written: a string table that can't be read stops the resize here.
+          const firstString = await resizeFirstString();
           const next = resizeTerrain(terrain, change);
           // Read and moved before anything is written; a bad file is left alone (see planPathingOverrides).
           const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as unknown).catch(() => null);
@@ -4577,7 +4612,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           markMapEdge(next, complements, true);
           await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
+          let infoStrings: { num: number; text: string }[] = [];
           await editDoc("war3map.w3i", (info) => {
+            // Its plain texts become strings of the table, the crest race and game data set as the editor's Map Size leaves them.
+            infoStrings = infoAfterResize(info, firstString);
             info.cameraComplements = [...complements];
             info.cameraBounds = cameraBounds(next, complements);
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
@@ -4587,9 +4625,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const s = startAfterResize(pl.start[0], pl.start[1], rect, edge, pb);
               if (!s.kept) [pl.start[0], pl.start[1]] = s.at;
             }
-            // A start left past the playable edge is "in an invalid position": the World Editor's save takes Melee off.
-            if (typeof info.flags === "number" && startsPastPlayable(next, unitsFile?.list ?? [])) info.flags &= ~MELEE_MAP;
+            // A start left past the playable edge is "in an invalid position": the World Editor's save takes Melee off, as
+            // for its other reasons the w3i and the units tell (meleeFlagsAfter: a game data set of 1 did in
+            // resize-strings-border), here and not only when a later save of an editor happens to run.
+            if (typeof info.flags === "number") info.flags = meleeFlagsAfter(info as unknown as MeleeInfo, unitsFile?.list ?? [], startsPastPlayable(next, unitsFile?.list ?? []));
           });
+          await addResizeStrings(infoStrings);
           void loadBorder();
           // Regions are clipped to the map (those left outside go).
           await editDoc("war3map.w3r", (d) => {

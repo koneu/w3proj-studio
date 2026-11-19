@@ -79,6 +79,33 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
   return { default: 1250, max: 1250, ...(zoom.min !== undefined ? { min: 1250 } : {}) };
 }
 
+/** war3map.w3i as the World Editor's Map Size leaves it besides the bounds (we-compare resize-strings-border and
+ *  resize-bounds-*, 2026-11-19, branch we-compare-15): every text field the map's string table can hold that has plain
+ *  text becomes a reference to a new string with that text, numbered on from `first` in this order: the map's name,
+ *  suggested players, description, author, the loading screen's title, subtitle and text, then the players' and the
+ *  forces' names. An empty text and one that is a TRIGSTR reference already stay; the prologue's texts stay plain. The
+ *  loading screen's crest race becomes 128 (64 and 3 did) and a game data set of -1 becomes 0 (1 stayed). Changes
+ *  `info` in place; the new strings, for the caller to add to the string table (and the languages' tables). */
+export function infoAfterResize(info: Record<string, unknown>, first: number): { num: number; text: string }[] {
+  const added: { num: number; text: string }[] = [];
+  const take = (owner: unknown, key: string) => {
+    if (!owner || typeof owner !== "object") return;
+    const o = owner as Record<string, unknown>, text = o[key];
+    if (typeof text !== "string" || text === "" || /^TRIGSTR_\d+$/.test(text)) return;
+    const num = first + added.length;
+    added.push({ num, text: text.replace(/\r\n/g, "\n") });
+    o[key] = `TRIGSTR_${String(num).padStart(3, "0")}`;
+  };
+  for (const key of ["name", "suggestedPlayers", "description", "author"]) take(info, key);
+  for (const key of ["title", "subtitle", "text"]) take(info.loadingScreen, key);
+  for (const p of Array.isArray(info.players) ? info.players : []) take(p, "name");
+  for (const f of Array.isArray(info.forces) ? info.forces : []) take(f, "name");
+  const screen = info.loadingScreen as Record<string, unknown> | undefined;
+  if (screen && typeof screen.crestRace === "number") screen.crestRace = 128;
+  if (typeof info.gameDataSet === "number" && info.gameDataSet >>> 0 === 0xffffffff) info.gameDataSet = 0;
+  return added;
+}
+
 /** A corner Map Size adds, as the World Editor makes it: a copy of the nearest corner on the old map's edge (height,
  *  cliff level, water, ground and cliff tile, flags), with a ground and a cliff variation of its own. we-drive
  *  2026-11-12, Last Refuge grown by 32 tiles left and bottom: all 7232 new corners equal their edge corner but for the
