@@ -91,6 +91,26 @@ function weStep(step, where, vars = {}) {
   return tokens[0] === "--type" && tokens.length === 2 ? [tokens[0], expandText(tokens[1], vars)] : tokens;
 }
 
+/**
+ * Palette settings of the World Editor that stay for the editor's session (a File > Open keeps them): specs of one mode
+ * share one editor, so a spec that sets one away from the editor's start sets it back, else every later spec of the
+ * run inherits it. Each: the click that sets it away and the click that sets it back (display positions, 1600x1000).
+ * The terrain palette's Shape: water-brush-square left it square, and water-dungeon, water-black-citadel and
+ * water-cliff-append, later in the same editor, drew square strokes (branch we-shared-state, 2026-11-19).
+ */
+export const SESSION_TOGGLES = Object.freeze([
+  { name: "the terrain palette's brush shape", away: "1424,624", awayIs: "square", back: "1392,624", backIs: "circle" },
+]);
+
+/** The SESSION_TOGGLES a spec's World Editor steps (weStep's form) leave set away: the last of its clicks is the
+ *  "away" one. */
+export function togglesLeft(steps) {
+  return SESSION_TOGGLES.filter((t) => {
+    const last = steps.findLast(([s, v]) => s === "--click" && (v === t.away || v === t.back));
+    return last?.[1] === t.away;
+  });
+}
+
 /** One Studio step; an `eval`'s `${REPO}` / `${MAIN}` become the checkouts' paths (quoted for a string literal). */
 function studioStep(step, where, vars = {}) {
   if (!isObject(step)) throw new Error(`${where}: a Studio step is an object, got ${JSON.stringify(step)}`);
@@ -216,12 +236,18 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
   if (dup.length) throw new Error(`${where}: compare names ${dup[0]} twice`);
   if (raw.limit !== undefined && !(Number.isInteger(raw.limit) && raw.limit > 0)) throw new Error(`${where}: limit is a positive whole number`);
+  const weSteps = (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars)));
+  const left = togglesLeft(weSteps);
+  if (left.length) {
+    const t = left[0];
+    throw new Error(`${where}: we.steps leave ${t.name} ${t.awayIs} (--click ${t.away}): it stays for the editor's session, which the next specs share; click ${t.back} (${t.backIs}) after the stroke`);
+  }
   return {
     name,
     description: raw.description ?? "",
     input: parsedInput,
     we: {
-      mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars))),
+      mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: weSteps,
       save: we.save ?? "plain", freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs, renderer: we.renderer ?? null,
     },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },

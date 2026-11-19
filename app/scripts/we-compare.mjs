@@ -42,6 +42,8 @@
 //               What an earlier spec toggled in that editor stays (Ctrl+Shift+W, a palette pick, a tree's scroll): a
 //               step that depends on it is set, not toggled. Num Lock: "--numlock on" (reads the X server's state and
 //               presses Num_Lock only when it differs; a blind "--key Num_Lock" depends on the spec before).
+//               A module window a spec leaves open (F4's Trigger Editor ignores every close) gets the next spec a new
+//               editor (we-drive --map restarts it, "modulesLeft"): an open one changed the next maps' saves.
 //               "freshEditor": true  this spec gets an editor of its own: the editor before is closed and a new one
 //                 started for it (the preferences written again), so nothing of the specs before it is left.
 //               "prefs": { "Misc": { "Enforce Water Limits": "false" } }  keys of WorldEditPreferences.txt written
