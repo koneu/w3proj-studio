@@ -200,6 +200,50 @@ function startsJudged(t: Terrain, placed: readonly PlacedLike[], around: StartSu
   return unknown ? "unknown" : "valid";
 }
 
+/**
+ * Where a start location goes that Map Size took off the map: the place on the 64 grid nearest to `from` where it is
+ * plainly valid by startsPlainlyValid's rules (its square inside the map and every cell of it fit for a town hall in
+ * `around.pathing`, which blocks the tiles past the playable map, no start of `others` overlapping it, no gold mine of
+ * `others` nearer than MINE_CLEARANCE, no doodad of unknown pathing within reach). The World Editor's save makes the
+ * new one at a random place among such (we-drive 2026-11-19, branch we-compare-18: twelve saves of a 64 x 64 map cut
+ * by 8 on the right, all on the 64 grid; with all but a 12 x 12 tile patch under shallow water all four landed on it,
+ * with all but a strip along the west edge all four in the strip, one 64 outside the camera bounds, none with its
+ * square past the playable edge). Null when there is none, or `around` doesn't fit the terrain.
+ */
+export function validStartPlace(t: Terrain, from: readonly [number, number], others: readonly PlacedLike[], around: StartSurroundings): [number, number] | null {
+  const w = (t.width - 1) * 4, h = (t.height - 1) * 4, cells = around.pathing.subarray(16);
+  if (cells.length !== w * h || !Number.isFinite(from[0]) || !Number.isFinite(from[1])) return null;
+  // Cells unfit for a hall, summed: a square's count in four lookups.
+  const sum = new Int32Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      if (cells[y * w + x] & NOT_FOR_A_HALL) row++;
+      sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const S = START_SQUARE;
+  const cellAt = (x: number, y: number) => [Math.round((x - t.offsetX) / 32), Math.round((y - t.offsetY) / 32)];
+  const starts = others.filter((p) => p.id === "sloc" && placedPos(p)).map((p) => cellAt(placedPos(p)![0], placedPos(p)![1]));
+  const mines = others.filter((p) => MINES.has(p.id) && placedPos(p)).map((p) => placedPos(p)!);
+  let best: [number, number] | null = null, bestD = Infinity;
+  const x0 = Math.ceil(t.offsetX / 64), x1 = Math.floor((t.offsetX + (t.width - 1) * 128) / 64);
+  const y0 = Math.ceil(t.offsetY / 64), y1 = Math.floor((t.offsetY + (t.height - 1) * 128) / 64);
+  for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) {
+    const x = gx * 64, y = gy * 64, d = Math.hypot(x - from[0], y - from[1]);
+    if (d >= bestD) continue;
+    const [cx, cy] = cellAt(x, y);
+    if (cx - S < 0 || cy - S < 0 || cx + S > w || cy + S > h) continue;
+    const bad = sum[(cy + S) * (w + 1) + cx + S] - sum[(cy - S) * (w + 1) + cx + S] - sum[(cy + S) * (w + 1) + cx - S] + sum[(cy - S) * (w + 1) + cx - S];
+    if (bad) continue;
+    if (starts.some(([ox, oy]) => Math.max(Math.abs(ox - cx), Math.abs(oy - cy)) < 2 * S)) continue;
+    if (mines.some(([mx, my]) => Math.hypot(mx - x, my - y) < MINE_CLEARANCE)) continue;
+    if (around.unknown?.some((u) => Math.max(Math.abs(u.x - x), Math.abs(u.y - y)) < UNKNOWN_REACH)) continue;
+    best = [x, y]; bestD = d;
+  }
+  return best;
+}
+
 /** What of a project the melee rules read. `gameText`: the game's tables (Terrain.slk, Water.slk, Doodads.slk,
  *  DestructableData.slk); `gameBytes`: its files (the doodads' pathing textures). Without them the flag is never put
  *  back. */
@@ -370,7 +414,14 @@ export async function readTypeVersions(ws: Pick<MeleeFiles, "gameText" | "typeVe
 /** What stands around the start locations (StartSurroundings) on `ground`: null when the game's tables or the doodads
  *  can't be read. */
 async function readSurroundings(ws: MeleeFiles, files: readonly string[], ground: Terrain): Promise<StartSurroundings | null> {
-  const find = (want: string) => files.find((p) => p.toLowerCase() === want.toLowerCase());
+  const dooPath = files.find((p) => p.toLowerCase() === "map/war3map.doo.json");
+  return startSurroundings(ws, ground, dooPath ? await ws.readText(dooPath).catch(() => null) : null);
+}
+
+/** The start locations' surroundings (readSurroundings) of `ground` with the doodads of `dooText` (war3map.doo.json's
+ *  text: null when there is none or it can't be read): for ground and doodads not saved yet, as Map Size's. Null when
+ *  they can't be told (no game tables, a doodad file that can't be read). */
+export async function startSurroundings(ws: Pick<MeleeFiles, "gameText" | "gameBytes">, ground: Terrain, dooText: string | null): Promise<StartSurroundings | null> {
   /** A game table's rows that have `key`; empty when it can't be read. */
   const table = async (path: string, key: string) => {
     const text = ws.gameText ? await ws.gameText(path).catch(() => null) : null;
@@ -394,8 +445,7 @@ async function readSurroundings(ws: MeleeFiles, files: readonly string[], ground
     }
     return m;
   };
-  const dooPath = find("map/war3map.doo.json");
-  const doodads = tiles.length ? await doodadStamps(dooPath ? await ws.readText(dooPath).catch(() => null) : null, ground, pathTex, texture) : null;
+  const doodads = tiles.length ? await doodadStamps(dooText, ground, pathTex, texture) : null;
   if (!doodads) return null;
   const rules = new Map(tiles.map((r) => [r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" }]));
   const water = parseWaterOffsets(await table("TerrainArt\\Water.slk", "waterID"));

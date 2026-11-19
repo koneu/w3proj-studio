@@ -55,7 +55,7 @@ import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { StringTable } from "../../lib/formats/wts";
@@ -4579,18 +4579,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const plan = planPathingOverrides(stored, terrain, change);
           const { rect, edge, stays } = await resizeRules(next, complements);
           // Start locations (startAfterResize): one still inside the map stays where it is, past the playable edge or
-          // not; one off the map is moved inside the camera bounds, where the World Editor removes it and its save
-          // makes a new one at a random place (a player needs one).
+          // not; one off the map is removed by the World Editor, whose save makes a new one at a random valid place
+          // (a player needs one). Studio moves it to the valid place nearest to where it was (validStartPlace, with the
+          // doodads that stay), else, when there is none or the game's tables can't tell, into the camera bounds.
           const pb = cameraBounds(next, complements);
-          let removed = 0;
+          // The new map's edge marks first: the starts' pathing blocks the tiles past the playable map by them.
+          markMapEdge(next, complements, true);
+          let removed = 0, around: StartSurroundings | null = null, aroundRead = false;
+          const movedStarts: { player: unknown; from: [number, number]; at: [number, number] }[] = [];
           for (const f of [dooFile, unitsFile]) {
             if (!f) continue;
             for (const p of f.list) {
               if (p.id !== "sloc") continue;
               const s = startAfterResize(p.position[0], p.position[1], rect, edge, pb);
-              if (!s.kept) [p.position[0], p.position[1]] = s.at;
+              let outside = s.outside;
+              if (!s.kept) {
+                if (!aroundRead) { aroundRead = true; around = await startSurroundings(meleeFiles(w3), next, dooFile ? JSON.stringify(dooFile.doc) : null); }
+                const from: [number, number] = [p.position[0], p.position[1]];
+                const others = f.list.filter((o) => o !== p && stays(o, f === dooFile));
+                const valid = around ? validStartPlace(next, from, others, around) : null;
+                const at = valid ?? s.at;
+                if (valid) outside = !inArea(valid[0], valid[1], edge);
+                [p.position[0], p.position[1]] = at;
+                movedStarts.push({ player: (p as Placed & { player?: number }).player, from, at });
+              }
               const flags = flagsOf(p);
-              if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, s.outside);
+              if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, outside);
             }
             const keep = f.list.filter((p) => stays(p, f === dooFile));
             removed += f.list.length - keep.length;
@@ -4610,7 +4624,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await savePlacedFile(w3, f);
           }
-          markMapEdge(next, complements, true);
           await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
           let infoStrings: { num: number; text: string }[] = [];
           await editDoc("war3map.w3i", (info) => {
@@ -4621,9 +4634,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
             const zoom = resizedCameraZoom(info.cameraZoom as Parameters<typeof resizedCameraZoom>[0]);
             if (zoom) info.cameraZoom = zoom;
-            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) {
+            for (const pl of (info.players as { id?: unknown; start: number[] }[] | undefined) ?? []) {
               const s = startAfterResize(pl.start[0], pl.start[1], rect, edge, pb);
-              if (!s.kept) [pl.start[0], pl.start[1]] = s.at;
+              // Where its start location went: the player's, else the one that stood at the same point.
+              const moved = movedStarts.find((m) => m.player !== undefined && m.player === pl.id) ?? movedStarts.find((m) => m.from[0] === pl.start[0] && m.from[1] === pl.start[1]);
+              if (!s.kept) [pl.start[0], pl.start[1]] = moved?.at ?? s.at;
             }
             // A start left past the playable edge is "in an invalid position": the World Editor's save takes Melee off, as
             // for its other reasons the w3i and the units tell (meleeFlagsAfter: a game data set of 1 did in

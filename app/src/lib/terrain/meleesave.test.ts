@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtgJson } from "../triggers/wtg";
-import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsUnderWater, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
@@ -393,4 +393,51 @@ test("a save sets flag 0x4000 for a placed tavern and clears it without one (tft
   assert.equal((await savedMelee(ws, { flags: M }, [startMid, tavern])).flags, M | TFT, "a tavern sets it");
   assert.equal((await savedMelee(ws, { flags: M | TFT }, [startMid, frog])).flags, M, "a frog of version 0 clears it");
   assert.equal((await savedMelee(ws, { flags: M }, [startMid, frog])).flags, M, "control: a frog leaves it off");
+});
+
+test("a start Map Size took off the map goes to the nearest plainly valid place on the 64 grid", () => {
+  /** Whether the start at p is plainly valid among `others` (startsPlainlyValid: the oracle), and no grid point nearer to
+   *  `from` is: the answer is the nearest valid place. */
+  const nearest = (t: Terrain, from: [number, number], others: { id: string; player?: number; position?: number[] }[], a: ReturnType<typeof around>, p: [number, number] | null) => {
+    assert.ok(p, "a place is found");
+    assert.equal(p[0] % 64, 0); assert.equal(p[1] % 64, 0);
+    assert.ok(startsPlainlyValid(t, [...others, start(p[0], p[1])], a), `${p} is valid`);
+    const d = Math.hypot(p[0] - from[0], p[1] - from[1]);
+    for (let y = 0; y <= (t.height - 1) * 128; y += 64) for (let x = 0; x <= (t.width - 1) * 128; x += 64) {
+      if (Math.hypot(x - from[0], y - from[1]) < d) assert.equal(startsPlainlyValid(t, [...others, start(x, y)], a), false, `${x},${y} is nearer and valid`);
+    }
+  };
+  const t = flat();
+  assert.deepEqual(validStartPlace(t, [MID, MID], [], around(t)), [MID, MID], "a valid grid point is its own answer");
+  // Off the map to the east: the square has to fit inside it (cells up to 64).
+  assert.deepEqual(validStartPlace(t, [3000, MID], [], around(t)), [1792, MID]);
+  // Unbuildable ground from corner 11 on: the place stays west of it.
+  const rock = flat(17, (c, x) => { if (x >= 11) c.texture = 1; });
+  const fromEast: [number, number] = [3000, MID];
+  nearest(rock, fromEast, [], around(rock), validStartPlace(rock, fromEast, [], around(rock)));
+  assert.ok(validStartPlace(rock, fromEast, [], around(rock))![0] < 1408);
+  // A gold mine, another start, a tree and a doodad of unknown pathing push it away.
+  const mine = [{ id: "ngol", player: 27, position: [1400, MID, 0] }];
+  nearest(t, fromEast, mine, around(t), validStartPlace(t, fromEast, mine, around(t)));
+  const byMine = validStartPlace(t, fromEast, mine, around(t))!;
+  assert.ok(Math.hypot(byMine[0] - 1400, byMine[1] - MID) >= 750);
+  const other = [{ ...start(1700, MID), player: 1 }];
+  nearest(t, fromEast, other, around(t), validStartPlace(t, fromEast, other, around(t)));
+  const trees = around(t, [tree(1600, MID)]);
+  nearest(t, fromEast, [], trees, validStartPlace(t, fromEast, [], trees));
+  assert.notDeepEqual(validStartPlace(t, fromEast, [], trees), [1792, MID], "control: the tree is in the way of the place without it");
+  const unknown = around(t, [], [{ x: 1700, y: MID }]);
+  const byUnknown = validStartPlace(t, fromEast, [], unknown)!;
+  assert.ok(Math.max(Math.abs(byUnknown[0] - 1700), Math.abs(byUnknown[1] - MID)) >= 768, "a doodad of unknown pathing: kept out of reach");
+  nearest(t, fromEast, [], unknown, byUnknown);
+  // The tiles past the playable map are no place for it (startPathing blocks them).
+  const edged = flat();
+  markMapEdge(edged, [2, 2, 2, 2]);
+  const p = validStartPlace(edged, fromEast, [], around(edged));
+  nearest(edged, fromEast, [], around(edged), p);
+  assert.deepEqual(p, [1792 - 256, MID]);
+  // Nowhere, or surroundings of another map: null.
+  const allRock = flat(17, (c) => { c.texture = 1; });
+  assert.equal(validStartPlace(allRock, fromEast, [], around(allRock)), null);
+  assert.equal(validStartPlace(t, fromEast, [], around(flat(9))), null, "a pathing map of another size");
 });

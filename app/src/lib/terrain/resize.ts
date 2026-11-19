@@ -195,8 +195,9 @@ export function camerasAfterResize<T extends { targetX: number; targetY: number 
  *  the playable edge (`playable`; the top cut left it at -256, 768 past it, with the "outside" flag, and the save took
  *  Melee off); one on or past the map's edge is removed by the World Editor, whose save then makes a new one at a
  *  random place in the playable area (six cuts: -1344, -2944 and -2688, -2176 for the same cut, all on the 64 grid; the
- *  w3i's player start a few units beside it). Studio moves it into the camera bounds (`bounds`, as stored: left,
- *  bottom, right, top first) instead, the nearest point there. The new one's hit points and mana are 0 where a placed
+ *  w3i's player start a few units beside it; the place is always a valid one: meleesave.ts validStartPlace, which
+ *  Map Size uses first). This gives the fallback: into the camera bounds (`bounds`, as stored: left, bottom, right,
+ *  top first), the nearest point there. The new one's hit points and mana are 0 where a placed
  *  one's are -1 (the editor's save turns a 0 into -1 before it makes the new start): Studio's save keeps its -1.
  *  `outside`: past the playable edge where it ends up. */
 export function startAfterResize(x: number, y: number, rect: Area, playable: Area, bounds: readonly number[]): { kept: boolean; at: [number, number]; outside: boolean } {
