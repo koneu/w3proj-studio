@@ -42,14 +42,24 @@ export function waterShadowKeep(depth: number, lit: number): [number, number, nu
   return WATER_SHADE.map((s) => 1 + (s + (1 - s) * l - 1) * deep) as [number, number, number];
 }
 
-/** HD water's dark edge: black up to the first of these distances (world units) inside the playable map, its colour
+/** HD water's dark edge: dark up to the first of these distances (world units) inside the playable map, its colour
  *  back in full at the second, by the pixel. The World Editor's HD water goes dark that far inside, hard, on all four
- *  sides alike (we-drive, 2026-11-13, a copy of the empty map with lakes across each edge, from above at 1200: half its
- *  colour 39 to 46 pixels inside, a tenth 24 to 29; about a pixel a unit there). */
-export const HD_WATER_EDGE = [10, 42] as const;
+ *  sides alike (we-drive, 2026-11-13, from above: half its colour 39 to 46 pixels inside, a tenth 24 to 29). Fitted in
+ *  the oblique game view (2026-11-19, make-water-tilesets.mjs wt-L.w3x, `--look ±3200,-1472,1200,304,70,0|180`, the
+ *  west and east edges across the view over 96 deep water): the editor's blue goes from a tenth to nine tenths of the
+ *  way between 31.6 and 40.6 units inside, half at 35; with [10, 42] Studio's did between 13.8 and 38.4, half at 22.6
+ *  (11 pixels nearer the edge); with these 31.7, 35.3, 40.6 in the sRGB picture. */
+export const HD_WATER_EDGE = [30, 44.5] as const;
 /** What HD water keeps of its own colour and reflection past HD_WATER_EDGE: the border's HD shade (area.ts
  *  hdBorderKeep, 0.0185), not black (TESTING.md, branch we-compare-15). */
 export const HD_WATER_EDGE_KEEP = hdBorderKeep(BORDER_ALPHA / 255);
+
+/** The share of its own colour and reflection HD water keeps `inside` world units inside the playable map (linear
+ *  light, HD_WATER_EDGE_KEEP to 1); `edge` the two distances, HD_WATER_EDGE. The water shader (WATER_FS) does the same. */
+export function hdWaterEdgeLit(inside: number, edge: readonly [number, number] = HD_WATER_EDGE): number {
+  const t = Math.min(1, Math.max(0, (inside - edge[0]) / (edge[1] - edge[0])));
+  return 1 + (HD_WATER_EDGE_KEEP - 1) * (1 - t * t * (3 - 2 * t));
+}
 
 /** The playable map's rectangle (left, bottom, right, top in world units) round the tiles `edge` leaves (1 per tile
  *  past it, rows from the south); an empty one in the map's middle when there are none. */
@@ -68,7 +78,7 @@ import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { BORDER_ALPHA, borderShade, darkWaterCorners, hdBorderKeep } from "../../lib/terrain/area";
+import { BORDER_ALPHA, BORDER_SPREAD, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -1305,24 +1315,26 @@ export class TerrainRenderer {
   refreshBorder() {
     if (!this.overlayProgram()) return;
     // Most edits leave the edge alone, and a big map's shade has millions of texels: made again only when it moved.
-    const marks = this.edgeTiles();
-    if (this.border && this.borderMarks && sameBytes(marks, this.borderMarks)) return;
+    const marks = this.edgeTiles(), spread = BORDER_SPREAD[this.tone === 2 ? "hd" : "sd"];
+    if (this.border && this.borderMarks && sameBytes(marks, this.borderMarks) && spread === this.borderSpread) return;
     this.borderMarks = marks;
+    this.borderSpread = spread;
     this.playRect = playRect(this.terrain, marks);
-    const { rgba, width, height } = borderShade(this.terrain, marks);
+    const { rgba, width, height } = borderShade(this.terrain, marks, spread);
     this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
     this.uploadOverlay(this.border.tex, rgba, width, height, true);
   }
   /** The marks the border's shade was made from. */
   private borderMarks: Uint8Array | null = null;
+  /** How far in it reaches (area.ts BORDER_SPREAD, by the graphics mode it was made in): made again when that changes. */
+  private borderSpread: BorderSpread = BORDER_SPREAD.hd;
   /** The playable rectangle round them, for HD water's dark edge (playRect). */
   private playRect: [number, number, number, number] = [0, 0, 0, 0];
 
-  /** Where the border's texture lies in the world (x, y, width, height): its texels sit on the pathing cells' corners
-   *  (borderShade), half a cell past the terrain's rim. */
+  /** Where the border's texture lies in the world (x, y, width, height): its texels on the pathing cells' corners or
+   *  middles, as it was made (area.ts borderShadeRect). */
   private borderRect(): [number, number, number, number] {
-    const t = this.terrain, half = 16;
-    return [t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half];
+    return borderShadeRect(this.terrain, this.borderSpread);
   }
 
   /** The border's shade for the placed models (EdgeShade: cliffs, doodads, specials, units, items, start locations,
@@ -1712,6 +1724,8 @@ export class TerrainRenderer {
 
   private drawFrame() {
     const gl = this.gl;
+    // The border's shade follows the graphics mode (set after the renderer was made).
+    if (this.border && this.borderSpread !== BORDER_SPREAD[this.tone === 2 ? "hd" : "sd"]) this.refreshBorder();
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     const far = this.distance * 10, near = Math.max(10, this.distance / 50);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BORDER_ALPHA, borderShade, darkWaterCorners, hdBorderKeep, isBackdrop } from "./area";
+import { BORDER_ALPHA, BORDER_SPREAD, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, isBackdrop, type BorderSpread } from "./area";
 import { mapEdgeTiles, markMapEdge, onBoundary, playableEdgeTiles, setWaterLevel, validComplements, type Corner, type Terrain } from "./w3e";
 
 /** A terrain of `tilesX` by `tilesY` tiles, its map edge marked for these complements (left, right, bottom, top). */
@@ -25,6 +25,51 @@ test("the border's shade covers the tiles the terrain marks as past the playable
   assert.equal(a(8, 5), 0);
   assert.equal(a(8, 12), 0);
   assert.ok([...rgba].every((v, i) => i % 4 === 3 || v === 0), "black");
+});
+
+/** The border shade's alpha (0 to 1) at world (x, y), sampled as the GPU's linear filter reads the texture over its rect
+ *  (area.ts borderShadeRect; clamped at the edges). */
+function shadeAt(t: Terrain, edge: Uint8Array, spread: BorderSpread, x: number, y: number): number {
+  const { rgba, width, height } = borderShade(t, edge, spread);
+  const [rx, ry, rw, rh] = borderShadeRect(t, spread);
+  const u = ((x - rx) / rw) * width - 0.5, v = ((y - ry) / rh) * height - 0.5;
+  const at = (i: number, j: number) => rgba[(Math.min(height - 1, Math.max(0, j)) * width + Math.min(width - 1, Math.max(0, i))) * 4 + 3] / 255;
+  const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+  return (at(i, j) * (1 - fu) + at(i + 1, j) * fu) * (1 - fv) + (at(i, j + 1) * (1 - fu) + at(i + 1, j + 1) * fu) * fv;
+}
+
+/** How far inside an edge the shade's alpha falls to half of BORDER_ALPHA (`shade(d)`: the alpha d units inside). */
+function halfInside(shade: (d: number) => number): number {
+  const half = BORDER_ALPHA / 255 / 2;
+  for (let d = 0; d < 200; d += 0.25) if (shade(d) <= half) return d;
+  return Infinity;
+}
+
+test("the border's shade reaches a further half cell in where the editor's does: HD on every side, SD west and east", () => {
+  // 10 by 10 tiles from 0, 0; left 2, right 2, bottom 2, top 2: the playable edges at 256 and 1024 on both axes.
+  const t = marked(10, 10, [2, 2, 2, 2]), edge = mapEdgeTiles(t);
+  const sides = (spread: BorderSpread) => ({
+    west: halfInside((d) => shadeAt(t, edge, spread, 256 + d, 640)),
+    east: halfInside((d) => shadeAt(t, edge, spread, 1024 - d, 640)),
+    south: halfInside((d) => shadeAt(t, edge, spread, 640, 256 + d)),
+    north: halfInside((d) => shadeAt(t, edge, spread, 640, 1024 - d)),
+  });
+  // we-drive 2026-11-19 (nv-L.w3x, game view, oblique): the editor's half 37 units in on every side in HD; in SD 30.6
+  // west, 39.0 east, 13.5 south, 22.4 north. Corners on every side (Studio before, the control) put it at 16.
+  assert.deepEqual(sides({ x: false, y: false }), { west: 16, east: 16, south: 16, north: 16 });
+  assert.deepEqual(sides(BORDER_SPREAD.hd), { west: 32, east: 32, south: 32, north: 32 });
+  assert.deepEqual(sides(BORDER_SPREAD.sd), { west: 32, east: 32, south: 16, north: 16 });
+  // Past the edge and well inside, the same as before: full shade one cell out, none two cells in.
+  for (const spread of [BORDER_SPREAD.hd, BORDER_SPREAD.sd]) {
+    assert.equal(shadeAt(t, edge, spread, 256 - 32, 640), BORDER_ALPHA / 255);
+    assert.equal(shadeAt(t, edge, spread, 640, 1024 + 32), BORDER_ALPHA / 255);
+    assert.equal(shadeAt(t, edge, spread, 256 + 64, 640), 0);
+    assert.equal(shadeAt(t, edge, spread, 640, 640), 0);
+  }
+  // The texture's size and place: a texel per cell's middle along a spread axis, per corner along the other.
+  assert.deepEqual(borderShadeRect(t, BORDER_SPREAD.sd), [0, -16, 1280, 1312]);
+  const { width, height } = borderShade(t, edge, BORDER_SPREAD.sd);
+  assert.deepEqual([width, height], [40, 41]);
 });
 
 test("the tiles past the playable map come from the w3i's complements, whatever the terrain's marks say", () => {

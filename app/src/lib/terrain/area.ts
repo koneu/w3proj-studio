@@ -21,19 +21,43 @@ export function playableArea(info: { cameraComplements?: number[] }, t: { offset
 /** The terrain's grid as the border's rules read it. */
 type EdgeGrid = Pick<Terrain, "width" | "height">;
 
+/** Per axis (x, y), whether the border's shade reaches a further half cell into the playable map (its texels on the
+ *  pathing cells' middles, dark beside a cell past the edge: the fade over the second half of the first playable cell
+ *  and the first half of the next) or not (its texels on the cells' corners: the fade over the first playable cell).
+ *  The World Editor's HD shade reaches in on all four sides, its SD shade on the west and east only (we-drive,
+ *  2026-11-19, make-water-tilesets.mjs --dry L, game view, `--look` 128 inside each edge across the view at 1200: the
+ *  fade's half 37 units inside on every side in HD; in SD 30.6 west, 39.0 east, 13.5 south, 22.4 north; Studio's
+ *  corners gave 18 on every side). */
+export interface BorderSpread { x: boolean; y: boolean }
+export const BORDER_SPREAD: Readonly<Record<"sd" | "hd", BorderSpread>> = Object.freeze({ sd: { x: true, y: false }, hd: { x: true, y: true } });
+
 /** The dark over the map's border: black at BORDER_ALPHA over each tile past the playable map (`edge`: 1 per tile,
  *  rows from the south; w3e.ts playableEdgeTiles, as the World Editor goes by the w3i). One RGBA texel per corner of the
- *  pathing cells (`4 * tiles + 1` a side, row 0 in the south), dark where any cell around it is past the playable map:
- *  drawn smoothly between the corners, the dark fades out over the first playable cell, as the editor's (we-drive, map
- *  03's west edge, 2026-11-12: from green 16 to 107 over 13 pixels, a cell's width there, just inside the edge). */
-export function borderShade(t: EdgeGrid, edge: ArrayLike<number>): { rgba: Uint8Array; width: number; height: number } {
+ *  pathing cells (`4 * tiles + 1` along an axis, row 0 in the south), dark where any cell around it is past the
+ *  playable map: drawn smoothly between the corners, the dark fades out over the first playable cell (we-drive, map
+ *  03's west edge, 2026-11-12: from green 16 to 107 over 13 pixels, a cell's width there). Along an axis `spread`
+ *  says (BORDER_SPREAD), one texel per cell's middle instead (`4 * tiles`), dark where the cell or one beside it is past:
+ *  the same fade half a cell further in. borderShadeRect says where the texture lies. */
+export function borderShade(t: EdgeGrid, edge: ArrayLike<number>, spread: BorderSpread = { x: false, y: false }): { rgba: Uint8Array; width: number; height: number } {
   const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
-  const width = tilesX * 4 + 1, height = tilesY * 4 + 1, rgba = new Uint8Array(width * height * 4);
+  const width = tilesX * 4 + (spread.x ? 0 : 1), height = tilesY * 4 + (spread.y ? 0 : 1), rgba = new Uint8Array(width * height * 4);
   const past = (cx: number, cy: number) => cx >= 0 && cy >= 0 && cx < tilesX * 4 && cy < tilesY * 4 && edge[(cy >> 2) * tilesX + (cx >> 2)] === 1;
+  // The cells a texel looks at along an axis: the two either side of a corner (texel i: cells i - 1 and i), or a
+  // middle's own and the two beside it (cells i - 1 to i + 1).
+  const xTo = spread.x ? 1 : 0, yTo = spread.y ? 1 : 0;
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    if (past(x - 1, y - 1) || past(x, y - 1) || past(x - 1, y) || past(x, y)) rgba[(y * width + x) * 4 + 3] = BORDER_ALPHA;
+    let dark = false;
+    for (let dy = -1; dy <= yTo && !dark; dy++) for (let dx = -1; dx <= xTo && !dark; dx++) dark = past(x + dx, y + dy);
+    if (dark) rgba[(y * width + x) * 4 + 3] = BORDER_ALPHA;
   }
   return { rgba, width, height };
+}
+
+/** Where borderShade's texture lies in the world (x, y, width, height), so that its texels sit on the cells' corners
+ *  (half a cell past the terrain's rim) or, along an axis `spread` says, on the cells' middles (the terrain itself). */
+export function borderShadeRect(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, spread: BorderSpread = { x: false, y: false }): [number, number, number, number] {
+  const half = 16, w = Math.max(0, t.width - 1) * 128, h = Math.max(0, t.height - 1) * 128;
+  return [t.offsetX - (spread.x ? 0 : half), t.offsetY - (spread.y ? 0 : half), w + (spread.x ? 0 : 2 * half), h + (spread.y ? 0 : 2 * half)];
 }
 /** How dark the border is: the World Editor's border ground keeps about 14.5 % of its colour (map 03, green 16 of 110
  *  just inside, we-drive 2026-11-12; Studio's 165 kept 35 %, green 39). */
