@@ -1,19 +1,14 @@
 {
   "name": "replace-doodad-grid",
-  "description": "test.md 'Replacing a 2x2-texture doodad with a 4x4 one in the World Editor': Advanced (260,41) > Replace Doodads... (288,257) opens 'Replace Doodads' (460x377 at 450,310): Old Doodad's category (563,363) Trees/Destructibles (505,459), Barrel LTbs (a click in the list, Home, 16 Down keys: the list follows the editor's language, which was English when this was first measured and is deDE since 2026-11-15: LTlt, LTba, OTds, ... rows from 408 in steps of 13, [LTbs] Fass the 17th); New Doodad's category (793,363) Trees/Destructibles (735,459), a click in its list, Home and 20 Down keys: Crates LTcr (4x4 texture); OK (791,674). Selected Doodads Only unticked: every barrel. Input: paste-centre.w3m's three barrels, on the 2x2 grid once loaded (-480, 992; -928, 672; 608, 672). Studio: w3.terrain.replaceDoodads {from LTbs, to LTcr} once the doodads are on their grids. MEASURED (2026-11-15, branch paste-centre-we): the editor puts each crate on the 4x4 grid, halves going up (-448, 1024; -896, 704), facing kept, as Studio; it leaves the third barrel (608, 672) a barrel: its crate (640, 704) would overlap the tree LTlt at 704, 640. Studio replaced it until branch replace-doodads-overlap (replace.ts roomForReplaced; tests/we-compare/replace-doodad-overlap.json has the rule)",
+  "description": "test.md 'Replacing a 2x2-texture doodad with a 4x4 one in the World Editor': Advanced (260,41) > Replace Doodads... (288,257) opens 'Replace Doodads' (460x377 at 450,310) with the types of WorldEditPreferences.txt [Replace Doodads] chosen (Old Doodad, New Doodad: the four characters of the id as a little-endian number, their tileset and category with them), which the spec writes: Barrel LTbs (1935823948) to Crates LTcr (1919112268, 4x4 texture); OK (791,674). Until branch we-compare-17 (2026-11-19) the spec picked them by Home and Down keys in the lists, which follow the editor's language (deDE when measured, enUS since we-drive sets it: [LTbs] Fass 17th in German, the 20 Downs reached [LTg3] Gate (Vertical) in English) and the tileset the dialog opened with (the last run's). Selected Doodads Only unticked: every barrel. Input: paste-centre.w3m's three barrels, on the 2x2 grid once loaded (-480, 992; -928, 672; 608, 672). Studio: w3.terrain.replaceDoodads {from LTbs, to LTcr} once the doodads are on their grids. MEASURED (2026-11-15, branch paste-centre-we): the editor puts each crate on the 4x4 grid, halves going up (-448, 1024; -896, 704), facing kept, as Studio; it leaves the third barrel (608, 672) a barrel: its crate (640, 704) would overlap the tree LTlt at 704, 640. Studio replaced it until branch replace-doodads-overlap (replace.ts roomForReplaced; tests/we-compare/replace-doodad-overlap.json has the rule)",
   "input": { "map": "${REPO}/tests/fixtures/we-compare/paste-centre.w3m" },
   "we": {
     "mode": "sd",
     "saveAccept": ["Warning"],
+    "prefs": { "Replace Doodads": { "Old Doodad": "1935823948", "New Doodad": "1919112268", "Reset Variations": "0", "Selected Only": "0", "Swap": "0" } },
     "steps": [
       ["--key", "d"], ["--sleep", "300"],
       ["--click", "260,41"], ["--sleep", "800"], ["--click", "288,257"], ["--sleep", "3500"],
-      ["--click", "563,363"], ["--sleep", "800"], ["--click", "505,459"], ["--sleep", "1000"],
-      ["--click", "793,363"], ["--sleep", "800"], ["--click", "735,459"], ["--sleep", "1000"],
-      ["--click", "520,500"], ["--sleep", "300"], ["--key", "Home"],
-      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "300"],
-      ["--click", "750,500"], ["--sleep", "300"], ["--key", "Home"],
-      ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--key", "Down"], ["--sleep", "500"],
       ["--click", "791,674"], ["--sleep", "2000"]
     ]
   },
