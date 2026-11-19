@@ -528,6 +528,41 @@ test("minimapBase: a pathing texture is read once for its cells and its size, ho
   assert.deepEqual(unexpected, [], "no other file was asked for");
 });
 
+test("minimapBase: in HD a doodad whose model only the _DE layer stores gets the grey dot, in the saved minimap as in Export Minimap", async () => {
+  // we-compare mmsave-dots-models-hd and we-drive --export-minimap (branch we-compare-12, 2026-11-19): the World Editor in HD
+  // draws EOcr, LCpa, LRsr, UO*, YO* … (56 types) as the grey 183 dot in its export and in the war3mapMap.blp its save writes;
+  // Studio's save (buildMinimap) drew their models' colours.
+  const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
+  const tables: Record<string, string> = {
+    "TerrainArt\\Terrain.slk": slk([["tileID", "dir", "file"], ["Ypth", "TerrainArt\\Test", "Test_Path"]]),
+    "TerrainArt\\CliffTypes.slk": slk([["cliffID", "texDir", "texFile"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height", "mmAlpha", "mmRed", "mmGreen", "mmBlue"]]),
+    "Doodads\\Doodads.slk": slk([["doodID", "showInMM", "useMMColor", "pathTex"], ["Ydeo", "1", "0", "none"], ["Ybas", "1", "0", "none"]]),
+    "Units\\DestructableData.slk": slk([["DestructableID"]]),
+    "Doodads\\DoodadSkins.txt": "[Ydeo]\r\nfile=Doodads\\De\\De\r\n[Ybas]\r\nfile=Doodads\\Base\\Base\r\n",
+  };
+  const files = new Map<string, Uint8Array>([
+    ["TerrainArt\\Test\\Test_Path.blp", tgaOf([50, 60, 70])],
+    ["Doodads\\De\\De.mdx", mdxOfTextures([[0, "Doodads\\De\\De.blp"]])], ["Doodads\\De\\De.blp", tgaOf([90, 30, 20])],
+    ["Doodads\\Base\\Base.mdx", mdxOfTextures([[0, "Doodads\\Base\\Base.blp"]])], ["Doodads\\Base\\Base.blp", tgaOf([20, 40, 90])],
+  ]);
+  const read = async (p: string) => { const f = files.get(p); if (!f) throw new Error(`no ${p}`); return f; };
+  // Where the game stores a file: the Ydeo model only in the 3.0 art layer.
+  const resolve = async (p: string) => (/De[\\/]De\.mdx$/i.test(p) ? "War3.w3mod:_de.w3mod:Doodads/De/De.mdx" : `War3.w3mod:${p}`);
+  const t = { ...flat(2, 2), tileset: "Y", groundTiles: ["Ypth"], cliffTiles: [] } as unknown as Terrain;
+  const placed = [{ id: "Ydeo", position: [0, 64, 0], angle: 0 }, { id: "Ybas", position: [128, 64, 0], angle: 0 }];
+  const dots = async (mode: string) => {
+    const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? mode : undefined) },
+      game: { readText: async (p: string) => tables[p] ?? "", resolve }, workspace: { files: () => [] } } as unknown as W3Api;
+    // As buildMinimap (the save, rebuild_map, the CLI's rebuild) calls it.
+    const b = await minimapBase(w3, t, placed as unknown as Parameters<typeof minimapBase>[2], read);
+    return b.objects.map((o) => o.rgb);
+  };
+  assert.deepEqual(await dots("hd"), [[183, 183, 183], [20, 40, 90]]);
+  // Control: SD reads the model (the base layer's files), and so does the other doodad in HD.
+  assert.deepEqual(await dots("sd"), [[90, 30, 20], [20, 40, 90]]);
+});
+
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {
   type V = [number, number, number];
   const norm = (v: V): V => { const l = Math.hypot(...v); return [v[0] / l, v[1] / l, v[2] / l]; };

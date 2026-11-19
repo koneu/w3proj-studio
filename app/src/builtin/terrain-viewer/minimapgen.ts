@@ -211,11 +211,12 @@ export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[
 /** Whether a resolved game path (`War3.w3mod:_de.w3mod:…`) lies in the 3.0 art layer. */
 export const inDeLayer = (stored: string | null) => stored !== null && /:_de\.w3mod:/i.test(stored);
 
-/** `noDeLayer`: Export Minimap in HD, where the World Editor draws a grey dot for a doodad whose model is stored only under
- *  `_DE.w3mod` (EOcr, LCpa, LRsr, UO*, YO*; we-compare 2026-11-17), while the terrain view does show such models (the game's
- *  layer fallback). A model the map imports itself is still read. */
+/** In HD a doodad whose model is stored only under `_DE.w3mod` (EOcr, LCpa, LRsr, UO*, YO*) gets the grey dot, as the World
+ *  Editor draws it in its Export Minimap and in the war3mapMap.blp its save writes alike (we-compare 2026-11-17 and branch
+ *  we-compare-12, 2026-11-19: 56 such types of minimap-dots-models.w3x), while the terrain view does show such models (the
+ *  game's layer fallback). A model the map imports itself is still read. */
 export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>, opts: { noDeLayer?: boolean } = {}): Promise<Omit<MinimapInput, "params">> {
+  readFile: (path: string) => Promise<Uint8Array>): Promise<Omit<MinimapInput, "params">> {
   await applyTilesetWater(w3, terrain);
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
@@ -277,7 +278,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     skins ??= loadSkins(w3);
     const mean = key.startsWith("mean:"), type = key.slice(mean ? 5 : 6);
     const skin = (await skins).get(type);
-    return skin ? modelTextureColor(skin, opts.noDeLayer ? readWithoutDe : readFile, mean) : null;
+    return skin ? modelTextureColor(skin, readWithoutDe, mean) : null;
   })().catch(() => null));
   const modelColor = (type: string, mean: boolean) => colorOf(`${mean ? "mean" : "first"}:${type}`);
   // A pathing texture is read and decoded once, for its cells and its size alike (null: unreadable).
