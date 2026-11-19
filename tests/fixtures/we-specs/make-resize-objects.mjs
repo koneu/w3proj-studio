@@ -1,7 +1,11 @@
 // Makes resize-objects.w3m, the input of tests/we-compare/resize-objects.json: what Map Size does to regions and camera
 // objects. From the empty 64 x 64 map (map -4096..4096 both ways, camera bounds x ±2816, y -3328..2816):
 //
-//   node tests/fixtures/we-specs/make-resize-objects.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli>
+//   node tests/fixtures/we-specs/make-resize-objects.mjs <empty_map_on_newest_world_editor.w3m> <w3proj cli> [bounds]
+//
+// "bounds" writes resize-bounds.w3m instead (tests/we-compare/resize-bounds.json): no regions, camera objects on and
+// beside the bounds a cut of 4 tiles on the left and on top makes (x -2304, y 2304), which a change of the camera
+// bounds alone by one arrow click on each of those sides makes too, and on and beside the right bound that stays (2816).
 //
 // Regions (named by what a cut of 4 tiles on the left and on top, to -3584 and 3584, does to them): one inside, one
 // across the new left edge, one wholly in the cut part on the left, one across the new top edge, one in the north-west
@@ -18,7 +22,9 @@ import { requireFresh } from "../../binfresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [empty, cli] = process.argv.slice(2, 4).map((p) => (p ? resolve(p) : p));
-if (!cli) { console.error("usage: make-resize-objects.mjs <empty map> <w3proj cli>"); process.exit(2); }
+const variant = process.argv[4];
+if (!cli || (variant !== undefined && variant !== "bounds")) { console.error("usage: make-resize-objects.mjs <empty map> <w3proj cli> [bounds]"); process.exit(2); }
+const bounds = variant === "bounds";
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
@@ -40,6 +46,11 @@ const REGIONS = [
 // name, target x, target y
 const CAMERAS = [["middle", 0, 0], ["cutLeft", -3800, 0], ["cutTop", 0, 3800], ["onEdge", -3584, 0], ["westOfMap", -5000, 0],
   ["growIn", -3000, 0], ["nearBound", -2800, 0], ["rightOut", 3000, 0], ["inside", -1000, 500]];
+// The bounds variant: on the new left bound, a hair and one unit either side of it, the same on the new top bound, the
+// new corner, and on the right bound that a cut on the left and top leaves (2816), and half a unit and one unit past it.
+const BOUND_CAMERAS = [["onLeft", -2304, 0], ["pastLeft", -2304.5, 0], ["pastLeft1", -2305, 0], ["insideLeft", -2303.5, 0],
+  ["onTop", 0, 2304], ["pastTop", 0, 2304.5], ["insideTop", 0, 2303.5], ["onCorner", -2304, 2304],
+  ["onRight", 2816, 0], ["pastRight", 2816.5, 0], ["pastRight1", 2817, 0], ["middle", 0, 0]];
 const scratch = mkdtempSync(join(tmpdir(), "we-specs-resize-objects-"));
 try {
   const dir = join(scratch, "p");
@@ -47,7 +58,7 @@ try {
   const map = join(dir, "map");
   const regionsFile = join(map, "war3map.w3r.json");
   const regions = JSON.parse(readFileSync(regionsFile, "utf8"));
-  regions.regions = REGIONS.map(([name, left, bottom, right, top], index) => ({
+  regions.regions = (bounds ? [] : REGIONS).map(([name, left, bottom, right, top], index) => ({
     left, bottom, right, top, name, index, weather: "0x00000000", sound: "", color: { blue: 255, green: 128, red: 128, alpha: 255 },
     ...(regions.version >= 7 ? { trailer: [0, 0] } : {}),
   }));
@@ -55,12 +66,12 @@ try {
   const camerasFile = join(map, "war3map.w3c.json");
   const cameras = JSON.parse(readFileSync(camerasFile, "utf8"));
   cameras.version = 3;
-  cameras.cameras = CAMERAS.map(([name, targetX, targetY]) => ({
+  cameras.cameras = (bounds ? BOUND_CAMERAS : CAMERAS).map(([name, targetX, targetY]) => ({
     targetX, targetY, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, farZ: 5000, nearZ: 100,
     localPitch: 0, localYaw: 0, localRoll: 0, dofDistance: 0, dofScale: 0, posAbsoluteZ: 0, name, trailer: 0,
   }));
   writeFileSync(camerasFile, JSON.stringify(cameras, null, 2));
-  run("pack", dir, "-o", join(here, "resize-objects.w3m"), "--force-stale");
+  run("pack", dir, "-o", join(here, bounds ? "resize-bounds.w3m" : "resize-objects.w3m"), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

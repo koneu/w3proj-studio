@@ -1,0 +1,29 @@
+[
+  {
+    "limit": 40,
+    "name": "resize-bounds-open",
+    "description": "The control for resize-bounds-cut and -border: resize-bounds.w3m (tests/fixtures/we-specs/make-resize-objects.mjs bounds: twelve camera objects on and beside the camera bounds a cut of 4 tiles on the left and on top makes, x -2304 and y 2304, and on and past the right bound 2816) opened and saved, no Map Size: the open and the save change neither file",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-bounds.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  },
+  {
+    "limit": 40,
+    "name": "resize-bounds-cut",
+    "description": "Map Size with Modify Map Bounds ticked: the left and the top cut by 4 tiles each (one click on each inward arrow) on resize-bounds.w3m, the new camera bounds x -2304 and y 2304: a camera exactly on a new bound stays, one half a unit past it goes; the ones on and past the right bound, which didn't move, as in resize-objects-grow. Studio's resize_map left -4, top -4 (resize.ts camerasAfterResize)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-bounds.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "444,536"], ["--sleep", "300"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
+    "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "left": -4, "top": -4 } }] },
+    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }]
+  },
+  {
+    "limit": 40,
+    "name": "resize-bounds-border",
+    "description": "Map Size with only Modify Camera Bounds ticked (the dialog's default): one click on the left and on the top inward arrow moves only the camera bounds, by one tile each (not the 4 of a map edge: border 6 to 7 and 8 to 9, camera bounds -2816 to -2688 and 2816 to 2688), the map stays 64 x 64 and its edge marks follow the border; camera objects outside the new bounds go here too (on and past the unchanged right bound: 2816 stays, 2816.5 and 2817 go), the others stay (2026-11-19). Studio's resize_map with the border alone, [7, 6, 4, 9]",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-bounds.w3m" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--click", "165,41"], ["--sleep", "500"], ["--click", "210,112"], ["--sleep", "1500"], ["--click", "482,333"], ["--sleep", "300"], ["--click", "608,217"], ["--sleep", "500"], ["--click", "819,831"], ["--sleep", "1500"]] },
+    "studio": { "settings": { "mcp.writeTools": true, "mcp.confirmResize": false }, "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "border": [7, 6, 4, 9] } }] },
+    "compare": [{ "file": "war3map.w3c", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet"] }, { "file": "war3map.w3e", "as": "w3e" }]
+  }
+]
