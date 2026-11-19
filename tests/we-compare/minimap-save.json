@@ -88,5 +88,23 @@
     "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
     "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 14 }],
     "limit": 20
+  },
+  {
+    "name": "mmsave-dots-dests-sd",
+    "description": "one of each destructable whose dot takes its model's colour (21: crates, barrels, boxes, rubble, the Barrens skulls; 2x2, 4x4, 8x8 pathing), SD: the mean of the textures its materials show. Tolerance 14 as for the doodads (the editor's JPEG encoder); minimap.test.ts compares each dot's colour with the editor's export (branch we-compare-13)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots-dests.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "sd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 14 }],
+    "limit": 20
+  },
+  {
+    "name": "mmsave-dots-dests-hd",
+    "description": "the same in HD",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/minimap-dots-dests.w3x" },
+    "we": { "mode": "hd", "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "settings": { "game.graphicsMode": "hd", "terrain.minimap.regenerate": "always" }, "steps": [{ "mcp": "rebuild_map" }] },
+    "compare": [{ "file": "war3mapMap.blp", "as": "minimap", "tolerance": 14 }],
+    "limit": 20
   }
 ]

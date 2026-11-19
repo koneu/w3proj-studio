@@ -7,6 +7,10 @@ import { dotReach, footprintTurned, grainAt, groundColors, minimapFrame, renderM
 import { minimapBase, minimapObjects, modelTextureColor, shownTextureMean, smallestMipColor, textureOrder } from "./minimapgen";
 import type { W3Api } from "../../extensions/api";
 import { viewOutline } from "./minimappanel";
+import { parseIni } from "../../lib/formats/text";
+import { artValue } from "../../lib/objects/artset";
+import { gameFiles } from "../../lib/testhelpers/gamefiles";
+import { skipOrFail } from "../../lib/testhelpers/testutil";
 
 /** A made-up 33×25 corner map: two ground tiles in stripes, a lake in the middle, hills. */
 function terrain(): Terrain {
@@ -591,6 +595,52 @@ test("footprintTurned: the editor's turn of a dot's footprint (we-drive 2026-11-
   const old = (deg: number) => !(Math.abs(Math.cos(rad(deg))) > Math.SQRT1_2);
   assert.ok([225, -45, 405].some((d) => old(d) !== measured.find((m) => m[0] === d)![1]));
 });
+test("modelTextureColor on the game's own models and textures: each dot the colour of the World Editor's export", async (ctx) => {
+  // The editor's Export Minimap of minimap-dots-models.w3x, minimap-dots-more.w3x and minimap-dots-dests.w3x (we-drive,
+  // branch we-compare-13, 2026-11-19; make-minimap-dots.mjs): the mean of each dot's middle 4 x 4 pixels (a dot is
+  // 8 x 8 there, of one colour). The colour is the mean of the textures the model's materials show (shownTextureMean),
+  // each texture's smallest mip, read from the game here as the app reads it.
+  const skinFiles = gameFiles(["War3.w3mod:Doodads/DoodadSkins.txt", "War3.w3mod:Units/DestructableSkin.txt"]);
+  if (skinFiles.length < 2) return skipOrFail(ctx, "no game or release CLI (.game-path, target/release/w3proj)");
+  const sections = new Map<string, Map<string, string>>();
+  for (const f of skinFiles) for (const [id, sec] of parseIni(new TextDecoder().decode(f.bytes), { firstWins: true })) sections.set(id, new Map([...sec].map(([k, v]) => [k.toLowerCase(), v])));
+  // The mode's keys first (file:hd, texID:hd), as the app reads the skins (objects.ts parseSkins).
+  const skinOf = (id: string, mode: string) => {
+    const s = sections.get(id);
+    const get = (k: string) => (s ? artValue((key) => s.get(key.toLowerCase()), k, mode) : undefined);
+    assert.ok(get("file"), `${id}: no skin`);
+    return { file: get("file")!, numVar: Number(get("numvar") ?? 1) || 1, texId: Number(get("texid") ?? -1), texFile: get("texfile") ?? "" };
+  };
+  // id: [SD, HD] as the editor drew them. The SD shipyard ruin's three materials show its texture twice and team colour
+  // (black) once; the SD granary's three show two textures, one of them twice. Shipyard and granary were the open
+  // point's numbers (63, 46, 32 and 90, 70, 53 then; this export's 61, 45, 32 and 83, 64, 49).
+  const editor: [string, Rgb, Rgb][] = [
+    ["LSrg", [61, 45, 32], [82, 70, 64]], ["LSgr", [83, 64, 49], [91, 80, 71]], ["LSeb", [135, 122, 76], [115, 93, 77]], ["LSsf", [66, 49, 38], [71, 59, 54]],
+    ["LTcr", [123, 105, 94], [88, 58, 39]], ["LTba", [125, 106, 95], [127, 94, 73]], ["ITcr", [102, 154, 170], [135, 167, 196]], ["BTs2", [113, 59, 33], [80, 75, 70]],
+    ["DTrc", [156, 69, 66], [75, 40, 38]], ["NTbd", [160, 147, 126], [106, 87, 70]],
+  ];
+  for (const [mode, layers] of [["sd", ["War3.w3mod:"]], ["hd", ["War3.w3mod:_HD.w3mod:", "War3.w3mod:"]]] as const) {
+    const read = async (path: string) => {
+      for (const layer of layers) {
+        const [hit] = gameFiles([layer + path.replace(/\\/g, "/")]);
+        if (hit) return hit.bytes;
+      }
+      throw new Error(`not stored: ${path}`);
+    };
+    for (const [id, sd, hd] of editor) {
+      const want = mode === "sd" ? sd : hd;
+      const got = await modelTextureColor(skinOf(id, mode), read, true);
+      assert.ok(got && got.every((v, k) => Math.abs(v - want[k]) <= 6), `${mode} ${id}: ${got?.map(Math.round)} against the editor's ${want}`);
+    }
+    // Control: in SD the first texture alone (the rule before shownTextureMean) is far from the shipyard ruin's dot
+    // (in HD its model shows that texture alone: 85, 73, 66 either way).
+    if (mode === "sd") {
+      const first = await modelTextureColor(skinOf("LSrg", mode), read, false);
+      assert.ok(first && first.some((v, k) => Math.abs(v - editor[0][1][k]) > 10), `control: ${first?.map(Math.round)}`);
+    }
+  }
+});
+
 test("minimapObjects: a doodad whose model can't be read is a grey dot whatever its pathing texture (a palisade has none)", async () => {
   const row = (pathTex: string) => ({ showInMM: "1", useMMColor: "0", pathTex });
   const objects = await minimapObjects(
