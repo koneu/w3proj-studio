@@ -4,11 +4,14 @@
 //   node tests/fixtures/we-specs/make-light-slots.mjs <w3proj cli> <game folder> <out folder>
 //
 // <out>/light-slots-<variant>.w3x: flat.w3x on the Barrens tileset (its first six ground tiles, two cliff types), three
-// footmen of player 1, three Barrens rocks (BRrk) and three Barrens trees (BTtw) on the flat ground round the centre,
+// footmen of player 1, three Barrens rocks (BRrk), three Barrens trees (BTtw), a hay cart (LOch), a granary (LSgr) and a
+// crate (LTcr, a destructable) on the flat ground round the centre,
 // and two lighting models of the map's own, each with one static sun and ambient colour: slot 1 (the codec's
 // terrainModel) green 0.1, 0.9, 0.2, slot 2 (unitModel) magenta 0.9, 0.15, 0.8 (MDL colours are stored b, g, r).
 // Variants: both (both slots on), first (only slot 1 on), second (only slot 2 on), none (both off: the game's Barrens
 // lights, whose terrain and unit models differ).
+// --base MAP: the same objects and lights on MAP as it is (its tileset and ground kept; e.g. smoketest_maps/cliff.w3m,
+// branch we-compare-10's map), written as light-base-<variant>.w3x.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +22,9 @@ import { requireFresh } from "../../binfresh.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game, out] = process.argv.slice(2, 5).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-if (!out) { console.error("usage: make-light-slots.mjs <w3proj cli> <game folder> <out folder>"); process.exit(2); }
+if (!out) { console.error("usage: make-light-slots.mjs <w3proj cli> <game folder> <out folder> [--base MAP]"); process.exit(2); }
+const baseAt = process.argv.indexOf("--base");
+const base = baseAt > 0 ? resolve(process.argv[baseAt + 1]) : null;
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -72,22 +77,24 @@ for (const [variant, first, second] of [["both", 1, 1], ["first", 1, 0], ["secon
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-inputs-"));
   try {
     const dir = join(scratch, "map");
-    run("unpack", join(here, "flat.w3x"), dir);
+    run("unpack", base ?? join(here, "flat.w3x"), dir);
     const m = (f) => join(dir, "map", f);
-    const info = JSON.parse(readFileSync(m("war3map.w3i.json"), "utf8"));
-    info.tileset = TILESET;
-    writeFileSync(m("war3map.w3i.json"), JSON.stringify(info));
-    const lines = readFileSync(m("war3map.w3e.txt"), "utf8").split("\n");
-    const set = (prefix, to) => {
-      const at = lines.findIndex((l) => l.startsWith(prefix));
-      if (at < 0) throw new Error(`no "${prefix}" line in the w3e text`);
-      lines[at] = to;
-    };
-    set("tileset ", `tileset ${TILESET}`);
-    set("custom-tilesets ", "custom-tilesets 1");
-    set("ground ", `ground ${ground.join(" ")}`);
-    set("cliffs ", `cliffs ${cliffs.join(" ")}`);
-    writeFileSync(m("war3map.w3e.txt"), lines.join("\n"));
+    if (!base) {
+      const info = JSON.parse(readFileSync(m("war3map.w3i.json"), "utf8"));
+      info.tileset = TILESET;
+      writeFileSync(m("war3map.w3i.json"), JSON.stringify(info));
+      const lines = readFileSync(m("war3map.w3e.txt"), "utf8").split("\n");
+      const set = (prefix, to) => {
+        const at = lines.findIndex((l) => l.startsWith(prefix));
+        if (at < 0) throw new Error(`no "${prefix}" line in the w3e text`);
+        lines[at] = to;
+      };
+      set("tileset ", `tileset ${TILESET}`);
+      set("custom-tilesets ", "custom-tilesets 1");
+      set("ground ", `ground ${ground.join(" ")}`);
+      set("cliffs ", `cliffs ${cliffs.join(" ")}`);
+      writeFileSync(m("war3map.w3e.txt"), lines.join("\n"));
+    }
 
     const units = JSON.parse(readFileSync(m("war3mapUnits.doo.json"), "utf8"));
     const template = units.units[0];
@@ -95,7 +102,8 @@ for (const [variant, first, second] of [["both", 1, 1], ["first", 1, 0], ["secon
       units.units.push({ ...template, id: "hfoo", skinId: "hfoo", position: [x, y, 0], angle: 4.712389, player: 0, editorId: i + 1, trailer: [0, 0] }));
     writeFileSync(m("war3mapUnits.doo.json"), JSON.stringify(units, null, 2));
     const doo = JSON.parse(readFileSync(m("war3map.doo.json"), "utf8"));
-    [["BRrk", 256, 256], ["BRrk", 512, 256], ["BRrk", 384, 512], ["BTtw", 256, -512], ["BTtw", 384, -512], ["BTtw", 512, -512]].forEach(([id, x, y], n) =>
+    [["BRrk", 256, 256], ["BRrk", 512, 256], ["BRrk", 384, 512], ["BTtw", 256, -512], ["BTtw", 384, -512], ["BTtw", 512, -512],
+      ["LOch", -512, -384], ["LSgr", -192, -448], ["LTcr", 64, -320]].forEach(([id, x, y], n) =>
       doo.doodads.push({ id, variation: 0, position: [x, y, 0], angle: 4.712389, scale: [1, 1, 1], skinId: id, preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: n, trailer: [n, 0, 0], extras: [] }));
     writeFileSync(m("war3map.doo.json"), JSON.stringify(doo, null, 2));
 
@@ -105,8 +113,8 @@ for (const [variant, first, second] of [["both", 1, 1], ["first", 1, 0], ["secon
     const w3l = JSON.parse(readFileSync(m("war3map.w3l.json"), "utf8"));
     Object.assign(w3l, { terrainModel: SLOT1, unitModel: SLOT2, terrainEnabled: first, unitEnabled: second });
     writeFileSync(m("war3map.w3l.json"), JSON.stringify(w3l, null, 2));
-    run("pack", dir, "-o", join(out, `light-slots-${variant}.w3x`), "--force-stale");
-    console.log(`${variant}: slot 1 ${first ? "on" : "off"}, slot 2 ${second ? "on" : "off"} (${ground.join(" ")} / ${cliffs.join(" ")})`);
+    run("pack", dir, "-o", join(out, `${base ? "light-base" : "light-slots"}-${variant}.w3x`), "--force-stale");
+    console.log(`${variant}: slot 1 ${first ? "on" : "off"}, slot 2 ${second ? "on" : "off"} (${base ?? `${ground.join(" ")} / ${cliffs.join(" ")}`})`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -608,6 +608,16 @@ export function edgeMode(b: Pick<ObjectBatch, "group" | "followGround">, tone: T
   return b.group === "doodads" && tone === 2 ? "object" : "tile";
 }
 
+/** Which of the map's two lights a batch's models take (the unit light: the World Editor's for units; lighting.ts
+ *  ownLightFile says which of war3map.w3l's slots that is): units, doodads and trees the unit light, the ground's own
+ *  models (cliffs, special doodads, the shore's waves) the terrain light. On light-slots-*.w3x (make-light-slots.mjs:
+ *  a green first slot, a magenta second, each switched off in turn; we-drive, branch we-compare-13, 2026-11-19, game
+ *  view) the editor's rocks and trees went with the first slot, as the footmen, in SD (rock 45, 40, 19 with both, 47,
+ *  47, 20 with the first alone, 85, 45, 33 with the second alone) and in HD, and the ground with the second. */
+export function lightSlotOf(group: string): "unit" | "terrain" {
+  return group === "units" || group === "doodads" ? "unit" : "terrain";
+}
+
 interface Mesh {
   vao: WebGLVertexArrayObject;
   count: number;
@@ -701,8 +711,8 @@ export class TerrainRenderer {
   private shapes = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
-  /** The map's day/night lighting at the chosen hour: terrain (ground, cliffs, doodads) and
-   *  units; null: a neutral default light. */
+  /** The map's day/night lighting at the chosen hour: terrain (ground, cliffs) and
+   *  units (doodads too: lightSlotOf); null: a neutral default light. */
   terrainLight: SceneLight | null = null;
   unitLight: SceneLight | null = null;
   /** How lit colours become pixels: the graphics mode's (tone.ts). */
@@ -1890,7 +1900,7 @@ export class TerrainRenderer {
     const edges = new Map<EdgeShade["mode"], EdgeShade>();
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
-        const light = (b.group === "units" ? unitLight : terrainLight) ?? undefined;
+        const light = (lightSlotOf(b.group) === "unit" ? unitLight : terrainLight) ?? undefined;
         // A see-through batch is blended whole, after everything opaque (which then shows through it).
         if (b.tint && pass === "opaque") continue;
         const mode = edgeMode(b, this.tone);

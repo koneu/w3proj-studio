@@ -4,7 +4,7 @@ import { applySky } from "../../lib/terrain/atmosphere";
 import { borderShade } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { castsSunShadow, edgeMode, inWaterDepth, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
 import { decode, HD_WATER_DEFAULTS, hdReflectScale, hdSky, hdWaterAt } from "./hdwater";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
@@ -37,6 +37,14 @@ test("past the playable map cliffs and specials shade as the ground, placed mode
   }
   assert.equal(edgeMode({ group: "doodads" }, 1), "tile", "SD doodads and trees");
   assert.equal(edgeMode({ group: "doodads" }, 2), "object", "HD doodads and trees");
+});
+
+test("the map's two lights: units, doodads and trees by the unit light, the ground's own models by the terrain light", () => {
+  // The World Editor on light-slots-*.w3x (make-light-slots.mjs; branch we-compare-13, SD and HD): rocks, trees, a hay
+  // cart, a granary and a crate went with the first slot, as the footmen; the ground with the second.
+  assert.equal(lightSlotOf("units"), "unit");
+  assert.equal(lightSlotOf("doodads"), "unit", "doodads and trees (destructables)");
+  for (const group of ["cliffs", "specials", "shoreline"]) assert.equal(lightSlotOf(group), "terrain", group);
 });
 
 test("the view's tiles past the playable map follow the w3i's complements once read, the terrain's marks before", () => {

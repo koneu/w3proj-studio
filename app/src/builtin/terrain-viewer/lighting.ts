@@ -40,10 +40,11 @@ interface Lights { terrainModel: string; unitModel: string; terrainEnabled: numb
 
 /** The map's own lighting model file that lights `kind`, or null (that slot off or empty). The codec names war3map.w3l's
  *  slots terrainModel (the first) and unitModel (the second), but the World Editor lights the units by the first and
- *  the ground and doodads by the second, as its script hands them to SetDayNightModels (lib/script/setup.ts
- *  dayNightModels). we-drive (branch we-compare-10, 2026-11-19, SD game view, cliff.w3m with the first slot's sun and
- *  ambient one colour and the second's another): the ground and the doodads took the second's colour, three footmen
- *  the first's. */
+ *  the ground by the second, as its script hands them to SetDayNightModels (lib/script/setup.ts dayNightModels).
+ *  we-drive (branch we-compare-10, 2026-11-19, SD game view, cliff.w3m with the first slot's sun and ambient one colour
+ *  and the second's another): the ground took the second's colour, three footmen the first's. On light-slots-*.w3x
+ *  (branch we-compare-13, SD and HD, each slot switched off in turn) the same, and the doodads and trees went with the
+ *  first, as the units (renderer.ts lightSlotOf; we-compare-10 had read them with the second). */
 export function ownLightFile(lights: Partial<Lights> | null | undefined, kind: "terrain" | "unit"): string | null {
   const [file, enabled] = kind === "terrain" ? [lights?.unitModel, lights?.unitEnabled] : [lights?.terrainModel, lights?.terrainEnabled];
   return file && enabled ? file : null;
