@@ -1,0 +1,355 @@
+{
+ "name": "floating-place",
+ "description": "test.md 'Placing or pasting a floating doodad (lily pad)'. Input and steps: tests/fixtures/we-compare/make-floating-place-input.mjs (a lake, ground 0 and water 38.4 with the water flag, on corners 24..40 x 32..42; a lily pad in it; the camera 0, 200 from 2000). The pad copied and pasted on the water and on dry ground, then picked into the palette (Ctrl+P, Studio's Select In Tool Palette) and placed by clicks on the water and on dry ground. Studio clicks the same world points where its own camera shows them, so x and y may differ by a few units; z and flags are compared exactly.",
+ "input": {
+  "map": "${REPO}/tests/fixtures/we-compare/floating-place.w3x"
+ },
+ "we": {
+  "mode": "sd",
+  "saveAccept": [
+   "Warning"
+  ],
+  "steps": [
+   [
+    "--key",
+    "m"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--click",
+    "1396,177"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--click",
+    "1476,119"
+   ],
+   [
+    "--sleep",
+    "2500"
+   ],
+   [
+    "--click",
+    "1194,555"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--key",
+    "d"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--click",
+    "1194,555"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--move",
+    "489,248"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--drag",
+    "489,248:578,303@1200"
+   ],
+   [
+    "--sleep",
+    "700"
+   ],
+   [
+    "--key",
+    "ctrl+c"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--key",
+    "ctrl+v"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--move",
+    "901,201"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--click",
+    "901,201"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--key",
+    "ctrl+v"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--move",
+    "952,673"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--click",
+    "952,673"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--key",
+    "Escape"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--key",
+    "Escape"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--click",
+    "1194,555"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--move",
+    "489,248"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--drag",
+    "489,248:578,303@1200"
+   ],
+   [
+    "--sleep",
+    "700"
+   ],
+   [
+    "--key",
+    "ctrl+p"
+   ],
+   [
+    "--sleep",
+    "700"
+   ],
+   [
+    "--move",
+    "650,133"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--click",
+    "650,133"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--move",
+    "530,807"
+   ],
+   [
+    "--sleep",
+    "400"
+   ],
+   [
+    "--click",
+    "530,807"
+   ],
+   [
+    "--sleep",
+    "500"
+   ],
+   [
+    "--key",
+    "Escape"
+   ],
+   [
+    "--sleep",
+    "300"
+   ],
+   [
+    "--key",
+    "Escape"
+   ],
+   [
+    "--sleep",
+    "300"
+   ]
+  ]
+ },
+ "studio": {
+  "steps": [
+   {
+    "setting": [
+     "script.generateOnSave",
+     false
+    ]
+   },
+   {
+    "terrain": true
+   },
+   {
+    "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.doodads?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500));"
+   },
+   {
+    "ui": [
+     [
+      "view",
+      "we:0,200,2000"
+     ],
+     [
+      "clickGround",
+      700,
+      -100
+     ],
+     [
+      "clickGround",
+      -400.3,
+      500.6
+     ]
+    ]
+   },
+   {
+    "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); await w3.commands.execute('w3.terrain.copy'); await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));"
+   },
+   {
+    "ui": [
+     [
+      "clickGround",
+      300.2,
+      700.4
+     ]
+    ]
+   },
+   {
+    "eval": "await w3.commands.execute('w3.terrain.paste'); await new Promise((r) => setTimeout(r, 300));"
+   },
+   {
+    "ui": [
+     [
+      "clickGround",
+      300.7,
+      -300.3
+     ]
+    ]
+   },
+   {
+    "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));"
+   },
+   {
+    "eval": "[...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500));"
+   },
+   {
+    "ui": [
+     [
+      "view",
+      "we:0,200,2000"
+     ],
+     [
+      "clickGround",
+      700,
+      -100
+     ],
+     [
+      "clickGround",
+      -400.3,
+      500.6
+     ]
+    ]
+   },
+   {
+    "eval": "await w3.commands.execute('w3.terrain.selectInPalette'); await new Promise((r) => setTimeout(r, 700));"
+   },
+   {
+    "ui": [
+     [
+      "clickGround",
+      -200.6,
+      900.2
+     ],
+     [
+      "clickGround",
+      -300.4,
+      -500.5
+     ]
+    ]
+   },
+   {
+    "eval": "const c = document.querySelector('.model-stage canvas'); c.focus(); for (const type of ['keydown', 'keyup']) c.dispatchEvent(new KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true })); await new Promise((r) => setTimeout(r, 300));"
+   }
+  ]
+ },
+ "compare": [
+  {
+   "file": "war3map.doo",
+   "as": "parsed",
+   "ignore": [
+    "version",
+    "doodads[].preFlags",
+    "doodads[].editorId",
+    "doodads[].trailer",
+    "doodads[].extras",
+    "doodads[].angle",
+    "doodads[].scale",
+    "doodads[].variation"
+   ],
+   "tolerance": {
+    "doodads[].position[0]": 16,
+    "doodads[].position[1]": 16,
+    "default": 0.01
+   }
+  }
+ ],
+ "limit": 40
+}

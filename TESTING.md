@@ -837,6 +837,35 @@ south-facing wall lit in both; in HD the editor's east-facing wall is 40, 32, 21
 two-level walls are one smooth face where Studio's step in a zigzag. View Selection with doodads and units at equal x
 can't be made in the editor: its d and u modes select only doodads or only units (above, edge-group-nudge).
 
+**defScale, the small grid, lily pads, Studio's water, real minimaps** (branch we-compare-11, 2026-11-19). (1) **The
+plain defScale is drawn and baked** (`shadow-defscale.json`, input `make-shadow-probes.mjs … shadow-defscale-sd`): the
+Barrens spires BRsp (DoodadSkins.txt defScale 0.36, no defScale:hd) placed at scale 1 are drawn a third of Studio's
+size in SD and HD (game view, `--look x,y,1200`), RuinFountain ZOfo (0.9) 0.87 of it in SD; Calculate Shadows shades
+BRsp 26 cells in SD (Studio 200 = 26 / 0.36²), 8 in HD (76), BOth (0.95) 201 (224), so the "other reasons" of
+we-compare-9's SD numbers were this. objects.ts `doodadModelScale`: defScale, in HD defScale:hd where given. Left: SD
+ZOfo 84 against 78, RibBones LOrb 42 against 6, the cage LOce 31/30 (HD 36/29). (2) **The small grid's lines** (wt-L.w3x
+from `make-water-tilesets.mjs`, `--compare-ready` then `--game-view off`, G three times; Studio `--compare-ready lit`,
+`w3.terrain.toggleSmallGrid`; looks 3500,-1500 / 0,3500 / -3500,-1500 at 1650): an opaque grey, 123, 123, 123 over the
+border's dark ground and 120 to 126 over brown ground, in SD and HD (Studio's lavender at half alpha: 70, 69, 87);
+white 247 and yellow 248, 248, 0 (Studio 242 and 235, 234, 35); over the deep border water neither draws more than a
+faint 24 grey. The border water itself: east (deep) the editor's HD black is 1, 2, 5, Studio's 1, 1, 0; north (4 deep)
+13, 6, 1 against 19, 13, 5; SD within 2. (3) **Lily pads** (`floating-place.json`, `make-floating-place-input.mjs`):
+pasted (Ctrl+V and a click) and placed from the palette (Ctrl+P on a selected pad, then clicks) on a lake (ground 0,
+water 38.4) they stand at 38.4, on dry ground at 0, flags 2, the new ones with a random scale in the type's range, as
+Studio (MATCH). The editor's "Reset Fixed Object Heights" (Advanced, Ctrl+Shift+H) is the switch for moved doodads
+only (doodad-water-z-nudge, -keep MATCH again); it has no command that resets a selection. (4) **Water on a
+Studio-made map** (`studio-water.json`: new_map Northrend 64x64, a shallow and a deep box by set_water, set_sky water
+tint 255, 64, 64 with tinting on): the editor keeps w3e and w3i (MATCH), `w3proj verify` passes; in its game view
+(`--look 0,384,2400`) shallow and deep water within 1 level of Studio's in SD, in HD shallow within 6, deep 29, 42, 42
+against Studio's 24, 49, 51; neither editor shows the red tint. (5) **Saved minimaps of HillsbradCreek and TurtleRock**
+(`minimap-real.json`, SD and HD): 16-pixel squares within 8 to 11 levels (7 of 256 squares over 8 on TurtleRock SD; a
+control of two different maps 88). (6) **Sample Points 3** (unit-ground-bumpy, 12 objects: hmtt, a goblin merchant and a
+footman given 3 points): no three points fit within 2 units: evenly spread at any radius and turn, a front point with a
+back pair at any of 0 to 1.5 times the collision size, mean, highest, lowest, median, or the plane through them at the
+centre. (7) **A two-level pit** (`--look 0,0,1650`): the editor's camera looks at the pit's floor (the picture closer
+than Studio's `we:` camera, whose target stays at height 0); its cliff walls (CliffsCCAA0 and the like) are smooth
+where Studio's show each tile's bend (the models' middle vertices sit 20 to 30 units into the wall).
+
 **Water shadows, HD saves, chapter objects, Open in World Editor** (branch we-compare-2, 2026-11-18, HD). (1) **Real
 shadows on water**: `make-water-shadows.mjs --depth D --deep D --low-flyers --lake-trees` (lakes 12, 30, 45 deep beside
 100 or 200 deep ones, gryphons and trees whose shadows fall in them), one we-drive run per batch of maps with

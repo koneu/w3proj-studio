@@ -124,6 +124,14 @@ const DOODAD_MAPS = {
   // DSah 1.4 (2 cells of 234).
   "shadow-defscale": () => ["ZOfo", "BOth", "NSct", "LRrk"].map((id, i) => (
     { id, x: -3072 + (i % 2) * 4096, y: 2048 - Math.floor(i / 2) * 3072, angle: 270, variation: 0 })),
+  // Doodads whose plain DoodadSkins.txt defScale isn't 1: the Barrens spires BRsp 0.36 (no defScale:hd), BOth 0.95
+  // (defScale:hd 1.35), with LRrk and NSct (1) as controls; as shadow-defscale (tests/we-compare/shadow-defscale.json's
+  // -sd and -hd-plain specs). Measured too (branch we-compare-11, a 3 x 3 grid with ZOfo 0.9, the cauldron LOca 1.2,
+  // the tavern sign YOta 1.4, the cage LOce and RibBones LOrb), left out as they differ for other reasons: SD ZOfo 84
+  // cells against Studio's 78, YOta 4 against 1, LOce 31 against 30, LOrb 42 against 6; LOca and YOta (off the grid)
+  // shade as many cells as Studio's in HD, partly other ones.
+  "shadow-defscale-sd": () => ["BRsp", "BOth", "NSct", "LRrk"].map((id, i) => (
+    { id, x: -3072 + (i % 2) * 4096, y: 2048 - Math.floor(i / 2) * 3072, angle: 270, variation: 0 })),
   // One box each (BOXES, D000..D007 in that order) at angle 0, four a row 2048 apart; then the closed box at 30 and 45.
   "shadow-boxes": () => [
     ...Object.keys(BOXES).map((_, i) => ({ id: `D00${i}`, x: -3072 + (i % 4) * 2048, y: 2048 - Math.floor(i / 4) * 2048, angle: 0, variation: 0 })),

@@ -1,0 +1,170 @@
+[
+ {
+  "name": "mmsave-hillsbrad-sd",
+  "description": "HillsbradCreek (smoketest_maps; Hillsbrad tileset with lakes: the tileset water of the minimap): the editor opens and saves it, Studio rebuilds the minimap; compared as pictures (war3mapMap.blp), tolerance 13 as mmsave-goldrush (one-tile strips are 2 px wide in the editor, 1 in Studio)",
+  "input": {
+   "map": "${MAIN}/smoketest_maps/10_w3c_251104_0950_HillsbradCreek.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--click",
+     "700,500"
+    ],
+    [
+     "--sleep",
+     "500"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "game.graphicsMode": "sd",
+    "terrain.minimap.regenerate": "always"
+   },
+   "steps": [
+    {
+     "mcp": "rebuild_map"
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3mapMap.blp",
+    "as": "minimap",
+    "tolerance": 13
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mmsave-hillsbrad-hd",
+  "description": "the same in HD",
+  "input": {
+   "map": "${MAIN}/smoketest_maps/10_w3c_251104_0950_HillsbradCreek.w3x"
+  },
+  "we": {
+   "mode": "hd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--click",
+     "700,500"
+    ],
+    [
+     "--sleep",
+     "500"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "game.graphicsMode": "hd",
+    "terrain.minimap.regenerate": "always"
+   },
+   "steps": [
+    {
+     "mcp": "rebuild_map"
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3mapMap.blp",
+    "as": "minimap",
+    "tolerance": 13
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mmsave-turtlerock-sd",
+  "description": "TurtleRock v2.0 (smoketest_maps; 17 cliff types listed, water round the rocks): the editor opens and saves it, Studio rebuilds the minimap; compared as pictures (war3mapMap.blp), tolerance 13 as mmsave-goldrush (one-tile strips are 2 px wide in the editor, 1 in Studio)",
+  "input": {
+   "map": "${MAIN}/smoketest_maps/12_w3c_251104_0950_TurtleRock_v2.0.w3x"
+  },
+  "we": {
+   "mode": "sd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--click",
+     "700,500"
+    ],
+    [
+     "--sleep",
+     "500"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "game.graphicsMode": "sd",
+    "terrain.minimap.regenerate": "always"
+   },
+   "steps": [
+    {
+     "mcp": "rebuild_map"
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3mapMap.blp",
+    "as": "minimap",
+    "tolerance": 13
+   }
+  ],
+  "limit": 20
+ },
+ {
+  "name": "mmsave-turtlerock-hd",
+  "description": "the same in HD",
+  "input": {
+   "map": "${MAIN}/smoketest_maps/12_w3c_251104_0950_TurtleRock_v2.0.w3x"
+  },
+  "we": {
+   "mode": "hd",
+   "saveAccept": [
+    "Warning"
+   ],
+   "steps": [
+    [
+     "--click",
+     "700,500"
+    ],
+    [
+     "--sleep",
+     "500"
+    ]
+   ]
+  },
+  "studio": {
+   "settings": {
+    "game.graphicsMode": "hd",
+    "terrain.minimap.regenerate": "always"
+   },
+   "steps": [
+    {
+     "mcp": "rebuild_map"
+    }
+   ]
+  },
+  "compare": [
+   {
+    "file": "war3mapMap.blp",
+    "as": "minimap",
+    "tolerance": 13
+   }
+  ],
+  "limit": 20
+ }
+]

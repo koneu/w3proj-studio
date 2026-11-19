@@ -316,8 +316,9 @@ test("a type whose skin section is spelled in another case is drawn, from its ow
   assert.equal(withObjectArt(skins, [{ kind: "w3d", custom: [{ base: "Yosh", id: "D000", mods: [] }] }]).get("D000")?.file, "Doodads\\Ship");
 });
 
-test("in HD a doodad is drawn its defScale:hd times larger, as the World Editor's HD view; the plain defScale isn't drawn", async () => {
-  // we-drive, branch we-compare-8: RuinFountain (defScale 0.9, defScale:hd 1.45) 1.45 times as large, RibBones 1.75.
+test("a doodad is drawn its defScale times larger, in HD its defScale:hd where it has one, as the World Editor's views", async () => {
+  // we-drive, branch we-compare-8: RuinFountain (defScale 0.9, defScale:hd 1.45) 1.45 times as large in HD, RibBones
+  // 1.75; branch we-compare-11: the Barrens spires (defScale 0.36, no defScale:hd) a third of the size in SD and HD.
   const slk = `ID;PWXL;N;E\r\nC;Y1;X1;K"doodID"\r\nC;Y2;X1;K"ZOfo"\r\nC;Y3;X1;K"LOrb"\r\nC;Y4;X1;K"YOsw"\r\nE\r\n`;
   const files = {
     ...gameTables(),
@@ -327,9 +328,10 @@ test("in HD a doodad is drawn its defScale:hd times larger, as the World Editor'
   const hd = await loadSkins(fakeGame(files, { "game.installDir": "/defscale", "game.graphicsMode": "hd" }));
   assert.equal(hd.get("ZOfo")?.modelScale, 1.45);
   assert.equal(hd.get("LOrb")?.modelScale, 1.75);
-  assert.equal(hd.get("YOsw")?.modelScale, 1, "without the key: as placed, not its defScale");
+  assert.equal(hd.get("YOsw")?.modelScale, 0.9, "without defScale:hd: its defScale");
   const sd = await loadSkins(fakeGame(files, { "game.installDir": "/defscale", "game.graphicsMode": "sd" }));
-  assert.equal(sd.get("ZOfo")?.modelScale, 1, "SD draws it as placed");
+  assert.equal(sd.get("ZOfo")?.modelScale, 0.9, "SD draws its defScale, not defScale:hd");
+  assert.equal(sd.get("LOrb")?.modelScale, 1);
   // The drawn matrix carries it: placement's scale is the placed one times the model's.
   const at = placement({ id: "ZOfo", position: [0, 0, 0], angle: 0, scale: [2, 2, 2] } as unknown as Placed, hd.get("ZOfo")!.modelScale);
   assert.ok(Math.abs(Math.hypot(at[0], at[1], at[2]) - 2.9) < 1e-6, `${at[0]}`);

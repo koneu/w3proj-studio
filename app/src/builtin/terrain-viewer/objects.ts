@@ -261,16 +261,20 @@ function shadowFields(get: (k: string) => string | undefined, kind: string): Par
   return out;
 }
 
-/** A doodad's model scale on top of its placed one: in HD its DoodadSkins.txt `defScale:hd`, else 1. The World Editor's
- *  HD view draws a placed doodad that much larger (we-drive, branch we-compare-8, 2026-11-18, doodads placed at scale
- *  1 against Studio's picture: RuinFountain ZOfo, defScale 0.9 and defScale:hd 1.45, came out 1.42 to 1.5 times as
- *  large; RibBones LOrb, 1 and 1.75, 1.77 to 1.8, also at scale 2; Corn LPcr 1.1 about 1.07; AshenShrooms APms 0.65
- *  smaller; a tree and doodads without the key alike). The plain defScale (the scale a new doodad gets) isn't drawn:
- *  the editor's SD view shows ZOfo as Studio's. */
+/** A doodad's model scale on top of its placed one: its DoodadSkins.txt `defScale`, in HD `defScale:hd` where the type
+ *  has one; 1 without either. The World Editor draws a placed doodad that much larger or smaller, and bakes its
+ *  Calculate Shadows at that size. HD (we-drive, branch we-compare-8, 2026-11-18, doodads placed at scale 1 against
+ *  Studio's picture): RuinFountain ZOfo, defScale 0.9 and defScale:hd 1.45, came out 1.42 to 1.5 times as large;
+ *  RibBones LOrb, 1 and 1.75, 1.77 to 1.8, also at scale 2; Corn LPcr 1.1 about 1.07; AshenShrooms APms 0.65 smaller.
+ *  The plain defScale in both modes (branch we-compare-11, 2026-11-19, shadow-defscale-sd.w3x from
+ *  make-shadow-probes.mjs, placed at scale 1, the save keeping 1): the Barrens spires BRsp (0.36, no defScale:hd) are
+ *  drawn about a third of Studio's size in SD and in HD, ZOfo 0.87 of it in SD; Calculate Shadows shades BRsp 26 cells
+ *  against Studio's 200 in SD (200 x 0.36 squared), 8 against 76 in HD, ZOfo 84 against 99 (0.9 squared: 80), BOth
+ *  (0.95) 201 against 224, the cauldron LOca (1.2) 9 against 7, the tavern sign YOta (1.4) 4 against 1 in SD and 13
+ *  against 7 in HD; LRrk, LOce and NSct (1) the same in both. */
 export function doodadModelScale(get: (key: string) => string | undefined, mode: string): number {
-  if (mode !== "hd") return 1;
-  const v = Number(get("defscale:hd"));
-  return Number.isFinite(v) && v > 0 ? v : 1;
+  const own = (key: string) => { const v = Number(get(key)); return Number.isFinite(v) && v > 0 ? v : null; };
+  return (mode === "hd" ? own("defscale:hd") : null) ?? own("defscale") ?? 1;
 }
 
 /** The skins from the tables' texts, in SKIN_TABLES' order. */

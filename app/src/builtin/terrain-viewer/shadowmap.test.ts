@@ -68,9 +68,9 @@ test("doodads the skin table says cast no shadow (shadow=0, as corn) stay out of
   assert.equal(shadowed(await predict("D001")), 0, "a rock whose object data turns it off doesn't");
 });
 
-test("in HD a doodad's shadow is baked at its drawn size, defScale:hd times the placed scale (we-compare shadow-defscale-hd)", async () => {
+test("a doodad's shadow is baked at its drawn size: defScale (in HD defScale:hd) times the placed scale (we-compare shadow-defscale-*)", async () => {
   const files: Record<string, string> = {
-    "Doodads\\DoodadSkins.txt": "[LOrk]\nfile=Doodads\\Rock\nshadow=1\n[ZOfo]\nfile=Doodads\\Rock\nshadow=1\ndefScale:hd=2",
+    "Doodads\\DoodadSkins.txt": "[LOrk]\nfile=Doodads\\Rock\nshadow=1\n[ZOfo]\nfile=Doodads\\Rock\nshadow=1\ndefScale:hd=2\n[BRsp]\nfile=Doodads\\Rock\nshadow=1\ndefScale=0.5",
     "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
   };
   const skinsIn = async (mode: string) => loadSkins({ settings: { get: () => mode }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api);
@@ -86,6 +86,13 @@ test("in HD a doodad's shadow is baked at its drawn size, defScale:hd times the 
   assert.ok(shadowed(twice) > shadowed(await predict("hd", "LOrk", 1)), "the control: scale 1 casts less");
   // SD doesn't draw defScale:hd: as placed.
   assert.deepEqual(await predict("sd", "ZOfo", 1), await predict("sd", "LOrk", 1));
+  // The plain defScale, in SD and (without defScale:hd) in HD: BRsp's 0.5 at scale 2 casts as scale 1 (we-compare
+  // shadow-defscale-sd: the Barrens spires, 0.36, 26 cells where Studio had 200).
+  for (const mode of ["sd", "hd"]) {
+    const half = await predict(mode, "BRsp", 2);
+    assert.deepEqual(half, await predict(mode, "LOrk", 1), `${mode}: defScale 0.5 at scale 2 casts as scale 1`);
+    assert.ok(shadowed(half) < shadowed(await predict(mode, "LOrk", 2)), `${mode}: the control, scale 2 casts more`);
+  }
 });
 
 test("a special doodad's footprint is read from its model: a tall one on flat ground casts, placed in the footprint's middle", async () => {
