@@ -316,13 +316,13 @@ mod tests {
         let sleep = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|f| Path::new(f).is_file()).unwrap();
         let fake = root.join("wineserver");
         std::fs::copy(sleep, &fake).unwrap();
-        let mut service = Command::new(&fake).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        let mut service = spawn_retry(Command::new(&fake).arg("30").env("WINEPREFIX", &prefix));
         assert!(end_idle_server(&p), "an idle server was left");
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("-k {}", prefix.display()));
         // The control: with a program of the user's in the prefix, `-k` isn't run again.
         let game = root.join("Battle.net.exe");
         std::fs::copy(sleep, &game).unwrap();
-        let mut busy = Command::new(&game).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        let mut busy = spawn_retry(Command::new(&game).arg("30").env("WINEPREFIX", &prefix));
         assert!(!end_idle_server(&p));
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1, "a busy prefix's server was ended");
         let _ = service.kill();
@@ -352,7 +352,7 @@ mod tests {
         let sleep = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|f| Path::new(f).is_file()).unwrap();
         let fake = root.join("wineserver");
         std::fs::copy(sleep, &fake).unwrap();
-        let mut service = Command::new(&fake).arg("30").env("WINEPREFIX", &prefix).spawn().unwrap();
+        let mut service = spawn_retry(Command::new(&fake).arg("30").env("WINEPREFIX", &prefix));
         let child = Command::new(sleep).arg("1").spawn().unwrap();
         let waiting = end_idle_server_after(exe.clone(), child);
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -362,6 +362,19 @@ mod tests {
         let _ = service.kill();
         let _ = service.wait();
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Starts a file this test has just copied: while another test's fork is between fork and exec it still holds the
+    /// copy's write handle and the start fails "Text file busy" (ETXTBSY); that ends in microseconds, so try again.
+    #[cfg(unix)]
+    fn spawn_retry(cmd: &mut Command) -> std::process::Child {
+        for _ in 0..100 {
+            match cmd.spawn() {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                r => return r.unwrap(),
+            }
+        }
+        cmd.spawn().unwrap()
     }
 
     static EXEC_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
