@@ -1,5 +1,6 @@
-import type { Disposable, EditorContribution, EditorDocument, EditorInstance, EditorProvider } from "../extensions/api";
+import type { Disposable, EditorContribution, EditorDocument, EditorInstance, EditorProvider, MenuItem } from "../extensions/api";
 import { disposable, errorView, Emitter, globMatch, h } from "./dom";
+import { closeInOrder, tabsToClose, type CloseMode } from "./tabclose";
 import { graphicsModeReopens, keptView } from "./tabmemory";
 import type { Stamp } from "./workspace";
 import { PendingWork } from "../lib/settle";
@@ -88,6 +89,8 @@ export class EditorService {
   /** The active tab (file and editor id), or null when none is open. */
   readonly onDidChangeActive = new Emitter<{ path: string; editor: string } | null>();
   activate: (event: string) => Promise<void> = async () => {};
+  /** Shows a context menu (the workbench's). */
+  showMenu: (at: { x: number; y: number }, items: MenuItem[]) => void = () => {};
   /** "editorAssociations" setting: glob → editor id; checked before manifest defaults. */
   associations: () => Record<string, string> = () => ({});
   /** Fallback when no contribution matches: decides text vs binary. */
@@ -310,6 +313,17 @@ export class EditorService {
     tab.tabEl.addEventListener("mousedown", (e) => {
       if (e.button === 1) { e.preventDefault(); this.close(tab); }
       else if (e.button === 0) this.show(tab);
+    });
+    tab.tabEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const run = (f: () => Promise<unknown>) => () => { f().catch((err) => console.error("closing tabs:", err)); };
+      const n = (mode: CloseMode) => tabsToClose(this.tabs, tab, mode).length;
+      this.showMenu({ x: e.clientX, y: e.clientY }, [
+        { label: "Close", run: run(() => this.close(tab)) },
+        { label: "Close Others", run: run(() => this.closeRelative(tab, "others")), disabled: n("others") === 0 },
+        { label: "Close to the Right", run: run(() => this.closeRelative(tab, "right")), disabled: n("right") === 0 },
+        { label: "Close All", run: run(() => this.closeRelative(tab, "all")) },
+      ]);
     });
     if (this.remembering) this.closedWhileAwaiting.delete(path);
     this.tabs.push(tab);
@@ -591,6 +605,13 @@ export class EditorService {
 
   async closeActive() {
     if (this.active) await this.close(this.active);
+  }
+
+  /** Close Others / to the Right / All, relative to a tab (the active one by default). Each goes through close(), so a
+   *  tab with unsaved changes asks first and a cancelled question leaves it and the tabs after it open. */
+  async closeRelative(from: Tab | null | undefined = this.active, mode: CloseMode): Promise<boolean> {
+    if (!from) return true;
+    return closeInOrder(tabsToClose(this.tabs, from, mode), (t) => this.close(t));
   }
 
   /** Closes tabs whose files no longer exist (e.g. after a sync). */
