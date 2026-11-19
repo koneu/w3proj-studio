@@ -1,6 +1,6 @@
 // Regions (war3map.w3r): the values the Regions tab and the AI tools give one, checked before anything changes. A
 // value past what the file's field holds is refused with a message, never clamped, wrapped or overflowed (decision
-// 2026-11-15; TESTING.md "Refused values").
+// 2026-11-15; docs/testing/refused-values.md).
 
 import { float32Text, storableFloat32 } from "../formats/float32";
 

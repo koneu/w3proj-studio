@@ -32,7 +32,7 @@
 //                       fogged, no start locations, regions or other editor marks; the pair of we-drive's
 //                       --compare-ready), "lit" (the map's lighting at 06:00, editor marks still drawn) or "unlit"
 //                       (even light, the pair of --compare-ready-unlit); sets terrain.gameView and terrain.lighting.*
-//                       and waits for the view (TESTING.md)
+//                       and waits for the view (docs/testing/pictures.md)
 //   --look X,Y          point the terrain camera at a map position (keeps its angle and distance)
 //   --settle            wait until the game's files are read and the terrain view's layers are done
 //   --sleep MS          wait

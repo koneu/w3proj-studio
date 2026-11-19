@@ -1,7 +1,7 @@
 [
   {
     "name": "import-modes-list",
-    "description": "test.md import lists (branch we-import-checks): flat.w3x with 13 imports of every kind of path (make-import-modes.mjs: plain, _HD.w3mod\\, _hd.w3mod\\, _DE.w3mod\\, _Teen.w3mod\\, _teen.w3mod\\, _HD.w3mod\\_Teen.w3mod\\, _locales\\enus.w3mod\\, a plain import and an _HD twin of a game path, a text file); the editor opens and saves it and keeps every entry with its flags (its Asset Manager lists them: Mode HD for _HD.w3mod\\, DE for _DE.w3mod\\, SD for the lower-case spellings and _locales, Teen Yes only for the game's spelling _Teen.w3mod\\; TESTING.md); Studio saves it as it is",
+    "description": "test.md import lists (branch we-import-checks): flat.w3x with 13 imports of every kind of path (make-import-modes.mjs: plain, _HD.w3mod\\, _hd.w3mod\\, _DE.w3mod\\, _Teen.w3mod\\, _teen.w3mod\\, _HD.w3mod\\_Teen.w3mod\\, _locales\\enus.w3mod\\, a plain import and an _HD twin of a game path, a text file); the editor opens and saves it and keeps every entry with its flags (its Asset Manager lists them: Mode HD for _HD.w3mod\\, DE for _DE.w3mod\\, SD for the lower-case spellings and _locales, Teen Yes only for the game's spelling _Teen.w3mod\\; docs/testing/saved-data-rules.md); Studio saves it as it is",
     "input": { "map": "${REPO}/target/import-modes/import-modes-list.w3x" },
     "we": { "mode": "hd", "steps": [] },
     "studio": { "steps": [{ "sleep": 500 }] },

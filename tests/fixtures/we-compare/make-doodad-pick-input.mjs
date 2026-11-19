@@ -8,7 +8,7 @@
 // we-drive's --look does) over a 4x4 grid of copies of one type, SPACING apart, on the positions the editor keeps (it
 // snaps what it loads to its doodad grid: 64, and 32 more for the 2x2 one). A probe is a ground point at 0 units from a
 // copy's centre or at an offset of OFFSETS from it towards east, west, north or south. The editor's steps for a
-// probe: click bare ground (clears the selection), click the probe's pixel (TESTING.md "Projection for clicks"),
+// probe: click bare ground (clears the selection), click the probe's pixel (docs/testing/cameras-and-views.md "Projection for clicks"),
 // Delete: a copy the click selected is gone from the saved war3map.doo.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -23,7 +23,7 @@ export const DIRS = { E: [1, 0], W: [-1, 0], N: [0, 1], S: [0, -1] };
 export const DISTANCE = 2000, SPACING = 384, COLS = 4, ROWS = 4;
 const TYPES = [{ id: "LTlt", shift: 0 }, { id: "LRrk", shift: 0 }, { id: "XOmr", shift: 32 }];
 
-/** The ground point (x, y, 0) in the editor's view of a look (target x, y; rotation 90; TESTING.md "Projection for clicks"). */
+/** The ground point (x, y, 0) in the editor's view of a look (target x, y; rotation 90; docs/testing/cameras-and-views.md "Projection for clicks"). */
 export function project(look, [X, Y, Z = 0]) {
   const D = look.distance, r = (look.rotation * Math.PI) / 180, p = (57.2 * Math.PI) / 180;
   const tx = look.x - (298 / 3000) * D * Math.cos(r), ty = look.y - (298 / 3000) * D * Math.sin(r);

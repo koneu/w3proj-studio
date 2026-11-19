@@ -92,7 +92,7 @@ function cameraValueProblem(key: CameraField, value: number, label: string, othe
 }
 
 /**
- * A value typed for `key` of the cameras `targets`, as the Cameras tab takes it (TESTING.md "Refused values"): the
+ * A value typed for `key` of the cameras `targets`, as the Cameras tab takes it (docs/testing/refused-values.md): the
  * cameras of `cameras` among them whose value it changes, or why it is refused. A refused value changes nothing: it
  * isn't held to the nearest float, and an empty field or text is no value. `typed`: the field's text.
  */

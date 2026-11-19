@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applySky } from "../../lib/terrain/atmosphere";
-import { BORDER_ALPHA, borderShade, hdBorderKeep } from "../../lib/terrain/area";
+import { BORDER_ALPHA, BORDER_SPREAD, borderShade, hdBorderKeep } from "../../lib/terrain/area";
 import { mapEdgeTiles, markMapEdge, type Terrain } from "../../lib/terrain/w3e";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { castsSunShadow, edgeMode, HD_WATER_EDGE_KEEP, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
+import { castsSunShadow, edgeMode, HD_WATER_EDGE, HD_WATER_EDGE_KEEP, hdWaterEdgeLit, inWaterDepth, lightSlotOf, meanRedGreen, playRect, TerrainRenderer, waterLight, waterRamp, waterShadowKeep, waterTile, wetLevels, withGroup } from "./renderer";
 import { decode, HD_WATER_DEFAULTS, hdReflectScale, hdSky, hdWaterAt } from "./hdwater";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
@@ -73,22 +73,51 @@ test("HD water past its dark edge keeps the border's HD share of its colour and 
   assert.ok(HD_WATER_EDGE_KEEP > 0.018 && HD_WATER_EDGE_KEEP < 0.019, String(HD_WATER_EDGE_KEEP));
 });
 
+test("HD water darkens at the border where the editor's does, hard, about 35 units inside", () => {
+  // we-drive and app-drive, wt-L.w3x of make-water-tilesets.mjs, HD game view, the west and east edges across the view
+  // over 96 deep water (2026-11-19): the editor's blue went from a tenth to nine tenths of the way between dark and lit
+  // at 31.6 and 40.6 units inside, half at 35. The picture's blue from the water's light (linear 0.0553 lit) over what's
+  // seen through it (0.0008), in sRGB, as the shader composes it.
+  const enc = (l: number) => (l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055);
+  const water = 0.0553, through = 0.0008;
+  const share = (edge: readonly [number, number], u: number) => {
+    const at = (lit: number) => enc(through + water * lit);
+    return (at(hdWaterEdgeLit(u, edge)) - at(HD_WATER_EDGE_KEEP)) / (at(1) - at(HD_WATER_EDGE_KEEP));
+  };
+  const where = (edge: readonly [number, number], f: number) => {
+    for (let u = 0; u < 100; u += 0.1) if (share(edge, u) >= f) return u;
+    return Infinity;
+  };
+  const seen = [[0.1, 31.6], [0.5, 35], [0.9, 40.6]];
+  for (const [f, u] of seen) assert.ok(Math.abs(where(HD_WATER_EDGE, f) - u) <= 1.5, `${f}: ${where(HD_WATER_EDGE, f).toFixed(1)} against ${u}`);
+  // The control: the edge before (10, 42) put the half 12 units nearer the border, the tenth 18.
+  assert.ok(Math.abs(where([10, 42], 0.5) - 35) > 10 && Math.abs(where([10, 42], 0.1) - 31.6) > 15);
+  // Dark past the playable map, the water's own colour back in full well inside.
+  assert.ok(Math.abs(hdWaterEdgeLit(-50) - HD_WATER_EDGE_KEEP) < 1e-12);
+  assert.ok(Math.abs(hdWaterEdgeLit(0) - HD_WATER_EDGE_KEEP) < 1e-12);
+  assert.equal(hdWaterEdgeLit(HD_WATER_EDGE[1] + 1), 1);
+});
+
 test("the border shade's texel in a tile's middle is shaded exactly where the tile lies past the playable map", () => {
   // The "tile" mode reads it (lib/model/renderer.ts instanceEdge): 4 texels a tile, the middle one at 4 t + 2.
   const t = { width: 9, height: 7, corners: Array.from({ length: 63 }, () => ({ rawWater: 0 })) } as unknown as Terrain;
   markMapEdge(t, [2, 1, 1, 2]);
-  const marks = mapEdgeTiles(t), { rgba, width } = borderShade(t, marks);
-  let past = 0;
-  for (let ty = 0; ty < 6; ty++) for (let tx = 0; tx < 8; tx++) {
-    const shaded = rgba[((4 * ty + 2) * width + 4 * tx + 2) * 4 + 3] > 0;
-    assert.equal(shaded, marks[ty * 8 + tx] === 1, `tile ${tx}, ${ty}`);
-    if (shaded) past++;
+  const marks = mapEdgeTiles(t);
+  // Texels on the cells' corners, and (as each graphics mode draws it) on the cells' middles along an axis.
+  for (const spread of [{ x: false, y: false }, BORDER_SPREAD.sd, BORDER_SPREAD.hd]) {
+    const { rgba, width } = borderShade(t, marks, spread);
+    let past = 0;
+    for (let ty = 0; ty < 6; ty++) for (let tx = 0; tx < 8; tx++) {
+      const shaded = rgba[((4 * ty + 2) * width + 4 * tx + 2) * 4 + 3] > 0;
+      assert.equal(shaded, marks[ty * 8 + tx] === 1, `tile ${tx}, ${ty}, ${JSON.stringify(spread)}`);
+      if (shaded) past++;
+    }
+    // The marks round the playable 5 by 3 tiles.
+    assert.equal(past, 48 - 15);
+    // A tile's edge texel is shaded beside a marked tile (the fade over the first playable cell), its middle not.
+    assert.ok(rgba[((4 * 3 + 2) * width + 4 * 2) * 4 + 3] > 0);
+    assert.equal(rgba[((4 * 3 + 2) * width + 4 * 2 + 2) * 4 + 3], 0);
   }
-  // The marks round the playable 5 by 3 tiles.
-  assert.equal(past, 48 - 15);
-  // A tile's edge texel is shaded beside a marked tile (the fade over the first playable cell), its middle not.
-  assert.ok(rgba[((4 * 3 + 2) * width + 4 * 2) * 4 + 3] > 0);
-  assert.equal(rgba[((4 * 3 + 2) * width + 4 * 2 + 2) * 4 + 3], 0);
 });
 
 const b = (group: string, name: string) => ({ group, name });

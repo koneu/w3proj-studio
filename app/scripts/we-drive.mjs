@@ -16,7 +16,7 @@
 //                       and a lock of its own (we-setup.mjs slotPaths), so editors on two slots run at once. Its first
 //                       start sets the slot up (the farm's hardlinks, a new prefix, the terms answered)
 //   --alone             take every slot's lock (in ascending order, waiting for the other runs), so no other editor
-//                       runs meanwhile: for --fps, whose numbers a second editor lowers (TESTING.md "Several editors")
+//                       runs meanwhile: for --fps, whose numbers a second editor lowers (docs/testing/editor-tooling.md "Several editors")
 //   --timeout S         how long --wait-ready and --close wait (default 300)
 //   --screen WxH        the hidden display's size (default 1600x1000; the positions below are measured there). The
 //                       editor sizes its main window by the display, the terrain view following it, which gives
@@ -24,7 +24,7 @@
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
 //   --frame-cap N       at most N frames a second for the editor's views (DXVK's limit; default 10, or
 //                       W3PROJ_WE_FRAME_CAP; 0 = none, the old behaviour). The editor redraws all the time, and under
-//                       lavapipe each frame costs the CPU (TESTING.md "Editor CPU"): settled pictures are the same
+//                       lavapipe each frame costs the CPU (docs/testing/editor-tooling.md "Editor CPU"): settled pictures are the same
 //                       bytes, but --fps counts at most N, and what times frames (an animation's phase) can differ
 //   --renderer R        software (default, or W3PROJ_WE_RENDERER): Mesa's lavapipe, the same pictures on every
 //                       machine; gpu: the machine's Vulkan driver (NVIDIA presents into Xvfb since driver 595), a
@@ -73,14 +73,14 @@
 //                       The "Progress" window ("Loading Units n/300") isn't a question: it's waited for, up to --timeout
 //   --compare-ready     --wait-ready, then game view on, with the day and night fixed (--day-night cycle is refused;
 //                       the editor then stands at 06:00): the state to compare with Studio's lit view, app-drive's
-//                       --compare-ready lit (TESTING.md, "Comparing pictures")
+//                       --compare-ready lit (docs/testing/pictures.md, "Comparing pictures")
 //   --compare-ready-unlit  --wait-ready, then game view off and View > Lighting off: the pair of app-drive's
 //                       --compare-ready unlit
 //   --look SPEC         look through a camera: SPEC is x,y[,distance[,aoa[,fov[,rotation]]]] or center[,distance…]
 //                       (the terrain's centre); missing values are the editor's opening camera (3000, 304, 70, 90).
 //                       Every --look of the run becomes a camera object in we-drive's copy of the map before the
 //                       editor starts (unpacked with the release CLI, war3map.w3c.json changed, packed again; the
-//                       map's own cameras stay, after them), and this step shows it as TESTING.md records: the camera
+//                       map's own cameras stay, after them), and this step shows it as docs/testing/cameras-and-views.md records: the camera
 //                       layer (m), its row in the palette, View Selected Camera, then waits until two pictures of
 //                       the view a frame apart are the same (at most 10 s; "viewSettled"). Prints the camera, and Studio's
 //                       equivalent for app-drive's --camera when there is one (we-camera.mjs)
@@ -254,7 +254,7 @@ const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Edit
  *  Editor - [Untitled]", "AI Editor - [Untitled]" when it reopens with none), so it goes by the start of the title. */
 export const isReopenedModule = (title) => REOPENED_MODULES.has(title) || /^(Campaign|AI) Editor\b/.test(title ?? "");
 // The tool palette (at 1356,30 in the display): the first row of the camera layer's list, the rows' height, and
-// View Selected Camera, from the palette's corner (TESTING.md, "Applying a camera object").
+// View Selected Camera, from the palette's corner (docs/testing/cameras-and-views.md, "Applying a camera object").
 const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, y: 89 } };
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
@@ -264,7 +264,7 @@ const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
 const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--wait-window", "--look", "--view"]);
 
-/** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
+/** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (docs/testing/editor-tooling.md
  *  "Layout"). */
 export const LAYOUT = Object.freeze({ main: Object.freeze([4, 30, 1352, 937]), palette: Object.freeze([1356, 30]) });
 
@@ -275,7 +275,7 @@ export const LAYOUT = Object.freeze({ main: Object.freeze([4, 30, 1352, 937]), p
 export function layoutProblem(main, palettes, want = LAYOUT) {
   if (!main) return "the editor's layout can't be checked: no main window";
   const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-  if (!same(main.rect, want.main)) return `the editor's main window is at ${main.rect.slice(0, 2).join(",")} ${main.rect[2]}x${main.rect[3]}, not ${want.main.slice(0, 2).join(",")} ${want.main[2]}x${want.main[3]}: the spec's clicks were measured in that layout (the 1600x1000 display; does the farm's prefix keep another window size? TESTING.md "Layout")`;
+  if (!same(main.rect, want.main)) return `the editor's main window is at ${main.rect.slice(0, 2).join(",")} ${main.rect[2]}x${main.rect[3]}, not ${want.main.slice(0, 2).join(",")} ${want.main[2]}x${want.main[3]}: the spec's clicks were measured in that layout (the 1600x1000 display; does the farm's prefix keep another window size? docs/testing/editor-tooling.md "Layout")`;
   const p = palettes.find((w) => w.rect[0] >= main.rect[0] + main.rect[2] / 2);
   if (p && !same(p.rect.slice(0, 2), want.palette)) return `the editor's tool palette is at ${p.rect.slice(0, 2).join(",")}, not ${want.palette.join(",")}: the spec's palette clicks were measured there`;
   return null;
@@ -599,7 +599,7 @@ export function parseFrameCap(v, what = "--frame-cap") {
 /**
  * The rendering part of the editor's environment: which Vulkan drivers the loader sees (`renderer` "software":
  * lavapipe, "gpu": the hardware ones) and DXVK's frame limit (`frameCap` > 0: DXVK_FRAME_RATE; 0 sets it to 0, which
- * DXVK reads as no limit, so a cap in the caller's own environment doesn't leak in). TESTING.md "Editor CPU".
+ * DXVK reads as no limit, so a cap in the caller's own environment doesn't leak in). docs/testing/editor-tooling.md "Editor CPU".
  */
 export function renderEnv({ renderer = "software", frameCap = DEFAULT_FRAME_CAP } = {}, icds = { software: lavapipeIcds, gpu: gpuIcds }) {
   if (!["software", "gpu"].includes(renderer)) throw new Error(`--renderer wants software or gpu, not "${renderer}"`);
@@ -707,7 +707,7 @@ const ASSET_KINDS = ["Buildings", "Environment", "EnvOld", "Heroes", "Icons", "T
 
 /**
  * The [Misc] keys we-drive sets in WorldEditPreferences.txt: no first-start questions, no interface sounds, the
- * graphics mode (`sd`, `hd` or `de`: assetMode 0, 1, 2 decides, hd and the per-kind switches follow; see TESTING.md),
+ * graphics mode (`sd`, `hd` or `de`: assetMode 0, 1, 2 decides, hd and the per-kind switches follow; see docs/testing/editor-tooling.md),
  * and whether the editor's day and night turn (`cycle`) or stand still (`fixed`).
  */
 export function editorPrefs(mode, dayNight, keep = false) {
@@ -741,7 +741,7 @@ export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enf
 /**
  * The [Minimap] toggle pinned the same way: the editor keeps the "Show Creep Camp Icon" box under the minimap as it
  * was left, so a spec's click on it ticked it in one run and unticked it in the next (the "first click doesn't take
- * half of the time" of TESTING.md: measured 2026-11-17, six runs alternating, the click took every time). Unticked,
+ * half of the time" of docs/testing/doodads-and-units.md: measured 2026-11-17, six runs alternating, the click took every time). Unticked,
  * as a fresh prefix starts. `--keep-prefs` leaves it as it is.
  */
 export const PINNED_MINIMAP_PREFS = Object.freeze({ "Show Creep Camps": "false" });
@@ -1403,7 +1403,7 @@ export class Session {
     const stamp = () => { try { const s = statSync(this.copy); return `${s.mtimeMs}:${s.size}`; } catch { return null; } };
     const before = stamp();
     if (shadows) {
-      // --save-shadows: File menu, Calculate Shadows and Save Map (positions of TESTING.md, branch we-terrain-2).
+      // --save-shadows: File menu, Calculate Shadows and Save Map (positions of docs/testing/lighting-and-shadows.md, branch we-terrain-2).
       this.act("click", SAVE_SHADOWS_CLICKS[0]);
       await this.wait(600);
       this.act("click", SAVE_SHADOWS_CLICKS[1]);

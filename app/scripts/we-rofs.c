@@ -34,7 +34,7 @@ static int takes_mode(int flags) {
   return (flags & O_CREAT) || ((flags & O_TMPFILE) == O_TMPFILE);
 }
 
-// Not covered (only a gap if the editor uses them; TESTING.md notes none): openat2 (glibc has no wrapper to
+// Not covered (only a gap if the editor uses them; docs/testing/editor-tooling.md notes none): openat2 (glibc has no wrapper to
 // replace: it is a direct syscall), fopen's internal calls that bypass these symbols (static glibc), and direct
 // syscalls. Wine's own file opens go through open/openat. A symbol the C library doesn't have (dlsym NULL) fails the
 // call with ENOSYS rather than jumping to address 0.

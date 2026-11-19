@@ -5126,7 +5126,7 @@ async function mcpLimits(page, found) {
     await settled(page);
     const below = await refusal("set_water", { mode: "shallow", ...sink });
     if (!/Not done: the water at \d+ corners? would go past/.test(below ?? "")) fail(`water on ground below -2048 with Enforce Water Height Limits on: ${below ?? "drawn"}`);
-    // Refused values (TESTING.md): ground past the stored word, a tool setting out of range, a place off the map, a
+    // Refused values (docs/testing/refused-values.md): ground past the stored word, a tool setting out of range, a place off the map, a
     // variation the type hasn't got. Each is refused with the files as they were; the controls in range go through.
     await settled(page);
     const files = () => [hash(w3e), JSON.stringify(k.doodads())].join();

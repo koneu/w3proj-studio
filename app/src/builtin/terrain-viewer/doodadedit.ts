@@ -2,7 +2,7 @@
 // a doodad or destructable as it is placed, pasted, moved, turned or scaled, as part of that edit, not only when a map
 // opens. The same settings switch them: Snap Doodads on Load (terrain.doodads.snapOnLoad) the grid and the facing,
 // Fix Doodads on Load (terrain.doodads.fixOnLoad) the scale (and on opening the flags, life and heights). What the editor does while editing (we-drive, 2026-11-13) is written in
-// TESTING.md "Doodad rules while editing".
+// docs/testing/doodads-and-units.md "Doodad rules while editing".
 
 import { doodadOnGrid, doodadSnaps, openedUnitAngle, type PathSize } from "./doodadgrid";
 import { doodadFixes, savedScale, type ScaleRule } from "./doodadrules";

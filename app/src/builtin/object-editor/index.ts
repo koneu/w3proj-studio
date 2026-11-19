@@ -815,7 +815,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             onchange: () => {
               const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
               // The World Editor's Modify Selected Field takes a typed negative for a real of the game's unsigned kind as 0
-              // (Cast Range 350, -7 typed: 0.000), where it asks for none (TESTING.md "Negative reals").
+              // (Cast Range 350, -7 typed: 0.000), where it asks for none (docs/testing/branch-rounds.md "Negative reals").
               if (clampsToZero(type, input.value, allowNegative)) input.value = "0";
               const v = parseValue(type, input.value, allowNegative);
               if (v === null) {
