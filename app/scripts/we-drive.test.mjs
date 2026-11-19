@@ -411,6 +411,17 @@ test("--map: starts the editor when none runs, opens in it when one does", () =>
   assert.equal(mapAction(true), "open");
 });
 
+test("--map: a module window the map before left open (the Trigger Editor) restarts the editor instead of opening in it", () => {
+  const d = (title) => ({ title, id: 1, rect: [0, 0, 1, 1] });
+  assert.equal(mapAction(true, [d("Trigger Editor")]), "restart");
+  assert.equal(mapAction(true, [d("Progress"), d("Object Editor")]), "restart");
+  assert.equal(mapAction(true, [d("AI Editor - [Untitled]")]), "restart");
+  // Controls: other dialogs don't, and with no editor running it is a plain start.
+  assert.equal(mapAction(true, [d("Progress"), d("Warning")]), "open");
+  assert.equal(mapAction(true, []), "open");
+  assert.equal(mapAction(false, [d("Trigger Editor")]), "start");
+});
+
 test("openQuestion: 'Save changes?' (Warning) is answered No, or Yes on request; other dialogs are errors; the loading window is ignored", () => {
   const w = (title, id = 1) => ({ title, id, rect: [0, 0, 1, 1] });
   assert.deepEqual(openQuestion([], false), {});
