@@ -15,6 +15,8 @@ Warcraft is a trademark of Blizzard Entertainment. You need your own installed c
 
 ## Features
 
+**[Try the UI in your browser](https://koneu.github.io/w3proj-studio/)** (a demo with made-up data: no maps, no terrain).
+
 What the World Editor doesn't have:
 
 - **AI integration.** Performance and cost heavily depend on provided guides and used models. Examples were done with built-in guides and Claude Opus 5.5.
