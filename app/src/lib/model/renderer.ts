@@ -337,7 +337,17 @@ export const REPLACEABLE: Record<number, string> = {
  *  height), the tiles' grid uEdgeTiles (x, y of the first tile, its size, texels per tile), uEdgeMode (0: none,
  *  1: per pixel, 2: per instance by the shade at its origin, 3: per instance, full where the tile under its origin is
  *  shaded). */
-const EDGE_UNIFORMS = "uniform highp sampler2D uEdge; uniform highp vec4 uEdgeRect; uniform highp vec4 uEdgeTiles; uniform highp float uEdgeMode;";
+const EDGE_UNIFORMS = "uniform highp sampler2D uEdge; uniform highp vec4 uEdgeRect; uniform highp vec4 uEdgeTiles; uniform highp float uEdgeMode; uniform highp vec2 uEdgeReach;";
+
+/** The border shade's alpha at `uv`, its dark grown by `r` (texture units, x and y; area.ts BorderSpread.reach): the
+ *  largest of the texel there and one `r` away along each axis, so a straight fade moves `r` further into the playable
+ *  map, unchanged in shape. The ground's shade (terrain-viewer OVERLAY_FS, BORDER_HD_FS) and the models' (edgeShade) read
+ *  it alike. */
+export const REACHED_ALPHA_GLSL = `float reachedAlpha(sampler2D t, vec2 uv, vec2 r) {
+  float a = texture(t, uv).a;
+  if (r.x <= 0.0 && r.y <= 0.0) return a;
+  return max(a, max(max(texture(t, uv - vec2(r.x, 0.0)).a, texture(t, uv + vec2(r.x, 0.0)).a), max(texture(t, uv - vec2(0.0, r.y)).a, texture(t, uv + vec2(0.0, r.y)).a)));
+}`;
 
 const VS = `#version 300 es
 precision highp float;
@@ -428,9 +438,10 @@ out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
 ${SUN_FS}
+${REACHED_ALPHA_GLSL}
 float edgeShade() {
   if (uEdgeMode < 0.5) return 0.0;
-  return uEdgeMode < 1.5 ? texture(uEdge, (vWorldPos.xy - uEdgeRect.xy) / uEdgeRect.zw).a : vEdge;
+  return uEdgeMode < 1.5 ? reachedAlpha(uEdge, (vWorldPos.xy - uEdgeRect.xy) / uEdgeRect.zw, uEdgeReach) : vEdge;
 }
 vec3 edgeDec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
 vec3 edgeEnc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
@@ -542,7 +553,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep", "uEdge", "uEdgeRect", "uEdgeTiles", "uEdgeMode", "uEdgeColor"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uCoord", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep", "uEdge", "uEdgeRect", "uEdgeTiles", "uEdgeMode", "uEdgeColor", "uEdgeReach"] as const;
 
 /** Texture unit of the border shade (EdgeShade): past the HD water's depth picture (6) and the sun's map (5). */
 const EDGE_UNIT = 7;
@@ -662,6 +673,8 @@ export interface EdgeShade {
   rect: readonly [number, number, number, number];
   tiles: readonly [number, number, number, number];
   mode: "pixel" | "object" | "tile";
+  /** "pixel": the dark grown by so much along x and y, in texture units (REACHED_ALPHA_GLSL); none when left out. */
+  reach?: readonly [number, number];
 }
 
 const EDGE_MODES = { pixel: 1, object: 2, tile: 3 } as const;
@@ -989,6 +1002,7 @@ export class ModelGpu {
         gl.uniform4f(u.uEdgeRect, edge.rect[0], edge.rect[1], edge.rect[2], edge.rect[3]);
         gl.uniform4f(u.uEdgeTiles, edge.tiles[0], edge.tiles[1], edge.tiles[2], edge.tiles[3]);
       }
+      gl.uniform2f(u.uEdgeReach, edge?.reach?.[0] ?? 0, edge?.reach?.[1] ?? 0);
     }
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BORDER_ALPHA, BORDER_SPREAD, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, isBackdrop, type BorderSpread } from "./area";
+import { BORDER_ALPHA, BORDER_SPREAD, borderReach, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, isBackdrop, type BorderSpread } from "./area";
 import { mapEdgeTiles, markMapEdge, onBoundary, playableEdgeTiles, setWaterLevel, validComplements, type Corner, type Terrain } from "./w3e";
 
 /** A terrain of `tilesX` by `tilesY` tiles, its map edge marked for these complements (left, right, bottom, top). */
@@ -58,7 +58,13 @@ test("the border's shade reaches a further half cell in where the editor's does:
   // west, 39.0 east, 13.5 south, 22.4 north. Corners on every side (Studio before, the control) put it at 16.
   assert.deepEqual(sides({ x: false, y: false }), { west: 16, east: 16, south: 16, north: 16 });
   assert.deepEqual(sides(BORDER_SPREAD.hd), { west: 32, east: 32, south: 32, north: 32 });
-  assert.deepEqual(sides(BORDER_SPREAD.sd), { west: 32, east: 32, south: 16, north: 16 });
+  // SD moved 4 units south-west (branch we-compare-18): within 3 units of the editor on every side, where the centred
+  // shade (the control) was 1.4 to 7 off, 6.4 too little in the north.
+  assert.deepEqual(sides(BORDER_SPREAD.sd), { west: 28, east: 36, south: 12, north: 20 });
+  const editorSd = { west: 30.6, east: 39.0, south: 13.5, north: 22.4 };
+  const off = (s: Record<string, number>) => Math.max(...Object.entries(editorSd).map(([k, v]) => Math.abs(s[k] - v)));
+  assert.ok(off(sides(BORDER_SPREAD.sd)) <= 3);
+  assert.ok(off(sides({ x: true, y: false })) > 6, "control: not moved");
   // Past the edge and well inside, the same as before: full shade one cell out, none two cells in.
   for (const spread of [BORDER_SPREAD.hd, BORDER_SPREAD.sd]) {
     assert.equal(shadeAt(t, edge, spread, 256 - 32, 640), BORDER_ALPHA / 255);
@@ -67,9 +73,30 @@ test("the border's shade reaches a further half cell in where the editor's does:
     assert.equal(shadeAt(t, edge, spread, 640, 640), 0);
   }
   // The texture's size and place: a texel per cell's middle along a spread axis, per corner along the other.
-  assert.deepEqual(borderShadeRect(t, BORDER_SPREAD.sd), [0, -16, 1280, 1312]);
+  assert.deepEqual(borderShadeRect(t, BORDER_SPREAD.sd), [-4, -20, 1280, 1312]);
   const { width, height } = borderShade(t, edge, BORDER_SPREAD.sd);
   assert.deepEqual([width, height], [40, 41]);
+});
+
+test("the reach grows the dark into the playable map: the fade's halves where the editor's are", () => {
+  const t = marked(10, 10, [2, 2, 2, 2]), edge = mapEdgeTiles(t);
+  // The shaders' reachedAlpha (lib/model/renderer.ts REACHED_ALPHA_GLSL) over shadeAt: the largest of the shade there and
+  // `reach` away along each axis; borderReach gives the shaders that distance in texture units.
+  const sides = (spread: BorderSpread) => {
+    const [ru, rv] = borderReach(t, spread), [, , rw, rh] = borderShadeRect(t, spread);
+    const rx = ru * rw, ry = rv * rh;
+    const at = (x: number, y: number) => Math.max(shadeAt(t, edge, spread, x, y), shadeAt(t, edge, spread, x - rx, y), shadeAt(t, edge, spread, x + rx, y), shadeAt(t, edge, spread, x, y - ry), shadeAt(t, edge, spread, x, y + ry));
+    return {
+      west: halfInside((d) => at(256 + d, 640)), east: halfInside((d) => at(1024 - d, 640)),
+      south: halfInside((d) => at(640, 256 + d)), north: halfInside((d) => at(640, 1024 - d)),
+    };
+  };
+  assert.deepEqual(borderReach(t, BORDER_SPREAD.hd), [5 / 1280, 5 / 1280]);
+  assert.deepEqual(borderReach(t, { x: true, y: true }), [0, 0], "none without a reach");
+  // The editor (we-drive 2026-11-19, nv-L): HD 37 on every side; SD 30.6, 39.0, 13.5, 22.4.
+  assert.deepEqual(sides(BORDER_SPREAD.hd), { west: 37, east: 37, south: 37, north: 37 });
+  const sd = sides(BORDER_SPREAD.sd), editorSd = { west: 30.6, east: 39.0, south: 13.5, north: 22.4 };
+  for (const [k, v] of Object.entries(editorSd)) assert.ok(Math.abs(sd[k as keyof typeof sd] - v) <= 1.1, `${k}: ${sd[k as keyof typeof sd]} against ${v}`);
 });
 
 test("the tiles past the playable map come from the w3i's complements, whatever the terrain's marks say", () => {

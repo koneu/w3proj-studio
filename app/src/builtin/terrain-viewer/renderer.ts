@@ -8,7 +8,7 @@ import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { rayBox, rayMesh } from "./meshpick";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, REACHED_ALPHA_GLSL, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -78,7 +78,7 @@ import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { BORDER_ALPHA, BORDER_SPREAD, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
+import { BORDER_ALPHA, BORDER_SPREAD, borderReach, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
 import { gridLines } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -445,10 +445,12 @@ uniform mat4 uViewProj; uniform vec4 uRect;
 out vec2 vUV;
 ${FOG_VS}
 void main() { vUV = (aPos.xy - uRect.xy) / uRect.zw; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+// uReach: the border's dark grown (REACHED_ALPHA_GLSL, area.ts borderReach); 0 for the other layers.
 const OVERLAY_FS = `#version 300 es
-precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform vec2 uReach; out vec4 outColor;
 ${FOG_FS}
-void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
+${REACHED_ALPHA_GLSL}
+void main() { outColor = texture(uTex, vUV); outColor.a = reachedAlpha(uTex, vUV, uReach); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
 // The View layers of regions and Pathing - Ground: the World Editor blends them over the picture (water included) in
 // linear light, not in sRGB: a colour of alpha a over a pixel d comes out as enc((1 - a) dec(d) + a dec(c)) (we-drive,
@@ -469,12 +471,13 @@ void main() {
 // by the shade's 1 - a taken as sRGB, dec(1 - a), not the sRGB value by 1 - a as SD and OVERLAY_FS do. The pixels under
 // it are the picture so far, copied (TerrainRenderer.copyScene); the fog goes over the dark part as OVERLAY_FS's.
 const BORDER_HD_FS = `#version 300 es
-precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; out vec4 outColor;
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; uniform vec2 uReach; out vec4 outColor;
 ${FOG_FS}
+${REACHED_ALPHA_GLSL}
 vec3 dec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
 vec3 enc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
 void main() {
-  float a = texture(uTex, vUV).a;
+  float a = reachedAlpha(uTex, vUV, uReach);
   if (a < 0.01) discard;
   float keep = dec(vec3(1.0 - a)).r;
   vec3 d = texelFetch(uDst, ivec2(gl_FragCoord.xy), 0).rgb;
@@ -1344,7 +1347,7 @@ export class TerrainRenderer {
   private edgeShade(textured: boolean): EdgeShade | null {
     if (!textured || !this.showBorder || !this.border) return null;
     // Four texels a tile (borderShade: one per pathing cell's corner or middle; the one at 4 t + 2 lies in tile t).
-    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel" };
+    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel", reach: borderReach(this.terrain, this.borderSpread) };
   }
 
   /** The overlay program, compiled the first time; null once the context is gone (the editor closed
@@ -1856,6 +1859,8 @@ export class TerrainRenderer {
       // The border's texels sit on the pathing cells' corners or middles (borderRect), the layers' on the cells.
       const rect = layer === this.border ? this.borderRect() : [t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128];
       gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), rect[0], rect[1], rect[2], rect[3]);
+      const reach = layer === this.border ? borderReach(t, this.borderSpread) : [0, 0];
+      gl.uniform2f(gl.getUniformLocation(this.overlayProg, "uReach"), reach[0], reach[1]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
@@ -2277,8 +2282,9 @@ export class TerrainRenderer {
     gl.useProgram(prog);
     setFog(gl, (name) => gl.getUniformLocation(prog, name), fog);
     gl.uniformMatrix4fv(gl.getUniformLocation(prog, "uViewProj"), false, viewProj);
-    const rect = this.borderRect();
+    const rect = this.borderRect(), reach = borderReach(this.terrain, this.borderSpread);
     gl.uniform4f(gl.getUniformLocation(prog, "uRect"), rect[0], rect[1], rect[2], rect[3]);
+    gl.uniform2f(gl.getUniformLocation(prog, "uReach"), reach[0], reach[1]);
     gl.uniform1i(gl.getUniformLocation(prog, "uDst"), 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, layer.tex);
