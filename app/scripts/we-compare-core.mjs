@@ -129,7 +129,8 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`${label}: "name" is needed (letters, digits, . _ -; it names the folder)`);
   if (RESERVED_NAMES.includes(name.toLowerCase())) throw new Error(`${label}: the name ${name} is one of we-compare's own folders (${RESERVED_NAMES.join(", ")})`);
   const where = `${label} (${name})`;
-  const unknown = Object.keys(raw).filter((k) => !["name", "description", "input", "we", "studio", "compare", "limit"].includes(k));  if (unknown.length) throw new Error(`${where}: unknown key ${unknown.join(", ")}`);
+  const unknown = Object.keys(raw).filter((k) => !["name", "description", "input", "we", "studio", "compare", "limit", "serial"].includes(k));  if (unknown.length) throw new Error(`${where}: unknown key ${unknown.join(", ")}`);
+  if (raw.serial !== undefined && typeof raw.serial !== "boolean") throw new Error(`${where}: serial is true or false`);
   const input = raw.input;
   if (!isObject(input)) throw new Error(`${where}: "input" is needed: { "map": … } or { "new": { name, width, height } }`);
   let parsedInput;
@@ -225,6 +226,8 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     compare,
     limit: raw.limit ?? 10,
     files: checkoutFiles(raw, vars),
+    // A World Editor part a second editor at the same time could disturb: run on slot 0 with every slot's lock held.
+    serial: raw.serial ?? false,
   };
 }
 
@@ -354,6 +357,33 @@ export function parseSpecFile(text, file, vars = {}, options = {}) {
   const dup = duplicateName(specs);
   if (dup) throw new Error(`${file}: two specs are named ${dup}`);
   return specs;
+}
+
+/** --shard's "i/n" (1 <= i <= n <= 64) as { index, count }. */
+export function parseShard(v) {
+  const m = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(String(v ?? ""));
+  if (!m || Number(m[1]) > Number(m[2]) || Number(m[2]) > 64) throw new Error(`--shard wants i/n with 1 <= i <= n <= 64, got ${JSON.stringify(v)}`);
+  return { index: Number(m[1]), count: Number(m[2]) };
+}
+
+/**
+ * Which spec files shard `index` of `count` runs: `files` is [{ file, specs }] (specs: how many the file holds). A file
+ * stays whole (its specs run in their order in one editor: a spec may build on the one before), and the files are
+ * dealt out by their spec counts, most first (ties by file name, then path), each to the shard with the fewest specs
+ * so far (ties: the lowest). The same list of files gives every run the same split whatever the order they were named
+ * in, and the n shards together hold every file exactly once. Returns the files of the shard, in the order given.
+ */
+export function shardFiles(files, index, count) {
+  const name = (f) => f.file.split(/[\\/]/).pop();
+  const order = [...files].sort((a, b) => b.specs - a.specs || (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const load = new Array(count).fill(0), mine = new Set();
+  for (const f of order) {
+    let at = 0;
+    for (let i = 1; i < count; i++) if (load[i] < load[at]) at = i;
+    load[at] += f.specs;
+    if (at === index - 1) mine.add(f.file);
+  }
+  return files.filter((f) => mine.has(f.file)).map((f) => f.file);
 }
 
 /** Whether a compare entry of this kind can name expectPaths: the JSON kinds, and "auto" on a file auto doesn't take as

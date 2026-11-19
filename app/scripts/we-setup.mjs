@@ -11,9 +11,13 @@
 //   prefix/       the Wine prefix (STEAM_COMPAT_DATA_PATH); Proton fills it on the first start (about 0.6 GB).
 //   we-rofs.so    built from we-rofs.c: turns the editor's read-write opens of the read-only links into read-only ones.
 //   build.info    the game build the farm was made from; the farm is made again only when the game's differs.
-//   (the lock is not in here: see lockPath, one per user and machine, whatever the farm)
+//   (the lock is not in here: see lockPath, one per slot, user and machine)
 //
-//   node scripts/we-setup.mjs [--game DIR]     set up (idempotent)
+// Slots (several editors at once): slot 0 is the folder above; slot N > 0 has a folder of its own with the same
+// contents, target/we-slotN of the main checkout (W3PROJ_WE_DIR/slotN when that is set), and a lock of its own
+// (slotPaths derives both). The slot is W3PROJ_WE_SLOT, or --slot N of this script, we-drive and we-compare.
+//
+//   node scripts/we-setup.mjs [--slot N] [--game DIR]     set up (idempotent)
 //   node scripts/we-setup.mjs --clean          remove the farm, the prefix and the rest
 //   node scripts/we-setup.mjs --snapshot FILE  write a list of the user's Steam prefix's files (the install is in it):
 //                                              size, mtime, ctime, inode, and the sha256 of files under 64 MB
@@ -36,7 +40,46 @@ import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repo = resolve(here, "..", "..");
-export const weDir = () => resolve(process.env.W3PROJ_WE_DIR || join(mainCheckout(repo), "target", "we"));
+
+// ---- slots: several World Editors at once, each with a farm, a prefix and a lock of its own ----------------------
+
+/** The highest slot number (slots are 0..MAX_SLOT). */
+export const MAX_SLOT = 31;
+
+/** A slot number from its text ("0".."31"); anything else is refused. */
+export function parseSlot(v, what = "slot") {
+  const s = String(v ?? "");
+  if (!/^(0|[1-9][0-9]?)$/.test(s) || Number(s) > MAX_SLOT) throw new Error(`${what} is a whole number 0 to ${MAX_SLOT}, got ${JSON.stringify(v)}`);
+  return Number(s);
+}
+
+/** This process's slot: W3PROJ_WE_SLOT (we-drive's and we-compare's --slot set it), else 0. */
+export const currentSlot = (env = process.env) => (env.W3PROJ_WE_SLOT === undefined || env.W3PROJ_WE_SLOT === "" ? 0 : parseSlot(env.W3PROJ_WE_SLOT, "W3PROJ_WE_SLOT"));
+
+function userName() {
+  try { return userInfo().username.replace(/[^A-Za-z0-9._-]/g, "_"); } catch { return "user"; }
+}
+
+/**
+ * A slot's folder and lock, derived together (so a farm can't be paired with another slot's lock). Slot 0 is the one
+ * there always was: W3PROJ_WE_DIR, else target/we of the main checkout, and the lock $XDG_RUNTIME_DIR/w3proj-we.lock
+ * (else the temp dir with the user name; W3PROJ_WE_LOCK overrides it). Slot N > 0: target/we-slotN of the main
+ * checkout, or W3PROJ_WE_DIR/slotN, and the lock with "-slotN" added (w3proj-we-slotN.lock, W3PROJ_WE_LOCK-slotN).
+ * `env`, `main`, `tmp` and `user` are parameters for the tests.
+ */
+export function slotPaths(slot, { env = process.env, main = mainCheckout(repo), tmp = tmpdir(), user = userName() } = {}) {
+  const n = parseSlot(slot);
+  const tag = n === 0 ? "" : `-slot${n}`;
+  const base = env.W3PROJ_WE_DIR ? resolve(env.W3PROJ_WE_DIR) : null;
+  const dir = n === 0 ? base ?? resolve(main, "target", "we") : base ? join(base, `slot${n}`) : resolve(main, "target", `we${tag}`);
+  let lock;
+  if (env.W3PROJ_WE_LOCK) lock = `${resolve(env.W3PROJ_WE_LOCK)}${tag}`;
+  else if (env.XDG_RUNTIME_DIR && existsSync(env.XDG_RUNTIME_DIR)) lock = join(env.XDG_RUNTIME_DIR, `w3proj-we${tag}.lock`);
+  else lock = join(tmp, `w3proj-we-${user}${tag}.lock`);
+  return { slot: n, dir, lock };
+}
+
+export const weDir = () => slotPaths(currentSlot()).dir;
 export const farmDir = () => join(weDir(), "install");
 export const prefixDir = () => join(weDir(), "prefix");
 export const shimPath = () => join(weDir(), "we-rofs.so");
@@ -151,10 +194,11 @@ function intact(game, rel, farm) {
   return !/\.idx$/.test(rel) || f.size === o.size;
 }
 
-/** The run that holds the World Editor lock on this farm, if it isn't this process (its farm must stay as it is). */
+/** The run that holds the World Editor lock on this farm, if it isn't this process or its parent holding it for it
+ *  (heldByParent): its farm must stay as it is. */
 function busyHolder() {
   const o = lockOwner(join(lockPath(), "owner.json"));
-  return o && o.pid !== process.pid && alive(o.pid) && o.farm && resolve(o.farm) === weDir() ? o : null;
+  return o && o.pid !== process.pid && !heldByParent(o) && alive(o.pid) && o.farm && resolve(o.farm) === weDir() ? o : null;
 }
 
 /**
@@ -233,7 +277,7 @@ export function clean(game) {
   }
 }
 
-// ---- the lock: one World Editor in the prefix at a time ---------------------------------------------------
+// ---- the lock: one World Editor in a slot's prefix at a time --------------------------------------------------
 
 function lockOwner(file) {
   try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; }
@@ -248,36 +292,51 @@ function ageMs(path) {
 }
 
 /**
- * The lock folder: one per user and machine, shared by every worktree and every W3PROJ_WE_DIR (two farms still
- * share the one display, GPU and CPU, and the editors disturb each other). W3PROJ_WE_LOCK overrides it (tests).
+ * The lock folder of this process's slot (slotPaths): one per slot, user and machine, shared by every worktree and
+ * every W3PROJ_WE_DIR. Slot 0's is the one lock there always was. W3PROJ_WE_LOCK overrides it (tests).
  */
-export function lockPath() {
-  if (process.env.W3PROJ_WE_LOCK) return resolve(process.env.W3PROJ_WE_LOCK);
-  let user = "user";
-  try { user = userInfo().username.replace(/[^A-Za-z0-9._-]/g, "_"); } catch { /* no passwd entry */ }
-  const run = process.env.XDG_RUNTIME_DIR;
-  if (run && existsSync(run)) return join(run, "w3proj-we.lock");
-  return join(tmpdir(), `w3proj-we-${user}.lock`);
+export const lockPath = (slot = currentSlot()) => slotPaths(slot).lock;
+
+/**
+ * Whether the lock's owner `o` is this process's parent, which took the slot's lock for it and said so in
+ * W3PROJ_WE_LOCK_HOLDER (we-compare holds a slot for a whole run and starts we-drive under it): the same slot and farm,
+ * the parent's pid, alive. `ppid` and `env` are parameters for the tests.
+ */
+export function heldByParent(o, slot = currentSlot(), { env = process.env, ppid = process.ppid } = {}) {
+  const holder = /^[1-9][0-9]*$/.test(env.W3PROJ_WE_LOCK_HOLDER ?? "") ? Number(env.W3PROJ_WE_LOCK_HOLDER) : null;
+  return !!o && holder !== null && o.pid === holder && o.pid === ppid && (o.slot ?? 0) === slot && !!o.farm && resolve(o.farm) === slotPaths(slot, { env }).dir && alive(o.pid);
+}
+
+/** Whether `slot`'s lock is held by a live process (none, or a dead owner, is free). */
+export function slotBusy(slot) {
+  const dir = lockPath(slot);
+  if (!existsSync(dir)) return false;
+  const o = lockOwner(join(dir, "owner.json"));
+  return o ? alive(o.pid) : ageMs(dir) <= 10000;
 }
 
 /**
- * Takes the lock folder (as the gate's coverage lock: a folder with the owner's process in it, taken over when that
- * process is gone). Waits while another run holds it, saying so once (who, since when); gives
- * up after `timeoutMs`. Returns a function that lets it go.
+ * Takes the lock folder of `slot` (default this process's; as the gate's coverage lock: a folder with the owner's
+ * process in it, taken over when that process is gone). Waits while another run holds it, saying so once (who, since
+ * when); gives up after `timeoutMs`; with `wait: false` returns null at once instead of waiting. A lock this
+ * process's parent holds for it (heldByParent) is used as it is: the release is then a no-op. Returns a function that
+ * lets it go.
  */
-export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename = () => {} } = {}) {
-  const dir = lockPath(), owner = join(dir, "owner.json");
+export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename = () => {}, slot = currentSlot(), wait = true } = {}) {
+  const dir = lockPath(slot), owner = join(dir, "owner.json");
+  const farm = slotPaths(slot).dir;
   mkdirSync(dirname(dir), { recursive: true });
   const start = Date.now();
   let told = 0;
   for (;;) {
     try {
       mkdirSync(dir);
-      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, farm: weDir(), since: new Date().toISOString() }));
+      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, slot, farm, since: new Date().toISOString() }));
       return () => rmSync(dir, { recursive: true, force: true });
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
       const held = lockOwner(owner);
+      if (heldByParent(held, slot)) return () => {};
       const stale = held ? !alive(held.pid) : ageMs(dir) > 10000;
       if (stale) {
         const again = lockOwner(owner);
@@ -301,6 +360,7 @@ export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename =
         rmSync(gone, { recursive: true, force: true });
         continue;
       }
+      if (!wait) return null;
       if (Date.now() - start > timeoutMs) throw new Error(`another World Editor run still holds ${dir} (${held ? `process ${held.pid} of ${held.repo}, since ${held.since}` : "no owner yet"})`);
       if (!told) {
         say(`waiting for the World Editor run of ${held ? `${held.repo} (process ${held.pid}, since ${held.since})` : "another session"}: ${dir}`);
@@ -309,6 +369,48 @@ export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename =
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
+}
+
+/**
+ * Takes the first free slot of `slots` (in their order: their locks are tried without waiting) and returns
+ * { slot, release }. While every one is busy it waits, trying them all again every `pollMs`, saying so once; gives up
+ * after `timeoutMs`. Two runs at once can't both get one slot: each lock is a folder made with mkdir.
+ */
+export async function takeFreeSlot(slots, say, { timeoutMs = 60 * 60 * 1000, pollMs = 2000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  if (!slots.length) throw new Error("no slots to take one of");
+  const start = Date.now();
+  let told = false;
+  for (;;) {
+    for (const slot of slots) {
+      const release = await takeLock(say, 0, { slot, wait: false });
+      if (release) return { slot, release };
+    }
+    if (Date.now() - start > timeoutMs) throw new Error(`every World Editor slot of ${slots.join(",")} is still busy`);
+    if (!told) { say(`every World Editor slot of ${slots.join(",")} is busy: waiting for one`); told = true; }
+    await sleep(pollMs);
+  }
+}
+
+/** The slots that can run an editor: 0, and every other whose folder exists (its first start made it) or whose lock
+ *  is there (a run that holds it may not have made the folder yet). */
+export const existingSlots = (exists = existsSync) => Array.from({ length: MAX_SLOT + 1 }, (_, n) => n).filter((n) => n === 0 || exists(slotPaths(n).dir) || exists(slotPaths(n).lock));
+
+/**
+ * Every existing slot's lock, taken in ascending order (waiting for each, `timeoutMs` in all), so that no other World
+ * Editor runs meanwhile: for measurements a second editor disturbs (--fps, specs marked serial). The caller must hold
+ * no slot lock when it calls this (it waits for all of them; two callers taking them in the same order can't
+ * deadlock). Returns a function that lets them all go; on a failure the ones taken are let go.
+ */
+export async function takeAllSlots(say, { timeoutMs = 60 * 60 * 1000, slots = existingSlots() } = {}) {
+  const start = Date.now(), taken = [];
+  const releaseAll = () => { for (const r of taken.splice(0).reverse()) r(); };
+  try {
+    for (const slot of [...slots].sort((a, b) => a - b)) taken.push(await takeLock(say, Math.max(0, timeoutMs - (Date.now() - start)), { slot }));
+  } catch (e) {
+    releaseAll();
+    throw e;
+  }
+  return releaseAll;
 }
 
 // ---- proof that the real install and the user's prefix are unchanged ----------------------------------------
@@ -367,6 +469,8 @@ export function guardedPaths(game) {
 
 function main(argv) {
   const at = (flag) => argv.indexOf(flag);
+  if (at("--slot") >= 0) process.env.W3PROJ_WE_SLOT = String(parseSlot(argv[at("--slot") + 1], "--slot"));
+  currentSlot(); // a bad W3PROJ_WE_SLOT is refused before anything is touched
   const game = gameDir(at("--game") >= 0 ? argv[at("--game") + 1] : undefined);
   if (at("--clean") >= 0) {
     clean(game);

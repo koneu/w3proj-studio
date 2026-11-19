@@ -10,7 +10,13 @@
 //
 // Options:
 //   --game DIR          the game's folder (default: W3PROJ_GAME, .game-path)
-//   --work DIR          scratch folder (default: target/we-drive of this checkout): map copies, the editor's log
+//   --work DIR          scratch folder (default: target/we-drive of this checkout, target/we-drive-slotN on slot N):
+//                       map copies, the editor's log
+//   --slot N            the World Editor slot (default W3PROJ_WE_SLOT, else 0): slot N > 0 has a farm, a Wine prefix
+//                       and a lock of its own (we-setup.mjs slotPaths), so editors on two slots run at once. Its first
+//                       start sets the slot up (the farm's hardlinks, a new prefix, the terms answered)
+//   --alone             take every slot's lock (in ascending order, waiting for the other runs), so no other editor
+//                       runs meanwhile: for --fps, whose numbers a second editor lowers (TESTING.md "Several editors")
 //   --timeout S         how long --wait-ready and --close wait (default 300)
 //   --screen WxH        the hidden display's size (default 1600x1000; the positions below are measured there). The
 //                       editor sizes its main window by the display, the terrain view following it, which gives
@@ -99,7 +105,8 @@
 //   --view-menu         the View menu's items, their shortcuts and check marks (read from a picture of the open menu)
 //   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
 //                       With game view on the items above it are greyed: their marks then read as unchecked
-//   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
+//   --fps MS            how often the terrain view's picture changes during MS (it animates day and night); another
+//                       editor running at the same time lowers it (use --alone)
 //   --sleep MS          wait (the windows read every second meanwhile: a crash dialog stops the run when it comes)
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
@@ -121,7 +128,7 @@
 // the next run's start kills the prefix's leftover wineserver first.
 //
 // Isolation (fixed, not options): the editor runs from the farm of we-setup.mjs (shared by all worktrees, one run at a
-// time by its lock), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
+// time per slot by the slot's lock; --slot), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
 // farm, its prefix, the work folder, the runtime dir and /tmp (writableDirs), and the user's Steam prefix (the real
 // install included) and every hardlink of the farm read-only within those. It shows nothing on the user's screen (a display of its
 // own, 1600x1000), renders through lavapipe (the NVIDIA driver can't present into Xvfb), and plays no sound: Wine's
@@ -139,7 +146,7 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
+import { currentSlot, existingSlots, farmDir, gameDir, linkedFiles, missing, parseSlot, prefixDir, setup, shimPath, takeAllSlots, takeLock, userCompatData } from "./we-setup.mjs";
 import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
 import { ensureCli } from "./appctl.mjs";
 import { decodePng } from "./pic-compare.mjs";
@@ -376,8 +383,11 @@ export function parseDrag(arg) {
 
 export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 
+/** we-drive's work folder when --work isn't given: target/we-drive of this checkout for slot 0, target/we-drive-slotN for N. */
+export const defaultWork = (slot) => join(repo, "target", slot ? `we-drive-slot${slot}` : "we-drive");
+
 export function parseArgs(argv) {
-  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
+  const opts = { game: null, work: null, timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
   let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
@@ -388,6 +398,8 @@ export function parseArgs(argv) {
     };
     if (a === "--game") opts.game = resolve(value());
     else if (a === "--work") opts.work = resolve(value());
+    else if (a === "--slot") opts.slot = parseSlot(value(), "--slot");
+    else if (a === "--alone") opts.alone = true;
     else if (a === "--timeout") opts.timeout = positiveNumber("--timeout", value());
     else if (a === "--mode") opts.mode = value();
     else if (a === "--save-accept") opts.saveAccept.push(...value().split(",").filter(Boolean));
@@ -412,6 +424,8 @@ export function parseArgs(argv) {
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown argument ${a} (see the top of we-drive.mjs)`);
   }
+  // The slot's own work folder by default, so runs on two slots don't share one (slot 0: target/we-drive as before).
+  opts.work ??= defaultWork(opts.slot ?? currentSlot());
   if (opts.expectLayout && opts.screen && (opts.screen[0] !== SIZE[0] || opts.screen[1] !== SIZE[1])) throw new Error("--expect-layout checks the layout of the 1600x1000 display: leave out --screen");
   for (const [step, v] of steps) if (step === "--numlock" && !["on", "off", "status"].includes(v)) throw new Error("--numlock wants on, off or status");
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
@@ -981,7 +995,7 @@ export class Session {
     let code = null;
     child.on("exit", (c) => { code = c; child.exited = true; });
     child.on("error", (e) => { child.spawnError = e; child.exited = true; });
-    // Bounded: it runs under the machine-wide lock, and a Wine that hangs (a stale wineserver) must not hold it forever.
+    // Bounded: it runs under the slot's lock, and a Wine that hangs (a stale wineserver) must not hold it forever.
     if (!(await waitExit(child, LOCALE_MS, this.clock))) {
       this.killPrefix(child);
       throw new Error(`couldn't set the editor's locale in the prefix: reg didn't finish within ${LOCALE_MS / 1000} s (killed; see ${this.log})`);
@@ -1017,8 +1031,10 @@ export class Session {
         throw new Error(`the editor before didn't exit within ${EXIT_WAIT_MS / 1000} s of its close (see ${this.log})`);
       }
     }
-    // A wineserver of the prefix still running now is a stale one (we-drive holds the machine-wide lock): a run before
-    // that was killed past its cleanup (SIGKILL, OOM). The next Wine program would join it.
+    // A wineserver of the prefix still running now is a stale one (we-drive holds the slot's lock): a run before
+    // that was killed past its cleanup (SIGKILL, OOM). The next Wine program would join it. Only this slot's: Wine
+    // finds a prefix's server by the prefix folder (/tmp/.wine-<uid>/server-<dev>-<inode> of pfx), and WINEPREFIX is
+    // this slot's (wineserver()), so another slot's editor and wineserver are never reached.
     this.wineserver(["-k"], EXIT_WAIT_MS);
     this.wineserver(["-w"], EXIT_WAIT_MS);
     // Another map after a --close: a run starts the editor once per --map, on the same display (we-compare.mjs).
@@ -1609,6 +1625,8 @@ async function main() {
     return 0;
   }
   const out = (o) => console.log(JSON.stringify(o));
+  // The slot decides the farm, the prefix and the lock together (we-setup slotPaths): set before any of them is read.
+  if (opts.slot !== undefined) process.env.W3PROJ_WE_SLOT = String(opts.slot);
   const game = gameDir(opts.game ?? undefined);
   let why = missing(game);
   if (!why && !lavapipeIcds().length) why = `no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
@@ -1627,7 +1645,9 @@ async function main() {
   textLocale(readFileSync(join(game, ".build.info"), "utf8"));
   // The lock first: setting up may rebuild the farm (another game build), which must not happen under another run's
   // live editor, nor in two fresh runs at once.
-  const release = await takeLock((m) => console.error(`we-drive: ${m}`));
+  // --alone: every slot's lock (no other editor runs meanwhile), else the slot's own.
+  const sayLock = (m) => console.error(`we-drive: ${m}`);
+  const release = opts.alone ? await takeAllSlots(sayLock, { slots: [...new Set([...existingSlots(), currentSlot()])] }) : await takeLock(sayLock);
   let s = null;
   const stopAll = () => {
     try { s?.stop(); } finally { release(); }

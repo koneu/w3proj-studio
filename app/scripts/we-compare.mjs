@@ -4,7 +4,14 @@
 //
 // Options:
 //   --app PATH      a built Studio to use (W3_APP_BIN; verify-build.mjs makes one): nothing is built
-//   --work DIR      scratch folder (default: target/we-compare): per spec its input map, the saves and Studio's project
+//   --work DIR      scratch folder (default: target/we-compare, target/we-compare-slotN on slot N): per spec its input
+//                   map, the saves and Studio's project; report.json goes there too, so every run has its own
+//   --slot N|auto   the World Editor slot (we-setup.mjs slotPaths: a farm, a prefix and a lock of its own each), held for
+//                   the whole run: N waits for that slot, auto takes the first free one of --slots. Without it, slot 0
+//                   (or W3PROJ_WE_SLOT) as before, the lock taken by each we-drive process
+//   --slots LIST    the slots --slot auto picks from, in order (default 0,1,2)
+//   --shard i/n     run part i of n of the spec files named (whole files, dealt out by their spec counts:
+//                   we-compare-core shardFiles); n runs with the same files and --slot auto cover them all, at once
 //   --game DIR      the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
 //   --json FILE     where the JSON report goes (default: <work>/report.json)
 //   --limit N       differences listed per file (default: the spec's "limit", else 10)
@@ -19,6 +26,8 @@
 //
 // A spec file holds one spec or a list. A spec (we-compare-core.mjs `parseSpec` has the full form):
 //   name        letters, digits, . _ - (the spec's folder)
+//   serial      true: the World Editor part would be disturbed by another editor at the same time (it times something):
+//               run last, on slot 0, with every slot's lock held (runSerial)
 //   input       { "map": "path.w3x" } (copied: the original isn't touched; ${MAIN} is the main checkout, ${REPO} this one,
 //               a relative path is the spec file's folder's) or { "new": { name, width, height }, "steps": [studio steps] }:
 //               Studio makes the map (new_map), runs the steps, packs it, and the World Editor opens that
@@ -87,7 +96,7 @@
 // "doodads[3].angle: WE 4.71, Studio 0", counts of fields and entries) and the same as JSON. Exit 0 when every file is
 // as its spec expects, 1 when not (or a file is MISSING), 2 when something couldn't run (a file's ERROR included), 3
 // when nothing was compared (--no-we). Local only (the World Editor: see we-drive.mjs).
-// Never starts the game; the World Editor is we-drive's, in its sandbox, with its machine-wide lock; the crash dialog is
+// Never starts the game; the World Editor is we-drive's, in its sandbox, with its slot's lock; the crash dialog is
 // never touched (we-drive).
 
 import { spawn, spawnSync } from "node:child_process";
@@ -96,7 +105,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { applyRoundtrip, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { applyRoundtrip, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { currentSlot, parseSlot, takeAllSlots, takeFreeSlot, takeLock } from "./we-setup.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
@@ -104,12 +114,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const say = (m) => console.error(`we-compare: ${m}`);
 
 export function parseArgs(argv) {
-  const o = { work: join(repo, "target", "we-compare"), game: null, json: null, limit: null, we: true, strictIgnore: false, files: [] };
+  const o = { work: null, game: null, json: null, limit: null, we: true, strictIgnore: false, files: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     if (a === "--app") process.env.W3_APP_BIN = resolve(value());
     else if (a === "--work") o.work = resolve(value());
+    else if (a === "--slot") { const v = value(); o.slot = v === "auto" ? "auto" : parseSlot(v, "--slot"); }
+    else if (a === "--slots") {
+      const v = value();
+      o.slots = v.split(",").map((x) => parseSlot(x.trim(), "--slots"));
+      if (new Set(o.slots).size !== o.slots.length) throw new Error(`--slots names a slot twice: ${v}`);
+    } else if (a === "--shard") o.shard = parseShard(value());
     else if (a === "--game") o.game = resolve(value());
     else if (a === "--json") o.json = resolve(value());
     else if (a === "--limit") {
@@ -125,8 +141,17 @@ export function parseArgs(argv) {
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a} (see the top of we-compare.mjs)`);
     else o.files.push(resolve(a));
   }
+  if (o.slots && o.slot !== "auto") throw new Error("--slots is the list --slot auto takes a free slot of: give --slot auto too");
+  if (o.slot === "auto") o.slots ??= DEFAULT_SLOTS;
   return o;
 }
+
+/** The slots `--slot auto` takes the first free one of when --slots isn't given. */
+export const DEFAULT_SLOTS = Object.freeze([0, 1, 2]);
+
+/** The work folder when --work isn't given: target/we-compare of this checkout for slot 0, target/we-compare-slotN for N,
+ *  so two runs on two slots never share one (the work folder's lock would stop the second). */
+export const defaultWork = (slot) => join(repo, "target", slot ? `we-compare-slot${slot}` : "we-compare");
 
 // ---------------------------------------------------------------- Studio's side
 
@@ -485,7 +510,12 @@ async function main() {
   }
   const vars = { MAIN: mainCheckout(repo), REPO: repo };
   const differsWithoutPaths = readDiffersAllowlist(repo);
-  const specs = o.files.flatMap((f) => parseSpecFile(readFileSync(f, "utf8"), f, vars, { differsWithoutPaths }));
+  const parsed = o.files.map((file) => ({ file, list: parseSpecFile(readFileSync(file, "utf8"), file, vars, { differsWithoutPaths }) }));
+  // --shard i/n: this run's part of the files (whole files, the same split in every run given the same files).
+  const files = o.shard ? shardFiles(parsed.map((p) => ({ file: p.file, specs: p.list.length })), o.shard.index, o.shard.count) : o.files;
+  if (o.shard) say(`shard ${o.shard.index}/${o.shard.count}: ${files.length} of ${o.files.length} spec files`);
+  const specs = parsed.filter((p) => files.includes(p.file)).flatMap((p) => p.list);
+  if (!specs.length) { say("no spec to run in this shard"); return 0; }
   const dup = duplicateName(specs);
   if (dup) throw new Error(`two specs are named ${dup} (names are folders: any case)`);
   // A missing input (most are made by a generator into target/) is that spec's error; the others still run.
@@ -494,12 +524,63 @@ async function main() {
   // nothing and match.
   for (const s of specs) if (!s.error) { const f = s.files.find((x) => !existsSync(x)); if (f) s.error = missingInput(f, repo, "file"); }
   const game = o.game ?? chosenGamePath() ?? gamePath(repo);
-  const release = lockWork(o.work);
+  // The World Editor slot: --slot N waits for that slot, --slot auto takes the first free one of --slots. The run holds
+  // the slot's lock throughout (its we-drive processes use it: W3PROJ_WE_LOCK_HOLDER), so no other run gets the slot
+  // between them. Without --slot (and no W3PROJ_WE_SLOT) nothing changes: slot 0, and we-drive takes the lock itself.
+  o.releaseSlot = o.we && o.slot !== undefined ? await holdSlot(o) : null;
   try {
-    return await runSpecs(specs, o, game);
+    // (--no-we --slot auto takes no slot: the default folder is then W3PROJ_WE_SLOT's, else slot 0's.)
+    o.work ??= defaultWork(typeof o.slot === "number" ? o.slot : currentSlot());
+    const release = lockWork(o.work);
+    try {
+      return await runSpecs(specs, o, game);
+    } finally {
+      release();
+    }
   } finally {
-    release();
+    o.releaseSlot?.();
   }
+}
+
+/** Takes the run's slot (o.slot: a number, or "auto" over o.slots, then replaced by the slot taken) and tells the
+ *  we-drive processes this run starts about it. Returns the release. */
+export async function holdSlot(o, { take = takeLock, takeFree = takeFreeSlot, env = process.env, pid = process.pid } = {}) {
+  let release;
+  if (o.slot === "auto") ({ slot: o.slot, release } = await takeFree(o.slots, say));
+  else release = await take(say, 60 * 60 * 1000, { slot: o.slot });
+  env.W3PROJ_WE_SLOT = String(o.slot);
+  env.W3PROJ_WE_LOCK_HOLDER = String(pid);
+  say(`World Editor slot ${o.slot}`);
+  // Once only: a second call would remove the lock another run has taken since.
+  let held = true;
+  return () => { if (!held) return; held = false; delete env.W3PROJ_WE_LOCK_HOLDER; release(); };
+}
+
+/**
+ * The World Editor part of the specs marked "serial": a second editor at the same time could disturb them. The run's
+ * own slot is let go first, then every existing slot's lock is taken in ascending order (takeAllSlots: waits until the
+ * other runs' editors are done; the same order everywhere, so no two runs wait on each other), and the specs run on
+ * slot 0 with all of them held. The locks are let go afterwards; the compare needs none.
+ */
+export async function runSerial(specs, o, game, { takeAll = takeAllSlots, runGroups = runWorldEditorGroups, env = process.env, pid = process.pid } = {}) {
+  o.releaseSlot?.();
+  o.releaseSlot = null;
+  say(`${specs.length} serial spec${specs.length === 1 ? "" : "s"}: waiting for every World Editor slot, then slot 0 with no other editor`);
+  const releaseAll = await takeAll(say);
+  const kept = { W3PROJ_WE_SLOT: env.W3PROJ_WE_SLOT, W3PROJ_WE_LOCK_HOLDER: env.W3PROJ_WE_LOCK_HOLDER };
+  env.W3PROJ_WE_SLOT = "0";
+  env.W3PROJ_WE_LOCK_HOLDER = String(pid);
+  try {
+    await runGroups(specs, o, game);
+  } finally {
+    for (const [k, v] of Object.entries(kept)) if (v === undefined) delete env[k]; else env[k] = v;
+    releaseAll();
+  }
+}
+
+/** One we-drive process per mode and set of accepted dialogs (both are options of the whole process). */
+async function runWorldEditorGroups(specs, o, game) {
+  for (const k of [...new Set(specs.map(weGroupKey))]) await runWorldEditor(specs.filter((s) => weGroupKey(s) === k), o, game);
 }
 
 /** The error of a spec whose input map (or another file it names, `what`) isn't there: the generator that makes it
@@ -520,10 +601,11 @@ async function runSpecs(specs, o, game) {
   if (specs.some((s) => !s.error)) await runStudio(specs, o, game);
   const tStudio = Date.now();
   if (o.we) {
-    // One we-drive process per mode and set of accepted dialogs (both are options of the whole process).
-    for (const k of [...new Set(specs.map(weGroupKey))]) {
-      const group = specs.filter((s) => weGroupKey(s) === k);
-      await runWorldEditor(group, o, game);
+    await runWorldEditorGroups(specs.filter((s) => !s.serial), o, game);
+    // Serial specs last, alone on slot 0 (runSerial).
+    const serial = specs.filter((s) => s.serial && !s.error);
+    if (serial.length) {
+      try { await runSerial(serial, o, game); } catch (e) { for (const s of serial) s.error ??= `World Editor (serial): ${e.message}`; }
     }
   }
   const tWe = Date.now();
@@ -541,7 +623,7 @@ async function runSpecs(specs, o, game) {
   const { ok, code, unexpected } = runOutcome(results, { strictIgnore: o.strictIgnore });
   for (const r of results) console.log(formatReport(r, o.limit ?? specs.find((s) => s.name === r.name).limit, { strictIgnore: o.strictIgnore }));
   const seconds = { studio: Math.round((tStudio - t0) / 1000), worldEditor: Math.round((tWe - tStudio) / 1000), compare: Math.round((Date.now() - tWe) / 1000) };
-  const json = { specs: results, seconds, ok, ...(o.we ? {} : { notCompared: true }) };
+  const json = { specs: results, seconds, ok, ...(o.we ? {} : { notCompared: true }), ...(typeof o.slot === "number" ? { slot: o.slot } : {}), ...(o.shard ? { shard: `${o.shard.index}/${o.shard.count}` } : {}) };
   writeFileSync(o.json ?? join(o.work, "report.json"), JSON.stringify(json, null, 2));
   console.log(`\n${results.length} spec${results.length === 1 ? "" : "s"}, ${o.we ? `${results.filter(unexpected).length} unexpected` : "NOT COMPARED (--no-we)"}; Studio ${seconds.studio} s, World Editor ${seconds.worldEditor} s, compare ${seconds.compare} s; report ${o.json ?? join(o.work, "report.json")}`);
   return code;
