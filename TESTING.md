@@ -543,6 +543,23 @@ It never starts the game itself.
   clamps the light to 1); in HD it holds for map 03, but cliff.w3m's own strong lighting makes its game view much
   brighter than the editor's light (green about 233 against 123). The rest of the colour difference to Studio was
   the HD picture's tone (`lib/model/tone.ts`).
+- **Waiting for the editor** (branch we-sleeps, 2026-11-19). `node app/scripts/we-sleeps.mjs` counts the fixed pauses of
+  the specs by what they follow: 484 specs, 1954 `--sleep` steps (1439 s: 1457 after a click, 394 after a key, 56 after
+  another sleep) and 350 Studio `{ "sleep" }` steps (418 s, 174 after a `ui` step). The editor's CPU can't say "quiet":
+  at rest (SD, day fixed, map ready) the editor and its Wine processes use about 9 cores without a pause (software GL
+  redraws all the time; the view changes 52 times a second), so `--idle` / `--wait-window` (we-idle.mjs) watch what
+  is on the screen instead: the window set and a hash of every window's picture but the main one (`we-x11.py windows
+  --pics`, one helper call a poll, about 250 ms) unchanged for 400 ms, at least 150 ms, at most `--timeout`. `--wait-window
+  TITLE` also waits for the window to exist (the quiet time counts from then); its error names the title. Where a
+  spec still sleeps, the effect isn't on a window: a brush click, a key into the view (nothing on the screen to wait
+  for; the view never stands still), the Object Editor and Trigger Editor (the window is there long before it paints,
+  45 to 90 s: a quiet window isn't a loaded one). Studio's `{ "sleep" }` after `open` is gone from the sound-order specs
+  (the step waits for the editor). Measured on the Sound Editor family (`sound-order-sort`, `sound-order-move`,
+  `sound-flags-we`, all MATCH after the change): F5 then a sleep of 2000 / 2000 / 2500 ms is now `--wait-window "Sound
+  Editor"`, which took 995 / 915 / 921 ms (6.5 s to 2.8 s of waiting); Studio's two `open` sleeps were 0.5 s each (the
+  packed maps are byte-identical without them). `w3Workbench.settled()` after opening the Sound Editor takes under 0.1 s
+  (10 calls in a row, 1 s for the spec with the open): the 2.9 s seen before was the first spec's cold start (project
+  unpack, game files), not the wait.
 
 ### Verification rounds: one build, many testers, one World Editor session
 

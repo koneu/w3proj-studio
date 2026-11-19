@@ -12,8 +12,8 @@
         "F5"
       ],
       [
-        "--sleep",
-        "2000"
+        "--wait-window",
+        "Sound Editor"
       ],
       [
         "--click",
@@ -68,9 +68,6 @@
     "steps": [
       {
         "open": "map/war3map.w3s.json"
-      },
-      {
-        "sleep": 500
       },
       {
         "eval": "[...document.querySelectorAll(\"tr.snd-row\")].find((r) => r.firstChild.textContent === \"Echo\").click();"
