@@ -5,14 +5,14 @@
 // A look is "x,y[,distance[,aoa[,fov[,rotation]]]]", or "center[,distance…]" for the terrain's centre; missing values
 // are the editor's opening camera.
 
-/** The editor's terrain view in we-drive's display (TESTING.md, "Layout"). */
+/** The editor's terrain view in we-drive's display (docs/testing/editor-tooling.md, "Layout"). */
 export const WE_VIEW = Object.freeze({ width: 1184, height: 844 });
 
 /** The hour the editor stands at with its day and night fixed (its status bar: "Time: 06:00"; we-drive's default). */
 export const WE_FIXED_HOUR = 6;
 
 /**
- * Studio's terrain settings for a comparison with the editor (TESTING.md, "Comparing pictures"). "game" pairs with
+ * Studio's terrain settings for a comparison with the editor (docs/testing/pictures.md, "Comparing pictures"). "game" pairs with
  * we-drive's --compare-ready (game view on, the day fixed at WE_FIXED_HOUR): Studio's game view (V) at that hour, which
  * also leaves out the start locations, regions and the rest the editor hides there. "lit" is the map's lighting at that
  * hour with the editor's marks still drawn (the pair before Studio had a game view). "unlit" pairs with
@@ -26,12 +26,12 @@ export function studioLighting(mode) {
   throw new Error(`a comparison is game, lit or unlit, not ${mode}`);
 }
 
-/** The camera the editor opens a map with, at the terrain's centre (TESTING.md, "The default camera"). */
+/** The camera the editor opens a map with, at the terrain's centre (docs/testing/cameras-and-views.md, "The default camera"). */
 export const WE_OPENING = Object.freeze({ distance: 3000, aoa: 304, fov: 70, rotation: 90 });
 
 /**
  * Studio's camera for the editor's view of angle of attack 304 and field of view 70, fitted from a 256 grid of marked
- * ground corners at the view's 1184:844 (0.5 px rms; TESTING.md): the target moves towards the eye by SHIFT times the
+ * ground corners at the view's 1184:844 (0.5 px rms; docs/testing/cameras-and-views.md): the target moves towards the eye by SHIFT times the
  * distance, Studio's distance is SCALE times the editor's, pitch and vertical field of view are fixed.
  */
 const FIT = Object.freeze({ aoa: 304, fov: 70, shift: 298 / 3000, scale: 2738 / 3000, pitch: 57.2, fovStudio: 41.06 });

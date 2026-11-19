@@ -20,7 +20,7 @@ test("the distance stays within its limits", () => {
 });
 
 // The renderer's own camera (eye, ray, project) on a stand-in for its canvas: the World Editor's view size, and its
-// opening camera in Studio's terms (TESTING.md "The default camera when a map opens": target y - 0.0993 d, distance
+// opening camera in Studio's terms (docs/testing/cameras-and-views.md "The default camera when a map opens": target y - 0.0993 d, distance
 // 0.9127 d, pitch 57.2°, field of view 41.06°, for the editor's distance d = 3000 around the origin).
 const W = 1184, H = 844;
 const camera = (target: Vec3, distance: number) => {

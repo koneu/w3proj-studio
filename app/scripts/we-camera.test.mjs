@@ -1,5 +1,5 @@
 // we-camera.mjs: looks, the terrain's centre, the camera objects we-drive adds for --look, and Studio's camera for
-// the World Editor's view (the fit recorded in TESTING.md).
+// the World Editor's view (the fit recorded in docs/testing/cameras-and-views.md).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,8 +28,8 @@ test("the terrain's centre is offset + (corners - 1) * 64, from war3map.w3e.txt'
   assert.equal(look.distance, 2000);
 });
 
-test("studioCamera: the opening view at the centre is TESTING.md's fitted camera", () => {
-  // TESTING.md: x=CX, y=CY-298, distance=2738, pitch=57.2, yaw=-90, fov=41.06.
+test("studioCamera: the opening view at the centre is the fitted camera of docs/testing/cameras-and-views.md", () => {
+  // docs/testing/cameras-and-views.md: x=CX, y=CY-298, distance=2738, pitch=57.2, yaw=-90, fov=41.06.
   assert.deepEqual(studioCamera(resolveLook(parseLook("center"), { width: 5, height: 3, offsetX: -128, offsetY: -64 })),
     { x: 128, y: 64 - 298, distance: 2738, pitch: 57.2, yaw: -90, fov: 41.06 });
   // Scaled with the distance: target y - 0.0993 d, distance 0.9127 d.

@@ -6,7 +6,7 @@ import {
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
-// The World Editor's HD pictures these come from (we-drive, branch water-render-we, 2026-11-14; TESTING.md "HD water"):
+// The World Editor's HD pictures these come from (we-drive, branch water-render-we, 2026-11-14; docs/testing/terrain-and-water.md "HD water"):
 // flat 128 × 96 maps of eight depths in bands across the map, View Entire Map, mean colours of the bands in a west, a
 // middle and an east column, the same maps with Water off for the bed.
 

@@ -1,7 +1,7 @@
 // Makes trigger-folds.w3x for tests/we-compare/trigger-folds.json from flat.w3x (the World Editor's own new map: one
 // category "Initialization", stored with `expanded` 0, holding Melee Initialization): a second category "Other" with
 // `expanded` 0 and no trigger, before Initialization, so the first trigger is in the second category. Opening the
-// Trigger Editor (F4) opens the first trigger's category in the editor whatever it says (TESTING branch we-compare-7);
+// Trigger Editor (F4) opens the first trigger's category in the editor whatever it says (docs/testing/branch-rounds.md branch we-compare-7);
 // does its save then write that category's `expanded` as 1?
 //
 //   node tests/fixtures/we-specs/make-trigger-folds.mjs <w3proj cli> <game folder>

@@ -1,4 +1,4 @@
-"""Reads camp icons off a --shot-screen of the World Editor with "Show Creep Camp Icon" ticked (see TESTING.md, Camps).
+"""Reads camp icons off a --shot-screen of the World Editor with "Show Creep Camp Icon" ticked (see docs/testing/doodads-and-units.md, Camps).
 
     python3 -I read-camp-icons.py <shot.png> <camps-X.layout.json>
 

@@ -77,7 +77,7 @@ export function scaledNudge(points: readonly (readonly [number, number])[], boun
 /** Where a dragged or nudged object's centre may go so that what it takes up (`half`, across and up: a unit's
  *  collision size or half a building's footprint, resize.ts unitHalf) stays inside `own` (the playable part, for a
  *  unit). The camera bounds don't come in: the World Editor's drags and nudges go past them with Enforce Camera
- *  Bounds on (we-drive 2026-11-13, see TESTING.md). An object too big for `own` gets its middle. One rule for
+ *  Bounds on (we-drive 2026-11-13, see docs/testing/doodads-and-units.md). An object too big for `own` gets its middle. One rule for
  *  `clampShift` in moveedit.ts, which cuts a group's shift to each entry's bounds. */
 export function insetBy(own: Bounds, half: readonly [number, number]): Bounds {
   const [hx, hy] = half.map((h) => (Number.isFinite(h) && h > 0 ? h : 0));

@@ -53,7 +53,7 @@ export interface Shown extends ViewSet {
 /**
  * What the view draws: the set as it is, or in game view the game's picture. The World Editor's game view greys out
  * every View item and draws the map as the game does: terrain textured, doodads, units, water, blight, lighting,
- * weather and fog on (TESTING.md: its fog map shows only fog colour with game view on), and none of the editor's
+ * weather and fog on (docs/testing/editor-tooling.md: its fog map shows only fog colour with game view on), and none of the editor's
  * marks: no grid, pathing, regions, camera objects, camera bounds, light ranges or start locations (we-drive,
  * map 03 with regions, a camera, lights, every one of those items on, 2026-11-09). Turned off, the items are as they
  * were. Studio's own marks (height map, naval pathing) go with the editor's.
@@ -276,7 +276,7 @@ export function lineAlong(corners: readonly (readonly [number, number])[], step 
   return out;
 }
 
-/** Pathing - Ground (P) and Pathing - Naval (N) are one switch in the World Editor (we-compare-6, TESTING.md): the one just
+/** Pathing - Ground (P) and Pathing - Naval (N) are one switch in the World Editor (we-compare-6, docs/testing/branch-rounds.md): the one just
  *  turned on switches the other off. The changes to make to the view state for `layer` turned on. */
 export function pathingSwitch(layer: string): { naval?: false; pathing?: false } {
   return layer === "naval" ? { pathing: false } : layer === "pathing" ? { naval: false } : {};

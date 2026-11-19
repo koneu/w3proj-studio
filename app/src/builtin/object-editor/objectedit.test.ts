@@ -32,7 +32,7 @@ test("Allow negative real values: unreal fields take values below 0 only with th
 });
 
 test("a typed negative for an unreal field is made 0 while negative reals are off, as in the World Editor's Modify Selected Field", () => {
-  // World Editor (TESTING.md "Negative reals", we-misc-2): Cast Range 350, typed -7, shows 0.000; Hit Points Gained (a real) keeps -4.
+  // World Editor (docs/testing/branch-rounds.md "Negative reals", we-misc-2): Cast Range 350, typed -7, shows 0.000; Hit Points Gained (a real) keeps -4.
   assert.equal(clampsToZero("unreal", "-7", false), true);
   assert.equal(clampsToZero("unreal", " -0.5 ", false), true);
   assert.equal(clampsToZero("unreal", "-7", true), false, "the setting lets it stand");
