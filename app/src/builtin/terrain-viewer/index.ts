@@ -5338,16 +5338,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Bottom to top: regions, ground pathing, heights, naval pathing.
             const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
             // The editor blends the layers in linear light in HD and in plain sRGB in SD (viewcmds.ts SD_LAYER_ALPHA). HD:
-            // Regions and Pathing - Ground over the picture, water too, the naval view in linear light under the water.
-            // SD: Pathing - Ground and the naval view under the water (the pathing's part over the border over it), the
-            // regions over everything. With the heights on, the SD order (not measured together).
+            // Regions, Pathing - Ground and the naval view over the picture, water too, the naval view over the regions
+            // (we-drive 2026-11-19, branch we-compare-18, ws-L.w3x: its brown over the border's water and over a yellow
+            // region there, water on and off; viewcmds.test.ts). SD: Pathing - Ground and the naval view under the water
+            // (the pathing's part over the border over it), the regions over everything. With the heights on, the SD
+            // order (not measured together).
             const linear = renderer.tone === 2 && !on.heights;
             const show = () => {
               if (!latest()) return;
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
               if (linear) {
-                const rgba = composeLayers([parts[0], parts[1]], true);
-                if (rgba || parts[3]) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, null, true, parts[3]); else renderer.setViewLayer(null);
+                const rgba = composeLayers([parts[0], parts[1], parts[3]], true);
+                if (rgba) renderer.setViewLayer(rgba, W, H, null, true); else renderer.setViewLayer(null);
               } else {
                 const path = parts[1] ? splitEdge(parts[1], edge) : null;
                 const rgba = composeLayers([path?.inside ?? null, parts[2], parts[3]]);

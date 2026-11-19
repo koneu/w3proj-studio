@@ -368,6 +368,23 @@ test("the naval view over the border is a see-through brown: the editor's colour
   }
 });
 
+test("HD: the naval view's brown lies over the regions, in linear light, as the editor's 204, 154, 15 and 204, 67, 15", () => {
+  // we-drive, branch we-compare-18 (ws-L.w3x, HD, water off, a yellow region across the south border and a red one
+  // across the west): the border's ground 14, 7, 1; regions alone 195, 194, 0 and 195, 3, 0; the naval view alone
+  // 156, 68, 15; both 204, 154, 15 and 204, 67, 15 (the region under the brown; with the water on alike, 202, 154, 16).
+  const edge = { tiles: [1], tilesX: 1 }, ground = [14, 7, 1];
+  for (const [color, alone, want] of [[{ red: 255, green: 255, blue: 0 }, [195, 194, 0], [204, 154, 15]], [{ red: 255, green: 0, blue: 0 }, [195, 3, 0], [204, 67, 15]]] as const) {
+    const region = { left: 0, bottom: 0, right: 128, top: 128, color };
+    const naval = navalColors(new Array(16).fill(0), edge);
+    const regions = regionColors([region], 4, 4, 0, 0, edge, true);
+    const seen = (layers: Uint8Array[]) => blend([...ground], composeLayers(layers, true)!.subarray(0, 4));
+    const near = (got: number[], w: readonly number[], d: number) => got.every((v, c) => Math.abs(v - w[c]) <= d);
+    assert.ok(near(seen([regions]), alone, 3), `regions alone: ${seen([regions])} against ${alone}`);
+    assert.ok(near(seen([regions, naval]), want, 3), `the brown over the region: ${seen([regions, naval])} against ${want}`);
+    assert.ok(!near(seen([naval, regions]), want, 6), "control: the region over the brown (SD's order) is off");
+  }
+});
+
 test("regions over the naval view's border: the region's colour lies over the brown, near the editor's 192, 164, 8 (yellow) and 192, 25, 8 (red)", () => {
   // flat.w3x (we-compare-6): its border ground is 20.7, 15.1, 10.0 (we-compare-8).
   const edge = { tiles: [1], tilesX: 1 }, ground = [20.7, 15.1, 10.0];
