@@ -217,7 +217,7 @@
   },
   {
     "name": "studio-paths-terrain-save",
-    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point) (the editor's ground for buildings isn't known: not the point's ground, not a mean or maximum of points round it; bugs.md); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17); every other unit's height must match",
+    "description": "(2): Studio's terrain editor moves every selected object (selectAll, Numpad6), saves (editors.saveAll) and packs; the editor opens that map (from: studio) and re-saves; (4) the regenerated war3map.lua of that save. skinIds ignored (a field of the doo version 8 the map has; the editor writes version 13 without it). Units: expected to differ in the height of the neutral buildings (tavern, marketplace, goblin merchant, shop, mercenary camps, ntrt/ntrg) the editor's save puts up to 5.2 off Studio's (the stored height, or after a move the ground at the point); units 5, 13, 14, 18, 27, 32, 54, 67, 73, 75, 77, 81, 87, 88, 89, 92, 97 (measured 2026-11-17). Since the save's elevation sample points (objheights.ts unitGround, commit b1cb0a28) only two are left, the tavern ntav 13 (WE 426.89, Studio 426.84) and the mercenary camp nmer 54 (263.65 against 264.05), in two runs of branch we-compare-17 (2026-11-19); every other unit's height must match",
     "input": {
       "map": "${REPO}/target/studio-paths/echo-plain.w3x"
     },
@@ -285,23 +285,8 @@
         "tolerance": 0.01,
         "expect": "differs",
         "expectPaths": [
-          "units[5].position[2]",
           "units[13].position[2]",
-          "units[14].position[2]",
-          "units[18].position[2]",
-          "units[27].position[2]",
-          "units[32].position[2]",
-          "units[54].position[2]",
-          "units[67].position[2]",
-          "units[73].position[2]",
-          "units[75].position[2]",
-          "units[77].position[2]",
-          "units[81].position[2]",
-          "units[87].position[2]",
-          "units[88].position[2]",
-          "units[89].position[2]",
-          "units[92].position[2]",
-          "units[97].position[2]"
+          "units[54].position[2]"
         ]
       },
       {
