@@ -100,6 +100,13 @@
 //   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
 //                       With game view on the items above it are greyed: their marks then read as unchecked
 //   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
+//   --idle              wait until the editor is quiet (the window set and the pictures of the palettes, dialogs and menus unchanged for 400 ms, at
+//                       least 150 ms, at most --timeout (default 300 s): an error names what it waited
+//                       for); prints the time and the busy part. Replaces a --sleep after a key or click that opens
+//                       something (we-idle.mjs)
+//   --wait-window TITLE wait until a window whose title contains TITLE is open (a dialog or palette) and has stood still for
+//                       400 ms, at most --timeout (default 300 s): an error names the title. For the window a key or click
+//                       just opened (F5 the Sound Editor), instead of a --sleep of its guessed opening time
 //   --sleep MS          wait (the windows read every second meanwhile: a crash dialog stops the run when it comes)
 //   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
 //                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
@@ -143,6 +150,7 @@ import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, tak
 import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
 import { ensureCli } from "./appctl.mjs";
 import { decodePng } from "./pic-compare.mjs";
+import { waitQuiet } from "./we-idle.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
@@ -236,7 +244,7 @@ const MAX_LOOKS = 16;
 /** --save-shadows: the File menu, then its "Calculate Shadows and Save Map" (display positions, 1600x1000). */
 const SAVE_SHADOWS_CLICKS = ["19,41", "105,155"];
 
-const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--open", "--save", "--save-shadows", "--export-minimap", "--export-options", "--shot", "--shot-window", "--shot-screen", "--clipboard", "--campaign", "--key", "--numlock", "--type", "--click", "--double-click", "--drag", "--drag-mod", "--drag-button", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--wait-window", "--look", "--view"]);
 
 /** The main window and the tool palette in the 1600x1000 display, where every spec's clicks were measured (TESTING.md
  *  "Layout"). */
@@ -261,7 +269,7 @@ export function parsePref(v) {
   if (!m || m[2] !== m[2].trim()) throw new Error(`--pref wants Section/Key=value ("Misc/Enforce Water Limits=false"), not ${JSON.stringify(v)}`);
   return { section: m[1], key: m[2], value: m[3] };
 }
-const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close"]);
+const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--close-modules", "--view-menu", "--close", "--idle"]);
 
 /** File > Open's own list (Ctrl+O), its title, and from its corner the first row and the OK button (measured 2026-11-13). */
 const OPEN_DIALOG = "Open Document";
@@ -1060,11 +1068,11 @@ export class Session {
 
   /** The editor's windows. If one is the crash-report dialog, the editor and its prefix's processes (the reporter
    *  included) are killed without touching it and EditorCrashed is thrown. Every step reads windows through here. */
-  windows() {
-    const all = this.x("windows").windows;
+  windows(flags = []) {
+    const all = this.x("windows", ...flags).windows;
     const crash = crashDialogs(all, programOfPid);
     if (crash.length) this.crashed(crash.map((w) => ({ title: w.title, class: w.class, program: programOfPid(w) })));
-    return classify(all);
+    return { ...classify(all), all };
   }
 
   /** A pointer action (click, drag, move) of a step: the window list is read first, so a crash dialog that came up
@@ -1083,6 +1091,22 @@ export class Session {
       await this.wait(Math.min(1000, left));
       if (this.editor) this.windows();
     }
+  }
+
+  /** Waits until the editor is quiet (we-idle.mjs): the window set and the pictures of the palettes, dialogs and menus unchanged for 400 ms, at
+   *  least `minMs`, at most `timeoutMs`, then an error naming `what`. A crash dialog on the way is handled by
+   *  windows() as everywhere. */
+  idle(what, opts = {}) {
+    return waitQuiet({
+      what, clock: this.clock, timeoutMs: (this.opts.timeout ?? 300) * 1000, ...opts,
+      sample: () => {
+        // One helper call: the window list with a hash of each window's picture (not the main window's: its terrain
+        // view redraws all the time, measured 52 changes a second in SD with the day fixed).
+        const w = this.windows(["--pics"]);
+        const key = [w.main, ...w.palettes, ...w.dialogs, ...w.menus].filter(Boolean).map((x) => `${x.title}@${x.rect.join(",")}`).join(" | ");
+        return { key, pic: w.all.map((x) => x.md5 ?? "").join(" "), ready: opts.window ? [...w.dialogs, ...w.palettes].some((x) => x.title.includes(opts.window)) : true };
+      },
+    });
   }
 
   /** The crash dialog was seen: a picture of the screen (read from the X server, nothing sent to the dialog), then the
@@ -1789,6 +1813,15 @@ async function main() {
         } else if (step === "--fps") {
           const { main } = s.mainOrThrow();
           out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
+        } else if (step === "--idle") {
+          // The editor's own work after the step before (a window opening, a list filling): quiet CPU and an unchanged
+          // window set, 30 s at most. Replaces most of the --sleep steps.
+          const r = await s.idle("the editor to go quiet");
+          out({ step, ...r });
+        } else if (step === "--wait-window") {
+          // The window the step before opened: it is there (title contains ARG) and has stood still for 400 ms.
+          const r = await s.idle(`a window titled "${arg}"`, { window: arg });
+          out({ step, window: arg, ...r });
         } else if (step === "--sleep") {
           await s.sleepWatching(Number(arg));
           out({ step });

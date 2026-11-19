@@ -27,6 +27,7 @@ its own), through python-xlib and its XTest extension. Every command prints one 
   we-x11.py --display :N focus ID                     give a window the keyboard focus and raise it
   we-x11.py --display :N close ID                      ask a window to close (WM_DELETE_WINDOW); "closed": false for a
                                                        window that is gone or unmapped
+  we-x11.py --display :N windows --pics                each window's hash of its picture too ("md5"; not the main window's)
   we-x11.py --display :N stats [--rect X,Y,W,H]        counts of a part of the screen (see stats())
   we-x11.py --display :N frames MS [--rect X,Y,W,H]    how often a part of the screen changes during MS
   we-x11.py --display :N settle [--rect R] [--interval MS] [--timeout MS]   wait until two grabs MS apart are the same
@@ -631,7 +632,19 @@ def main(argv):
     set_deadline(deadline + waits.get(cmd, 0) if deadline > 0 else 0)
     d = connect(disp)
     if cmd == "windows":
-        out({"windows": windows(d)})
+        ws = windows(d)
+        if flag("--pics"):
+            # A hash of the picture under every window but the editor's main one (its terrain view redraws all the
+            # time): what we-drive --idle watches, in the same call as the list.
+            import hashlib
+            for w in ws:
+                if w["title"].startswith("Warcraft III World Editor") and w["rect"][2] > 800:
+                    continue
+                try:
+                    w["md5"] = hashlib.md5(grab(d, w["rect"]).tobytes()).hexdigest()
+                except SystemExit:
+                    pass
+        out({"windows": ws})
     elif cmd == "key":
         # A --window that is gone (a dialog that just closed) gets no key: it would land in whatever has the focus.
         win = opt("--window")
