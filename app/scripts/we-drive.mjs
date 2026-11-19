@@ -22,6 +22,14 @@
 //                       editor sizes its main window by the display, the terrain view following it, which gives
 //                       other view sizes (moving the window by X doesn't: the editor doesn't lay out again). It
 //                       seems to keep that size in its prefix for the next run: read the view from --wait-ready
+//   --frame-cap N       at most N frames a second for the editor's views (DXVK's limit; default 10, or
+//                       W3PROJ_WE_FRAME_CAP; 0 = none, the old behaviour). The editor redraws all the time, and under
+//                       lavapipe each frame costs the CPU (TESTING.md "Editor CPU"): settled pictures are the same
+//                       bytes, but --fps counts at most N, and what times frames (an animation's phase) can differ
+//   --renderer R        software (default, or W3PROJ_WE_RENDERER): Mesa's lavapipe, the same pictures on every
+//                       machine; gpu: the machine's Vulkan driver (NVIDIA presents into Xvfb since driver 595), a
+//                       fraction of the CPU, but pictures a few levels apart from lavapipe's (texture filtering).
+//                       --wait-ready's "render" names the driver the editor really loaded
 //   --keyboard LAYOUT   the display's keyboard layout (setxkbmap, e.g. de) before the editor starts. --key names keysyms,
 //                       so under de the key named z is the physical key US keyboards call Y
 //   --mode sd|hd|de     the editor's graphics (default hd; de = the 3.0 art): written into its preferences before the start
@@ -106,7 +114,8 @@
 //   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
 //                       With game view on the items above it are greyed: their marks then read as unchecked
 //   --fps MS            how often the terrain view's picture changes during MS (it animates day and night); another
-//                       editor running at the same time lowers it (use --alone)
+//                       editor running at the same time lowers it (use --alone), and the frame cap bounds it (printed
+//                       as "frameCap"; --frame-cap 0 for the editor's own rate)
 //   --idle              wait until the editor is quiet (the window set and the pictures of the palettes, dialogs and menus unchanged for 400 ms, at
 //                       least 150 ms, at most --timeout (default 300 s): an error names what it waited
 //                       for); prints the time and the busy part. Replaces a --sleep after a key or click that opens
@@ -138,7 +147,7 @@
 // time per slot by the slot's lock; --slot), in that folder's Wine prefix, inside bubblewrap with the whole machine mounted read-only except the
 // farm, its prefix, the work folder, the runtime dir and /tmp (writableDirs), and the user's Steam prefix (the real
 // install included) and every hardlink of the farm read-only within those. It shows nothing on the user's screen (a display of its
-// own, 1600x1000), renders through lavapipe (the NVIDIA driver can't present into Xvfb), and plays no sound: Wine's
+// own, 1600x1000), renders through lavapipe (--renderer) at most 10 frames a second (--frame-cap), and plays no sound: Wine's
 // audio drivers are off, PulseAudio and PipeWire are pointed at nothing, and their sockets and /dev/snd are hidden.
 // Before each start the editor's preferences in that prefix get no first-start questions, no interface sounds, the
 // graphics mode and the day and night setting (editorPrefs); the install's text locale goes into its registry.
@@ -395,7 +404,9 @@ export const DRAG_MODS = Object.freeze(["alt", "shift", "ctrl"]);
 export const defaultWork = (slot) => join(repo, "target", slot ? `we-drive-slot${slot}` : "we-drive");
 
 export function parseArgs(argv) {
-  const opts = { game: null, work: null, timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [] };
+  const envCap = process.env.W3PROJ_WE_FRAME_CAP;
+  const opts = { game: null, work: null, timeout: 300, mode: "hd", dayNight: "fixed", saveAccept: [], renderer: process.env.W3PROJ_WE_RENDERER || "software",
+    frameCap: envCap !== undefined && envCap !== "" ? parseFrameCap(envCap, "W3PROJ_WE_FRAME_CAP") : DEFAULT_FRAME_CAP };
   let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
@@ -422,6 +433,8 @@ export function parseArgs(argv) {
       opts.keyboard = layout;
     }
     else if (a === "--keep-prefs") opts.keepPrefs = true;
+    else if (a === "--frame-cap") opts.frameCap = parseFrameCap(value());
+    else if (a === "--renderer") opts.renderer = value();
     else if (a === "--null-audio") opts.nullAudio = true;
     else if (a === "--pref") (opts.prefs ??= []).push(parsePref(value()));
     else if (a === "--expect-layout") opts.expectLayout = true;
@@ -434,6 +447,7 @@ export function parseArgs(argv) {
   }
   // The slot's own work folder by default, so runs on two slots don't share one (slot 0: target/we-drive as before).
   opts.work ??= defaultWork(opts.slot ?? currentSlot());
+  if (!["software", "gpu"].includes(opts.renderer)) throw new Error(`--renderer (or W3PROJ_WE_RENDERER) wants software or gpu, not "${opts.renderer}"`);
   if (opts.expectLayout && opts.screen && (opts.screen[0] !== SIZE[0] || opts.screen[1] !== SIZE[1])) throw new Error("--expect-layout checks the layout of the 1600x1000 display: leave out --screen");
   for (const [step, v] of steps) if (step === "--numlock" && !["on", "off", "status"].includes(v)) throw new Error("--numlock wants on, off or status");
   if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
@@ -538,7 +552,7 @@ export function protonFor(game) {
 }
 
 /**
- * Mesa's software Vulkan (lavapipe; the NVIDIA driver can't present into Xvfb): every lvp_icd*.json manifest in the
+ * Mesa's software Vulkan (lavapipe, `--renderer software`: the same pictures on every machine): every lvp_icd*.json manifest in the
  * loader's folders, as distributions name it "lvp_icd.json" (Ubuntu) or per architecture ("lvp_icd.x86_64.json",
  * Debian 12, Fedora). All of them go to the loader, which takes the one of the editor's architecture. [] when none.
  */
@@ -550,6 +564,49 @@ export function lavapipeIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
     for (const n of [...names].sort()) if (/^lvp_icd.*\.json$/.test(n)) found.push(posix.join(d, n));
   }
   return found;
+}
+
+/** The Vulkan drivers' manifests other than lavapipe's (NVIDIA's, Mesa's hardware ones): what `--renderer gpu` gives
+ *  the loader, so a machine without a usable GPU fails to start rather than falling back to software unseen. */
+export function gpuIcds(dirs = ICD_DIRS, list = (d) => readdirSync(d)) {
+  const found = [];
+  for (const d of dirs) {
+    let names;
+    try { names = list(d); } catch { continue; }
+    for (const n of [...names].sort()) if (/\.json$/.test(n) && !/^lvp_icd/.test(n)) found.push(posix.join(d, n));
+  }
+  return found;
+}
+
+/** The default frames a second of the editor's views (`--frame-cap`; W3PROJ_WE_FRAME_CAP overrides, 0 = uncapped). */
+export const DEFAULT_FRAME_CAP = 10;
+
+/** `--frame-cap`'s value: a whole number of frames a second, 0 for none. */
+export function parseFrameCap(v, what = "--frame-cap") {
+  const s = String(v ?? "").trim();
+  if (!/^\d{1,4}$/.test(s)) throw new Error(`${what} wants a whole number of frames a second (0: no cap), not "${v}"`);
+  return Number(s);
+}
+
+/**
+ * The rendering part of the editor's environment: which Vulkan drivers the loader sees (`renderer` "software":
+ * lavapipe, "gpu": the hardware ones) and DXVK's frame limit (`frameCap` > 0: DXVK_FRAME_RATE; 0 sets it to 0, which
+ * DXVK reads as no limit, so a cap in the caller's own environment doesn't leak in). TESTING.md "Editor CPU".
+ */
+export function renderEnv({ renderer = "software", frameCap = DEFAULT_FRAME_CAP } = {}, icds = { software: lavapipeIcds, gpu: gpuIcds }) {
+  if (!["software", "gpu"].includes(renderer)) throw new Error(`--renderer wants software or gpu, not "${renderer}"`);
+  const files = icds[renderer]().join(":");
+  return { VK_ICD_FILENAMES: files, VK_DRIVER_FILES: files, DXVK_FRAME_RATE: String(frameCap) };
+}
+
+/** Which Vulkan driver a process has loaded, from its /proc/PID/maps text: "lavapipe", "nvidia" (its ICD is
+ *  libGLX_nvidia), "other" for another Mesa driver (libvulkan_*), null for none (yet). --wait-ready reports it. */
+export function vulkanDriver(maps) {
+  const text = String(maps ?? "");
+  if (/\/libvulkan_lvp\.so/.test(text)) return "lavapipe";
+  if (/\/libGLX_nvidia\.so/.test(text)) return "nvidia";
+  if (/\/libvulkan_[a-z0-9]+\.so/.test(text)) return "other";
+  return null;
 }
 
 /** Whether util-linux's setpriv is there (it is on every usual distribution). */
@@ -879,6 +936,14 @@ export class Session {
     }
   }
 
+  /** How the editor renders: the asked renderer and frame cap, and the Vulkan driver its main window's process has
+   *  loaded (null when /proc can't tell), so a run on the GPU that fell back to software shows. */
+  renderInfo(main) {
+    let driver = null;
+    try { if (main?.pid) driver = vulkanDriver(readFileSync(`/proc/${main.pid}/maps`, "utf8")); } catch { /* gone or not ours */ }
+    return { renderer: this.opts.renderer ?? "software", frameCap: this.opts.frameCap ?? DEFAULT_FRAME_CAP, driver };
+  }
+
   /** The folders the editor's processes may write (everything else of the machine is mounted read-only): the farm
    *  (its copied CASC indices, shmem and ecache; its hardlinks are mounted read-only again after it), the farm's Wine
    *  prefix, the run's work folder (the map copies the editor saves over, the minimap it exports), the runtime dir
@@ -920,8 +985,7 @@ export class Session {
       STEAM_COMPAT_CLIENT_INSTALL_PATH: this.proton.steamRoot,
       SteamAppId: this.proton.appId,
       SteamGameId: this.proton.appId,
-      VK_ICD_FILENAMES: lavapipeIcds().join(":"),
-      VK_DRIVER_FILES: lavapipeIcds().join(":"),
+      ...renderEnv({ renderer: this.opts.renderer, frameCap: this.opts.frameCap }),
       WINEDEBUG: "-all",
       // English system dialogs whatever the user's language, so their buttons' keys are known ("n" is No).
       LANG: "en_US.UTF-8",
@@ -1310,7 +1374,7 @@ export class Session {
             const layout = layoutProblem(main, palettes);
             if (layout) return { ready: false, layout, main: main.rect, palettes: palettes.map((p) => ({ title: p.title, rect: p.rect })), screen: this.dialogShot("layout") };
           }
-          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
+          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls, render: this.renderInfo(main) };
         }
       } else readySince = 0;
       if (this.now() > deadline) {
@@ -1653,7 +1717,8 @@ async function main() {
   if (opts.slot !== undefined) process.env.W3PROJ_WE_SLOT = String(opts.slot);
   const game = gameDir(opts.game ?? undefined);
   let why = missing(game);
-  if (!why && !lavapipeIcds().length) why = `no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
+  if (!why && opts.renderer === "gpu" && !gpuIcds().length) why = `no hardware Vulkan driver for --renderer gpu (a manifest other than lavapipe's in ${ICD_DIRS.join(" or ")})`;
+  if (!why && opts.renderer !== "gpu" && !lavapipeIcds().length) why =`no lavapipe Vulkan driver (lvp_icd*.json in ${ICD_DIRS.join(" or ")}; Debian/Ubuntu: mesa-vulkan-drivers)`;
   if (!why) {
     try {
       const { tool } = protonFor(game);
@@ -1832,7 +1897,8 @@ async function main() {
           out({ step, ...(await s.gameView(arg)) });
         } else if (step === "--fps") {
           const { main } = s.mainOrThrow();
-          out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")) });
+          // Never more changes a second than the frame cap: it goes with the count (--frame-cap 0 for the editor's own rate).
+          out({ step, ...s.x("frames", Number(arg), "--rect", s.viewRect(main).join(",")), frameCap: opts.frameCap });
         } else if (step === "--idle") {
           // The editor's own work after the step before (a window opening, a list filling): quiet CPU and an unchanged
           // window set, 30 s at most. Replaces most of the --sleep steps.

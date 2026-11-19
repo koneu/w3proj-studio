@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as drive from "./we-drive.mjs";
 import { weOutcome } from "./we-compare-core.mjs";
-import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, EditorCrashed, fileIsWholeMpq, isCrashDialog, isWholeMpq, lavapipeIcds, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
+import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, DEFAULT_FRAME_CAP, EditorCrashed, fileIsWholeMpq, gpuIcds, isCrashDialog, isWholeMpq, lavapipeIcds, renderEnv, vulkanDriver, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -450,6 +450,81 @@ test("--null-audio keeps Wine's ALSA driver and gives it a null device only", ()
   assert.equal(wineOverrides(true, "x=n"), "winepulse.drv=d;wineoss.drv=d;x=n");
   assert.equal(wineOverrides(false), "winepulse.drv=d;winealsa.drv=d;wineoss.drv=d", "control: without it ALSA is off too");
   assert.match(NULL_ALSA_CONF, /pcm\.!default \{\n {2}type null\n\}/);
+});
+
+/** Runs `fn` with the given environment variables set (undefined: removed), restoring them afterwards. */
+function withEnv(vars, fn) {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  try {
+    for (const [k, v] of Object.entries(vars)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+}
+
+test("--frame-cap: 10 frames a second by default, W3PROJ_WE_FRAME_CAP or the option instead, 0 for none; a bad value is refused", () => {
+  withEnv({ W3PROJ_WE_FRAME_CAP: undefined }, () => {
+    assert.equal(DEFAULT_FRAME_CAP, 10);
+    assert.equal(parseArgs([]).opts.frameCap, 10);
+    assert.equal(parseArgs(["--frame-cap", "0"]).opts.frameCap, 0, "the old, uncapped behaviour");
+    assert.equal(parseArgs(["--frame-cap", "30"]).opts.frameCap, 30);
+    for (const bad of ["-1", "2.5", "ten", "", "99999"]) assert.throws(() => parseArgs(["--frame-cap", bad]), /--frame-cap wants a whole number/, bad);
+    assert.throws(() => parseArgs(["--frame-cap"]), /needs a value/);
+  });
+  withEnv({ W3PROJ_WE_FRAME_CAP: "0" }, () => {
+    assert.equal(parseArgs([]).opts.frameCap, 0, "the environment's (we-compare's children inherit it)");
+    assert.equal(parseArgs(["--frame-cap", "5"]).opts.frameCap, 5, "the option wins over the environment");
+  });
+  withEnv({ W3PROJ_WE_FRAME_CAP: "x" }, () => assert.throws(() => parseArgs([]), /W3PROJ_WE_FRAME_CAP wants a whole number/));
+  withEnv({ W3PROJ_WE_FRAME_CAP: "" }, () => assert.equal(parseArgs([]).opts.frameCap, 10, "empty is unset"));
+});
+
+test("--renderer: software (lavapipe) by default, gpu by the option or W3PROJ_WE_RENDERER; anything else is refused", () => {
+  withEnv({ W3PROJ_WE_RENDERER: undefined }, () => {
+    assert.equal(parseArgs([]).opts.renderer, "software");
+    assert.equal(parseArgs(["--renderer", "gpu"]).opts.renderer, "gpu");
+    assert.throws(() => parseArgs(["--renderer", "nvidia"]), /--renderer \(or W3PROJ_WE_RENDERER\) wants software or gpu/);
+  });
+  withEnv({ W3PROJ_WE_RENDERER: "gpu" }, () => {
+    assert.equal(parseArgs([]).opts.renderer, "gpu");
+    assert.equal(parseArgs(["--renderer", "software"]).opts.renderer, "software", "the option wins");
+  });
+  withEnv({ W3PROJ_WE_RENDERER: "llvmpipe" }, () => assert.throws(() => parseArgs([]), /wants software or gpu, not "llvmpipe"/));
+});
+
+test("renderEnv: the renderer's Vulkan manifests and DXVK's frame limit, 0 written out so the caller's own cap doesn't leak in", () => {
+  const icds = { software: () => ["/a/lvp_icd.json"], gpu: () => ["/a/nvidia_icd.json", "/b/intel_icd.json"] };
+  assert.deepEqual(renderEnv({ renderer: "software", frameCap: 10 }, icds), { VK_ICD_FILENAMES: "/a/lvp_icd.json", VK_DRIVER_FILES: "/a/lvp_icd.json", DXVK_FRAME_RATE: "10" });
+  assert.deepEqual(renderEnv({ renderer: "gpu", frameCap: 0 }, icds), { VK_ICD_FILENAMES: "/a/nvidia_icd.json:/b/intel_icd.json", VK_DRIVER_FILES: "/a/nvidia_icd.json:/b/intel_icd.json", DXVK_FRAME_RATE: "0" });
+  assert.equal(renderEnv({}, icds).DXVK_FRAME_RATE, String(DEFAULT_FRAME_CAP), "defaults: software, the default cap");
+  assert.equal(renderEnv({}, icds).VK_ICD_FILENAMES, "/a/lvp_icd.json");
+  assert.throws(() => renderEnv({ renderer: "hw" }, icds), /--renderer wants software or gpu/);
+});
+
+test("gpuIcds: every manifest but lavapipe's; vulkanDriver names the driver a process loaded", () => {
+  const listing = { "/a": ["nvidia_icd.json", "lvp_icd.x86_64.json", "README"], "/b": ["lvp_icd.json", "radeon_icd.x86_64.json"] };
+  const list = (d) => { if (!listing[d]) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return listing[d]; };
+  assert.deepEqual(gpuIcds(["/a", "/none", "/b"], list), ["/a/nvidia_icd.json", "/b/radeon_icd.x86_64.json"]);
+  assert.deepEqual(gpuIcds(["/none"], list), [], "control: none");
+  const line = (p) => `7f00-7f10 r-xp 00000000 08:02 123 ${p}\n`;
+  assert.equal(vulkanDriver(line("/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so") + line("/usr/lib/libLLVM.so.20.1")), "lavapipe");
+  assert.equal(vulkanDriver(line("/usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.595.99.02")), "nvidia");
+  assert.equal(vulkanDriver(line("/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so")), "other");
+  assert.equal(vulkanDriver(line("/usr/lib/x86_64-linux-gnu/libvulkan.so.1")), null, "the loader alone is no driver");
+  assert.equal(vulkanDriver(undefined), null);
+});
+
+test("Session: the editor's environment has the run's renderer and frame cap; --wait-ready names them", { skip: LINUX_ONLY }, (t) => {
+  const r = rig(t);
+  r.s.display = ":77";
+  assert.equal(r.s.sandboxed("x.exe", []).env.DXVK_FRAME_RATE, String(DEFAULT_FRAME_CAP), "the default cap");
+  r.s.opts.frameCap = 0;
+  const { env } = r.s.sandboxed("x.exe", []);
+  assert.equal(env.DXVK_FRAME_RATE, "0", "uncapped is written, not left to the caller's environment");
+  assert.equal(env.VK_ICD_FILENAMES, lavapipeIcds().join(":"));
+  assert.deepEqual(r.s.renderInfo({ pid: 0 }), { renderer: "software", frameCap: 0, driver: null });
+  assert.equal(r.s.renderInfo({ pid: process.pid }).driver, null, "node has no Vulkan driver loaded");
 });
 
 test("withEditorPrefs unticks the minimap's Show Creep Camp Icon before each start (the editor keeps it), unless kept", () => {
