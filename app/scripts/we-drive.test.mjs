@@ -1,5 +1,5 @@
 // The parts of we-drive.mjs and we-setup.mjs that don't need the game: the editor's preferences, sorting its windows,
-// the farm's copy rule, the snapshot comparison and the lock. Running the editor itself is local only (TESTING.md).
+// the farm's copy rule, the snapshot comparison and the lock. Running the editor itself is local only (TESTING.md, docs/testing/editor-tooling.md).
 
 import test from "node:test";
 /** we-drive drives the editor through Proton and X11: these checks use its Linux-only paths (Z: drive names, process.getuid). */
@@ -390,7 +390,7 @@ test("closeAction never types into a dialog it can't vouch for", () => {
 
 test("EditorCrashed carries the message we-drive prints", () => {
   const e = new EditorCrashed([{ title: "Blizzard Error" }]);
-  // The literal text TESTING.md quotes (and readers grep for), not the constant compared with itself.
+  // The literal text docs/testing/editor-tooling.md quotes (and readers grep for), not the constant compared with itself.
   assert.equal(e.message, "the World Editor crashed; report dismissed without sending");
   assert.equal(CRASH_MESSAGE, e.message);
   assert.equal(e.crashed, true);
@@ -773,7 +773,7 @@ test("withExtraPrefs sets each --pref in its section, a later one of the same ke
   const text = drive.withExtraPrefs("[Misc]\nhd=1\n", [drive.parsePref("Misc/hd=0"), drive.parsePref("Misc/hd=2"), drive.parsePref("New/k=v")]);
   assert.equal(text, "[Misc]\nhd=2\n\n[New]\nk=v\n");
   assert.equal(drive.withExtraPrefs("[Misc]\nhd=1\n", []), "[Misc]\nhd=1\n");
-  // The layout of TESTING.md "Layout" (main window 4,30 1352x937, palette 1356,30) is fine; no palette is fine too.
+  // The layout of docs/testing/editor-tooling.md "Layout" (main window 4,30 1352x937, palette 1356,30) is fine; no palette is fine too.
   const main = { title: "Warcraft III World Editor - [x]", rect: [4, 30, 1352, 937] };
   assert.equal(drive.layoutProblem(main, [{ title: "Terrain Palette", rect: [1356, 30, 240, 600] }]), null);
   assert.equal(drive.layoutProblem(main, []), null);

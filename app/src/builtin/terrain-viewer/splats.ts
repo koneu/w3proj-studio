@@ -12,7 +12,7 @@ export interface SplatDef {
   /** Texture path (.blp; the game may ship .dds). */
   texture: string;
   /** Half the side of the square, world units (the World Editor's marks of a farm, town hall and two barracks are as
-   *  wide as Studio's within a few pixels: TESTING.md "Looks against Studio, branch we-compare-5"). */
+   *  wide as Studio's within a few pixels: docs/testing/pictures.md "Looks against Studio, branch we-compare-5"). */
   scale: number;
   /** 0 blend, 1 additive. */
   blend: number;

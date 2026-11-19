@@ -1,4 +1,4 @@
-// Inputs for the import-list specs against the World Editor (tests/we-compare/import-modes.json, TESTING.md "Import
+// Inputs for the import-list specs against the World Editor (tests/we-compare/import-modes.json, docs/testing/saved-data-rules.md "Import
 // lists and graphics modes"): flat.w3x (the editor's own new 64x64 map) with files of the game added to its import list
 // under the paths a graphics mode reads, into <repo>/target/import-modes/ (not committed).
 //

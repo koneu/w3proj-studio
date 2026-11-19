@@ -1,7 +1,7 @@
 [
  {
   "name": "studio-water-north",
-  "description": "test.md 'Water on Studio-saved maps against the WE': a Northrend map made in Studio (new_map tileset N, 64x64), a box of shallow water (the brush's: ground one level down, surface 38.4 over it) and one of deep water (two levels down, 166.4), the water tint 255, 64, 64 and water tinting on (set_sky). The World Editor opens Studio's pack and saves it; Studio packs it again unchanged: the editor keeps the terrain corner for corner, the tint and the flags. Pictures of the same input against Studio's are in TESTING.md (branch we-compare-11).",
+  "description": "test.md 'Water on Studio-saved maps against the WE': a Northrend map made in Studio (new_map tileset N, 64x64), a box of shallow water (the brush's: ground one level down, surface 38.4 over it) and one of deep water (two levels down, 166.4), the water tint 255, 64, 64 and water tinting on (set_sky). The World Editor opens Studio's pack and saves it; Studio packs it again unchanged: the editor keeps the terrain corner for corner, the tint and the flags. Pictures of the same input against Studio's are in docs/testing/branch-rounds.md (branch we-compare-11).",
   "input": {
    "new": { "name": "WaterNorth", "width": 64, "height": 64, "tileset": "N" },
    "steps": [

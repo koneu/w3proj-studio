@@ -1,6 +1,6 @@
 // Refused values: what a placed object may be given, typed in the Selection panel or the Edit all fields, or asked of
 // the AI tools, checked before anything changes. A value past these is refused with a message and the map stays as it
-// was: not clamped, wrapped or rounded to the nearest one that fits (decision 2026-11-15; TESTING.md "Refused values").
+// was: not clamped, wrapped or rounded to the nearest one that fits (decision 2026-11-15; docs/testing/refused-values.md).
 
 import type { Area } from "../../lib/terrain/area";
 import { storableFloat32 } from "../../lib/formats/float32";

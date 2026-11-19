@@ -51,7 +51,7 @@ export function waterShadowKeep(depth: number, lit: number): [number, number, nu
  *  (11 pixels nearer the edge); with these 31.7, 35.3, 40.6 in the sRGB picture. */
 export const HD_WATER_EDGE = [30, 44.5] as const;
 /** What HD water keeps of its own colour and reflection past HD_WATER_EDGE: the border's HD shade (area.ts
- *  hdBorderKeep, 0.0185), not black (TESTING.md, branch we-compare-15). */
+ *  hdBorderKeep, 0.0185), not black (docs/testing/branch-rounds.md, branch we-compare-15). */
 export const HD_WATER_EDGE_KEEP = hdBorderKeep(BORDER_ALPHA / 255);
 
 /** The share of its own colour and reflection HD water keeps `inside` world units inside the playable map (linear
@@ -625,7 +625,7 @@ export function castsSunShadow(b: Pick<ObjectBatch, "group" | "instances" | "tin
 }
 
 /** How a batch's models take the border's shade past the playable map (EdgeShade's mode). The World Editor (we-drive,
- *  game view on and off, branch border-shade-models, 2026-11-13; TESTING.md "Border shade"): the cliffs and the special
+ *  game view on and off, branch border-shade-models, 2026-11-13; docs/testing/terrain-and-water.md "Border shade"): the cliffs and the special
  *  doodads, which are the ground's, as the ground and per pixel ("pixel": a cliff fades across the edge as the ground,
  *  three tiles past it a hollow keeps 0.146 of its colour, the SD ground 0.149); units, items and start locations black,
  *  whole, when the tile under them lies past the edge ("tile": a footman at the edge's corner line is lit, one 64

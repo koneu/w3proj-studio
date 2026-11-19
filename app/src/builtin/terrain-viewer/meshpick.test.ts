@@ -7,7 +7,7 @@ import { boxSphere, placement, type Placed } from "./objects";
 import { TerrainRenderer, type ObjectBatch, type ObjectInstance } from "./renderer";
 
 const W = 1184, H = 844;
-/** Studio's camera for the editor's look at (0, 0) from 2000 (TESTING.md "Projection for clicks": target y - 0.0993 d, distance 0.9127 d, pitch 57.2, field of view 41.06). */
+/** Studio's camera for the editor's look at (0, 0) from 2000 (docs/testing/cameras-and-views.md "Projection for clicks": target y - 0.0993 d, distance 0.9127 d, pitch 57.2, field of view 41.06). */
 const camera = () => ({
   canvas: { clientWidth: W, clientHeight: H }, target: [0, -0.0993333 * 2000, 0] as Vec3, distance: 0.9127 * 2000, yaw: -Math.PI / 2,
   pitch: (57.2 * Math.PI) / 180, fov: (41.06 * Math.PI) / 180, eye: TerrainRenderer.prototype.eye,

@@ -1,5 +1,5 @@
 // war3mapExtra.txt: the World Editor's per-map preferences (Scenario > Map Properties > Prefs, and the Trigger
-// Editor's JassHelper menu). Measured with the hidden editor (branch map-settings-we, 2026-11-14; TESTING.md "Map
+// Editor's JassHelper menu). Measured with the hidden editor (branch map-settings-we, 2026-11-14; docs/testing/saved-data-rules.md "Map
 // preferences"): one section, [MapExtraInfo], LF line ends and an empty line at the end, holding only what differs
 // from the editor's defaults, in a fixed order whatever order they were set in. With nothing to say the editor saves
 // the file empty (0 bytes) and keeps it in the map. Its JassHelper keys are written only with JassHelper on:

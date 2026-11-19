@@ -1,4 +1,4 @@
-// HD water as the World Editor draws it (we-drive, HD, branch water-render-we, 2026-11-14; TESTING.md "HD water"):
+// HD water as the World Editor draws it (we-drive, HD, branch water-render-we, 2026-11-14; docs/testing/terrain-and-water.md "HD water"):
 // in linear light, the bed seen through the water, the water's own colour by its depth, and a reflection of the sky
 // that depends on where the view looks (the editor's water is lighter towards the west and the south: its environment
 // map is bright there), scaled by the map's water settings (war3map.w3i: reflectivity, environment map reflectivity).
