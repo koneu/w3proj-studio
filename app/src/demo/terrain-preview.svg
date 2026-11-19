@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#27384f"/>
+      <stop offset="1" stop-color="#6d8aa0"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f6f8f"/>
+      <stop offset="1" stop-color="#1c4660"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#ffffff" stroke-opacity="0.12"/>
+    </pattern>
+  </defs>
+  <rect width="960" height="540" fill="url(#sky)"/>
+  <path d="M0 260 L120 200 L230 250 L360 170 L470 240 L600 160 L730 230 L860 180 L960 220 V540 H0Z" fill="#4c6a4a"/>
+  <path d="M0 330 L150 290 L300 335 L450 285 L620 330 L790 290 L960 325 V540 H0Z" fill="#5f8a55"/>
+  <path d="M0 400 Q240 360 480 400 T960 390 V540 H0Z" fill="url(#water)"/>
+  <rect width="960" height="540" fill="url(#grid)"/>
+  <g fill="#2f4a2d">
+    <path d="M180 330 l14 -40 l14 40z"/><path d="M215 340 l12 -34 l12 34z"/><path d="M640 320 l14 -40 l14 40z"/><path d="M680 335 l12 -34 l12 34z"/>
+  </g>
+  <rect x="380" y="300" width="60" height="34" fill="#8a6f4d"/>
+  <path d="M372 300 L410 270 L448 300z" fill="#a0432f"/>
+  <rect x="250" y="190" width="460" height="130" rx="8" fill="#000000" fill-opacity="0.55"/>
+  <text x="480" y="245" text-anchor="middle" font-family="system-ui, sans-serif" font-size="26" fill="#ffffff">Terrain viewer placeholder</text>
+  <text x="480" y="278" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" fill="#d6e4f0">A made-up picture. The terrain needs the desktop app</text>
+  <text x="480" y="300" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" fill="#d6e4f0">and a Warcraft III install to draw a real map.</text>
+</svg>

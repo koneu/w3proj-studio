@@ -764,6 +764,12 @@ The terrain editor itself only does view, selection, undo and saving; its tools 
 that use `w3.terrain`: Terrain Painter (`terrain-painter`), Object Placer (`terrain-objects`) and
 Pathing Editor (`terrain-pathing`, overrides in `.w3proj/pathing.json`).
 
+## Web demo
+
+`npm run build:demo` in `app/` builds the UI alone as a static site (`app/dist-demo/`), with a made-up sample project and
+no game data, for showing it in a browser; `npm run dev:demo` serves it. `.github/workflows/demo.yml` deploys it to
+GitHub Pages from master once Pages is enabled in the repository settings. See [docs/web-demo.md](docs/web-demo.md).
+
 ## Known limits / next steps
 
 - `wpm` and `shd` are stored raw, as derived data. New codecs plug into
