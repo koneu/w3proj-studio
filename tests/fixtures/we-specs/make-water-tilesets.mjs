@@ -19,8 +19,15 @@ requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_ST
 // --dry: <out>/nv-<char>.w3x instead, the tileset's tiles and cliffs on flat.w3x's dry, flat ground (its first tile
 // everywhere, the 6-tile border kept): for the naval view's border on each tileset.
 const dry = process.argv.includes("--dry");
-const only = process.argv.slice(5).filter((a) => a !== "--dry");
-if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry] [tileset char…]"); process.exit(2); }
+// --shore: <out>/ws-<char>.w3x instead, for the border's shade over land and water and the View layers over the border:
+// the north half dry ground 64 above the water's surface, the south half water 24 deep (corner rows 32..47 from the
+// north) and 96 deep (the rest), flat.w3x's border kept (6, 6, 4, 8 tiles), so land and water both run into the west and
+// east border, land into the north one and water into the south one; and two regions, a yellow one across the south
+// border (x -1024..1024, y -4096..-2816) and a red one across the west border over land (x -4096..-2560, y 1024..2048).
+const shore = process.argv.includes("--shore");
+if (dry && shore) { console.error("make-water-tilesets.mjs: --dry and --shore are two different maps"); process.exit(2); }
+const only = process.argv.slice(5).filter((a) => a !== "--dry" && a !== "--shore");
+if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry | --shore] [tileset char…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -64,7 +71,25 @@ for (const ch of TILESETS) {
       lines.splice(at, end - at, `[${name}]`, ...rows, "");
     };
     // Rows are written north first (the text's order). Band k: rows 8k..8k+7 from the north, the last takes the rest.
-    if (!dry) {
+    if (shore) {
+      // Rows north first: 0..31 dry, 32..47 24 deep, 48..64 96 deep (surface 38.4 at the stored level 512).
+      const depthOf = (y) => (y < 32 ? -64 : y < 48 ? 24 : 96);
+      section("height", Array.from({ length: 65 }, (_, y) => `${Math.round((38.4 - depthOf(y)) * 4)}*65`));
+      section("water", Array.from({ length: 65 }, () => "512*65"));
+      section("flags", Array.from({ length: 65 }, (_, y) => (y < 32 ? "0" : "4").repeat(65)));
+      section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
+      const regionsFile = join(dir, "map", "war3map.w3r.json");
+      const regions = JSON.parse(readFileSync(regionsFile, "utf8"));
+      const region = (name, index, [left, bottom, right, top], [red, green, blue]) => ({
+        left, bottom, right, top, name, index, weather: "0x00000000", sound: "", color: { blue, green, red, alpha: 255 },
+        ...(regions.version >= 7 ? { trailer: [0, 0] } : {}),
+      });
+      regions.regions = [
+        region("yellowSouth", 0, [-1024, -4096, 1024, -2816], [255, 255, 0]),
+        region("redWest", 1, [-4096, 1024, -2560, 2048], [255, 0, 0]),
+      ];
+      writeFileSync(regionsFile, JSON.stringify(regions, null, 2));
+    } else if (!dry) {
       const heightRow = (y) => String(Math.round((38.4 - DEPTHS[Math.min(7, Math.floor(y / 8))]) * 4));
       section("height", Array.from({ length: 65 }, (_, y) => `${heightRow(y)}*65`));
       section("water", Array.from({ length: 65 }, () => "512*65"));
@@ -72,7 +97,7 @@ for (const ch of TILESETS) {
       section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
     }
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(out, `${dry ? "nv" : "wt"}-${ch}.w3x`), "--force-stale");
+    run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

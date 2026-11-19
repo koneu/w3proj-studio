@@ -432,6 +432,15 @@ float edgeShade() {
   if (uEdgeMode < 0.5) return 0.0;
   return uEdgeMode < 1.5 ? texture(uEdge, (vWorldPos.xy - uEdgeRect.xy) / uEdgeRect.zw).a : vEdge;
 }
+vec3 edgeDec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
+vec3 edgeEnc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
+// The shade over a colour: SD's plain mix towards uEdgeColor; HD's in linear light, keeping dec(1 - s) of the colour's
+// light, as the ground under the border (terrain-viewer BORDER_HD_FS, area.ts hdBorderKeep).
+vec3 edged(vec3 c, float s) {
+  if (s <= 0.0) return c;
+  if (uTone < 1.5) return mix(c, fogged(uEdgeColor), s);
+  return edgeEnc(mix(edgeDec(fogged(uEdgeColor)), edgeDec(c), edgeDec(vec3(1.0 - s)).r));
+}
 void main() {
   vec4 c = texture(uTex, vUV);
   c.a *= uColor.a;
@@ -443,7 +452,7 @@ void main() {
   float lit = uUnshaded > 0.5 ? 1.0 : sunLit(vWorldPos, vNormal);
   vec3 light = uUnshaded > 0.5 ? vec3(1.0) : objectLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
-  outColor = vec4(mix(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), fogged(uEdgeColor), edgeShade()), c.a);
+  outColor = vec4(edged(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), edgeShade()), c.a);
 }`;
 
 const LINE_VS = `#version 300 es

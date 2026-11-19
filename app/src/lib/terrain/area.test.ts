@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { borderShade, darkWaterCorners, isBackdrop } from "./area";
+import { BORDER_ALPHA, borderShade, darkWaterCorners, hdBorderKeep, isBackdrop } from "./area";
 import { mapEdgeTiles, markMapEdge, onBoundary, playableEdgeTiles, setWaterLevel, validComplements, type Corner, type Terrain } from "./w3e";
 
 /** A terrain of `tilesX` by `tilesY` tiles, its map edge marked for these complements (left, right, bottom, top). */
@@ -51,6 +51,23 @@ test("only four whole numbers from 0 up stand for the playable map", () => {
   for (const bad of [undefined, null, [1, 2, 3], [1, 2, 3, 4, 5], [1, 2, -1, 4], [1, 2, 3.5, 4], ["1", 2, 3, 4], { 0: 1 }]) {
     assert.equal(validComplements(bad), null, JSON.stringify(bad));
   }
+});
+
+test("HD's border keeps the shade's 1 - a in linear light: the editor's dark land past the edge", () => {
+  const dec = (v: number) => ((v / 255 + 0.055) / 1.055) ** 2.4;
+  const enc = (l: number) => 255 * (l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055);
+  const keep = hdBorderKeep(BORDER_ALPHA / 255);
+  // we-drive 2026-11-19, ws-L and ws-A (make-water-tilesets.mjs --shore), HD, game view, from above: the land inside
+  // and past the west edge.
+  const seen: [number[], number[]][] = [[[133.2, 92.6, 26.3], [14.5, 7.0, 1.0]], [[31.1, 34.7, 44.7], [1.0, 1.0, 1.8]]];
+  for (const [inside, past] of seen) {
+    inside.forEach((v, i) => assert.ok(Math.abs(enc(dec(v) * keep) - past[i]) <= 1, `${v} keeps ${enc(dec(v) * keep).toFixed(1)}, the editor ${past[i]}`));
+  }
+  // The control: SD's plain share of the sRGB value (Studio's HD before) is 4 to 7 levels off on Lordaeron's land.
+  assert.ok(Math.abs(133.2 * (1 - BORDER_ALPHA / 255) - 14.5) > 4 || Math.abs(92.6 * (1 - BORDER_ALPHA / 255) - 7.0) > 4);
+  assert.equal(hdBorderKeep(0), 1);
+  assert.equal(hdBorderKeep(1), 0);
+  assert.ok(Math.abs(keep - 0.0185) < 0.0005);
 });
 
 test("the classic water is black at corners whose north-east tile is past the playable map, as the editor's", () => {

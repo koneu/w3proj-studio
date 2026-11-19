@@ -452,6 +452,22 @@ void main() {
   outColor = vec4(enc(mix(dec(d), dec(c.rgb), c.a)), 1.0);
 }`;
 
+// The border's shade in HD (area.ts hdBorderKeep): the World Editor's HD picture multiplies the linear light under it
+// by the shade's 1 - a taken as sRGB, dec(1 - a), not the sRGB value by 1 - a as SD and OVERLAY_FS do. The pixels under
+// it are the picture so far, copied (TerrainRenderer.copyScene); the fog goes over the dark part as OVERLAY_FS's.
+const BORDER_HD_FS = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; out vec4 outColor;
+${FOG_FS}
+vec3 dec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
+vec3 enc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
+void main() {
+  float a = texture(uTex, vUV).a;
+  if (a < 0.01) discard;
+  float keep = dec(vec3(1.0 - a)).r;
+  vec3 d = texelFetch(uDst, ivec2(gl_FragCoord.xy), 0).rgb;
+  outColor = vec4(enc(mix(dec(fogged(vec3(0.0))), dec(d), keep)), 1.0);
+}`;
+
 // Grid lines over the ground, drawn per pixel so any map size costs the same: up to three sets of lines (finest first,
 // every uSteps[i] world units from the map's corner, in uColors[i]), each fading out once its cells are too small to tell
 // apart, the coarser lying over the finer.
@@ -1814,6 +1830,7 @@ export class TerrainRenderer {
     // alone: `linear`, drawn after the water, as the editor's lie over it at any depth).
     for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer?.linear ? null : this.viewLayer, this.overlay] : []) {
       if (!layer || !this.overlayProg) continue;
+      if (layer === this.border && this.tone === 2) { this.drawHdBorder(viewProj, fog); continue; }
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
       // The border is part of the map, and fades with it. What a tool shows has to stay readable.
@@ -2229,6 +2246,32 @@ export class TerrainRenderer {
     gl.depthMask(true);
     gl.enable(gl.BLEND);
     gl.useProgram(this.colorProg);
+  }
+
+  private borderHdProg: WebGLProgram | null = null;
+
+  /** The border's shade in HD, over the picture so far in linear light (BORDER_HD_FS, area.ts hdBorderKeep). */
+  private drawHdBorder(viewProj: Mat4, fog: Fog | null) {
+    const gl = this.gl, layer = this.border;
+    if (!layer || gl.isContextLost()) return;
+    const prog = (this.borderHdProg ??= compile(gl, OVERLAY_VS, BORDER_HD_FS));
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.copyScene());
+    gl.useProgram(prog);
+    setFog(gl, (name) => gl.getUniformLocation(prog, name), fog);
+    gl.uniformMatrix4fv(gl.getUniformLocation(prog, "uViewProj"), false, viewProj);
+    const rect = this.borderRect();
+    gl.uniform4f(gl.getUniformLocation(prog, "uRect"), rect[0], rect[1], rect[2], rect[3]);
+    gl.uniform1i(gl.getUniformLocation(prog, "uDst"), 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, layer.tex);
+    gl.uniform1i(gl.getUniformLocation(prog, "uTex"), 0);
+    gl.disable(gl.BLEND);
+    gl.depthMask(false);
+    gl.bindVertexArray(layer.vao);
+    gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
+    gl.depthMask(true);
+    gl.enable(gl.BLEND);
   }
 
   dispose() {

@@ -39,6 +39,18 @@ export function borderShade(t: EdgeGrid, edge: ArrayLike<number>): { rgba: Uint8
  *  just inside, we-drive 2026-11-12; Studio's 165 kept 35 %, green 39). */
 export const BORDER_ALPHA = 218;
 
+/** What HD keeps of a colour under the border's shade of alpha `a` (0 to 1), as a factor on its linear light: the World
+ *  Editor's HD picture takes the shade's 1 - a as an sRGB value to linear light and multiplies by it, dec(1 - a), so
+ *  at BORDER_ALPHA 0.0185 where SD keeps 0.145 of the sRGB value (we-drive 2026-11-19, ws-A and ws-L of
+ *  make-water-tilesets.mjs --shore, from above: Lordaeron's land 133.2, 92.6, 26.3 kept 14.5, 7.0, 1.0 past the edge,
+ *  this gives 13.7, 6.6, 0.6; Ashenvale's 31.1, 34.7, 44.7 kept 1.0, 1.0, 1.8, this 0.8, 1.0, 1.5; SD keeps 0.145 of the
+ *  sRGB value on both, Studio's plain blend). The dark ground's sRGB toe makes it darker than the share on dark ground.
+ *  renderer.ts BORDER_HD_FS and the models' edge shade (lib/model/renderer.ts) do the same in their shaders. */
+export function hdBorderKeep(a: number): number {
+  const s = Math.min(1, Math.max(0, 1 - a));
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+
 /** Per corner (row 0 in the south), 1 where the classic water is black: the tile north-east of it (the one whose lower
  *  left corner it is; on the last row and column the tile beside it) lies past the playable map (`edge`, as
  *  borderShade's). Drawn smoothly between the corners, as the World Editor's SD water: it fades over the last border
