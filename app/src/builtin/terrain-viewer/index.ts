@@ -2629,11 +2629,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rects = specialList.filter((sp) => skins.has(sp.id)).map((sp) => specialTiles(sp, specialSizes.get(sp.id) ?? undefined));
           specialPlaced.forEach((p, i) => specialTileOf.set(p, rects[i]));
           const look = specialLooks(specialPlaced, rects);
-          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf, undefined, true, skinShown),
-            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
-              (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
-            loader.load("specials", specialPlaced, skins, () => 0, baseOf, undefined, false, undefined, undefined, specialLook)]);
+          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, { baseOf, shownAs: skinShown }),
+            loader.load("units", units, skins, team, { baseOf, heightOf: (p, skin) => drawnZ(p, skin.moveType, skin), shownAs,
+              looksOf: (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType)) }),
+            loader.load("units", startPreviews(units, startRaces), skins, team, { placeholders: false }),
+            loader.load("specials", specialPlaced, skins, () => 0, { baseOf, placeholders: false, texturesOf: specialLook })]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
           specialsPlaced = specialPlaced;
@@ -2788,7 +2788,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === previewKey) return;
           previewKey = key;
           const gen = ++previewGen, rebuilt = rebuildGen;
-          void viewWork.track(loader.load("units", startPreviews(units, startRaces), ctx.skins, team, undefined, undefined, false).then((s) => {
+          void viewWork.track(loader.load("units", startPreviews(units, startRaces), ctx.skins, team, { placeholders: false }).then((s) => {
             // A full rebuild in between made them itself; a newer change makes them again.
             if (disposed || gen !== previewGen || rebuilt !== rebuildGen) return;
             const fresh = s.batches.map(lookOfPreview);

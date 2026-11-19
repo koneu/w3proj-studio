@@ -506,6 +506,16 @@ export interface PlacedTextures {
   retexture?: (path: string, slot?: string) => string;
 }
 
+/** `ObjectLoader.load`'s optional parts; each is described at `load`. */
+export interface LoadOptions {
+  baseOf?: (id: string) => string | undefined;
+  heightOf?: (p: Placed, skin: Skin) => number;
+  placeholders?: boolean;
+  shownAs?: (p: Placed) => string | undefined;
+  looksOf?: (p: Placed, skin: Skin) => readonly string[];
+  texturesOf?: (p: Placed, skin: Skin) => PlacedTextures | undefined;
+}
+
 export interface LoadResult {
   batches: ObjectBatch[];
   /** Objects without a drawable model (start locations, unknown ids, load errors). */
@@ -719,10 +729,7 @@ export class ObjectLoader {
    *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim").
    *  `texturesOf`: textures a placed object takes instead of its type's (a special doodad's cliff texture). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
-    baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
-    placeholders = true, shownAs?: (p: Placed) => string | undefined,
-    looksOf?: (p: Placed, skin: Skin) => readonly string[],
-    texturesOf?: (p: Placed, skin: Skin) => PlacedTextures | undefined): Promise<LoadResult> {
+    { baseOf = () => undefined, heightOf, placeholders = true, shownAs, looksOf, texturesOf }: LoadOptions = {}): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
