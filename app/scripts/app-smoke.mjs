@@ -6870,7 +6870,9 @@ async function viewCommands(page, fail, shots, size) {
   const wet = await picture("water-border");
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
   const [wetEdge, wetInside] = [await meanColour(page, wet, edgeBox), await meanColour(page, wet, insideBox)];
-  if (lum(wetEdge) > 12 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
+  // Not quite black in HD: past the edge the water keeps the border's HD share (renderer.ts HD_WATER_EDGE_KEEP; the
+  // editor's is 2 to 7 per channel there, docs/testing/branch-rounds.md we-compare-15), so the sum may reach 30.
+  if (lum(wetEdge) > 30 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
   // HD water reflects a sky that is brighter in the west (hdwater.ts; we-drive, flat deep maps, View Entire Map,
   // 2026-11-14: deep Lordaeron water 73, 87, 95 on the left, 46, 68, 82 on the right; Studio's was a flat 22, 57, 73).
   // With the map's reflectivity 0 (war3map.w3i's water) it is the flat deep colour 0, 48, 69: the control that the
