@@ -780,6 +780,22 @@ test("we.renderer is software or gpu, we.why is text, and a spec with another re
   assert.notEqual(core.weGroupKey(spec({ mode: "hd" })[0]), core.weGroupKey(spec({ mode: "hd", renderer: "software" })[0]));
 });
 
+test("--frame-cap and we.frameCap: the flag wins, else the spec's, else we-drive's default; another cap is another editor process", () => {
+  const spec = (we) => core.parseSpecFile(JSON.stringify({ name: "r", input: { new: { name: "x", width: 32, height: 32 } }, we, compare: [{ file: "war3map.w3i" }] }), "r.json", {});
+  assert.equal(spec({ frameCap: 0, why: "timed drags" })[0].we.frameCap, 0);
+  assert.equal(spec({})[0].we.frameCap, null);
+  for (const bad of [-1, 2.5, "10", 10000]) assert.throws(() => spec({ frameCap: bad }), /we.frameCap is a whole number/, String(bad));
+  assert.notEqual(core.weGroupKey(spec({})[0]), core.weGroupKey(spec({ frameCap: 0 })[0]));
+  assert.equal(core.weGroupKey(spec({ frameCap: 20 })[0]), core.weGroupKey(spec({ frameCap: 20 })[0]));
+  assert.equal(core.chooseFrameCap({}), null, "we-drive's own default");
+  assert.equal(core.chooseFrameCap({ specCap: 0 }), 0);
+  assert.equal(core.chooseFrameCap({ asked: 10, specCap: 0 }), 10, "the flag wins");
+  assert.equal(core.chooseFrameCap({ asked: 0, specCap: 20 }), 0);
+  assert.equal(run.parseArgs(["a.json"]).frameCap, undefined);
+  assert.equal(run.parseArgs(["--frame-cap", "0", "a.json"]).frameCap, 0);
+  assert.throws(() => run.parseArgs(["--frame-cap", "x", "a.json"]), /--frame-cap wants a whole number/);
+});
+
 test("a palette setting that stays for the editor's session (the brush shape) is set back by the spec that sets it, else the spec is refused", () => {
   const steps = (...clicks) => [["--key", "t"], ...clicks.map((c) => ["--click", c]), ["--sleep", "1500"]];
   assert.deepEqual(core.togglesLeft(steps("1456,569", "1424,624", "748,500")).map((t) => t.awayIs), ["square"]);

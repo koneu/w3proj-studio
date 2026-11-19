@@ -13,6 +13,8 @@
 //   --renderer R    software|gpu|auto (default auto, or W3PROJ_WE_RENDERER): the we-drive renderer. auto: gpu for hd/de specs and
 //                   for a full run (the whole tests/we-compare folder or a --shard), else software; a spec's we.renderer
 //                   forces its own; software or gpu given here wins over all. No hardware driver: software, one line
+//   --frame-cap N   the editor's frames a second (we-drive --frame-cap; 0 = none) for every we-drive process, over a
+//                   spec's we.frameCap; without it a spec's we.frameCap, else we-drive's default (10)
 //   --shard i/n     run part i of n of the spec files named (whole files, dealt out by their spec counts:
 //                   we-compare-core shardFiles); n runs with the same files and --slot auto cover them all, at once
 //   --game DIR      the game's folder (default: W3PROJ_GAME, .game-path, or the folder above the checkout)
@@ -110,7 +112,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
 import { buildApp, ensureCli, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
-import { applyRoundtrip, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { applyRoundtrip, chooseFrameCap, chooseRenderer, compareEntry, crashExpectation, duplicateName, formatReport, generatorOf, gpuMissing, isFullRun, parseShard, parseSpecFile, readDiffersAllowlist, runOutcome, settingKeys, shardFiles, verifyOutcome, weDriveSteps, weGroupKey, weOutcome } from "./we-compare-core.mjs";
+import { parseFrameCap } from "./we-drive.mjs";
 import { currentSlot, parseSlot, takeAllSlots, takeFreeSlot, takeLock } from "./we-setup.mjs";
 import { uiStep } from "./we-compare-ui.mjs";
 import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
@@ -141,6 +144,7 @@ export function parseArgs(argv) {
     else if (a === "--strict-ignore") o.strictIgnore = true;
     else if (a === "--allow-stale") continue; // read by tests/binfresh.mjs: a binary older than its sources is used anyway
     else if (a === "--renderer") o.renderer = value();
+    else if (a === "--frame-cap") o.frameCap = parseFrameCap(value());
     else if (a === "--keep-prefs") o.keepPrefs = true;
     else if (a === "--restart-per-map") o.restart = true;
     else if (a === "-h" || a === "--help") o.help = true;
@@ -335,11 +339,12 @@ async function runWorldEditor(specs, opts, game) {
   const { mode, saveAccept, prefs } = specs[0].we;
   let renderer = chooseRenderer({ asked: opts.renderer, specRenderer: specs[0].we.renderer, mode, fullRun: opts.fullRun });
   const auto = opts.renderer === "auto";
+  const frameCap = chooseFrameCap({ asked: opts.frameCap ?? null, specCap: specs[0].we.frameCap });
   let rest = specs.filter((s) => !s.error);
   while (rest.length) {
     // --expect-layout: the first --wait-ready on a main window or tool palette of another size or place than the
     // spec coordinates were measured in stops the process with one message (weOutcome gives it to every spec).
-    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), "--renderer", renderer, ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
+    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), "--renderer", renderer, ...(frameCap !== null ? ["--frame-cap", String(frameCap)] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
     // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
     // fails), the map before it was saved, so nothing is asked. --close after the last map, around a spec with
     // we.freshEditor or we.expectCrash (weDriveSteps). --restart-per-map (opts.restart) is the old way, an editor
