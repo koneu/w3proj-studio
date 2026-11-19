@@ -175,6 +175,9 @@ test("gridLines: as the World Editor's, a finer grid keeps the coarser lines: wh
   const [tile, four] = gridLines(128).map((l) => l.rgba);
   assert.deepEqual(tile, [1, 1, 1, 1], "the tiles' lines white");
   assert.deepEqual(four, [1, 1, 0, 1], "every 4 tiles yellow");
+  // The pathing cells' lines: an opaque middle grey in SD and HD (we-drive, branch we-compare-11: 123, 123, 123 over
+  // the border's dark ground and over brown ground alike, not a blend).
+  assert.deepEqual(gridLines(32)[0].rgba, [0.5, 0.5, 0.5, 1], "the small grid's lines opaque grey");
 });
 
 test("composeLayers: the later layer lies over the earlier; none gives null; one stays as it is", () => {

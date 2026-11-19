@@ -154,9 +154,13 @@ export interface GridLines { step: number; rgba: readonly [number, number, numbe
 
 /** The World Editor's line colours: in SD the tiles' lines pure white and every 4 tiles pure yellow, a pixel wide and
  *  opaque (we-drive, map 03's opening view, 2026-11-12: 254, 254, 254 and 252, 253, 2; its HD tints them, 195, 199, 228
- *  and 196, 200, 68 on HillsbradCreek, 2026-11-11), none over deep water. The pathing cells' lines were only seen in
- *  HD, a faint lavender (115, 120, 159 over ground of about 100, 100, 105). */
-const GRID_COLOUR: Record<number, GridLines["rgba"]> = { 32: [0.55, 0.58, 0.85, 0.5], 128: [1, 1, 1, 1], 512: [1, 1, 0, 1] };
+ *  and 196, 200, 68 on HillsbradCreek, 2026-11-11), none over deep water. The pathing cells' lines (the small grid)
+ *  are an opaque middle grey in both modes: branch we-compare-11 (2026-11-19, wt-L.w3x from make-water-tilesets.mjs,
+ *  06:00, game view off, the small grid against none at the north, east and west borders), the editor's fine lines
+ *  came out 123, 123, 123 over the border's dark ground (13, 6, 1 in HD, 20, 14, 10 in SD) and 120 to 126 over the
+ *  brown ground inside (123, 89, 40): no blend, the brightest 127; Studio's half-transparent lavender gave 70, 69, 87
+ *  there. HillsbradCreek's "faint lavender" (115, 120, 159) was that map's tint on all its lines. */
+const GRID_COLOUR: Record<number, GridLines["rgba"]> = { 32: [0.5, 0.5, 0.5, 1], 128: [1, 1, 1, 1], 512: [1, 1, 0, 1] };
 
 /** The lines a grid of this step draws, finest first: as the World Editor's, a finer grid keeps the coarser ones'
  *  lines over its own (medium: the tiles' white lines and every 4 tiles yellow; small: the pathing cells too). */
