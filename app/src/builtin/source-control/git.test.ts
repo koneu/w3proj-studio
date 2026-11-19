@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, parseBranches, parseCounts, parseLog, parseNameStatus, type Change } from "./git";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, parseBranches, parseCounts, parseLog, parseNameStatus, takeSide, type Change, type Side } from "./git";
 
 test("LFS pointers give the file's real size", () => {
   const pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 271253\n";
@@ -67,3 +71,39 @@ test("diff tabs: a working copy file or a file of a commit", () => {
   assert.deepEqual(diffTarget("@abc1234:map/a.json"), { rev: "abc1234", path: "map/a.json" });
   assert.deepEqual(diffTarget("@not-hash:map/a.json"), { rev: null, path: "@not-hash:map/a.json" });
 });
+
+// takeSide against real repositories: a conflict is made by merging two branches.
+const hasGit = spawnSync("git", ["--version"]).status === 0;
+function conflict(files: Record<string, [Buffer | null, Buffer | null, Buffer | null]>) {
+  const dir = mkdtempSync(join(tmpdir(), "w3-takeside-"));
+  const sh = (...a: string[]) => { const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false", ...a], { cwd: dir, encoding: "utf8" }); return r; };
+  const put = (i: number) => { for (const [f, v] of Object.entries(files)) { if (v[i]) writeFileSync(join(dir, f), v[i]!); else rmSync(join(dir, f), { force: true }); } sh("add", "-A"); sh("commit", "-m", `c${i}`); };
+  sh("init", "-q", "-b", "main"); put(0);
+  sh("switch", "-q", "-c", "other"); put(2);
+  sh("switch", "-q", "main"); put(1);
+  const m = sh("merge", "other");
+  assert.notEqual(m.status, 0, "the merge should conflict");
+  const run = async (...a: string[]) => { const r = sh(...a); if (r.status !== 0) throw new Error(r.stderr); return r.stdout; };
+  return { dir, run, status: () => sh("status", "--porcelain").stdout };
+}
+const B = (s: string) => Buffer.from(s);
+const cases: [string, [Buffer | null, Buffer | null, Buffer | null], Record<Side, Buffer | null>][] = [
+  ["modify/modify", [B("a\nb\nc\n"), B("a\nOURS\nc\n"), B("a\nTHEIRS\nc\n")], { ours: B("a\nOURS\nc\n"), theirs: B("a\nTHEIRS\nc\n") }],
+  ["delete/modify (ours deleted)", [B("a\n"), null, B("changed\n")], { ours: null, theirs: B("changed\n") }],
+  ["modify/delete (theirs deleted)", [B("a\n"), B("changed\n"), null], { ours: B("changed\n"), theirs: null }],
+  ["binary", [Buffer.from([0, 1, 2, 3]), Buffer.from([0, 9, 9, 0xff]), Buffer.from([0, 7, 7, 0xfe])], { ours: Buffer.from([0, 9, 9, 0xff]), theirs: Buffer.from([0, 7, 7, 0xfe]) }],
+];
+for (const [name, triple, want] of cases) for (const side of ["ours", "theirs"] as const) {
+  test(`take ${side}: ${name}`, { skip: !hasGit }, async () => {
+    const { dir, run, status } = conflict({ "f.bin": triple });
+    try {
+      assert.match(status(), /^(UU|DU|UD) f\.bin/m);
+      await takeSide(run, side, "f.bin");
+      const w = want[side];
+      assert.equal(existsSync(join(dir, "f.bin")), w !== null);
+      if (w) assert.deepEqual(readFileSync(join(dir, "f.bin")), w);
+      assert.doesNotMatch(status(), /^(UU|DU|UD|AA|DD|AU|UA) /m, "the conflict is cleared");
+      await assert.rejects(takeSide(run, side, "f.bin"), /no conflict/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
