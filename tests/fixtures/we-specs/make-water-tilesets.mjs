@@ -16,8 +16,11 @@ import { requireFresh } from "../../binfresh.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const [cli, game, out] = process.argv.slice(2, 5).map((p) => (p ? resolve(p) : p));
 requireFresh(cli, "cli"); // refuses a stale binary (--allow-stale / W3_ALLOW_STALE=1 overrides)
-const only = process.argv.slice(5);
-if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [tileset char…]"); process.exit(2); }
+// --dry: <out>/nv-<char>.w3x instead, the tileset's tiles and cliffs on flat.w3x's dry, flat ground (its first tile
+// everywhere, the 6-tile border kept): for the naval view's border on each tileset.
+const dry = process.argv.includes("--dry");
+const only = process.argv.slice(5).filter((a) => a !== "--dry");
+if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry] [tileset char…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -61,13 +64,15 @@ for (const ch of TILESETS) {
       lines.splice(at, end - at, `[${name}]`, ...rows, "");
     };
     // Rows are written north first (the text's order). Band k: rows 8k..8k+7 from the north, the last takes the rest.
-    const heightRow = (y) => String(Math.round((38.4 - DEPTHS[Math.min(7, Math.floor(y / 8))]) * 4));
-    section("height", Array.from({ length: 65 }, (_, y) => `${heightRow(y)}*65`));
-    section("water", Array.from({ length: 65 }, () => "512*65"));
-    section("flags", Array.from({ length: 65 }, () => "4".repeat(65)));
-    section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
+    if (!dry) {
+      const heightRow = (y) => String(Math.round((38.4 - DEPTHS[Math.min(7, Math.floor(y / 8))]) * 4));
+      section("height", Array.from({ length: 65 }, (_, y) => `${heightRow(y)}*65`));
+      section("water", Array.from({ length: 65 }, () => "512*65"));
+      section("flags", Array.from({ length: 65 }, () => "4".repeat(65)));
+      section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
+    }
     writeFileSync(file, lines.join("\n"));
-    run("pack", dir, "-o", join(out, `wt-${ch}.w3x`), "--force-stale");
+    run("pack", dir, "-o", join(out, `${dry ? "nv" : "wt"}-${ch}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

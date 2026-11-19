@@ -42,6 +42,8 @@ const MAPS = {
   "minimap-dots-more": { margin: 0, types: ["LTlt", "LZth", "LSgr", "LSst", "LSpl", "VSvb"], origin: (t) => [-3840 + (t % 3) * 2688, -3584 + Math.floor(t / 3) * 2688], step: 640, quarter: 8, cols: 2, rows: 2 },
   // The dot colour of the doodad types whose model gives it (`models`), and the dot at angles other than 270 degrees (`angles`).
   "minimap-dots-models": { size: 64, margin: 0, models: true },
+  // The same for the destructables (DestructableData.slk: crates, barrels, boxes, rubble, the Barrens skulls; 21 types).
+  "minimap-dots-dests": { size: 64, margin: 0, models: true, table: "Units\\DestructableData.slk" },
   "minimap-dots-angles": { size: 64, margin: 0, types: ["LSgr", "LSst", "LZth", "LSrg", "LSeb"], angles: true },
   // Around the angles where the footprint turns (45, 135, 225, 315 degrees), and others: 8x6 and 4x6 pathing.
   "minimap-dots-angles-fine": { size: 64, margin: 0, types: ["LSgr", "LSst"], angleList: [40, 42, 44, 45, 46, 48, 50, 130, 132, 134, 135, 136, 138, 140, 220, 222, 224, 225, 226, 228, 230, 310, 312, 314, 315, 316, 318, 320, 0, 90, 180, 270, 360, -45, -90, 405] },
@@ -136,7 +138,7 @@ for (const [name, m] of Object.entries(MAPS)) {
       // One doodad of every type whose dot colour comes from its model (showInMM 1, useMMColor not 1) and whose pathing
       // texture is none or a square of at most 8x8, in rows of 14, 4 tiles apart, at a tile corner (a tile's middle for
       // "none": its dot is the tile it stands in). "id path" lines go to <name>.txt, in order, for reading the pictures.
-      const slk = spawnSync(cli, ["game", "slk", "Doodads\\Doodads.slk"], { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
+      const slk = spawnSync(cli, ["game", "slk", m.table ?? "Doodads\\Doodads.slk"], { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
       if (slk.status !== 0) throw new Error(`w3proj game slk: ${slk.stderr}`);
       const [head, ...body] = slk.stdout.split("\n").filter(Boolean).map((l) => l.split("\t"));
       const col = (n) => head.indexOf(n);
