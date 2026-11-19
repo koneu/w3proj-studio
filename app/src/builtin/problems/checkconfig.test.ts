@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
 import { MINIMAL_MANIFEST, addDisabled, applySeverity, disabledIds, isDisabled, severityOverride, parseChecksConfig, readChecksConfig } from "./checkconfig";
+import { blocksPacking, countProblems, describeCounts } from "../../lib/problemcount";
 import { activate } from "./index";
 import { readFixture } from "../../lib/testhelpers/testutil";
 
@@ -146,7 +147,7 @@ test("[checks.severity] sets a check's severity; off acts as disable; melee rule
 });
 
 test("a [checks.severity] that can't be read is an error and nothing is overridden", async () => {
-  for (const bad of ['[checks.severity]\nimports = "info"\n', '[checks.severity]\nimports = 3\n', "[checks.severity]\nnonsense\n", '[checks]\nseverity = { imports = "warning" }\n']) {
+  for (const bad of ['[checks.severity]\nimports = "fatal"\n', '[checks.severity]\nimports = 3\n', "[checks.severity]\nnonsense\n", '[checks]\nseverity = { imports = "warning" }\n']) {
     assert.throws(() => parseChecksConfig(bad), Error, bad);
     const r = await readChecksConfig(async () => bad, async () => true);
     assert.deepEqual(r.config.severity, {});
@@ -176,4 +177,32 @@ test("the Problems service reports a check at the severity the project sets, and
   assert.equal(sev("mine-b"), undefined, "off: not run");
   assert.deepEqual(h.ran.sort(), ["mine-a", "mine-c"]);
   assert.deepEqual(r.disabled, ["mine-b"]);
+});
+
+test("[checks.severity] accepts info: parsed, applied over error and warning, and named in the error text", () => {
+  const c = parseChecksConfig('format = 1\n[checks.severity]\nimports = "info"\n"melee/camps" = "warning"\n');
+  assert.deepEqual(c.severity, { imports: "info", "melee/camps": "warning" });
+  assert.equal(applySeverity(c, "imports", "error"), "info");
+  assert.equal(applySeverity(c, "imports", "warning"), "info");
+  assert.equal(applySeverity(c, "other", "warning"), "warning", "control: no override keeps it");
+  assert.ok(!isDisabled(c, "imports"), "info still runs");
+  assert.throws(() => parseChecksConfig('[checks.severity]\nimports = "fatal"\n'), /isn't one of error, warning, info, off/);
+  assert.throws(() => parseChecksConfig("[checks.severity]\nnonsense\n"), /"error" \| "warning" \| "info" \| "off"/);
+});
+
+test("the Problems service keeps an info finding as info", async () => {
+  const h = harness({ "w3proj.toml": 'format = 1\n[checks.severity]\nmine-a = "info"\n' }, ["mine-a", "mine-c"]);
+  const r = await h.service.runChecked();
+  assert.deepEqual(r.checks.find((c) => c.id === "mine-a")?.problems.map((p) => p.severity), ["info"]);
+  assert.deepEqual(r.checks.find((c) => c.id === "mine-c")?.problems.map((p) => p.severity), ["warning"], "control");
+});
+
+test("info findings are neither errors nor warnings and don't block packing", () => {
+  const infos = countProblems([{ severity: "info" }, { severity: "info" }]);
+  assert.deepEqual(infos, { errors: 0, warnings: 0, infos: 2 });
+  assert.equal(blocksPacking(infos), false);
+  assert.equal(blocksPacking(countProblems([{ severity: "info" }, { severity: "warning" }])), false);
+  assert.equal(blocksPacking(countProblems([{ severity: "info" }, { severity: "error" }])), true, "control: an error blocks");
+  assert.equal(describeCounts(infos), "0 errors, 0 warnings, 2 infos");
+  assert.equal(describeCounts(countProblems([{ severity: "warning" }])), "0 errors, 1 warning");
 });

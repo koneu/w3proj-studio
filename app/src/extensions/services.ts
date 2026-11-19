@@ -684,7 +684,7 @@ export interface ProblemCheck {
 }
 
 export interface Problem {
-  severity: "error" | "warning";
+  severity: "error" | "warning" | "info";
   message: string;
   /** Where (file, object), shown next to the message. */
   location?: string;

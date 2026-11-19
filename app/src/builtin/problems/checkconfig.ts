@@ -3,7 +3,7 @@
 //   [checks]
 //   disable = ["imports", "melee/camps"]   # check ids (the Problems view's, `melee/<rule>` for check_melee, or "melee")
 //
-//   [checks.severity]                      # a check's findings all reported as "error" or "warning"; "off" is like disable
+//   [checks.severity]                      # a check's findings all reported as "error", "warning" or "info"; "off" is like disable
 //   imports = "warning"
 //   "melee/camps" = "error"
 //
@@ -18,8 +18,8 @@ export const MANIFEST_FILE = "w3proj.toml";
  *  (tests/fixtures/manifest-minimal-checks/w3proj.toml is this plus a disable, loaded by crates/w3proj tests). */
 export const MINIMAL_MANIFEST = "format = 1\n";
 
-export type SeverityOverride = "error" | "warning" | "off";
-export const SEVERITIES: readonly SeverityOverride[] = ["error", "warning", "off"];
+export type SeverityOverride = "error" | "warning" | "info" | "off";
+export const SEVERITIES: readonly SeverityOverride[] = ["error", "warning", "info", "off"];
 export interface ChecksConfig { disable: string[]; /** check id -> severity its findings get ("off": not run, as in disable) */ severity: Record<string, SeverityOverride> }
 export const noChecksConfig = (): ChecksConfig => ({ disable: [], severity: {} });
 
@@ -69,7 +69,7 @@ export function parseChecksConfig(text: string): ChecksConfig {
     }
     if (inSeverity) {
       const sv = /^([A-Za-z0-9_-]+|"([^"]*)"|'([^']*)')\s*=\s*(?:"([^"]*)"|'([^']*)')$/.exec(line);
-      if (!sv) throw new Error(`[checks.severity] line ${i + 1} isn't check = "error" | "warning" | "off"`);
+      if (!sv) throw new Error(`[checks.severity] line ${i + 1} isn't check = "error" | "warning" | "info" | "off"`);
       const id = sv[2] ?? sv[3] ?? sv[1], level = sv[4] ?? sv[5];
       if (!(SEVERITIES as readonly string[]).includes(level)) throw new Error(`[checks.severity] ${id}: "${level}" isn't one of ${SEVERITIES.join(", ")}`);
       config.severity[id] = level as SeverityOverride;
@@ -99,9 +99,9 @@ export const isDisabled = (c: ChecksConfig, id: string) => ids(id).some((i) => c
 /** Everything the project switched off, for reports. */
 export const disabledIds = (c: ChecksConfig) => [...new Set([...c.disable, ...Object.keys(c.severity).filter((k) => c.severity[k] === "off")])];
 /** `severity` as the project's override has it (kept when there is none or the check is off, which isn't run). */
-export function applySeverity<T extends string>(c: ChecksConfig, id: string, severity: T): T | "error" | "warning" {
+export function applySeverity<T extends string>(c: ChecksConfig, id: string, severity: T): T | "error" | "warning" | "info" {
   const o = severityOverride(c, id);
-  return o === "error" || o === "warning" ? o : severity;
+  return o === "error" || o === "warning" || o === "info" ? o : severity;
 }
 
 /** Reads the project's config: none when the manifest has no [checks] (or no file); an `error` when it is unusable. */
