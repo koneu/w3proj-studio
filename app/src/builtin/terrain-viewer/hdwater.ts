@@ -3,24 +3,39 @@
 // that depends on where the view looks (the editor's water is lighter towards the west and the south: its environment
 // map is bright there), scaled by the map's water settings (war3map.w3i: reflectivity, environment map reflectivity).
 //
-//   out = enc(through(d) · dec(bed) + own(d) · dec(deep) + reflect(d) · (k · sky(R) − dim · (through · bed + own · deep)))
+//   out = enc(through(p) · dec(bed) + own(p) · dec(deep) + reflect(d) · (k · sky(R) − dim · (through · bed + own · deep)))
 //
-// d the depth (world units, ground to surface), deep the tileset's deep colour (hdWaterColor; towards its shallow colour
-// in shallow water where it has one: hdShallowAt), R the view reflected on
+// d the depth (world units, ground to surface), p the length of the view's path through the water (hdWaterPath: d over
+// the cosine of the view's angle from straight down), deep the tileset's deep colour (hdWaterColor; towards its shallow
+// colour in shallow water where it has one: hdShallowAt), R the view reflected on
 // a flat surface, k = reflectivity / 10 · environment map reflectivity / 100, dim = HD_REFLECT_DIM · reflectivity / 10.
 // The water shader (renderer.ts WATER_FS) does the same through HD_WATER_GLSL; hdWaterPixel is the same in TypeScript.
 
-/** Depths (world units) of the tables below: the eight bands of the measuring maps, 0 and the depth where all is water. */
+/** Depths (world units) of the reflection's and the shallow colour's tables below: the eight bands of the measuring
+ *  maps, 0 and the depth where all is water. */
 export const HD_WATER_DEPTHS = [0, 4, 12, 24, 38.4, 64, 96, 200] as const;
 /**
- * How much of the bed shows through (linear light) and how much of the tileset's deep colour is added, by depth: fitted
- * (0.3 levels mean, 2 at most) over flat maps of eight depths on Lordaeron Summer, Ashenvale (its water 12.8 higher:
- * Water.slk's height), Barrens and Northrend with the reflection off (w3i reflectivity 0), each band's colour against
- * the same map with Water off. 200 and 800
- * deep look alike: all water from 200 on (between 96 and 200 unmeasured, taken linear).
+ * Path lengths through the water (world units, hdWaterPath) of HD_WATER_THROUGH and HD_WATER_OWN.
  */
-export const HD_WATER_THROUGH = [1, 0.925, 0.809, 0.66, 0.489, 0.251, 0.049, 0] as const;
-export const HD_WATER_OWN = [0, 0.026, 0.079, 0.152, 0.258, 0.415, 0.721, 1] as const;
+export const HD_WATER_PATHS = [0, 4, 12, 24, 40, 56, 72, 88, 100, 112, 124, 136, 200] as const;
+/**
+ * How much of the bed shows through (linear light) and how much of the tileset's deep colour is added, by the length of
+ * the view's path through the water (we-drive, HD, game view, branch hd-deep-water, 2026-11-20: Lordaeron maps of bands
+ * 8 to 800 deep, the w3i's reflectivity 0, the editor's camera at angle of attack 304 from 600, 1200 and 2400, boxes of
+ * 60 rows across each band against the dry ground's 133, 92, 27). The editor's water shows less of the bed the more
+ * slanted the view: through 64 deep water 0.28 of it looking down at 15° from straight down, 0.07 at 50°, the same
+ * at any distance, as the path's length gives it (every band's mean within 1.5 levels, single boxes up to 9 where the
+ * waves' blotches are; Barrens, not fitted on, within 2; a straight path fits as well as one bent by refraction
+ * would, water's own 1.33 worse). No bed from 136 on, all the deep colour from 200 (the 4 point from the straight-down
+ * fit before). The straight-down fit on View Entire Map (branch
+ * water-render-we) agrees up to 38.4 deep; past that the editor's View Entire Map isn't the game view's (on a 64 x 64
+ * map 32 deep water there shows 28, 45, 58 and 64 deep water none of the bed).
+ */
+export const HD_WATER_THROUGH = [1, 0.925, 0.828, 0.674, 0.516, 0.373, 0.222, 0.139, 0.078, 0.025, 0.003, 0, 0] as const;
+export const HD_WATER_OWN = [0, 0.026, 0.084, 0.165, 0.253, 0.349, 0.469, 0.576, 0.659, 0.762, 0.857, 0.964, 1] as const;
+/** The flattest view the path is taken for (the cosine of its angle from straight down): a view along the surface
+ *  would make the path endless. */
+export const HD_PATH_FLATTEST = 0.2;
 /**
  * How much of the reflection water of a depth shows (the same maps, reflectivity 10, over Water off, through
  * hdWaterPixel; 1.4 levels mean, 6 at most over all bands, five columns and the four tilesets). Water 30 to 60 deep
@@ -33,12 +48,16 @@ export const HD_REFLECT_DEPTH = [0, 0.09, 0.365, 0.925, 1.155, 1.025, 1.005, 1] 
  */
 export const HD_REFLECT_DIM = 0.113;
 /**
- * How much of a tileset's shallow colour its water has instead of the deep colour, by depth (linear light): Sunken
- * Ruins' water is turquoise in the shallows and blue in the deep (renderer.ts HD_SHALLOW), which one colour can't give
- * (its green was up to 16 levels short 24 to 64 deep). Fitted on the green of its eight-depth map with the reflection
- * off (branch water-waves-we, 2026-11-14: 0.2 levels in green, 1.6 at most in blue); 4 deep unmeasured, taken as 12.
+ * How much of a tileset's shallow colour its water has instead of the deep colour, by depth (linear light; the depths
+ * HD_SHALLOW_DEPTHS): Sunken Ruins' water is turquoise in the shallows and blue in the deep (renderer.ts HD_SHALLOW),
+ * which one colour can't give. In the editor's game view (branch hd-deep-water, 2026-11-20: its bands 8 to 200 deep
+ * with the reflection off, the bed's share by the path) the water's own colour is the same from 8 to 56 deep, two
+ * thirds of the way to the deep colour at 64 and the deep colour from 72: Water.slk's shallow and deep levels (64 and
+ * 72 of 128). Band means within 2 levels from 8 to 64 deep. (The View Entire Map fit before, branch water-waves-we,
+ * went down from 24 to 96.)
  */
-export const HD_SHALLOW_SHARE = [1, 1, 1, 0.96, 0.836, 0.602, 0.061, 0] as const;
+export const HD_SHALLOW_DEPTHS = [0, 60, 72] as const;
+export const HD_SHALLOW_SHARE = [1, 1, 0] as const;
 /**
  * The sky the water reflects (linear light, at the w3i's default reflectivity 10 and environment map reflectivity 100),
  * by the reflected view R (unit, z up): a second-order spherical-harmonic fit per channel (constant, x, y, z, xy, yz,
@@ -98,21 +117,28 @@ export function hdReflectScale(s: HdReflectSettings): [number, number] {
   return [(s.reflectivity / 10) * (s.environment / 100), HD_REFLECT_DIM * (s.reflectivity / 10)];
 }
 
-const table = (t: readonly number[], d: number): number => {
-  const D = HD_WATER_DEPTHS;
+const table = (t: readonly number[], d: number, D: readonly number[] = HD_WATER_DEPTHS): number => {
   if (!(d > 0)) return t[0];
   for (let i = 1; i < D.length; i++) if (d <= D[i]) return t[i - 1] + ((t[i] - t[i - 1]) * (d - D[i - 1])) / (D[i] - D[i - 1]);
   return t[D.length - 1];
 };
 
-/** HD water at a depth (world units): the bed's share, the deep colour's, the reflection's. */
-export function hdWaterAt(depth: number): { through: number; own: number; reflect: number } {
-  return { through: table(HD_WATER_THROUGH, depth), own: table(HD_WATER_OWN, depth), reflect: table(HD_REFLECT_DEPTH, depth) };
+/** The length of the view's path through water of a depth (world units): the depth over the cosine of the view's
+ *  angle from straight down (`view` from the eye to the point, any length; no flatter than HD_PATH_FLATTEST). */
+export function hdWaterPath(depth: number, view: readonly number[]): number {
+  const len = Math.hypot(view[0], view[1], view[2]);
+  return depth / Math.max(len > 0 ? -view[2] / len : 1, HD_PATH_FLATTEST);
+}
+
+/** HD water at a depth (world units) seen along a path through it (world units, hdWaterPath; the depth itself
+ *  looking straight down): the bed's share, the deep colour's (by the path), the reflection's (by the depth). */
+export function hdWaterAt(depth: number, path = depth): { through: number; own: number; reflect: number } {
+  return { through: table(HD_WATER_THROUGH, path, HD_WATER_PATHS), own: table(HD_WATER_OWN, path, HD_WATER_PATHS), reflect: table(HD_REFLECT_DEPTH, depth) };
 }
 
 /** How much of the tileset's shallow colour (against its deep colour) water of a depth has. */
 export function hdShallowAt(depth: number): number {
-  return table(HD_SHALLOW_SHARE, depth);
+  return table(HD_SHALLOW_SHARE, depth, HD_SHALLOW_DEPTHS);
 }
 
 /** The reflected view as the sky is looked up with: unit, at least HD_SKY_LOWEST up. */
@@ -210,7 +236,7 @@ export const encode = (l: number): number => { const c = Math.min(1, Math.max(0,
  * without its shadows, edge and fog.
  */
 export function hdWaterPixel(bed: readonly number[], depth: number, deep: readonly number[], view: readonly number[], settings: HdReflectSettings & { waves?: number } = HD_WATER_DEFAULTS, shallow: readonly number[] = deep, lean = 0, flatSky: FlatSky | null = null): [number, number, number] {
-  const { through, own, reflect } = hdWaterAt(depth);
+  const { through, own, reflect } = hdWaterAt(depth, hdWaterPath(depth, view));
   const [k, dim] = hdReflectScale(settings);
   const sky = flatSky?.sky ?? hdSky([view[0], view[1], -view[2]]);
   const wave = hdWaveLight({ waves: settings.waves ?? HD_WATER_DEFAULTS.waves }).map((v) => v * (flatSky?.waves ?? 1));
@@ -226,18 +252,24 @@ const f = (v: number) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
 const arr = (t: readonly number[]) => `float[${t.length}](${t.map(f).join(", ")})`;
 const sky = (k: number) => `vec3(${HD_SKY.map((c) => f(c[k])).join(", ")})`;
 
-/** GLSL of the above: hdWaterAt (as vec3 through, own, reflect), hdShallowAt, hdSky, hdWaveLean, srgbDec, srgbEnc. */
-export const HD_WATER_GLSL = `
-const float HD_DEPTHS[8] = ${arr(HD_WATER_DEPTHS)};
-float hdTable(float t[8], float d) {
+/** GLSL of `table` over the knots `knots` (held in the constant `KNOTS`): `float NAME(float t[n], float d)`. */
+const tableGlsl = (name: string, knots: string, k: readonly number[]) => `
+const float ${knots}[${k.length}] = ${arr(k)};
+float ${name}(float t[${k.length}], float d) {
   if (d <= 0.0) return t[0];
-  for (int i = 1; i < 8; i++) if (d <= HD_DEPTHS[i]) return mix(t[i - 1], t[i], (d - HD_DEPTHS[i - 1]) / (HD_DEPTHS[i] - HD_DEPTHS[i - 1]));
-  return t[7];
+  for (int i = 1; i < ${k.length}; i++) if (d <= ${knots}[i]) return mix(t[i - 1], t[i], (d - ${knots}[i - 1]) / (${knots}[i] - ${knots}[i - 1]));
+  return t[${k.length - 1}];
+}`;
+
+/** GLSL of the above: hdWaterPath, hdWaterAt (as vec3 through, own, reflect), hdShallowAt, hdSky, hdWaveLean, srgbDec,
+ *  srgbEnc. */
+export const HD_WATER_GLSL = `${tableGlsl("hdTable", "HD_DEPTHS", HD_WATER_DEPTHS)}${tableGlsl("hdPathTable", "HD_PATHS", HD_WATER_PATHS)}${tableGlsl("hdShallowTable", "HD_SHALLOW_DEPTHS", HD_SHALLOW_DEPTHS)}
+// view: unit, from the eye to the point.
+float hdWaterPath(float d, vec3 view) { return d / max(-view.z, ${f(HD_PATH_FLATTEST)}); }
+vec3 hdWaterAt(float d, float p) {
+  return vec3(hdPathTable(${arr(HD_WATER_THROUGH)}, p), hdPathTable(${arr(HD_WATER_OWN)}, p), hdTable(${arr(HD_REFLECT_DEPTH)}, d));
 }
-vec3 hdWaterAt(float d) {
-  return vec3(hdTable(${arr(HD_WATER_THROUGH)}, d), hdTable(${arr(HD_WATER_OWN)}, d), hdTable(${arr(HD_REFLECT_DEPTH)}, d));
-}
-float hdShallowAt(float d) { return hdTable(${arr(HD_SHALLOW_SHARE)}, d); }
+float hdShallowAt(float d) { return hdShallowTable(${arr(HD_SHALLOW_SHARE)}, d); }
 // r: unit (normalised in high precision by the caller).
 vec3 hdSky(vec3 r) {
   if (r.z < ${f(HD_SKY_LOWEST)}) r = vec3(normalize(r.xy + vec2(1e-6, 0.0)) * ${f(Math.sqrt(1 - HD_SKY_LOWEST ** 2))}, ${f(HD_SKY_LOWEST)});

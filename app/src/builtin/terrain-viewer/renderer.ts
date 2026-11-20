@@ -212,13 +212,14 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // The bed, the deep colour and the sky's reflection by the depth (hdWaterAt), the depth being that of the water in
-    // front of what's behind (seenDepth); the sky along the view reflected on the flat surface (hdSky).
+    // The bed, the deep colour and the sky's reflection by the depth and the view's path through the water (hdWaterAt,
+    // hdWaterPath), the depth being that of the water in front of what's behind (seenDepth); the sky along the view
+    // reflected on the flat surface (hdSky).
     float depth = seenDepth(vDepth * 128.0) * t.a;
-    vec3 w = hdWaterAt(depth);
-    vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // In high precision: the squares of world distances overflow medium precision (16-bit floats on some drivers).
     highp vec3 view = normalize(vWorld - uEye);
+    vec3 w = hdWaterAt(depth, hdWaterPath(depth, view));
+    vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // The waves: the game's water normal map, two layers drifting against each other (hdwater.ts HD_WAVES), away
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
     highp vec2 p = vec2(vWorld.x, -vWorld.y);
@@ -379,12 +380,14 @@ export function hdWaterColor(tileset: string, tinted: boolean): [number, number,
 
 /**
  * The tilesets whose shallow HD water has another colour than the deep (sRGB 0–255): Sunken Ruins' is turquoise over
- * its blue. From the same pictures as HD_DEEP (its 12 to 96 deep bands, reflectivity 0, the bed's share taken away:
- * the colour the water itself needs came out 0, 142, 181 at 12 deep, 0, 135, 176 at 38.4, 0, 95, 170 at 96); how
- * much of it a depth has is hdwater.ts HD_SHALLOW_SHARE. The others' shallow bands fit their deep colour within 3
- * levels (Cityscape's blue 5 at 64 deep).
+ * its blue. From the editor's game view (branch hd-deep-water, 2026-11-20: bands 8 to 200 deep with the w3i's
+ * reflectivity 0, the bed's share taken away by hdwater.ts's path tables): the colour the water itself needs is
+ * 0, 122 to 124, 164 to 170 in every band from 8 to 56 deep, 0, 115, 171 at 64, the deep colour from 72; how much of it
+ * a depth has is hdwater.ts HD_SHALLOW_SHARE. (View Entire Map, branch water-render-we, gave 0, 142, 181 with the bed's
+ * share by the depth alone.) The others' shallow bands fit their deep colour within 3 levels (Cityscape's blue 5 at 64
+ * deep).
  */
-export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 142, 181] };
+export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 123, 167] };
 
 /** The water's shallow colour in HD (sRGB, 0–1): the tileset's where it has one (HD_SHALLOW), else its deep colour
  *  (hdWaterColor: one colour at every depth), as with a map's water tint. */
