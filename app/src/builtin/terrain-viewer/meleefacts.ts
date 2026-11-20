@@ -5,7 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import type { TerrainToolGroup } from "../../extensions/services";
 import { parseSlk } from "../../lib/formats/text";
-import { NO_WALK } from "../../lib/terrain/pathing";
+import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { onBoundary, parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { checkMelee, unitLevels } from "./meleecheck";
@@ -67,12 +67,15 @@ export async function projectWalkSource(w3: W3Api, opts: {
   };
 }
 
-/** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
-export async function walkGrid(src: WalkSource): Promise<Grid> {
+/** How a unit moves: "walk" is stopped by the pathing map's no-walk cells, "float" (ships) by its no-water cells. */
+export type Movement = "walk" | "float";
+
+/** What a unit can't walk on (or, for "float", sail on): the pathing map, and what stands there, which it leaves out. */
+export async function walkGrid(src: WalkSource, movement: Movement = "walk"): Promise<Grid> {
   const [pathing, blockers] = await Promise.all([src.pathing(), src.blockers()]);
   const t = src.terrain;
   const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
-  return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
+  return { blocked: pathing.cells.map((c, i) => (c & (movement === "float" ? NO_WATER : NO_WALK) || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
 }
 
 /** What stands by the tight or stuck place of a report: usually the reason. */
@@ -83,8 +86,8 @@ export function withNeighbour<T extends { narrowest?: { at: [number, number] }; 
 }
 
 /** check_path: whether a unit of `unitSize` gets from `from` to `to`, and what stands by where it gets stuck. */
-export async function pathReport(src: WalkSource, from: [number, number], to: [number, number], unitSize = DEFAULT_UNIT_SIZE): Promise<PathReport & { standingNearby?: { id: string; position: number[] } }> {
-  return withNeighbour(src, checkPath(await walkGrid(src), from, to, unitSize));
+export async function pathReport(src: WalkSource, from: [number, number], to: [number, number], unitSize = DEFAULT_UNIT_SIZE, movement: Movement = "walk"): Promise<PathReport & { standingNearby?: { id: string; position: number[] } }> {
+  return withNeighbour(src, checkPath(await walkGrid(src, movement), from, to, unitSize));
 }
 
 /** Whether placed units look like a ladder map's: two or more start locations and a gold mine. Counted from the units

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { NO_WALK } from "../../lib/terrain/pathing";
+import { NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 import { ladderLook, pathReport, projectWalkSource, walkGrid, type WalkSource } from "./meleefacts";
@@ -46,6 +46,30 @@ test("check_path names what stands where a unit gets stuck", async () => {
   assert.equal(blocked.standingNearby?.id, "LTlt");
   const open = await pathReport(source([], []), from, to, 0);
   assert.equal(open.walkable, true, "control: without the wall it gets through");
+});
+
+test("check_path movement: float is stopped by land (0x40), walk by what can't be waded (0x02); default is walk", async () => {
+  const t = parseW3e(w3eFromText(terrainText));
+  const from: [number, number] = [t.offsetX + 2 * 32, t.offsetY + 4 * 32], to: [number, number] = [t.offsetX + 14 * 32, t.offsetY + 4 * 32];
+  const column = (flag: number): WalkSource => {
+    const src = source([], []);
+    const cells = new Uint8Array(16 * 8);
+    for (let y = 0; y < 8; y++) cells[y * 16 + 8] = flag;
+    return { ...src, pathing: async () => ({ cells, width: 16, height: 8 }) };
+  };
+  const ok = async (flag: number, movement?: "walk" | "float") => (await pathReport(column(flag), from, to, 0, movement)).walkable;
+  // Water too deep to wade: no walking, but a ship sails it.
+  assert.equal(await ok(NO_WALK, "walk"), false);
+  assert.equal(await ok(NO_WALK, "float"), true);
+  // Land strip: a ship can't cross it, a walker can.
+  assert.equal(await ok(NO_WATER, "float"), false);
+  assert.equal(await ok(NO_WATER, "walk"), true);
+  // A cliff stops both.
+  assert.equal(await ok(NO_WALK | NO_WATER, "walk"), false);
+  assert.equal(await ok(NO_WALK | NO_WATER, "float"), false);
+  // Default is walk.
+  assert.equal(await ok(NO_WALK), false);
+  assert.equal(await ok(NO_WATER), true);
 });
 
 /** A project with these files (path → text); `broken` are listed but can't be read. */

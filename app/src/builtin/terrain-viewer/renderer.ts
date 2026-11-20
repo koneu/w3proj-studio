@@ -79,7 +79,7 @@ import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEff
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { BORDER_ALPHA, BORDER_SPREAD, borderReach, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
-import { gridLines } from "./viewcmds";
+import { gridLines, regionOutline, type RegionBox } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -1598,6 +1598,21 @@ export class TerrainRenderer {
     return [((nx + 1) / 2) * w, ((1 - ny) / 2) * h];
   }
 
+  /** The Regions layer's outlines (viewcmds.ts regionOutline: black strips on the ground along each box's edges, drawn
+   *  after the layer's fill, over the border too); null or none removes them. */
+  setRegionOutlines(boxes: readonly RegionBox[] | null) {
+    if (this.regionOutlines) this.freeVao(this.regionOutlines.vao);
+    this.regionOutlines = null;
+    if (!boxes?.length) return;
+    const data: number[] = [];
+    for (const b of boxes) {
+      const tri = regionOutline(b);
+      for (let i = 0; i < tri.length; i += 3) data.push(tri[i], tri[i + 1], this.groundHeight(tri[i], tri[i + 1]) + 3, 0, 0, 0, tri[i + 2]);
+    }
+    if (data.length) this.regionOutlines = this.colorMesh(data);
+  }
+  private regionOutlines: Mesh | null = null;
+
   /** The brush outline (editing tools); null hides it. */
   setBrush(b: Ring | null) {
     if (this.brush) this.freeVao(this.brush.vao);
@@ -2085,6 +2100,13 @@ export class TerrainRenderer {
     }
     // Rings stay visible through trees and water.
     gl.disable(gl.DEPTH_TEST);
+    if (onGround && this.regionOutlines && !this.held) {
+      gl.useProgram(this.colorProg);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindVertexArray(this.regionOutlines.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.regionOutlines.count);
+    }
     for (const ring of [...[...this.ringSets.values()].flat(), ...this.selection, this.brush]) {
       if (!ring) continue;
       if (ring.crisp) { this.drawCrisp(ring.crisp, viewProj); continue; }
@@ -2301,6 +2323,7 @@ export class TerrainRenderer {
   }
 
   dispose() {
+    this.setRegionOutlines(null);
     if (this.sceneCopy) this.gl.deleteTexture(this.sceneCopy.tex);
     this.sceneCopy = null;
     this.sunMap?.dispose();

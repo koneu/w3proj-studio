@@ -278,6 +278,9 @@ export interface GameReadOptions {
    *  on (a map opening, a model shown), but still gets a turn now and then. Once read, it doesn't count
    *  as a file in use, so a pass over many files doesn't push the ones in use out of the cache. */
   background?: boolean;
+  /** `read` only: the bytes the game service keeps, not a private copy. They must never be written to, nor
+   *  their buffer transferred or detached (postMessage transfer list); decoding, parsing and GPU uploads are fine. */
+  shared?: boolean;
 }
 
 export interface W3Api {

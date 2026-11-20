@@ -163,9 +163,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   const game = async () => {
     if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
       const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
-      try { return { buf: await w3.game.read(hd), name: hd }; } catch { /* classic texture */ }
+      try { return { buf: await w3.game.read(hd, { shared: true }), name: hd }; } catch { /* classic texture */ }
     }
-    return { buf: await w3.game.read(path), name: path };
+    return { buf: await w3.game.read(path, { shared: true }), name: path };
   };
   if (doc.path.startsWith("game:") || !w3.workspace.project()) return game();
   return importOr(readImport(w3, path).then((buf) => ({ buf, name: path })), game);
@@ -838,11 +838,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed, undo: `undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; ${checkpointed ? "the checkpoint just made stays." : "no checkpoint was made: the Checkpoints extension is off."}` };
     }),
-    w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
+    w3.mcp.registerTool("check_path", async ({ from, to, unitSize, movement }) => {
+      if (movement !== undefined && movement !== "walk" && movement !== "float") throw new Error('movement must be "walk" or "float".');
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE;
       const { handle } = await liveEditor("read");
-      return pathReport(walkSource(handle), start, goal, size);
+      return pathReport(walkSource(handle), start, goal, size, movement ?? "walk");
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
@@ -5332,6 +5333,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const on = groundLayersOn();
             // The cameras aren't on the ground: one marker each, as the World Editor's (cameraMarkers).
             if (!on.cameras) renderer.setShapes("cameras", null);
+            if (!on.regions) renderer.setRegionOutlines(null);
             if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
@@ -5360,7 +5362,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { if (latest()) renderer.setRegionOutlines(list); parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;

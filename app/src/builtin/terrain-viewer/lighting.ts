@@ -73,7 +73,7 @@ export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLi
     const path = entries && [...entries].find(([k]) => k.toUpperCase() === env)?.[1];
     if (!path) return null;
     try {
-      const m = readLightMdx(await w3.game.read(path.replace(/\.mdl$/i, ".mdx")));
+      const m = readLightMdx(await w3.game.read(path.replace(/\.mdl$/i, ".mdx"), { shared: true }));
       notes.push(`${kind}: ${m.name}`);
       return m;
     } catch { return null; }
