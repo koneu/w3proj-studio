@@ -1,0 +1,20 @@
+[
+  {
+    "name": "ct0-wpm-rev6-0",
+    "description": "custom-tilesets 0, the file's ground list the tileset's own reversed (Lgrd Lgrs Lrok Ldrg Ldro Ldrt; make-custom-tilesets.mjs, stripes per slot), opened and saved with no edit: the pathing map follows the tile drawn (the own list by slot: slot 3's stripe drawn and saved as Lrok, unbuildable), not the file's Lrok of slot 2 (branch we-terrain-items, 2026-11-20). Studio: pathing.ts with ownTiles (w3e.ts drawnGroundTiles); the save steps as ct0-save-rev6-0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-rev6-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.wpm", "as": "wpm" }, { "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  },
+  {
+    "name": "ct0-wpm-few3-0",
+    "description": "custom-tilesets 0, the file's list Lgrs Lrok Ldrt (three tiles), no edit: slot 1 is drawn (and saved) as Ldro, buildable, though the file says Lrok; the rule as ct0-wpm-rev6-0",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/custom-tilesets-few3-0.w3x" },
+    "we": { "saveAccept": ["Warning"], "steps": [["--sleep", "500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "sleep": 1500 }, { "eval": "window.__driveEd.pushEdit({ undo() {}, redo() {}, terrain: false, objects: false });" }, { "sleep": 500 }] },
+    "compare": [{ "file": "war3map.wpm", "as": "wpm" }, { "file": "war3map.w3e", "as": "w3e" }],
+    "limit": 40
+  }
+]

@@ -145,15 +145,15 @@ export class Hands {
     await this.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY });
     await sleep(50);
   }
-  /** Presses at `from`, moves to `to` in `steps` moves `stepMs` apart, lets go. */
-  async drag(from, to, steps = 12, stepMs = 30) {
-    await this.mouse("mouseMoved", from.x, from.y);
-    await this.mouse("mousePressed", from.x, from.y, 1);
+  /** Presses at `from`, moves to `to` in `steps` moves `stepMs` apart, lets go; `modifiers` (mouse's bits) held throughout. */
+  async drag(from, to, steps = 12, stepMs = 30, modifiers = 0) {
+    await this.mouse("mouseMoved", from.x, from.y, 0, modifiers);
+    await this.mouse("mousePressed", from.x, from.y, 1, modifiers);
     for (let i = 1; i <= steps; i++) {
-      await this.mouse("mouseMoved", from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps, 1);
+      await this.mouse("mouseMoved", from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps, 1, modifiers);
       await sleep(stepMs);
     }
-    await this.mouse("mouseReleased", to.x, to.y);
+    await this.mouse("mouseReleased", to.x, to.y, 0, modifiers);
     await sleep(100);
   }
   /** Inserts the text, then one round trip through the page: insertText answers once it's sent, so a check reading the

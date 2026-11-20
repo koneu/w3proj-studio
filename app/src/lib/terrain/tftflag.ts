@@ -18,6 +18,33 @@
 /** The w3i flag. */
 export const REQUIRES_TFT = 0x4000;
 
+/** The units file's (war3mapUnits.doo) subversion with map item tables and hero attributes. */
+export const TFT_UNITS_SUBVERSION = 11;
+
+/**
+ * war3mapUnits.doo in the layout the World Editor's save gives a map with flag 0x4000: subversion 9 becomes 11, every
+ * entry with item table -1 (none) and hero attributes 0, the values the editor writes. Measured with we-drive
+ * 2026-11-20 (branch we-terrain-items; nine saves): the save writes 11 exactly when the saved w3i has 0x4000, whatever
+ * set it (a placed tavern ntav, marketplace nmrk or Naga hero Nngs, all of version 1; a custom ability; (12)WormWar's
+ * kept flag) and on .w3m and .w3x alike; without it (a creep nfrl or a gold mine ngol, version 0) 9. The editor also
+ * writes a file of 11 without the flag back as 9, dropping the tables and attributes: Studio doesn't (a save never loses
+ * data). Changes `doc` in place; true when it did.
+ */
+export function tftUnitsLayout(doc: { subversion?: unknown; units?: unknown }): boolean {
+  if (Number(doc.subversion) !== 9 || !Array.isArray(doc.units)) return false;
+  for (const u of doc.units as Record<string, unknown>[]) {
+    if (!u || typeof u !== "object") return false;
+  }
+  for (const u of doc.units as Record<string, unknown>[]) {
+    u.itemTable ??= -1;
+    u.strength ??= 0;
+    u.agility ??= 0;
+    u.intelligence ??= 0;
+  }
+  doc.subversion = TFT_UNITS_SUBVERSION;
+  return true;
+}
+
 /** Placed objects that aren't a type of the tables: start locations (version 0 for this rule: every melee map has one).
  *  Random units, buildings and items (uDNR, bDNR, iDNR …) and custom objects aren't in the tables either, so Studio
  *  can't tell them (typeVersions has no entry). */

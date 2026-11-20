@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { meleeFiles, readTypeVersions, savedMelee, type MeleeFiles } from "./meleesave";
-import { placedNeedTft, REQUIRES_TFT, tftFlagsAfter, typeVersions } from "./tftflag";
+import { placedNeedTft, REQUIRES_TFT, TFT_UNITS_SUBVERSION, tftFlagsAfter, tftUnitsLayout, typeVersions } from "./tftflag";
 
 /** UnitData.slk: a footman (0), a tavern (1), a Reforged unit (2); ItemData.slk: an item of version 0 and one of 1. */
 const UNITS = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"version"\nC;Y2;X1;K"hfoo"\nC;X2;K0\nC;Y3;X1;K"ntav"\nC;X2;K1\nC;Y4;X1;K"sfoo"\nC;X2;K2\nC;Y5;X1;K"ngol"\nC;X2;K0\nE\n';
@@ -127,4 +127,22 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
     assert.equal((await savedMelee(project(GAME, { "map/war3map.wtg.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);
     assert.equal((await savedMelee(project(GAME, {}), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, 0, `control: neither, cleared (${flags.toString(16)})`);
   }
+});
+
+test("a units file of subversion 9 takes the layout with item tables and hero attributes, as the editor's save with 0x4000", () => {
+  // The editor's save of building-turn-tavern.w3m: every entry (start location, footman, tavern) with item table -1 and
+  // attributes 0, nothing else changed (we-drive 2026-11-20).
+  const doc = { version: 8, subversion: 9, units: [{ id: "sloc", hp: -1 }, { id: "hfoo", hp: -1 }, { id: "ntav", hp: 0 }] };
+  assert.equal(tftUnitsLayout(doc), true);
+  assert.equal(doc.subversion, TFT_UNITS_SUBVERSION);
+  for (const u of doc.units) assert.deepEqual(u, { id: u.id, hp: u.hp, itemTable: -1, strength: 0, agility: 0, intelligence: 0 });
+  // A file of 11 is left as it is (its tables and attributes kept), and so is one already upgraded.
+  const eleven = { subversion: 11, units: [{ id: "Hpal", itemTable: 2, strength: 22 }] };
+  assert.equal(tftUnitsLayout(eleven), false);
+  assert.deepEqual(eleven, { subversion: 11, units: [{ id: "Hpal", itemTable: 2, strength: 22 }] });
+  assert.equal(tftUnitsLayout(doc), false);
+  // Not a list of entries: nothing is changed, not even the subversion.
+  const odd = { subversion: 9, units: [{ id: "hfoo" }, 7] };
+  assert.equal(tftUnitsLayout(odd), false);
+  assert.deepEqual(odd, { subversion: 9, units: [{ id: "hfoo" }, 7] });
 });

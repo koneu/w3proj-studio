@@ -55,6 +55,7 @@ import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
 import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
@@ -2833,7 +2834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (lastGhost?.group) handle.objects.setGhost(lastGhost);
         };
         let stopAutoCycleTimer = startAutoCycle(() => autoCycleTick());
-        // Switched on: the first change comes 2 to 5 s later, not at whatever was left of the wait while it was off.
+        // Switched on: the first change comes 3 s later, not at whatever was left of the wait while it was off.
         const stopAutoCycleSetting = w3.settings.onDidChange((key) => {
           if (key !== "terrain.placement.autoCycleRandomGroups" || disposed || !autoCycleOn()) return;
           stopAutoCycleTimer();
@@ -4009,7 +4010,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Facing with Ctrl and the button held: it ends when the button is let go. */
         let faceHeld = false;
         const startFacing = () => {
-          const entries = selectedEntries();
+          // A building keeps its facing, as under the turn keys (rotateSelected): the World Editor's Ctrl+drag turns a
+          // peasant toward the pointer, never a farm (we-compare building-face-*, branch we-terrain-items).
+          const entries = selectedEntries().filter((e) => isDoodadType(e.id) || !buildingCells.get(e.id));
           if (!editable || !entries.length) return;
           facing = { entries, before: entries.map(poseOf) };
           modeHint.textContent = "Facing the pointer: click to apply · Esc to cancel";
@@ -5832,7 +5835,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (g) {
               e.preventDefault();
               if (control === "moveToPointer") startMoveTo(g);
-              else { startFacing(); faceHeld = true; faceToward(g); }
+              else {
+                startFacing();
+                // Nothing to turn when every selected object is a building (startFacing leaves them).
+                if (facing) { faceHeld = true; faceToward(g); }
+              }
               refreshGroupRings();
               return;
             }
@@ -6356,6 +6363,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added " + (had ? `${had.player + 1}'s start where the map's players file has it.` : "Player 1's in the middle of the map."));
             }
             if (objectsTouched) await settleMoved();
+            // Saved with flag 0x4000 (Requires The Frozen Throne data), the units file gets the layout with item tables
+            // and hero attributes, as the World Editor's save writes it (tftflag.ts tftUnitsLayout): only written with
+            // the objects, and never back (a file of 11 keeps its tables). A w3i that can't be read leaves it as it is.
+            if (objectsTouched && unitsFile && Number(unitsFile.doc.subversion) === 9 && typeof (edgeInfo as { flags?: unknown } | null)?.flags === "number") {
+              const after = await savedMelee(meleeFiles(w3), edgeInfo as unknown as MeleeInfo, unitsFile.list).catch(() => null);
+              if (after && after.flags & REQUIRES_TFT) tftUnitsLayout(unitsFile.doc);
+            }
             // The tilesets' own lists, which the w3e is written with under the flag 0 (savedTerrain).
             await ownReady;
             // Every unit at the height the World Editor's save gives it (setting Units on the Ground on Save). An item
