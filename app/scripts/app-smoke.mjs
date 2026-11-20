@@ -14011,6 +14011,8 @@ async function triggerMultiSelect(page, found) {
     await k.tool("remove_trigger_variable", { name: "marks" }).catch((e) => fail(`marks is still used after the cut: ${e.message}`));
     if ((await vars())?.includes("score")) fail("the variable score wasn't removed");
     await said();
+    // The setting is off by default, as the World Editor's box on its first start (branch we-script-items): on here.
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", true)`);
     await click(1);
     await key("v", { ctrl: true });
     if ((await lines()) !== 5) fail(`Paste of two lines gave ${await lines()} lines, not 5`);
@@ -14027,8 +14029,8 @@ async function triggerMultiSelect(page, found) {
     await key("z", { ctrl: true });
     const after = await vars();
     if ((await lines()) !== 3 || after?.includes("score") || after?.includes("marks")) fail(`one undo of the Paste left ${await lines()} lines and the variables ${lit(after)}`);
-    // The setting off: the lines come, the variables don't, and the warning names them.
-    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", false)`);
+    // The setting off (its default): the lines come, the variables don't, and the warning names them.
+    await page.evaluate(`w3.settings.set("triggers.autoCreateVariables", undefined)`);
     await click(1);
     await key("v", { ctrl: true });
     const off = await vars();

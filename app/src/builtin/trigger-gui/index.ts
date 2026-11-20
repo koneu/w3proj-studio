@@ -319,7 +319,8 @@ class GuiView {
     const to = this.target(kind);
     if (typeof to === "string") { void this.w3.window.showWarning(`Can't paste a ${KIND_NAMES[kind].toLowerCase()} here. ${to}`); return; }
     const missing = missingVariableNames(this.ed.file, clip.ecas);
-    const auto = missing.length > 0 && this.w3.settings.get<boolean>("triggers.autoCreateVariables") !== false;
+    // Off unless set, as the World Editor's box on its first start ([Trigger Editor] Auto Create Variables=0).
+    const auto = missing.length > 0 && this.w3.settings.get<boolean>("triggers.autoCreateVariables") === true;
     let created: string[] = [], refused = "";
     const label = clip.ecas.length > 1 ? `Paste ${clip.ecas.length} lines` : `Paste ${KIND_NAMES[kind].toLowerCase()}`;
     this.edit(label, () => {
