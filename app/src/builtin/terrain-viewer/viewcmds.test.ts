@@ -244,7 +244,7 @@ test("regionOutline: a thin black strip on the box's own edge, in and out of the
   // 32 unit wide rim (the old outline) is gone, and the edge at x -3968 (past the playable edge) has its strip.
   assert.equal(Math.min(...xs), box.left - grow); assert.equal(Math.max(...xs), box.right + grow);
   assert.equal(Math.min(...ys), box.bottom - grow); assert.equal(Math.max(...ys), box.top + grow);
-  assert.ok(xs.some((x) => x === box.left + shrink), "the inner loop");
+  assert.ok(xs.some((x) => x === box.left - shrink), "the inner loop");
   assert.ok(REGION_OUTLINE.filter((o) => o.a === 1).every((o) => o.d >= -2 && o.d <= 3), "the black part is a few units wide: about 3 px at 1.33 px a unit");
   assert.ok(grow - REGION_OUTLINE.find((o) => o.a === 1 && o.d > 0)!.d <= 6, "the fall-off outside is a few units");
   // Along the west edge the strip is cut every 32 units (to lie on the ground).
