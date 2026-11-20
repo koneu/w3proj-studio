@@ -196,7 +196,7 @@ snipe it from a weak one and run. Spread two drops over two creeps, so players f
 ## Paths
 
 - Every way in the map should be wide enough for an army, or not exist. Stray little paths between trees look
-  like a mistake, and trap units. Narrow strips are only 1.3 to 3.2% of the walkable ground on ladder maps.
+  like a mistake, and trap units. On this app's grid (every tree and doodad counted), narrow strips are 2.3 to 8.4% of the walkable ground on ladder 1v1 maps.
 - The widest way to a camp is usually 480, and hardly ever under 224. Players fight there with a whole group.
 - Close a gap with trees or widen it; don't leave it in between. A camp isn't reached through a crack.
 

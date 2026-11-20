@@ -166,9 +166,19 @@ test("a narrow way to a camp is an error, a tight one a warning, and guards don'
 test("stray narrow paths are reported only past what ladder maps have", () => {
   const strip = { cells: 60, at: [100, 200] as const };
   assert.ok(!checkMelee({ ...map(), narrow: { percent: 2, strips: [strip] } }).findings.some((x) => x.rule === "narrow path"));
-  const many = checkMelee({ ...map(), narrow: { percent: 2, strips: Array(12).fill(strip) } });
-  assert.ok(many.findings.some((x) => x.rule === "narrow path" && x.severity === "warning" && /12 stray/.test(x.message)));
-  assert.ok(checkMelee({ ...map(), narrow: { percent: 9, strips: [strip] } }).findings.some((x) => x.rule === "narrow path" && x.at?.[0] === 100));
+  // What this grid measures on ladder 1v1 maps (Last Refuge 5.4% and 13 strips, Northern Isles 4.0% and 18, Tirisfal
+  // Glades 7.1% and 19) is no warning: the old limits (5%, 10 strips) warned on every one of them.
+  for (const [percent, n] of [[5.4, 13], [4.0, 18], [7.1, 19]]) {
+    assert.ok(!checkMelee({ ...map(), narrow: { percent, strips: Array(n).fill(strip) } }).findings.some((x) => x.rule === "narrow path"), `${percent}%, ${n}`);
+  }
+  const many = checkMelee({ ...map(), narrow: { percent: 2, strips: Array(31).fill(strip) } });
+  assert.ok(many.findings.some((x) => x.rule === "narrow path" && x.severity === "warning" && /31 stray/.test(x.message)));
+  // An AI's map of smoketest_maps: 21.1% and 64 strips.
+  const ai = checkMelee({ ...map(), narrow: { percent: 21.1, strips: Array(64).fill(strip) } }).findings.filter((x) => x.rule === "narrow path" && x.severity === "warning");
+  assert.equal(ai.length, 2);
+  assert.ok(checkMelee({ ...map(), narrow: { percent: 9.5, strips: [strip] } }).findings.some((x) => x.rule === "narrow path" && x.at?.[0] === 100));
+  // The measure is in the answer.
+  assert.deepEqual(checkMelee({ ...map(), narrow: { percent: 4.04, strips: [strip, strip] } }).measures?.narrow, { percent: 4, strips: 2 });
 });
 
 test("unequal walks show, however even the map looks", () => {

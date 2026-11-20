@@ -211,10 +211,18 @@ export function checkMelee(f: MeleeFacts) {
   });
 
   // Paths.
+  // Measured on this grid (every tree and doodad counted; branch tm-units-data, 2026-11-20): the game's 18 two-player
+  // melee maps and smoketest_maps' 6 ladder 1v1 maps have 2.3 to 8.4% and 11 to 48 strips (all but one up to 7.1% and
+  // 24), the game's and smoketest_maps' maps for 4 and 8 3.1 to 11% and 13 to 54.
   if (f.narrow) {
-    if (f.narrow.percent > 5) add("narrow path", "warning", `${f.narrow.percent.toFixed(1)}% of the walkable ground is narrow strips. Ladder maps have 1.3 to 3.2%.`);
-    if (f.narrow.strips.length > 10) add("narrow path", "warning", `${f.narrow.strips.length} stray narrow paths. Ladder maps have 2 to 8.`);
-    for (const s of f.narrow.strips.slice(0, 5)) if (f.narrow.percent > 5 || f.narrow.strips.length > 10) add("narrow path", "info", `A narrow strip of ${s.cells} pathing cells starts near here.`, s.at);
+    const duel = starts.length <= 2;
+    const [most, many] = duel ? [9, 30] : [12, 60];
+    const usual = duel ? ["2.3 to 8.4%", "11 to 24"] : ["3.1 to 11%", "13 to 54"];
+    const kind = duel ? "1v1 maps" : "maps for 4 and 8";
+    const wide = f.narrow.percent > most, stray = f.narrow.strips.length > many;
+    if (wide) add("narrow path", "warning", `${f.narrow.percent.toFixed(1)}% of the walkable ground is narrow strips. Ladder ${kind} have ${usual[0]}.`);
+    if (stray) add("narrow path", "warning", `${f.narrow.strips.length} stray narrow paths. Ladder ${kind} have ${usual[1]}.`);
+    for (const s of f.narrow.strips.slice(0, 5)) if (wide || stray) add("narrow path", "info", `A narrow strip of ${s.cells} pathing cells starts near here.`, s.at);
   }
 
   // Lumber.
@@ -308,7 +316,8 @@ export function checkMelee(f: MeleeFacts) {
   return {
     errors: findings.filter((x) => x.severity === "error").length,
     warnings: findings.filter((x) => x.severity === "warning").length,
-    measures: { starts: perStart, camps: field.length, guards: guards.length, startGuards: camps.length - field.length, mines: mines.length, trees: f.trees.length, campedRoutePasses: camped },
+    measures: { starts: perStart, camps: field.length, guards: guards.length, startGuards: camps.length - field.length, mines: mines.length, trees: f.trees.length, campedRoutePasses: camped,
+      ...(f.narrow ? { narrow: { percent: Math.round(f.narrow.percent * 10) / 10, strips: f.narrow.strips.length } } : {}) },
     findings,
     accuracy: notes,
   };
