@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { drawnGroundTiles, floatingLevelAt, groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import * as aitools from "./aitools";
 import { replaceByType, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, replacePlaced, roughenCorners, rowSpots, seededRandom, setCliffType, setWater, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, parseArea, playableArea } from "../../lib/terrain/area";
 import { mulberry32 } from "../../lib/testhelpers/testutil";
@@ -575,4 +576,63 @@ test("a replace keeps the variation within what the new type has, and a type wit
   assert.equal(run("Many"), 5, "control: a type with enough keeps it");
   assert.equal(run("None"), 0, "no variations: 0, not -1");
   assert.equal(run("Unknown"), 0, "a type the lookup doesn't know counts as one variation");
+});
+
+test("set_water argument validation refuses mixing points with region or box coordinates", () => {
+  const checkWaterArgs = (aitools as { checkWaterArgs?: (args: Record<string, unknown>) => unknown }).checkWaterArgs;
+  assert.equal(typeof checkWaterArgs, "function");
+  const pts = [[0, 0], [512, 512]];
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: pts, left: 0, bottom: 0 }), /not both/);
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: pts, left: 0, bottom: 0, right: 512, top: 512 }), /not both/);
+  assert.throws(() => checkWaterArgs!({ mode: "lake", points: pts, region: "River" }), /not both/);
+  assert.throws(() => checkWaterArgs!({ mode: "lake", region: "River", left: 0 }), /not both/);
+  assert.throws(() => checkWaterArgs!({ mode: "bogus", points: pts }), /mode must be/);
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: [[0, 0]] }), /at least two/);
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: [[0, Number.NaN], [100, 100]] }), /at least two/);
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: pts, width: 64 }), /at least 128/);
+  assert.throws(() => checkWaterArgs!({ mode: "ford", points: pts, width: Number.NaN }), /at least 128/);
+  assert.deepEqual(checkWaterArgs!({ mode: "ford", points: pts }), { mode: "ford", points: pts, width: 384 });
+  assert.deepEqual(checkWaterArgs!({ mode: "lake", left: 0, bottom: 0, right: 512, top: 512 }), { mode: "lake", points: undefined, width: 384 });
+  assert.deepEqual(checkWaterArgs!({ mode: "shallow", region: "Lake" }), { mode: "shallow", points: undefined, width: 384 });
+});
+
+test("setWater ford and lake are idempotent when run again over the same line or area", () => {
+  const snap = (t: Terrain) => t.corners.map((c) => [c.rawHeight, c.rawWater, c.hasWater]);
+  const line = { points: [[256, 256], [1792, 1792]] as [number, number][], width: 512 };
+  const tFord = field();
+  const c1 = setWater(tFord, line, "ellipse", "ford", []);
+  assert.ok(c1.length > 0);
+  const after1 = snap(tFord);
+  const mid = tFord.corners[8 * 17 + 8];
+  assert.ok(mid.hasWater && mid.water - mid.height > 36 && mid.water - mid.height < 40, `ford depth: ${mid.water - mid.height}`);
+  assert.deepEqual(setWater(tFord, line, "ellipse", "ford", []), []);
+  assert.deepEqual(snap(tFord), after1);
+
+  // Deepening an existing ford into a lake preserves the water surface and becomes idempotent on the next lake call.
+  const cDeep = setWater(tFord, line, "ellipse", "lake", []);
+  assert.ok(cDeep.length > 0);
+  assert.equal(tFord.corners[8 * 17 + 8].rawWater, mid.rawWater);
+  assert.ok(tFord.corners[8 * 17 + 8].water - tFord.corners[8 * 17 + 8].height > 100);
+  const afterLake = snap(tFord);
+  assert.deepEqual(setWater(tFord, line, "ellipse", "lake", []), []);
+  assert.deepEqual(snap(tFord), afterLake);
+
+  // Widening an existing ford keeps the middle depth and surface intact.
+  const tWiden = field();
+  setWater(tWiden, { points: line.points, width: 256 }, "ellipse", "ford", []);
+  const narrowMid = tWiden.corners[8 * 17 + 8].rawHeight;
+  const narrowWater = tWiden.corners[8 * 17 + 8].rawWater;
+  const cWide = setWater(tWiden, line, "ellipse", "ford", []);
+  assert.ok(cWide.length > 0);
+  assert.equal(tWiden.corners[8 * 17 + 8].rawHeight, narrowMid);
+  assert.equal(tWiden.corners[8 * 17 + 8].rawWater, narrowWater);
+
+  // Area (ellipse) lake and ford are also idempotent.
+  for (const mode of ["ford", "lake"] as const) {
+    const tArea = field();
+    assert.ok(setWater(tArea, hill, "ellipse", mode, []).length > 0);
+    const snapArea = snap(tArea);
+    assert.deepEqual(setWater(tArea, hill, "ellipse", mode, []), []);
+    assert.deepEqual(snap(tArea), snapArea);
+  }
 });

@@ -119,6 +119,24 @@ test("nudged to the edge a footman stops at 3296 and a doodad strictly inside th
   assert.equal(run(-3584, doodad, 1, -8), -4088);
 });
 
+test("a building whose footprint already reaches past the playable part refuses nudges that stay outside, and allows one back inside", () => {
+  // we-drive 2026-11-20 on building-turn-hall.w3m: town hall at (3136, -1024), playable right 3328 -> bound 3072.
+  const playable = { left: -3328, bottom: -3584, right: 3328, top: 3072 };
+  const hall = insetBy(playable, unitHalf([16, 16], 50));
+  const mine = insetBy(playable, unitHalf([16, 16], 50));
+  assert.equal(hall.right, 3072);
+  // KP_8 (north), KP_2 (south), KP_6 (east), KP_9 (northeast) all keep it outside -> refused.
+  for (const nudge of [[0, 8], [0, -8], [8, 0], [8, 8]] as const) {
+    assert.deepEqual(scaledNudge([[3136, -1024]], [hall], [8], nudge), [[0, 0]], `hall nudge ${nudge}`);
+    assert.deepEqual(scaledNudge([[3136, -1024]], [mine], [8], nudge), [[0, 0]], `mine nudge ${nudge}`);
+  }
+  // KP_4 (west) brings the footprint back inside the playable part -> moves 64 west to 3072.
+  assert.deepEqual(scaledNudge([[3136, -1024]], [hall], [8], [-8, 0]), [[-64, 0]]);
+  // A group where one building is already outside refuses the step for the whole group.
+  const footman = insetBy(playable, unitHalf(null, 31));
+  assert.deepEqual(scaledNudge([[3136, -1024], [0, 0]], [hall, footman], [8, 1], [0, 8]), [[0, 0], [0, 0]]);
+});
+
 test("a drag's step is judged where a gridded doodad lands, not where the pointer is (edge-group-drag)", () => {
   const strict = strictlyInside({ left: -4096, bottom: -4096, right: 4096, top: 4096 });
   const grid = (_i: number, x: number, y: number): [number, number] => [Math.round(x / 64) * 64, Math.round(y / 64) * 64];

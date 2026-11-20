@@ -10,7 +10,7 @@
 import { randomVariation, type Corner, type Terrain } from "./w3e";
 import { inArea, type Area } from "./area";
 import { viewInCameraBounds } from "./cameras";
-import { namesToStrings, textsToStrings, type InfoString } from "../formats/infostrings";
+import { namesToStrings, tableCantHold, textsToStrings, type InfoString } from "../formats/infostrings";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -84,14 +84,15 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
  *  resize-bounds-*, 2026-11-19, branch we-compare-15): every text field the map's string table can hold that has plain
  *  text becomes a reference to a new string with that text, numbered on from `first` in this order: the map's name,
  *  suggested players, description, author, the loading screen's title, subtitle and text, then the players' and the
- *  forces' names. An empty text and one that is a TRIGSTR reference already stay; the prologue's texts stay plain. The
+ *  forces' names. An empty text, one that is a TRIGSTR reference already, and one a string table can't hold
+ *  (tableCantHold, containing an unescaped `}`) stay; the prologue's texts stay plain. The
  *  loading screen's crest race becomes 128 (64 and 3 did) and a game data set of -1 becomes 0 (1 stayed). Changes
  *  `info` in place; the new strings, for the caller to add to the string table (and the languages' tables). */
 export function infoAfterResize(info: Record<string, unknown>, first: number): InfoString[] {
   const fields = [...["name", "suggestedPlayers", "description", "author"].map((key) => [info, key] as const),
     ...["title", "subtitle", "text"].map((key) => [info.loadingScreen, key] as const)];
-  const added = textsToStrings(fields, first);
-  added.push(...namesToStrings(info, first + added.length));
+  const added = textsToStrings(fields, first, undefined, tableCantHold);
+  added.push(...namesToStrings(info, first + added.length, undefined, tableCantHold));
   const screen = info.loadingScreen as Record<string, unknown> | undefined;
   if (screen && typeof screen.crestRace === "number") screen.crestRace = 128;
   if (typeof info.gameDataSet === "number" && info.gameDataSet >>> 0 === 0xffffffff) info.gameDataSet = 0;

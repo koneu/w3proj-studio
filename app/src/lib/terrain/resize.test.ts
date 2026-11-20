@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cameraBounds, camerasAfterResize, coordProblem, doodadStays, infoAfterResize, newCliffVariation, playableSize, resizedCameraZoom, resizedSize, resizeProblem, resizeSpecials, sidesProblem, resizeTerrain, startAfterResize, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
+import { addLocaleStrings } from "../formats/localewts";
 
 /** The header fields of a w3e, for terrains that get written. */
 const base = { version: 12, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt", "Lgrs", "Lgrd"], cliffTiles: ["CLdi"], trailer: new Uint8Array() };
@@ -217,6 +218,38 @@ test("Map Size gives the w3i's plain texts strings of their own, numbered in the
   assert.equal(empty.gameDataSet, 0);
   assert.equal(infoAfterResize({ name: "A" }, 1000)[0].num, 1000);
   assert.deepEqual(infoAfterResize({}, 1), [], "a w3i without those fields: nothing");
+});
+
+test("Map Size keeps names and map texts with an unescaped } plain so the string table never refuses them", () => {
+  const info = {
+    name: "Brace } Name",
+    suggestedPlayers: "2",
+    description: "Desc } here",
+    author: "Escaped \\} author",
+    loadingScreen: { title: "Title } 1", subtitle: "Sub", text: "Body } 2" },
+    players: [{ id: 0, name: "Player } 1" }, { id: 1, name: "Player Two" }],
+    forces: [{ flags: 0, name: "Force } 1" }, { flags: 0, name: "Force Two" }],
+  };
+  const added = infoAfterResize(info, 3);
+  assert.deepEqual(added.map((s) => [s.num, s.text]), [
+    [3, "2"],
+    [4, "Escaped \\} author"],
+    [5, "Sub"],
+    [6, "Player Two"],
+    [7, "Force Two"],
+  ]);
+  assert.equal(info.name, "Brace } Name");
+  assert.equal(info.suggestedPlayers, "TRIGSTR_003");
+  assert.equal(info.description, "Desc } here");
+  assert.equal(info.author, "TRIGSTR_004");
+  assert.equal(info.loadingScreen.title, "Title } 1");
+  assert.equal(info.loadingScreen.subtitle, "TRIGSTR_005");
+  assert.equal(info.loadingScreen.text, "Body } 2");
+  assert.equal(info.players[0].name, "Player } 1");
+  assert.equal(info.players[1].name, "TRIGSTR_006");
+  assert.equal(info.forces[0].name, "Force } 1");
+  assert.equal(info.forces[1].name, "TRIGSTR_007");
+  assert.doesNotThrow(() => addLocaleStrings("map/war3map.wts", "\uFEFF", added));
 });
 
 test("adding on the left and bottom moves the offset, not the world position", () => {

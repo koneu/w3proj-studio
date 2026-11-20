@@ -74,7 +74,7 @@ import { CornerUndo, MAX_CLIFF_TYPES } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, cliffNumbers, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { checkWaterArgs, entryLook, restoreEntry, replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, replaceByType, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, roomCells, roomForReplaced, swapsOf, variationAfter, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -969,14 +969,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds, own.get(t.tileset)));
     }),
     w3.mcp.registerTool("set_water", async (args) => {
-      const { mode, points, width } = args;
-      if (mode !== "ford" && mode !== "lake" && mode !== "shallow" && mode !== "deep" && mode !== "dry") throw new Error("mode must be ford, lake, shallow, deep or dry.");
-      const line = points !== undefined;
-      if (line && !(Array.isArray(points) && points.length >= 2 && points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number")))) throw new Error("points must be at least two [x, y].");
-      if (width !== undefined && !(typeof width === "number" && width >= 128)) throw new Error("width must be at least 128.");
-      const area = line ? null : await readArea(w3, args);
-      if (!line && !area) throw new Error("set_water needs points, a region, or left, bottom, right and top.");
-      const place = area ?? { points: points as [number, number][], width: typeof width === "number" ? width : 384 };
+      const { mode, points, width } = checkWaterArgs(args);
+      const area = points ? null : await readArea(w3, args);
+      if (!points && !area) throw new Error("set_water needs points, a region, or left, bottom, right and top.");
+      const place = area ?? { points: points!, width };
       const kinds = await cliffKinds();
       const where = area ? area.name ?? "an area" : "a line";
       return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds));

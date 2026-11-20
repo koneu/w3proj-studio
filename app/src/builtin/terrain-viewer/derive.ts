@@ -74,10 +74,23 @@ export async function shadowFileProblem(w3: W3Api): Promise<string | null> {
 
 /** The minimap icons (war3map.mmp) of the placed units on a terrain, written only when they
  *  differ from the stored ones by more than order and rounding. */
-export async function updateMinimapIcons(w3: W3Api, t: Terrain, units: Placed[]) {
+export async function updateMinimapIcons(w3: W3Api, t: Terrain, units: Placed[], build = buildMinimapIcons) {
   try {
-    const icons = await buildMinimapIcons(w3, t, units);
-    const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp");
+    const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+    const present = files.has("map/war3map.mmp.json") || files.has("map/war3map.mmp");
+    let stored: { icons?: MinimapIcon[] } | null = null;
+    if (present) {
+      try {
+        const raw = await readMapJson<unknown>(w3, "war3map.mmp");
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("not a minimap icon file");
+        const doc = raw as { icons?: unknown };
+        if (doc.icons !== undefined && !Array.isArray(doc.icons)) throw new Error("not a minimap icon file");
+        stored = doc as { icons?: MinimapIcon[] };
+      } catch (e) {
+        throw new Error(`the file is unreadable (${errorText(e)}); it was left as it is`);
+      }
+    }
+    const icons = await build(w3, t, units);
     if (!stored) {
       const text = JSON.stringify({ format: "w3proj.minimap/1", version: 0, icons });
       const root = w3.workspace.project()!.root;
@@ -86,7 +99,7 @@ export async function updateMinimapIcons(w3: W3Api, t: Terrain, units: Placed[])
       await editMapDoc(w3, "war3map.mmp", (d) => { d.icons = icons; });
     }
   } catch (e) {
-    w3.window.showError(`The minimap icons (war3map.mmp) couldn't be updated: ${(e as Error).message ?? e}`);
+    w3.window.showError(`The minimap icons (war3map.mmp) couldn't be updated: ${errorText(e)}`);
   }
 }
 

@@ -10,7 +10,7 @@ import { groundLimitText } from "./limits";
 import { variationText } from "./values";
 import { savedLife } from "./doodadrules";
 import { doodadGround } from "./objheights";
-import { drawnGroundTiles, paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { drawnGroundTiles, paintSlot, groundFits, groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, settleDrawnList, waterLevelAt, waterLevelWanted, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -233,26 +233,56 @@ function cornersAlong(t: Terrain, points: readonly [number, number][], width: nu
  *  down under the surface, so units can walk in. The surface goes by dry ground, or by water that's
  *  there already. Ground only goes down. Corners on other cliff levels stay. */
 function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], depth: number) {
+  const offset = waterOffsetOf(t);
   const showing = inside.filter(({ i }) => t.corners[i].hasWater && t.corners[i].water > t.corners[i].height);
   const from = t.corners[middleOf(inside).i];
-  const surface = showing.length ? t.corners[middleOf(showing).i].water : from.height - 8;
-  const level = waterLevelAt(surface, waterOffsetOf(t)), changed: number[] = [];
+  const rawSurface = showing.length ? t.corners[middleOf(showing).i].water : from.height - 8;
+  const level = waterLevelAt(rawSurface, offset);
+  // Use the actual quantized surface when it fits 14 bits, and slope from its bank (`surface + 8`) rather than
+  // each corner's current height, so running ford or lake again over the same place changes nothing.
+  const surface = level === waterLevelWanted(rawSurface, offset) ? (level - 0x2000) / 4 - offset : rawSurface;
+  const top = surface + 8, bottom = surface - depth, changed: number[] = [];
   const grounds = inside.filter(({ i }) => t.corners[i].layer === from.layer).map(({ i, r }) => {
     const c = t.corners[i];
     const k = Math.min(1, (1 - r) / BANK), s = k * k * (3 - 2 * k);
-    const bottom = surface - depth, target = c.height + (bottom - c.height) * s;
+    const target = top + (bottom - top) * s;
     return { i, ground: target < c.height ? target - (c.layer - 2) * TILE : null };
   });
   refuseGroundPast(grounds.flatMap((g) => (g.ground === null ? [] : [g.ground])));
   for (const { i, ground } of grounds) {
     const c = t.corners[i];
-    const before = c.rawHeight, wet = c.hasWater;
+    const before = c.rawHeight, beforeWater = c.rawWater, wet = c.hasWater;
     if (ground !== null) setGroundHeight(c, ground);
     dropRamp(t, i, changed);
-    setWaterLevel(c, level, waterOffsetOf(t));
-    if (c.rawHeight !== before || !wet) changed.push(i);
+    setWaterLevel(c, level, offset);
+    if (c.rawHeight !== before || !wet || (c.rawWater & 0x3fff) !== (beforeWater & 0x3fff)) changed.push(i);
   }
   return changed;
+}
+
+/** Validates the arguments of MCP `set_water`: refuses mixing `points` with a `region` or rectangle,
+ *  or a `region` with a rectangle. */
+export function checkWaterArgs(args: Record<string, unknown>): { mode: WaterMode; points?: [number, number][]; width: number } {
+  const { mode, points, width } = args;
+  if (mode !== "ford" && mode !== "lake" && mode !== "shallow" && mode !== "deep" && mode !== "dry") {
+    throw new Error("mode must be ford, lake, shallow, deep or dry.");
+  }
+  const hasPoints = points !== undefined;
+  const hasRegion = args.region !== undefined;
+  const hasBox = [args.left, args.bottom, args.right, args.top].some((v) => v !== undefined);
+  if (hasPoints && (hasRegion || hasBox)) {
+    throw new Error("Give points, or a region or rectangle (left, bottom, right, top), not both.");
+  }
+  if (hasRegion && hasBox) {
+    throw new Error("Give a region, or left, bottom, right and top, not both.");
+  }
+  if (hasPoints && !(Array.isArray(points) && points.length >= 2 && points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n))))) {
+    throw new Error("points must be at least two [x, y].");
+  }
+  if (width !== undefined && !(typeof width === "number" && Number.isFinite(width) && width >= 128)) {
+    throw new Error("width must be at least 128.");
+  }
+  return { mode, points: hasPoints ? (points as [number, number][]) : undefined, width: typeof width === "number" ? width : 384 };
 }
 
 /** Puts water on an area or along a line. `ford` and `lake` slope in with no cliff around them.

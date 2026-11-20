@@ -51,7 +51,7 @@ export async function fitsSnapped(snap: (x: number, y: number) => Promise<readon
   return fits(sx, sy);
 }
 
-import { refuseShift, type Bounds } from "./moveedit";
+import type { Bounds } from "./moveedit";
 export type { Bounds };
 
 /** The point, or the nearest one inside the bounds. */
@@ -59,19 +59,24 @@ export const clampPoint = (b: Bounds | null, x: number, y: number): [number, num
   b ? [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))] : [x, y];
 
 /**
- * A nudge for a group, held to the bounds: a step that would pass one is refused (refuseShift), not cut back.
- * `steps` is how many nudges long each entry's own step is (a building goes twice as far, on its finer grid); the
- * group moves by the longest one, all by the same shift, and what stands on a grid snaps to it afterwards (a pathless
- * doodad with a tree goes 64, not 8: we-compare edge-group-nudge, the editor's probes with the pointer on either).
- * A diagonal step with one axis refused is refused whole: at the east edge KP_9 moves nothing (the free axis doesn't
- * move, we-compare edge-single-diagonal).
+ * A nudge for a group, held to the bounds: a step that would land outside a member's bounds is refused, not cut
+ * back (`steps`: how many nudges long each entry's own step is; the group moves by the longest one, all by the same
+ * shift, and what stands on a grid snaps to it afterwards: a pathless doodad with a tree goes 64, not 8, we-compare
+ * edge-group-nudge). Unlike `clampShift` / `refuseShift` (which let an object already outside move along the edge),
+ * a nudge requires every destination to lie inside its bounds: observed in the World Editor on
+ * `building-turn-hall.w3m` (2026-11-20; town hall at 3136, -1024 with playable right edge 3328 -> bound 3072): KP_8
+ * (north, landing at 3136, -960) was refused and stayed at 3136, -1024, while KP_4 (west, landing at 3072, -1024)
+ * moved it 64 inside. A diagonal step with either axis outside is refused whole (KP_9 at the east edge moves nothing,
+ * we-compare edge-single-diagonal).
  */
 export function scaledNudge(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], steps: readonly number[], nudge: readonly [number, number]): [number, number][] {
   const longest = Math.max(1, ...steps);
   const asked: [number, number] = [nudge[0] * longest, nudge[1] * longest];
-  let [dx, dy] = refuseShift(points, bounds, asked[0], asked[1]);
-  if (asked[0] !== 0 && asked[1] !== 0 && (dx === 0 || dy === 0)) { dx = 0; dy = 0; }
-  return steps.map(() => [dx, dy]);
+  const fits = points.every(([x, y], i) => {
+    const b = bounds[i], nx = x + asked[0], ny = y + asked[1];
+    return nx >= b.left && nx <= b.right && ny >= b.bottom && ny <= b.top;
+  });
+  return steps.map(() => (fits ? asked : [0, 0]));
 }
 
 /** Where a dragged or nudged object's centre may go so that what it takes up (`half`, across and up: a unit's
