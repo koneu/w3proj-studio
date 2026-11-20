@@ -6,6 +6,7 @@
 import type { W3Api } from "../../extensions/api";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, type LightModel } from "../../lib/model/dnclight";
+import { slotKeys } from "../../lib/terrain/lightslots";
 import { hdWaterSettings, type HdWaterSettings } from "./hdwater";
 
 export interface MapLighting {
@@ -46,7 +47,8 @@ interface Lights { terrainModel: string; unitModel: string; terrainEnabled: numb
  *  (branch we-compare-13, SD and HD, each slot switched off in turn) the same, and the doodads and trees went with the
  *  first, as the units (renderer.ts lightSlotOf; we-compare-10 had read them with the second). */
 export function ownLightFile(lights: Partial<Lights> | null | undefined, kind: "terrain" | "unit"): string | null {
-  const [file, enabled] = kind === "terrain" ? [lights?.unitModel, lights?.unitEnabled] : [lights?.terrainModel, lights?.terrainEnabled];
+  const keys = slotKeys(kind);
+  const [file, enabled] = [lights?.[keys.model], lights?.[keys.enabled]];
   return file && enabled ? file : null;
 }
 

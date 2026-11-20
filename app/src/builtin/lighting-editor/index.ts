@@ -9,6 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { lightNumber } from "./numbers";
+import { slotKeys, type LightKind } from "../../lib/terrain/lightslots";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, writeLightMdl, type Light, type LightModel, type Prop, type Track } from "../../lib/model/dnclight";
 import { TILESETS } from "../../lib/terrain/tilesets";
@@ -17,7 +18,7 @@ import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
 
 const VIEW = "w3.lighting.overview";
-type Kind = "terrain" | "unit";
+type Kind = LightKind;
 const KINDS: [Kind, string, string][] = [["terrain", "Terrain lighting", "TerrainLights"], ["unit", "Unit lighting", "UnitLights"]];
 
 interface Lights {
@@ -67,8 +68,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const file = `${crypto.randomUUID()}.mdl`;
     await w3.workspace.writeText(`map/${file}`, writeLightMdl(model));
     const lights = (await readMapDoc<Lights>(w3, "war3map.w3l")) ?? { doc: emptyLights(), json: true };
-    lights.doc[`${kind}Model`] = file;
-    lights.doc[`${kind}Enabled`] = 1;
+    lights.doc[slotKeys(kind).model] = file;
+    lights.doc[slotKeys(kind).enabled] = 1;
     await writeMapDoc(w3, "war3map.w3l", lights.doc, lights.json);
     // Registered as an import, newest first (as the World Editor does).
     const imports = (await readMapDoc<Imports>(w3, "war3map.imp")) ?? { doc: { format: "w3proj.imports/1", version: 1, files: [] }, json: true };
@@ -80,13 +81,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** Takes the map's model for `kind` out: the file, its import entry, its name in war3map.w3l. */
   const remove = async (kind: Kind, lights: { doc: Lights; json: boolean }) => {
-    const file = lights.doc[`${kind}Model`];
+    const file = lights.doc[slotKeys(kind).model];
     const ok = await w3.window.showWarning(`Remove the map's ${kind} lighting (${file})? The tileset's lighting is used again.`, "Remove", "Cancel");
     if (ok !== "Remove") return;
     await w3.editors.close(`map/${file}`).catch(() => {});
     await w3.workspace.delete(`map/${file}`).catch(() => {});
-    lights.doc[`${kind}Model`] = "";
-    lights.doc[`${kind}Enabled`] = 0;
+    lights.doc[slotKeys(kind).model] = "";
+    lights.doc[slotKeys(kind).enabled] = 0;
     await writeMapDoc(w3, "war3map.w3l", lights.doc, lights.json);
     const imports = await readMapDoc<Imports>(w3, "war3map.imp");
     if (imports) {
@@ -120,20 +121,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const tileset = (info?.doc.lightEnvironment || info?.doc.tileset || "L").toUpperCase();
           // The model name inside each of the map's own models (the game model it was copied from).
           const ownNames = new Map(await Promise.all(KINDS.map(async ([kind]) => {
-            const file = lights?.doc[`${kind}Model`];
+            const file = lights?.doc[slotKeys(kind).model];
             const text = file ? await w3.workspace.readText(`map/${file}`).catch(() => null) : null;
             return [kind, text === null ? "missing file" : /^Model "([^"]*)"/m.exec(text)?.[1] ?? file] as const;
           })));
           const sections = KINDS.map(([kind, title]) => {
             const fallback = models[kind].get(tileset) ?? [...models[kind].values()][0] ?? "";
-            const own = lights?.doc[`${kind}Model`] ?? "";
-            const enabled = (lights?.doc[`${kind}Enabled`] ?? 0) !== 0;
+            const own = lights?.doc[slotKeys(kind).model] ?? "";
+            const enabled = (lights?.doc[slotKeys(kind).enabled] ?? 0) !== 0;
             const rows: (HTMLElement | null)[] = [
               h("div.lighting-row.muted", { title: fallback }, `Tileset (${TILESETS[tileset] ?? tileset}): ${modelName(fallback)}`),
             ];
             if (own && lights) {
               const box = h("input", { type: "checkbox", checked: enabled, onchange: run(async () => {
-                lights.doc[`${kind}Enabled`] = box.checked ? 1 : 0;
+                lights.doc[slotKeys(kind).enabled] = box.checked ? 1 : 0;
                 await writeMapDoc(w3, "war3map.w3l", lights.doc, lights.json);
               }) });
               rows.push(

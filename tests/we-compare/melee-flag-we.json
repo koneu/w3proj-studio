@@ -180,6 +180,14 @@
     ]
   },
   {
+    "name": "meleeflag-category-off",
+    "description": "flat.w3x with the trigger category Initialization renamed Setup and the Melee flag cleared (0x9c10): the save turns it back on (branch we-batch-3; c4 measured only keeping it on). Input: tests/fixtures/we-specs/make-melee-valid.mjs category-off. A Studio-made input can't hold the flag off: its pack puts Melee back.",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-category-off.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
     "name": "meleeflag-trigger-category",
     "description": "(c4) the category Initialization renamed",
     "input": {

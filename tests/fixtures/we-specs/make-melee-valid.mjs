@@ -7,9 +7,10 @@
 // (or DIR; not committed: 24 maps of 35 KB).
 // Without --case it makes the CASES below; --case makes others (for measuring), the JSON as a CASES entry:
 //   off        true: the w3i's Melee flag cleared (0x9c10), to see whether the editor's save puts it back
-//   doodads    [[id, dx, dy]]: doodads or destructables at the start + (dx, dy)
-//   units      [[id, dx, dy, player, drops]]: units or items (player 24: Neutral Hostile, the default; 27 is Neutral Passive) at the start + (dx, dy);
-//              drops: item ids of one drop set (each 100%)
+//   doodads    [[id, dx, dy, drops]]: doodads or destructables at the start + (dx, dy); drops: item ids of one drop set
+//   units      [[id, dx, dy, player, drops, inventory]]: units or items (player 24: Neutral Hostile, the default; 27 is Neutral Passive) at the start + (dx, dy);
+//              drops: item ids of one drop set (each 100%); inventory: item ids of a hero's slots 0, 1, …
+//   itemTables [[ids]]: war3map.w3i's item tables, one per entry, each one drop set of these ids (each 100%)
 //   start      [dx, dy]: moves the start location
 //   corners    [[x0, y0, x1, y1, { layer, flags, texture, water, height }]]: corners (inclusive, the map's corner
 //              indices; the start's is 32, 30) set to these values; cliff corners get Grass Cliff as Apply Cliff leaves it
@@ -19,6 +20,8 @@
 //   noStart    true: no start location in the units file (a map the World Editor's save gives starts of its own)
 //   players    [[id, controller, x, y]]: the w3i's players instead of flat's one (copies of it with that id, controller
 //              (1 user, 2 computer, 3 neutral, 4 rescuable) and start); [] leaves the w3i without players
+//   category   the trigger category "Initialization" renamed to this
+//   noWts      true: war3map.wts deleted (the w3i's player and force names, TRIGSTR_001 and _002, are left without a string)
 // The pathing map, shadows and minimap are made again (w3proj rebuild), as the editor makes its own on open.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -109,6 +112,19 @@ export const CASES = {
   "ns-mines": { noStart: true, players: [0, 1, 2, 3, 4, 5].map((id) => [id, 1, 0, 0]),
     units: [-3072, -1536, 0, 1536, 3072].flatMap((x) => [-3072, -1536, 0, 1536, 3072].map((y) => ["ngol", x, y + 256])) }, // at x, y (offsets from the start at 0, -256)
   "ns-none": { noStart: true, players: [] },
+  // Branch we-batch-3: an item of version 1 (shas) only in a hero's inventory (Hpal, version 0), only in a w3i item
+  // table nothing uses, only in a destructable's drops (LTcr, version 0).
+  "tft-inventory": { units: [["Hpal", 1280, 1280, 24, null, ["shas"]]] },
+  "tft-item-table": { itemTables: [["shas"]] },
+  "tft-dest-drop": { doodads: [["LTcr", 1280, 1280, ["shas"]]] },
+  // Their controls: the inventory and the item table with 0x4000 already set, the crate with an item of version 0.
+  "tft-inventory-clear": { flags: 0x4000, units: [["Hpal", 1280, 1280, 24, null, ["shas"]]] },
+  "tft-item-table-clear": { flags: 0x4000, itemTables: [["shas"]] },
+  "tft-dest-drop-v0": { doodads: [["LTcr", 1280, 1280, ["ratc"]]] },
+  // tests/we-compare/melee-flag-we.json meleeflag-category-off: Melee cleared and the trigger category renamed.
+  "category-off": off({ category: "Setup" }),
+  // tests/we-compare/wts-missing.json: no string table, then Scenario > Map Description's name changed.
+  "nowts": { noWts: true },
 };
 
 const run = (...args) => {
@@ -171,11 +187,12 @@ function make(name, c) {
     if (c.start) start.position = [START[0] + c.start[0], START[1] + c.start[1], 0];
     // Numbered after the start (0), or from 0 when it goes (noStart): no gap, as in a map the editor saved.
     let n = c.noStart ? 0 : 1;
-    for (const [id, dx, dy, player = 24, drops] of c.units ?? []) {
+    for (const [id, dx, dy, player = 24, drops, inventory] of c.units ?? []) {
       units.units.push({
         ...start, id, skinId: id, position: [START[0] + dx, START[1] + dy, 0], angle: 0, player, flags: 2,
         hp: -1, mana: -1, level: 1, gold: id === "ngol" ? 12500 : 0, targetAcquisition: -1, editorId: n++, trailer: [0, 0],
         ...(drops ? { itemSets: [drops.map((d) => ({ id: d, chance: 100 }))] } : {}),
+        ...(inventory ? { inventory: inventory.map((d, slot) => ({ slot, id: d })) } : {}),
       });
     }
     if (c.noStart) units.units = units.units.filter((u) => u.id !== "sloc");
@@ -183,9 +200,10 @@ function make(name, c) {
     if (c.doodads?.length) {
       const dooFile = join(map, "war3map.doo.json");
       const doo = JSON.parse(readFileSync(dooFile, "utf8"));
-      c.doodads.forEach(([id, dx, dy], i) => doo.doodads.push({
+      c.doodads.forEach(([id, dx, dy, drops], i) => doo.doodads.push({
         id, variation: 0, position: [START[0] + dx, START[1] + dy, 0], angle: 4.712389, scale: [1, 1, 1], skinId: id,
-        preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: i, trailer: [0, 0, 0], extras: [] }));
+        preFlags: 4294967295, flags: 2, life: 100, itemTable: -1, itemSets: drops ? [drops.map((d) => ({ id: d, chance: 100 }))] : [],
+        editorId: i, trailer: [0, 0, 0], extras: [] }));
       writeFileSync(dooFile, JSON.stringify(doo, null, 2));
     }
     if (c.corners?.length) editTerrain(join(map, "war3map.w3e.txt"), c.corners);
@@ -199,10 +217,18 @@ function make(name, c) {
       if (c.customTilesets) lines[lines.findIndex((l) => l.startsWith("custom-tilesets "))] = "custom-tilesets 1";
       writeFileSync(w3e, lines.join("\n"));
     }
+    if (c.category) {
+      const wtg = join(map, "war3map.wtg.json");
+      const text = readFileSync(wtg, "utf8");
+      const from = '"name":"Initialization"';
+      if (!text.includes(from)) throw new Error(`${name}: no category Initialization in war3map.wtg.json`);
+      writeFileSync(wtg, text.replace(from, `"name":${JSON.stringify(c.category)}`));
+    }
     const infoFile = join(map, "war3map.w3i.json");
     const info = JSON.parse(readFileSync(infoFile, "utf8"));
     if (c.off) info.flags &= ~4;
     if (c.flags) info.flags |= c.flags;
+    if (c.itemTables) info.itemTables = c.itemTables.map((ids, number) => ({ number, name: `Table ${number}`, sets: [ids.map((id) => ({ chance: 100, id }))] }));
     // A start location for another player: that player in the w3i too (a copy of player 1, its start there).
     for (const u of units.units.slice(1).filter((u) => u.id === "sloc")) {
       info.players.push({ ...info.players[0], id: u.player, start: [u.position[0], u.position[1]] });
@@ -212,6 +238,7 @@ function make(name, c) {
       info.players = c.players.map(([id, controller, x, y]) => ({ ...like, id, controller, name: `Player ${id + 1}`, start: [x, y] }));
     }
     writeFileSync(infoFile, JSON.stringify(info, null, 2));
+    if (c.noWts) rmSync(join(map, "war3map.wts"));
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
     mkdirSync(out, { recursive: true });
     run("pack", dir, "-o", join(out, `melee-valid-${name}.w3x`), "--force-stale");
