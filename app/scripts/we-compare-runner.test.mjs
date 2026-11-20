@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, normalize, resolve } from "node:path";
 import * as core from "./we-compare-core.mjs";
 import * as w3e from "./we-compare-w3e.mjs";
 import * as run from "./we-compare.mjs";
@@ -587,8 +587,10 @@ test("an --open step's map is a path as input.map's, and one of the files the sp
   const vars = { REPO: "/r", MAIN: "/m" };
   const s = parseSpec({ ...good(), we: { steps: [["--open", "${REPO}/target/paste-cliff/b.w3x"], "--open c.w3x", ["--key", "${REPO}/x"]] } }, "/s", vars);
   // Each is waited for; only --open's path is filled in.
-  assert.deepEqual(s.we.steps, [["--open", join("/r", "target", "paste-cliff", "b.w3x")], ["--wait-ready"], ["--open", resolve("/s", "c.w3x")], ["--wait-ready"], ["--key", "${REPO}/x"]]);
-  assert.deepEqual(s.files.sort(), [join("/r", "target", "paste-cliff", "b.w3x"), resolve("/s", "c.w3x")].sort());
+  // Compared as paths of this platform: on Windows a path that was already absolute keeps its '/' (the same file).
+  const same = (steps) => steps.map((st) => (st[0] === "--open" ? [st[0], normalize(st[1])] : st));
+  assert.deepEqual(same(s.we.steps), [["--open", join("/r", "target", "paste-cliff", "b.w3x")], ["--wait-ready"], ["--open", resolve("/s", "c.w3x")], ["--wait-ready"], ["--key", "${REPO}/x"]]);
+  assert.deepEqual(s.files.map(normalize).sort(), [join("/r", "target", "paste-cliff", "b.w3x"), resolve("/s", "c.w3x")].sort());
   assert.throws(() => parseSpec({ ...good(), we: { steps: [["--open", "${NOPE}/b.w3x"]] } }, "/s", vars), /unknown \$\{NOPE\}/);
 });
 
