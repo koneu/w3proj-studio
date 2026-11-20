@@ -3,7 +3,7 @@
 // Light Editor (Module > Light Editor) calls the first "Unit" and the second "Terrain": with its list set to Unit,
 // Enable Custom Light writes the first slot; set to Terrain, the second; Both, both and the w3l's last u32 1 (we-drive,
 // branch we-batch-3, 2026-11-20, flat.w3x, SD). Its game view lights the ground by the second slot and units, doodads
-// and trees by the first (terrain-viewer/lighting.ts ownLightFile), so the labels follow the light.
+// and trees by the first (terrain-viewer/lighting.ts ownLightFile, which reads them through slotKeys), so the labels follow the light.
 
 export type LightKind = "terrain" | "unit";
 

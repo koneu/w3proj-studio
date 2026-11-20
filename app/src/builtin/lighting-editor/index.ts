@@ -9,7 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { lightNumber } from "./numbers";
-import { slotKeys, type LightKind } from "./slots";
+import { slotKeys, type LightKind } from "../../lib/terrain/lightslots";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, writeLightMdl, type Light, type LightModel, type Prop, type Track } from "../../lib/model/dnclight";
 import { TILESETS } from "../../lib/terrain/tilesets";

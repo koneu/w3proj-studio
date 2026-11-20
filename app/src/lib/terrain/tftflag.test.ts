@@ -52,7 +52,7 @@ test("a destructable's drops count; a hero's inventory and an item table nothing
   assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("ratc")]), false, "control: of version 0");
   assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("YjI5")]), false, "a random item");
   assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("I000")]), null, "a custom item");
-  assert.equal(placedNeedTft([start], VERSIONS, undefined, [{ id: "LTbr", position: [0, 0, 0], itemSets: [] }]), false, "a destructable of version 1 itself isn't a reason");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [{ id: "LTbr", itemSets: [] }]), false, "a destructable of version 1 itself isn't a reason");
   assert.equal(placedNeedTft([start], VERSIONS, undefined, [{ ...crate(), itemSets: 3 }]), null, "drop sets of another shape");
   assert.equal(placedNeedTft([start], VERSIONS, undefined, null), null, "a doodad file that can't be read");
   assert.equal(placedNeedTft([start, at("ntav")], VERSIONS, undefined, null), true, "a tavern decides anyway");
