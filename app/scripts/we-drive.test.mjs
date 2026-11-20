@@ -1277,6 +1277,34 @@ test("Session: the sandbox mounts the machine read-only and only the farm, its p
   assert.equal(env.XDG_CACHE_HOME, join(r.dir, "we", "prefix", "cache"), "caches in a writable folder, not the read-only home");
 });
 
+test("Session in place (we-launch.mjs): the map itself is opened and its folder writable; the editor through runinprefix", { skip: LINUX_ONLY }, async (t) => {
+  const r = rig(t);
+  const spawned = [];
+  r.onSpawn = (c, program, args) => spawned.push({ program: basename(program), args });
+  // Control: a plain start opens a copy in the work folder, through Proton's "run", with the map's folder read-only.
+  await r.s.start(r.maps["a.w3m"]);
+  assert.equal(r.s.copy, join(r.dir, "work", "maps", "a.w3m"));
+  r.s.display = ":77";
+  const writable = () => { const { bw } = r.s.sandboxed("x.exe", []); return bw.flatMap((a, i) => (a === "--bind" ? [bw[i + 1]] : [])); };
+  assert.ok(!writable().includes(r.dir), "control: the map's own folder stays read-only");
+  assert.deepEqual(r.s.sandboxed("x.exe", ["-a"]).bw.slice(-3), ["run", "x.exe", "-a"]);
+  r.children[0].emit("exit", 0);
+  r.s.editorExited = true;
+  r.s.opts.inPlace = true;
+  r.s.opts.editorVerb = "runinprefix";
+  // spawnWine is the rig's: the verb it was given is read off the sandbox the real one would build.
+  let verb = null;
+  r.s.spawnWine = (program, args, v) => { verb = v; const c = new FakeChild(); r.children.push(c); spawned.push({ program: basename(program), args }); return c; };
+  await r.s.start(r.maps["b.w3m"]);
+  assert.equal(r.s.copy, r.maps["b.w3m"], "the map itself, as the app gave it");
+  assert.equal(verb, "runinprefix");
+  assert.deepEqual(spawned.at(-1).args, ["-launch", "-loadfile", winePath(r.maps["b.w3m"])]);
+  assert.ok(writable().includes(r.dir), "the map's folder is writable: the editor saves over the map there");
+  assert.deepEqual(r.s.sandboxed("x.exe", [], "runinprefix").bw.slice(-2), ["runinprefix", "x.exe"]);
+  assert.throws(() => r.s.sandboxed("x.exe", [], "rm"), /isn't run or runinprefix/);
+  await assert.rejects(async () => { r.children.at(-1).emit("exit", 0); r.s.editorExited = true; await r.s.start(r.maps["a.w3m"], [{ x: 0, y: 0 }]); }, /--look changes the map/);
+});
+
 test("pruneArtefacts: the old minimap TGAs go, the newest dialog pictures stay, nothing else is touched", () => {
   const dir = scratchDir("we-prune-");
   try {

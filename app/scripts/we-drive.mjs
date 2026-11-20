@@ -997,11 +997,15 @@ export class Session {
    *  (sockets) and /tmp (wineserver's socket in /tmp/.wine-<uid>, the X server's socket). */
   writableDirs() {
     const run = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
-    return [...new Set([farmDir(), prefixDir(), resolve(this.opts.work), run, "/tmp"])].filter((p) => existsSync(p));
+    // opts.inPlace (we-launch.mjs): the editor saves over the map itself, so the map's folder is writable too (the editor
+    // writes a "<map>Temp" folder beside it). we-launch has checked the folder (inPlaceProblem).
+    const own = this.opts.inPlace && this.copy ? [dirname(resolve(this.copy))] : [];
+    return [...new Set([farmDir(), prefixDir(), resolve(this.opts.work), ...own, run, "/tmp"])].filter((p) => existsSync(p));
   }
 
-  /** The environment and the sandbox the editor's processes run in. */
-  sandboxed(program, args) {
+  /** The environment and the sandbox the editor's processes run in. `verb` is Proton's: "run" (sets the prefix up
+   *  first), or "runinprefix" as the app starts the editor (proton.rs `command`; we-launch.mjs's opts.editorVerb). */
+  sandboxed(program, args, verb = "run") {
     const user = userCompatData(this.game);
     const run = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
     const ro = [user, ...linkedFiles()];
@@ -1019,7 +1023,8 @@ export class Session {
       "--die-with-parent");
     for (const p of ["pulse"]) if (existsSync(join(run, p))) bw.push("--tmpfs", join(run, p));
     for (const p of ["pipewire-0", "pipewire-0-manager"]) if (existsSync(join(run, p))) bw.push("--ro-bind", "/dev/null", join(run, p));
-    bw.push("--args", "3", join(this.proton.tool, "proton"), "run", program, ...args);
+    if (verb !== "run" && verb !== "runinprefix") throw new Error(`we-drive: Proton verb ${verb} isn't run or runinprefix`);
+    bw.push("--args", "3", join(this.proton.tool, "proton"), verb, program, ...args);
     const env = { ...process.env };
     delete env.PIPEWIRE_REMOTE;
     // Never the desktop: the editor opens on its own Xvfb or not at all.
@@ -1056,10 +1061,10 @@ export class Session {
     return { bw, env, fdArgs };
   }
 
-  spawnWine(program, args) {
+  spawnWine(program, args, verb = "run") {
     mkdirSync(this.opts.work, { recursive: true });
     mkdirSync(sandboxCache(), { recursive: true });
-    const { bw, env, fdArgs } = this.sandboxed(program, args);
+    const { bw, env, fdArgs } = this.sandboxed(program, args, verb);
     // One log per run: the first program of the session starts it afresh, the later ones (the editor after the
     // locale's reg, another map's editor) add to it.
     const out = openSync(this.log, this.logStarted ? "a" : "w");
@@ -1165,7 +1170,13 @@ export class Session {
     this.mapName = null;
     const exe = join(farmDir(), "_retail_", "x86_64", "World Editor.exe");
     const args = ["-launch"];
-    if (map) {
+    if (map && this.opts.inPlace) {
+      // we-launch.mjs: the map itself, as the app gives it to the editor (its save is what the app watches).
+      if (looks.length) throw new Error("--look changes the map: not with a map opened in place");
+      this.copy = resolve(map);
+      args.push("-loadfile", winePath(this.copy));
+      this.mapName = basename(map);
+    } else if (map) {
       const dir = join(this.opts.work, "maps");
       mkdirSync(dir, { recursive: true });
       const copy = join(dir, basename(map));
@@ -1178,7 +1189,7 @@ export class Session {
     await this.ensureLocale();
     this.writePrefs();
     this.startedAt = this.now();
-    const child = this.spawnWine(exe, args);
+    const child = this.spawnWine(exe, args, this.opts.editorVerb ?? "run");
     child.exited = false;
     this.editor = child;
     // Only this child's own exit counts: an editor before it may report its exit late (after this start), and must
