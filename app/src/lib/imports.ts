@@ -30,9 +30,10 @@ export const gameLookupName = (archivePath: string) => archivePath.replace(/\.w3
 /** Same archive path regardless of case (the game's archive isn't case sensitive). */
 export const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-/** The map's own files at the archive root (and their JSON or text project forms), which aren't
- *  imports (war3mapPreview.tga, the preview image, too: maps without any import entry hold it). */
-const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Preview\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign(\.[a-z0-9]+|Skin\.[a-z0-9]+|Misc\.txt|Extra\.txt)|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
+/** The map's own files at the archive root (and their JSON or text project forms), which aren't imports. Not the
+ *  preview image (war3mapPreview.tga, .dds): the World Editor's save keeps it only where the import list names it by
+ *  that name and drops it otherwise, as any import (we-compare corpus-saves-preview-*, corpus-saves-wormwar). */
+const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign(\.[a-z0-9]+|Skin\.[a-z0-9]+|Misc\.txt|Extra\.txt)|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
 
 const SOUND = /\.(flac|ogg|mp3|wav)$/i;
 /** The project files that can stand for an archive path: itself, and for sounds the same name with
