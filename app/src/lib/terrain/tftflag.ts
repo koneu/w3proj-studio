@@ -11,9 +11,13 @@
 // it on flat.w3x; unit, item, destructable and doodad data and war3mapSkin.txt don't, custom units based on Ucrl
 // included). That rule is
 // meleesave.ts objectDataTft; custom triggers alone aren't measured, so they still keep Studio from clearing the flag
-// (tftFlagsAfter's `mayClear`). Neither measured: a hero's
-// inventory and the map's item tables (war3map.w3i), counted as "can't tell" when they hold a type of version 1; the
-// drops of destructables, not looked at.
+// (tftFlagsAfter's `mayClear`).
+//
+// Branch we-batch-3 (2026-11-20, tests/we-compare/tft-flag-we.json tft-inventory*, tft-item-table*, tft-dest-drop*):
+// an item of version 1 (shas) in a destructable's drop set (a crate LTcr, version 0) sets the flag, ratc there doesn't;
+// the same item in a hero's inventory (Hpal) or in a war3map.w3i item table nothing uses is not a reason, either way
+// (the flag stays off, and a stored one is cleared). An item table a unit or destructable uses isn't measured: counted
+// as "can't tell" when it holds a type that isn't of version 0.
 
 /** The w3i flag. */
 export const REQUIRES_TFT = 0x4000;
@@ -53,7 +57,7 @@ const NOT_TFT = new Set(["sloc"]);
 const RANDOM_ITEM = /^Y[a-zA-Z]I[0-9a-zA-Z]$/;
 
 interface DropLike { id?: unknown }
-interface PlacedLike { id?: unknown; itemSets?: unknown; inventory?: unknown }
+interface PlacedLike { id?: unknown; itemSets?: unknown; inventory?: unknown; itemTable?: unknown }
 
 /** A table's id → version, from rows of parseSlk. Rows without a version are left out (not known). */
 export function typeVersions(rows: readonly Record<string, string>[], key: string, into = new Map<string, number>()): Map<string, number> {
@@ -80,37 +84,48 @@ function dropIds(sets: unknown): string[] | null {
 }
 
 /**
- * Whether the placed units and items need The Frozen Throne's data: true when one of them, or an item of a unit's drop
- * sets, is of version 1 or more; false when every one is known and of version 0; null when that can't be told (a type
- * `versions` doesn't have, no versions, a drop list of another shape, or a type of version 1 only where it isn't
- * measured: a hero's inventory, `itemTables` of war3map.w3i).
+ * Whether the placed units and items need The Frozen Throne's data: true when one of them, or an item of a unit's or a
+ * destructable's drop sets, is of version 1 or more; false when every one is known and of version 0; null when that
+ * can't be told (a type `versions` doesn't have, no versions, a drop list of another shape, `doodads` null: the doodad
+ * file can't be read, or an item table of war3map.w3i that a unit or destructable uses holding a type that isn't of
+ * version 0). A hero's inventory and an item table nothing uses are not reasons. `doodads`: war3map.doo's entries
+ * (undefined: none); only their drops count, never their own type.
  */
-export function placedNeedTft(placed: readonly PlacedLike[], versions: ReadonlyMap<string, number> | null | undefined, itemTables?: unknown): boolean | null {
+export function placedNeedTft(placed: readonly PlacedLike[], versions: ReadonlyMap<string, number> | null | undefined, itemTables?: unknown, doodads?: readonly PlacedLike[] | null): boolean | null {
   if (!versions) return null;
-  let unknown = false;
+  let unknown = doodads === null;
+  let tableUsed = false;
   const counted = (id: string) => {
     if (NOT_TFT.has(id)) return false;
     const v = versions.get(id);
     if (v === undefined) unknown = true;
     return v !== undefined && v >= 1;
   };
-  /** Ids where a type of version 1 can't be told to count. */
-  const unsure = (ids: string[] | null) => {
-    if (ids === null || ids.some((id) => versions.get(id) !== 0 && !RANDOM_ITEM.test(id))) unknown = true;
+  /** Whether an entry's drop sets hold an item of version 1 (a random item isn't one); marks `unknown` on the way. */
+  const dropsNeed = (p: PlacedLike) => {
+    const drops = dropIds(p.itemSets);
+    if (drops === null) unknown = true;
+    else if (drops.some((id) => !RANDOM_ITEM.test(id) && counted(id))) return true;
+    if (p.itemTable !== undefined && p.itemTable !== -1) tableUsed = true;
+    return false;
   };
   for (const p of placed) {
     if (typeof p.id !== "string") { unknown = true; continue; }
     if (counted(p.id)) return true;
-    const drops = dropIds(p.itemSets);
-    if (drops === null) unknown = true;
-    else if (drops.some((id) => !RANDOM_ITEM.test(id) && counted(id))) return true;
-    if (p.inventory !== undefined) {
-      unsure(Array.isArray(p.inventory) ? (p.inventory as DropLike[]).map((i) => (typeof i?.id === "string" ? i.id : "")) : null);
+    if (dropsNeed(p)) return true;
+  }
+  if (Array.isArray(doodads)) {
+    for (const d of doodads) {
+      if (!d || typeof d !== "object") { unknown = true; continue; }
+      if (dropsNeed(d)) return true;
     }
   }
-  if (itemTables !== undefined) {
+  if (tableUsed && itemTables !== undefined) {
     if (!Array.isArray(itemTables)) unknown = true;
-    else for (const t of itemTables as { sets?: unknown }[]) unsure(dropIds(t?.sets ?? null));
+    else for (const t of itemTables as { sets?: unknown }[]) {
+      const ids = dropIds(t?.sets ?? null);
+      if (ids === null || ids.some((id) => versions.get(id) !== 0 && !RANDOM_ITEM.test(id))) unknown = true;
+    }
   }
   return unknown ? null : false;
 }

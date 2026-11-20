@@ -30,7 +30,7 @@ test("the placed units and items of version 1 or 2 need The Frozen Throne's data
   assert.equal(placedNeedTft([start, at("ntav")], undefined), null, "no tables, even for a tavern");
 });
 
-test("an item of version 1 in a unit's drop sets counts; a random item doesn't; inventories and item tables can't be told", () => {
+test("an item of version 1 in a unit's drop sets counts; a random item doesn't", () => {
   const drops = (...ids: string[]) => ({ ...at("hfoo"), itemSets: [ids.map((id) => ({ id, chance: 100 }))] });
   // tft-drop and tft-drop-random (we-drive 2026-11-17); the game's melee maps with rman, rreb or gold in their drops
   // keep it (corpus).
@@ -40,13 +40,31 @@ test("an item of version 1 in a unit's drop sets counts; a random item doesn't; 
   assert.equal(placedNeedTft([start, drops("I000")], VERSIONS), null, "a custom item");
   assert.equal(placedNeedTft([start, { ...at("hfoo"), itemSets: 3 }], VERSIONS), null, "drop sets of another shape");
   assert.equal(placedNeedTft([start, { ...at("hfoo"), itemSets: [[{ chance: 5 }]] }], VERSIONS), null, "a drop without an id");
-  // Not measured: a hero's inventory, the map's item tables.
-  assert.equal(placedNeedTft([start, { ...at("hfoo"), inventory: [{ slot: 0, id: "shas" }] }], VERSIONS), null, "an inventory item of version 1");
-  assert.equal(placedNeedTft([start, { ...at("hfoo"), inventory: [{ slot: 0, id: "ratc" }] }], VERSIONS), false, "control: of version 0");
-  assert.equal(placedNeedTft([start], VERSIONS, [{ number: 0, sets: [[{ id: "shas", chance: 100 }]] }]), null, "an item table with an item of version 1");
-  assert.equal(placedNeedTft([start], VERSIONS, [{ number: 0, sets: [[{ id: "ratc", chance: 100 }]] }]), false, "control: of version 0");
-  assert.equal(placedNeedTft([start], VERSIONS, [{ number: 0 }]), null, "an item table without sets");
-  assert.equal(placedNeedTft([start, at("ntav")], VERSIONS, [{ number: 0, sets: [[{ id: "shas", chance: 100 }]] }]), true, "a tavern decides anyway");
+});
+
+test("a destructable's drops count; a hero's inventory and an item table nothing uses don't", () => {
+  // we-drive 2026-11-20 (branch we-batch-3), tft-flag-we.json tft-dest-drop(-v0), tft-inventory(-clear),
+  // tft-item-table(-clear): the editor's save set the flag for shas in a crate's drops, not for ratc there, and neither
+  // set nor kept it for shas in a Paladin's inventory or in an unused item table.
+  const crate = (...ids: string[]) => ({ id: "LTcr", position: [0, 0, 0], itemTable: -1, itemSets: [ids.map((id) => ({ id, chance: 100 }))] });
+  const table = [{ number: 0, sets: [[{ id: "shas", chance: 100 }]] }];
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("shas")]), true, "a destructable's drop of version 1");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("ratc")]), false, "control: of version 0");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("YjI5")]), false, "a random item");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [crate("I000")]), null, "a custom item");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [{ id: "LTbr", position: [0, 0, 0], itemSets: [] }]), false, "a destructable of version 1 itself isn't a reason");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, [{ ...crate(), itemSets: 3 }]), null, "drop sets of another shape");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, null), null, "a doodad file that can't be read");
+  assert.equal(placedNeedTft([start, at("ntav")], VERSIONS, undefined, null), true, "a tavern decides anyway");
+  assert.equal(placedNeedTft([start], VERSIONS, undefined, []), false, "no doodads");
+  assert.equal(placedNeedTft([start, { ...at("Hpal"), inventory: [{ slot: 0, id: "shas" }] }], new Map([...VERSIONS, ["Hpal", 0]])), false, "an inventory item of version 1");
+  assert.equal(placedNeedTft([start], VERSIONS, table), false, "an item table nothing uses");
+  assert.equal(placedNeedTft([start], VERSIONS, [{ number: 0 }]), false, "an unused item table of another shape");
+  // A table a unit or destructable uses isn't measured: can't be told unless it holds only types of version 0.
+  assert.equal(placedNeedTft([start, { ...at("hfoo"), itemTable: 0 }], VERSIONS, table), null, "a used table holding shas");
+  assert.equal(placedNeedTft([start], VERSIONS, table, [{ ...crate(), itemTable: 0 }]), null, "a used table, by a destructable");
+  assert.equal(placedNeedTft([start, { ...at("hfoo"), itemTable: 0 }], VERSIONS, [{ number: 0, sets: [[{ id: "ratc", chance: 100 }]] }]), false, "control: of version 0");
+  assert.equal(placedNeedTft([start, { ...at("hfoo"), itemTable: 0 }], VERSIONS, [{ number: 0 }]), null, "a used table without sets");
 });
 
 test("the flag follows: set, cleared, or left when it can't be told", () => {
@@ -126,6 +144,13 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
     assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": "{" }), 0, `unreadable ability data doesn't set it (${hex})`);
     assert.equal((await savedMelee(project(GAME, { "map/war3map.wtg.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);
     assert.equal((await savedMelee(project(GAME, {}), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, 0, `control: neither, cleared (${flags.toString(16)})`);
+    // war3map.doo's drops (tft-dest-drop, branch we-batch-3): read from the project; a raw or unreadable file can't be told.
+    const doo = (id: string) => JSON.stringify({ doodads: [{ id: "LTcr", position: [0, 0, 0], itemTable: -1, itemSets: [[{ id, chance: 100 }]] }], specials: [] });
+    assert.equal(await tftOf(flags, only, { "map/war3map.doo.json": doo("shas") }), REQUIRES_TFT, `a crate dropping shas sets it (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.doo.json": doo("ratc") }), 0, `control: dropping ratc, cleared (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.doo.json": "{" }), REQUIRES_TFT, `an unreadable doodad file keeps it (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.doo.json": new Error("EACCES") }), REQUIRES_TFT, `a doodad file that can't be read keeps it (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.doo": "raw" }), REQUIRES_TFT, `a raw doodad file keeps it (${hex})`);
   }
 });
 

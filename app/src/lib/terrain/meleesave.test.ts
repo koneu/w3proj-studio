@@ -81,7 +81,7 @@ test("the facts come from the project; missing and unreadable files set nothing"
   // The file's name as the project has it (case differs on disk).
   assert.equal((await readMeleeFacts(files({ "map/War3MapMisc.txt": "[Misc]\nA=1\n" }))).customConstants, true);
   const none = await readMeleeFacts(files({}));
-  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, triggersKnown: true });
+  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, doodads: [], triggersKnown: true });
   // A melee map with custom triggers loses its flag (the World Editor's save does: melee-flag-we); without them, or
   // with a trigger file nobody can read, it keeps it.
   const two = defaultTriggerFile("x");
@@ -92,8 +92,13 @@ test("the facts come from the project; missing and unreadable files set nothing"
   assert.equal(await keptWith({ "map/war3map.wtg.json": new Error("EACCES") }), MELEE, "triggers unreadable");
   assert.equal(await keptWith({}), MELEE, "no trigger file");
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
-  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, triggersKnown: true }, "unreadable: not known, so the flag stays");
+  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, doodads: [], triggersKnown: true }, "unreadable: not known, so the flag stays");
   assert.equal((await readMeleeFacts(files({ "map/war3map.wtg.json": new Error("EACCES") }))).triggersKnown, undefined, "triggers unreadable: not known");
+  // The doodads, for their drops (flag 0x4000): a missing file is none, one that is there but can't be read isn't known.
+  assert.deepEqual((await readMeleeFacts(files({ "map/war3map.doo.json": '{"doodads":[{"id":"LTcr"}]}' }))).doodads, [{ id: "LTcr" }]);
+  assert.equal((await readMeleeFacts(files({ "map/war3map.doo.json": new Error("EACCES") }))).doodads, null, "unreadable");
+  assert.equal((await readMeleeFacts(files({ "map/war3map.doo.json": "{" }))).doodads, null, "not JSON");
+  assert.equal((await readMeleeFacts(files({ "map/war3map.doo": new Uint8Array([1]) }))).doodads, null, "kept raw");
   // The ground being saved wins over the project's.
   const given = await readMeleeFacts(files({ "map/war3map.w3e": new Uint8Array([1]) }), t);
   assert.equal(given.terrain, t);
@@ -288,11 +293,14 @@ test("the facts for putting the flag back come from the project; unreadable ones
   // A map that is melee reads what taking it off needs: the ground, the triggers and what stands round the starts.
   const on = project();
   await savedMelee(on, { flags: MELEE }, units);
-  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json", "map/war3map.doo.json"]);
-  // Custom triggers take it off anyway: the doodads aren't read.
+  assert.deepEqual(on.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/war3map.wtg.json"]);
+  // Custom triggers take it off anyway: the doodads are read once, for their drops (flag 0x4000), and what stands round
+  // the starts isn't worked out (the texture isn't asked for).
   const custom = project({ "map/war3map.wtg.json": writeWtgJson(renamed) });
-  await savedMelee(custom, { flags: MELEE }, units);
-  assert.deepEqual(custom.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.wtg.json"]);
+  let textures = 0;
+  await savedMelee({ ...custom, gameBytes: async () => { textures++; throw new Error("EIO"); } }, { flags: MELEE }, units);
+  assert.deepEqual(custom.reads.filter((p) => !p.endsWith(".w3e")), ["map/war3map.doo.json", "map/war3map.wtg.json"]);
+  assert.equal(textures, 0);
 });
 
 test("a melee map loses the flag when a start is surely in an invalid position, and keeps it where Studio can't tell", async () => {

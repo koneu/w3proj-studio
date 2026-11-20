@@ -86,5 +86,53 @@
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
     "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
     "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-inventory",
+    "description": "A Paladin (Hpal, version 0) with shas (version 1) in inventory slot 0, nothing else of version 1 (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-inventory.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-item-table",
+    "description": "A war3map.w3i item table that nothing uses, its one drop set shas (version 1) (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-item-table.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-dest-drop",
+    "description": "A crate (LTcr, version 0) whose drop set holds shas (version 1) (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-dest-drop.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-inventory-clear",
+    "description": "tft-inventory's Paladin with 0x4000 already set and nothing else of version 1 (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-inventory-clear.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-item-table-clear",
+    "description": "tft-item-table's table with 0x4000 already set (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-item-table-clear.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
+  },
+  {
+    "name": "tft-dest-drop-v0",
+    "description": "The control of tft-dest-drop: the crate's drop set holds ratc (version 0) (branch we-batch-3).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-tft-dest-drop-v0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": ["war3map.w3i"]
   }
 ]
