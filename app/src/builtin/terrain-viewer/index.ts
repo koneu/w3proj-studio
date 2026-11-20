@@ -64,6 +64,7 @@ import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea
 import { DEFAULT_UNIT_SIZE, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { campsOf } from "./meleecheck";
 import { meleeFacts as meleeFactsOf, meleeReport, pathReport, walkGrid as gridOf, withNeighbour as neighbourOf, type WalkSource } from "./meleefacts";
+import { hasTabKey, lateCancel, SELECT_TOGGLE_COMMAND, TAB_COMMANDS, tabTarget } from "./tabkeys";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
@@ -224,7 +225,7 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
 ];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
-  /** The key that turns the selection toward the pointer now (T by default), for hints. */
+  /** The key that turns the selection toward the pointer now (Shift+T by default), for hints. */
   const faceKey = () => w3.keybindings.labelFor(FACE_COMMAND) ?? "no key";
   /** The key held for an area of ground, for hints: none by default, since a drag with A held is the World Editor's
    *  plain box select of objects (we-drive, verify round 3, 2026-11-13); the Select tab's Area button selects ground. */
@@ -3856,7 +3857,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = pasting = clipboard;
           pasteModels = [];
           const what = [...(f.ground ? [`${f.ground.width - 1} × ${f.ground.height - 1} tiles`] : []), ...(f.objects.length || !f.ground ? [`${f.objects.length} object${f.objects.length === 1 ? "" : "s"}`] : [])];
-          selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
+          selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · Shift+R turns · Esc ends.`;
           // The clipboard may come from another map, with buildings this one hasn't met.
           for (const id of new Set(f.objects.filter((o) => o.list === "units").map((o) => String(o.entry.id)))) void loadCells(id).catch(() => { /* stays free */ });
           for (const id of new Set(f.objects.filter((o) => o.list === "doodads").map((o) => String(o.entry.id)))) void loadDoodadCells(id).catch(() => { /* stays where it is put */ });
@@ -4164,7 +4165,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const openObject = (kind: string, id: string) => {
           w3.commands.execute("w3.objectEditor.open", kind, id).catch((e) => w3.window.showError(String(e)));
         };
-        /** What was selected before the selection was cleared, for Space. */
+        /** What was selected before the selection was cleared, for Select the Last Selection (RECALL_COMMAND). */
         let lastSelected: Placed[] = [];
         const clearSelection = () => {
           pendingSel = null;
@@ -4966,6 +4967,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const groupBar = h("div.model-toolbar.terrain-tools", {}, builtinBar);
         /** The active tab: null = the built-in tools. */
         let activeGroup: string | null = null;
+        /** The tab open before the last switch away from a tab: where Space goes back to from the Select tab. */
+        let lastTab: string | null = null;
         /** A drag taken by the active group's pointerDown. */
         let groupDrag = false;
         const activeInst = () => (activeGroup ? groupInsts.get(activeGroup) ?? null : null);
@@ -4973,6 +4976,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (id === activeGroup) return;
           setArea(null);
           activeInst()?.deactivate?.();
+          if (activeGroup !== null) lastTab = activeGroup;
           activeGroup = id;
           const inst = activeInst();
           groupBar.replaceChildren(inst ? inst.toolbar : builtinBar);
@@ -4984,8 +4988,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         const renderTabs = () => {
-          const tab = (id: string | null, title: string) =>
-            h(`button.terrain-tab${id === activeGroup ? ".on" : ""}`, { onclick: () => showTab(id) }, title);
+          // The tab's keys in its tooltip (tabkeys.ts: the World Editor's palette keys by default).
+          const keysOf = (id: string | null) => (id === null ? [SELECT_TOGGLE_COMMAND] : Object.keys(TAB_COMMANDS).filter((c) => TAB_COMMANDS[c] === id))
+            .map((c) => w3.keybindings.labelFor(c)).filter((k): k is string => !!k);
+          const tab = (id: string | null, title: string) => {
+            const keys = keysOf(id);
+            return h(`button.terrain-tab${id === activeGroup ? ".on" : ""}`, { onclick: () => showTab(id), ...(keys.length ? { title: `${title} (${keys.join(", ")})` } : {}) }, title);
+          };
           tabsEl.replaceChildren(tab(null, "Select"), ...toolGroups.all().filter((g) => groupInsts.has(g.id)).map((g) => tab(g.id, g.title)),
             h("span.terrain-tabs-gap"),
             h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
@@ -5908,14 +5917,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const step = undoStepOf(w3.keybindings.commandsFor(e));
           if (step) { e.preventDefault(); if (step === "redo") redo(); else undo(); }
         });
-        /** The key commands after a tab's own keys (`ids` as earlyKeys'): Space, Ctrl+F1, the View keys and any other
+        /** The key commands after a tab's own keys (`ids` as earlyKeys'): Escape's last steps, the tab keys (T, D, U, R, M,
+         *  O, Space), Select the Last Selection, Ctrl+F1, the View keys and any other
          *  command bound here, facing the pointer, deleting, the selection's keys, and last the camera's (as the World
          *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection the
          *  number pad's 8 2 4 6 nudge it instead). True when one did something. */
         const lateKeys = (ids: readonly string[], repeat: boolean) => {
-          // Escape with nothing else to end: facing the pointer, else the selection.
+          // Escape with nothing else to end: facing the pointer, else the selection, else from a tab to the Select tab.
           if (ids.includes(CANCEL_COMMAND)) {
-            if (facing) endFacing(false); else clearSelection();
+            const step = lateCancel({ facing: !!facing, selected: selectedEntries().length, tab: activeGroup });
+            if (step === "facing") endFacing(false);
+            else if (step === "selectTab") showTab(null);
+            else clearSelection();
+            return true;
+          }
+          // The World Editor's palette keys (T, D, U, R, M; O and Space as tabkeys.ts says): a tab to the front.
+          if (hasTabKey(ids)) {
+            const tab = tabTarget(ids, activeGroup, lastTab, (id) => groupInsts.has(id));
+            if (!repeat && tab !== undefined) {
+              if (facing) endFacing(false);
+              showTab(tab);
+            }
             return true;
           }
           if (ids.includes(RECALL_COMMAND) && !activeGroup) {

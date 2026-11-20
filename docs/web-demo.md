@@ -39,8 +39,14 @@ running programs, native dialogs, and the title bar's window buttons.
   the unpacked project format, plus text files), project listing, settings that open it at start. Edits live in the page
   until it is reloaded. Every other command rejects with "This needs the desktop app: it isn't available in the web
   demo." (`window.__w3demoRefused` counts them), which the app shows as it does any failed command.
+- `src/demo/gamedata/`: made-up trigger definitions (`TriggerData.txt`, `TriggerStrings.txt`, `WorldEditStrings.txt`: a
+  few categories, about 25 events, conditions, actions and calls, types, presets and strings, with invented names such as
+  "Demo Action - Show message") in the same file format the Trigger Editor's parser reads for the game's files.
+  `game_read` answers those three `UI/` paths and refuses every other game file. The sample `war3map.wtg.json` uses them.
 - The empty editor area shows `src/demo/terrain-preview.svg` (drawn for the demo) where the terrain would be.
 
 What the demo shows: the layout, side bar views, tabs, menus, command palette, panels, status bar, themes, the extension
-view, and the editors that run on plain project files (Map Info, Object Editor with raw ids, text and script editors).
-The Trigger Editor needs the game's trigger definitions and says so.
+view, and the editors that run on plain project files (Map Info, Object Editor with raw ids, text and script editors), and the Trigger
+Editor on the made-up definitions (tree with folding, a trigger's events, conditions and actions, the parameter and
+function pickers, variables). What needs real game data still says it needs the desktop app: object names and icons,
+the terrain, models and textures. `demo-check` opens the trigger file, looks at the tree, a trigger's parts and folding.

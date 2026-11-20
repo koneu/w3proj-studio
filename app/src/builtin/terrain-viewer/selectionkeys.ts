@@ -6,9 +6,10 @@
 // / and [ turn left, * and ] right, the number pad's 8 2 4 6 and the diagonals 7 9 1 3 (NumLock on) nudge (the World Editor's Edit > Nudge
 // Selection; Ctrl and the arrows are its camera's, we-drive 2026-11-13: they moved no object; with nothing selected the
 // digits do nothing, no camera move either, we-drive 2026-11-18); H and V mirror, R turns a quarter,
-// Shift+R back (the selection, or what's being pasted); T turns it toward the pointer (not F, the World Editor's Fog
-// Effects; T is none of its terrain view's keys: its View menu, read by we-drive --view-menu, 2026-11-10); Space
-// selects the last selection, or nothing; Ctrl+F1 shows it in the Object Editor; Delete and Backspace delete it;
+// Shift+R back (the selection, or what's being pasted), Ctrl+NumPad * and / too (the World Editor's Rotate Paste 90 CW
+// and CCW; R is its Regions palette, tabkeys.ts); Shift+T turns it toward the pointer (not F, the World Editor's Fog
+// Effects, nor T, its Terrain palette); Select the Last Selection has no key (Space is the World Editor's selection
+// brush, tabkeys.ts); Ctrl+F1 shows it in the Object Editor; Delete and Backspace delete it;
 // Ctrl+C, X, V and A copy, cut, paste and select all. Shift with them does the same, as before they were bindings,
 // except where Shift is a key of its own (Shift+R).
 
@@ -16,6 +17,7 @@ import type { Turn } from "../../lib/terrain/fragment";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { undoStepOf } from "../../lib/keybindings";
 import { CAMERA_COMMANDS } from "./viewmodes";
+import { TAB_KEY_COMMANDS } from "./tabkeys";
 
 export type SelectionKey =
   | { raise: number }
@@ -74,8 +76,9 @@ export const DELETE_COMMAND = "w3.terrain.selection.delete";
 export const CLIPBOARD_COMMANDS = { copy: "w3.terrain.copy", cut: "w3.terrain.cut", paste: "w3.terrain.paste", selectAll: "w3.terrain.selectAll" } as const;
 
 /** Escape: ends what is going on, the first of these there is: picking a point for a tool, the paste, the area drawn,
- *  the open tab's own (placing an object, a region or camera selected), facing the pointer; else nothing is selected
- *  (the World Editor's Other - Cancel Paste and Cancel Select Object Mode). */
+ *  the open tab's own (placing an object, a region or camera selected), facing the pointer, the selected objects;
+ *  else a tab goes to the Select tab (the World Editor's Other - Cancel Paste and Cancel Select Object Mode, and its
+ *  Escape from a brush to the selection brush: tabkeys.ts lateCancel). */
 export const CANCEL_COMMAND = "w3.terrain.cancel";
 
 /** The terrain view's own key commands (camera, selection, clipboard): the view runs them as their keys say, in its own
@@ -84,6 +87,7 @@ export const CANCEL_COMMAND = "w3.terrain.cancel";
 export const KEY_COMMANDS: ReadonlySet<string> = new Set([
   ...Object.keys(CAMERA_COMMANDS), ...Object.keys(SELECTION_COMMANDS), ...Object.keys(TURN_COMMANDS),
   FACE_COMMAND, RECALL_COMMAND, OBJECT_EDITOR_COMMAND, DELETE_COMMAND, CANCEL_COMMAND, ...Object.values(CLIPBOARD_COMMANDS),
+  ...TAB_KEY_COMMANDS,
 ]);
 
 /** What is done while a mouse button is held over the map (the World Editor's mouse controls in Configure Controls):

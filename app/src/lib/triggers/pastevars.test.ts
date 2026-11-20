@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createVariables, missingVariableNames, usedVariableNames, variablesOf } from "./pastevars";
+import { repoPath } from "../testhelpers/testutil";
+import { autoCreateOn, createVariables, missingVariableNames, usedVariableNames, variablesOf } from "./pastevars";
 import type { Eca, TriggerFile, Variable } from "./wtg";
 
 const v = (name: string, extra: Partial<Variable> = {}): Variable =>
@@ -55,4 +57,14 @@ test("createVariables in an old file numbers by position; a Reforged file withou
   bare.items = [];
   assert.throws(() => createVariables(bare, [v("b")], ["b"]), /category/);
   assert.equal(bare.variables.length, 0);
+});
+
+test("triggers.autoCreateVariables: declared default true, unset is on, only an explicit false is off", () => {
+  const manifest = JSON.parse(readFileSync(repoPath("app", "src", "builtin", "trigger-gui", "extension.json"), "utf8")) as {
+    contributes: { configuration: { properties: Record<string, { default?: unknown }> } };
+  };
+  assert.equal(manifest.contributes.configuration.properties["triggers.autoCreateVariables"]?.default, true);
+  assert.equal(autoCreateOn(undefined), true);
+  assert.equal(autoCreateOn(true), true);
+  assert.equal(autoCreateOn(false), false);
 });
