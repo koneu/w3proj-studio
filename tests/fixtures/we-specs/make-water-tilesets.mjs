@@ -31,7 +31,23 @@ if (dry && shore) { console.error("make-water-tilesets.mjs: --dry and --shore ar
 const cliffsAt = process.argv.indexOf("--cliffs");
 const cliffList = cliffsAt >= 0 ? (process.argv[cliffsAt + 1] ?? "").split(",").filter(Boolean) : null;
 if (cliffList && !cliffList.length) { console.error("make-water-tilesets.mjs: --cliffs wants a list, e.g. CAgr,CLdi"); process.exit(2); }
-const only = process.argv.slice(5).filter((a, i, all) => a !== "--dry" && a !== "--shore" && a !== "--cliffs" && all[i - 1] !== "--cliffs");
+// --depths D,D…: the wt- map's bands at these depths instead (up to eight, north to south; the last takes the rest),
+// as <out>/wt-<char>-<D>-<D>….w3x: for the HD water's colour over deep water (branch hd-deep-water: 64 to 200).
+const depthsAt = process.argv.indexOf("--depths");
+const depthList = depthsAt >= 0 ? (process.argv[depthsAt + 1] ?? "").split(",").filter(Boolean).map(Number) : null;
+if (depthList && (!depthList.length || depthList.length > 8 || depthList.some((d) => !Number.isFinite(d) || d < 0 || d > 1000))) {
+  console.error("make-water-tilesets.mjs: --depths wants one to eight depths of 0 to 1000, e.g. 64,96,128,160,200,800"); process.exit(2);
+}
+// --reflectivity N: the w3i's HD water reflectivity N (0 to 100; the name gets -r<N>): 0 draws the bed and the water's own
+// colour alone, without the sky's reflection.
+const reflectAt = process.argv.indexOf("--reflectivity");
+const reflectivity = reflectAt >= 0 ? Number(process.argv[reflectAt + 1]) : null;
+if (reflectAt >= 0 && !(Number.isInteger(reflectivity) && reflectivity >= 0 && reflectivity <= 100)) {
+  console.error("make-water-tilesets.mjs: --reflectivity wants a whole number of 0 to 100"); process.exit(2);
+}
+if ((depthList || reflectAt >= 0) && (dry || shore)) { console.error("make-water-tilesets.mjs: --depths and --reflectivity are for the wt- maps"); process.exit(2); }
+const VALUED = new Set(["--cliffs", "--depths", "--reflectivity"]);
+const only = process.argv.slice(5).filter((a, i, all) => a !== "--dry" && a !== "--shore" && !VALUED.has(a) && !VALUED.has(all[i - 1]));
 if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry | --shore] [tileset char…]"); process.exit(2); }
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8", env: { ...process.env, W3PROJ_GAME: game } });
@@ -42,7 +58,7 @@ const table = (file, cols) => run("game", "slk", file, "--col", cols).trim().spl
 const tiles = table("TerrainArt/Terrain.slk", "tileID").map(([id]) => id);
 const cliffs = table("TerrainArt/CliffTypes.slk", "cliffID,groundTile");
 const TILESETS = "ABCDFGIJKLNOQVWXYZ".split("");
-const DEPTHS = [4, 12, 24, 38.4, 64, 96, 200, 800];
+const DEPTHS = depthList ?? [4, 12, 24, 38.4, 64, 96, 200, 800];
 mkdirSync(out, { recursive: true });
 for (const ch of TILESETS) {
   if (only.length && !only.includes(ch)) continue;
@@ -60,6 +76,10 @@ for (const ch of TILESETS) {
     // (tilesetflag.ts): without it an open and save alone differs there (water-cliff-append-open, 2026-11-19). Only the
     // --cliffs maps: the wt-, nv- and ws- maps of the specs were made without it.
     if (cliffList) info.flags = (info.flags | 0x0008) >>> 0;
+    if (reflectivity !== null) {
+      if (!info.water || typeof info.water !== "object") throw new Error("flat.w3x's w3i has no water block for --reflectivity");
+      info.water.reflectivity = reflectivity;
+    }
     writeFileSync(w3i, JSON.stringify(info));
     const file = join(dir, "map", "war3map.w3e.txt");
     const lines = readFileSync(file, "utf8").split("\n");
@@ -99,14 +119,14 @@ for (const ch of TILESETS) {
       ];
       writeFileSync(regionsFile, JSON.stringify(regions, null, 2));
     } else if (!dry) {
-      const heightRow = (y) => String(Math.round((38.4 - DEPTHS[Math.min(7, Math.floor(y / 8))]) * 4));
+      const heightRow = (y) => String(Math.round((38.4 - DEPTHS[Math.min(DEPTHS.length - 1, Math.floor(y / 8))]) * 4));
       section("height", Array.from({ length: 65 }, (_, y) => `${heightRow(y)}*65`));
       section("water", Array.from({ length: 65 }, () => "512*65"));
       section("flags", Array.from({ length: 65 }, () => "4".repeat(65)));
       section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
     }
     writeFileSync(file, lines.join("\n"));
-    const suffix = cliffList ? `-${cliffList.join("-")}` : "";
+    const suffix = (cliffList ? `-${cliffList.join("-")}` : "") + (depthList ? `-${depthList.join("-")}` : "") + (reflectivity !== null ? `-r${reflectivity}` : "");
     run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}${suffix}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {

@@ -59,7 +59,9 @@ try {
   await until("the sample project", () => page.evaluate(`!!w3Workbench.workspace.project() && w3Workbench.workspace.files().length > 5`), 30_000);
   const banner = await text(".demo-banner");
   if (!/UI demo/.test(banner)) found.push("no demo banner");
-  if (!(await page.evaluate(`!!document.querySelector(".titlebar .menubar") && document.querySelectorAll(".titlebar-button").length === 0`))) found.push("title bar: menus missing, or window buttons shown");
+  const bar = await page.evaluate(`JSON.stringify({ titlebar: !!document.querySelector(".titlebar"), menubar: !!document.querySelector(".menubar"), menubarInTitlebar: !!document.querySelector(".titlebar .menubar"), buttons: document.querySelectorAll(".titlebar-button").length, items: document.querySelectorAll(".menubar-item").length, ua: navigator.userAgent })`);
+  const barState = JSON.parse(bar);
+  if (!barState.menubarInTitlebar || barState.buttons !== 0) found.push(`title bar: menus missing, or window buttons shown (${bar})`);
   await shot("1-start");
 
   const views = await page.evaluate(`document.querySelectorAll("button.activity").length`);

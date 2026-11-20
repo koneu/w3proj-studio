@@ -1,6 +1,6 @@
 // One command for every automatic check, with one honest answer. See TESTING.md.
 //
-//   node tests/gate.mjs            the commit gate: types, unit and system tests, clippy, UI smoke
+//   node tests/gate.mjs            the commit gate: types, unit and system tests, clippy, UI smoke, web demo
 //   node tests/gate.mjs coverage   the commit gate's tests, measured against tests/coverage-floor.json
 //   node tests/gate.mjs corpus     real maps and the installed game (local only, some minutes)
 //   node tests/gate.mjs batch      commit and corpus in one run (a merge batch: they overlap)
@@ -283,6 +283,8 @@ const steps = [
   { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
   { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
   { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
+  // The web demo (docs/web-demo.md): its own build folder (app/dist-demo), so no "dist" lock. A missing browser FAILS, as in ui-smoke.
+  { id: "demo", name: "web demo build and check (headless)", tier: "commit", weight: 2, run: shell("node scripts/demo-check.mjs --build", { cwd: app }) },
   { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
   // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
@@ -290,7 +292,7 @@ const steps = [
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "tstestcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "demo", "tstestcorpus", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],

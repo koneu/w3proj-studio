@@ -494,7 +494,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   const sources = await w3.backend.invoke<Record<string, string>>("derived_sources", { root: w3.workspace.project()!.root }).catch(() => null);
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
   await w3.workspace.refresh();
-  const read = (p: string) => w3.game.read(p);
+  const read = (p: string) => w3.game.read(p, { shared: true });
   const { wpm } = await buildPathingMap(w3, t, [], read, w3.settings.get<number>("terrain.pathing.deepWater"));
   await w3.workspace.writeBytes("map/war3map.wpm", wpm);
   await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, t, [], read, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));

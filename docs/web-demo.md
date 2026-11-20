@@ -9,6 +9,8 @@ master; Pages must be enabled once in the repository settings).
     npm run dev:demo      # http://localhost:1421/
     npm run build:demo    # app/dist-demo/ (base /w3proj-studio/; DEMO_BASE=/ overrides it)
     npm run demo-check    # serves dist-demo under /w3proj-studio/ and drives it in headless Chrome/Edge, ~15 s
+                          # (a step of the commit gate as `demo`, which builds first; CI's Windows job runs it too;
+                          # no browser found = FAIL)
 
 ## Where the frontend reaches the backend
 

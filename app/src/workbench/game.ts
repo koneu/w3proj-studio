@@ -137,8 +137,9 @@ export class GameService {
   }
 
   /** Each caller gets its own copy: one that changes its bytes can't change another's.
-   *  `background`: nobody waits on it now (see GameReadOptions). */
-  async read(path: string, tileset?: string, background = false): Promise<Uint8Array> {
+   *  `background`: nobody waits on it now (see GameReadOptions).
+   *  `shared`: the kept bytes themselves, not a copy (see GameReadOptions): the caller must never write to them. */
+  async read(path: string, tileset?: string, background = false, shared = false): Promise<Uint8Array> {
     this.requests++;
     const args = this.args();
     // As the backend looks paths up: either slash, any case.
@@ -168,7 +169,8 @@ export class GameService {
         else if (this.files.get(key) === started) this.files.delete(key);
       });
     }
-    return (await read).slice();
+    const bytes = await read;
+    return shared ? bytes : bytes.slice();
   }
 
   /** Runs a backend read when one of MAX_READS_IN_FLIGHT places is free; a finished read hands

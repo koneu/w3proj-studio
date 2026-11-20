@@ -81,8 +81,10 @@ export const editorVars = (vars, platform = process.platform) =>
   Object.fromEntries(Object.entries(vars).filter(([k]) => k === "REPO" || k === "MAIN").map(([k, v]) => [`${k}_WE`, editorPath(v, platform)]));
 
 /** One World Editor step of a spec as the arguments we-drive takes: "--key d" or ["--key", "d"] or ["--wait-ready"].
- *  A `--type` text gets `${REPO_WE}` / `${MAIN_WE}` (editorVars) filled in. */
-function weStep(step, where, vars = {}) {
+ *  A `--type` text gets `${REPO_WE}` / `${MAIN_WE}` (editorVars) filled in; an `--open` map (a second map opened in
+ *  the same editor, e.g. to paste what was copied in the input) is a path as input.map's (expandPath: `${REPO}`,
+ *  `${MAIN}`, else the spec's folder); parseSpec waits for it with a --wait-ready after it. */
+function weStep(step, where, vars = {}, specDir = ".", pathVars = {}) {
   const tokens = typeof step === "string" ? [step.slice(0, /\s/.test(step) ? step.search(/\s/) : step.length), ...(/\s/.test(step) ? [step.slice(step.search(/\s/)).trim()] : [])] : step;
   if (!Array.isArray(tokens) || !tokens.length || tokens.some((t) => typeof t !== "string") || tokens.length > 2 || !tokens[0].startsWith("--")) {
     throw new Error(`${where}: a World Editor step is "--step value" or ["--step", "value"], got ${JSON.stringify(step)}`);
@@ -90,6 +92,7 @@ function weStep(step, where, vars = {}) {
   if (["--map", "--start", "--save", "--save-shadows", "--close", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--look"].includes(tokens[0])) {
     throw new Error(`${where}: ${tokens[0]} is done by we-compare itself (the map, the wait for it, the save and the close)`);
   }
+  if (tokens[0] === "--open" && tokens.length === 2) return [tokens[0], expandPath(tokens[1], specDir, pathVars)];
   return tokens[0] === "--type" && tokens.length === 2 ? [tokens[0], expandText(tokens[1], vars)] : tokens;
 }
 
@@ -239,7 +242,11 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   const dup = compare.map((c) => c.file.toLowerCase()).filter((f, i, a) => a.indexOf(f) !== i);
   if (dup.length) throw new Error(`${where}: compare names ${dup[0]} twice`);
   if (raw.limit !== undefined && !(Number.isInteger(raw.limit) && raw.limit > 0)) throw new Error(`${where}: limit is a positive whole number`);
-  const weSteps = (we.steps ?? []).map((s, i) => weStep(s, `${where}: we.steps[${i}]`, editorVars(vars)));
+  const weSteps = (we.steps ?? []).flatMap((s, i) => {
+    // An opened map is waited for as the input is (--wait-ready, which a spec can't give itself).
+    const step = weStep(s, `${where}: we.steps[${i}]`, editorVars(vars), specDir, vars);
+    return step[0] === "--open" ? [step, ["--wait-ready"]] : [step];
+  });
   const left = togglesLeft(weSteps);
   if (left.length) {
     const t = left[0];
@@ -257,7 +264,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
     limit: raw.limit ?? 10,
-    files: checkoutFiles(raw, vars),
+    files: checkoutFiles(raw, vars, specDir),
     // A World Editor part a second editor at the same time could disturb: run on slot 0 with every slot's lock held.
     serial: raw.serial ?? false,
   };
@@ -363,14 +370,17 @@ const toleranceUsed = (t) => (isObject(t) ? Object.values(t).some((v) => v > 0) 
  * make-*.mjs writes into target/) would make both sides import nothing and match. we-compare stops the spec before
  * the run instead, as for a missing input map.
  */
-export function checkoutFiles(raw, vars) {
+export function checkoutFiles(raw, vars, specDir = ".") {
   const texts = [];
+  const found = new Set();
   for (const s of raw.we?.steps ?? []) {
+    // A map the editor opens in the spec (weStep's --open), wherever it is.
+    const open = typeof s === "string" && /^--open\s/.test(s) ? s.replace(/^--open\s+/, "") : Array.isArray(s) && s[0] === "--open" && typeof s[1] === "string" ? s[1] : null;
+    if (open !== null) found.add(expandPath(open, specDir, vars));
     if (typeof s === "string" && /^--type\s/.test(s)) texts.push(s.replace(/^--type\s+/, ""));
     else if (Array.isArray(s) && s[0] === "--type" && typeof s[1] === "string") texts.push(s[1]);
   }
   for (const s of [...(raw.input?.steps ?? []), ...(raw.studio?.steps ?? [])]) if (isObject(s) && typeof s.eval === "string") texts.push(s.eval);
-  const found = new Set();
   for (const t of texts) {
     for (const m of t.matchAll(/\$\{(REPO|MAIN)(?:_WE)?\}((?:[\\/][^\\/'"`\s,;()[\]{}<>|*?]+)+)/g)) {
       if (!Object.hasOwn(vars, m[1])) continue;

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  decode, HD_REFLECT_DEPTH, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_THROUGH, HD_WAVE_LIGHT, HD_WAVE_RED, HD_WAVES,
-  hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight, hdWaveShift,
+  decode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_WATER_TILT, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
+  HD_WAVE_RED, HD_WAVES, hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPath, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight,
+  hdWaveShift,
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
 
@@ -23,6 +24,10 @@ function ray(cam: { target: number[]; distance: number; yaw: number; pitch: numb
   const t = Math.tan(fov / 2), nx = (2 * (px + 0.5)) / W - 1, ny = 1 - (2 * (py + 0.5)) / H;
   return norm([0, 1, 2].map((i) => f[i] + nx * t * (W / H) * r[i] + ny * t * u[i]));
 }
+/** The camera's axis (from the eye to the target, unit). */
+function axis(cam: { distance: number; yaw: number; pitch: number }): number[] {
+  return [-Math.cos(cam.pitch) * Math.cos(cam.yaw), -Math.cos(cam.pitch) * Math.sin(cam.yaw), -Math.sin(cam.pitch)];
+}
 /** View Entire Map of the 128 × 96 maps (Studio's, at the editor's field of view, which the pictures line up with). */
 const ENTIRE = { target: [704, -2867.5, -161.5], distance: 17168, yaw: -Math.PI / 2, pitch: 1.5688, fov: 0.7166 };
 /** The bands' rows and the columns' pixels in the editor's pictures. */
@@ -39,15 +44,35 @@ test("HD water's tables: none of the water at 0, all of it from 200 deep, linear
   assert.deepEqual(hdWaterAt(200), { through: 0, own: 1, reflect: 1 });
   assert.deepEqual(hdWaterAt(5000), { through: 0, own: 1, reflect: 1 });
   const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
-  HD_WATER_DEPTHS.forEach((d, i) => {
-    const w = hdWaterAt(d);
-    assert.ok(near(w.through, HD_WATER_THROUGH[i]) && near(w.own, HD_WATER_OWN[i]) && near(w.reflect, HD_REFLECT_DEPTH[i]), `at ${d}: ${JSON.stringify(w)}`);
+  // The bed's and the deep colour's shares go by the path, the reflection's by the depth.
+  HD_WATER_PATHS.forEach((p, i) => {
+    const w = hdWaterAt(1000, p);
+    assert.ok(near(w.through, HD_WATER_THROUGH[i]) && near(w.own, HD_WATER_OWN[i]), `along ${p}: ${JSON.stringify(w)}`);
   });
-  const half = hdWaterAt(18);
-  assert.ok(Math.abs(half.through - (HD_WATER_THROUGH[2] + HD_WATER_THROUGH[3]) / 2) < 1e-9, "18 is halfway between 12 and 24");
-  // The shader holds the same tables, in the same places: the depths, then hdWaterAt's through, own, reflect in that order.
+  HD_WATER_DEPTHS.forEach((d, i) => assert.ok(near(hdWaterAt(d, 1000).reflect, HD_REFLECT_DEPTH[i]), `at ${d}`));
+  assert.deepEqual(hdWaterAt(24), hdWaterAt(24, 24), "the path is the depth unless given");
+  const half = hdWaterAt(20);
+  assert.ok(Math.abs(half.through - (HD_WATER_THROUGH[3] + HD_WATER_THROUGH[4]) / 2) < 1e-9, "20 is halfway between 16 and 24");
+  // The thickness along the camera's axis: the path through the water (the depth over the cosine of the view's angle
+  // from straight down, never flatter than 0.2) times the cosine of the view's angle from the axis, less by the
+  // camera's tilt; any lengths. A camera looking straight down (the default): the depth anywhere in its picture.
+  assert.equal(hdWaterPath(50, [0, 0, -3]), 50);
+  assert.ok(near(hdWaterPath(50, [0, 3, -4]), 50), "the side of a straight-down camera's picture");
+  assert.ok(near(hdWaterPath(50, [0, 3, -4], [0, 0, -7]), 50));
+  assert.equal(hdWaterPath(50, [0, 0, 0]), 50, "no view: the depth");
+  // A camera 0.8 below the horizon (sine), looking along the view: the path, 1 − 0.2 × HD_WATER_TILT of it.
+  const tilt = 1 - HD_WATER_TILT * 0.2;
+  assert.ok(near(hdWaterPath(50, [0, 3, -4], [0, 6, -8]), 62.5 * tilt));
+  assert.ok(near(hdWaterPath(50, [0, 0, -1], [0, 3, -4]), 50 * 0.8 * tilt), "straight down through that camera's picture");
+  assert.ok(near(hdWaterPath(50, [1, 0, 0], [1, 0, 0]), (50 / HD_PATH_FLATTEST) * (1 - HD_WATER_TILT)), "along the surface: no flatter than 0.2");
+  assert.ok(near(hdWaterPath(50, [0, 0, -1], [1, 0, 0]), 50 * HD_PATH_FLATTEST * (1 - HD_WATER_TILT)), "never less than the flattest share of the view");
+  // The shader holds the same tables, in the same places: the depths, the paths, then hdWaterAt's through, own,
+  // reflect in that order, and the same flattest view.
   assert.deepEqual(glslTables(/const float HD_DEPTHS\[8\] = (float\[8\]\([^)]*\))/), [[...HD_WATER_DEPTHS]]);
-  assert.deepEqual(glslTables(/return vec3\((.*)\);\s*\}\s*float hdShallowAt/s), [[...HD_WATER_THROUGH], [...HD_WATER_OWN], [...HD_REFLECT_DEPTH]]);
+  assert.deepEqual(glslTables(/const float HD_PATHS\[\d+\] = (float\[\d+\]\([^)]*\))/), [[...HD_WATER_PATHS]]);
+  assert.deepEqual(glslTables(/vec3 hdWaterAt\(float d, float p\) \{\s*return vec3\((.*?)\);\s*\}/s), [[...HD_WATER_THROUGH], [...HD_WATER_OWN], [...HD_REFLECT_DEPTH]]);
+  const glslPath = /return d \/ max\(-view\.z, ([\d.]+)\) \* max\(dot\(view, forward\), ([\d.]+)\) \* \(1\.0 - ([\d.]+) \* \(1\.0 \+ forward\.z\)\);/.exec(HD_WATER_GLSL);
+  assert.deepEqual([Number(glslPath?.[1]), Number(glslPath?.[2]), Number(glslPath?.[3])], [HD_PATH_FLATTEST, HD_PATH_FLATTEST, HD_WATER_TILT]);
 });
 
 /** The `float[n](…)` tables inside the part of the shader a pattern's first group matches, as numbers. */
@@ -67,15 +92,104 @@ test("the w3i's water settings: its reflectivity and environment map reflectivit
   assert.deepEqual(hdReflectScale({ reflectivity: 0, environment: 100 }), [0, 0], "reflectivity 0: no reflection, nothing dimmed");
 });
 
-test("without the reflection (w3i reflectivity 0) HD water is the bed and the tileset's deep colour by depth, as the editor's", () => {
-  // [depth, bed, the editor's water] in the middle column; Ashenvale's water lies 12.8 higher (Water.slk's height).
-  const bands: Record<string, [number, number[], number[]][]> = {
-    L: [[4, [1, 125, 0], [1, 121, 5]], [12, [1, 125, 0], [1, 115, 15]], [24, [1, 125, 0], [1, 105, 24]], [38.4, [1, 125, 0], [0, 93, 33]], [64, [1, 125, 0], [1, 72, 44]], [96, [1, 125, 0], [0, 50, 57]]],
-    A: [[16.8, [0, 50, 25], [0, 45, 31]], [24.8, [0, 50, 25], [0, 43, 34]], [36.8, [0, 50, 25], [0, 40, 39]], [51.2, [0, 50, 25], [0, 37, 44]], [76.8, [0, 50, 25], [1, 33, 52]], [108.8, [0, 50, 25], [0, 35, 64]]],
-    B: [[4, [121, 79, 37], [116, 76, 36]], [12, [121, 80, 37], [110, 72, 34]], [24, [121, 79, 37], [99, 66, 32]], [38.4, [121, 80, 37], [86, 58, 29]], [64, [121, 79, 37], [62, 44, 24]], [96, [121, 79, 37], [26, 31, 23]]],
-    N: [[4, [74, 132, 148], [71, 128, 143]], [12, [74, 132, 148], [66, 120, 134]], [24, [74, 132, 148], [60, 110, 122]], [38.4, [73, 132, 148], [51, 97, 106]], [64, [74, 131, 147], [35, 73, 78]], [96, [74, 132, 148], [11, 45, 39]]],
-  };
+/**
+ * The editor's game view through `--look 0,Y,D,304,70,90` over a band `depth` deep (surface 38.4): Studio's camera for it
+ * (we-camera.mjs studioCamera: the target 298/3000 of the distance back, on the bed; 2738/3000 of the distance).
+ */
+const gameCam = (y: number, depth: number, distance = 1200) =>
+  ({ target: [0, y - (298 / 3000) * distance, 38.4 - depth], distance: (2738 / 3000) * distance, yaw: -Math.PI / 2, pitch: 0.99833, fov: 0.71663 });
+/**
+ * Bands of the editor's game view (we-drive, HD, branch hd-deep-water, 2026-11-20; Lordaeron maps from
+ * make-water-tilesets.mjs --depths 4,8,16,24,40,56,72,800 and 32,64,96,128,160,200,800,800, the look's Y in a band's
+ * middle): [Y, depth, boxes of 60 rows (from py − 30) in three columns (200 to 440, 472 to 712, 784 to 1084), the first,
+ * middle and last that lie in the band: [px, py, the editor's colour]]. The dry ground (nv-L.w3x through the same
+ * looks: the camera stands on the ground, so the bed is seen as there) is 133, 92, 27 everywhere.
+ */
+type GameBand = [number, number, [number, number, number[]][]];
+const GAME_BED = [133.4, 92.4, 27.3];
+/** With the w3i's reflectivity 0 (the -r0 maps), from 1200. */
+const GAME_OFF: GameBand[] = [
+  [2624, 8, [[320, 130, [120, 84, 32]], [320, 370, [125, 88, 30]], [320, 610, [125, 87, 30]], [592, 130, [118, 83, 32]], [592, 370, [125, 87, 30]], [592, 610, [124, 86, 30]], [934, 130, [127, 88, 29]], [934, 370, [123, 86, 30]], [934, 610, [123, 86, 31]]]],
+  [1600, 16, [[320, 130, [110, 78, 35]], [320, 370, [115, 82, 33]], [320, 610, [117, 83, 33]], [592, 130, [111, 79, 34]], [592, 370, [118, 83, 32]], [592, 610, [116, 82, 33]], [934, 130, [113, 80, 34]], [934, 370, [114, 81, 33]], [934, 610, [118, 83, 32]]]],
+  [576, 24, [[320, 130, [101, 73, 38]], [320, 370, [105, 75, 37]], [320, 610, [106, 76, 36]], [592, 130, [102, 74, 37]], [592, 370, [102, 74, 37]], [592, 610, [110, 79, 35]], [934, 130, [106, 76, 36]], [934, 370, [105, 76, 36]], [934, 610, [111, 79, 34]]]],
+  [-448, 40, [[320, 130, [80, 62, 44]], [320, 370, [90, 67, 41]], [320, 610, [94, 69, 39]], [592, 130, [82, 64, 43]], [592, 370, [88, 66, 42]], [592, 610, [96, 70, 39]], [934, 130, [81, 63, 44]], [934, 370, [87, 66, 41]], [934, 610, [95, 70, 39]]]],
+  [-1472, 56, [[320, 130, [55, 52, 50]], [320, 370, [66, 56, 48]], [320, 610, [77, 61, 45]], [592, 130, [54, 51, 51]], [592, 370, [68, 57, 47]], [592, 610, [76, 60, 45]], [934, 130, [55, 52, 51]], [934, 370, [69, 58, 47]], [934, 610, [76, 60, 45]]]],
+  [2624, 64, [[320, 130, [40, 47, 55]], [320, 370, [59, 54, 50]], [320, 610, [67, 56, 47]], [592, 130, [38, 46, 55]], [592, 370, [58, 53, 50]], [592, 610, [66, 55, 48]], [934, 130, [47, 50, 53]], [934, 370, [56, 52, 50]], [934, 610, [65, 55, 48]]]],
+  [-2496, 72, [[320, 130, [29, 46, 57]], [320, 370, [46, 49, 53]], [320, 610, [61, 55, 50]], [592, 130, [29, 47, 57]], [592, 370, [46, 50, 54]], [592, 610, [60, 54, 50]], [934, 130, [26, 46, 58]], [934, 370, [47, 50, 53]], [934, 610, [58, 53, 50]]]],
+  [1600, 96, [[320, 130, [0, 46, 69]], [320, 370, [5, 44, 63]], [320, 610, [25, 44, 58]], [592, 130, [0, 49, 69]], [592, 370, [7, 44, 62]], [592, 610, [22, 43, 59]], [934, 130, [0, 47, 68]], [934, 370, [7, 47, 62]], [934, 610, [24, 43, 59]]]],
+  [576, 128, [[320, 130, [0, 48, 69]], [320, 310, [0, 47, 69]], [320, 550, [0, 46, 69]], [592, 130, [0, 50, 69]], [592, 310, [0, 45, 69]], [592, 550, [0, 47, 69]], [934, 130, [0, 49, 69]], [934, 310, [0, 47, 69]], [934, 550, [0, 49, 69]]]],
+  [-448, 160, [[320, 130, [0, 48, 69]], [320, 310, [0, 47, 69]], [320, 550, [0, 48, 69]], [592, 130, [0, 51, 69]], [592, 310, [0, 48, 69]], [592, 550, [0, 50, 69]], [934, 130, [0, 49, 69]], [934, 310, [0, 47, 69]], [934, 550, [0, 48, 69]]]],
+  [-1472, 200, [[320, 130, [0, 47, 69]], [320, 310, [0, 46, 69]], [320, 550, [0, 49, 69]], [592, 130, [0, 49, 69]], [592, 310, [0, 45, 69]], [592, 550, [0, 47, 69]], [934, 130, [0, 48, 69]], [934, 310, [0, 48, 69]], [934, 550, [0, 46, 69]]]],
+];
+/** The same, from 600 and 2400 (the deep -r0 map): the bed's share goes by the slant, not the distance. */
+const GAME_OFF_NEAR_FAR: [number, GameBand[]][] = [
+  [600, [
+    [2624, 64, [[320, 70, [35, 47, 56]], [320, 430, [59, 53, 50]], [320, 790, [72, 58, 46]], [592, 70, [35, 46, 56]], [592, 430, [58, 53, 50]], [592, 790, [73, 58, 47]], [934, 70, [35, 46, 56]], [934, 430, [57, 53, 50]], [934, 790, [71, 58, 47]]]],
+    [1600, 96, [[320, 70, [0, 47, 69]], [320, 430, [13, 45, 61]], [320, 790, [37, 48, 56]], [592, 70, [0, 48, 69]], [592, 430, [13, 45, 61]], [592, 790, [36, 47, 56]], [934, 70, [0, 48, 69]], [934, 430, [12, 45, 61]], [934, 790, [36, 47, 56]]]],
+  ]],
+  [2400, [
+    [2624, 64, [[320, 250, [56, 53, 50]], [320, 310, [58, 53, 50]], [320, 430, [61, 54, 49]], [592, 250, [56, 52, 51]], [592, 310, [58, 53, 50]], [592, 430, [56, 51, 50]], [934, 250, [53, 51, 51]], [934, 310, [58, 53, 50]], [934, 430, [60, 53, 50]]]],
+    [1600, 96, [[320, 250, [2, 45, 64]], [320, 310, [6, 45, 63]], [320, 430, [15, 45, 61]], [592, 250, [0, 45, 65]], [592, 310, [1, 44, 64]], [592, 430, [18, 46, 60]], [934, 250, [0, 44, 64]], [934, 310, [4, 45, 63]], [934, 430, [12, 44, 61]]]],
+  ]],
+];
+
+/** Barrens the same way (make-water-tilesets.mjs … --reflectivity 0 B; its dry ground 80, 49, 29): not fitted on. */
+const GAME_BARRENS: GameBand[] = [
+  [2624, 8, [[320, 130, [72, 44, 27]], [320, 370, [75, 46, 28]], [320, 610, [75, 46, 28]], [592, 130, [70, 43, 27]], [592, 370, [75, 46, 28]], [592, 610, [74, 45, 28]], [934, 130, [76, 46, 28]], [934, 370, [74, 45, 28]], [934, 610, [73, 45, 27]]]],
+  [1600, 16, [[320, 130, [65, 41, 25]], [320, 370, [68, 42, 26]], [320, 610, [70, 43, 26]], [592, 130, [66, 41, 26]], [592, 370, [70, 44, 27]], [592, 610, [69, 43, 26]], [934, 130, [67, 42, 26]], [934, 370, [69, 43, 26]], [934, 610, [70, 43, 27]]]],
+  [576, 24, [[320, 130, [59, 38, 24]], [320, 370, [62, 39, 25]], [320, 610, [63, 40, 25]], [592, 130, [61, 39, 25]], [592, 370, [60, 38, 24]], [592, 610, [65, 41, 25]], [934, 130, [62, 39, 25]], [934, 370, [63, 40, 25]], [934, 610, [66, 41, 26]]]],
+  [-448, 40, [[320, 130, [46, 33, 22]], [320, 370, [53, 35, 23]], [320, 610, [56, 37, 24]], [592, 130, [48, 34, 23]], [592, 370, [51, 34, 23]], [592, 610, [57, 37, 24]], [934, 130, [48, 33, 23]], [934, 370, [51, 35, 23]], [934, 610, [56, 37, 24]]]],
+  [-1472, 56, [[320, 130, [32, 28, 22]], [320, 370, [38, 29, 21]], [320, 610, [45, 32, 22]], [592, 130, [31, 28, 21]], [592, 370, [39, 30, 22]], [592, 610, [44, 32, 22]], [934, 130, [31, 28, 21]], [934, 370, [40, 31, 23]], [934, 610, [44, 31, 22]]]],
+  [2624, 64, [[320, 130, [22, 27, 22]], [320, 370, [34, 30, 22]], [320, 610, [39, 30, 22]], [592, 130, [21, 26, 21]], [592, 370, [33, 28, 21]], [592, 610, [38, 29, 21]], [934, 130, [27, 28, 23]], [934, 370, [32, 28, 21]], [934, 610, [37, 28, 21]]]],
+  [-2496, 72, [[320, 130, [17, 26, 22]], [320, 370, [27, 28, 22]], [320, 610, [34, 30, 23]], [592, 130, [17, 28, 24]], [592, 370, [26, 28, 23]], [592, 610, [34, 30, 22]], [934, 130, [16, 27, 23]], [934, 370, [27, 28, 22]], [934, 610, [33, 29, 22]]]],
+  [1600, 96, [[320, 130, [6, 28, 26]], [320, 370, [7, 26, 23]], [320, 610, [15, 25, 22]], [592, 130, [7, 30, 27]], [592, 370, [8, 27, 24]], [592, 610, [13, 25, 22]], [934, 130, [6, 29, 27]], [934, 370, [8, 29, 26]], [934, 610, [14, 25, 22]]]],
+  [576, 128, [[320, 130, [7, 30, 27]], [320, 310, [6, 29, 26]], [320, 550, [6, 28, 25]], [592, 130, [7, 32, 29]], [592, 310, [6, 27, 24]], [592, 550, [6, 29, 26]], [934, 130, [7, 30, 28]], [934, 310, [6, 29, 27]], [934, 550, [7, 31, 28]]]],
+  [-448, 160, [[320, 130, [6, 29, 26]], [320, 310, [6, 29, 26]], [320, 550, [7, 30, 27]], [592, 130, [7, 32, 29]], [592, 310, [6, 29, 27]], [592, 550, [7, 31, 28]], [934, 130, [7, 30, 28]], [934, 310, [6, 29, 27]], [934, 550, [6, 30, 27]]]],
+  [-1472, 200, [[320, 130, [6, 29, 27]], [320, 310, [5, 26, 24]], [320, 550, [7, 31, 28]], [592, 130, [7, 31, 28]], [592, 310, [6, 28, 25]], [592, 550, [6, 29, 27]], [934, 130, [7, 31, 29]], [934, 310, [6, 29, 27]], [934, 550, [6, 28, 25]]]],
+];
+
+/**
+ * hdWaterPixel over the bed (GAME_BED, Lordaeron's colours unless given) at each box's middle against the editor's
+ * colour: each band's mean within `tol`, every box within `boxTol` (the waves' blotches move a single box by a few
+ * levels).
+ */
+function checkBands(bands: GameBand[], distance: number, settings: Parameters<typeof hdWaterPixel>[4], tol: number, boxTol: number, ts = "L", bed = GAME_BED) {
+  for (const [y, depth, boxes] of bands) {
+    const cam = gameCam(y, depth, distance), sum = [0, 0, 0], want = [0, 0, 0];
+    for (const [px, py, editor] of boxes) {
+      const got = hdWaterPixel(bed, depth, deep(ts), ray(cam, px, py), settings, hdWaterShallow(ts, false), 0, null, axis(cam));
+      within(got, editor, boxTol, `${depth} deep from ${distance}, the box at ${px}, ${py}`);
+      got.forEach((v, k) => { sum[k] += v / boxes.length; want[k] += editor[k] / boxes.length; });
+    }
+    within(sum, want, tol, `${depth} deep from ${distance}, the band's mean`);
+  }
+}
+
+test("without the reflection (w3i reflectivity 0) HD water is the bed and the deep colour by its thickness along the camera, as in the editor's game view", () => {
   const off = { reflectivity: 0, environment: 100 };
+  // Every band's mean within 2 levels; single boxes up to 8 (64 deep) and 9 (96 deep, the last row before the slope
+  // down to 128) off, where the bed shows least evenly.
+  checkBands(GAME_OFF, 1200, off, 2, 10);
+  for (const [distance, bands] of GAME_OFF_NEAR_FAR) checkBands(bands, distance, off, 2, 6);
+  // The same tables on another tileset's bed and colour, not fitted on: every band within 2, every box within 5.
+  checkBands(GAME_BARRENS, 1200, off, 2, 5.5, "B", [80, 49, 29]);
+  // The control (the open point this closes): through 96 deep water at the view's own slant the editor shows almost
+  // none of the bed (red 7 in the middle box), where the depth alone, as if looking straight down, shows much more.
+  const [y, depth, boxes] = GAME_OFF[7], [px, py, editor] = boxes[4], view = ray(gameCam(y, depth), px, py);
+  const straight = hdWaterPixel(GAME_BED, depth, deep("L"), [0, 0, -1], off), slanted = hdWaterPixel(GAME_BED, depth, deep("L"), view, off, undefined, 0, null, axis(gameCam(y, depth)));
+  assert.ok(straight[0] - editor[0] > 20 && slanted[0] < 12, `96 deep: ${straight.map(Math.round)} by the depth, ${slanted.map(Math.round)} along the slanted camera, the editor's ${editor}`);
+  assert.ok(hdWaterPath(depth, view, axis(gameCam(y, depth))) > 1.1 * depth, "a slanted camera's thickness is more than the depth");
+
+  // Looking straight down (View Entire Map, branch water-render-we, 2026-11-14: [depth, bed, the editor's water] in the
+  // middle column): the shallow bands of the four tilesets, where the editor's View Entire Map agrees with its game
+  // view (deeper, its View Entire Map shows less of the bed than the game view: docs/testing/branch-rounds.md, branch
+  // hd-deep-water). Ashenvale's water lies 12.8 higher (Water.slk's height).
+  const bands: Record<string, [number, number[], number[]][]> = {
+    L: [[4, [1, 125, 0], [1, 121, 5]], [12, [1, 125, 0], [1, 115, 15]], [24, [1, 125, 0], [1, 105, 24]]],
+    A: [[16.8, [0, 50, 25], [0, 45, 31]], [24.8, [0, 50, 25], [0, 43, 34]]],
+    B: [[4, [121, 79, 37], [116, 76, 36]], [12, [121, 80, 37], [110, 72, 34]], [24, [121, 79, 37], [99, 66, 32]]],
+    N: [[4, [74, 132, 148], [71, 128, 143]], [12, [74, 132, 148], [66, 120, 134]], [24, [74, 132, 148], [60, 110, 122]]],
+  };
   for (const [ts, rows] of Object.entries(bands)) for (const [d, bed, editor] of rows) {
     within(hdWaterPixel(bed, d, deep(ts), [0, 0, -1], off), editor, 3, `${ts} ${d} deep`);
   }
@@ -83,23 +197,81 @@ test("without the reflection (w3i reflectivity 0) HD water is the bed and the ti
   within(hdWaterPixel([255, 255, 255], 800, deep("B"), [0, 0, -1], off), [6, 31, 27], 0.5, "Barrens 800 deep");
 });
 
-test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: its own shallow colour by depth", () => {
-  // The editor's bands with the reflection off (wdZr0, View Entire Map, the middle column): [depth, bed, water].
-  const bands: [number, number[], number[]][] = [
-    [12, [137, 133, 74], [124, 127, 86]], [24, [137, 133, 74], [113, 122, 96]], [38.4, [137, 133, 74], [98, 117, 107]],
-    [64, [137, 132, 74], [71, 106, 125]], [96, [137, 133, 74], [29, 87, 147]], [200, [137, 133, 74], [0, 91, 170]],
-  ];
-  const off = { reflectivity: 0, environment: 100 };
-  const shallow = hdWaterShallow("Z", false);
-  for (const [d, bed, editor] of bands) within(hdWaterPixel(bed, d, deep("Z"), [0, 0, -1], off, shallow), editor, 3, `Z ${d} deep`);
-  // The control: with the deep colour alone the green is far short in the middle depths (the open point this closes).
-  const plain = hdWaterPixel([137, 132, 74], 64, deep("Z"), [0, 0, -1], off);
-  assert.ok(106 - plain[1] > 12, `one colour: ${plain.map(Math.round)} at 64 deep against the editor's 71, 106, 125`);
-  // Deep water has none of the shallow colour, the surface all of it; the shader holds the same table.
-  assert.ok(Math.abs(hdShallowAt(200)) < 1e-9 && hdShallowAt(5000) === 0);
+/**
+ * The editor's game view looking straight down (we-drive, HD, branch we-look-hd2, 2026-11-20: `--look 0,Y,1200,270,70,90`
+ * over the middle of each band of the -r0 maps of GAME_OFF, the mean of rows 200 to 640 and columns 300 to 900 in linear
+ * light): [depth, the editor's colour]. The colour is the same across the picture (96 deep: red 24 to 30 in every column
+ * from the middle to the sides, 28° off straight down).
+ */
+const STRAIGHT_DOWN: [number, number[]][] = [
+  [8, [124.5, 87.0, 30.2]], [16, [117.6, 82.9, 32.5]], [24, [108.6, 77.7, 35.3]], [40, [94.6, 69.7, 39.5]], [48, [86.3, 65.4, 42.0]],
+  [56, [77.0, 60.8, 44.9]], [64, [67.4, 56.4, 47.5]], [72, [59.8, 54.1, 49.8]], [80, [48.3, 49.4, 52.8]], [96, [27.4, 44.4, 57.8]],
+  [112, [3.9, 44.4, 62.9]], [144, [0, 49.0, 69.0]], [176, [0, 48.3, 69.0]],
+];
+
+/** GAME_OFF's looks through the angle of attack 304 in STRAIGHT_DOWN's session (48 and 80 deep on the 8, 48, 80, … map,
+ *  64 and 96 deep on the 32, 64, 96, … map), the same boxes. */
+const GAME_OFF_SAME_SESSION: GameBand[] = [
+  [2624, 48, [[320, 130, [71, 59, 47]], [592, 130, [71, 58, 47]], [934, 130, [72, 59, 46]], [320, 370, [79, 62, 44]], [592, 370, [77, 61, 45]], [934, 370, [80, 62, 44]], [320, 610, [89, 67, 41]], [592, 610, [89, 67, 41]], [934, 610, [88, 66, 42]]]],
+  [1600, 80, [[320, 130, [10, 43, 61]], [592, 130, [8, 44, 62]], [934, 130, [8, 45, 62]], [320, 370, [29, 45, 57]], [592, 370, [31, 45, 57]], [934, 370, [35, 47, 56]], [320, 610, [49, 51, 53]], [592, 610, [47, 49, 53]], [934, 610, [47, 48, 53]]]],
+  [576, 112, [[320, 130, [0, 46, 69]], [592, 130, [0, 47, 69]], [934, 130, [0, 48, 69]], [320, 370, [0, 49, 68]], [592, 370, [0, 48, 68]], [934, 370, [0, 46, 69]], [320, 610, [0, 44, 64]], [592, 610, [0, 44, 64]], [934, 610, [1, 45, 64]]]],
+  [2624, 64, [[320, 130, [45, 50, 54]], [592, 130, [46, 50, 53]], [934, 130, [44, 48, 54]], [320, 370, [53, 51, 51]], [592, 370, [55, 52, 51]], [934, 370, [56, 51, 50]], [320, 610, [67, 56, 48]], [592, 610, [71, 59, 46]], [934, 610, [68, 57, 47]]]],
+  [1600, 96, [[320, 130, [0, 50, 68]], [592, 130, [0, 48, 68]], [934, 130, [0, 49, 68]], [320, 370, [3, 44, 63]], [592, 370, [5, 43, 63]], [934, 370, [8, 44, 62]], [320, 610, [30, 46, 57]], [592, 610, [29, 46, 57]], [934, 610, [25, 46, 58]]]],
+];
+
+test("HD water goes by its thickness along the camera's axis: looking straight down, the same colour across the picture", () => {
+  const off = { reflectivity: 0, environment: 100 }, down = [0, 0, -1];
+  // Every band within 3 levels of the editor's (the tables lie half way between these and the slanted views of GAME_OFF).
+  for (const [depth, editor] of STRAIGHT_DOWN) within(hdWaterPixel(GAME_BED, depth, deep("L"), down, off, undefined, 0, null, down), editor, 3, `${depth} deep, straight down`);
+  // At the picture's side (28° off straight down) the same colour as in its middle: the camera's axis counts, not the view.
+  const side = [Math.sin(0.49), 0, -Math.cos(0.49)];
+  assert.deepEqual(hdWaterPixel(GAME_BED, 96, deep("L"), side, off, undefined, 0, null, down), hdWaterPixel(GAME_BED, 96, deep("L"), down, off, undefined, 0, null, down));
+  // The control: by the path through the water (the view taken as the axis) the side would show far less of the bed
+  // than the editor's 24 to 30 red.
+  const byPath = hdWaterPixel(GAME_BED, 96, deep("L"), side, off, undefined, 0, null, side);
+  assert.ok(byPath[0] < 20, `96 deep at the side by the path: ${byPath.map(Math.round)}`);
+  // Through the angle of attack 304 in the same session (not fitted on): every band within 3, every box within 7.
+  checkBands(GAME_OFF_SAME_SESSION, 1200, off, 3, 7);
+  // The control: without the camera's tilt (HD_WATER_TILT) the slanted view shows too little of the bed there.
+  const [y, depth, boxes] = GAME_OFF_SAME_SESSION[1], [px, py, editor] = boxes[4], cam = gameCam(y, depth), f = axis(cam), v = ray(cam, px, py);
+  // (Lordaeron has one water colour and the reflection is off, so straight down through water as thick is the same.)
+  const untilted = hdWaterPixel(GAME_BED, hdWaterPath(depth, v, f) / (1 - HD_WATER_TILT * (1 + f[2])), deep("L"), [0, 0, -1], off);
+  assert.ok(editor[0] - untilted[0] > 4, `80 deep at 592, 370 without the tilt: ${untilted.map(Math.round)} against the editor's ${editor}`);
+});
+
+/**
+ * Sunken Ruins in the editor's game view as GAME_OFF (make-water-tilesets.mjs … --reflectivity 0 Z; its dry ground
+ * 100.5, 96, 38.6). The 160 band left out: its blue was 178 on the mean against the deep colour's 171 at 128 and 200
+ * deep, in that picture alone (its boxes 168 to 186).
+ */
+const GAME_Z: GameBand[] = [
+  [2624, 8, [[320, 130, [91, 95, 62]], [320, 370, [94, 95, 55]], [320, 610, [92, 94, 60]], [592, 130, [90, 95, 65]], [592, 370, [94, 96, 57]], [592, 610, [92, 94, 59]], [934, 130, [95, 95, 56]], [934, 370, [91, 95, 62]], [934, 610, [92, 94, 59]]]],
+  [1600, 16, [[320, 130, [83, 94, 78]], [320, 370, [86, 94, 73]], [320, 610, [88, 95, 70]], [592, 130, [84, 95, 78]], [592, 370, [87, 94, 71]], [592, 610, [88, 95, 71]], [934, 130, [85, 94, 76]], [934, 370, [86, 95, 75]], [934, 610, [85, 93, 73]]]],
+  [576, 24, [[320, 130, [77, 95, 87]], [320, 370, [81, 95, 81]], [320, 610, [80, 94, 82]], [592, 130, [76, 95, 90]], [592, 370, [80, 95, 82]], [592, 610, [82, 94, 80]], [934, 130, [75, 93, 89]], [934, 370, [81, 95, 82]], [934, 610, [82, 94, 79]]]],
+  [-448, 40, [[320, 130, [58, 94, 110]], [320, 370, [67, 96, 103]], [320, 610, [69, 95, 99]], [592, 130, [59, 95, 111]], [592, 370, [66, 95, 104]], [592, 610, [68, 92, 97]], [934, 130, [56, 95, 114]], [934, 370, [71, 97, 102]], [934, 610, [68, 93, 98]]]],
+  [-1472, 56, [[320, 130, [41, 99, 129]], [320, 370, [49, 96, 120]], [320, 610, [60, 98, 115]], [592, 130, [41, 99, 129]], [592, 370, [50, 97, 121]], [592, 610, [57, 95, 112]], [934, 130, [38, 98, 130]], [934, 370, [49, 97, 121]], [934, 610, [58, 97, 113]]]],
+  [2624, 64, [[320, 130, [27, 97, 141]], [320, 370, [44, 93, 136]], [320, 610, [48, 92, 118]], [592, 130, [30, 96, 135]], [592, 370, [43, 94, 129]], [592, 610, [49, 93, 118]], [934, 130, [32, 96, 143]], [934, 370, [39, 94, 129]], [934, 610, [49, 92, 120]]]],
+  [-2496, 72, [[320, 130, [21, 81, 146]], [320, 370, [30, 80, 134]], [320, 610, [41, 80, 127]], [592, 130, [19, 82, 146]], [592, 370, [31, 80, 130]], [592, 610, [39, 80, 120]], [934, 130, [17, 82, 147]], [934, 370, [33, 80, 137]], [934, 610, [37, 80, 117]]]],
+  [1600, 96, [[320, 130, [1, 91, 173]], [320, 370, [2, 85, 152]], [320, 610, [18, 82, 155]], [592, 130, [1, 90, 182]], [592, 370, [3, 85, 152]], [592, 610, [13, 83, 136]], [934, 130, [1, 90, 172]], [934, 370, [3, 85, 163]], [934, 610, [12, 83, 142]]]],
+  [576, 128, [[320, 130, [0, 91, 168]], [320, 310, [0, 91, 169]], [320, 550, [0, 91, 169]], [592, 130, [0, 91, 175]], [592, 310, [0, 91, 177]], [592, 550, [0, 91, 164]], [934, 130, [0, 91, 174]], [934, 310, [0, 91, 171]], [934, 550, [0, 91, 164]]]],
+  [-1472, 200, [[320, 130, [1, 91, 168]], [320, 310, [1, 91, 178]], [320, 550, [1, 91, 170]], [592, 130, [0, 91, 162]], [592, 310, [1, 91, 183]], [592, 550, [1, 91, 168]], [934, 130, [1, 91, 170]], [934, 310, [1, 91, 180]], [934, 550, [1, 91, 168]]]],
+];
+
+test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: its own shallow colour to 64 deep", () => {
+  const off = { reflectivity: 0, environment: 100 }, bed = [100.5, 96, 38.6];
+  // Band means within 4 levels; the deep blue varies by 24 from box to box (162 to 186 at 200 deep), the rest by 13.
+  checkBands(GAME_Z, 1200, off, 4, 16, "Z", bed);
+  // The control: with the deep colour alone the green is far short in the shallows (the open point this closed).
+  const [y, depth, boxes] = GAME_Z[4], [px, py, editor] = boxes[4];
+  const plain = hdWaterPixel(bed, depth, deep("Z"), ray(gameCam(y, depth), px, py), off, undefined, 0, null, axis(gameCam(y, depth)));
+  assert.ok(editor[1] - plain[1] > 6, `one colour: ${plain.map(Math.round)} at 56 deep against the editor's ${editor}`);
+  // The shallow colour to 60 deep, the deep colour from 72 (Water.slk's levels); the shader holds the same table.
   assert.equal(hdShallowAt(0), 1);
-  assert.ok(Math.abs(hdShallowAt(38.4) - HD_SHALLOW_SHARE[4]) < 1e-9);
+  assert.equal(hdShallowAt(56), 1);
+  assert.ok(Math.abs(hdShallowAt(66) - 0.5) < 1e-9);
+  assert.ok(hdShallowAt(72) === 0 && hdShallowAt(5000) === 0);
   assert.deepEqual(glslTables(/(float hdShallowAt\(float d\) \{[^}]*\})/), [[...HD_SHALLOW_SHARE]]);
+  assert.deepEqual(glslTables(/const float HD_SHALLOW_DEPTHS\[\d+\] = (float\[\d+\]\([^)]*\))/), [[...HD_SHALLOW_DEPTHS]]);
   // A tileset without a shallow colour of its own keeps its deep colour at every depth, and so does a tinted map.
   assert.deepEqual(hdWaterShallow("L", false), hdWaterColor("L", false));
   assert.deepEqual(hdWaterShallow("z", false).map((v) => Math.round(v * 255)), [...HD_SHALLOW.Z], "the tileset's letter in any case");
@@ -108,22 +280,43 @@ test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: 
 });
 
 test("HD water reflects a sky that is brighter in the west: the editor's water lighter on the left of View Entire Map", () => {
-  // [column, depth, bed (Water off), the editor's water].
+  // [column, depth, bed (Water off), the editor's water]. The 96 deep bands left out: there the editor's View Entire
+  // Map shows less of the bed than its game view (the test below).
   const bands: Record<string, [string, number, number[], number[]][]> = {
-    L: [["west", 12, [1, 125, 0], [35, 119, 40]], ["west", 38.4, [1, 125, 0], [70, 113, 75]], ["west", 96, [1, 125, 0], [70, 86, 87]], ["west", 800, [1, 125, 0], [73, 87, 95]],
-      ["mid", 12, [1, 125, 0], [25, 116, 34]], ["mid", 38.4, [1, 125, 0], [54, 105, 65]], ["mid", 96, [1, 125, 0], [57, 77, 79]], ["mid", 800, [1, 125, 0], [61, 78, 89]],
-      ["east", 12, [1, 125, 0], [15, 115, 28]], ["east", 38.4, [1, 125, 0], [39, 99, 56]], ["east", 96, [1, 125, 0], [44, 69, 73]], ["east", 800, [1, 123, 0], [46, 68, 82]]],
-    B: [["west", 12, [121, 80, 37], [114, 81, 50]], ["west", 38.4, [121, 80, 37], [105, 89, 73]], ["west", 96, [121, 79, 37], [71, 75, 70]], ["west", 800, [121, 79, 37], [71, 78, 74]],
-      ["mid", 12, [121, 80, 37], [111, 77, 45]], ["mid", 38.4, [121, 80, 37], [98, 80, 63]], ["mid", 96, [121, 79, 37], [62, 66, 62]], ["mid", 800, [121, 79, 37], [59, 68, 66]],
-      ["east", 12, [121, 79, 37], [109, 75, 42]], ["east", 38.4, [121, 79, 37], [91, 71, 54]], ["east", 96, [121, 80, 37], [52, 57, 54]], ["east", 800, [119, 78, 37], [50, 60, 59]]],
+    L: [["west", 12, [1, 125, 0], [35, 119, 40]], ["west", 38.4, [1, 125, 0], [70, 113, 75]], ["west", 800, [1, 125, 0], [73, 87, 95]],
+      ["mid", 12, [1, 125, 0], [25, 116, 34]], ["mid", 38.4, [1, 125, 0], [54, 105, 65]], ["mid", 800, [1, 125, 0], [61, 78, 89]],
+      ["east", 12, [1, 125, 0], [15, 115, 28]], ["east", 38.4, [1, 125, 0], [39, 99, 56]], ["east", 800, [1, 123, 0], [46, 68, 82]]],
+    B: [["west", 12, [121, 80, 37], [114, 81, 50]], ["west", 38.4, [121, 80, 37], [105, 89, 73]], ["west", 800, [121, 79, 37], [71, 78, 74]],
+      ["mid", 12, [121, 80, 37], [111, 77, 45]], ["mid", 38.4, [121, 80, 37], [98, 80, 63]], ["mid", 800, [121, 79, 37], [59, 68, 66]],
+      ["east", 12, [121, 79, 37], [109, 75, 42]], ["east", 38.4, [121, 79, 37], [91, 71, 54]], ["east", 800, [119, 78, 37], [50, 60, 59]]],
   };
   for (const [ts, rows] of Object.entries(bands)) for (const [col, d, bed, editor] of rows) {
-    within(hdWaterPixel(bed, d, deep(ts), ray(ENTIRE, COLS[col], ROWS[d])), editor, 6, `${ts} ${col} ${d} deep`);
+    within(hdWaterPixel(bed, d, deep(ts), ray(ENTIRE, COLS[col], ROWS[d]), undefined, undefined, 0, null, axis(ENTIRE)), editor, 6, `${ts} ${col} ${d} deep`);
   }
   // The open point this closes: deep Lordaeron water 67 red in the west, 39 in the east; Studio's was a flat 22.
   const west = hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]));
   const east = hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.east, ROWS[800]));
   assert.ok(west[0] - east[0] > 20, `west ${west.map(Math.round)} against east ${east.map(Math.round)}`);
+});
+
+/** GAME_OFF's maps with the w3i's default reflectivity 10 (no -r0), the same looks. */
+const GAME_ON: GameBand[] = [
+  [2624, 8, [[320, 130, [122, 87, 38]], [320, 370, [122, 88, 43]], [320, 610, [126, 91, 40]], [592, 130, [122, 87, 35]], [592, 370, [122, 87, 38]], [592, 610, [126, 89, 34]], [934, 130, [119, 85, 39]], [934, 370, [125, 88, 34]], [934, 610, [122, 86, 36]]]],
+  [1600, 16, [[320, 130, [109, 81, 47]], [320, 370, [118, 88, 48]], [320, 610, [121, 92, 56]], [592, 130, [110, 81, 45]], [592, 370, [116, 85, 44]], [592, 610, [119, 88, 48]], [934, 130, [113, 83, 46]], [934, 370, [113, 83, 49]], [934, 610, [114, 83, 43]]]],
+  [576, 24, [[320, 130, [102, 78, 52]], [320, 370, [108, 85, 59]], [320, 610, [115, 93, 68]], [592, 130, [101, 78, 52]], [592, 370, [106, 82, 54]], [592, 610, [111, 87, 58]], [934, 130, [99, 75, 49]], [934, 370, [108, 82, 55]], [934, 610, [106, 80, 49]]]],
+  [-448, 40, [[320, 130, [80, 67, 56]], [320, 370, [100, 84, 65]], [320, 610, [100, 85, 70]], [592, 130, [81, 67, 53]], [592, 370, [93, 76, 58]], [592, 610, [95, 78, 60]], [934, 130, [81, 68, 60]], [934, 370, [92, 74, 57]], [934, 610, [94, 74, 53]]]],
+  [-1472, 56, [[320, 130, [61, 60, 61]], [320, 370, [78, 72, 65]], [320, 610, [96, 88, 76]], [592, 130, [57, 56, 58]], [592, 370, [75, 69, 62]], [592, 610, [91, 82, 70]], [934, 130, [60, 59, 62]], [934, 370, [74, 67, 65]], [934, 610, [80, 68, 57]]]],
+  [-2496, 72, [[320, 130, [42, 57, 67]], [320, 370, [62, 68, 70]], [320, 610, [73, 75, 74]], [592, 130, [37, 54, 67]], [592, 370, [59, 65, 67]], [592, 610, [62, 63, 64]], [934, 130, [43, 59, 71]], [934, 370, [53, 60, 64]], [934, 610, [61, 61, 60]]]],
+  [1600, 96, [[320, 130, [28, 57, 75]], [320, 370, [36, 60, 75]], [320, 610, [66, 79, 84]], [592, 130, [31, 62, 76]], [592, 370, [30, 55, 71]], [592, 610, [36, 54, 69]], [934, 130, [20, 52, 72]], [934, 370, [31, 57, 71]], [934, 610, [34, 52, 68]]]],
+  [576, 128, [[320, 130, [31, 60, 76]], [320, 310, [37, 64, 79]], [320, 550, [51, 74, 87]], [592, 130, [27, 58, 75]], [592, 310, [29, 59, 76]], [592, 550, [34, 63, 79]], [934, 130, [19, 51, 72]], [934, 310, [30, 57, 77]], [934, 550, [28, 56, 77]]]],
+  [-448, 160, [[320, 130, [23, 53, 73]], [320, 310, [42, 68, 82]], [320, 550, [42, 67, 83]], [592, 130, [25, 55, 74]], [592, 310, [34, 65, 78]], [592, 550, [28, 55, 76]], [934, 130, [23, 53, 74]], [934, 310, [31, 62, 78]], [934, 550, [25, 56, 75]]]],
+  [-1472, 200, [[320, 130, [25, 56, 74]], [320, 310, [36, 63, 79]], [320, 550, [63, 84, 92]], [592, 130, [23, 56, 73]], [592, 310, [31, 60, 77]], [592, 550, [36, 64, 80]], [934, 130, [28, 58, 76]], [934, 310, [33, 60, 79]], [934, 550, [25, 57, 75]]]],
+];
+
+test("HD water in the editor's game view with the reflection: the bed, the deep colour and the sky by the thickness, 8 to 200 deep", () => {
+  // Band means within 3 levels (before the path, deep water was 9 to 14 too red from 56 to 128 deep: the open point's
+  // "too much bed"); single boxes up to 16 off, deep water too: the sky's fit (HD_SKY) and the waves.
+  checkBands(GAME_ON, 1200, undefined, 3, 17);
 });
 
 test("Outland's deep water reflects a dark red sky alike in every direction: the editor's 23, 13, 13", () => {
@@ -205,7 +398,7 @@ test("the w3i's reflectivity scales the reflection, its environment map reflecti
   for (const [reflectivity, environment, deepWater, shallow] of cases) {
     const s = { reflectivity, environment };
     within(hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]), s), deepWater, 7, `reflectivity ${reflectivity}, environment ${environment}, deep`);
-    within(hdWaterPixel([1, 125, 0], 38.4, deep("L"), ray(ENTIRE, COLS.west, ROWS[38.4]), s), shallow, 7, `reflectivity ${reflectivity}, environment ${environment}, 38.4 deep`);
+    within(hdWaterPixel([1, 125, 0], 38.4, deep("L"), ray(ENTIRE, COLS.west, ROWS[38.4]), s, undefined, 0, null, axis(ENTIRE)), shallow, 7, `reflectivity ${reflectivity}, environment ${environment}, 38.4 deep`);
   }
 });
 

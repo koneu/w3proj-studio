@@ -41,6 +41,13 @@ jobs:
       - name: UI smoke test
         working-directory: app
         run: npm run ui-smoke
+      # Builds app/dist-demo and drives it in the runner's Edge (found by scripts/demo-check.mjs, ~15 s).
+      # continue-on-error until the title bar check's failure in Edge on Windows is understood (2026-11-20: it
+      # passes in Chrome on Linux, in the gate); the step's log names what it found.
+      - name: Web demo build and check
+        working-directory: app
+        continue-on-error: true
+        run: node scripts/demo-check.mjs --build
 
       # Version and components (clippy) come from rust-toolchain.toml.
       - name: Rust toolchain

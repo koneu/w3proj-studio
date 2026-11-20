@@ -19,6 +19,8 @@ import { StringTable, WtsCutError } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
+import { mdxPathOf } from "../../lib/model/mdxpath";
+import { ICON_FIELD, KINDS, trigstrText } from "./shared";
 import { REPLACEABLE, TEAM_COLORS } from "../../lib/model/renderer";
 import { ABILITY_ART, abilityArt, freshPicks, modelAt, modelList, previewTeam, previewTextures, syncPicks } from "./previewart";
 import { projectWithFiles, readMapDocStrict } from "../../lib/formats/mapdoc";
@@ -78,20 +80,9 @@ const isCampaignProject = (w3: W3Api) => isCampaignFiles(w3.workspace.files());
 const objectDocPath = (w3: W3Api, ext: string) => `map/${isCampaignProject(w3) ? "war3campaign" : "war3map"}.${ext}.json`;
 /** The string table of an object data file: a campaign's own texts are in war3campaign.wts. */
 const wtsOf = (docPath: string) => (/(^|\/)war3campaign\.w3[utabdhq]\.json$/i.test(docPath.replace(/\\/g, "/")) ? "map/war3campaign.wts" : "map/war3map.wts");
-const KINDS: { ext: string; label: string; singular: string }[] = [
-  { ext: "w3u", label: "Units", singular: "unit" },
-  { ext: "w3t", label: "Items", singular: "item" },
-  { ext: "w3a", label: "Abilities", singular: "ability" },
-  { ext: "w3h", label: "Buffs/Effects", singular: "buff" },
-  { ext: "w3b", label: "Destructables", singular: "destructable" },
-  { ext: "w3d", label: "Doodads", singular: "doodad" },
-  { ext: "w3q", label: "Upgrades", singular: "upgrade" },
-];
 const KIND_ICONS: Record<string, string> = { w3u: "♞", w3t: "✦", w3a: "✧", w3h: "◌", w3b: "▲", w3d: "♣", w3q: "⇧" };
 /** Kinds whose mods carry level and data-pointer fields. */
 const OPT_INTS = new Set(["w3a", "w3d", "w3q"]);
-/** Icon (art) field per kind. */
-const ICON_FIELD: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aart", w3h: "fart", w3q: "gar1" };
 /** Fields that override the number of levels. */
 const LEVEL_FIELD: Record<string, string> = { w3a: "alev", w3q: "glvl" };
 
@@ -298,7 +289,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const n = typeof v === "string" ? StringTable.ref(v) : null;
           return n !== null && wts.table.has(n) ? n : null;
         };
-        const resolveStr = (v: unknown) => { const n = trigRef(v); return n === null ? null : wts.table.get(n)!; };
+        const resolveStr = (v: unknown) => trigstrText(wts.table, v);
 
         // Game knowledge; until it loads (or without a game install) the
         // editor shows only the modifications, with raw ids.
@@ -579,10 +570,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, listMenu());
         });
         const copySelection = () => {
-          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          const objects = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
+          const objects = [...selection].map((o) => copyOf(o as EditObject, resolveStr) as Obj);
           // The copy is made from the editor as it is now, and finished while the user goes on.
-          const live = { ext: kind, file: { version: file.version, custom: structuredClone(file.custom), original: structuredClone(file.original) }, text, skinMerged: true };
+          const live = { ext: kind, file: { version: file.version, custom: structuredClone(file.custom), original: structuredClone(file.original) }, text: resolveStr, skinMerged: true };
           const ready = prepareCopy(w3, kind, objects, live, w3.workspace.project()?.root) as Promise<{ objects: Obj[]; along: Copied[] }>;
           ready.catch((e) => void w3.window.showError(`Copying: ${(e as Error).message ?? e} Pasting this copy will not work.`));
           clipboard[kind] = { count: objects.length, ready };
@@ -733,7 +723,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (metaType === "model" || metaType === "modelList") {
             // Data names .mdl; the game stores .mdx. The map's imports come first.
-            const mdx = path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx");
+            const mdx = mdxPathOf(path);
             return h("button.obj-art-view", { title: `Open ${mdx} in the model viewer`, onclick: async () => {
               // The import under its name on disk, whatever the case the field names (as the game finds it).
               const imported = importedPathFor(w3, mdx, w3.settings.get<string>("game.graphicsMode") ?? "hd");
@@ -1445,17 +1435,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const path = await w3.window.pickSaveFile({ title: `Export ${kindInfo?.label ?? kind}`, defaultPath: `${kindInfo?.label ?? kind}.${kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
           if (!path) return;
           // Its own texts: references to this map's string table mean nothing in another.
-          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           // The fields the map keeps in its Skin file (names, models, art) belong in the exported file: the editor
           // holds them with the rest, the Skin file's own objects too.
-          const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
+          const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, resolveStr)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, resolveStr)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
         };
         /** The selected objects as a .w3o of their own. */
         const exportSelection = async () => {
-          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          await exportObjects(w3, kind, file as unknown as EditFile, [...selection] as unknown as EditObject[], text, { skinMerged: true });
+          await exportObjects(w3, kind, file as unknown as EditFile, [...selection] as unknown as EditObject[], resolveStr, { skinMerged: true });
         };
         const importFile = async () => {
           const path = await w3.window.pickFile({ title: `Import ${kindInfo?.label ?? kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });

@@ -55,7 +55,7 @@ import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { StringTable } from "../../lib/formats/wts";
@@ -163,9 +163,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   const game = async () => {
     if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
       const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
-      try { return { buf: await w3.game.read(hd), name: hd }; } catch { /* classic texture */ }
+      try { return { buf: await w3.game.read(hd, { shared: true }), name: hd }; } catch { /* classic texture */ }
     }
-    return { buf: await w3.game.read(path), name: path };
+    return { buf: await w3.game.read(path, { shared: true }), name: path };
   };
   if (doc.path.startsWith("game:") || !w3.workspace.project()) return game();
   return importOr(readImport(w3, path).then((buf) => ({ buf, name: path })), game);
@@ -838,11 +838,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed, undo: `undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; ${checkpointed ? "the checkpoint just made stays." : "no checkpoint was made: the Checkpoints extension is off."}` };
     }),
-    w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
+    w3.mcp.registerTool("check_path", async ({ from, to, unitSize, movement }) => {
+      if (movement !== undefined && movement !== "walk" && movement !== "float") throw new Error('movement must be "walk" or "float".');
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE;
       const { handle } = await liveEditor("read");
-      return pathReport(walkSource(handle), start, goal, size);
+      return pathReport(walkSource(handle), start, goal, size, movement ?? "walk");
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
@@ -4579,18 +4580,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const plan = planPathingOverrides(stored, terrain, change);
           const { rect, edge, stays } = await resizeRules(next, complements);
           // Start locations (startAfterResize): one still inside the map stays where it is, past the playable edge or
-          // not; one off the map is moved inside the camera bounds, where the World Editor removes it and its save
-          // makes a new one at a random place (a player needs one).
+          // not; one off the map is removed by the World Editor, whose save makes a new one at a random valid place
+          // (a player needs one). Studio moves it to the valid place nearest to where it was (validStartPlace, with the
+          // doodads that stay), else, when there is none or the game's tables can't tell, into the camera bounds.
           const pb = cameraBounds(next, complements);
-          let removed = 0;
+          // The new map's edge marks first: the starts' pathing blocks the tiles past the playable map by them.
+          markMapEdge(next, complements, true);
+          let removed = 0, around: StartSurroundings | null = null, aroundRead = false;
+          const movedStarts: { player: unknown; from: [number, number]; at: [number, number] }[] = [];
           for (const f of [dooFile, unitsFile]) {
             if (!f) continue;
             for (const p of f.list) {
               if (p.id !== "sloc") continue;
               const s = startAfterResize(p.position[0], p.position[1], rect, edge, pb);
-              if (!s.kept) [p.position[0], p.position[1]] = s.at;
+              let outside = s.outside;
+              if (!s.kept) {
+                if (!aroundRead) { aroundRead = true; around = await startSurroundings(meleeFiles(w3), next, dooFile ? JSON.stringify(dooFile.doc) : null); }
+                const from: [number, number] = [p.position[0], p.position[1]];
+                const others = f.list.filter((o) => o !== p && stays(o, f === dooFile));
+                const valid = around ? validStartPlace(next, from, others, around) : null;
+                const at = valid ?? s.at;
+                if (valid) outside = !inArea(valid[0], valid[1], edge);
+                [p.position[0], p.position[1]] = at;
+                movedStarts.push({ player: (p as Placed & { player?: number }).player, from, at });
+              }
               const flags = flagsOf(p);
-              if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, s.outside);
+              if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, outside);
             }
             const keep = f.list.filter((p) => stays(p, f === dooFile));
             removed += f.list.length - keep.length;
@@ -4610,7 +4625,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await savePlacedFile(w3, f);
           }
-          markMapEdge(next, complements, true);
           await writeTerrainBytes(doc.path, writeW3e(savedTerrain(next, ownTiles?.get(next.tileset), cliffGroundOf(next))), doc);
           let infoStrings: { num: number; text: string }[] = [];
           await editDoc("war3map.w3i", (info) => {
@@ -4621,9 +4635,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
             const zoom = resizedCameraZoom(info.cameraZoom as Parameters<typeof resizedCameraZoom>[0]);
             if (zoom) info.cameraZoom = zoom;
-            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) {
+            for (const pl of (info.players as { id?: unknown; start: number[] }[] | undefined) ?? []) {
               const s = startAfterResize(pl.start[0], pl.start[1], rect, edge, pb);
-              if (!s.kept) [pl.start[0], pl.start[1]] = s.at;
+              // Where its start location went: the player's, else the one that stood at the same point.
+              const moved = movedStarts.find((m) => m.player !== undefined && m.player === pl.id) ?? movedStarts.find((m) => m.from[0] === pl.start[0] && m.from[1] === pl.start[1]);
+              if (!s.kept) [pl.start[0], pl.start[1]] = moved?.at ?? s.at;
             }
             // A start left past the playable edge is "in an invalid position": the World Editor's save takes Melee off, as
             // for its other reasons the w3i and the units tell (meleeFlagsAfter: a game data set of 1 did in
@@ -5317,22 +5333,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const on = groundLayersOn();
             // The cameras aren't on the ground: one marker each, as the World Editor's (cameraMarkers).
             if (!on.cameras) renderer.setShapes("cameras", null);
+            if (!on.regions) renderer.setRegionOutlines(null);
             if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
             // Bottom to top: regions, ground pathing, heights, naval pathing.
             const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null];
             // The editor blends the layers in linear light in HD and in plain sRGB in SD (viewcmds.ts SD_LAYER_ALPHA). HD:
-            // Regions and Pathing - Ground over the picture, water too, the naval view in linear light under the water.
-            // SD: Pathing - Ground and the naval view under the water (the pathing's part over the border over it), the
-            // regions over everything. With the heights on, the SD order (not measured together).
+            // Regions, Pathing - Ground and the naval view over the picture, water too, the naval view over the regions
+            // (we-drive 2026-11-19, branch we-compare-18, ws-L.w3x: its brown over the border's water and over a yellow
+            // region there, water on and off; viewcmds.test.ts). SD: Pathing - Ground and the naval view under the water
+            // (the pathing's part over the border over it), the regions over everything. With the heights on, the SD
+            // order (not measured together).
             const linear = renderer.tone === 2 && !on.heights;
             const show = () => {
               if (!latest()) return;
               const edge = { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 };
               if (linear) {
-                const rgba = composeLayers([parts[0], parts[1]], true);
-                if (rgba || parts[3]) renderer.setViewLayer(rgba ?? new Uint8Array(W * H * 4), W, H, null, true, parts[3]); else renderer.setViewLayer(null);
+                const rgba = composeLayers([parts[0], parts[1], parts[3]], true);
+                if (rgba) renderer.setViewLayer(rgba, W, H, null, true); else renderer.setViewLayer(null);
               } else {
                 const path = parts[1] ? splitEdge(parts[1], edge) : null;
                 const rgba = composeLayers([path?.inside ?? null, parts[2], parts[3]]);
@@ -5343,7 +5362,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { if (latest()) renderer.setRegionOutlines(list); parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;

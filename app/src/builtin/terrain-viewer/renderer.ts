@@ -8,7 +8,7 @@ import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { rayBox, rayMesh } from "./meshpick";
 import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
-import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { bounds, compile, DEFAULT_LIGHT, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, REACHED_ALPHA_GLSL, standClock, type Clock, type EdgeShade, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
@@ -78,8 +78,8 @@ import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
 import { cornerNormal, heightAt, pickGroundOn, mapEdgeTiles, playableEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { BORDER_ALPHA, BORDER_SPREAD, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
-import { gridLines } from "./viewcmds";
+import { BORDER_ALPHA, BORDER_SPREAD, borderReach, borderShade, borderShadeRect, darkWaterCorners, hdBorderKeep, type BorderSpread } from "../../lib/terrain/area";
+import { gridLines, regionOutline, type RegionBox } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -212,13 +212,14 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // The bed, the deep colour and the sky's reflection by the depth (hdWaterAt), the depth being that of the water in
-    // front of what's behind (seenDepth); the sky along the view reflected on the flat surface (hdSky).
+    // The bed, the deep colour and the sky's reflection by the depth and the water's thickness along the camera's axis
+    // (hdWaterAt, hdWaterPath), the depth being that of the water in front of what's behind (seenDepth); the sky along the
+    // view reflected on the flat surface (hdSky).
     float depth = seenDepth(vDepth * 128.0) * t.a;
-    vec3 w = hdWaterAt(depth);
-    vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // In high precision: the squares of world distances overflow medium precision (16-bit floats on some drivers).
     highp vec3 view = normalize(vWorld - uEye);
+    vec3 w = hdWaterAt(depth, hdWaterPath(depth, view, normalize(uForward)));
+    vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // The waves: the game's water normal map, two layers drifting against each other (hdwater.ts HD_WAVES), away
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
     highp vec2 p = vec2(vWorld.x, -vWorld.y);
@@ -379,12 +380,14 @@ export function hdWaterColor(tileset: string, tinted: boolean): [number, number,
 
 /**
  * The tilesets whose shallow HD water has another colour than the deep (sRGB 0–255): Sunken Ruins' is turquoise over
- * its blue. From the same pictures as HD_DEEP (its 12 to 96 deep bands, reflectivity 0, the bed's share taken away:
- * the colour the water itself needs came out 0, 142, 181 at 12 deep, 0, 135, 176 at 38.4, 0, 95, 170 at 96); how
- * much of it a depth has is hdwater.ts HD_SHALLOW_SHARE. The others' shallow bands fit their deep colour within 3
- * levels (Cityscape's blue 5 at 64 deep).
+ * its blue. From the editor's game view (branch hd-deep-water, 2026-11-20: bands 8 to 200 deep with the w3i's
+ * reflectivity 0, the bed's share taken away by hdwater.ts's path tables): the colour the water itself needs is
+ * 0, 122 to 124, 164 to 170 in every band from 8 to 56 deep, 0, 115, 171 at 64, the deep colour from 72; how much of it
+ * a depth has is hdwater.ts HD_SHALLOW_SHARE. (View Entire Map, branch water-render-we, gave 0, 142, 181 with the bed's
+ * share by the depth alone.) The others' shallow bands fit their deep colour within 3 levels (Cityscape's blue 5 at 64
+ * deep).
  */
-export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 142, 181] };
+export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 123, 167] };
 
 /** The water's shallow colour in HD (sRGB, 0–1): the tileset's where it has one (HD_SHALLOW), else its deep colour
  *  (hdWaterColor: one colour at every depth), as with a map's water tint. */
@@ -445,10 +448,12 @@ uniform mat4 uViewProj; uniform vec4 uRect;
 out vec2 vUV;
 ${FOG_VS}
 void main() { vUV = (aPos.xy - uRect.xy) / uRect.zw; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+// uReach: the border's dark grown (REACHED_ALPHA_GLSL, area.ts borderReach); 0 for the other layers.
 const OVERLAY_FS = `#version 300 es
-precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform vec2 uReach; out vec4 outColor;
 ${FOG_FS}
-void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
+${REACHED_ALPHA_GLSL}
+void main() { outColor = texture(uTex, vUV); outColor.a = reachedAlpha(uTex, vUV, uReach); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
 // The View layers of regions and Pathing - Ground: the World Editor blends them over the picture (water included) in
 // linear light, not in sRGB: a colour of alpha a over a pixel d comes out as enc((1 - a) dec(d) + a dec(c)) (we-drive,
@@ -469,12 +474,13 @@ void main() {
 // by the shade's 1 - a taken as sRGB, dec(1 - a), not the sRGB value by 1 - a as SD and OVERLAY_FS do. The pixels under
 // it are the picture so far, copied (TerrainRenderer.copyScene); the fog goes over the dark part as OVERLAY_FS's.
 const BORDER_HD_FS = `#version 300 es
-precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; out vec4 outColor;
+precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform sampler2D uDst; uniform vec2 uReach; out vec4 outColor;
 ${FOG_FS}
+${REACHED_ALPHA_GLSL}
 vec3 dec(vec3 s) { return mix(pow((s + 0.055) / 1.055, vec3(2.4)), s / 12.92, vec3(lessThanEqual(s, vec3(0.04045)))); }
 vec3 enc(vec3 l) { l = max(l, vec3(0.0)); return mix(1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, l * 12.92, vec3(lessThanEqual(l, vec3(0.0031308)))); }
 void main() {
-  float a = texture(uTex, vUV).a;
+  float a = reachedAlpha(uTex, vUV, uReach);
   if (a < 0.01) discard;
   float keep = dec(vec3(1.0 - a)).r;
   vec3 d = texelFetch(uDst, ivec2(gl_FragCoord.xy), 0).rgb;
@@ -1344,7 +1350,7 @@ export class TerrainRenderer {
   private edgeShade(textured: boolean): EdgeShade | null {
     if (!textured || !this.showBorder || !this.border) return null;
     // Four texels a tile (borderShade: one per pathing cell's corner or middle; the one at 4 t + 2 lies in tile t).
-    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel" };
+    return { texture: this.border.tex, rect: this.borderRect(), tiles: [this.terrain.offsetX, this.terrain.offsetY, 128, 4], mode: "pixel", reach: borderReach(this.terrain, this.borderSpread) };
   }
 
   /** The overlay program, compiled the first time; null once the context is gone (the editor closed
@@ -1591,6 +1597,21 @@ export class TerrainRenderer {
     const nx = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / z / (t * (w / h)), ny = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / z / t;
     return [((nx + 1) / 2) * w, ((1 - ny) / 2) * h];
   }
+
+  /** The Regions layer's outlines (viewcmds.ts regionOutline: black strips on the ground along each box's edges, drawn
+   *  after the layer's fill, over the border too); null or none removes them. */
+  setRegionOutlines(boxes: readonly RegionBox[] | null) {
+    if (this.regionOutlines) this.freeVao(this.regionOutlines.vao);
+    this.regionOutlines = null;
+    if (!boxes?.length) return;
+    const data: number[] = [];
+    for (const b of boxes) {
+      const tri = regionOutline(b);
+      for (let i = 0; i < tri.length; i += 3) data.push(tri[i], tri[i + 1], this.groundHeight(tri[i], tri[i + 1]) + 3, 0, 0, 0, tri[i + 2]);
+    }
+    if (data.length) this.regionOutlines = this.colorMesh(data);
+  }
+  private regionOutlines: Mesh | null = null;
 
   /** The brush outline (editing tools); null hides it. */
   setBrush(b: Ring | null) {
@@ -1856,6 +1877,8 @@ export class TerrainRenderer {
       // The border's texels sit on the pathing cells' corners or middles (borderRect), the layers' on the cells.
       const rect = layer === this.border ? this.borderRect() : [t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128];
       gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), rect[0], rect[1], rect[2], rect[3]);
+      const reach = layer === this.border ? borderReach(t, this.borderSpread) : [0, 0];
+      gl.uniform2f(gl.getUniformLocation(this.overlayProg, "uReach"), reach[0], reach[1]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
@@ -2077,6 +2100,13 @@ export class TerrainRenderer {
     }
     // Rings stay visible through trees and water.
     gl.disable(gl.DEPTH_TEST);
+    if (onGround && this.regionOutlines && !this.held) {
+      gl.useProgram(this.colorProg);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindVertexArray(this.regionOutlines.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.regionOutlines.count);
+    }
     for (const ring of [...[...this.ringSets.values()].flat(), ...this.selection, this.brush]) {
       if (!ring) continue;
       if (ring.crisp) { this.drawCrisp(ring.crisp, viewProj); continue; }
@@ -2277,8 +2307,9 @@ export class TerrainRenderer {
     gl.useProgram(prog);
     setFog(gl, (name) => gl.getUniformLocation(prog, name), fog);
     gl.uniformMatrix4fv(gl.getUniformLocation(prog, "uViewProj"), false, viewProj);
-    const rect = this.borderRect();
+    const rect = this.borderRect(), reach = borderReach(this.terrain, this.borderSpread);
     gl.uniform4f(gl.getUniformLocation(prog, "uRect"), rect[0], rect[1], rect[2], rect[3]);
+    gl.uniform2f(gl.getUniformLocation(prog, "uReach"), reach[0], reach[1]);
     gl.uniform1i(gl.getUniformLocation(prog, "uDst"), 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, layer.tex);
@@ -2292,6 +2323,7 @@ export class TerrainRenderer {
   }
 
   dispose() {
+    this.setRegionOutlines(null);
     if (this.sceneCopy) this.gl.deleteTexture(this.sceneCopy.tex);
     this.sceneCopy = null;
     this.sunMap?.dispose();

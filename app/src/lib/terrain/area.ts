@@ -27,9 +27,25 @@ type EdgeGrid = Pick<Terrain, "width" | "height">;
  *  The World Editor's HD shade reaches in on all four sides, its SD shade on the west and east only (we-drive,
  *  2026-11-19, make-water-tilesets.mjs --dry L, game view, `--look` 128 inside each edge across the view at 1200: the
  *  fade's half 37 units inside on every side in HD; in SD 30.6 west, 39.0 east, 13.5 south, 22.4 north; Studio's
- *  corners gave 18 on every side). */
-export interface BorderSpread { x: boolean; y: boolean }
-export const BORDER_SPREAD: Readonly<Record<"sd" | "hd", BorderSpread>> = Object.freeze({ sd: { x: true, y: false }, hd: { x: true, y: true } });
+ *  corners gave 18 on every side). `shift`: the whole shade moved by so many world units (x, y; borderShadeRect): the
+ *  editor's SD shade lies about 4 units south-west of a centred one on every tileset (its halves 30.6 / 39.0 west /
+ *  east and 13.5 / 22.4 south / north are 34.8 and 18 apart from 4.2 and 4.45 to the west and south; branch
+ *  we-compare-18 on nv-A, F, W, D and L, both camera turns: Studio's centred fade 2 to 3.4 px further in on the west and
+ *  south, 5 to 11 px further out on the east and north). `reach`: the dark grown by so many world units on every side
+ *  (the renderers' REACHED_ALPHA_GLSL, borderReach), the fade moved that much further in: what the texels' places leave,
+ *  37 against 32 units in HD (the editor's fade 4 to 5 px further in on every side and tileset, the same rounds), 2.5
+ *  in SD (the halves 34.8 and 18 against 32 and 16). */
+export interface BorderSpread { x: boolean; y: boolean; shift?: readonly [number, number]; reach?: number }
+export const BORDER_SPREAD: Readonly<Record<"sd" | "hd", BorderSpread>> = Object.freeze({
+  sd: Object.freeze({ x: true, y: false, shift: Object.freeze([-4, -4] as const), reach: 2.5 }),
+  hd: Object.freeze({ x: true, y: true, reach: 5 }),
+});
+
+/** `spread.reach` in borderShade's texture units over borderShadeRect (x, y), for the shaders' reachedAlpha. */
+export function borderReach(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, spread: BorderSpread): [number, number] {
+  const [, , w, h] = borderShadeRect(t, spread), r = spread.reach ?? 0;
+  return [w > 0 ? r / w : 0, h > 0 ? r / h : 0];
+}
 
 /** The dark over the map's border: black at BORDER_ALPHA over each tile past the playable map (`edge`: 1 per tile,
  *  rows from the south; w3e.ts playableEdgeTiles, as the World Editor goes by the w3i). One RGBA texel per corner of the
@@ -54,10 +70,12 @@ export function borderShade(t: EdgeGrid, edge: ArrayLike<number>, spread: Border
 }
 
 /** Where borderShade's texture lies in the world (x, y, width, height), so that its texels sit on the cells' corners
- *  (half a cell past the terrain's rim) or, along an axis `spread` says, on the cells' middles (the terrain itself). */
+ *  (half a cell past the terrain's rim) or, along an axis `spread` says, on the cells' middles (the terrain itself);
+ *  moved by `spread.shift`. */
 export function borderShadeRect(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, spread: BorderSpread = { x: false, y: false }): [number, number, number, number] {
   const half = 16, w = Math.max(0, t.width - 1) * 128, h = Math.max(0, t.height - 1) * 128;
-  return [t.offsetX - (spread.x ? 0 : half), t.offsetY - (spread.y ? 0 : half), w + (spread.x ? 0 : 2 * half), h + (spread.y ? 0 : 2 * half)];
+  const [sx, sy] = spread.shift ?? [0, 0];
+  return [t.offsetX - (spread.x ? 0 : half) + sx, t.offsetY - (spread.y ? 0 : half) + sy, w + (spread.x ? 0 : 2 * half), h + (spread.y ? 0 : 2 * half)];
 }
 /** How dark the border is: the World Editor's border ground keeps about 14.5 % of its colour (map 03, green 16 of 110
  *  just inside, we-drive 2026-11-12; Studio's 165 kept 35 %, green 39). */

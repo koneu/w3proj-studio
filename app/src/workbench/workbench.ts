@@ -428,7 +428,7 @@ export class Workbench {
         list: () => wb.game.list(),
         resolve: (p, o) => wb.game.resolve(p, o?.tileset),
         resolveMany: (paths, o) => wb.game.resolveMany(paths, o?.tileset),
-        read: (p, o) => wb.game.read(p, o?.tileset, o?.background === true),
+        read: (p, o) => wb.game.read(p, o?.tileset, o?.background === true, o?.shared === true),
         readText: (p, o) => wb.game.readText(p, o?.tileset, o?.background === true),
         reload: () => wb.game.reload(),
       },

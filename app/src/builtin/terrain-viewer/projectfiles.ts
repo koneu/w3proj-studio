@@ -115,6 +115,6 @@ export async function importOr<T>(read: Promise<T>, fallback: () => Promise<T>):
 /** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
  *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
 export async function readFile(w3: W3Api, doc: Pick<EditorDocument, "path">, path: string, tileset?: string): Promise<Uint8Array> {
-  const game = () => w3.game.read(path, { tileset });
+  const game = () => w3.game.read(path, { tileset, shared: true });
   return !doc.path.startsWith("game:") && w3.workspace.project() ? importOr(readImport(w3, path), game) : game();
 }
