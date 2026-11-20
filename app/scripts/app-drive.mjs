@@ -28,6 +28,8 @@
 //                       values, fitted at the editor view's 1184:844 (use --view-size 1184x844; we-camera.mjs)
 //   --view-size WxH     give the terrain view's canvas this size in pixels (over the rest of the window), so its
 //                       pictures line up with another's, e.g. 1184x844 for the World Editor's view; "off" undoes it
+//   --window-size WxH   resize the app's window (WebDriver's Set Window Rect: Linux only; the window's minimum, 800 px
+//                       wide, still holds); prints the page's inner size
 //   --compare-ready MODE  the terrain view for comparing with the World Editor: "game" (game view at 06:00: lit,
 //                       fogged, no start locations, regions or other editor marks; the pair of we-drive's
 //                       --compare-ready), "lit" (the map's lighting at 06:00, editor marks still drawn) or "unlit"
@@ -73,7 +75,7 @@ import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 import { parseLook, resolveLook, studioCamera, studioLighting } from "./we-camera.mjs";
 import { lit } from "./jslit.mjs";
 
-const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key", "--click"]);
+const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--window-size","--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key", "--click"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 function parseArgs(argv) {
@@ -276,6 +278,14 @@ async function main() {
           if (size && (got.width !== size.width || got.height !== size.height)) throw new Error(`the canvas draws ${got.width}x${got.height}, not ${arg}`);
           await sleep(300);
           out({ step, canvas: got });
+        } else if (step === "--window-size") {
+          const size = parseViewSize(arg);
+          if (!size) throw new Error("--window-size wants WxH");
+          // WebDriver's Set Window Rect (Linux: WebKitWebDriver); the window's own minimum size still holds.
+          if (typeof page.request !== "function") throw new Error("--window-size needs the WebDriver session (Linux)");
+          await page.request("POST", "/window/rect", size);
+          await sleep(500);
+          out({ step, window: await page.evaluate(`({ width: innerWidth, height: innerHeight })`) });
         } else if (step === "--look") {
           await editor();
           const [x, y] = arg.split(",").map(Number);
