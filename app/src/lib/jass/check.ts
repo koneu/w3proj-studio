@@ -482,11 +482,17 @@ class Checker {
     const a = this.sum();
     if (["==", "!=", "<", ">", "<=", ">="].some((o) => this.is(o))) {
       const op = this.next();
-      const b = this.sum();
+      // "x == not y": the right side may be a "not" (WoW Reforged's war3map.j, which the game runs).
+      const b = this.is("not") ? this.not() : this.sum();
       if (op.text === "==" || op.text === "!=") {
         // The game also compares integers with null (vJASS structs compiled by JassHelper: "if this==null").
         const intNull = (a === "integer" && b === "null") || (a === "null" && b === "integer");
-        if (!intNull && !this.assignable(a, b) && !this.assignable(b, a)) this.err(op.from, op.to, `Can't compare ${a} with ${b}`);
+        if (!intNull && !this.assignable(a, b) && !this.assignable(b, a)) {
+          // Two unrelated handle types compile in the game (WoW Reforged compares a player with a group); they are
+          // never the same object, so it's only a warning.
+          if (this.isHandle(a) && this.isHandle(b)) this.err(op.from, op.to, `Comparing ${a} with ${b}: never the same object`, "warning");
+          else this.err(op.from, op.to, `Can't compare ${a} with ${b}`);
+        }
       } else if (!this.numeric(a) || !this.numeric(b)) this.err(op.from, op.to, `"${op.text}" compares numbers, not ${a} and ${b}`);
       return "boolean";
     }
