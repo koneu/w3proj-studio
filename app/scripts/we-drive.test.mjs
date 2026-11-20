@@ -558,6 +558,16 @@ test("withEditorPrefs unticks the minimap's Show Creep Camp Icon before each sta
   assert.match(withEditorPrefs("", "sd", "fixed"), /\[Minimap\]\nShow Creep Camps=false/, "a fresh file gets it too");
 });
 
+test("withEditorPrefs empties the recent maps (the File menu's items below them move with each), unless kept", () => {
+  const left = "[Recent Documents]\r\nMap 0=Z:/a/flat.w3x\r\nMap 1=Z:/b/input.w3x\r\n\r\n[Replace Doodads]\r\nX=1\r\n";
+  const out = withEditorPrefs(left, "sd", "fixed");
+  assert.match(out, /\[Recent Documents\]\r\n\r\n\[Replace Doodads\]\r\nX=1\r\n/);
+  assert.doesNotMatch(out, /Map \d=/);
+  assert.match(withEditorPrefs(left, "sd", "fixed", true), /Map 0=Z:\/a\/flat\.w3x\r\nMap 1=/, "control: --keep-prefs leaves them");
+  assert.equal(drive.clearPrefs("[A]\nk=1\n", "B"), "[A]\nk=1\n", "no such section: unchanged");
+  assert.equal(drive.clearPrefs("[A]\nk=1\nj=2", "A"), "[A]", "the last section, no blank line after it");
+});
+
 test("parseArgs: --timeout, --sleep and --fps must be numbers (NaN waited forever or not at all)", () => {
   assert.equal(parseArgs(["--timeout", "12.5", "--start"]).opts.timeout, 12.5);
   for (const bad of ["abc", "0", "-5", "", "Infinity", "1e999"]) {

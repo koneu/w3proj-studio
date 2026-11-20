@@ -769,10 +769,26 @@ export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enf
  */
 export const PINNED_MINIMAP_PREFS = Object.freeze({ "Show Creep Camps": "false" });
 
-/** The editor's preferences text with we-drive's keys set: [Misc] always, [Minimap] unless kept. */
+/** The editor's preferences text with we-drive's keys set: [Misc] always, [Minimap] unless kept, and [Recent Documents]
+ *  emptied unless kept. The File menu lists the recent maps (each run's copies: seven after a day of runs, more on)
+ *  above Preferences, Configure Controls, Test Map and Exit, so every item below the list moves 17 px down with each
+ *  entry: a click measured at File > Preferences (54,419) hit Test Map, which started the game (Warcraft III.exe) in
+ *  the sandbox, and one at 54,369 opened a recent map (branch we-batch-3, 2026-11-20). Emptied, the list holds what
+ *  this run opened. */
 export function withEditorPrefs(text, mode, dayNight, keep = false) {
   const misc = setPrefs(text, "Misc", editorPrefs(mode, dayNight, keep));
-  return keep ? misc : setPrefs(misc, "Minimap", PINNED_MINIMAP_PREFS);
+  return keep ? misc : clearPrefs(setPrefs(misc, "Minimap", PINNED_MINIMAP_PREFS), "Recent Documents");
+}
+
+/** Removes every key of one section of an INI-like text (the section's head stays); every other line as it was. */
+export function clearPrefs(text, section) {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === `[${section}]`);
+  if (start < 0) return text;
+  let end = lines.findIndex((l, i) => i > start && /^\[.*\]\s*$/.test(l.trim()));
+  if (end < 0) end = lines.length;
+  return [...lines.slice(0, start + 1), ...lines.slice(start + 1, end).filter((l) => !l.includes("=")), ...lines.slice(end)].join(eol);
 }
 
 /** The preferences text with the --pref keys ([{ section, key, value }], parsePref) set over it, in their sections; a
