@@ -1,0 +1,9 @@
+// Made up for the web demo: the explanations under the function list.
+[DemoShowMessage]
+DemoShowMessageHint="Shows a line of text to a player. Made up for the demo."
+DemoAddScoreHint="Adds points to a player's score (they may be negative)."
+DemoWaitHint="Pauses the trigger for some seconds."
+DemoTimerEventHint="Runs the trigger over and over, after the given time."
+DemoCompareIntegerHint="True when the comparison holds."
+DemoRandomIntHint="A random whole number, both ends included."
+IfThenElseMultipleHint="Runs the Then actions if all conditions hold, otherwise the Else actions."
