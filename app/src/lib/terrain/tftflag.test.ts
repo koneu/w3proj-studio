@@ -101,13 +101,28 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
   assert.equal((await savedMelee(project(null), { flags: MELEE | REQUIRES_TFT }, [start])).flags, MELEE | REQUIRES_TFT, "no game: left");
   assert.equal((await savedMelee(project(null), { flags: MELEE }, [start, at("ntav", 27)])).flags, MELEE, "no game: left off");
   assert.equal((await savedMelee(project(), { flags: MELEE | REQUIRES_TFT }, [start, at("h000")])).flags, MELEE | REQUIRES_TFT, "a custom unit: left");
-  // (12)WormWar: nothing of version 1 placed, custom units and triggers: the World Editor's save kept the flag. Studio
-  // clears it only without custom object data and custom triggers, for melee maps and others alike.
-  const custom = { "map/war3map.w3u.json": JSON.stringify({ custom: [{ id: "h000", base: "Ucrl" }] }) };
+  // (12)WormWar: nothing of version 1 placed, custom units, abilities, buffs and triggers: the World Editor's save kept
+  // the flag, for its abilities and buffs. we-compare corpus-saves (2026-11-20): ability, buff and upgrade data, custom
+  // or a changed original, set the flag; a custom unit (based on Ucrl or hfoo) and item, destructable and doodad data
+  // let it clear. For melee maps and others alike.
+  const objects = (original: unknown[], custom: unknown[]) => JSON.stringify({ format: "w3proj.objects/1", version: 2, original, custom });
+  const tftOf = async (flags: number, only: typeof start[], own: Record<string, string | Error>) => (await savedMelee(project(GAME, own), { flags }, only)).flags & REQUIRES_TFT;
   for (const flags of [MELEE, NOT]) {
     const only = flags === NOT ? [start, at("hfoo", 0)] : [start];
-    assert.equal((await savedMelee(project(GAME, custom), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `custom object data keeps it (${flags.toString(16)})`);
-    assert.equal((await savedMelee(project(GAME, { "map/war3map.w3u.json": "{" }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable object data keeps it (${flags.toString(16)})`);
+    const hex = flags.toString(16);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.w3u.json": objects([], [{ id: "U000", base: "Ucrl", mods: [] }]) }), 0, `a custom unit based on Ucrl: cleared (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.w3t.json": objects([], [{ id: "I000", base: "ratc", mods: [] }]), "map/war3mapSkin.w3d.json": objects([{ base: "LWw0", mods: [] }], []) }), 0, `item data and a doodad skin entry: cleared (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": objects([], [{ id: "A000", base: "AHhb", mods: [] }]) }), REQUIRES_TFT, `a custom ability sets it (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": objects([{ base: "AHhb", mods: [{ field: "anam" }] }], []) }), REQUIRES_TFT, `a changed original ability sets it (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3h.json": objects([], [{ id: "B000", base: "BHbd", mods: [] }]) }), REQUIRES_TFT, `a custom buff sets it (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3q.json": objects([{ base: "Rhme", mods: [] }], []) }), REQUIRES_TFT, `upgrade data sets it (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3q.json": objects([], []) }), 0, `control: an empty upgrade file doesn't (${hex})`);
+    // Not measured, so left as they are: ability data only in a skin file, a custom game interface.
+    assert.equal(await tftOf(flags, only, { "map/war3mapSkin.w3a.json": objects([{ base: "AHhb", mods: [] }], []) }), 0, `a skin entry of an ability: not set (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.w3a.json": objects([{ base: "AHhb", mods: [] }], []) }), REQUIRES_TFT, `nor cleared (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.txt": "[Misc]\nA=1\n" }), REQUIRES_TFT, `a custom game interface: not cleared (${hex})`);
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.w3u.json": "{" }), REQUIRES_TFT, `unreadable object data keeps it (${hex})`);
+    assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": "{" }), 0, `unreadable ability data doesn't set it (${hex})`);
     assert.equal((await savedMelee(project(GAME, { "map/war3map.wtg.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);
     assert.equal((await savedMelee(project(GAME, {}), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, 0, `control: neither, cleared (${flags.toString(16)})`);
   }

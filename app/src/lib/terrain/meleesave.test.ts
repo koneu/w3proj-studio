@@ -81,7 +81,7 @@ test("the facts come from the project; missing and unreadable files set nothing"
   // The file's name as the project has it (case differs on disk).
   assert.equal((await readMeleeFacts(files({ "map/War3MapMisc.txt": "[Misc]\nA=1\n" }))).customConstants, true);
   const none = await readMeleeFacts(files({}));
-  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false, triggersKnown: true });
+  assert.deepEqual(none, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, triggersKnown: true });
   // A melee map with custom triggers loses its flag (the World Editor's save does: melee-flag-we); without them, or
   // with a trigger file nobody can read, it keeps it.
   const two = defaultTriggerFile("x");
@@ -92,7 +92,7 @@ test("the facts come from the project; missing and unreadable files set nothing"
   assert.equal(await keptWith({ "map/war3map.wtg.json": new Error("EACCES") }), MELEE, "triggers unreadable");
   assert.equal(await keptWith({}), MELEE, "no trigger file");
   const broken = await readMeleeFacts(files({ "map/war3mapMisc.txt": new Error("EACCES"), "map/war3map.w3e": new Uint8Array([1, 2, 3]) }));
-  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, triggersKnown: true }, "unreadable: not known, so the flag stays");
+  assert.deepEqual(broken, { customConstants: false, terrain: null, customData: false, tftData: { need: false, mayClear: true }, triggersKnown: true }, "unreadable: not known, so the flag stays");
   assert.equal((await readMeleeFacts(files({ "map/war3map.wtg.json": new Error("EACCES") }))).triggersKnown, undefined, "triggers unreadable: not known");
   // The ground being saved wins over the project's.
   const given = await readMeleeFacts(files({ "map/war3map.w3e": new Uint8Array([1]) }), t);
@@ -375,6 +375,7 @@ test("custom object data and interface files count only when they change somethi
   const empty: [string, string | Uint8Array][] = [];
   for (const ext of ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"]) {
     empty.push([`map/war3map.${ext}.json`, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] })], [`map/war3map.${ext}`, header(0, 0)]);
+    empty.push([`map/war3mapSkin.${ext}.json`, JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [], custom: [] })], [`map/war3mapSkin.${ext}`, header(0, 0)]);
   }
   empty.push(["map/war3map.w3u.json", "{}"], ["map/war3mapSkin.txt", ""], ["map/war3mapSkin.txt", "// nothing\r\n[Misc]\r\n"]);
   const base = { "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
@@ -389,6 +390,11 @@ test("custom object data and interface files count only when they change somethi
   const changing: [string, string | Uint8Array][] = [
     ["map/war3map.w3t.json", entry], ["map/war3map.w3u", header(1, 0)], ["map/war3map.w3q", header(0, 2)], ["map/war3mapSkin.txt", "[Misc]\nA=1"],
     ["map/war3map.w3b.json", JSON.stringify({ custom: [{ id: "B000" }] })],
+    // The skin files of the object data count as the object data does: BanewoodBog's war3mapSkin.w3d holds one entry
+    // (LWw0, no values), and the editor's save takes its Melee flag off and doesn't put it back; without the file it
+    // does (we-compare corpus-saves-melee-banewoodbog, -banewoodbog-noskin-off).
+    ["map/war3mapSkin.w3d.json", JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [{ base: "LWw0", mods: [] }], custom: [] })],
+    ["map/war3mapSkin.w3u", header(1, 0)],
   ];
   for (const [path, body] of changing) {
     assert.equal(await putBack({ [path]: body }), OFF, `${path} with entries: stays off`);

@@ -6,9 +6,11 @@
 // of version 0, a destructable, doodad or ground tile of version 1, a random item (YjI5) in the drops. The Melee flag is
 // independent (tft-tavern-off: Melee cleared, the save put it back on and set 0x4000).
 //
-// The save also kept the flag on the game's (12)WormWar, which places nothing of version 1 but has custom units based
-// on ones of version 1 and its own triggers: what of those counts isn't measured, so Studio clears the flag only on a
-// map without custom object data and custom triggers (tftFlagsAfter's `mayClear`). Neither measured: a hero's
+// The save also kept the flag on the game's (12)WormWar, which places nothing of version 1: its custom abilities and
+// buffs keep it (we-compare corpus-saves, 2026-11-20: ability, buff and upgrade data, custom or a changed original, set
+// it on flat.w3x; unit, item, destructable and doodad data don't, custom units based on Ucrl included). That rule is
+// meleesave.ts objectDataTft; custom triggers alone aren't measured, so they still keep Studio from clearing the flag
+// (tftFlagsAfter's `mayClear`). Neither measured: a hero's
 // inventory and the map's item tables (war3map.w3i), counted as "can't tell" when they hold a type of version 1; the
 // drops of destructables, not looked at.
 

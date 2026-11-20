@@ -33,8 +33,10 @@ export const MISC_TXT = "map/war3mapMisc.txt";
 
 /** Files of the World Editor's other reasons: custom unit, item, destructible, doodad, ability, buff and upgrade data
  *  (WESTRING_NOTMELEE_CUSTOMUNITS … CUSTOMUPGRADEDATA) and a custom game interface (CUSTOMSKINDATA). Only a file that
- *  changes something counts (customDataState): an empty one (no objects, no values) is the default. */
-const CUSTOM_DATA = /^map\/(war3map\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?|war3mapSkin\.txt)$/i;
+ *  changes something counts (customDataState): an empty one (no objects, no values) is the default. The object data's
+ *  skin files (war3mapSkin.w3u …) count as the object data does: BanewoodBog's war3mapSkin.w3d holds one entry without
+ *  values, and the editor's save takes the flag off (we-compare corpus-saves-melee-banewoodbog). */
+const CUSTOM_DATA = /^map\/(war3map(Skin)?\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?|war3mapSkin\.txt)$/i;
 
 /** Whether a custom-data file changes anything: false for no entry (JSON objects: `original` and `custom` empty or
  *  absent; the raw w3u family: the header's two counts 0; war3mapSkin.txt: no value in any section); null when it can't
@@ -73,6 +75,32 @@ export async function customDataState(ws: MeleeFiles, files: readonly string[]):
     if (r === null) unknown = true;
   }
   return unknown ? null : false;
+}
+
+/** What the object data says about flag 0x4000 (Requires The Frozen Throne data). Measured with we-compare
+ *  corpus-saves (2026-11-20, flat.w3x and (12)WormWar with one kind of object data each): ability, buff or upgrade data
+ *  (war3map.w3a, .w3h, .w3q), custom or a change to an original, makes the editor's save set the flag, as Reign of
+ *  Chaos had none of them; unit, item, destructable and doodad data (custom units based on Ucrl and hfoo included)
+ *  let it clear the flag. `need`: true when one of war3map.w3a/.w3h/.w3q changes something, false when none of those
+ *  nor their skin files does, null when that can't be told (a file unreadable, a skin file of those kinds with entries:
+ *  not measured). `mayClear`: nothing but unit, item, destructable and doodad data (and their skin files) changes
+ *  something, every file read (war3mapSkin.txt with values isn't measured, so it holds the flag). */
+export async function objectDataTft(ws: MeleeFiles, files: readonly string[]): Promise<{ need: boolean | null; mayClear: boolean }> {
+  let need: boolean | null = false, mayClear = true;
+  for (const path of files.filter((p) => CUSTOM_DATA.test(p))) {
+    let r: boolean | null;
+    try {
+      r = customFileChanges(path, /\.(json|txt)$/i.test(path) ? await ws.readText(path) : await ws.readBytes(path));
+    } catch { r = null; }
+    if (r === false) continue;
+    const m = /war3map(Skin)?\.(w3[a-z])/i.exec(path);
+    const tftKind = !!m && /^w3[ahq]$/i.test(m[2]);
+    if (tftKind && r === true && !m![1]) need = true;
+    else if (tftKind && need !== true) need = null;
+    // Unit, item, destructable and doodad data that is read lets the flag clear; anything else holds it.
+    if (r === null || tftKind || !m) mayClear = false;
+  }
+  return { need, mayClear };
 }
 
 /** Half the side, in pathing cells (32), of the square the World Editor's save fits on each start location (a town
@@ -302,6 +330,8 @@ export interface MeleeFacts {
   customTriggers?: boolean;
   /** A file of custom object data or game interface changes something (customDataState); null: not known. */
   customData?: boolean | null;
+  /** What the object data says about flag 0x4000 (objectDataTft); absent: not read, which leaves the flag as it is. */
+  tftData?: { need: boolean | null; mayClear: boolean };
   /** What stands around the start locations: the pathing their squares are tested against. Not read (absent) when
    *  another reason decides; null when it can't be read. */
   around?: StartSurroundings | null;
@@ -360,6 +390,7 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   const versions = await readTypeVersions(ws);
   if (versions) facts.typeVersions = versions;
   facts.customData = await customDataState(ws, files);
+  facts.tftData = await objectDataTft(ws, files);
   const { triggers, known, custom } = await readTriggers(ws, files);
   if (custom) facts.customTriggers = true;
   if (known) facts.triggersKnown = true;
@@ -398,10 +429,15 @@ async function readTriggers(ws: MeleeFiles, files: readonly string[]): Promise<{
   }
 }
 
-/** Whether flag 0x4000 may be cleared (tftFlagsAfter's `mayClear`): no custom object data and no custom triggers, both
- *  known. */
-const tftMayClear = (facts: Pick<MeleeFacts, "customData" | "customTriggers" | "triggersKnown">) =>
-  facts.customData === false && facts.triggersKnown === true && facts.customTriggers !== true;
+/** Whether flag 0x4000 may be cleared (tftFlagsAfter's `mayClear`): no object data but what lets it clear
+ *  (objectDataTft) and no custom triggers, both known. */
+const tftMayClear = (facts: Pick<MeleeFacts, "tftData" | "customTriggers" | "triggersKnown">) =>
+  facts.tftData?.mayClear === true && facts.triggersKnown === true && facts.customTriggers !== true;
+
+/** Flag 0x4000's need from the placed objects (placedNeedTft) and the object data (objectDataTft): true when either
+ *  needs it, false when both are known not to, else null (left as it is). */
+const tftNeed = (placed: boolean | null, data: boolean | null | undefined): boolean | null =>
+  placed === true || data === true ? true : placed === false && data === false ? false : null;
 
 /** The game's unit and item types → their version (Units\UnitData.slk, Units\ItemData.slk: tftflag.ts typeVersions);
  *  null when there's no game or a table can't be read or has no versions. */
@@ -475,11 +511,13 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
 
 /** The map's flags after a save, and why Melee went off (empty when it didn't). Melee goes off by owner.ts
  *  meleeBlockers, and back on only when meleeSetBlockers finds nothing; else the flag stays as it is. Flag 0x4000
- *  follows the placed units and items (tftflag.ts), when `facts.typeVersions` tells. */
+ *  follows the placed units and items (tftflag.ts), when `facts.typeVersions` tells, and the object data
+ *  (`facts.tftData`). */
 export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): { flags: number; reasons: string[] } {
-  // Requires The Frozen Throne data follows the placed units and items, whatever the Melee flag does; 0x0008 the
-  // terrain's custom tilesets flag.
-  const tft = (flags: number) => tilesetFlagAfter(tftFlagsAfter(flags, placedNeedTft(placed, facts.typeVersions, info.itemTables), tftMayClear(facts)), facts.terrain);
+  // Requires The Frozen Throne data follows the placed units and items and the ability, buff and upgrade data, whatever
+  // the Melee flag does; 0x0008 the terrain's custom tilesets flag.
+  const need = tftNeed(placedNeedTft(placed, facts.typeVersions, info.itemTables), facts.tftData ? facts.tftData.need : null);
+  const tft = (flags: number) => tilesetFlagAfter(tftFlagsAfter(flags, need, tftMayClear(facts)), facts.terrain);
   if (!(info.flags & MELEE_MAP)) return { flags: tft(meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP), reasons: [] };
   const t = facts.terrain;
   const reasons = meleeBlockers({ ...info, customConstants: facts.customConstants }, placed,
@@ -495,15 +533,17 @@ export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], f
 export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readonly PlacedLike[], terrain?: Terrain | null): Promise<{ flags: number; reasons: string[] }> {
   const off = !(info.flags & MELEE_MAP);
   if (off && meleeBlockers(info, placed).length) {
-    const need = placedNeedTft(placed, await readTypeVersions(ws), info.itemTables);
-    // Clearing needs to know there is no custom object data and no custom triggers; setting doesn't.
+    let need = placedNeedTft(placed, await readTypeVersions(ws), info.itemTables);
+    // Clearing needs to know there is no object data that holds the flag and no custom triggers; setting doesn't.
     let mayClear = false;
-    if (need === false) {
+    if (need !== true) {
       const files = ws.files().map((f) => f.path);
       // The object data first: it is small, and decides most custom maps without parsing their triggers.
-      if (await customDataState(ws, files) === false) {
+      const tftData = await objectDataTft(ws, files);
+      need = tftNeed(need, tftData.need);
+      if (need === false && tftData.mayClear) {
         const { known, custom } = await readTriggers(ws, files);
-        mayClear = tftMayClear({ customData: false, triggersKnown: known, customTriggers: custom });
+        mayClear = tftMayClear({ tftData, triggersKnown: known, customTriggers: custom });
       }
     }
     const ground = terrain !== undefined ? terrain : await readGround(ws, ws.files().map((f) => f.path));
