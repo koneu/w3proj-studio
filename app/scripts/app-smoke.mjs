@@ -2045,8 +2045,8 @@ async function viewModes(page, found) {
   await key("f", "KeyF", 70);
   if (/Facing/.test(await page.evaluate(facingHint))) fail("F still turns the selection toward the pointer");
   await key("f", "KeyF", 70);
-  await key("t", "KeyT", 84);
-  if (!/Facing/.test(await page.evaluate(facingHint))) fail(`T didn't start turning the selection toward the pointer (hint: "${await page.evaluate(facingHint)}")`);
+  await key("T", "KeyT", 84, SHIFT);
+  if (!/Facing/.test(await page.evaluate(facingHint))) fail(`Shift+T didn't start turning the selection toward the pointer (hint: "${await page.evaluate(facingHint)}")`);
   await key("Escape", "Escape", 27);
   await key("Escape", "Escape", 27);
 
@@ -2091,6 +2091,101 @@ async function viewModes(page, found) {
     await page.evaluate(`w3.settings.set("terrain.animate", undefined)`).catch(() => {});
     await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
     await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
+/** The World Editor's palette keys in the terrain view (tabkeys.ts; we-drive 2026-11-20, docs/testing/branch-rounds.md
+ *  "Branch terrain-hotkeys"), pressed in the hidden window: T the Terrain tab, D, U and O the Objects tab, R Regions, M
+ *  Cameras; Space the Select tab and back to the tab before; Escape deselects first, then goes from a tab to the
+ *  Select tab. Keys typed into a field of the view's panel switch nothing, and the same keys on the map again do (the
+ *  control). The commands from the palette do the same; switching tabs is no edit. */
+async function terrainTabKeys(page, found) {
+  try {
+  const fail = (what) => found.push(`terrain tab keys: ${what}`);
+  const k = await heightKit(page, "TabKeys");
+  const TXT = "map/war3map.w3e.txt";
+  const SHIFT = 8;
+  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await settled(page); };
+  const tabNow = () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent ?? null`);
+  const selected = () => page.evaluate(`document.querySelectorAll(".terrain-sel-triple input").length >= 2`);
+  const expectTab = async (want, what) => { const t = await tabNow(); if (t !== want) fail(`${what}: the ${t} tab is open, not ${want}`); };
+  const KEYS = { t: ["t", "KeyT", 84], d: ["d", "KeyD", 68], u: ["u", "KeyU", 85], o: ["o", "KeyO", 79], r: ["r", "KeyR", 82], m: ["m", "KeyM", 77], space: [" ", "Space", 32], esc: ["Escape", "Escape", 27] };
+  const press = (name, modifiers = 0) => key(...KEYS[name], modifiers);
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 384, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const footman = k.units().find((u) => u.id === "hfoo");
+  if (!footman) return fail("the footman to select wasn't placed");
+  const pick = () => k.look(footman.position[0], footman.position[1], { id: "hfoo", x: footman.position[0], y: footman.position[1] });
+  await k.tab("Select");
+
+  // Each palette key from the Select tab and from another tab.
+  for (const [name, tab] of [["t", "Terrain"], ["d", "Objects"], ["m", "Cameras"], ["u", "Objects"], ["r", "Regions"], ["o", "Objects"], ["t", "Terrain"]]) {
+    await press(name);
+    await expectTab(tab, name.toUpperCase());
+  }
+  // The tab buttons name their keys.
+  const tip = await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Objects")?.title ?? ""`);
+  if (!/\bO\b/.test(tip) || !/\bD\b/.test(tip) || !/\bU\b/.test(tip)) fail(`the Objects tab's tooltip doesn't name O, D and U: "${tip}"`);
+  // With a modifier they don't switch, as in the World Editor (Shift+T faces the pointer, Ctrl+T is View > Terrain).
+  await press("m", SHIFT);
+  await expectTab("Terrain", "Shift+M");
+
+  // Space: to the Select tab, then back to the tab before.
+  await press("space");
+  await expectTab("Select", "Space from the Terrain tab");
+  await press("space");
+  await expectTab("Terrain", "Space from the Select tab");
+  await press("r");
+  await press("space");
+  await press("space");
+  await expectTab("Regions", "Space twice from the Regions tab");
+
+  // Escape with nothing selected: from a tab to the Select tab; there, nothing more.
+  await press("esc");
+  await expectTab("Select", "Escape on the Regions tab with nothing selected");
+  await press("esc");
+  await expectTab("Select", "Escape on the Select tab");
+
+  // Escape with an object selected: deselected first, the tab stays; the next one goes to the Select tab.
+  await pick();
+  if (!(await selected())) return fail("the footman wasn't selected (control)");
+  await press("esc");
+  if (await selected()) fail("Escape on the Select tab didn't deselect the footman");
+  await expectTab("Select", "Escape deselecting on the Select tab");
+  await pick();
+  await press("t");
+  await expectTab("Terrain", "T with the footman selected");
+  await press("esc");
+  await expectTab("Terrain", "Escape with the footman selected (it deselects first)");
+  await press("esc");
+  await expectTab("Select", "the second Escape on the Terrain tab");
+  if (await selected()) fail("Escape on the Terrain tab didn't deselect the footman");
+
+  // Typed into a field of the view's panel (the footman's position), the keys switch nothing.
+  await pick();
+  await page.evaluate(`document.querySelector(".terrain-sel-triple input").focus()`);
+  for (const name of ["t", "r", "m", "o", "space"]) await k.hands.key(...KEYS[name]);
+  await settled(page);
+  await expectTab("Select", "keys typed into the position box");
+  if (!(await selected())) fail("keys typed into the position box changed the selection");
+  // The same key on the map again (the control).
+  await press("m");
+  await expectTab("Cameras", "M on the map after the position box");
+
+  // The commands, as the command palette runs them.
+  for (const [id, tab] of [["w3.terrain.tab.regions", "Regions"], ["w3.terrain.tab.toggleSelect", "Select"], ["w3.terrain.tab.toggleSelect", "Regions"], ["w3.terrain.tab.units", "Objects"], ["w3.terrain.tab.terrain", "Terrain"]]) {
+    const err = await k.run(id);
+    if (err) fail(`${id}: ${err}`);
+    await settled(page);
+    await expectTab(tab, id);
+  }
+  await k.tab("Select");
+  // Switching tabs is no edit.
+  await settled(page);
+  if (await page.evaluate(`w3.editors.isDirty(${lit(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the tab keys left unsaved changes");
+  await page.evaluate(`w3.editors.closeAll()`);
+  } finally {
     await restoreWindow(page);
   }
 }
@@ -15970,6 +16065,7 @@ async function run() {
         techtreeRandomLevels,
         terrainModelTexture,
         terrainSelectCameras,
+        terrainTabKeys,
         terrainWiring,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
         testMapWithoutGame: async (p, f) => {
@@ -16174,6 +16270,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "terrainSelectCameras", found);
   await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
   await leftOpen(page, "viewModes", found);
+  await terrainTabKeys(page, found).catch((e) => found.push(`terrain tab keys: ${e.message}`));
+  await leftOpen(page, "terrainTabKeys", found);
   await toggleGroups(page, found).catch((e) => found.push(`toggle groups: ${e.message}`));
   await leftOpen(page, "toggleGroups", found);
   await toolbarNarrow(page, found).catch((e) => found.push(`toolbar narrow: ${e.message}`));
