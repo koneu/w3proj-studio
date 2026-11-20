@@ -456,6 +456,10 @@ test("editorPrefs pins the persisted toggles to the editor's defaults, unless ke
   assert.match(out, /Enforce Camera Boundaries=1/);
   // Ctrl+Shift+H's switch (unit-heights), left on by a run before: back to off.
   assert.match(out, /^Reset Fixed Z When Moving Objects=false$/m);
+  // A Campaign Editor left open by a run before (bit 64): the editor's start doesn't show it again.
+  const reopening = setPrefs("[Misc]\nVisible UI Elements=75\n", "Misc", p);
+  assert.match(reopening, /^Visible UI Elements=11$/m);
+  assert.doesNotMatch(reopening, /=75$/m, "control: the left value is replaced, not kept beside");
   const kept = editorPrefs("hd", "fixed", true);
   for (const k of Object.keys(PINNED_PREFS)) assert.equal(k in kept, false, `${k} stays as it was with keep`);
   assert.equal(parseArgs(["--keep-prefs"]).opts.keepPrefs, true);
