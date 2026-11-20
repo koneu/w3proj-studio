@@ -370,7 +370,7 @@ test("a custom ability without an autocast order gets an empty order, learned or
   assert.equal(count(units([unit({ abilities })], { customAbility })), 2);
   hasNot(units([unit({ abilities })], {}), 'IssueImmediateOrder( u, "" )');
   // A hero's unlearned hero ability gets none (script-items: H000's A004 on Divine Shield).
-  assert.equal(count(units([unit({ id: "H000", level: 3, abilities })], { customAbility, heroAbility: (id) => id === "XAC9" })), 1);
+  assert.equal(count(units([unit({ id: "H000", level: 3, abilities })], { customAbility, heroAbility: (id: string) => id === "XAC9" })), 1);
 });
 
 test("a custom ability on a base with only an Order/Unorder pair gets no autocast order", () => {
@@ -380,7 +380,7 @@ test("a custom ability on a base with only an Order/Unorder pair gets no autocas
     [{ custom: [{ id: "A000", base: "AHfa" }, { id: "A001", base: "Adef" }, { id: "A002", base: "Ahea" }] }]);
   assert.deepEqual([orders("AHfa"), orders("Adef"), orders("A000"), orders("A001"), orders("A002")],
     [{ on: "flamingarrows" }, { on: "defend" }, undefined, undefined, { on: "healon", off: "healoff" }]);
-  const placed = (id: string, autocast: number) => units([unit({ id: "Emoo", level: 3, abilities: [{ id, autocast, level: 1 }] })], { autocastOrders: orders, customAbility: (a) => a.startsWith("A0") });
+  const placed = (id: string, autocast: number) => units([unit({ id: "Emoo", level: 3, abilities: [{ id, autocast, level: 1 }] })], { autocastOrders: orders, customAbility: (a: string) => a.startsWith("A0") });
   has(placed("AHfa", 1), '    call IssueImmediateOrder( u, "flamingarrows" )');
   hasNot(placed("AHfa", 0), "IssueImmediateOrder");
   has(placed("A000", 1), '    call IssueImmediateOrder( u, "" )');
