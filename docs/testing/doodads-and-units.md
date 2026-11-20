@@ -113,10 +113,10 @@ Placing, moving, picking, rules on load, pathing footprints, fences, camps and u
   editor ids 3 and 4), uDNR with random type 1, group, position. A placed group unit is drawn as one of its group's lines
   under a "?" from the start (which one differs per start). Advanced (260,41) has Cycle Random Groups - Next / Previous
   (Ctrl+= / Ctrl+-; `--key ctrl+equal` did nothing, the menu item 320,334 works) and Auto Cycle Random Groups (Ctrl+G,
-  on): with it on the drawn line changes by itself every 2 to 5 s with no input at all, both ways round the lines (15
+  on): with it on the drawn line changes by itself every 3 s (measured 2026-11-20: 3.03 s on average over 380 pictures; it was 2 to 5 s in Studio before) with no input at all, both ways round the lines (15
   pictures 2.3 s apart: F F R K R R R F R F K K F F F), and stays after Ctrl+G turns it off (10 pictures alike). It is
   not tied to placing: pastes changed the line or not as the timer had it.
-  Studio: randomplace.ts `startAutoCycle` (2 to 5 s, uniform random line), the line starts random per open; app-smoke placerAndCampaign.
+  Studio: randomplace.ts `startAutoCycle` (a tick every 3 s, `AUTO_CYCLE_MS`; uniform random line), the line starts random per open; app-smoke placerAndCampaign.
 
 Diagonal fences and angles (branch rotated-footprint-we, 2026-11-15; `tests/we-compare/fence-wpm.json`, inputs from `make-fence.mjs`, `angles`, `ints`): a diagonal pathing texture (Fence45, Fence135, ShortFence135) turns by quarters cell for cell as `pathing.ts` stamps it, the scale doesn't count, and example map 22's played Fence 1 gets the editor's own war3map.wpm. Opening a map, the editor reads a stored angle that is a whole number as degrees (2.0 is 2 degrees: a rectangle turns to 0), any doodad (doodadgrid.ts `openedAngle`).
 
