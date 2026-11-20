@@ -159,8 +159,30 @@ pub fn parse_imp(bytes: &[u8]) -> Vec<String> {
 
 const EXTS: &[&str] = &[
     "mdx", "mdl", "blp", "tga", "dds", "png", "wav", "mp3", "flac", "ogg", "txt", "slk", "fdf",
-    "toc", "j", "lua", "ai", "pld", "imp", "w3x", "w3m",
+    "toc", "j", "lua", "ai", "pld", "imp", "w3x", "w3m", "ttf",
 ];
+
+/// The name in a model's MODL chunk (MDX: "MDLX", then chunks of a tag, a u32 size and the data; MODL starts with
+/// an 80-byte name). Imported models are often stored under it: 2 of The Chosen Ones campaign's otherwise unnamed
+/// models (war3campImported\Tower01.mdx, Felsen1.mdx) are named only by their own MODL name.
+fn mdx_model_name(bytes: &[u8]) -> Option<&str> {
+    if !bytes.starts_with(b"MDLX") {
+        return None;
+    }
+    let mut p = 4usize;
+    while p.checked_add(8)? <= bytes.len() {
+        let tag = &bytes[p..p + 4];
+        let size = u32::from_le_bytes(bytes[p + 4..p + 8].try_into().ok()?) as usize;
+        let data = p + 8;
+        if tag == b"MODL" {
+            let name = bytes.get(data..data.checked_add(80)?)?;
+            let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+            return std::str::from_utf8(&name[..end]).ok().map(str::trim).filter(|s| !s.is_empty());
+        }
+        p = data.checked_add(size)?;
+    }
+    None
+}
 
 fn is_path_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'\\' | b'/' | b'.' | b'-' | b' ' | b'(' | b')' | b'!' | b'#' | b'&' | b'\'' | b'+' | b',' | b'[' | b']')
@@ -169,6 +191,11 @@ fn is_path_byte(b: u8) -> bool {
 /// Finds things that look like file paths inside arbitrary bytes, and adds
 /// common variants (model ↔ portrait, .mdl ↔ .mdx).
 pub fn scan_candidates(bytes: &[u8], out: &mut BTreeSet<String>) {
+    if let Some(name) = mdx_model_name(bytes) {
+        if name.bytes().all(is_path_byte) {
+            scan_token(&format!("{name}.mdx"), out);
+        }
+    }
     for token in bytes.split(|&b| !is_path_byte(b)) {
         if token.len() < 3 || token.len() > 260 {
             continue;
@@ -211,12 +238,18 @@ fn scan_token(s: &str, out: &mut BTreeSet<String>) {
                 out.insert(format!("ReplaceableTextures\\CommandButtonsDisabled\\DIS{file}"));
             }
         }
-        // Imports may sit in the import folder of a map or a campaign.
-        let imported = lower.starts_with("war3mapimported\\") || lower.starts_with("war3campimported\\");
+        // Imports may sit in the import folder of a map or a campaign: a chapter's script names a campaign import as
+        // war3mapImported\X as often as war3campImported\X. And an import keeps only its file name when a model names
+        // it with folders (Textures\Zap1b.blp stored as war3campImported\Zap1b.blp or Zap1b.blp). The Chosen Ones
+        // campaign: 108 more of its 494 unnamed files found by these, 2026-11-20.
         for f in forms {
-            if !imported {
-                out.insert(format!("war3mapImported\\{f}"));
-                out.insert(format!("war3campImported\\{f}"));
+            let lower = f.to_ascii_lowercase();
+            let rest = ["war3mapimported\\", "war3campimported\\"].iter().find_map(|p| lower.starts_with(p).then(|| &f[p.len()..]));
+            let file = f.rsplit('\\').next().unwrap_or(&f);
+            for base in [rest.unwrap_or(&f), file] {
+                out.insert(format!("war3mapImported\\{base}"));
+                out.insert(format!("war3campImported\\{base}"));
+                out.insert(base.to_string());
             }
             out.insert(f);
         }
