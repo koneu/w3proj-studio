@@ -45,8 +45,15 @@ const reflectivity = reflectAt >= 0 ? Number(process.argv[reflectAt + 1]) : null
 if (reflectAt >= 0 && !(Number.isInteger(reflectivity) && reflectivity >= 0 && reflectivity <= 100)) {
   console.error("make-water-tilesets.mjs: --reflectivity wants a whole number of 0 to 100"); process.exit(2);
 }
-if ((depthList || reflectAt >= 0) && (dry || shore)) { console.error("make-water-tilesets.mjs: --depths and --reflectivity are for the wt- maps"); process.exit(2); }
-const VALUED = new Set(["--cliffs", "--depths", "--reflectivity"]);
+// --tint R,G,B: the w3i's water tint (0 to 255 each; stored blue, green, red, alpha 255) with its flag 0x10000 on (the
+// name gets -t<R>-<G>-<B>): for the HD water's colour under a tint (branch we-remeasure-hd).
+const tintAt = process.argv.indexOf("--tint");
+const tint = tintAt >= 0 ? (process.argv[tintAt + 1] ?? "").split(",").map(Number) : null;
+if (tint && (tint.length !== 3 || tint.some((v) => !(Number.isInteger(v) && v >= 0 && v <= 255)))) {
+  console.error("make-water-tilesets.mjs: --tint wants red, green and blue of 0 to 255, e.g. 255,64,64"); process.exit(2);
+}
+if ((depthList || reflectAt >= 0 || tint) && (dry || shore)) { console.error("make-water-tilesets.mjs: --depths, --reflectivity and --tint are for the wt- maps"); process.exit(2); }
+const VALUED = new Set(["--cliffs", "--depths", "--reflectivity", "--tint"]);
 const only = process.argv.slice(5).filter((a, i, all) => a !== "--dry" && a !== "--shore" && !VALUED.has(a) && !VALUED.has(all[i - 1]));
 if (!out) { console.error("usage: make-water-tilesets.mjs <w3proj cli> <game folder> <out folder> [--dry | --shore] [tileset char…]"); process.exit(2); }
 const run = (...args) => {
@@ -79,6 +86,10 @@ for (const ch of TILESETS) {
     if (reflectivity !== null) {
       if (!info.water || typeof info.water !== "object") throw new Error("flat.w3x's w3i has no water block for --reflectivity");
       info.water.reflectivity = reflectivity;
+    }
+    if (tint) {
+      info.waterTint = [tint[2], tint[1], tint[0], 255];
+      info.flags = (info.flags | 0x10000) >>> 0;
     }
     writeFileSync(w3i, JSON.stringify(info));
     const file = join(dir, "map", "war3map.w3e.txt");
@@ -126,7 +137,7 @@ for (const ch of TILESETS) {
       section("texture", Array.from({ length: 65 }, () => "0".repeat(65)));
     }
     writeFileSync(file, lines.join("\n"));
-    const suffix = (cliffList ? `-${cliffList.join("-")}` : "") + (depthList ? `-${depthList.join("-")}` : "") + (reflectivity !== null ? `-r${reflectivity}` : "");
+    const suffix = (cliffList ? `-${cliffList.join("-")}` : "") + (depthList ? `-${depthList.join("-")}` : "") + (reflectivity !== null ? `-r${reflectivity}` : "") + (tint ? `-t${tint.join("-")}` : "");
     run("pack", dir, "-o", join(out, `${dry ? "nv" : shore ? "ws" : "wt"}-${ch}${suffix}.w3x`), "--force-stale");
     console.log(`${ch}: ${ground.join(" ")} / ${own.join(" ")}`);
   } finally {
