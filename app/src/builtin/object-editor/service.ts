@@ -19,10 +19,7 @@ import { joinPath } from "../../lib/paths";
 import { mergeSkin } from "./w3o";
 import { withLists, withSkin } from "./skin";
 import type { EditFile } from "./objectedit";
-
-const KIND_LABELS: Record<string, string> = {
-  w3u: "Units", w3t: "Items", w3a: "Abilities", w3h: "Buffs/Effects", w3b: "Destructables", w3d: "Doodads", w3q: "Upgrades",
-};
+import { ICON_FIELD, KIND_LABELS } from "./shared";
 
 /** war3map.wts as "TRIGSTR_nnn" → text. */
 export function parseWts(text: string): Map<string, string> {
@@ -53,7 +50,7 @@ function entriesOf(kind: string, kd: KindData, objects: RawObject[], wts: string
     const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)];
     const nameMod = mods.find((m) => /nam$/.test(m.field) && typeof m.value === "string");
     const name = nameMod ? resolve(nameMod.value as string) : kd.names.get(o.base) ?? o.base;
-    const icon = mods.find((m) => m.field === ICON_FIELDS[kind] && typeof m.value === "string")?.value as string | undefined;
+    const icon = mods.find((m) => m.field === ICON_FIELD[kind] && typeof m.value === "string")?.value as string | undefined;
     return { id: o.id!, base: o.base, name: stripColors(name), icon, ...(campaign ? { campaign: true } : {}) };
   });
 }
@@ -94,9 +91,6 @@ export async function campaignObjects(w3: W3Api, kind: string, root?: string): P
   });
   return { campaign, custom: (merged.custom ?? []) as RawObject[], original: (merged.original ?? []) as RawObject[], wts };
 }
-
-/** Icon (command button art) field per object kind; destructables and doodads have none. */
-const ICON_FIELDS: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aart", w3h: "fart", w3q: "gar1" };
 
 /** The side of a list icon in pixels: rows show them at 20 to 24, doubled on a dense screen. A Reforged icon is
  *  256 a side, and as a data URL of that size 100 KB that every row's picture decodes again. */
@@ -142,7 +136,7 @@ export function iconLoader(w3: W3Api) {
   const load = imageLoader(w3, LIST_ICON_SIZE);
   /** Icon of object `id` of `kind` (custom objects: `base` and the map's own value in `custom`). */
   return (kd: KindData, kind: string, id: string, base?: string, custom?: string): Promise<string | null> => {
-    const field = ICON_FIELDS[kind] && kd.fieldById.get(ICON_FIELDS[kind]);
+    const field = ICON_FIELD[kind] && kd.fieldById.get(ICON_FIELD[kind]);
     if (!field) return Promise.resolve(null);
     const raw = custom ?? kd.defaultValue(base ?? id, field, field.repeat > 0 ? 1 : 0);
     // Some art fields list several files; the first is the icon.
@@ -197,7 +191,7 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
       return undefined;
     },
     async icon(kind, id) {
-      if (!ICON_FIELDS[kind]) return null;
+      if (!ICON_FIELD[kind]) return null;
       const kd = await loadKind(w3, kind);
       const custom = (await customOf(kind, kd)).find((c) => c.id === id);
       return icons(kd, kind, id, custom?.base, custom?.icon);
