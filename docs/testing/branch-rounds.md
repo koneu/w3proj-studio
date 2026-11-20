@@ -105,6 +105,60 @@ Studio: app-smoke `terrainTabKeys` (the keys in the hidden window, typed into a 
 
 **Branch bugs-general-1** (2026-11-20, no editor; the release CLI on copies of the 25 maps of smoketest_maps, The Chosen Ones 1.1a and Curse of the Forsaken (30 chapters) and the game's 273 maps under Maps/). (1) **Braces in player and force names**: the readback guard of localewts.ts `addLocaleStrings` is right: a string of war3map.wts ends at its first `}` and nothing escapes one (wts.ts `wtsCutLines`), so such a name now stays plain in war3map.w3i (which holds it whole), the pack's output names the field ("Player 2's name"), and the other names still get their strings (they all stayed plain before); no map of the corpus has a plain name with a `}` (2 have plain names: CrazyHeroSiegeAI, MatrixPCDefense). (2) **Chapter maps' names**: the 27 Forsaken chapters have no plain player or force names (all TRIGSTR_), The Chosen Ones' three keep war3map.w3i raw (left as is), so the chapter step changes no corpus chapter; it was proven on a made-up campaign (namestrings.test.ts). (3) **Imports under another extension**: the pack and Problems warn for a listed sound held under another sound extension and for war3mapPreview.* held under another extension; game maps: 8 of 273 warn (WormWar 10 entries, ExtremeCandyWar2004 35, 2005 21, Skibi'sCastleTD 5, Monolith 1, BomberCommand 5, AzerothGrandPrix 16, FunnyBunnysEggHunt 18), none of the smoketest maps or the two campaigns. Not warned: ForgottenHollow, SilverpineSprint and Dalaran list .mdl models held as .mdx, a .tga held as .dds and war3mapMap.blp as war3mapmap.tga (Blizzard's own maps, likely the editor's conversion; not measured), 31 entries in all. (4) **Sound channel -1**: the six sounds of we-script-items that came back as 0 with SetSoundChannel( 0 ) were unlabelled; of the game maps' 571 sounds (music left out) 23 are labelled with -1 (the label's channel 0, as the editor's Sound Editor stores it, no SetSoundChannel in their scripts) and none is unlabelled with -1, so the script check can't tell either way. jass.ts now writes SetSoundChannel( 0 ) for an unlabelled -1 (script.test.ts); the w3s keeps -1 (the editor's open stores 0; the script decides what the game uses). The corpus script check is unchanged (whole file 219/326, Sound Assets 326/326, Lua 41/49). (5) The overwrite question already compares a content hash (commit aa341409, editors.ts `sameStamp`, app-smoke staleEditors).
 
+**Branch tm-units-data** (2026-11-20; no World Editor: CLI, corpus and unit tests on copies). (1) **WoW Reforged 4.6**
+(`smoketest_models/wc3_wowr`, project and map): `w3proj pack` of the project gives the same 4,563 files as
+wowr4.6.w3x, every one byte for byte (`w3proj cat` of each, sha1), only the archive differs (123,243,118 against
+123,290,793 bytes: compression and table sizes); a fresh unpack of the original equals the project (`diff -r`), and
+`verify` passes on both. `w3proj check`: 200 `jass` errors were false: the map imports its own `Scripts\common.j`
+(8,865 lines, about 160 constants the game's lacks: ITEM_VALUES_DUMMY_HERO, PLAYER_BOSSES, …), which the game reads
+before its own; now checked against it (`lib/jass/env.ts` `mapScriptJassEnv`). Two more were Studio's parser: `x ==
+not y` is valid JASS, and a player compared with a group compiles in the game (now a warning). Left: 2 such warnings,
+the 2 `triggerValidate` errors on the same comparison (the variable Bosses is a unit group), and warnings checked by
+hand as right: the model textures (25 paths in neither the map nor any art set of the game), the object data's model
+paths, the disabled triggers' missing variables. The melee section ran because the map "looks like a ladder map" (13
+starts, 51 mines): its 2,800 findings judge an RPG by ladder rules. (2) **Random units "any by level"** (randomType
+0): common.j declares `native ChooseRandomCreep takes integer level returns integer` and `native ChooseRandomNPBuilding
+takes nothing returns integer` (Blizzard.j only wraps them, `ChooseRandomCreepBJ`, `ChooseRandomNPBuildingBJ`); Studio
+writes `set unitID = ChooseRandomCreep( N )` (-1 any) and `ChooseRandomNPBuilding(  )`, the spellings the editor wrote
+for item drops (`lib/script/drops.ts`). None of the 375 game maps nor smoketest_maps places one (357 uDNR and 13 bDNR
+of randomType 1, 3 bDNR of type 2). (3) **The Chosen Ones' unnamed files** (494 of each copy, 492 with the game's
+names; 320 BLP, 162 MDX): unpack now also tries a model's own MODL name in the import folders, a path's file name in
+the map's and the campaign's import folders and at the root (a model's `Textures\Zap1b.blp` stored as
+`war3campImported\Zap1b.blp`), the other import folder for `war3mapImported\…` (a chapter's script naming a campaign
+import) and `.ttf`: 409 left (407 with the game's names), `crates/w3proj/src/names.rs`. Trying every string of the
+campaign with every extension and folder (218 million names) finds 23 more (`t_`, `aaaaa.blp`, `Demon_portrait.mdx`,
+…): guessing, not a rule, so left out. The rest (282 BLP, 115 MDX) is named by nothing in the campaign or its chapters:
+no (listfile), no war3campaign.imp, and their own MODL names aren't their file names. (4) **check_melee's narrow
+strips** (this grid counts every tree and doodad): on the six ladder 1v1 maps of smoketest_maps 3.3 to 5.4% and 12 to
+18 strips, on the game's 18 two-player melee maps 2.3 to 8.4% (Shrine of the Ancients; the others up to 7.1%) and 11
+to 48 (others up to 24), on the maps for 4 and 8 3.1 to 11% and 13 to 54: the old limits (5%, 10 strips; "ladder maps
+have 1.3 to 3.2%, 2 to 8") warned on every ladder map. Now 9% and 30 strips for two starts, 12% and 60 for more
+(`meleecheck.ts`); an AI's map of smoketest_maps (meelee_map_2: 21.1%, 64) still gets both warnings; `measures.narrow`
+gives the numbers. (5) **Snap on Load with real pathing pictures**: of the 481 pathing textures the object data of 606
+projects names (smoketest_maps with their chapters, the game's 375 maps), the 401 found are none of them one colour
+with varying alpha; of the game's PathTextures only CliffCollapse*Path (8x4, 4x8: rectangles, which turn anyway) and
+WaterfallBase0 (8x8, used by no row of the game's tables) are. So no real map has the case; the built maps of the
+`doodad-snap-custom-alpha` spec are its proof. A missing map texture with placed objects: only ForsakenKingdom
+Scenario 1 ForgottenHollow (D001, dptx `Unpathable32x32.tga`, 191 placed at 101° on the 64 grid); its type's own
+4x4Default stands in, a one-colour square that would keep them too, so the map agrees with the rule but can't tell it
+from snapping by the stand-in (CSW WC2OrcAct1's B61R with `IceCoverPath.tga` is placed nowhere). (6) **Skin sections in
+another case**: already found by `lib/objects/skinids.ts` since 5176c527 (after the batch the item came from); with
+the game's tables it gives Yosh [YOsh], Lcsy [LCsy], Ycgd [YCgd], Lccn [LCcn], YOgo [YOGO], Aisy [AIsy], BNss [Bnss],
+Xesn [XEsn], and every unit, item, destructable and doodad id has a section. (7) **The Classic converter's refusal**:
+`convertToClassic` reads models only through `readReforged` → `readLayered` → `w3.game.read` (`checks.ts`), so no
+project file reaches it; `classicRefusal` wrapping `w3.game.read` is the only way in. (8) **GameService.read shared**:
+`fails-without --base 2cc2a0f6~1 src/workbench/game.test.ts src/workbench/game.ts` fails on "shared reads are the one
+kept array". (9) **we-drive's display check**: `input-guard.test.mjs` against we-x11.py before aeb35564 fails "an fd
+that vanishes during the scan" and "a refusal is asked again"; "a dead Xvfb is said as such" (we-drive.test.mjs) goes
+red with the dead-Xvfb check taken out of `Session.x`. **binfresh**: the old tests passed without SOURCES.app's page
+files; the new "the web page's sources make the app stale, not the CLI" fails against binfresh.mjs before 8236e7ac.
+(10) **The headless bundle in a .deb**: as the release workflow does (the CLI as `binaries/w3proj-<triple>`, `node
+app/scripts/headless.mjs --out app/src-tauri/binaries/w3proj-headless.mjs`), `npx tauri build --debug --ci --bundles
+deb --config src-tauri/tauri.release.conf.json` (about 15 minutes here) gives usr/bin/w3proj-studio, usr/bin/w3proj and
+`usr/lib/W3Proj Studio/w3proj-headless.mjs`; the extracted usr/bin/w3proj's `rebuild --only script` on a copy of the
+mini map ran node on `usr/bin/../lib/W3Proj Studio/w3proj-headless.mjs` (a W3PROJ_NODE wrapper logged it). The
+AppImage wasn't built.
+
 **Misc checks against the editor** (branch we-misc-2, 2026-11-17, SD). One we-drive process runs only one map, so every Object Editor probe is one start (F6 after a click on the view, `--sleep 80000`; with other agents queued, wait for the lock with `--timeout 1800`).
 (1) **Negative reals** (inputs `tests/fixtures/we-specs/make-negative-reals.mjs`: custom Heal A000 with Cooldown -3, -1.5, 2, Casting Time -0.5, Cast Range -100): `Allow Negative Values=1` in `[Object Editor]` of WorldEditPreferences.txt (kept by we-drive) changed nothing that can be seen: the editor has no switch for it in its Object Editor menus, and File > Preferences stops at "Unable to initialize audio device" (the dialog is unreachable here), so whether the key does anything is not proved. Observed with it set: Auto Fill Levels (Ctrl+L, field Level 1 Cooldown) opens with Base Value 0.00 where the field holds -3, Base Value and Previous Value Factor typed -3 and -1 become 0.00, Level Factor and Constant Factor keep -2 and -4, the preview floors every level at 0.00 (base 1, previous 1, level 4, constant -10: 1.00, 0.00, 2.00 as before), and OK on the untouched dialog overwrites the whole row with 0 (-3, -1.5, 2 all 0.000); Modify Selected Field typed -7 over Cast Range 350 gives **0.000** (clamped, no refusal; typed -2 over 0 stays 0, over Casting Time and Cooldown too), a real field (Hit Points Gained) takes -4, Mana Cost (int) typed -5 over 5 stays 5; stored negatives show as -3.000 and the like; Paste Ability (Edit > Copy Ability, Paste Ability, an ID asked, OK) copies the object with its negatives unchanged. Studio: objectedit.ts `clampsToZero` (a typed negative for an unreal field is made 0 while the setting is off; it refused before), app-smoke editorExtras.
 (2) **Modules**: Module menu of this build (7003) lists Terrain Editor F3, Trigger Editor F4, Sound Editor F5, Object Editor F6, Campaign Editor F7, AI Editor F8, Object Manager F11, Asset Manager F12 and Light Editor; **no Sound Set Editor, Dialogue Editor or Foliage module** (Foliage is only the View > Foliage switch). Object Manager (F11): tabs Map Summary (Map Name, Expansion Required, Map Type, Playable Map Size, Map Size Description, Tileset, Total Units, Items, Doodads, Regions, Cameras, Triggers, Variables, Sounds, Custom Objects by kind), Units, Items, Doodads, Regions, Cameras, Triggers, Functions, Variables, Sounds. Light Editor: trees Terrain (23 internal DNC*Terrain.mdl, Imported 0) and Unit (internal, Imported), a Terrain/Unit drop-down, "Enable Custom Light", "Export Current Values" (greyed until enabled), a Preview time spin (0.00): edits the day and night lighting models; Studio has no counterpart.

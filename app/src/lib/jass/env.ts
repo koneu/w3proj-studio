@@ -18,6 +18,18 @@ export function gameJassEnv(read: (path: string) => Promise<string>): Promise<Ja
   return game;
 }
 
+/** What a map's war3map.j is checked against: the game's common.j and Blizzard.j, except where the map imports its own
+ *  copy (Scripts\common.j, Scripts\Blizzard.j; the game reads the map's files before its own). WoW Reforged's script
+ *  uses about 160 constants its own common.j declares and the game's doesn't. `own(path)`: the map's file's text, null
+ *  when the map has none (a file that is there but can't be read rejects: it is never taken for the game's). */
+export async function mapScriptJassEnv(read: (path: string) => Promise<string>, own: (path: string) => Promise<string | null>): Promise<JassEnv> {
+  const [ownCommon, ownBlizzard] = await Promise.all([own(COMMON_J), own(BLIZZARD_J)]);
+  if (ownCommon === null && ownBlizzard === null) return gameJassEnv(read);
+  const label = (mine: string | null, path: string) => `${mine === null ? "game" : "map"}:${path}`;
+  const common = envFrom([ownCommon ?? await read(COMMON_J)], undefined, [label(ownCommon, COMMON_J)]);
+  return envFrom([ownBlizzard ?? await read(BLIZZARD_J)], common, [label(ownBlizzard, BLIZZARD_J)]);
+}
+
 /** The trigger each function of a generated map script belongs to (by its "// Trigger: " banner). */
 export function triggerOfFunctions(script: string): Map<string, string> {
   const out = new Map<string, string>();

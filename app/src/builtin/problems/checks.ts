@@ -13,7 +13,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
-import { gameJassEnv } from "../../lib/jass/env";
+import { mapScriptJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { type ModeChoices, pickClassicModel } from "./modelpick";
@@ -92,7 +92,12 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
             reveal: { command: "w3.text.revealAt", args: ["map/war3map.lua", lua.slice(0, d.from).replace(/\r\n/g, "\n").length] },
           })), "script problems");
         }
-        const env = await gameJassEnv((p) => w3.game.readText(p));
+        // The map's own Scripts\common.j or Blizzard.j, where it imports one, stands in for the game's.
+        const files = scope().lookup();
+        const env = await mapScriptJassEnv((p) => w3.game.readText(p), async (p) => {
+          const bytes = await files.read(p);
+          return bytes === null ? null : new TextDecoder().decode(bytes);
+        });
         const lineOf = (at: number) => src.slice(0, at).split("\n").length;
         // The text editor counts a line break as one character, also in CRLF files.
         const editorOffset = (at: number) => src.slice(0, at).replace(/\r\n/g, "\n").length;

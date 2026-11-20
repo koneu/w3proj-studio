@@ -61,6 +61,22 @@ for (const [name, src] of correct) {
   test(`accepts: ${name}`, () => assert.deepEqual(messages(src), []));
 }
 
+// WoW Reforged's war3map.j (smoketest_models/wc3_wowr), which the game runs, has both of these.
+test("a comparison's right side may be a not", () => {
+  assert.deepEqual(messages(fn("    if true == not false and false != not true then\n    endif")), []);
+  // Control: a comparison with nothing on its right side is still an error.
+  assert.notDeepEqual(messages(fn("    if true == then\n    endif")), []);
+  // "not" on a non-boolean is still reported there.
+  assert.ok(messages(fn("    if true == not 1 then\n    endif")).some((m) => /not.*boolean/.test(m)));
+});
+
+test("two unrelated handle types compare with a warning, not an error; a handle with a string stays an error", () => {
+  const found = checkJass(fn("    local player p = null\n    local group g = null\n    if p != g then\n    endif"), env);
+  assert.deepEqual(found.map((d) => [d.severity, d.message]), [["warning", "Comparing player with group: never the same object"]]);
+  const control = checkJass(fn('    local player p = null\n    if p == "x" then\n    endif'), env);
+  assert.deepEqual(control.map((d) => d.severity), ["error"]);
+});
+
 test("a report points at the mistake", () => {
   const src = fn("    call KilUnit(null)");
   const [d] = checkJass(src, env);
