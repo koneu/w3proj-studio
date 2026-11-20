@@ -1,0 +1,12 @@
+[
+  {
+    "name": "wts-missing-map-name",
+    "description": "flat.w3x without war3map.wts (make-melee-valid.mjs nowts), Scenario > Map Description's Name typed over (Renamed Map) and OK (branch we-batch-3). The editor's save then writes a war3map.wts of its own: strings 1 to 4 the name, suggested players, description and author, which the w3i names as TRIGSTR_001 to _004; the player and force names (TRIGSTR_001, _002 without a string) become \"\". Studio's set_map_text writes the name inline and makes no string table. The dialog's OK also sets the loading screen's crestRace 64 to 128, gameDataSet -1 to 0 and the three camera zooms 0 to 1250 (its defaults), and counts a save more. Expected to differ by these paths until Studio follows (bugs.md).",
+    "input": { "map": "${REPO}/target/melee-valid/melee-valid-nowts.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--click", "166,41"], ["--click", "202,61"], ["--wait-window", "Map Properties"], ["--type", "Renamed Map"], ["--click", "818,831"], "--idle"] },
+    "studio": { "settings": { "mcp.writeTools": true }, "steps": [{ "mcp": "set_map_text", "args": { "field": "name", "text": "Renamed Map" } }] },
+    "compare": [
+      { "file": "war3map.w3i", "expect": "differs", "expectPaths": ["saves", "name", "author", "description", "suggestedPlayers", "loadingScreen.crestRace", "gameDataSet", "cameraZoom.default", "cameraZoom.max", "cameraZoom.min", "players[].name", "forces[].name"] }
+    ]
+  }
+]

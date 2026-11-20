@@ -21,12 +21,16 @@ export function startLocations(units: readonly Placed[]): Map<number, number[]> 
   return out;
 }
 
-/** The start a map with no start location unit is given when saved: the first user player the w3i already has, at the
- *  start the w3i holds for it (a map made by another tool keeps its players' places, and the sync with the starts must
- *  not move them), else null: the caller adds Player 1's in the middle. */
-export function startToAdd(players: readonly Pick<StartPlayer, "id" | "controller" | "start">[]): { player: number; at: number[] } | null {
-  const p = players.find((q) => q.controller === USER && q.start.length >= 2 && q.start.every(Number.isFinite));
-  return p ? { player: p.id, at: [p.start[0], p.start[1]] } : null;
+/**
+ * The players a save gives a start location, in id order: every player of the w3i that has none in `now`, whatever its
+ * controller (user, computer, neutral, rescuable, none), as the World Editor's save does (we-drive 2026-11-20, branch
+ * all-starts: a w3i of six players of every controller and no start, one of three players where only the first had
+ * one, MatrixPCDefense's eight users and a computer: each got one; a w3i without players gets none). A player whose
+ * start is in `before` (the starts as opened or last saved) lost it by an edit: that removes the player
+ * (syncPlayers), so it gets none.
+ */
+export function playersWithoutStart<P extends Pick<StartPlayer, "id">>(players: readonly P[], now: ReadonlyMap<number, unknown>, before: ReadonlyMap<number, unknown>): P[] {
+  return players.filter((p) => Number.isInteger(p.id) && !now.has(p.id) && !before.has(p.id)).sort((a, b) => a.id - b.id);
 }
 
 /** Adds player `id` (a new user player of selectable race in the first force), sorted by id. */

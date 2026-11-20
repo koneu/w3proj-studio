@@ -272,6 +272,34 @@ export function validStartPlace(t: Terrain, from: readonly [number, number], oth
   return best;
 }
 
+/**
+ * Places for the start locations a save adds for players without one (startlocations.ts playersWithoutStart), in
+ * the order given: for each, the plainly valid place on the 64 grid nearest to the start its w3i holds (validStartPlace,
+ * the starts placed before it and `placed` counted, so the squares don't overlap and keep off the gold mines), the
+ * playable area's middle for a start that isn't a number. The World Editor's save draws each at random among the valid
+ * places of the playable map (we-drive 2026-11-20, branch all-starts: starts on flat, strip, mine-grid and
+ * MatrixPCDefense maps over 15 saves (82 starts), all on the 64 grid and plainly valid here, the square reaching the playable edge
+ * but not the camera bounds, a new set each save, the w3i's start the drawn point within 32 of it); Studio's choice is
+ * stable, so saving the same map twice writes the same file, and keeps a map's own layout. Where there is no valid
+ * place (or `around` is null: the surroundings can't be told) the start goes to the w3i's start as it is (where
+ * Studio's save put a map's first start before): the editor's save then puts it at a random place of the playable map,
+ * valid or not (two of three players on a map with room for one stood in water).
+ */
+export function newStartPlaces(t: Terrain, wanted: readonly { id: number; start: readonly number[] }[], placed: readonly PlacedLike[],
+  around: StartSurroundings | null, area: { left: number; right: number; bottom: number; top: number }): Map<number, [number, number]> {
+  const out = new Map<number, [number, number]>();
+  const others: PlacedLike[] = [...placed];
+  for (const p of wanted) {
+    const given = p.start.length >= 2 && Number.isFinite(p.start[0]) && Number.isFinite(p.start[1]);
+    // The playable area's middle on the 64 grid (startlocations.ts firstStart).
+    const from: [number, number] = given ? [p.start[0], p.start[1]] : [Math.round((area.left + area.right) / 128) * 64, Math.round((area.bottom + area.top) / 128) * 64];
+    const at = (around ? validStartPlace(t, from, others, around) : null) ?? from;
+    out.set(p.id, at);
+    others.push({ id: "sloc", player: p.id, position: [at[0], at[1]] });
+  }
+  return out;
+}
+
 /** What of a project the melee rules read. `gameText`: the game's tables (Terrain.slk, Water.slk, Doodads.slk,
  *  DestructableData.slk); `gameBytes`: its files (the doodads' pathing textures). Without them the flag is never put
  *  back. */
@@ -332,6 +360,9 @@ export interface MeleeFacts {
   customData?: boolean | null;
   /** What the object data says about flag 0x4000 (objectDataTft); absent: not read, which leaves the flag as it is. */
   tftData?: { need: boolean | null; mayClear: boolean };
+  /** war3map.doo's entries, whose drop sets count for flag 0x4000 (readDoodadEntries): [] without a doodad file; null
+   *  when it can't be read; absent: not read. Either of the last two leaves the flag as it is unless something sets it. */
+  doodads?: readonly PlacedLike[] | null;
   /** What stands around the start locations: the pathing their squares are tested against. Not read (absent) when
    *  another reason decides; null when it can't be read. */
   around?: StartSurroundings | null;
@@ -391,6 +422,8 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   if (versions) facts.typeVersions = versions;
   facts.customData = await customDataState(ws, files);
   facts.tftData = await objectDataTft(ws, files);
+  const dooText = await readDooText(ws, files);
+  facts.doodads = doodadEntries(dooText);
   const { triggers, known, custom } = await readTriggers(ws, files);
   if (custom) facts.customTriggers = true;
   if (known) facts.triggersKnown = true;
@@ -403,8 +436,27 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   // triggers that aren't the default but aren't custom don't skip them.
   const decided = facts.customData === true || facts.customConstants || facts.customTriggers === true
     || (forSet && (facts.customData !== false || !facts.constantsKnown));
-  if (!decided && ground) facts.around = await readSurroundings(ws, files, ground);
+  if (!decided && ground) facts.around = await readSurroundings(ws, dooText, ground);
   return facts;
+}
+
+/** war3map.doo.json's text: undefined when the map has no doodad file, null when it can't be read or is kept raw (a
+ *  project not unpacked to JSON). */
+async function readDooText(ws: Pick<MeleeFiles, "readText">, files: readonly string[]): Promise<string | null | undefined> {
+  const json = files.find((p) => p.toLowerCase() === "map/war3map.doo.json");
+  if (!json) return files.some((p) => p.toLowerCase() === "map/war3map.doo") ? null : undefined;
+  return ws.readText(json).catch(() => null);
+}
+
+/** war3map.doo's entries (doodads and destructables) from readDooText's answer, for their drop sets: [] when the map
+ *  has no doodad file; null when it is there but can't be told: raw, unreadable, or not a doodad file. */
+export function doodadEntries(text: string | null | undefined): PlacedLike[] | null {
+  if (text === undefined) return [];
+  if (text === null) return null;
+  try {
+    const doc = JSON.parse(text) as { doodads?: unknown };
+    return doc && Array.isArray(doc.doodads) ? doc.doodads as PlacedLike[] : null;
+  } catch { return null; }
 }
 
 /** The project's saved terrain; null when there is none or it can't be read or parsed. */
@@ -454,9 +506,8 @@ export async function readTypeVersions(ws: Pick<MeleeFiles, "gameText" | "typeVe
 
 /** What stands around the start locations (StartSurroundings) on `ground`: null when the game's tables or the doodads
  *  can't be read. */
-async function readSurroundings(ws: MeleeFiles, files: readonly string[], ground: Terrain): Promise<StartSurroundings | null> {
-  const dooPath = files.find((p) => p.toLowerCase() === "map/war3map.doo.json");
-  return startSurroundings(ws, ground, dooPath ? await ws.readText(dooPath).catch(() => null) : null);
+async function readSurroundings(ws: MeleeFiles, dooText: string | null | undefined, ground: Terrain): Promise<StartSurroundings | null> {
+  return startSurroundings(ws, ground, dooText ?? null);
 }
 
 /** The start locations' surroundings (readSurroundings) of `ground` with the doodads of `dooText` (war3map.doo.json's
@@ -516,7 +567,7 @@ export function meleeSetBlockers(info: MeleeInfo, placed: readonly PlacedLike[],
 export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], facts: MeleeFacts): { flags: number; reasons: string[] } {
   // Requires The Frozen Throne data follows the placed units and items and the ability, buff and upgrade data, whatever
   // the Melee flag does; 0x0008 the terrain's custom tilesets flag.
-  const need = tftNeed(placedNeedTft(placed, facts.typeVersions, info.itemTables), facts.tftData ? facts.tftData.need : null);
+  const need = tftNeed(placedNeedTft(placed, facts.typeVersions, info.itemTables, facts.doodads ?? null), facts.tftData ? facts.tftData.need : null);
   const tft = (flags: number) => tilesetFlagAfter(tftFlagsAfter(flags, need, tftMayClear(facts)), facts.terrain);
   if (!(info.flags & MELEE_MAP)) return { flags: tft(meleeSetBlockers(info, placed, facts).length ? info.flags : info.flags | MELEE_MAP), reasons: [] };
   const t = facts.terrain;
@@ -533,11 +584,11 @@ export function meleeAfterSave(info: MeleeInfo, placed: readonly PlacedLike[], f
 export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readonly PlacedLike[], terrain?: Terrain | null): Promise<{ flags: number; reasons: string[] }> {
   const off = !(info.flags & MELEE_MAP);
   if (off && meleeBlockers(info, placed).length) {
-    let need = placedNeedTft(placed, await readTypeVersions(ws), info.itemTables);
+    const files = ws.files().map((f) => f.path);
+    let need = placedNeedTft(placed, await readTypeVersions(ws), info.itemTables, doodadEntries(await readDooText(ws, files)));
     // Clearing needs to know there is no object data that holds the flag and no custom triggers; setting doesn't.
     let mayClear = false;
     if (need !== true) {
-      const files = ws.files().map((f) => f.path);
       // The object data first: it is small, and decides most custom maps without parsing their triggers.
       const tftData = await objectDataTft(ws, files);
       need = tftNeed(need, tftData.need);

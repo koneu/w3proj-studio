@@ -47,8 +47,12 @@ const MP3_BITRATES = [
 const MP3_RATES = [[44100, 48000, 32000], [22050, 24000, 16000], [11025, 12000, 8000]];
 
 /** MP3 (layer III), as the World Editor measures it (869 mp3s of a campaign's chapter maps, 772 to the
- *  millisecond): a Xing/Info header's frame count when it has one (the header frame itself isn't audio);
+ *  millisecond): a Xing header's frame count when it has one (the header frame itself isn't audio);
  *  else the frames counted, plus one, plus one more when bytes follow the last frame (mostly an ID3v1 tag).
+ *  An Info header (LAME's for constant bitrates) is not read: the editor's save of a map naming the game's
+ *  S04Huntress03.mp3 (Info: 127 frames, 128 in the file) wrote 3369 ms, the frames counted plus one (we-drive
+ *  --null-audio, branch we-batch-3); on CSW Tides of Darkness' 631 mp3s with one the frames counted match the
+ *  editor on 623, the Info count on 621 (no file where only the Info count does).
  *  Counting the frames keeps variable bitrates right. Most of the rest are a frame shorter on files whose
  *  real bitrate is under the header's (no padded frames), as if the editor's estimate went by the bitrate. */
 function mp3DurationMs(buf: Uint8Array): number | null {
@@ -81,13 +85,13 @@ function mp3DurationMs(buf: Uint8Array): number | null {
   return Math.floor((samples * 1000) / rate);
 }
 
-/** The frame count of a Xing or Info header in the frame at `o` (after the CRC and the side information), null
- *  without one or without its count. */
+/** The frame count of a Xing header in the frame at `o` (after the CRC and the side information), null without one
+ *  or without its count; an Info header counts as none (mp3DurationMs). */
 function xingFrames(buf: Uint8Array, o: number, mpeg1: boolean, mono: boolean, crc: boolean): number | null {
   const at = o + 4 + (crc ? 2 : 0) + (mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17));
   if (at + 12 > buf.length) return null;
   const id = String.fromCharCode(buf[at], buf[at + 1], buf[at + 2], buf[at + 3]);
-  if (id !== "Xing" && id !== "Info") return null;
+  if (id !== "Xing") return null;
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   return dv.getUint32(at + 4) & 1 ? dv.getUint32(at + 8) : null;
 }

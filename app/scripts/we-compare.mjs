@@ -52,6 +52,8 @@
 //                 before each start of its editor (we-drive --pref); specs with other prefs get another we-drive
 //                 process. Pinned for every run unless --keep-prefs: Enforce Water Limits, Enforce Camera Boundaries,
 //                 Reset Fixed Z When Moving Objects, Show Creep Camps (we-drive PINNED_PREFS).
+//               "nullAudio": true  the editor gets an audio device that plays nowhere (we-drive --null-audio: with it the
+//                 save writes SetSoundDuration, without it none); specs with it get another we-drive process.
 //               "frameCap": 0  the editor's frame cap for this spec (we-drive --frame-cap; we-compare's --frame-cap
 //                 wins); specs with another cap get another we-drive process. None is set: drags hold still at both
 //                 ends (we-drive --drag-hold) and keys are messages, so the cap of 10 gave the same results
@@ -347,7 +349,7 @@ async function runWorldEditor(specs, opts, game) {
   while (rest.length) {
     // --expect-layout: the first --wait-ready on a main window or tool palette of another size or place than the
     // spec coordinates were measured in stops the process with one message (weOutcome gives it to every spec).
-    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), "--renderer", renderer, ...(frameCap !== null ? ["--frame-cap", String(frameCap)] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p])];
+    const args = [join(here, "we-drive.mjs"), "--work", join(opts.work, "we-drive"), "--mode", mode, "--game", game, "--expect-layout", ...(opts.keepPrefs ? ["--keep-prefs"] : []), "--renderer", renderer, ...(frameCap !== null ? ["--frame-cap", String(frameCap)] : []), ...(saveAccept.length ? ["--save-accept", saveAccept.join(",")] : []), ...prefs.flatMap((p) => ["--pref", p]), ...(specs[0].we.nullAudio ? ["--null-audio"] : [])];
     // One editor for all: --map after the first opens the map in the running editor (File > Open; a restart if that
     // fails), the map before it was saved, so nothing is asked. --close after the last map, around a spec with
     // we.freshEditor or we.expectCrash (weDriveSteps). --restart-per-map (opts.restart) is the old way, an editor

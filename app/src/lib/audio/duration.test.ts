@@ -49,9 +49,12 @@ test("bytes after the last frame (an ID3v1 tag) count as one more frame", () => 
   assert.equal(soundDurationMs(concat(id3(1014), frames(100), id3v1())), ms(102));
 });
 
-test("a Xing or Info header's frame count is the length, its own frame not counted", () => {
+test("a Xing header's frame count is the length, its own frame not counted; an Info header isn't read", () => {
   assert.equal(soundDurationMs(concat(xingFrame(100), frames(100))), ms(100));
-  assert.equal(soundDurationMs(concat(id3(26), xingFrame(80, "Info"), frames(80))), ms(80));
+  // The editor's save (we-drive --null-audio, branch we-batch-3): the game's S04Huntress03.mp3, an Info header of 127
+  // frames in a file of 128, gave 3369 ms, the frames counted (the header's own included) plus one.
+  assert.equal(soundDurationMs(concat(xingFrame(127, "Info"), frames(127))), ms(129));
+  assert.equal(soundDurationMs(concat(id3(26), xingFrame(80, "Info"), frames(80))), ms(82));
   // A header without a frame count (flags 0): the frames are counted.
   const noCount = xingFrame(100);
   new DataView(noCount.buffer).setUint32(4 + 32 + 4, 0);

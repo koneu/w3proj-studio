@@ -31,7 +31,7 @@ import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { editorSuffix, labelWithSuffix, type MapObject } from "./objectinfo";
 import { isCampaignFiles, registerObjectTools } from "./tools";
-import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withLists } from "./skin";
+import { isSkinField, listedPath, skinChanged, skinPathOf, skinWatches, skinWritable, splitSkin, withLists } from "./skin";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -1666,7 +1666,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Closed: the saved file is what there is again.
             if (liveData.get(doc.path)?.data === liveNow) { liveData.delete(doc.path); edits.fire(kind); }
           },
-          watches: [WTS, skinPath],
+          watches: [WTS, ...skinWatches(paths, skinPath)],
         };
       },
     }),

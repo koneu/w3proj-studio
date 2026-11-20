@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  addPlayer, applyAllyPriorities, startToAdd, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer,
+  addPlayer, applyAllyPriorities, playersWithoutStart, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer,
 } from "./startlocations";
 
 /** A map that lost its only player: what a deleted start location left behind. */
@@ -111,19 +111,30 @@ test("ally priorities: not only for melee maps, and a lone player has none (we-d
   assert.deepEqual(editorAllyPriorities(old), new Map([[0, [0, 2]], [1, [0, 1]]]));
 });
 
-test("a map with no start location unit is given the first user player's own start, not the middle", () => {
+test("a save gives every player of the w3i without a start location one, whatever its controller (we-drive ns-mixed, ns-partial)", () => {
   const players = [
-    { id: 3, controller: 2, start: [9, 9] },
+    { id: 7, controller: 1, start: [2048, 0] },
+    { id: 3, controller: 4, start: [9, 9] },
     { id: 0, controller: 1, start: [-3400, 6300] },
-    { id: 1, controller: 1, start: [-6300, 3400] },
+    { id: 5, controller: 0, start: [0, 0] },
+    { id: 1, controller: 2, start: [-6300, 3400] },
+    { id: 2, controller: 3, start: [0, 0] },
   ];
-  assert.deepEqual(startToAdd(players), { player: 0, at: [-3400, 6300] });
-  // Control: no user player, or a start the file can't hold, falls back to the middle (null).
-  assert.equal(startToAdd([{ id: 3, controller: 2, start: [9, 9] }]), null);
-  assert.equal(startToAdd([]), null);
-  assert.equal(startToAdd([{ id: 0, controller: 1, start: [NaN, 1] }]), null);
-  // Syncing the added start with the players moves nobody.
-  const info = { version: 31, players: players.map((p) => ({ ...p, race: 0, fixedStart: 1, name: "x", allyLow: 0, allyHigh: 0 })), forces: [{ players: 3 }], flags: 0 } as unknown as Parameters<typeof syncPlayers>[0];
-  const at = startToAdd(players)!;
-  assert.deepEqual(syncPlayers(info, new Map([[at.player, at.at]]), new Map()), []);
+  const none = new Map<number, number[]>();
+  assert.deepEqual(playersWithoutStart(players, none, none).map((p) => p.id), [0, 1, 2, 3, 5, 7], "all six, in id order");
+  // ns-partial: the player that has one keeps it and gets no second.
+  assert.deepEqual(playersWithoutStart(players, new Map([[0, [0, -256]]]), none).map((p) => p.id), [1, 2, 3, 5, 7]);
+  // A start deleted since the open or the last save removes its player (syncPlayers): no new one for it.
+  assert.deepEqual(playersWithoutStart(players, new Map([[0, [0, -256]]]), new Map([[0, [0, -256]], [1, [5, 5]]])).map((p) => p.id), [2, 3, 5, 7]);
+  // A w3i without players gets none (ns-none: the editor's save added nothing, and counted no edit).
+  assert.deepEqual(playersWithoutStart([], none, none), []);
+  // Every player with a start: nothing (the corpus' maps with starts are saved as they were).
+  assert.deepEqual(playersWithoutStart(players, new Map(players.map((p) => [p.id, p.start])), none), []);
+  // The added starts synced with the players move each player's w3i start onto its start location.
+  const info = { version: 31, players: players.map((p) => ({ ...p, race: 0, fixedStart: 1, name: "x", allyLow: 0, allyHigh: 0 })), forces: [{ players: 0xff }], flags: 0 } as unknown as Parameters<typeof syncPlayers>[0];
+  const placed = new Map(players.map((p, i) => [p.id, [i * 640, 64]]));
+  const changes = syncPlayers(info, placed, none);
+  assert.equal(changes.length, players.length);
+  assert.ok(changes.every((c) => c.startsWith("moved player")), changes.join("; "));
+  for (const p of info.players) assert.deepEqual(p.start, placed.get(p.id));
 });

@@ -794,6 +794,15 @@ test("we.renderer is software or gpu, we.why is text, and a spec with another re
   assert.notEqual(core.weGroupKey(spec({ mode: "hd" })[0]), core.weGroupKey(spec({ mode: "hd", renderer: "software" })[0]));
 });
 
+test("we.nullAudio: true or false (default false); specs with it get another we-drive process", () => {
+  const spec = (we) => core.parseSpecFile(JSON.stringify({ name: "r", input: { new: { name: "x", width: 32, height: 32 } }, we, compare: [{ file: "war3map.w3i" }] }), "r.json", {});
+  assert.equal(spec({ nullAudio: true })[0].we.nullAudio, true);
+  assert.equal(spec({})[0].we.nullAudio, false);
+  assert.throws(() => spec({ nullAudio: "yes" }), /we.nullAudio is true or false/);
+  assert.notEqual(core.weGroupKey(spec({})[0]), core.weGroupKey(spec({ nullAudio: true })[0]));
+  assert.equal(core.weGroupKey(spec({ nullAudio: false })[0]), core.weGroupKey(spec({})[0]), "control: false is the default");
+});
+
 test("--frame-cap and we.frameCap: the flag wins, else the spec's, else we-drive's default; another cap is another editor process", () => {
   const spec = (we) => core.parseSpecFile(JSON.stringify({ name: "r", input: { new: { name: "x", width: 32, height: 32 } }, we, compare: [{ file: "war3map.w3i" }] }), "r.json", {});
   assert.equal(spec({ frameCap: 0, why: "timed drags" })[0].we.frameCap, 0);
