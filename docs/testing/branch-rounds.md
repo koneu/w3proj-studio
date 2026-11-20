@@ -158,6 +158,59 @@ deb --config src-tauri/tauri.release.conf.json` (about 15 minutes here) gives us
 `usr/lib/W3Proj Studio/w3proj-headless.mjs`; the extracted usr/bin/w3proj's `rebuild --only script` on a copy of the
 mini map ran node on `usr/bin/../lib/W3Proj Studio/w3proj-headless.mjs` (a W3PROJ_NODE wrapper logged it). The
 AppImage wasn't built.
+**Branch we-batch-5** (2026-11-20, slot 1, software renderer; SD unless said). (1) **Skin fields**
+(`tests/we-compare/skin-fields.json`, inputs `make-skin-fields.mjs`: H001 on Hpal with unam and upro in war3mapSkin.w3u
+and hit points in war3map.w3u, A001 on AHhb with anam, B001 on BHab with fnam and ftip in their Skin files; three specs,
+all OK). Object Editor (F6) at 114,140 (tabs at y 198: Units 155, Abilities 458, Buffs/Effects 545; a tree click at
+200,240, End, Right ten times selects the custom object; the field list's End shows the Level and Text rows; a field's
+dialog by a double-click on its row, "Edit Unit Value - String" and the like, Ctrl+A, the text, Return). **Paste**
+(Edit 159,151 > Copy 193,171, Paste 195,188, Return): the copies H000, A000, B000 keep their Skin fields in the Skin
+files and their main fields in the main files, as Studio's Ctrl+C, Ctrl+V (MATCH); the test.md claim that Studio's paste
+writes them to the main file no longer holds. **Rename** (Text - Name, 380,775): the editor writes the name into
+war3mapSkin.w3u as TRIGSTR_003 ("// Units: H001 (Renamed Hero), Name (Name)" in war3map.wts) and drops a hidden
+"Main Hero" from war3map.w3u; Studio puts the typed text into war3mapSkin.w3u and drops the hidden name too (w3u
+MATCH, the value the expected difference). **The editor writes every plain object text as a string on any save**: its
+plain save of the input made all five Skin texts TRIGSTR_003 to _007 (units, then abilities, then buffs; unchanged
+texts too) and dropped the hidden main-file name. Its resave of Studio's renamed map keeps every field in the file Studio
+put it in (MATCH but for those strings). (2) **Allow Negative Values=true** (`oe-typed-limits.json`, input
+`make-negative-reals.mjs`, through we.prefs): Level 1 - Stats - Cast Range (350, row 380,383) typed -7 is saved 0.000,
+as with =0 and =1: the preference changes no typed value; Studio clamps with its setting off (MATCH) and keeps -7 with
+it on. (3) **`_HD.w3mod\` imports** (HD; the Asset Manager F12 at 174,200): its File menu has Import File (Ctrl+I),
+Import Files (Ctrl+Shift+I), Export File(s) and also Test Map (Ctrl+F9; not clicked); Import File gives
+war3mapImported\Rabbit.mdx, Mode SD. A row's context menu (right button on 220,305) has Modify File Properties (298,394),
+Replace File, Replace File and Reload World, Delete File; Modify File Properties edits the Full Path in place: Home and
+"zz" made zzwar3mapImported\Rabbit.mdx, "sub\" then "_HD.w3mod" made _HD.w3modsub\war3mapImported\Rabbit.mdx, but
+"_HD.w3mod\" in front was not taken (the saved list kept war3mapImported\Rabbit.mdx). So no way found for the editor to
+write a `_HD.w3mod\` import; Replace File not tried. (4) **Numeric limits** (`oe-typed-limits.json` oe-typed-past-max):
+typed past a field's maxVal the Object Editor saves the maxVal without a word (Mana Cost 5000 to 1000, Cooldown 9999 to
+3600, Cast Range 123456 to 99999); Studio saves what was typed, with the range in the tooltip (lib/objects/limits.ts,
+on purpose: the game's own maps go past the ranges), the expected difference. Drop chance, Trigger Editor and Map
+Properties numbers not reached. (5) **A drop's random item with equipment type and tag** (`drop-random.json`, inputs
+`make-drop-random.mjs`; a footman at 0,0 shows at 745,390 in the opening view): Unit Properties (double-click), Items
+Dropped (785,414), an entry (650,480), Edit Item (807,555): "Choose Item" (858,247; it draws after about 6 s) offers for
+Random a level, a class, an equipment type (1015,337; rows 13 px from 355: Any, None, Head, Chest, …) and a tag
+(1015,361; from 379: Any, Undefined, Droppable, …). Saved, the entry's 4-byte id is 'Z', low byte, 'I', high byte of
+class + 9 × (equipment + 1, 0 any) + 90 × (tag + 1, 0 any) + 810 × (level + 1): 0x5a45490a level 2 Permanent Head
+Droppable, 0x5a914909 Head and any tag, 0x5a33490a any and Droppable, 0x5a6a490c Chest and Shop, 0x5a0d490d Charged
+level 3 None and Undefined (drop-random-4.w3x); the script has ChooseRandomItemExWithFilter with them; with both any the
+"Y" id stays. The units file came back as subversion 9. Studio wrote the 'Z' id as a quoted raw id: drops.ts and
+randomids.ts read it now (MATCH); Studio's random item picker has no equipment type or tag. (6) **SetSoundDuration of
+mp3s** (`mp3-durations.json`, input `make-mp3-durations.mjs` with smoketest_maps/build_1/CSW_Tides_Of_Darkness: the 867
+mp3s the chapter scripts give a length, one sound each, 287 MB; we-drive --null-audio, the save about 26 s): the editor
+wrote the chapters' own values for all 867. Studio's (rebuild --only script) matched 774; all 39 MPEG-2 (22050 Hz) files
+with a Xing header were at half the editor's value (Ability_EarthShield 4075 against 8150, Naval_Rowboat_Loop_1 8515
+against 17031, WarHorn1 7575 against 15151): the editor takes a Xing count at 1152 samples a frame whatever the version;
+MPEG-1 Xing files (46) and MPEG-2 files without Xing (23) matched. duration.ts now does so: 813 of 867. Left, by the
+editor's value minus Studio's: -26 (35 files), -27 (10), +26 (2), -52/-53 (3), -79, -130, +78 and -1306 (GoblinRadioLoop,
+163082 against 164388): counted files without Xing (3 with an Info header in their first frame), e.g. CS_Prologue2_Foley1 7209 against 7235,
+Warcraft II Menu Theme 248320 against 248346, AbilityLifeTap 2821 against 2795 (the spec lists all 54). So both counts of
+the bugs.md item were about other questions: 40 of 88 was the editor against Studio (39 of 85 here), 6 of 1678 old
+Studio against new. (7) **we-drive**: `--look` on drop-random.w3x (a start location and a footman) never settled
+(10.1 s each): between two pictures 1.2 % of the view changed at distance 3000 and 9.1 % at 800 (the turning marker, the
+idle footman, the scrolling message lines); `settle --still 0.2` (two differences in a row at most 20 %) settles in
+about 0.45 s (changedShare 0.003 to 0.08). `--wait-ready` with a module that ignores the close now says `modulesLeft`.
+"Scan Maps" not seen again: `--start`, then `--open` twice (via open, no dialog). Not reached: the Trigger Editor's typed
+codes, vJASS, the AI Editor's hero chances and meanings, the campaign items.
 
 **Misc checks against the editor** (branch we-misc-2, 2026-11-17, SD). One we-drive process runs only one map, so every Object Editor probe is one start (F6 after a click on the view, `--sleep 80000`; with other agents queued, wait for the lock with `--timeout 1800`).
 (1) **Negative reals** (inputs `tests/fixtures/we-specs/make-negative-reals.mjs`: custom Heal A000 with Cooldown -3, -1.5, 2, Casting Time -0.5, Cast Range -100): `Allow Negative Values=1` in `[Object Editor]` of WorldEditPreferences.txt (kept by we-drive) changed nothing that can be seen: the editor has no switch for it in its Object Editor menus, and File > Preferences stops at "Unable to initialize audio device" (the dialog is unreachable here), so whether the key does anything is not proved. Observed with it set: Auto Fill Levels (Ctrl+L, field Level 1 Cooldown) opens with Base Value 0.00 where the field holds -3, Base Value and Previous Value Factor typed -3 and -1 become 0.00, Level Factor and Constant Factor keep -2 and -4, the preview floors every level at 0.00 (base 1, previous 1, level 4, constant -10: 1.00, 0.00, 2.00 as before), and OK on the untouched dialog overwrites the whole row with 0 (-3, -1.5, 2 all 0.000); Modify Selected Field typed -7 over Cast Range 350 gives **0.000** (clamped, no refusal; typed -2 over 0 stays 0, over Casting Time and Cooldown too), a real field (Hit Points Gained) takes -4, Mana Cost (int) typed -5 over 5 stays 5; stored negatives show as -3.000 and the like; Paste Ability (Edit > Copy Ability, Paste Ability, an ID asked, OK) copies the object with its negatives unchanged. Studio: objectedit.ts `clampsToZero` (a typed negative for an unreal field is made 0 while the setting is off; it refused before), app-smoke editorExtras.
