@@ -1,0 +1,17 @@
+[
+  {
+    "name": "mp3-durations",
+    "description": "SetSoundDuration of mp3s (bugs.md 'SetSoundDuration of an mp3 with a Xing header'; branch we-batch-5, 2026-11-20): mp3-durations.w3x (tests/fixtures/we-specs/make-mp3-durations.mjs with smoketest_maps/build_1/CSW_Tides_Of_Darkness: flat.w3x with the 867 mp3s the campaign's chapter scripts give a SetSoundDuration, imported at their paths, one sound each), the editor's save with an audio device (we-drive --null-audio) against Studio's script of the same map. The editor wrote the chapters' own values for all 867. Studio matches 813 since the MPEG-2 Xing rule (lib/audio/duration.ts: the Xing count at 1152 samples a frame; 774 before, the 39 MPEG-2 files with Xing at half the editor's value); the other 54 are counted files a frame (26 ms) or more off (fable.md's mp3 item), so the lines are compared as a set with those listed",
+    "input": { "map": "${REPO}/target/mp3-durations/mp3-durations.w3x" },
+    "we": { "mode": "sd", "nullAudio": true, "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true, "game.graphicsMode": "sd" }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text-set", "lines": "^    call SetSoundDuration", "expect": "differs",
+        "expectLines": {
+          "we": ["^    call SetSoundDuration\\( gg_snd_M(002|026|112|114|204|205|219|220|225|227|229|311|339|340|341|346|353|423|430|450|454|479|486|487|489|490|499|563|568|577|578|589|679|680|681|687|689|691|724|725|726|743|745|748|749|800|801|804|807|827|828|833|859|860), \\d+ \\)$"],
+          "studio": ["^    call SetSoundDuration\\( gg_snd_M(002|026|112|114|204|205|219|220|225|227|229|311|339|340|341|346|353|423|430|450|454|479|486|487|489|490|499|563|568|577|578|589|679|680|681|687|689|691|724|725|726|743|745|748|749|800|801|804|807|827|828|833|859|860), \\d+ \\)$"]
+        } }
+    ],
+    "limit": 60
+  }
+]

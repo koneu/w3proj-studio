@@ -61,6 +61,31 @@ test("a Xing header's frame count is the length, its own frame not counted; an I
   assert.equal(soundDurationMs(concat(noCount, frames(100))), ms(102));
 });
 
+/** MPEG-2 layer III, 64 kbit/s, 22050 Hz, mono, no padding: 208 bytes, 576 samples. */
+function frame22(): Uint8Array {
+  const b = new Uint8Array(208);
+  b.set([0xff, 0xf3, 0x80, 0xc0]);
+  return b;
+}
+function xingFrame22(frames: number): Uint8Array {
+  const b = frame22(), at = 4 + 9, dv = new DataView(b.buffer);
+  for (let i = 0; i < 4; i++) b[at + i] = "Xing".charCodeAt(i);
+  dv.setUint32(at + 4, 1);
+  dv.setUint32(at + 8, frames);
+  return b;
+}
+
+test("an MPEG-2 mp3's Xing count is taken at 1152 samples a frame, twice its length, as the World Editor writes it", () => {
+  // The editor's save with an audio device (we-drive --null-audio, branch we-batch-5) of CSW Tides of Darkness' 867
+  // chapter mp3s: on all 39 MPEG-2 (22050 Hz) files with a Xing header it wrote twice their length (Ability_EarthShield
+  // 8150 ms where 576 samples a frame give 4075), on the 46 MPEG-1 ones with one the length; MPEG-2 files without one
+  // (23) are counted at 576.
+  const n = 353;
+  assert.equal(soundDurationMs(concat(xingFrame22(n), ...Array.from({ length: n }, frame22))), Math.floor((n * 1152 * 1000) / 22050));
+  // control: the same frames without the header are counted at their own 576 samples (plus the one frame more)
+  assert.equal(soundDurationMs(concat(...Array.from({ length: n }, frame22))), Math.floor(((n + 1) * 576 * 1000) / 22050));
+});
+
 test("a WAV whose fmt chunk is cut off before its byte rate has no length, without throwing", () => {
   const b = new Uint8Array(30), d = new DataView(b.buffer);
   b.set(new TextEncoder().encode("RIFF"), 0);

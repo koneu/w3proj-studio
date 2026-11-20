@@ -47,7 +47,9 @@ const MP3_BITRATES = [
 const MP3_RATES = [[44100, 48000, 32000], [22050, 24000, 16000], [11025, 12000, 8000]];
 
 /** MP3 (layer III), as the World Editor measures it (869 mp3s of a campaign's chapter maps, 772 to the
- *  millisecond): a Xing header's frame count when it has one (the header frame itself isn't audio);
+ *  millisecond; 813 of 867 with the MPEG-2 rule below, the editor's own save under we-drive giving the chapters'
+ *  values on all 867): a Xing header's frame count when it has one (the header frame itself isn't audio), at 1152
+ *  samples a frame whatever the MPEG version;
  *  else the frames counted, plus one, plus one more when bytes follow the last frame (mostly an ID3v1 tag).
  *  An Info header (LAME's for constant bitrates) is not read: the editor's save of a map naming the game's
  *  S04Huntress03.mp3 (Info: 127 frames, 128 in the file) wrote 3369 ms, the frames counted plus one (we-drive
@@ -73,8 +75,10 @@ function mp3DurationMs(buf: Uint8Array): number | null {
     perFrame = mpeg1 ? 1152 : 576;
     const size = Math.floor(((perFrame / 8) * MP3_BITRATES[mpeg1 ? 0 : 1][bitrateIdx] * 1000) / rate) + padding;
     if (!samples) {
+      // The editor takes a Xing count at 1152 samples a frame, MPEG-2 and 2.5 too (576 each): such a file's length
+      // comes out twice its own, as the editor writes it (all 39 such files of CSW Tides of Darkness, branch we-batch-5).
       const frames = xingFrames(buf, o, mpeg1, (buf[o + 3] >> 6) === 3, (buf[o + 1] & 1) === 0);
-      if (frames) return rate ? Math.floor((frames * perFrame * 1000) / rate) : null;
+      if (frames) return rate ? Math.floor((frames * 1152 * 1000) / rate) : null;
     }
     samples += perFrame;
     o += size;
