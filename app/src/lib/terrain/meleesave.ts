@@ -81,10 +81,10 @@ export async function customDataState(ws: MeleeFiles, files: readonly string[]):
  *  corpus-saves (2026-11-20, flat.w3x and (12)WormWar with one kind of object data each): ability, buff or upgrade data
  *  (war3map.w3a, .w3h, .w3q), custom or a change to an original, makes the editor's save set the flag, as Reign of
  *  Chaos had none of them; unit, item, destructable and doodad data (custom units based on Ucrl and hfoo included)
- *  let it clear the flag. `need`: true when one of war3map.w3a/.w3h/.w3q changes something, false when none of those
- *  nor their skin files does, null when that can't be told (a file unreadable, a skin file of those kinds with entries:
- *  not measured). `mayClear`: nothing but unit, item, destructable and doodad data (and their skin files) changes
- *  something, every file read (war3mapSkin.txt with values isn't measured, so it holds the flag). */
+ *  and a custom game interface (WormWar's war3mapSkin.txt) let it clear the flag. `need`: true when one of
+ *  war3map.w3a/.w3h/.w3q changes something, false when none of those nor their skin files does, null when that can't
+ *  be told (a file unreadable, a skin file of those kinds with entries: not measured). `mayClear`: nothing but unit,
+ *  item, destructable and doodad data (and their skin files) and war3mapSkin.txt changes something, every file read. */
 export async function objectDataTft(ws: MeleeFiles, files: readonly string[]): Promise<{ need: boolean | null; mayClear: boolean }> {
   let need: boolean | null = false, mayClear = true;
   for (const path of files.filter((p) => CUSTOM_DATA.test(p))) {
@@ -97,8 +97,8 @@ export async function objectDataTft(ws: MeleeFiles, files: readonly string[]): P
     const tftKind = !!m && /^w3[ahq]$/i.test(m[2]);
     if (tftKind && r === true && !m![1]) need = true;
     else if (tftKind && need !== true) need = null;
-    // Unit, item, destructable and doodad data that is read lets the flag clear; anything else holds it.
-    if (r === null || tftKind || !m) mayClear = false;
+    // Unit, item, destructable and doodad data and war3mapSkin.txt that are read let the flag clear; the rest holds it.
+    if (r === null || tftKind) mayClear = false;
   }
   return { need, mayClear };
 }

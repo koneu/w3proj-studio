@@ -117,10 +117,11 @@ test("a save sets and clears 0x4000 on melee maps and others alike, through save
     assert.equal(await tftOf(flags, only, { "map/war3map.w3h.json": objects([], [{ id: "B000", base: "BHbd", mods: [] }]) }), REQUIRES_TFT, `a custom buff sets it (${hex})`);
     assert.equal(await tftOf(flags, only, { "map/war3map.w3q.json": objects([{ base: "Rhme", mods: [] }], []) }), REQUIRES_TFT, `upgrade data sets it (${hex})`);
     assert.equal(await tftOf(flags, only, { "map/war3map.w3q.json": objects([], []) }), 0, `control: an empty upgrade file doesn't (${hex})`);
-    // Not measured, so left as they are: ability data only in a skin file, a custom game interface.
+    // A custom game interface lets it clear (WormWar's war3mapSkin.txt, corpus-saves-wormwar-noobj).
+    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.txt": "[FrameDef]\nQUESTSMAIN=x\n" }), 0, `a custom game interface: cleared (${hex})`);
+    // Not measured, so left as it is: ability data only in a skin file.
     assert.equal(await tftOf(flags, only, { "map/war3mapSkin.w3a.json": objects([{ base: "AHhb", mods: [] }], []) }), 0, `a skin entry of an ability: not set (${hex})`);
     assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.w3a.json": objects([{ base: "AHhb", mods: [] }], []) }), REQUIRES_TFT, `nor cleared (${hex})`);
-    assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3mapSkin.txt": "[Misc]\nA=1\n" }), REQUIRES_TFT, `a custom game interface: not cleared (${hex})`);
     assert.equal(await tftOf(flags | REQUIRES_TFT, only, { "map/war3map.w3u.json": "{" }), REQUIRES_TFT, `unreadable object data keeps it (${hex})`);
     assert.equal(await tftOf(flags, only, { "map/war3map.w3a.json": "{" }), 0, `unreadable ability data doesn't set it (${hex})`);
     assert.equal((await savedMelee(project(GAME, { "map/war3map.wtg.json": new Error("EACCES") }), { flags: flags | REQUIRES_TFT }, only)).flags & REQUIRES_TFT, REQUIRES_TFT, `unreadable triggers keep it (${flags.toString(16)})`);

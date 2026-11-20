@@ -8,7 +8,8 @@
 //
 // The save also kept the flag on the game's (12)WormWar, which places nothing of version 1: its custom abilities and
 // buffs keep it (we-compare corpus-saves, 2026-11-20: ability, buff and upgrade data, custom or a changed original, set
-// it on flat.w3x; unit, item, destructable and doodad data don't, custom units based on Ucrl included). That rule is
+// it on flat.w3x; unit, item, destructable and doodad data and war3mapSkin.txt don't, custom units based on Ucrl
+// included). That rule is
 // meleesave.ts objectDataTft; custom triggers alone aren't measured, so they still keep Studio from clearing the flag
 // (tftFlagsAfter's `mayClear`). Neither measured: a hero's
 // inventory and the map's item tables (war3map.w3i), counted as "can't tell" when they hold a type of version 1; the
