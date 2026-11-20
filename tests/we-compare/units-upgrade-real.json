@@ -1,0 +1,16 @@
+[
+  {
+    "name": "units-upgrade-cliff-tavern",
+    "description": "test.md 'The units-file upgrade (9 → 11) on a real map': smoketest cliff.w3m (the editor's own save, units subversion 9, no 0x4000) with a tavern ntav of Neutral Passive at (1024, -512) (make-corpus-saves.mjs units9-cliff-tavern), box selected at the opening camera (it stands at 1188,578) and nudged once (KP_8): the editor's save sets w3i flag 0x4000 and writes the units file as subversion 11 (item tables -1, hero attributes 0); Studio's terrain-view save the same (tftflag.ts tftUnitsLayout, branch we-terrain-items). Branch we-batch-4, 2026-11-20",
+    "input": { "map": "${REPO}/target/corpus-saves/units9-cliff-tavern.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--numlock", "on"], ["--key", "u"], ["--key", "Escape"], ["--key", "u"], ["--drag", "1106,499:1286,659"], ["--sleep", "700"], ["--key", "KP_8"], ["--sleep", "500"]] },
+    "studio": { "steps": [
+      { "setting": ["script.generateOnSave", false] },
+      { "terrain": true },
+      { "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units?.length; i++) await new Promise((r) => setTimeout(r, 500)); [...document.querySelectorAll('.terrain-tab')].find((b) => b.textContent === 'Select').click(); await new Promise((r) => setTimeout(r, 500));" },
+      { "ui": [["view", "we"], ["key", "Escape"], ["drag", 1106, 499, 1286, 659], ["key", "Numpad8"]] },
+      { "sleep": 500 }
+    ] },
+    "compare": [{ "file": "war3mapUnits.doo", "as": "parsed" }, { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] }]
+  }
+]

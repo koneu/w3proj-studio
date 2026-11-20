@@ -212,6 +212,58 @@ about 0.45 s (changedShare 0.003 to 0.08). `--wait-ready` with a module that ign
 "Scan Maps" not seen again: `--start`, then `--open` twice (via open, no dialog). Not reached: the Trigger Editor's typed
 codes, vJASS, the AI Editor's hero chances and meanings, the campaign items.
 
+**Branch we-batch-4** (2026-11-20, slot 2; SD software renderer unless said; pictures `--compare-ready-unlit` or game view
+against app-drive's pair at `--view-size 1184x844`). (1) **A cliff brush over a special doodad** (`tests/we-compare/special-paint.json`,
+lone-LCc0.w3x from `make-specials-look.mjs --lone LCc0`: flat.w3x with one cave on tile 31,31, under the opening camera):
+a ground tile painted on it keeps the cave (MATCH); the cliff brush Level (Grass Cliff, size 3) or Increase One on it takes
+the cave out of war3map.doo's specials, and the view shows the ground and the start location's preview under it at once;
+Studio keeps it (expected difference). On these made-up maps any Level click takes every special out, far from them too
+(lone-LCc0: eight size-1 clicks round the footprint and one at 300,800; specials-look.w3x: all 25, those on the plateau's
+faces too); a ground tile click (Apply Cliff off) keeps them. On a real map only those whose corners change go:
+AutumnLeaves_S2 (a copy, `--pref "Misc/Enforce Camera Boundaries=0"`, `--look 5824,-960,1500`, Level with Grass Cliff
+size 1 at 748,404 on the cave LCc0 at tile 108,55) changed 21 corners (layers of 108..113 x 54..59, types of 109..111 x
+56..58) and lost LCc0, YCp3 (108,59) and YCg3 (110,59), the other 52 kept; a Level click elsewhere on that map (748,500
+at the opening camera) kept all 55. So "a layer painted under a special redraws it" doesn't arise in the editor: the
+special goes. Studio, painting a layer under the cave (MCP set_cliff_level), draws a plateau round the kept cave.
+(2) **The ramp-lift mesh on AutumnLeaves** (-5504,-3456; `--pref "Misc/Enforce Camera Boundaries=0"` lets `--look` go
+past the camera bounds; game view, `--look -5504,-3456,1500` and `2500`, app-drive `--set 'game.graphicsMode="sd"'`): at
+2500 the views line up; the editor draws the slope below the trees as one rounded dark rock, Studio the same rock cut by
+straight vertical seams (its left part lit grey, the right dark) and the slope above it as stepped blocks
+(`target/wb4-pics/al-crop.png` in that worktree). (3) **Units file 9 to 11 on a real map** (`tests/we-compare/units-upgrade-real.json`,
+smoketest cliff.w3m, units subversion 9, with a tavern ntav from `make-corpus-saves.mjs units9-cliff-tavern`, box selected
+and KP_8 in both): both write subversion 11 and w3i 0xdc10 (MATCH), and the editor opens Studio's save without a dialog.
+(4) **Maps that open in the editor** (`--wait-ready`, no dialog): the editor's and Studio's saves of (8)BanewoodBog and
+BanewoodBog_LV with Melee left off (corpus-saves specs MATCH again); a flat map with version-1 object data that got
+HillsbradCreek's version-3 units imported by Studio's Import Object Data (13 objects, converted to 1), and TwistedMeadows
+(version 3) with a version-1 .w3o imported (1 object, converted to 3); both also pass `w3proj verify`. (5) **The naval
+view's brown** on flat.w3x with w3i complements 10, 2, 8, 4 and the w3e's edge marks left at 6, 6, 4, 8: the editor's
+brown ends at x = -2816 (the w3i's, not the marks' -3328), Studio's too (pixel 720 against 718 at `--look
+-3072,0,2500,270,70,90`). (6) **melee-valid-we.json**: 22 of 22 MATCH. (7) **A Ramp click in front of a straight face**
+(`tests/we-compare/ramp-low-front.json`, plateau.w3x): at 750,680 both build the line 32, 25..27; at 750,720 the editor
+builds nothing and Studio the line (expected, kept). (8) **HD-mode save and sync**: import-modes-units.w3x saved by the
+editor in HD (gpu): its war3mapImported\both.mdx holds the _HD bytes, and `w3proj unpack` into the project unpacked from the
+input keeps the project's Classic copy ("kept the project's map/war3mapImported/both.mdx"). (9) **InitAllyPriorities'
+pack warning**: none on the editor's own scripts of 3v3_4v4_MurgulOasis (8 players, masks worked out), Deadlock,
+MountHyjal, TurtleRock (Modify ally priorities) and nine saves of this round; MurgulOasis with player 1's start moved next
+to player 6's warns (the control). (10) **EW00/ET00 in DE** (`--mode de --renderer gpu`, game view, `--look 0,0,1500`):
+the editor draws the Exterior Wall and the Exterior Tower (arches, a statue, a domed tower); Studio drew the wall twice:
+the loader's batch and model cache went by the plain Classic path both name (RuinsWall0). objects.ts keys them by the HD
+stand-in too (objectlooks.test.ts); Studio's picture then shows the tower where the editor's does. (11) **The live start preview under water** (flat.w3x, the brushes of
+start-under-water-we): the editor drops the town hall preview inside the ring under shallow water (the ring stays; deep
+water hides both), Undo brings it back, and it wasn't drawn while the lone cave of (1) covered the start (back once the
+cave was gone); Studio draws it under water too. (12) **Visible UI Elements**: a run that closed the editor with the
+Campaign Editor open (F7) left 75; the next start with `--keep-prefs` reopened the Campaign Editor (the control), one
+without it (the pin, 11) showed none. (13) **Editor integration**: the app's World Editor (`world_editor_open`, lib.rs) runs
+`proton runinprefix` in the game's own Steam prefix (proton.rs `proton_for` refuses an exe outside
+`…/compatdata/<id>/pfx`), on the app's display, with the network and without we-rofs.so; a farm slot's exe is outside such a
+prefix, and nothing lets the app hand the start to we-drive's sandbox, so app-smoke can't start the real editor.
+(14) **Shard 1/4 of a full run with `--renderer auto`** (gpu for every process; 32 files, 137 specs, the build of dev
+0a1905dd; slot 1 ran another session's editor during part of the World Editor phase, slot 0 another's at its start):
+135 OK; paste-negative-reals-on and -off UNEXPECTED, the editor's save without the pasted ability A001 (its Paste Ability
+step missed; not looked into further: the run started before we-batch-3's we-drive changes came in). World Editor 2704 s,
+Studio 1022 s. The file-diff specs of this round ran with another editor on slot 0 or 1 as well (banewood, units-upgrade,
+the shard) and came out as alone.
+
 **Misc checks against the editor** (branch we-misc-2, 2026-11-17, SD). One we-drive process runs only one map, so every Object Editor probe is one start (F6 after a click on the view, `--sleep 80000`; with other agents queued, wait for the lock with `--timeout 1800`).
 (1) **Negative reals** (inputs `tests/fixtures/we-specs/make-negative-reals.mjs`: custom Heal A000 with Cooldown -3, -1.5, 2, Casting Time -0.5, Cast Range -100): `Allow Negative Values=1` in `[Object Editor]` of WorldEditPreferences.txt (kept by we-drive) changed nothing that can be seen: the editor has no switch for it in its Object Editor menus, and File > Preferences stops at "Unable to initialize audio device" (the dialog is unreachable here), so whether the key does anything is not proved. Observed with it set: Auto Fill Levels (Ctrl+L, field Level 1 Cooldown) opens with Base Value 0.00 where the field holds -3, Base Value and Previous Value Factor typed -3 and -1 become 0.00, Level Factor and Constant Factor keep -2 and -4, the preview floors every level at 0.00 (base 1, previous 1, level 4, constant -10: 1.00, 0.00, 2.00 as before), and OK on the untouched dialog overwrites the whole row with 0 (-3, -1.5, 2 all 0.000); Modify Selected Field typed -7 over Cast Range 350 gives **0.000** (clamped, no refusal; typed -2 over 0 stays 0, over Casting Time and Cooldown too), a real field (Hit Points Gained) takes -4, Mana Cost (int) typed -5 over 5 stays 5; stored negatives show as -3.000 and the like; Paste Ability (Edit > Copy Ability, Paste Ability, an ID asked, OK) copies the object with its negatives unchanged. Studio: objectedit.ts `clampsToZero` (a typed negative for an unreal field is made 0 while the setting is off; it refused before), app-smoke editorExtras.
 (2) **Modules**: Module menu of this build (7003) lists Terrain Editor F3, Trigger Editor F4, Sound Editor F5, Object Editor F6, Campaign Editor F7, AI Editor F8, Object Manager F11, Asset Manager F12 and Light Editor; **no Sound Set Editor, Dialogue Editor or Foliage module** (Foliage is only the View > Foliage switch). Object Manager (F11): tabs Map Summary (Map Name, Expansion Required, Map Type, Playable Map Size, Map Size Description, Tileset, Total Units, Items, Doodads, Regions, Cameras, Triggers, Variables, Sounds, Custom Objects by kind), Units, Items, Doodads, Regions, Cameras, Triggers, Functions, Variables, Sounds. Light Editor: trees Terrain (23 internal DNC*Terrain.mdl, Imported 0) and Unit (internal, Imported), a Terrain/Unit drop-down, "Enable Custom Light", "Export Current Values" (greyed until enabled), a Preview time spin (0.00): edits the day and night lighting models; Studio has no counterpart.
