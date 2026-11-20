@@ -247,9 +247,9 @@ test("regionOutline: a thin black strip on the box's own edge, in and out of the
   assert.ok(xs.some((x) => x === box.left - shrink), "the inner loop");
   assert.ok(REGION_OUTLINE.filter((o) => o.a === 1).every((o) => o.d >= -2 && o.d <= 3), "the black part is a few units wide: about 3 px at 1.33 px a unit");
   assert.ok(grow - REGION_OUTLINE.find((o) => o.a === 1 && o.d > 0)!.d <= 6, "the fall-off outside is a few units");
-  // Along the west edge the strip is cut every 32 units (to lie on the ground).
+  // Along the west edge (the black's outer loop) the strip is cut every 32 units (to lie on the ground).
   const onWest = new Set<number>();
-  for (let i = 0; i < tri.length; i += 3) if (tri[i] === box.left) onWest.add(tri[i + 1]);
+  for (let i = 0; i < tri.length; i += 3) if (tri[i] === box.left - REGION_OUTLINE[3].d) onWest.add(tri[i + 1]);
   assert.ok(onWest.size >= 40, `cut for the ground: ${onWest.size} heights`);
   // Control: the box's inside has nothing (no corner deeper than the thin strip).
   assert.ok(!xs.some((x, i) => x > box.left + 8 && x < box.right - 8 && ys[i] > box.bottom + 8 && ys[i] < box.top - 8));

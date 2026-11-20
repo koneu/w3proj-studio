@@ -295,11 +295,15 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
 }
 
 /** A region's outline as the World Editor draws it (we-drive, branch region-outline, 2026-11-20, SD, region-outline.w3m,
- *  boxes crossing the playable edge and inside it): a thin black line on the region's own edge, over the playable map and
- *  the border alike, about 3 px black at 1.33 px a unit (so a line of world width: 2.3 units, 3 px more at 0.66 px a
- *  unit), its inside edge sharp over 1 to 2 px and a soft fall-off outside of 4.5 units. Loops of the box grown by `d`
- *  (negative: shrunk) with black at alpha `a`; the strips between them are blended across. */
-export const REGION_OUTLINE: readonly { d: number; a: number }[] = [{ d: -1, a: 0 }, { d: 0, a: 1 }, { d: 2, a: 1 }, { d: 6.5, a: 0 }];
+ *  boxes crossing the playable edge and inside it): a thin black line centred on the region's own edge, over the playable
+ *  map and the border alike, of world width (at 1.33 px a unit about 4 px black, at 0.66 px a unit 2 to 3), sharp to its
+ *  inside over about 2 units (alpha .14, .48, .94 a pixel apart) and falling off outside over 4.5 units (the pixels'
+ *  alpha .91, .83, .72, .46, .2, 0). Loops of the box grown by `d` (negative: shrunk) with black at alpha `a`; the strips
+ *  between them are blended across. */
+export const REGION_OUTLINE: readonly { d: number; a: number }[] = [
+  { d: -3, a: 0 }, { d: -2.2, a: 0.5 }, { d: -1.5, a: 1 }, { d: 1.5, a: 1 },
+  { d: 2.25, a: 0.91 }, { d: 3, a: 0.83 }, { d: 3.8, a: 0.72 }, { d: 4.5, a: 0.46 }, { d: 5.3, a: 0.2 }, { d: 6, a: 0 },
+];
 
 /** The triangles (x, y, alpha per corner, flat) of a region's outline, each side cut every `step` units so that a
  *  caller can lay them on the ground. Empty for a box with a non-finite or inverted edge. */
