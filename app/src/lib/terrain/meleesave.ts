@@ -272,6 +272,34 @@ export function validStartPlace(t: Terrain, from: readonly [number, number], oth
   return best;
 }
 
+/**
+ * Places for the start locations a save adds for players without one (startlocations.ts playersWithoutStart), in
+ * the order given: for each, the plainly valid place on the 64 grid nearest to the start its w3i holds (validStartPlace,
+ * the starts placed before it and `placed` counted, so the squares don't overlap and keep off the gold mines), the
+ * playable area's middle for a start that isn't a number. The World Editor's save draws each at random among the valid
+ * places of the playable map (we-drive 2026-11-20, branch all-starts: starts on flat, strip, mine-grid and
+ * MatrixPCDefense maps over 15 saves (82 starts), all on the 64 grid and plainly valid here, the square reaching the playable edge
+ * but not the camera bounds, a new set each save, the w3i's start the drawn point within 32 of it); Studio's choice is
+ * stable, so saving the same map twice writes the same file, and keeps a map's own layout. Where there is no valid
+ * place (or `around` is null: the surroundings can't be told) the start goes to the w3i's start as it is (where
+ * Studio's save put a map's first start before): the editor's save then puts it at a random place of the playable map,
+ * valid or not (two of three players on a map with room for one stood in water).
+ */
+export function newStartPlaces(t: Terrain, wanted: readonly { id: number; start: readonly number[] }[], placed: readonly PlacedLike[],
+  around: StartSurroundings | null, area: { left: number; right: number; bottom: number; top: number }): Map<number, [number, number]> {
+  const out = new Map<number, [number, number]>();
+  const others: PlacedLike[] = [...placed];
+  for (const p of wanted) {
+    const given = p.start.length >= 2 && Number.isFinite(p.start[0]) && Number.isFinite(p.start[1]);
+    // The playable area's middle on the 64 grid (startlocations.ts firstStart).
+    const from: [number, number] = given ? [p.start[0], p.start[1]] : [Math.round((area.left + area.right) / 128) * 64, Math.round((area.bottom + area.top) / 128) * 64];
+    const at = (around ? validStartPlace(t, from, others, around) : null) ?? from;
+    out.set(p.id, at);
+    others.push({ id: "sloc", player: p.id, position: [at[0], at[1]] });
+  }
+  return out;
+}
+
 /** What of a project the melee rules read. `gameText`: the game's tables (Terrain.slk, Water.slk, Doodads.slk,
  *  DestructableData.slk); `gameBytes`: its files (the doodads' pathing textures). Without them the flag is never put
  *  back. */

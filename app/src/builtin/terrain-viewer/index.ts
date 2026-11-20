@@ -56,7 +56,7 @@ import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { Turns } from "./turns";
 import { isUprooted, MELEE_MAP, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { REQUIRES_TFT, tftUnitsLayout } from "../../lib/terrain/tftflag";
-import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, newStartPlaces, readMeleeFacts, savedMelee, startsPastPlayable, startSurroundings, validStartPlace, type StartSurroundings } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, stringNumbersTaken, terrainFacts } from "../../lib/formats/mapdoc";
 import { addLocaleStrings, isLocaleWts } from "../../lib/formats/localewts";
 import { StringTable } from "../../lib/formats/wts";
@@ -97,7 +97,7 @@ import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, firstStart, startLocations, syncPlayers, startToAdd, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
 import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, loadStartGold, typeFacts, type FactsData } from "./typefacts";
@@ -6374,15 +6374,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[]; players?: StartPlayer[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
-            // The game won't start a map with no players, so one always gets Player 1's start.
-            const had = edgeInfo ? startToAdd(Array.isArray(edgeInfo.players) ? edgeInfo.players : []) : null;
-            const startAdded = !!edgeInfo && !!unitsFile && !unitsFile.list.some((p) => p.id === "sloc");
-            if (startAdded && unitsFile) {
-              // A map that has players (made by another tool) gets the start its w3i holds for the first, not the middle.
-              const [x, y] = had?.at ?? firstStart(playableArea(edgeInfo, terrain));
-              unitsFile.list.push(newEntry(unitsFile, "sloc", [x, y, heightAt(terrain, x, y)], had?.player ?? 0));
-              objectsTouched = true;
-              void w3.window.showInfo("This map had no start location, which the game can't start. Added " + (had ? `${had.player + 1}'s start where the map's players file has it.` : "Player 1's in the middle of the map."));
+            // Every player of the w3i without a start location gets one, as the World Editor's save gives them (there at
+            // a random valid place; here the valid place nearest to the w3i's start: meleesave.ts newStartPlaces). A
+            // start deleted since the open or the last save removes its player instead (syncPlayers); a w3i without
+            // players gets none, as in the editor.
+            let startsAdded: number[] = [];
+            const wantStarts = (): StartPlayer[] => edgeInfo && unitsFile && Array.isArray(edgeInfo.players)
+              ? playersWithoutStart(edgeInfo.players, startLocations(unitsFile.list), savedStarts) : [];
+            if (edgeInfo && unitsFile && wantStarts().length) {
+              const uf = unitsFile;
+              const around = await startSurroundings(meleeFiles(w3), terrain, dooFile ? JSON.stringify(dooFile.doc) : null).catch(() => null);
+              // The units may have been read again meanwhile (an AI tool's write) or a start placed: what is there now
+              // counts, and a file read again waits for the next save.
+              const want = unitsFile === uf && !disposed ? wantStarts() : [];
+              if (want.length) {
+                const places = newStartPlaces(terrain, want, uf.list, around, playableArea(edgeInfo, terrain));
+                for (const [player, [x, y]] of places) {
+                  // As the editor's save writes the starts it adds (all-starts.json): the player's number as the
+                  // variation, level 0. Its hit points and mana 0 Studio's save writes as -1, as the editor's next save
+                  // does (owner.ts savedUnitValues).
+                  const e = newEntry(uf, "sloc", [x, y, heightAt(terrain, x, y)], player) as ReturnType<typeof newEntry> & Record<string, unknown>;
+                  e.variation = player;
+                  if ("level" in e) e.level = 0;
+                  uf.list.push(e);
+                }
+                startsAdded = [...places.keys()];
+                objectsTouched = true;
+                void w3.window.showInfo(`Added start locations for ${startsAdded.length === 1 ? "player" : "players"} ${startsAdded.map((p) => p + 1).join(", ")}, as the World Editor's save gives every player of the map one: each at the valid place nearest to where the map's players file has it${around ? "" : " (the ground's pathing couldn't be read: at that place itself)"}.`);
+              }
             }
             if (objectsTouched) await settleMoved();
             // Saved with flag 0x4000 (Requires The Frozen Throne data), the units file gets the layout with item tables
@@ -6462,7 +6481,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               },
               saved: () => doc.setDirty(mark.isDirty(at)),
             });
-            if (startAdded) void rebuildObjects();
+            if (startsAdded.length) void rebuildObjects();
             // The derived files follow what was written, not what an edit made meanwhile changed.
             const doodads = snap.doodads ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
             // In the rebuilds' turn, which write the same files: a rebuild running now ends first (else its files, made

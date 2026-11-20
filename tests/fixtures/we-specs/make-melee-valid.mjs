@@ -16,6 +16,9 @@
 //   ground     [index, tileId]: the w3e's ground tile at that index of its list replaced
 //   customTilesets  true: with `ground`, the w3e's custom tilesets flag set (else the editor reads the tileset's list)
 //   flags      bits ored into the w3i's flags (0x4000: Requires The Frozen Throne data)
+//   noStart    true: no start location in the units file (a map the World Editor's save gives starts of its own)
+//   players    [[id, controller, x, y]]: the w3i's players instead of flat's one (copies of it with that id, controller
+//              (1 user, 2 computer, 3 neutral, 4 rescuable) and start); [] leaves the w3i without players
 // The pathing map, shadows and minimap are made again (w3proj rebuild), as the editor makes its own on open.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -96,6 +99,16 @@ export const CASES = {
   "tft-drop": { units: [["nfrp", 1280, 1280, 24, ["shas"]]] },
   "tft-drop-random": { units: [["nfrp", 1280, 1280, 24, ["YjI5"]]] },
   "tft-clear": { flags: 0x4000 },
+  // tests/we-compare/all-starts.json: no start location; the editor's save gives every player of the w3i one at a
+  // random valid place. Six players of every controller (1 user, 2 computer, 3 neutral, 4 rescuable, 0); three players
+  // where only the first has one; four users on a strip along the west edge (the rest shallow water); six users among a
+  // grid of gold mines 1536 apart; a w3i without players (nothing added).
+  "ns-mixed": { noStart: true, players: [[0, 1, 0, -256], [1, 2, 1024, 1024], [2, 3, -1024, 1024], [3, 4, 1024, -1024], [5, 0, -1024, -1024], [7, 1, 2048, 0]] },
+  "ns-partial": { players: [[0, 1, 0, -256], [1, 1, 1024, 1024], [2, 2, -1024, 1024]] },
+  "ns-strip": { noStart: true, players: [0, 1, 2, 3].map((id) => [id, 1, 0, 0]), corners: [[15, 0, 64, 64, { flags: 4, water: 400 }]] },
+  "ns-mines": { noStart: true, players: [0, 1, 2, 3, 4, 5].map((id) => [id, 1, 0, 0]),
+    units: [-3072, -1536, 0, 1536, 3072].flatMap((x) => [-3072, -1536, 0, 1536, 3072].map((y) => ["ngol", x, y + 256])) }, // at x, y (offsets from the start at 0, -256)
+  "ns-none": { noStart: true, players: [] },
 };
 
 const run = (...args) => {
@@ -156,7 +169,8 @@ function make(name, c) {
     const units = JSON.parse(readFileSync(unitsFile, "utf8"));
     const start = units.units[0];
     if (c.start) start.position = [START[0] + c.start[0], START[1] + c.start[1], 0];
-    let n = 1;
+    // Numbered after the start (0), or from 0 when it goes (noStart): no gap, as in a map the editor saved.
+    let n = c.noStart ? 0 : 1;
     for (const [id, dx, dy, player = 24, drops] of c.units ?? []) {
       units.units.push({
         ...start, id, skinId: id, position: [START[0] + dx, START[1] + dy, 0], angle: 0, player, flags: 2,
@@ -164,6 +178,7 @@ function make(name, c) {
         ...(drops ? { itemSets: [drops.map((d) => ({ id: d, chance: 100 }))] } : {}),
       });
     }
+    if (c.noStart) units.units = units.units.filter((u) => u.id !== "sloc");
     writeFileSync(unitsFile, JSON.stringify(units, null, 2));
     if (c.doodads?.length) {
       const dooFile = join(map, "war3map.doo.json");
@@ -191,6 +206,10 @@ function make(name, c) {
     // A start location for another player: that player in the w3i too (a copy of player 1, its start there).
     for (const u of units.units.slice(1).filter((u) => u.id === "sloc")) {
       info.players.push({ ...info.players[0], id: u.player, start: [u.position[0], u.position[1]] });
+    }
+    if (c.players) {
+      const like = info.players[0];
+      info.players = c.players.map(([id, controller, x, y]) => ({ ...like, id, controller, name: `Player ${id + 1}`, start: [x, y] }));
     }
     writeFileSync(infoFile, JSON.stringify(info, null, 2));
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
