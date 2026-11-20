@@ -12,12 +12,12 @@
   },
   {
     "name": "script-items-2",
-    "description": "as script-items: script-items-2.w3x (make-script-items.mjs): sounds with dialogue keys by file (a .wav the game holds as .ogg only, the .ogg, a dialogue file by .flac and .mp3) and by the word after the facial animation file, speaker unit type, keys and facial animation; the game's Adef and AHfa switched on and off, custom abilities not learned. The sounds' creation, dialogue and length lines and the placed units' lines",
+    "description": "as script-items: script-items-2.w3x (make-script-items.mjs): sounds with dialogue keys by file (a .wav the game holds as .ogg only, the .ogg, a dialogue file by .flac and .mp3) and by the word after the facial animation file, speaker unit type, keys and facial animation; the game's Adef and AHfa switched on and off, custom abilities not learned. The sounds' creation, facial animation and dialogue lines and the placed units' lines. Not the lengths: the editor under we-drive writes SetSoundDuration for none of these files (the exact .ogg and the dialogue file included), Studio for those it finds",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/script-items-2.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
     "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
     "compare": [
-      { "file": "war3map.j", "as": "text", "lines": "^    (set (u|gg_snd_\\w+) = |call (SetDialogue\\w+|SetSoundDuration|SelectHeroSkill|IssueImmediateOrder))" }
+      { "file": "war3map.j", "as": "text", "lines": "^    (set (u|gg_snd_\\w+) = |call (SetDialogue\\w+|SetSoundFacial\\w+|SelectHeroSkill|IssueImmediateOrder))" }
     ],
     "limit": 60
   }
