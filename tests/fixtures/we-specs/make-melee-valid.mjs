@@ -18,6 +18,7 @@
 //   customTilesets  true: with `ground`, the w3e's custom tilesets flag set (else the editor reads the tileset's list)
 //   flags      bits ored into the w3i's flags (0x4000: Requires The Frozen Throne data)
 //   category   the trigger category "Initialization" renamed to this
+//   noWts      true: war3map.wts deleted (the w3i's player and force names, TRIGSTR_001 and _002, are left without a string)
 // The pathing map, shadows and minimap are made again (w3proj rebuild), as the editor makes its own on open.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -109,6 +110,8 @@ export const CASES = {
   "tft-dest-drop-v0": { doodads: [["LTcr", 1280, 1280, ["ratc"]]] },
   // tests/we-compare/melee-flag-we.json meleeflag-category-off: Melee cleared and the trigger category renamed.
   "category-off": off({ category: "Setup" }),
+  // tests/we-compare/wts-missing.json: no string table, then Scenario > Map Description's name changed.
+  "nowts": { noWts: true },
 };
 
 const run = (...args) => {
@@ -216,6 +219,7 @@ function make(name, c) {
       info.players.push({ ...info.players[0], id: u.player, start: [u.position[0], u.position[1]] });
     }
     writeFileSync(infoFile, JSON.stringify(info, null, 2));
+    if (c.noWts) rmSync(join(map, "war3map.wts"));
     run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
     mkdirSync(out, { recursive: true });
     run("pack", dir, "-o", join(out, `melee-valid-${name}.w3x`), "--force-stale");

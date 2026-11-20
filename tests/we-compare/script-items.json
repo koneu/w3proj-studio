@@ -34,10 +34,10 @@
   },
   {
     "name": "script-items-2-duration",
-    "description": "script-items-2.w3x with an audio device for the editor (we-drive --null-audio; branch we-batch-3): its save then writes SetSoundDuration for every sound (the .wav held as .ogg, the exact .ogg, the dialogue file as .flac and .mp3), without one none. The sounds' creation and length lines.",
+    "description": "script-items-2.w3x with an audio device for the editor (we-drive --null-audio; branch we-batch-3): its save then writes SetSoundDuration for every sound (the .wav held as .ogg, the exact .ogg, the dialogue file as .flac and .mp3), without one none. The sounds' creation and length lines. The dialogue file by .flac and .mp3 both 3369: SD holds only the enUS .mp3 (an Info header of 127 frames in 128, not read), the .flac and .ogg (3753) are in _DE and _HD; Studio in SD, as the editor.",
     "input": { "map": "${REPO}/tests/fixtures/we-specs/script-items-2.w3x" },
     "we": { "mode": "sd", "saveAccept": ["Warning"], "nullAudio": true, "steps": [] },
-    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "studio": { "settings": { "script.generateOnSave": true, "game.graphicsMode": "sd" }, "steps":[{ "command": "w3.script.generate", "args": { "quiet": true } }] },
     "compare": [
       { "file": "war3map.j", "as": "text", "lines": "^    (set gg_snd_\\w+ = |call SetSoundDuration)" }
     ],
