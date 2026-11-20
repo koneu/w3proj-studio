@@ -1145,6 +1145,70 @@ fn missing_map_files(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
     out
 }
 
+/// The entries of an import list (`war3map.imp`: u32 version, u32 count, {u8 flags, cstring path}[count]) as flags and
+/// path; stops at the first entry that runs past the end or isn't UTF-8 (what follows can't be told).
+fn import_entries(bytes: &[u8]) -> Vec<(u8, String)> {
+    let mut out = Vec::new();
+    let Some(count) = bytes.get(4..8).map(|c| u32::from_le_bytes(c.try_into().unwrap())) else {
+        return out;
+    };
+    let mut p = 8;
+    for _ in 0..count {
+        let Some(&flags) = bytes.get(p) else { break };
+        let Some(n) = bytes.get(p + 1..).and_then(|rest| rest.iter().position(|&b| b == 0)) else {
+            break;
+        };
+        let Ok(path) = std::str::from_utf8(&bytes[p + 1..p + 1 + n]) else {
+            break;
+        };
+        out.push((flags, path.to_string()));
+        p += n + 2;
+    }
+    out
+}
+
+/// Import list entries whose file the archive (`encoded`: archive name → bytes) holds only under another extension,
+/// as warnings: (12)WormWar lists `war3mapPreview.tga` and nine sounds as `.flac` and holds a `.dds` and `.ogg` files.
+/// The World Editor's save drops such a file without a word (we-compare corpus-saves-wormwar, branch we-corpus-saves,
+/// 2026-11-20); this pack keeps it (the game reads a sound under its other extensions). An entry with the standard
+/// path flags (5, 8) names its file in the import folder or as listed; a `/` in a path is a `\`.
+fn imports_under_other_extension(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
+    let lower: BTreeMap<String, &String> = encoded.keys().map(|k| (k.to_ascii_lowercase(), k)).collect();
+    let stem = |p: &str| match p.rfind('.') {
+        Some(i) if !p[i..].contains('\\') => p[..i].to_string(),
+        _ => p.to_string(),
+    };
+    let mut by_stem: BTreeMap<String, Vec<&String>> = BTreeMap::new();
+    for (l, k) in &lower {
+        if l.rfind('.').is_some_and(|i| !l[i..].contains('\\')) {
+            by_stem.entry(stem(l)).or_default().push(k);
+        }
+    }
+    let mut out = Vec::new();
+    for (list, folder) in [("war3map.imp", "war3mapImported"), ("war3campaign.imp", "war3campImported")] {
+        let Some(bytes) = lower.get(list).map(|k| &encoded[*k]) else { continue };
+        for (flags, path) in import_entries(bytes) {
+            if path.is_empty() {
+                continue;
+            }
+            let path = path.replace('/', "\\");
+            let forms = if matches!(flags, 5 | 8) { vec![format!("{folder}\\{path}"), path.clone()] } else { vec![path.clone()] };
+            let forms: Vec<String> = forms.iter().map(|f| f.to_ascii_lowercase()).collect();
+            if forms.iter().any(|f| lower.contains_key(f)) {
+                continue;
+            }
+            let held = forms.iter().filter(|f| *f != &stem(f)).find_map(|f| by_stem.get(&stem(f)).and_then(|v| v.first()));
+            if let Some(held) = held {
+                out.push(format!(
+                    "{MAP_DIR}/{list} lists {path}, but the map holds it as {held}: this pack keeps the file, the World \
+                     Editor's save drops it without a warning"
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// `prune`: the map's war3map.wts goes into the archive without the strings nothing refers to
 /// (`wts::prune_files`; the project's files stay as they are), and what that did is put there.
 /// Chapter maps are packed as they are. Builds a project's archive (chapter maps under `maps/` are
@@ -1161,6 +1225,7 @@ fn pack_bytes_with(
     }
     let mut encoded = encode_files(&files, &manifest.pack.raw, codecs)?;
     warnings.extend(missing_map_files(&encoded));
+    warnings.extend(imports_under_other_extension(&encoded));
     // The ally priorities the World Editor's save works out (`allies`); a map whose masks already
     // match goes in byte for byte. The script stays as it is: when its priorities aren't those, it
     // was made from other start locations or players; only the app's generator makes it again (its

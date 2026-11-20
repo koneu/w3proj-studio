@@ -23,7 +23,7 @@ import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes, rebuildDerived } from "./invalid";
 import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, entryFile, gameLookupName, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, entryFile, gameLookupName, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, otherExtensionImports, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import { checkpointOrStop } from "../../lib/checkpoint";
 
 export { FileLookup };
@@ -293,6 +293,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
       run: () => unlistedImports(w3, scope()),
     },
     {
+      id: "otherExtensionImports",
+      title: "Imports stored under another extension",
+      run: () => importsUnderOtherExtension(w3, scope()),
+    },
+    {
       id: "unlistedLocaleTexts",
       title: "Locale string tables not in the import list",
       run: () => unlistedLocaleTexts(w3, scope()),
@@ -511,6 +516,27 @@ export async function missingStrings(w3: W3Api): Promise<Problem[]> {
     message: `war3map.wts is missing but ${where.join(", ")} refer${where.length === 1 ? "s" : ""} to ${refs.size} string${refs.size === 1 ? "" : "s"} in it (${sample}${refs.size > 3 ? ", …" : ""}): the World Editor and the game show them empty. Restore war3map.wts from a checkpoint or the packed map, or type the texts again.`,
     location: "war3map.wts",
   }];
+}
+
+/** Import list entries whose file the map holds only under another extension (lib/imports.ts otherExtensionImports):
+ *  Studio packs the file, the World Editor's save drops it without a word. No fix: which name is meant (the list's or the
+ *  file's) is the map maker's call. A list that is there and can't be read fails the check. */
+async function importsUnderOtherExtension(w3: W3Api, s: RunScope): Promise<Problem[]> {
+  const listed = w3.workspace.files();
+  const names = new Set(listed.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+  const campaign = names.has("map/war3campaign.w3f.json") || names.has("map/war3campaign.w3f");
+  const listPath = campaign ? "map/war3campaign.imp.json" : "map/war3map.imp.json";
+  const folder = campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER;
+  const list = await s.docStrict<{ files?: ImportEntry[] }>(listPath);
+  if (!list) return [];
+  if (!Array.isArray(list.files)) throw new Error(`${listPath} has no file list.`);
+  const location = listPath.slice(4).replace(/\.json$/, "");
+  return capped(otherExtensionImports(listed.map((f) => f.path), list.files, folder).map(({ entry, file }) => ({
+    severity: "warning" as const,
+    message: `${entry} is listed, but the map holds it as ${archivePath(file)}: Studio packs the file, the World Editor's save drops it without a warning`,
+    location,
+    reveal: { command: "w3.imports.open" },
+  })), "imports stored under another extension");
 }
 
 /** The `_Locales/x.w3mod/war3map.wts` string tables the import list doesn't name: the World Editor drops such a file
