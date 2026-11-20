@@ -162,6 +162,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     try {
       const named = await namesToStringTable(w3);
       if (named.kept) out.append(`players' and forces' plain names kept as they are: ${named.kept}`);
+      if (named.plainKept) out.append(`kept plain in war3map.w3i: ${named.plainKept.join(", ")}: a string of war3map.wts ends at its first "}", so the game would cut such a name there`);
+      for (const c of named.chapters ?? []) {
+        out.append(`${c.folder}: gave ${c.added.length} plain player or force name${c.added.length === 1 ? "" : "s"} a string of its war3map.wts${c.added.length ? ` (${c.added.join(", ")})` : ""}${c.reused ? `, ${c.reused} now refer${c.reused === 1 ? "s" : ""} to one with the same text` : ""}, as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);
+      }
       if (named.reused) out.append(`${named.reused} plain player or force name${named.reused === 1 ? "" : "s"} now refer${named.reused === 1 ? "s" : ""} to a string of war3map.wts with the same text, as the World Editor's save does`);
       if (named.added.length || named.reused) {
         if (named.added.length) out.append(`gave ${named.added.length} plain player or force name${named.added.length === 1 ? "" : "s"} a string of war3map.wts (${named.added.join(", ")}), as the World Editor's save does; "MCP: Undo Last AI Edit" takes it back`);

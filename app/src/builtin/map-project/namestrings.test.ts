@@ -174,3 +174,79 @@ test("the project changes while the files are read: nothing written", async () =
   assert.deepEqual(writes, []);
   assert.equal(files[INFO], project()[INFO]);
 });
+
+// A string of war3map.wts ends at its first "}" (lib/formats/wts wtsCutLines): such a name can't become a string, so it
+// stays plain, named in the outcome, and the other names still get theirs (it used to throw for all of them).
+test("a name with braces, or with a line of only }, stays plain and is named; the others get strings", async () => {
+  const files = project();
+  files["map/_Locales/deDE.w3mod/war3map.wts"] = "﻿" + block(1, "Spieler 1");
+  files[INFO] = JSON.stringify({ players: [{ id: 0, name: "{Clan} Bob" }, { id: 3, name: "two\n}" }, { id: 4, name: "Fine" }, { id: 5, name: "{open" }], forces: [{ name: "{x}" }, { name: "Team" }] });
+  const { w3, records } = fakeW3(files);
+  assert.deepEqual(await namesToStringTable(w3), { added: [3, 4, 5], reused: 0, kept: null, plainKept: ["Player 1's name", "Player 4's name", "Force 1's name"] });
+  assert.deepEqual(info(files).players.map((p) => p.name), ["{Clan} Bob", "two\n}", "TRIGSTR_003", "TRIGSTR_004"]);
+  assert.deepEqual(info(files).forces.map((f) => f.name), ["{x}", "TRIGSTR_005"]);
+  for (const path of ["map/war3map.wts", "map/_Locales/deDE.w3mod/war3map.wts"]) {
+    const table = new StringTable(files[path]);
+    assert.deepEqual([3, 4, 5].map((n) => table.get(n)), ["Fine", "{open", "Team"], path);
+  }
+  assert.equal(records.length, 1);
+  // Again: the braces names are still named, nothing else changes.
+  assert.deepEqual(await namesToStringTable(w3), { added: [], reused: 0, kept: null, plainKept: ["Player 1's name", "Player 4's name", "Force 1's name"] });
+  assert.equal(records.length, 1);
+  // Only such names: nothing is written, no table is made.
+  const only = project();
+  delete only["map/war3map.wts"];
+  only[INFO] = JSON.stringify({ players: [{ id: 0, name: "}" }], forces: [] });
+  const o = fakeW3(only);
+  assert.deepEqual(await namesToStringTable(o.w3), { added: [], reused: 0, kept: null, plainKept: ["Player 1's name"] });
+  assert.deepEqual(o.writes, []);
+});
+
+/** A campaign project: no map of its own, two chapter maps under maps/ (each a project), the campaign's string table. */
+function campaign() {
+  return {
+    "map/war3campaign.w3f.json": "{}",
+    "map/war3campaign.wts": "﻿" + block(90, "Campaign"),
+    "maps/Chapter 1/map/war3map.w3i.json": JSON.stringify({ players: [{ id: 0, name: "Arthas" }, { id: 1, name: "TRIGSTR_001" }], forces: [{ name: "Force 1" }] }),
+    "maps/Chapter 1/map/war3map.wts": "﻿" + block(1, "Player 1") + block(2, "Force 1"),
+    "maps/Chapter 1/map/war3map.w3r.json": JSON.stringify({ regions: [{ name: "TRIGSTR_040" }] }),
+    "maps/Chapter 1/map/_Locales/deDE.w3mod/war3map.wts": "﻿" + block(1, "Spieler 1") + block(50, "nur deutsch"),
+    "maps/Chapter 1/.w3proj/pruned-strings.json": JSON.stringify({ format: "w3proj.prunedStrings/1", strings: { 60: "dropped earlier" } }),
+    "maps/Chapter 2/map/war3map.w3i.json": JSON.stringify({ players: [{ id: 0, name: "Jaina" }, { id: 1, name: "{Kel}" }], forces: [{ name: "Alliance" }] }),
+  } as Record<string, string>;
+}
+
+test("a campaign's chapter maps get strings for their plain names, each from its own files and tables", async () => {
+  const files = campaign();
+  const { w3, records } = fakeW3(files);
+  const got = await namesToStringTable(w3);
+  // Chapter 1: past its region's 40, its German table's 50 and its record's 60; "Force 1" is its table's 2.
+  // Chapter 2: no table yet, one is made; "{Kel}" stays plain.
+  assert.deepEqual(got, {
+    added: [], reused: 0, kept: null, plainKept: ["maps/Chapter 2: Player 2's name"],
+    chapters: [{ folder: "maps/Chapter 1", added: [61], reused: 1 }, { folder: "maps/Chapter 2", added: [1, 2], reused: 0 }],
+  });
+  const one = JSON.parse(files["maps/Chapter 1/map/war3map.w3i.json"]);
+  assert.deepEqual([...one.players, ...one.forces].map((x: { name: string }) => x.name), ["TRIGSTR_061", "TRIGSTR_001", "TRIGSTR_002"]);
+  assert.equal(new StringTable(files["maps/Chapter 1/map/war3map.wts"]).get(61), "Arthas");
+  assert.equal(new StringTable(files["maps/Chapter 1/map/_Locales/deDE.w3mod/war3map.wts"]).get(61), "Arthas");
+  const two = JSON.parse(files["maps/Chapter 2/map/war3map.w3i.json"]);
+  assert.deepEqual([...two.players, ...two.forces].map((x: { name: string }) => x.name), ["TRIGSTR_001", "{Kel}", "TRIGSTR_002"]);
+  assert.deepEqual([...new StringTable(files["maps/Chapter 2/map/war3map.wts"]).entries()], [[1, "Jaina"], [2, "Alliance"]]);
+  assert.equal(files["map/war3campaign.wts"], campaign()["map/war3campaign.wts"], "the campaign's own table stays");
+  assert.equal("map/war3map.wts" in files, false, "no table at the campaign's root");
+  assert.equal(records.length, 1, "one undoable edit for all of it");
+  // Done: nothing left.
+  assert.deepEqual((await namesToStringTable(w3)).chapters, undefined);
+  assert.equal(records.length, 1);
+});
+
+test("a chapter's table there but unreadable: throws, nothing written in any chapter", async () => {
+  const files = campaign();
+  files["maps/Chapter 2/map/war3map.wts"] = "\u0000unreadable";
+  const before = { ...files };
+  const { w3, writes } = fakeW3(files);
+  await assert.rejects(namesToStringTable(w3), /Chapter 2\/map\/war3map\.wts/);
+  assert.deepEqual(writes, []);
+  assert.deepEqual(files, before);
+});
