@@ -43,6 +43,28 @@ test("a fresh binary is accepted; the app's sources count only for the app", () 
   } finally { rmSync(r.root, { recursive: true, force: true }); }
 });
 
+// The app embeds the web page app/dist, built from these: an app built before an edit in one of them is stale, the CLI
+// isn't (batch 17's stale-binary false result was this class).
+test("the web page's sources make the app stale, not the CLI", () => {
+  const page = ["app/src/main.ts", "app/index.html", "app/vite.config.ts", "app/tsconfig.json", "app/package.json", "app/package-lock.json"];
+  for (const file of page) {
+    const r = repo();
+    try {
+      mkdirSync(join(r.root, "app", "src"), { recursive: true });
+      writeFileSync(join(r.root, file), "");
+      execFileSync("git", ["add", file], { cwd: r.root, stdio: "ignore" });
+      utimesSync(join(r.root, file), 3000, 3000);
+      r.at(2500);
+      // Control: newer than every Rust source, so only the page's file can make it stale.
+      assert.equal(checkFresh(r.bin, { root: r.root }), r.bin, `${file}: the CLI`);
+      assert.throws(() => checkFresh(r.bin, { root: r.root, kind: "app" }), (e) => e.message.includes(file), `${file}: the app`);
+      // An untracked file there doesn't count (git lists only tracked ones).
+      execFileSync("git", ["rm", "-q", "--cached", file], { cwd: r.root, stdio: "ignore" });
+      assert.equal(checkFresh(r.bin, { root: r.root, kind: "app" }), r.bin, `${file}: untracked`);
+    } finally { rmSync(r.root, { recursive: true, force: true }); }
+  }
+});
+
 test("the override lets a stale binary through; a missing one is still refused", () => {
   const r = repo();
   try {
