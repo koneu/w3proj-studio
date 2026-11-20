@@ -130,24 +130,23 @@ test("scatter and stroke facing follow the same rule as single placement (placeA
   assert.ok(near(placeAngle({ ...tree, fixedRot: 90 }, true, r), Math.PI / 2), "fixed rotation wins");
 });
 
-test("Auto Cycle Random Groups is a timer: 2 to 5 s, a random line, stops when stopped", () => {
-  assert.equal(autoCycleDelay(() => 0), 2000);
-  assert.equal(autoCycleDelay(() => 0.5), 3500);
-  assert.ok(autoCycleDelay(() => 0.999999) < 5000);
+test("Auto Cycle Random Groups is a timer: every 3 s, a random line, stops when stopped", () => {
+  // The editor's turns came 3.03 s apart on average, singles 2.9 to 3.4 s at 0.5 s sampling (branch we-terrain-items).
+  assert.equal(autoCycleDelay(), 3000);
   assert.equal(autoCycleLine(0, () => 0.5), 0);
   assert.deepEqual([0, 0.34, 0.67, 0.999999].map((r) => autoCycleLine(3, () => r)), [1, 2, 3, 3]);
   // A fake clock: timers fire in order of their time.
   let now = 0; const timers: { at: number; f: () => void; id: number }[] = []; let ids = 0;
-  const env = { random: () => 0.5, setTimer: (f: () => void, ms: number) => { const t = { at: now + ms, f, id: ++ids }; timers.push(t); return t; },
+  const env = { setTimer: (f: () => void, ms: number) => { const t = { at: now + ms, f, id: ++ids }; timers.push(t); return t; },
     clearTimer: (t: unknown) => { const i = timers.indexOf(t as never); if (i >= 0) timers.splice(i, 1); } };
   const advance = (ms: number) => { const end = now + ms; for (;;) { timers.sort((a, b) => a.at - b.at); const t = timers[0]; if (!t || t.at > end) break; timers.shift(); now = t.at; t.f(); } now = end; };
   let ticks = 0;
   const stop = startAutoCycle(() => { ticks++; }, env);
-  advance(3499); assert.equal(ticks, 0);
+  advance(2999); assert.equal(ticks, 0);
   advance(1); assert.equal(ticks, 1);
-  advance(7000); assert.equal(ticks, 3);
+  advance(6000); assert.equal(ticks, 3);
   stop(); advance(60000); assert.equal(ticks, 3);
   // A tick that throws doesn't end the timer.
   let n = 0; const stop2 = startAutoCycle(() => { n++; throw new Error("x"); }, env);
-  advance(3500); advance(3500); stop2(); assert.equal(n, 2);
+  advance(3000); advance(3000); stop2(); assert.equal(n, 2);
 });

@@ -76,24 +76,25 @@ export type RandomChoice =
 
 export type RandomSpec = RandomChoice & { what: RandomWhat };
 
-/** Auto Cycle Random Groups (the World Editor's, measured 2026-11-14): a timer. Every 2 to 5 s, with no input, what
- *  the random-group objects are drawn as moves to a random line of the groups. */
-export const AUTO_CYCLE_MIN_MS = 2000;
-export const AUTO_CYCLE_MAX_MS = 5000;
+/** Auto Cycle Random Groups (the World Editor's): a timer. With no input, what the random-group objects are drawn as
+ *  moves to a random line of the groups, the same line again as often as another. Every 3 s: random-group.w3m's unit
+ *  pictured every 0.5 s for 146 s and 41 s (we-drive, GPU, no frame cap, branch we-terrain-items, 2026-11-20) changed
+ *  after 2.9 to 3.4 s, or after 5.8 to 6.3, 8.7 to 9.3 or 12 s (the same line drawn again in between), 3.03 s a turn on
+ *  average in both runs; the "2 to 5 s" of 2026-11-14 came from pictures 2.3 s apart. */
+export const AUTO_CYCLE_MS = 3000;
 /** The wait before the next change. */
-export function autoCycleDelay(random: () => number = Math.random): number {
-  return AUTO_CYCLE_MIN_MS + random() * (AUTO_CYCLE_MAX_MS - AUTO_CYCLE_MIN_MS);
+export function autoCycleDelay(): number {
+  return AUTO_CYCLE_MS;
 }
 /** A random line (1-based) of `most` lines; 0 (the question mark) when there are none. */
 export function autoCycleLine(most: number, random: () => number = Math.random): number {
   return most > 0 ? 1 + Math.min(most - 1, Math.floor(random() * most)) : 0;
 }
-/** Runs `tick` after each random wait until stopped; the clock and the random numbers can be injected. */
-export function startAutoCycle(tick: () => unknown, env: { random?: () => number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): () => void {
-  const random = env.random ?? Math.random;
+/** Runs `tick` every AUTO_CYCLE_MS until stopped; the clock can be injected. */
+export function startAutoCycle(tick: () => unknown, env: { setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): () => void {
   const set = env.setTimer ?? ((f, ms) => setTimeout(f, ms)), clear = env.clearTimer ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
   let timer: unknown, stopped = false;
-  const arm = () => { timer = set(() => { if (stopped) return; try { void Promise.resolve(tick()).catch(() => undefined); } catch { /* the next one still comes */ } arm(); }, autoCycleDelay(random)); };
+  const arm = () => { timer = set(() => { if (stopped) return; try { void Promise.resolve(tick()).catch(() => undefined); } catch { /* the next one still comes */ } arm(); }, autoCycleDelay()); };
   arm();
   return () => { stopped = true; clear(timer); };
 }

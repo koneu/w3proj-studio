@@ -2834,7 +2834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (lastGhost?.group) handle.objects.setGhost(lastGhost);
         };
         let stopAutoCycleTimer = startAutoCycle(() => autoCycleTick());
-        // Switched on: the first change comes 2 to 5 s later, not at whatever was left of the wait while it was off.
+        // Switched on: the first change comes 3 s later, not at whatever was left of the wait while it was off.
         const stopAutoCycleSetting = w3.settings.onDidChange((key) => {
           if (key !== "terrain.placement.autoCycleRandomGroups" || disposed || !autoCycleOn()) return;
           stopAutoCycleTimer();

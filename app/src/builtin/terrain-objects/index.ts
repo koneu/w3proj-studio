@@ -306,7 +306,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
       () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
     sizeWrap, densityWrap,
-    toggle("Auto cycle random groups", "Every 2 to 5 seconds the units and items from a random group are drawn as another, random line of the group, as the World Editor does; setting terrain.placement.autoCycleRandomGroups",
+    toggle("Auto cycle random groups", "Every 3 seconds the units and items from a random group are drawn as a random line of the group (maybe the same again), as the World Editor does; setting terrain.placement.autoCycleRandomGroups",
       () => autoCycle(), (v) => void w3.settings.set("terrain.placement.autoCycleRandomGroups", v)),
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),

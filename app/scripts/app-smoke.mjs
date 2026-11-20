@@ -12503,7 +12503,7 @@ async function placerAndCampaign(page, found) {
       await k.clearToasts();
     }
     if ((await page.evaluate(`w3.editors.unsavedPaths()`)).length) fail(`Cycle Random Groups left unsaved editors: ${await page.evaluate(`w3.editors.unsavedPaths()`)}`);
-    // Auto Cycle Random Groups is the editor's timer (every 2 to 5 s a random line, no input, placing has no part in
+    // Auto Cycle Random Groups is the editor's timer (every 3 s a random line, no input, placing has no part in
     // it): on, the drawn line (data-random-line) changes by itself; off, it stays (the control).
     const lineNow = () => page.evaluate(`document.querySelector("canvas.model-canvas")?.dataset.randomLine ?? null`);
     await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", false)`);
@@ -12521,7 +12521,7 @@ async function placerAndCampaign(page, found) {
     const now = await lineNow();
     if (now === held) fail(`with Auto Cycle Random Groups on the drawn line stayed ${held} for 40 s, without any placement`);
     else if (!/^[12]$/.test(now ?? "")) fail(`the timer put the line at ${now}, not one of the group's 2 lines`);
-    else if (Date.now() - started < 1500) fail(`the line changed after ${Date.now() - started} ms, before the 2 s the timer waits`);
+    else if (Date.now() - started < 1500) fail(`the line changed after ${Date.now() - started} ms, before the 3 s the timer waits`);
     await page.evaluate(`w3.settings.set("terrain.placement.autoCycleRandomGroups", false)`);
     // A random item by level is no group object: the question mark stays out of it (nothing in the map changed).
     await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
