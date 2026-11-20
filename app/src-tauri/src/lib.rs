@@ -1622,7 +1622,19 @@ mod we_launch_hook_tests {
         std::fs::write(&hook, "#!/bin/sh\n[ \"$1 $2\" = \"-launch -loadfile\" ] && exit 7\nexit 1\n").unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut child = launch_world_editor("/nowhere/World Editor.exe", "/m.w3x", Some(hook)).unwrap();
+        // A script this test has just written can fail to start "Text file busy" (ETXTBSY) while another test's fork
+        // is between fork and exec and still holds its write handle; that ends in microseconds: try again.
+        let mut child = None;
+        for _ in 0..100 {
+            match launch_world_editor("/nowhere/World Editor.exe", "/m.w3x", Some(hook.clone())) {
+                Err(e) if e.contains("Text file busy") => std::thread::sleep(std::time::Duration::from_millis(20)),
+                r => {
+                    child = Some(r.unwrap());
+                    break;
+                }
+            }
+        }
+        let mut child = child.expect("the hook never started: Text file busy for 2 s");
         assert_eq!(child.wait().unwrap().code(), Some(7));
         std::fs::remove_dir_all(&dir).unwrap();
     }
