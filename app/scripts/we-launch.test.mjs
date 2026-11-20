@@ -15,7 +15,7 @@ const SCRIPT = repoPath("app", "scripts", "we-launch.mjs");
 
 test("parseLaunchArgs: the app's -launch -loadfile <map> after --, options before; anything else for the editor refused", () => {
   const { opts, map } = parseLaunchArgs(["--slot", "0", "--ctl", "c", "--mode", "hd", "--", "-launch", "-loadfile", "/p/build/p.edit.w3x"]);
-  assert.equal(map, "/p/build/p.edit.w3x");
+  assert.equal(map, resolve("/p/build/p.edit.w3x"), "the map is resolved: a drive letter on Windows");
   assert.equal(opts.slot, 0);
   assert.equal(opts.ctl, resolve("c"));
   assert.equal(opts.mode, "hd");
