@@ -174,9 +174,9 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
   if (we.mode !== undefined && !["sd", "hd", "de"].includes(we.mode)) throw new Error(`${where}: we.mode is sd, hd or de`);
   if (we.from !== undefined && !["input", "studio"].includes(we.from)) throw new Error(`${where}: we.from is input (the spec's map) or studio (the map Studio saved: does the editor open and re-save it unchanged?)`);
   if (we.saveAccept !== undefined && !(Array.isArray(we.saveAccept) && we.saveAccept.every((t) => typeof t === "string" && t && !t.includes(",")))) throw new Error(`${where}: we.saveAccept is a list of dialog titles`);
-  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "save", "steps", "freshEditor", "expectCrash", "prefs", "renderer", "frameCap", "why"].includes(k));
+  const unknownWe = Object.keys(we).filter((k) => !["mode", "from", "saveAccept", "save", "steps", "freshEditor", "expectCrash", "prefs", "renderer", "frameCap", "nullAudio", "why"].includes(k));
   if (unknownWe.length) throw new Error(`${where}: unknown we.${unknownWe.join(", we.")}`);
-  for (const k of ["freshEditor", "expectCrash"]) if (we[k] !== undefined && typeof we[k] !== "boolean") throw new Error(`${where}: we.${k} is true or false`);
+  for (const k of ["freshEditor", "expectCrash", "nullAudio"]) if (we[k] !== undefined && typeof we[k] !== "boolean") throw new Error(`${where}: we.${k} is true or false`);
   if (we.renderer !== undefined && !["software", "gpu"].includes(we.renderer)) throw new Error(`${where}: we.renderer is software or gpu (the editor's renderer for this spec, whatever we-compare's --renderer auto would pick)`);
   if (we.frameCap !== undefined && !(Number.isInteger(we.frameCap) && we.frameCap >= 0 && we.frameCap <= 9999)) throw new Error(`${where}: we.frameCap is a whole number of frames a second, 0 for none (we-drive --frame-cap for this spec's editor)`);
   if (we.why !== undefined && typeof we.why !== "string") throw new Error(`${where}: we.why is text (a comment: why the renderer or the frame cap is forced)`);
@@ -261,7 +261,7 @@ export function parseSpec(raw, specDir, vars = {}, label = "spec", { differsWith
     we: {
       mode: we.mode ?? "sd", from: we.from ?? "input", saveAccept: we.saveAccept ?? [], steps: weSteps,
       save: we.save ?? "plain", freshEditor: we.freshEditor ?? false, expectCrash: we.expectCrash ?? false, prefs, renderer: we.renderer ?? null,
-      frameCap: we.frameCap ?? null,
+      frameCap: we.frameCap ?? null, nullAudio: we.nullAudio ?? false,
     },
     studio: { settings: studio.settings ?? {}, steps: (studio.steps ?? []).map((s, i) => studioStep(s, `${where}: studio.steps[${i}]`, vars)) },
     compare,
@@ -914,7 +914,7 @@ export function weDriveSteps(specs, { restart = false, mapOf, saveOf }) {
 
 /** The key of a spec's World Editor process: specs share one (one editor) only with the same mode, dialogs the save
  *  answers and pinned prefs (each is an option of the whole we-drive process). */
-export const weGroupKey = (s) => JSON.stringify([s.we.mode, s.we.saveAccept, s.we.prefs ?? [], s.we.renderer ?? null, s.we.frameCap ?? null]);
+export const weGroupKey = (s) => JSON.stringify([s.we.mode, s.we.saveAccept, s.we.prefs ?? [], s.we.renderer ?? null, s.we.frameCap ?? null, s.we.nullAudio ?? false]);
 
 /**
  * The frame cap a we-drive process gets (`--frame-cap` of we-drive), or null for we-drive's own default: `asked` is
