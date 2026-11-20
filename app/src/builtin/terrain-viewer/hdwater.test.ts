@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  decode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_WATER_TILT, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
+  decode, encode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_WATER_TILT, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
   HD_WAVE_RED, HD_WAVES, HD_DEPTH_EXTRA, HD_DEPTH_EXTRA_FULL, hdDepthExtra, hdTableDepth, hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPath, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight,
   hdWaveShift,
 } from "./hdwater";
-import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
+import { HD_DEEP, HD_SHALLOW, HD_TINT_CAP, hdWaterColor, hdWaterShallow } from "./renderer";
 
 // The World Editor's HD pictures these come from (we-drive, branch water-render-we, 2026-11-14; docs/testing/terrain-and-water.md "HD water"):
 // flat 128 × 96 maps of eight depths in bands across the map, View Entire Map, mean colours of the bands in a west, a
@@ -36,7 +36,7 @@ const COLS: Record<string, number> = { west: 240, mid: 600, east: 955 };
 
 const within = (got: readonly number[], want: readonly number[], tol: number, what: string) =>
   assert.ok(got.every((v, i) => Math.abs(v - want[i]) <= tol), `${what}: ${got.map(Math.round)} against the editor's ${want} (±${tol})`);
-const deep = (ts: string) => hdWaterColor(ts, false);
+const deep = (ts: string) => hdWaterColor(ts, null);
 
 test("HD water's tables: none of the water at 0, all of it from 200 deep, linear between the measured depths", () => {
   assert.deepEqual(hdWaterAt(0), { through: 1, own: 0, reflect: 0 });
@@ -157,7 +157,7 @@ function checkBands(bands: GameBand[], distance: number, settings: Parameters<ty
   for (const [y, depth, boxes] of bands) {
     const cam = gameCam(y, depth, distance), sum = [0, 0, 0], want = [0, 0, 0];
     for (const [px, py, editor] of boxes) {
-      const got = hdWaterPixel(bed, depth, deep(ts), ray(cam, px, py), settings, hdWaterShallow(ts, false), 0, null, axis(cam));
+      const got = hdWaterPixel(bed, depth, deep(ts), ray(cam, px, py), settings, hdWaterShallow(ts, null), 0, null, axis(cam));
       within(got, editor, boxTol, `${depth} deep from ${distance}, the box at ${px}, ${py}`);
       got.forEach((v, k) => { sum[k] += v / boxes.length; want[k] += editor[k] / boxes.length; });
     }
@@ -272,11 +272,14 @@ test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: 
   assert.ok(hdShallowAt(72) === 0 && hdShallowAt(5000) === 0);
   assert.deepEqual(glslTables(/(float hdShallowAt\(float d\) \{[^}]*\})/), [[...HD_SHALLOW_SHARE]]);
   assert.deepEqual(glslTables(/const float HD_SHALLOW_DEPTHS\[\d+\] = (float\[\d+\]\([^)]*\))/), [[...HD_SHALLOW_DEPTHS]]);
-  // A tileset without a shallow colour of its own keeps its deep colour at every depth, and so does a tinted map.
-  assert.deepEqual(hdWaterShallow("L", false), hdWaterColor("L", false));
-  assert.deepEqual(hdWaterShallow("z", false).map((v) => Math.round(v * 255)), [...HD_SHALLOW.Z], "the tileset's letter in any case");
-  assert.deepEqual(hdWaterShallow("Z", true), hdWaterColor("Z", true));
-  assert.deepEqual(hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off, hdWaterShallow("L", false)), hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off));
+  // A tileset without a shallow colour of its own keeps its deep colour at every depth, tinted too; Sunken Ruins' shallow
+  // colour takes the tint as its deep colour does (HD_TINT_CAP).
+  assert.deepEqual(hdWaterShallow("L", null), hdWaterColor("L", null));
+  assert.deepEqual(hdWaterShallow("L", [64, 64, 255, 255]), hdWaterColor("L", [64, 64, 255, 255]));
+  assert.deepEqual(hdWaterShallow("z", null).map((v) => Math.round(v * 255)), [...HD_SHALLOW.Z], "the tileset's letter in any case");
+  assert.deepEqual(hdWaterShallow("Z", [255, 255, 255, 255]), hdWaterShallow("Z", null), "a white tint: as untinted");
+  assert.ok(hdWaterShallow("Z", [64, 64, 64, 255])[2] < hdWaterShallow("Z", null)[2] / 2, "a dark tint darkens it");
+  assert.deepEqual(hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off, hdWaterShallow("L", null)), hdWaterPixel([1, 125, 0], 38.4, deep("L"), [0, 0, -1], off));
 });
 
 test("HD water reflects a sky that is brighter in the west: the editor's water lighter on the left of View Entire Map", () => {
@@ -492,10 +495,41 @@ test("the waves' two layers drift against each other, north-east and south-west,
 });
 
 test("each tileset has its own deep HD colour, Northrend's for one not measured", () => {
-  const rgb = (ts: string) => hdWaterColor(ts, false).map((v) => Math.round(v * 255));
+  const rgb = (ts: string) => hdWaterColor(ts, null).map((v) => Math.round(v * 255));
   assert.deepEqual(rgb("L"), [0, 48, 69]);
   assert.deepEqual(rgb("y"), [36, 48, 126], "the tileset's letter in any case");
   assert.deepEqual(rgb("C"), [0, 0, 0], "Felwood's is black");
   assert.deepEqual(rgb("?"), [...HD_DEEP.N]);
   assert.equal(Object.keys(HD_DEEP).length, 18, "the eighteen tilesets of the editor's list");
+});
+
+test("a map's water tint caps HD water's own colour per channel: the editor's deep Lordaeron water under nine tints", () => {
+  // we-drive, HD, game view (branch we-remeasure-hd, 2026-11-20): make-water-tilesets.mjs --depths 32,64,96,128,160,200,
+  // 800,800 --tint R,G,B --reflectivity 0 L, the 200 deep band through `--look 0,-1472,1200,304,70,90` (rows 380 to 480,
+  // columns 200 to 1000), where the deep colour is all there is: [tint red, green, blue], the editor's colour.
+  const editor: [number[], number[]][] = [
+    [[255, 255, 255], [0, 47.7, 69]], [[224, 224, 224], [0, 48.7, 59]], [[192, 192, 192], [0, 47.3, 50]], [[160, 160, 160], [0, 47.2, 41]],
+    [[128, 128, 128], [0, 48.1, 31]], [[96, 96, 96], [0, 41, 22]], [[255, 64, 64], [0, 25, 12]], [[64, 255, 64], [0, 48.2, 12]],
+    [[64, 64, 255], [0, 25, 69]], [[255, 128, 64], [0, 48.7, 12]],
+  ];
+  // The tint is stored blue, green, red, alpha.
+  const stored = ([r, g, b]: number[]) => [b, g, r, 255];
+  for (const [tint, want] of editor) within(hdWaterColor("L", stored(tint)).map((v) => v * 255), want, 2.2, `tint ${tint}`);
+  // Sunken Ruins and Northrend the same way: grey tints 255, 128 and 64.
+  const others: [string, number, number[]][] = [
+    ["Z", 255, [0.9, 91, 175.3]], ["Z", 128, [0.9, 43, 106]], ["Z", 64, [0.9, 18, 52]],
+    ["N", 255, [0, 36.2, 21.2]], ["N", 128, [0, 39.2, 21.4]], ["N", 64, [0, 22, 14]],
+  ];
+  for (const [ts, v, want] of others) within(hdWaterColor(ts, stored([v, v, v])).map((c) => c * 255), want, 4.5, `${ts} tint ${v}`);
+  for (const ts of ["L", "Z", "N", "B", "Y"]) assert.deepEqual(hdWaterColor(ts, stored([255, 255, 255])), hdWaterColor(ts, null), `${ts}: a white tint is the water untinted`);
+  // The control: Lordaeron's bound on Sunken Ruins would take its blue far down under a white tint.
+  assert.ok(Math.abs(encode(Math.min(decode(171), HD_TINT_CAP.L[2])) - 171) > 90);
+  // A tileset not measured: its deep colour times the tint squared (in linear light).
+  within(hdWaterColor("Y", stored([128, 128, 128])).map((c) => c * 255), [...HD_DEEP.Y].map((c) => encode(decode(c) * (128 / 255) ** 2)), 0.01, "Cityscape");
+  // The control: the colour taken before for every tint (0, 40, 37) is 25 off in blue under the 255, 64, 64 tint and
+  // 32 under a white one.
+  assert.ok(Math.abs(37 - 12) > 20 && Math.abs(37 - 69) > 20);
+  assert.ok(hdWaterColor("L", stored([255, 64, 64]))[2] * 255 < 14, "the 255, 64, 64 tint's blue");
+  // A stored value past 255 or not a number counts as 255 (no tint in that channel).
+  assert.deepEqual(hdWaterColor("L", [300, Number.NaN, 255, 255]), hdWaterColor("L", null));
 });

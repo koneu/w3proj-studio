@@ -14,7 +14,7 @@ import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
 import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
 import { ViewDepth } from "../../lib/model/viewdepth";
-import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdDepthExtra, hdReflectScale, hdSkyFlat, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
+import { decode, encode, HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdDepthExtra, hdReflectScale, hdSkyFlat, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -369,14 +369,49 @@ export const HD_DEEP: Record<string, readonly [number, number, number]> = {
 };
 
 /**
- * The water's deep colour in HD (sRGB, 0–1): the tileset's (HD_DEEP; Northrend's for one not measured). A map's water
- * tint takes Lordaeron's blue away (03b_Water_Tint, red, 2026-11-08: 23, 50, 40 with the reflection in it) rather than
- * showing its colour: unproven without the reflection.
+ * What a map's water tint leaves of HD water's own colour, per tileset (linear light, red, green, blue): per channel no
+ * more than this times the tint's channel (0–1) squared, the water's own colour being the lesser of the two (a white
+ * tint is the water untinted). Measured (we-drive, HD, game view, branch we-remeasure-hd, 2026-11-20: maps from
+ * make-water-tilesets.mjs --tint with the w3i's reflectivity 0, the 200 deep band through
+ * `--look 0,-1472,1200,304,70,90`). Lordaeron (untinted 0, 47.7, 69): grey tints 255, 224, 192, 160, 128, 96, 64 gave
+ * blue 69, 59, 50, 41, 31, 22, 12 and green 47.7, 48.7, 47.3, 47.2, 48.1, 41, 25; one channel at 64 and the others at
+ * 255 the same in that channel (255, 64, 64: 0, 25, 12; 64, 255, 64: 0, 48, 12; 64, 64, 255: 0, 25, 69; 255, 128, 64:
+ * 0, 48.7, 12), so each channel by its own tint. Sunken Ruins (0, 91, 175): 128 gave 0, 43, 106, 64 0, 18, 52.
+ * Northrend (0, 36 to 39, 21): 128 gave 0, 39, 21, 64 0, 22, 14. Within 2.1 levels everywhere. So the bound isn't the
+ * deep colour scaled alike on every tileset (Lordaeron's green keeps its full colour down to the tint 128, Sunken Ruins'
+ * falls with the square from 255 on). Red can't be seen on these three (their deep red is 0): taken as green's.
+ * Lordaeron's Fall, Winter, Village and Village Fall (the same deep colour) as Lordaeron, Icecrown as Northrend; any
+ * other tileset falls with the square in every channel (its deep colour as the bound), not measured. The bed seen
+ * through isn't tinted (red at 96 deep 9 to 12 under every grey tint on Lordaeron).
  */
-export function hdWaterColor(tileset: string, tinted: boolean): [number, number, number] {
-  if (tinted) return [0, 40 / 255, 37 / 255];
-  const own = HD_DEEP[tileset.toUpperCase()] ?? HD_DEEP.N;
-  return [own[0] / 255, own[1] / 255, own[2] / 255];
+const TINT_L = [0.156, 0.156, 0.06] as const, TINT_N = [0.127, 0.127, 0.07] as const;
+export const HD_TINT_CAP: Record<string, readonly [number, number, number]> = {
+  L: TINT_L, F: TINT_L, W: TINT_L, Q: TINT_L, V: TINT_L, Z: [0.105, 0.105, 0.56], N: TINT_N, I: TINT_N,
+};
+
+/** HD water's own colour `own` (sRGB 0–255) on a tileset whose deep colour is `deep` under a map's water tint
+ *  (war3map.w3i, stored blue, green, red, alpha; null when its tinting is off): HD_TINT_CAP, sRGB 0–1. A colour other
+ *  than the deep one (Sunken Ruins' shallow colour, not measured tinted) is bound in the same proportion to itself. */
+function tintedHd(tileset: string, own: readonly number[], deep: readonly number[], tint: readonly number[] | null): [number, number, number] {
+  if (!tint) return [own[0] / 255, own[1] / 255, own[2] / 255];
+  const cap = HD_TINT_CAP[tileset.toUpperCase()];
+  const t = [tint[2], tint[1], tint[0]].map((v) => Math.min(1, Math.max(0, (Number.isFinite(v) ? v : 255) / 255)));
+  return [0, 1, 2].map((i) => {
+    const o = decode(own[i]), d = decode(deep[i]);
+    const bound = cap && d > 0 ? (cap[i] / d) * o : o;
+    const tinted = bound * t[i] * t[i];
+    return tinted >= o ? own[i] / 255 : encode(tinted) / 255;
+  }) as [number, number, number];
+}
+
+/**
+ * The water's deep colour in HD (sRGB, 0–1): the tileset's (HD_DEEP; Northrend's for one not measured), under the map's
+ * water tint (`tint`: war3map.w3i's, stored blue, green, red, alpha; null when its tinting is off) no more than
+ * HD_TINT_CAP allows.
+ */
+export function hdWaterColor(tileset: string, tint: readonly number[] | null): [number, number, number] {
+  const deep = HD_DEEP[tileset.toUpperCase()] ?? HD_DEEP.N;
+  return tintedHd(tileset, deep, deep, tint);
 }
 
 /**
@@ -391,10 +426,11 @@ export function hdWaterColor(tileset: string, tinted: boolean): [number, number,
 export const HD_SHALLOW: Record<string, readonly [number, number, number]> = { Z: [0, 123, 167] };
 
 /** The water's shallow colour in HD (sRGB, 0–1): the tileset's where it has one (HD_SHALLOW), else its deep colour
- *  (hdWaterColor: one colour at every depth), as with a map's water tint. */
-export function hdWaterShallow(tileset: string, tinted: boolean): [number, number, number] {
-  const own = tinted ? undefined : HD_SHALLOW[tileset.toUpperCase()];
-  return own ? [own[0] / 255, own[1] / 255, own[2] / 255] : hdWaterColor(tileset, tinted);
+ *  (hdWaterColor: one colour at every depth); under the map's water tint as the deep colour (not measured on Sunken
+ *  Ruins). */
+export function hdWaterShallow(tileset: string, tint: readonly number[] | null): [number, number, number] {
+  const own = HD_SHALLOW[tileset.toUpperCase()];
+  return own ? tintedHd(tileset, own, HD_DEEP[tileset.toUpperCase()] ?? HD_DEEP.N, tint) : hdWaterColor(tileset, tint);
 }
 
 /** An image's mean red and green (0–1), from a small mip level; null if it can't be decoded. For the water's normal
@@ -2032,8 +2068,8 @@ export class TerrainRenderer {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
       setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
-      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
-      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdShallow"), hdWaterShallow(this.terrain.tileset, !!this.waterTint));
+      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, this.waterTint));
+      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdShallow"), hdWaterShallow(this.terrain.tileset, this.waterTint));
       gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uReflect"), hdReflectScale(this.hdWater));
       const flatSky = hdSkyFlat(this.terrain.tileset);
       gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uSkyFlat"), flatSky ? [...flatSky.sky, flatSky.waves] : [0, 0, 0, 0]);
