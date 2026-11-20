@@ -14,7 +14,7 @@ import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
 import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
 import { ViewDepth } from "../../lib/model/viewdepth";
-import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdReflectScale, hdSkyFlat, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
+import { HD_WATER_DEFAULTS, HD_WATER_GLSL, HD_WAVES, hdDepthExtra, hdReflectScale, hdSkyFlat, hdWaveLight, hdWaveShift, type HdWaterSettings } from "./hdwater";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -181,7 +181,8 @@ uniform float uLight;
 // (hdReflectScale), and the waves: the game's water normal map uWave, its two layers' sizes (world units per repeat)
 // and where they have drifted to (uWaveSize, uWaveShift), its mean red and green uWaveMean and the light a wave adds
 // (uWaveLight: hdWaveLight; 0 without the map).
-uniform vec3 uHdWater; uniform vec3 uHdShallow; uniform sampler2D uBed; uniform vec2 uReflect; uniform vec4 uSkyFlat;
+// uDepthExtra: how much deeper the tileset's water hides the bed than it is (hdwater.ts HD_DEPTH_EXTRA, hdTableDepth).
+uniform vec3 uHdWater; uniform vec3 uHdShallow; uniform sampler2D uBed; uniform vec2 uReflect; uniform vec4 uSkyFlat; uniform float uDepthExtra;
 uniform sampler2D uWave; uniform highp vec2 uWaveSize; uniform highp vec4 uWaveShift; uniform vec2 uWaveMean; uniform vec3 uWaveLight;
 // HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
 // the eye uEye looking along uForward with the projection's near and far planes (uNearFar).
@@ -218,7 +219,7 @@ void main() {
     float depth = seenDepth(vDepth * 128.0) * t.a;
     // In high precision: the squares of world distances overflow medium precision (16-bit floats on some drivers).
     highp vec3 view = normalize(vWorld - uEye);
-    vec3 w = hdWaterAt(depth, hdWaterPath(depth, view, normalize(uForward)));
+    vec3 w = hdWaterAt(depth, hdWaterPath(hdTableDepth(depth, uDepthExtra), view, normalize(uForward)));
     vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // The waves: the game's water normal map, two layers drifting against each other (hdwater.ts HD_WAVES), away
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
@@ -2036,6 +2037,7 @@ export class TerrainRenderer {
       gl.uniform2fv(gl.getUniformLocation(this.waterProg, "uReflect"), hdReflectScale(this.hdWater));
       const flatSky = hdSkyFlat(this.terrain.tileset);
       gl.uniform4fv(gl.getUniformLocation(this.waterProg, "uSkyFlat"), flatSky ? [...flatSky.sky, flatSky.waves] : [0, 0, 0, 0]);
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uDepthExtra"), hdDepthExtra(this.terrain.tileset));
       // The waves' normal map, drifted to where it is now (a texture is always bound to the sampler).
       const wave = this.waterWave;
       gl.activeTexture(gl.TEXTURE0 + WATER_WAVE_UNIT);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_WATER_TILT, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
-  HD_WAVE_RED, HD_WAVES, hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPath, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight,
+  HD_WAVE_RED, HD_WAVES, HD_DEPTH_EXTRA, HD_DEPTH_EXTRA_FULL, hdDepthExtra, hdTableDepth, hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPath, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight,
   hdWaveShift,
 } from "./hdwater";
 import { HD_DEEP, HD_SHALLOW, hdWaterColor, hdWaterShallow } from "./renderer";
@@ -336,8 +336,8 @@ test("Outland's deep water reflects a dark red sky alike in every direction: the
   // wt-O.w3x's 200 deep band through `--look 0,-2600,1500,304,70,R` (branch we-compare-13, 2026-11-19), boxes of the
   // editor's pictures: the middle (400, 300, 400 x 250), the left (0, 300, 300 x 250) and the right (884, 300, 300 x 250).
   // Red stays 22 to 25 in all; green and blue are the environment map's faces (straight-edged patches of 7 to 21).
-  // The bed is left out here: Studio's picture shows some of Outland's red ground through that water (29 red in the
-  // middle box, the 800 deep band 24), the editor's none (open).
+  // The bed is left out here (Studio's picture showed some of Outland's red ground through that water, 29 red in the
+  // middle box, where the editor's showed none: the next test, HD_DEPTH_EXTRA).
   const looks: [number, number[][]][] = [
     [0, [[23, 10, 9], [24, 8, 6], [25, 21, 20]]],
     [90, [[23, 13, 13], [23, 20, 21], [22, 10, 8]]],
@@ -366,6 +366,34 @@ test("Outland's deep water reflects a dark red sky alike in every direction: the
   // Control: Lordaeron's sky (what a tint of it gave) changes with the direction where the editor's red doesn't.
   assert.ok(Math.max(...reds) > 1.6 * Math.min(...reds), `Lordaeron's sky's red ${reds.map(Math.round)}`);
   assert.deepEqual(hdWaterPixel([0, 0, 0], 800, deep("L"), view, undefined, undefined, 0, hdSkyFlat("L")), hdWaterPixel([0, 0, 0], 800, deep("L"), view), "the other tilesets are untouched");
+});
+
+test("Outland's water hides its red bed as water 28 deeper would (HD_DEPTH_EXTRA)", () => {
+  // The editor's game view (we-drive, HD, branch we-remeasure-hd, 2026-11-20): wt-O-32-64-96-128-160-200-800-800.w3x,
+  // whose 128, 160 and 200 bands are 25.6, 57.6 and 97.6 deep under Outland's surface; straight down
+  // (`--look 0,Y,1200,270,70,90`, rows 300 to 544 and columns 300 to 884) and through 304 (`--look 0,Y,1200,304,70,90`,
+  // rows 380 to 480 and columns 200 to 1000); the dry nv-O's 80.4, 21.7, 0 for the bed. Red only: green and blue are
+  // the environment map's faces (lowprio-features), which HD_SKY_FLAT doesn't draw.
+  const bed = [80.4, 21.7, 0], down = [0, 0, -1], a = (34 * Math.PI) / 180, slanted = [0, Math.sin(a), -Math.cos(a)];
+  const cases: [number, number[], number][] = [
+    [25.6, down, 51.7], [57.6, down, 34.0], [97.6, down, 22.3], [25.6, slanted, 46.9], [57.6, slanted, 28.3], [97.6, slanted, 23.7],
+  ];
+  const red = (depth: number, view: number[], extra: number) => hdWaterPixel(bed, depth, deep("O"), view, undefined, undefined, 0, hdSkyFlat("O"), view, extra)[0];
+  for (const [depth, view, editor] of cases) {
+    assert.ok(Math.abs(red(depth, view, hdDepthExtra("O")) - editor) <= 1.5, `${depth} deep along ${view.map((v) => v.toFixed(2))}: ${red(depth, view, hdDepthExtra("O")).toFixed(1)} against the editor's ${editor}`);
+  }
+  // The control: the plain depth shows far more of the red bed (Studio's 68, 51 red before at 25.6 and 57.6 straight down).
+  assert.ok(red(25.6, down, 0) - 51.7 > 10 && red(57.6, down, 0) - 34.0 > 10, "without the extra the bed shows through");
+  assert.equal(hdDepthExtra("o"), HD_DEPTH_EXTRA.O, "a lower case tileset letter too");
+  assert.equal(hdDepthExtra("L"), 0, "the other tilesets: the depth itself");
+  // Less towards the shore, none at it, in full from HD_DEPTH_EXTRA_FULL.
+  assert.equal(hdTableDepth(0, 28), 0);
+  assert.equal(hdTableDepth(-3, 28), -3);
+  assert.equal(hdTableDepth(HD_DEPTH_EXTRA_FULL / 2, 28), HD_DEPTH_EXTRA_FULL / 2 + 14);
+  assert.equal(hdTableDepth(40, 28), 68);
+  assert.equal(hdTableDepth(40, 0), 40);
+  // The shader does the same.
+  assert.ok(HD_WATER_GLSL.includes(`d / ${HD_DEPTH_EXTRA_FULL.toFixed(1)}`), "the shader's hdTableDepth");
 });
 
 test("the reflection follows the view: the editor's opening camera turned to the four sides over 200 deep water", () => {
