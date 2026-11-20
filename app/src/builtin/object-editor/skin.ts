@@ -154,6 +154,13 @@ export function splitSkin(merged: EditFile, main: EditFile | null, skin: EditFil
 /** A project path as the project lists it (a file's name may differ in case on disk), else `wanted` itself. */
 export const listedPath = (paths: readonly string[], wanted: string) => paths.find((p) => p.toLowerCase() === wanted.toLowerCase()) ?? wanted;
 
+/** The files a Skin file is kept in: the .json one, and the raw one the editor reads when the project holds only that
+ *  (a raw write of it must reopen the editor), each as the project lists it. */
+export const skinWatches = (paths: readonly string[], skinPath: string): string[] => {
+  const raw = skinPath.replace(/\.json$/i, "");
+  return [...new Set([listedPath(paths, skinPath), listedPath(paths, raw)])];
+};
+
 /** An object file with both lists (a file may leave out an empty one). */
 export const withLists = (f: EditFile): EditFile => ({ ...f, original: f.original ?? [], custom: f.custom ?? [] });
 

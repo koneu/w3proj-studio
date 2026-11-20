@@ -8,7 +8,7 @@ import { gameTable } from "../../lib/testhelpers/gamefiles";
 import { skipOrFail } from "../../lib/testhelpers/testutil";
 import type { FieldMeta } from "../../lib/objects/metadata";
 import type { EditFile, EditMod, EditObject } from "./objectedit";
-import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withSkin } from "./skin";
+import { isSkinField, listedPath, skinChanged, skinPathOf, skinWatches, skinWritable, splitSkin, withSkin } from "./skin";
 import { mergeSkin } from "./w3o";
 
 const file = (custom: EditObject[], original: EditObject[] = [], version = 3): EditFile => ({ format: "w3proj.objects/1", version, original, custom });
@@ -138,6 +138,11 @@ test("which fields belong in the Skin file comes from the metadata's netsafe col
   assert.equal(skinPathOf("map/war3map.w3u.json"), "map/war3mapSkin.w3u.json");
   assert.equal(skinPathOf("map/war3campaign.w3d.json"), "map/war3campaignSkin.w3d.json");
   assert.equal(listedPath(["map/war3mapskin.w3u.json"], "map/war3mapSkin.w3u.json"), "map/war3mapskin.w3u.json");
+  // The raw Skin file is watched too: the editor reads it when the project holds only that.
+  assert.deepEqual(skinWatches(["map/war3mapSkin.w3u"], "map/war3mapSkin.w3u.json"), ["map/war3mapSkin.w3u.json", "map/war3mapSkin.w3u"]);
+  assert.deepEqual(skinWatches(["map/war3mapskin.w3t.json"], "map/war3mapSkin.w3t.json"), ["map/war3mapskin.w3t.json", "map/war3mapSkin.w3t"]);
+  // Control: the old single listedPath never named the raw file.
+  assert.ok(!skinWatches(["map/war3mapSkin.w3u"], "map/war3mapSkin.w3u.json").every((p) => p !== "map/war3mapSkin.w3u"), "control");
 });
 
 // --- the game's own metadata tables, when the game and the release CLI are here -----------------------------------

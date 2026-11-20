@@ -22,7 +22,8 @@ export interface WalkSource {
   /** The pathing map as made from terrain and doodads, the Pathing tool's overrides applied. */
   pathing(): Promise<{ cells: Uint8Array; width: number; height: number }>;
   /** Cells where doodads, destructables and buildings stand in the way (the pathing map leaves them out). */
-  blockers(): Promise<Uint8Array>;
+  blockers(objectsOnly?: boolean): Promise<Uint8Array>;
+  /* objectsOnly: not the ground's own no-walk cells (deep water a ship sails). */
   /** The placed units, items, doodads and destructables. */
   list(): readonly Placed[];
   /** A custom object's base id. */
@@ -55,12 +56,12 @@ export async function projectWalkSource(w3: W3Api, opts: {
       for (const g of opts.groups) await g.filterSavedPathing?.(wpm.subarray(16), width, height);
       return { cells: wpm.slice(16), width, height };
     },
-    blockers: async () => {
+    blockers: async (objectsOnly) => {
       const d = await (data ??= loadPathingData(w3, opts.read, opts.baseOf));
       // Units walk off and items are walked over: of those, only buildings stay in the way (as the open editor's).
       const buildings = (unitsFile?.list ?? []).filter((e) => d.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" }));
       const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
-      return (await Occupancy.build(terrain, d, placed)).blocked;
+      return objectsOnly ? Occupancy.mask(terrain, d, placed) : (await Occupancy.build(terrain, d, placed)).blocked;
     },
     list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
     baseOf: opts.baseOf,
@@ -70,9 +71,10 @@ export async function projectWalkSource(w3: W3Api, opts: {
 /** How a unit moves: "walk" is stopped by the pathing map's no-walk cells, "float" (ships) by its no-water cells. */
 export type Movement = "walk" | "float";
 
-/** What a unit can't walk on (or, for "float", sail on): the pathing map, and what stands there, which it leaves out. */
+/** What a unit can't walk on (or, for "float", sail on): the pathing map, and what stands there, which it leaves out.
+ *  A ship isn't stopped by the ground's plain no-walk cells (deep water), so its blockers are the objects alone. */
 export async function walkGrid(src: WalkSource, movement: Movement = "walk"): Promise<Grid> {
-  const [pathing, blockers] = await Promise.all([src.pathing(), src.blockers()]);
+  const [pathing, blockers] = await Promise.all([src.pathing(), src.blockers(movement === "float")]);
   const t = src.terrain;
   const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
   return { blocked: pathing.cells.map((c, i) => (c & (movement === "float" ? NO_WATER : NO_WALK) || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
