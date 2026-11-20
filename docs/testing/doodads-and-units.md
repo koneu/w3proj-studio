@@ -26,7 +26,8 @@ Placing, moving, picking, rules on load, pathing footprints, fences, camps and u
   doodad and a unit are never one group. A group nudges all by the longest step (tree + pathless LPcr: both 64, a
   footman + farm: both 64) and is refused whole when any member's step would pass its limit (tree 4032 with LPcr 4032;
   footman 3264 with the farm 3200, not 3296 and 3264). In about 3 of 12 first runs of an editor a group stepped 8
-  instead (the tree stayed, LPcr went to 4088): not explained. A diagonal (KP_9) at the east edge moves nothing, the
+  instead (the tree stayed, LPcr went to 4088): the box missed the tree, as the editor reads the pointer once a frame
+  (branch we-timed-specs in branch-rounds.md; we-drive's drags now hold still at both ends). A diagonal (KP_9) at the east edge moves nothing, the
   free axis too, for one object and for a group. A tree dragged past the edge stops on the grid inside it (4032, 3968
   or 3904 in different runs: the last motion that fits varies), never on 4096; the unit and group drags didn't press
   reliably, so no drag spec. Studio: limits.ts `scaledNudge`, moveedit.ts `refuseShift` with `settle`.
