@@ -31,9 +31,11 @@ its own), through python-xlib and its XTest extension. Every command prints one 
   we-x11.py --display :N windows --pics                each window's hash of its picture too ("md5"; not the main window's)
   we-x11.py --display :N stats [--rect X,Y,W,H]        counts of a part of the screen (see stats())
   we-x11.py --display :N frames MS [--rect X,Y,W,H]    how often a part of the screen changes during MS
-  we-x11.py --display :N settle [--rect R] [--interval MS] [--timeout MS]   wait until two grabs MS apart are the same
-                                                       picture (at most --timeout); `settle --dry --hashes a,b,…` runs
-                                                       the rule on given hashes
+  we-x11.py --display :N settle [--rect R] [--interval MS] [--timeout MS] [--still SHARE]   wait until two grabs MS apart
+                                                       are the same picture (at most --timeout); with --still, until
+                                                       two differences in a row change at most SHARE of the pixels
+                                                       ("changed": the last share); `settle --dry --hashes a,b,…` (or
+                                                       --changes -,0.9,… --still SHARE) runs the rule on given hashes
   we-x11.py stats FILE [--rect X,Y,W,H]                the same counts of a picture
 
 Every command that touches a display is refused (exit 2) unless it is an Xvfb started for tests (guard_decision;
@@ -478,22 +480,60 @@ def frames(d, rect, ms):
             "changesPerSecond": round(changes / secs, 1)}
 
 
-def settle(grab_hash, sleep_ms, now_ms, timeout_ms, interval_ms):
+def settle(grab_hash, sleep_ms, now_ms, timeout_ms, interval_ms, change=None, still=None):
     """Grabs every `interval_ms` until two grabs in a row are the same picture (the view stands still), at most
-    `timeout_ms`. `grab_hash` returns a picture's hash (None: no more pictures, the dry run's end)."""
+    `timeout_ms`. `grab_hash` returns a picture (or its hash; None: no more pictures, the dry run's end).
+    With `still` (a share of the pixels, 0 to 1) and `change(a, b)` (the share of the pixels that differ between two
+    pictures), the view counts as standing still once two differences in a row (three grabs) are at most `still`, or
+    one is nothing: what never stops moving (a start location's turning marker, the scrolling message lines, an idle
+    unit) doesn't keep a view that has otherwise stopped from settling, while a camera move changes most of the view.
+    "changed" is the last share seen."""
     start = now_ms()
     last = grab_hash()
     grabs = 1
+    changed, small = None, 0
     while last is not None and now_ms() - start < timeout_ms:
         sleep_ms(interval_ms)
         h = grab_hash()
         if h is None:
             break
         grabs += 1
-        if h == last:
-            return {"settled": True, "ms": now_ms() - start, "grabs": grabs}
+        if still is not None and change is not None:
+            changed = change(last, h)
+            small = small + 1 if changed <= still else 0
+            same = changed == 0 or small >= 2
+        else:
+            same = h == last
+        if same:
+            res = {"settled": True, "ms": now_ms() - start, "grabs": grabs}
+            if still is not None:
+                res["changed"] = changed
+            return res
         last = h
-    return {"settled": False, "ms": now_ms() - start, "grabs": grabs}
+    res = {"settled": False, "ms": now_ms() - start, "grabs": grabs}
+    if still is not None:
+        res["changed"] = changed
+    return res
+
+
+def changed_share(a, b):
+    """The share of the pixels (0 to 1, 4 decimals) that differ between two pictures of one size."""
+    from PIL import ImageChops
+    d = ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v else 0)
+    return round(d.histogram()[255] / (a.width * a.height), 4)
+
+
+def parse_share(text):
+    """A share of the pixels, 0 to 1; None for None or ""."""
+    if not text:
+        return None
+    try:
+        v = float(text)
+    except ValueError:
+        v = -1
+    if not 0 <= v <= 1:
+        raise SystemExit("--still wants a share of the pixels from 0 to 1, e.g. 0.15: %r" % text)
+    return v
 
 
 def viewable(d, wid):
@@ -605,11 +645,21 @@ def main(argv):
 
     if cmd == "settle" and flag("--dry"):
         # The settle rule on a list of frame hashes, one per --interval of a made-up clock (needs no display):
-        # --hashes a,b,c
-        hashes = iter(opt("--hashes", "").split(","))
+        # --hashes a,b,c; or --changes -,0.9,0.05,… with --still SHARE: the share of the pixels changed since the grab
+        # before (the first entry is the first grab's and not read)
         clock = [0]
-        out(settle(lambda: next(hashes, None), lambda ms: clock.__setitem__(0, clock[0] + ms), lambda: clock[0],
-                   int(opt("--timeout", "10000")), int(opt("--interval", "200"))))
+        still = parse_share(opt("--still"))
+        given = opt("--changes")
+        if given is not None:
+            shares = [0.0 if c == "-" else float(c) for c in given.split(",")]
+            frames_left = iter(range(len(shares)))
+            res = settle(lambda: next(frames_left, None), lambda ms: clock.__setitem__(0, clock[0] + ms), lambda: clock[0],
+                         int(opt("--timeout", "10000")), int(opt("--interval", "200")), lambda a, b: shares[b], still)
+        else:
+            hashes = iter(opt("--hashes", "").split(","))
+            res = settle(lambda: next(hashes, None), lambda ms: clock.__setitem__(0, clock[0] + ms), lambda: clock[0],
+                         int(opt("--timeout", "10000")), int(opt("--interval", "200")))
+        out(res)
         return 0
 
     if cmd == "guard-check":
@@ -751,8 +801,13 @@ def main(argv):
         import time
         rect = opt("--rect")
         r = parse_rect(rect) if rect else None
-        out(settle(lambda: hashlib.md5(grab(d, r).tobytes()).digest(), lambda ms: time.sleep(ms / 1000),
-                   lambda: time.monotonic() * 1000, num("--timeout", "10000"), num("--interval", "200")))
+        still = parse_share(opt("--still"))
+        if still is not None:
+            out(settle(lambda: grab(d, r), lambda ms: time.sleep(ms / 1000), lambda: time.monotonic() * 1000,
+                       num("--timeout", "10000"), num("--interval", "200"), changed_share, still))
+        else:
+            out(settle(lambda: hashlib.md5(grab(d, r).tobytes()).digest(), lambda ms: time.sleep(ms / 1000),
+                       lambda: time.monotonic() * 1000, num("--timeout", "10000"), num("--interval", "200")))
     else:
         raise SystemExit(f"unknown command {cmd}")
     return 0
