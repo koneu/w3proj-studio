@@ -13,7 +13,7 @@ import {
 import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
 import { keyOf } from "../../lib/keys";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
-import { createVariables, missingVariableNames, variablesOf } from "../../lib/triggers/pastevars";
+import { autoCreateOn, createVariables, missingVariableNames, variablesOf } from "../../lib/triggers/pastevars";
 import type { Eca, Param, TriggerItem, Variable } from "../../lib/triggers/wtg";
 import { copyText, h } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
@@ -319,8 +319,8 @@ class GuiView {
     const to = this.target(kind);
     if (typeof to === "string") { void this.w3.window.showWarning(`Can't paste a ${KIND_NAMES[kind].toLowerCase()} here. ${to}`); return; }
     const missing = missingVariableNames(this.ed.file, clip.ecas);
-    // Off unless set, as the World Editor's box on its first start ([Trigger Editor] Auto Create Variables=0).
-    const auto = missing.length > 0 && this.w3.settings.get<boolean>("triggers.autoCreateVariables") === true;
+    // On unless set to false. The World Editor's box is off on its first start; Studio deliberately differs (decision 2026-11-20).
+    const auto = missing.length > 0 && autoCreateOn(this.w3.settings.get<boolean>("triggers.autoCreateVariables"));
     let created: string[] = [], refused = "";
     const label = clip.ecas.length > 1 ? `Paste ${clip.ecas.length} lines` : `Paste ${KIND_NAMES[kind].toLowerCase()}`;
     this.edit(label, () => {

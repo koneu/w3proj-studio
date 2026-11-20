@@ -51,3 +51,8 @@ export function createVariables(file: TriggerFile, carried: readonly Variable[],
   }
   return todo.map((v) => v.name);
 }
+
+/** The setting triggers.autoCreateVariables: unset means on. Studio's default is on, unlike the World Editor's own first start (off); decided 2026-11-20. */
+export function autoCreateOn(setting: boolean | undefined): boolean {
+  return setting !== false;
+}
