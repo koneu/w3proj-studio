@@ -310,7 +310,10 @@ export function sounds(i: ScriptInput): string {
       labelledSoundParams(lines, s, label);
       continue;
     }
-    if (s.channel >= 0) lines.push(`    call SetSoundChannel( ${n}, ${s.channel} )`);
+    // An unlabelled sound's channel -1 is 0 to World Editor 2.0, which writes SetSoundChannel( 0 ) for it (script-items:
+    // six sounds); none of the game's maps has one, so their scripts don't say otherwise.
+    const channel = s.channel === -1 && !s.assetLabel ? 0 : s.channel;
+    if (channel >= 0) lines.push(`    call SetSoundChannel( ${n}, ${channel} )`);
     lines.push(`    call SetSoundVolume( ${n}, ${s.volume} )`);
     if (!unset(s.pitch)) lines.push(`    call SetSoundPitch( ${n}, ${r1(s.pitch)} )`);
     if (s.flags & 2) {

@@ -134,6 +134,28 @@ test("custom gameplay constants take the Melee flag off with generateOnSave off"
   assert.equal(p.flags() & MELEE, 0);
 });
 
+// The object data is one of the editor's reasons (WESTRING_NOTMELEE_CUSTOMUNITS …): saving it with generateOnSave off
+// re-runs the rules too, also for a skin file and a raw (not JSON) file.
+test("custom object data takes the Melee flag off with generateOnSave off", async () => {
+  const custom = JSON.stringify({ original: [], custom: [{ id: "h000", base: "hfoo", mods: [] }] });
+  for (const path of ["map/war3map.w3u.json", "map/war3mapSkin.w3a.json", "map/war3map.w3q.json", "map/war3map.w3d.json"]) {
+    const empty = project({ generateOnSave: false, own: { [path]: JSON.stringify({ original: [], custom: [] }) } });
+    await empty.save(path);
+    assert.equal(empty.flags() & MELEE, MELEE, `control: ${path} without objects keeps the flag`);
+    const p = project({ generateOnSave: false, own: { [path]: custom } });
+    await p.save(path);
+    assert.equal(p.flags() & MELEE, 0, path);
+    assert.equal(p.written.has("map/war3map.j"), false, "no script is made with generateOnSave off");
+  }
+  // A raw w3t whose header counts one original change (version 2, original 1, custom 0, then the entry's bytes).
+  const raw = new Uint8Array(20);
+  new DataView(raw.buffer).setUint32(0, 2, true);
+  new DataView(raw.buffer).setUint32(4, 1, true);
+  const p = project({ generateOnSave: false, bytes: { "map/war3map.w3t": raw } });
+  await p.save("map/war3map.w3t");
+  assert.equal(p.flags() & MELEE, 0, "raw war3map.w3t");
+});
+
 test("Map Properties with unsaved changes isn't written over: it gets its turn when it's saved", async () => {
   const p = project({ generateOnSave: false, dirty: true });
   await p.save("map/war3mapUnits.doo.json", footman as never);

@@ -43,9 +43,10 @@ const DIFF = "w3:script-diff:";
 const INFO_JSON = "map/war3map.w3i.json";
 /** Files whose save can change the Melee flag (lib/terrain/meleesave): the placed units, the map's info, its gameplay
  *  constants, and the ground (a start location under water) take it off; with the triggers and the doodads they can
- *  also put it back. Looked at after every save, whatever script.generateOnSave says and whatever the script's
- *  language. */
-const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
+ *  also put it back. The object data and the game interface (meleesave's CUSTOM_DATA, also as skin files) take it off
+ *  and decide flag 0x4000 with the placed objects. Looked at after every save, whatever script.generateOnSave says and
+ *  whatever the script's language. */
+const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapSkin\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?|war3map(Skin)?\.(w3u|w3t|w3b|w3d|w3a|w3h|w3q)(\.json)?)$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */

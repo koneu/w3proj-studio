@@ -1023,6 +1023,16 @@ test("sounds: created, then only what's set", () => {
   hasNot(soundSection({ pitch: 4294967300 }), "SetSoundPitch");
 });
 
+// World Editor 2.0 (script-items.json, branch we-script-items): six unlabelled sounds stored with channel -1 came back
+// as 0 with SetSoundChannel( 0 ). A labelled one with -1 is the label's channel 0 (the editor's Sound Editor writes it
+// so; the game's 23 such sounds have no SetSoundChannel when the label says 0).
+test("an unlabelled sound with channel -1 sets channel 0", () => {
+  has(soundSection({ channel: -1 }), "    call SetSoundChannel( gg_snd_S, 0 )");
+  has(soundSection({ channel: 0 }), "    call SetSoundChannel( gg_snd_S, 0 )");
+  const label = () => ({ channel: 0, pitch: 1, minDistance: 100, maxDistance: 1000, distanceCutoff: 3000 });
+  hasNot(soundSection({ channel: -1, assetLabel: "Rain" }, { soundLabel: label }), "SetSoundChannel");
+});
+
 test("music is only its file path", () => {
   has(soundSection({ flags: 8 }), '    set gg_snd_S = "Sound\\\\x.wav"');
   assert.ok(generateSections(input({ sounds: [sound({ flags: 8 })] as never })).get("Global Variables")!.includes(`${"string".padEnd(24)}gg_snd_S`));
