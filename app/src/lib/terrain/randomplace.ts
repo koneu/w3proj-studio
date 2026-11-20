@@ -106,11 +106,13 @@ export function randomWhatOf(id: string): RandomWhat | undefined {
 /** The highest level offered for a random object by level (the Object Placer's Random… and Unit Properties). */
 export const MAX_RANDOM_LEVEL = 20;
 
-/** A random level from the placement file's 3 bytes (levelBytes' hex): ffffff is any (-1); anything unreadable too. */
+/** A random level from the placement file's 3 bytes (levelBytes' hex): the first two, little-endian, ffff any (-1);
+ *  anything unreadable is any too. The third byte is a random item's equipment type and tag (World Editor 2.0:
+ *  lib/script/units.ts randomItemFilter), not part of the level. */
 export function levelOf(hex: unknown): number {
   if (typeof hex !== "string" || !/^[0-9a-fA-F]{6}$/.test(hex)) return -1;
-  const v = parseInt(hex.slice(0, 2), 16) | (parseInt(hex.slice(2, 4), 16) << 8) | (parseInt(hex.slice(4, 6), 16) << 16);
-  return v === 0xffffff ? -1 : v;
+  const v = parseInt(hex.slice(0, 2), 16) | (parseInt(hex.slice(2, 4), 16) << 8);
+  return v === 0xffff ? -1 : v;
 }
 
 /** How a placed random object is chosen now, from its fields; null for a randomType the file doesn't know. */
@@ -127,18 +129,22 @@ export function randomOf(e: Record<string, unknown>): RandomChoice | null {
 
 export interface RandomGroup { number: number; name: string; positions: number[]; lines?: { chance: number; ids: string[] }[] }
 
-/** The 3 bytes of a random level as the placement file's JSON holds them (hex, little-endian; -1 is ffffff). */
-export function levelBytes(level: number): string {
-  const v = level < 0 ? 0xffffff : Math.min(0xffffff, Math.round(level));
-  return [v & 255, (v >> 8) & 255, (v >> 16) & 255].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** The 3 bytes of a random level as the placement file's JSON holds them (hex, little-endian; -1 is ffffff). `third`:
+ *  the third byte as two hex digits (a random item's equipment type and tag: levelOf), else 00, ff for any. */
+export function levelBytes(level: number, third?: string): string {
+  const v = level < 0 ? 0xffff : Math.min(0xfffe, Math.round(level));
+  return [v & 255, (v >> 8) & 255].map((b) => b.toString(16).padStart(2, "0")).join("") + (third ?? (level < 0 ? "ff" : "00"));
 }
 
 /** The random fields of a placed unit or item (war3mapUnits.doo, formats/units.json): only those its randomType
- *  stores, so fields of another kind of random object don't stay behind. */
+ *  stores, so fields of another kind of random object don't stay behind. A random item by level keeps the third byte
+ *  it had (the equipment type and tag World Editor 2.0 sets there). */
 export function applyRandom(e: Record<string, unknown>, spec: RandomSpec): void {
+  const old = e.randomType === 0 && typeof e.randomLevel === "string" && /^[0-9a-fA-F]{6}$/.test(e.randomLevel) ? e.randomLevel.slice(4, 6) : undefined;
   for (const k of ["randomLevel", "randomClass", "randomGroup", "randomPosition", "randomUnits"]) delete e[k];
   if (spec.by === "level") {
-    Object.assign(e, { randomType: 0, randomLevel: levelBytes(spec.what === "building" ? -1 : spec.level), randomClass: spec.what === "item" ? Math.max(0, Math.min(7, spec.itemClass ?? 0)) : 0 });
+    const third = spec.what === "item" ? old : undefined;
+    Object.assign(e, { randomType: 0, randomLevel: levelBytes(spec.what === "building" ? -1 : spec.level, third), randomClass: spec.what === "item" ? Math.max(0, Math.min(7, spec.itemClass ?? 0)) : 0 });
   } else if (spec.by === "group") {
     Object.assign(e, { randomType: 1, randomGroup: spec.group, randomPosition: spec.position });
   } else {

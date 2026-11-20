@@ -133,9 +133,19 @@ const UNITS_2 = [
   place("h002", 1536, -1024, { abilities: [skill("A00B", 1, 1), skill("A00C", 0, 0)] }),
 ];
 
+// script-items-3.w3x: placed random items (iDNR, any by level) whose randomLevel holds other bytes after the level: do
+// the two bytes the level leaves carry the editor's equipment type and tag (ChooseRandomItemExWithFilter)?
+editorId = 0;
+const UNITS_3 = [
+  place("sloc", 0, -256, { level: 0, targetAcquisition: 0 }),
+  ...["020000", "020100", "020001", "020504", "020908", "02ffff", "ff0000", "ffffff", "ffff00", "030091"].map((randomLevel, k) =>
+    place("iDNR", -1024 + 256 * k, 512, { ...neutral, angle: 0, randomLevel, randomClass: 1 })),
+];
+
 const MAPS = {
   "script-items.w3x": { units: UNITS, w3u: W3U, w3a: W3A, w3t: W3T, sounds: SOUNDS, header: "   " },
   "script-items-2.w3x": { units: UNITS_2, w3u: W3U_2, w3a: W3A_2, sounds: SOUNDS_2 },
+  "script-items-3.w3x": { units: UNITS_3 },
 };
 for (const [out, m] of Object.entries(MAPS)) {
   const scratch = mkdtempSync(join(tmpdir(), "we-specs-script-items-"));
@@ -149,7 +159,7 @@ for (const [out, m] of Object.entries(MAPS)) {
     units.units = m.units;
     writeFileSync(unitsFile, JSON.stringify(units, null, 1));
     for (const kind of ["w3u", "w3a", "w3t"]) if (m[kind]) writeFileSync(join(map, `war3map.${kind}.json`), JSON.stringify(m[kind], null, 1));
-    writeFileSync(join(map, "war3map.w3s.json"), JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: m.sounds }, null, 1));
+    if (m.sounds?.length) writeFileSync(join(map, "war3map.w3s.json"), JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: m.sounds }, null, 1));
     const wtsFile = join(map, "war3map.wts");
     const strings = ["Subtitle 900", "Speaker 901", "Speaker 902", "Subtitle 903", "Speaker 904", "Speaker 905"]
       .map((t, k) => `STRING ${900 + k}\r\n{\r\n${t}\r\n}\r\n\r\n`).join("");

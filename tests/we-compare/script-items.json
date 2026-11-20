@@ -20,5 +20,16 @@
       { "file": "war3map.j", "as": "text", "lines": "^    (set (u|gg_snd_\\w+) = |call (SetDialogue\\w+|SetSoundFacial\\w+|SelectHeroSkill|IssueImmediateOrder))" }
     ],
     "limit": 60
+  },
+  {
+    "name": "script-items-3",
+    "description": "test.md 'The WE 2.0 item Random choice's equipment type and tag' (branch we-script-items): script-items-3.w3x (make-script-items.mjs): placed random items (iDNR, Permanent, by level) whose three random bytes are 020000, 020100, 020001, 020504, 020908, 02ffff, ff0000, ffffff, ffff00, 030091. The editor reads the first two as the level (little-endian, ffff any), the third's low four bits as the tag + 1 and its high four as the equipment type + 1 (0 any); its Item Properties > Random tab set to Level 2, Head, Shop saved 020028, Any Level ffff00. The random item lines as a set (the editor's order of items of one type isn't the file's)",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/script-items-3.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "settings": { "script.generateOnSave": true }, "steps": [{ "command": "w3.script.generate", "args": { "quiet": true } }] },
+    "compare": [
+      { "file": "war3map.j", "as": "text-set", "lines": "ChooseRandomItemExWithFilter" }
+    ],
+    "limit": 20
   }
 ]

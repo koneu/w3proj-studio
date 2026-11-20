@@ -572,6 +572,18 @@ test("World Editor 2.0 picks random items with ChooseRandomItemExWithFilter, any
   has(random("020000", 1), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
   has(random("ffffff", 4), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ARTIFACT, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
   has(random("060000", 7), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_MISCELLANEOUS, 6, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  // The level is two bytes, ffff any; the third byte holds the tag + 1 and the equipment type + 1 (tests/we-compare/
+  // script-items.json script-items-3: its Item Properties' Random tab set to Level 2, Head, Shop saved 020028; Any Level
+  // ffff).
+  const filter = (randomLevel: string, want: string) => has(random(randomLevel, 1), `    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, ${want} )`);
+  filter("020028", "2, EQUIPMENT_TYPE_HEAD, ITEMTAG_TYPE_SHOP");
+  filter("ffff00", "-1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY");
+  filter("ff0000", "255, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY");
+  filter("020100", "258, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY");
+  filter("02ffff", "65282, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY");
+  filter("020001", "2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_UNDEFINED");
+  filter("020504", "1282, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_BOSSDROP");
+  filter("030091", "3, EQUIPMENT_TYPE_TRINKET, ITEMTAG_TYPE_UNDEFINED");
   // Its item drops the same.
   const drops = dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }, { id: "YiI/", chance: 30 }], [{ id: "YYI/", chance: 100 }]], 7003);
   has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 50 )");

@@ -55,6 +55,21 @@ test("random levels are three little-endian bytes, any is ffffff", () => {
   assert.equal(levelBytes(10), "0a0000");
   assert.equal(levelBytes(-1), "ffffff");
   assert.equal(levelBytes(300), "2c0100");
+  // The level is the first two bytes; the third is a random item's equipment type and tag (World Editor 2.0,
+  // tests/we-compare/script-items.json script-items-3: Level 2, Head, Shop is 020028; its Any Level ffff00).
+  assert.deepEqual(["020028", "ffff00", "ffffff", "2c0100", "ff0000", "nonsense"].map(levelOf), [2, -1, -1, 300, 255, -1]);
+  assert.equal(levelBytes(3, "28"), "030028");
+  assert.equal(levelBytes(-1, "28"), "ffff28");
+});
+
+test("a random item's new level keeps its equipment type and tag", () => {
+  const e: Record<string, unknown> = { id: "iDNR", randomType: 0, randomLevel: "020028", randomClass: 1 };
+  applyRandom(e, { what: "item", by: "level", level: 5, itemClass: 1 });
+  assert.equal(e.randomLevel, "050028");
+  // A unit's (or one that wasn't by level) starts afresh.
+  const u: Record<string, unknown> = { id: "uDNR", randomType: 0, randomLevel: "020028", randomClass: 0 };
+  applyRandom(u, { what: "unit", by: "level", level: 5 });
+  assert.equal(u.randomLevel, "050000");
 });
 
 test("a random object's fields are those its kind stores, nothing of another kind stays", () => {
@@ -62,7 +77,8 @@ test("a random object's fields are those its kind stores, nothing of another kin
   applyRandom(e, { what: "unit", by: "level", level: 3 });
   assert.deepEqual(e, { id: "uDNR", randomType: 0, randomLevel: "030000", randomClass: 0 });
   applyRandom(e, { what: "item", by: "level", level: -1, itemClass: 2 });
-  assert.deepEqual(e, { id: "uDNR", randomType: 0, randomLevel: "ffffff", randomClass: 2 });
+  // The third byte stays (00: any equipment type and tag), as the World Editor's Any Level writes it.
+  assert.deepEqual(e, { id: "uDNR", randomType: 0, randomLevel: "ffff00", randomClass: 2 });
   applyRandom(e, { what: "building", by: "level", level: 5 });
   assert.equal(e.randomLevel, "ffffff");
   applyRandom(e, { what: "item", by: "group", group: 4, position: 1 });

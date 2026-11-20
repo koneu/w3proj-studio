@@ -20,9 +20,10 @@ const RANDOM_TYPES: Record<string, string> = {
  *  (7003) writes ChooseRandomItemExWithFilter with any equipment and tag for every class and level, any class too
  *  (we-drive saves, 2026-11-09; the 7003 maps in smoketest_maps the same); the game's maps up to 6127 have
  *  ChooseRandomItemEx, any class included. None of 7000 to 7002 has a random item: the plain ChooseRandomItem
- *  for any class there is an older guess, kept. */
-export function randomItem(type: string, level: number | string, editorVersion: number): string {
-  if (editorVersion >= 7003) return `ChooseRandomItemExWithFilter( ITEM_TYPE_${type}, ${level}, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )`;
+ *  for any class there is an older guess, kept. `equipment` and `tag` (EQUIPMENT_TYPE_<name>, ITEMTAG_TYPE_<name>):
+ *  a placed random item's (units.ts randomItemFilter); a drop's id holds none. */
+export function randomItem(type: string, level: number | string, editorVersion: number, equipment = "ANY", tag = "ANY"): string {
+  if (editorVersion >= 7003) return `ChooseRandomItemExWithFilter( ITEM_TYPE_${type}, ${level}, EQUIPMENT_TYPE_${equipment}, ITEMTAG_TYPE_${tag} )`;
   return type === "ANY" && editorVersion >= 7000 ? `ChooseRandomItem( ${level} )` : `ChooseRandomItemEx( ITEM_TYPE_${type}, ${level} )`;
 }
 

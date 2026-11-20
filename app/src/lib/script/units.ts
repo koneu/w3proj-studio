@@ -89,9 +89,29 @@ function pickRandomItem(it: UnitJson, editorVersion: number, groups?: readonly n
   if (it.randomType === 2) {
     return ["    call RandomDistReset(  )", ...(it.randomUnits ?? []).map((r) => `    call RandomDistAddItem( '${r.id}', ${r.chance} )`), "    set itemID = RandomDistChoose(  )"];
   }
+  const type = ITEM_TYPES[it.randomClass ?? 0] ?? "ANY";
+  if (editorVersion >= 7003) {
+    const f = randomItemFilter(it.randomLevel);
+    return [`    set itemID = ${randomItem(type, f.level, editorVersion, f.equipment, f.tag)}`];
+  }
   const raw = parseInt((it.randomLevel ?? "").slice(0, 2), 16);
   const level = Number.isNaN(raw) || raw === 255 ? -1 : raw;
-  return [`    set itemID = ${randomItem(ITEM_TYPES[it.randomClass ?? 0] ?? "ANY", level, editorVersion)}`];
+  return [`    set itemID = ${randomItem(type, level, editorVersion)}`];
+}
+
+const EQUIPMENT_TYPES = ["NONE", "HEAD", "CHEST", "GLOVES", "BOOTS", "RING", "PRIMARY", "OFFHAND", "TRINKET"];
+const ITEM_TAGS = ["UNDEFINED", "DROPPABLE", "QUESTREWARD", "BOSSDROP", "SECRET", "PUZZLE", "WORLD", "SHOP"];
+
+/** A placed random item's level, equipment type and tag as World Editor 2.0 reads its 3 random bytes (the doo's
+ *  randomLevel, hex in file order; tests/we-compare/script-items.json script-items-3, the Random tab of its Item
+ *  Properties): the level is the first two bytes, little-endian, ffff any (-1); the third byte's low four bits are the
+ *  tag + 1, its high four the equipment type + 1, 0 (or a number past the list) any. */
+export function randomItemFilter(hex: string | undefined): { level: number; equipment: string; tag: string } {
+  const h = hex ?? "";
+  const b = /^[0-9a-fA-F]{6}$/.test(h) ? [0, 2, 4].map((k) => parseInt(h.slice(k, k + 2), 16)) : [255, 255, 0];
+  const raw = b[0] | (b[1] << 8);
+  const pick = (names: string[], n: number) => names[n - 1] ?? "ANY";
+  return { level: raw === 0xffff ? -1 : raw, equipment: pick(EQUIPMENT_TYPES, b[2] >> 4), tag: pick(ITEM_TAGS, b[2] & 15) };
 }
 
 /** Lines that put a random unit's type into unitID. */
