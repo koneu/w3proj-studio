@@ -67,27 +67,25 @@ test("plain arrows and everything else stay out of it", () => {
   assert.equal(press("PageUp", { altKey: true }), null);
 });
 
-test("Space alone recalls the selection", () => {
+test("Select the Last Selection has no key: Space is the World Editor's selection brush (tabkeys.ts)", () => {
   const keys = { key: " ", code: "Space", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
-  assert.equal(isRecallKey(keys), true);
-  assert.equal(isRecallKey({ ...keys, ctrlKey: true }), false);
-  assert.equal(isRecallKey({ ...keys, shiftKey: true }), false);
-  assert.equal(isRecallKey({ ...keys, key: "a" }), false);
+  assert.equal(isRecallKey(keys), false);
+  assert.equal(primaryKey(bindings, RECALL_COMMAND), undefined);
 });
 
-test("T turns the selection toward the pointer; F is the World Editor's Fog Effects, Ctrl+T its Terrain", () => {
-  const keys = { key: "t", code: "KeyT", ctrlKey: false, metaKey: false, altKey: false };
-  assert.equal(FACE_KEY, "T");
+test("Shift+T turns the selection toward the pointer; T is the World Editor's Terrain palette, F its Fog Effects, Ctrl+T its Terrain", () => {
+  const keys = { key: "T", code: "KeyT", ctrlKey: false, metaKey: false, altKey: false, shiftKey: true };
+  assert.equal(FACE_KEY, "Shift+T");
   assert.equal(isFaceKey(keys), true);
-  assert.equal(isFaceKey({ ...keys, key: "T" }), true, "caps lock");
   assert.equal(isFaceKey({ ...keys, key: "Unidentified" }), true, "WebKitGTK's unnamed key, by its code");
+  assert.equal(isFaceKey({ ...keys, key: "t", shiftKey: false }), false, "plain T is the Terrain tab");
   assert.equal(isFaceKey({ ...keys, ctrlKey: true }), false);
   assert.equal(isFaceKey({ ...keys, altKey: true }), false);
-  assert.equal(isFaceKey({ ...keys, key: "f", code: "KeyF" }), false);
-  // No View key and no selection key takes T.
-  assert.equal(viewKeyCommand({ ...keys, shiftKey: false }), null);
-  assert.equal(bindings.some((b) => b.key === "t" && runsAsCommand(b.command)), false);
-  assert.equal(turnKey({ ...keys, shiftKey: false }), null);
+  assert.equal(isFaceKey({ ...keys, key: "f", code: "KeyF", shiftKey: false }), false);
+  // No View key and no selection key takes Shift+T.
+  assert.equal(viewKeyCommand(keys), null);
+  assert.equal(bindings.some((b) => b.key === "shift+t" && runsAsCommand(b.command)), false);
+  assert.equal(turnKey(keys), null);
   assert.equal(selectionKey(keys), null);
 });
 
@@ -117,11 +115,13 @@ test("joined steps undo backwards and redo forwards", () => {
   assert.equal(held.terrain, false);
 });
 
-test("H, V and R mirror and turn, but Ctrl+V is still paste", () => {
+test("H and V mirror, Ctrl+NumPad * and / and Shift+R turn, but Ctrl+V is still paste and R the Regions tab", () => {
   const keys = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.equal(turnKey({ ...keys, key: "h" }), "mirrorX");
   assert.equal(turnKey({ ...keys, key: "v" }), "mirrorY");
-  assert.equal(turnKey({ ...keys, key: "r" }), "cw");
+  assert.equal(turnKey({ ...keys, key: "r" }), null, "R is the World Editor's Region palette");
+  assert.equal(turnKey({ ...keys, key: "*", code: "NumpadMultiply", ctrlKey: true }), "cw", "the World Editor's Rotate Paste 90 CW");
+  assert.equal(turnKey({ ...keys, key: "/", code: "NumpadDivide", ctrlKey: true }), "ccw", "its Rotate Paste 90 CCW");
   assert.equal(turnKey({ ...keys, key: "R", shiftKey: true }), "ccw");
   assert.equal(turnKey({ ...keys, key: "v", ctrlKey: true }), null);
   assert.equal(turnKey({ ...keys, key: "a" }), null);
@@ -132,7 +132,7 @@ test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (li
   assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 5 });
   assert.deepEqual(press("Unidentified", { code: "PageUp", ctrlKey: true }), { raise: 16 });
   const plain = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
-  assert.equal(isRecallKey({ key: "Unidentified", code: "Space", ...plain }), true);
+  assert.equal(isFaceKey({ key: "Unidentified", code: "KeyT", ...plain, shiftKey: true }), true);
   assert.equal(isObjectEditorKey({ key: "Unidentified", code: "F1", ...plain, ctrlKey: true }), true);
   assert.equal(turnKey({ key: "Unidentified", code: "KeyR", ...plain, shiftKey: true }), "ccw");
 });

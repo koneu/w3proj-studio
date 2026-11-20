@@ -82,6 +82,26 @@ try {
       await shot(`file-${path.replace(/[^a-z0-9]+/gi, "_")}`);
     } catch (e) { found.push(`opening ${path}: ${e?.message ?? e}`); }
   }
+  // The Trigger Editor, on the made-up trigger definitions the demo serves: the tree, a trigger's parts and its folding.
+  try {
+    await page.evaluate(`w3Workbench.editors.open("map/war3map.wtg.json")`);
+    const click = (label) => page.evaluate(`(() => { const el = [...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(label)}); if (el) el.click(); return !!el; })()`);
+    await until("the trigger tree", () => page.evaluate(`document.body.innerText.includes("Demo Timers")`), 10_000);
+    const tree = await page.evaluate(`document.body.innerText`);
+    for (const name of ["Demo Setup", "Demo Init", "Demo Score", "Demo Tick", "Demo Chat", "Demo Timers"]) if (!tree.includes(name)) found.push(`trigger tree lacks "${name}"`);
+    if (/needs the desktop app|Could not open/.test(tree)) found.push("the Trigger Editor shows a desktop-app error");
+    await click("Demo Score");
+    await until("the trigger's parts", () => page.evaluate(`document.body.innerText.includes("Score of")`), 10_000).catch(() => found.push("trigger Demo Score shows no parts"));
+    const parts = await page.evaluate(`document.body.innerText`);
+    for (const want of ["score becomes", "If - Conditions", "Then - Actions", "Else - Actions", "Add "]) if (!parts.includes(want)) found.push(`Demo Score lacks "${want}"`);
+    await shot("trigger-score");
+    // The ▾ in front of the category folds it.
+    await page.evaluate(`[...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === "\u25be")?.click()`);
+    await sleep(300);
+    const folded = await page.evaluate(`document.body.innerText.includes("Demo Init")`);
+    if (folded) found.push("a category does not fold");
+    await shot("trigger-folded");
+  } catch (e) { found.push(`trigger editor: ${e?.message ?? e}`); }
   // The command palette and a theme.
   void page.evaluate(`w3Workbench.commands.execute("workbench.commandPalette")`);
   await sleep(300);

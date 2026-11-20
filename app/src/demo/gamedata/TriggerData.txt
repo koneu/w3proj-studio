@@ -1,0 +1,169 @@
+// Made up for the web demo: a small set of trigger definitions in the format the Trigger Editor reads (the desktop app
+// reads the game's own file). Nothing here comes from Warcraft III.
+
+[TriggerCategories]
+TC_DEMO_GAME=WESTRING_DEMO_TC_GAME,DemoIconGame
+TC_DEMO_TIMER=WESTRING_DEMO_TC_TIMER,DemoIconTimer
+TC_DEMO_PLAYER=WESTRING_DEMO_TC_PLAYER,DemoIconPlayer
+TC_DEMO_MATH=WESTRING_DEMO_TC_MATH,DemoIconMath,1
+TC_DEMO_CONTROL=WESTRING_DEMO_TC_CONTROL,DemoIconControl,1
+
+[TriggerTypes]
+integer=0,1,1,WESTRING_DEMO_TYPE_INTEGER
+real=0,1,1,WESTRING_DEMO_TYPE_REAL
+string=0,1,1,WESTRING_DEMO_TYPE_STRING
+StringExt=0,0,0,WESTRING_DEMO_TYPE_MESSAGE,string
+boolean=0,1,1,WESTRING_DEMO_TYPE_BOOLEAN
+player=0,1,0,WESTRING_DEMO_TYPE_PLAYER
+demooperator=0,0,0,WESTRING_DEMO_TYPE_OPERATOR
+demomode=0,1,1,WESTRING_DEMO_TYPE_MODE
+nothing=0,0,0,Nothing
+code=0,0,0,Code
+
+[TriggerParams]
+DemoTrue=0,boolean,true,WESTRING_DEMO_TRUE
+DemoFalse=0,boolean,false,WESTRING_DEMO_FALSE
+DemoLess=0,demooperator,<,WESTRING_DEMO_LESS
+DemoEqual=0,demooperator,==,WESTRING_DEMO_EQUAL
+DemoGreater=0,demooperator,>,WESTRING_DEMO_GREATER
+DemoPlus=0,demooperator,+,WESTRING_DEMO_PLUS
+DemoMinus=0,demooperator,-,WESTRING_DEMO_MINUS
+DemoModeEasy=0,demomode,0,WESTRING_DEMO_MODE_EASY
+DemoModeNormal=0,demomode,1,WESTRING_DEMO_MODE_NORMAL
+DemoModeHard=0,demomode,2,WESTRING_DEMO_MODE_HARD
+DemoPlayerOne=0,player,Player(0),WESTRING_DEMO_PLAYER_ONE
+DemoPlayerTwo=0,player,Player(1),WESTRING_DEMO_PLAYER_TWO
+DemoAllPlayers=0,player,Player(0),WESTRING_DEMO_ALL_PLAYERS
+
+[TriggerEvents]
+MapInitializationEvent=0,nothing
+_MapInitializationEvent_DisplayName="Demo Event - Map initialization"
+_MapInitializationEvent_Parameters="Map initialization"
+_MapInitializationEvent_Category=TC_DEMO_GAME
+DemoTimerEvent=0,real
+_DemoTimerEvent_DisplayName="Demo Event - Repeating timer"
+_DemoTimerEvent_Parameters="Every ",~Seconds," seconds of game time"
+_DemoTimerEvent_Defaults=5
+_DemoTimerEvent_Limits=0.1,3600
+_DemoTimerEvent_Category=TC_DEMO_TIMER
+DemoChatEvent=0,player,string
+_DemoChatEvent_DisplayName="Demo Event - Player types text"
+_DemoChatEvent_Parameters=~Player," types ",~Text
+_DemoChatEvent_Defaults=DemoPlayerOne,"-demo"
+_DemoChatEvent_Category=TC_DEMO_PLAYER
+DemoScoreEvent=0,player,demooperator,integer
+_DemoScoreEvent_DisplayName="Demo Event - Player score"
+_DemoScoreEvent_Parameters=~Player,"'s score becomes ",~Operator," ",~Value
+_DemoScoreEvent_Defaults=DemoPlayerOne,DemoGreater,10
+_DemoScoreEvent_Category=TC_DEMO_PLAYER
+
+[TriggerConditions]
+DemoCompareInteger=0,integer,demooperator,integer
+_DemoCompareInteger_DisplayName="Demo Condition - Integer comparison"
+_DemoCompareInteger_Parameters=~A," ",~Operator," ",~B
+_DemoCompareInteger_Defaults=DemoGetScore,DemoGreater,0
+_DemoCompareInteger_Category=TC_DEMO_MATH
+DemoIsFlagSet=0,boolean
+_DemoIsFlagSet_DisplayName="Demo Condition - Flag is set"
+_DemoIsFlagSet_Parameters="The flag is ",~Value
+_DemoIsFlagSet_Defaults=DemoTrue
+_DemoIsFlagSet_Category=TC_DEMO_GAME
+DemoModeIs=0,demomode
+_DemoModeIs_DisplayName="Demo Condition - Difficulty is"
+_DemoModeIs_Parameters="The difficulty is ",~Mode
+_DemoModeIs_Defaults=DemoModeNormal
+_DemoModeIs_Category=TC_DEMO_GAME
+AndMultiple=0,nothing
+_AndMultiple_DisplayName="Demo Condition - And"
+_AndMultiple_Parameters="All (Conditions) are true"
+_AndMultiple_Category=TC_DEMO_CONTROL
+OrMultiple=0,nothing
+_OrMultiple_DisplayName="Demo Condition - Or"
+_OrMultiple_Parameters="Any (Conditions) are true"
+_OrMultiple_Category=TC_DEMO_CONTROL
+
+[TriggerActions]
+DoNothing=0,nothing
+_DoNothing_DisplayName="Demo Action - Do nothing"
+_DoNothing_Parameters="Do nothing"
+_DoNothing_Category=TC_DEMO_CONTROL
+CommentString=0,string
+_CommentString_DisplayName="Demo Action - Comment"
+_CommentString_Parameters="-------- ",~Text," --------"
+_CommentString_Defaults="Note"
+_CommentString_Category=TC_DEMO_CONTROL
+CustomScriptCode=0,string
+_CustomScriptCode_DisplayName="Demo Action - Custom script"
+_CustomScriptCode_Parameters="Custom script: ",~Code
+_CustomScriptCode_Defaults=""
+_CustomScriptCode_Category=TC_DEMO_CONTROL
+SetVariable=0,string,string
+_SetVariable_DisplayName="Demo Action - Set variable"
+_SetVariable_Parameters="Set ",~Variable," = ",~Value
+_SetVariable_Category=TC_DEMO_MATH
+IfThenElseMultiple=0,nothing
+_IfThenElseMultiple_DisplayName="Demo Action - If, then, else"
+_IfThenElseMultiple_Parameters="If (Conditions) then do (Then) else do (Else)"
+_IfThenElseMultiple_Category=TC_DEMO_CONTROL
+DemoShowMessage=0,player,StringExt
+_DemoShowMessage_DisplayName="Demo Action - Show message"
+_DemoShowMessage_Parameters="Show ",~Message," to ",~Player
+_DemoShowMessage_Defaults=DemoAllPlayers,"Hello from the demo"
+_DemoShowMessage_Category=TC_DEMO_PLAYER
+DemoAddScore=0,player,integer
+_DemoAddScore_DisplayName="Demo Action - Add to score"
+_DemoAddScore_Parameters="Add ",~Points," to the score of ",~Player
+_DemoAddScore_Defaults=DemoPlayerOne,1
+_DemoAddScore_Limits=_,_,-1000,1000
+_DemoAddScore_Category=TC_DEMO_PLAYER
+DemoSetFlag=0,boolean
+_DemoSetFlag_DisplayName="Demo Action - Set flag"
+_DemoSetFlag_Parameters="Set the flag to ",~Value
+_DemoSetFlag_Defaults=DemoTrue
+_DemoSetFlag_Category=TC_DEMO_GAME
+DemoWait=0,real
+_DemoWait_DisplayName="Demo Action - Wait"
+_DemoWait_Parameters="Wait ",~Seconds," seconds"
+_DemoWait_Defaults=1
+_DemoWait_Limits=0,_
+_DemoWait_Category=TC_DEMO_TIMER
+DemoSetMode=0,demomode
+_DemoSetMode_DisplayName="Demo Action - Set difficulty"
+_DemoSetMode_Parameters="Set the difficulty to ",~Mode
+_DemoSetMode_Defaults=DemoModeNormal
+_DemoSetMode_Category=TC_DEMO_GAME
+
+[TriggerCalls]
+DemoGetScore=0,0,integer,player
+_DemoGetScore_DisplayName="Demo Function - Score of player"
+_DemoGetScore_Parameters="Score of ",~Player
+_DemoGetScore_Defaults=DemoPlayerOne
+_DemoGetScore_Category=TC_DEMO_PLAYER
+DemoArithmetic=0,0,integer,integer,demooperator,integer
+_DemoArithmetic_DisplayName="Demo Function - Arithmetic"
+_DemoArithmetic_Parameters="(",~A," ",~Operator," ",~B,")"
+_DemoArithmetic_Defaults=1,DemoPlus,1
+_DemoArithmetic_Category=TC_DEMO_MATH
+DemoRandomInt=0,0,integer,integer,integer
+_DemoRandomInt_DisplayName="Demo Function - Random number"
+_DemoRandomInt_Parameters="Random number between ",~Low," and ",~High
+_DemoRandomInt_Defaults=1,10
+_DemoRandomInt_Category=TC_DEMO_MATH
+DemoJoin=0,0,string,string,string
+_DemoJoin_DisplayName="Demo Function - Join text"
+_DemoJoin_Parameters="Join ",~First," and ",~Second
+_DemoJoin_Defaults="",""
+_DemoJoin_Category=TC_DEMO_MATH
+DemoGetTriggerPlayer=0,1,player
+_DemoGetTriggerPlayer_DisplayName="Demo Function - Triggering player"
+_DemoGetTriggerPlayer_Parameters="Triggering player"
+_DemoGetTriggerPlayer_Category=TC_DEMO_PLAYER
+DemoPlayerNumber=0,0,player,integer
+_DemoPlayerNumber_DisplayName="Demo Function - Player by number"
+_DemoPlayerNumber_Parameters="Player ",~Number
+_DemoPlayerNumber_Defaults=1
+_DemoPlayerNumber_Category=TC_DEMO_PLAYER
+DemoDifficulty=0,0,demomode
+_DemoDifficulty_DisplayName="Demo Function - Current difficulty"
+_DemoDifficulty_Parameters="Current difficulty"
+_DemoDifficulty_Category=TC_DEMO_GAME
