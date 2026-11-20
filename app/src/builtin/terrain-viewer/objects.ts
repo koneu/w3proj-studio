@@ -646,7 +646,8 @@ export class ObjectLoader {
   }
 
   private model(req: ModelRequest): Promise<ModelGpu> {
-    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}|${req.retextureKey ?? ""}`;
+    // The 3.0 art's stand-in (`reforged`) counts: EW00 and ET00 name one plain file and have different HD models.
+    const key = `${req.path.toLowerCase()}|${req.reforged?.toLowerCase() ?? ""}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}|${req.retextureKey ?? ""}`;
     let m = this.models.get(key);
     if (!m) {
       // A model that can't be read or parsed stays so (asked for again, it fails at once), except when a read failed
@@ -749,7 +750,7 @@ export class ObjectLoader {
       const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
       const own = texturesOf?.(p, skin);
       const paint = paintOf(skin);
-      const key = `${path}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}|${paint ?? ""}`;
+      const key = `${path}|${reforgedModelPath(skin, p.variation) ?? ""}|${own ? `=${own.key}` : skin.texFile}|${props ?? ""}|${paint ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = own?.replaceable ?? skinTextures(skin);
