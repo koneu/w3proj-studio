@@ -753,9 +753,13 @@ export function editorPrefs(mode, dayNight, keep = false) {
  * toggles (Grid, Camera Bounds, pathing, ...) aren't kept in the preferences file: they start as the editor's own.
  * "Reset Fixed Z When Moving Objects" is the switch Ctrl+Shift+H toggles (unit-heights; seen 2026-11-17: false before,
  * true after one press, and kept by the next start when not pinned): pinned to false, what the farm's prefix held
- * through the runs the specs were written in. `--keep-prefs` leaves these as they are.
+ * through the runs the specs were written in. "Visible UI Elements" is a bit set of the windows the editor shows again
+ * at its start: 11 in every farm's prefix through the spec runs; a run that closed the editor with the Campaign Editor
+ * open left 75 (bit 64), after which every start reopened it, the close of answerKnown didn't shut it, and the specs'
+ * --key went into it ("t" typed into the campaign's name: no terrain palette, nothing painted; branch we-recheck-onhold,
+ * 2026-11-20). `--keep-prefs` leaves these as they are.
  */
-export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1", "Reset Fixed Z When Moving Objects": "false" });
+export const PINNED_PREFS = Object.freeze({ "Enforce Water Limits": "true", "Enforce Camera Boundaries": "1", "Reset Fixed Z When Moving Objects": "false", "Visible UI Elements": "11" });
 
 /**
  * The [Minimap] toggle pinned the same way: the editor keeps the "Show Creep Camp Icon" box under the minimap as it
