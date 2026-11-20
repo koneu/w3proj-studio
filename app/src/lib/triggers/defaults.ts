@@ -66,10 +66,25 @@ export function defaultTriggerFile(root?: string): TriggerFile {
   return parseWtgWithoutArgs(defaultWtg(root));
 }
 
-/** A raw war3map.wtg read as if no function took arguments: right for the default trigger, and a file with arguments
- *  comes out garbled or throws (enough to tell it isn't the default, see isDefaultTriggers). */
+/** The functions of the default trigger: none takes an argument. */
+const DEFAULT_FUNCTIONS = new Set(["MapInitializationEvent", ...MELEE_ACTIONS]);
+
+/** Thrown by parseWtgWithoutArgs at the first function the default trigger doesn't use: the file holds an event,
+ *  condition or action that isn't the default trigger's, so its triggers are custom (hasCustomTriggers), though the
+ *  rest can't be read without the game's TriggerData. */
+export class NotDefaultFunction extends Error {
+  constructor(readonly fn: string) { super(`"${fn}" isn't a function of the default trigger`); }
+}
+
+/** A raw war3map.wtg read without the game's TriggerData: exact up to the first function that isn't the default
+ *  trigger's (they take no arguments), where it throws NotDefaultFunction; a damaged file throws another error. */
 export function parseWtgWithoutArgs(bytes: Uint8Array): TriggerFile {
-  return parseWtg(bytes, { find: () => ({ args: [] }) } as unknown as TriggerData);
+  return parseWtg(bytes, {
+    find: (_kind: number, name: string) => {
+      if (!DEFAULT_FUNCTIONS.has(name)) throw new NotDefaultFunction(name);
+      return { args: [] };
+    },
+  } as unknown as TriggerData);
 }
 
 /**

@@ -17,6 +17,17 @@ test("files of the map folder the list doesn't name are unlisted; the map's own 
   assert.deepEqual(unlistedFiles(["map/war3campaign.w3f.json", "map/war3campImported/s.blp"], [{ flags: 5, path: "s.blp" }], "war3campImported"), []);
 });
 
+// The World Editor's save drops a war3mapPreview.tga the import list doesn't name and keeps a listed one (we-compare
+// corpus-saves-preview-unlisted, -listed); WormWar's list names war3mapPreview.tga where the map holds a .dds, and the
+// save drops the .dds (corpus-saves-wormwar). So the preview is an import like any other, not one of the map's files.
+test("the preview image is an import: unlisted unless the list names it by its own name", () => {
+  assert.equal(isMapFile("war3mapPreview.tga"), false);
+  assert.deepEqual(unlistedFiles(["map/war3map.w3i.json", "map/war3mapPreview.tga"], [], "war3mapImported"), ["map/war3mapPreview.tga"]);
+  assert.deepEqual(unlistedFiles(["map/war3mapPreview.tga"], [{ flags: 29, path: "war3mapPreview.tga" }], "war3mapImported"), [], "listed");
+  assert.deepEqual(unlistedFiles(["map/war3mapPreview.dds"], [{ flags: 29, path: "war3mapPreview.tga" }], "war3mapImported"), ["map/war3mapPreview.dds"], "listed under another extension");
+  assert.equal(isMapFile("war3mapMap.blp"), true, "control: the minimap is the map's own");
+});
+
 test("an entry listed with `/` names the folders' file, or a file of that very name (the World Editor's Replace Internal Sound)", () => {
   const entries = [{ flags: 21, path: "Sound/Interface/AchievementEarned.flac" }];
   assert.deepEqual(unlistedFiles(["map/Sound/Interface/AchievementEarned.flac"], entries, "war3mapImported"), []);
@@ -51,7 +62,7 @@ test("a campaign's own files aren't imports, its imports are", () => {
   }
   for (const f of ["war3campaignMiscs.txt", "war3campImported\\war3campaignMisc.txt", "war3campaignOther.txt"]) assert.ok(!isMapFile(f), f);
   // The language and art set versions of the map's own files (Blizzard's maps) aren't imports either.
-  for (const f of ["war3mapPreview.tga", "_Locales\\deDE.w3mod\\war3map.wts", "_HD.w3mod\\war3mapSkin.txt", "_hd.w3mod\\_locales\\zhCN.w3mod\\war3map.wts"]) assert.ok(isMapFile(f), f);
+  for (const f of ["_Locales\\deDE.w3mod\\war3map.wts", "_HD.w3mod\\war3mapSkin.txt", "_hd.w3mod\\_locales\\zhCN.w3mod\\war3map.wts"]) assert.ok(isMapFile(f), f);
   for (const f of ["_Locales\\deDE.w3mod\\war3mapImported\\a.blp", "_HD.w3mod\\x\\war3map.wts", "_Locales\\de.w3mod\\war3map.wts"]) assert.ok(!isMapFile(f), f);
 });
 
