@@ -785,11 +785,37 @@ fn program(exe: &str, args: Vec<String>) -> CmdResult<Command> {
     Ok(cmd)
 }
 
+/// The program that stands in for the World Editor's start when `W3PROJ_WE_LAUNCH` names one (`value`), only in a build
+/// where `honoured` (test builds: `cfg!(debug_assertions)`); else None, and the editor starts as always. For app-smoke's
+/// `worldEditorReal`: `app/scripts/we-launch.mjs` (through a wrapper) starts the real editor inside we-drive's sandbox
+/// (own display, no network, the game's files read-only), which the app's own start can't (a slot's farm isn't in a
+/// Steam prefix). A release build ignores the variable, so nobody can be talked into setting it to run something else.
+fn we_launch_hook(value: Option<std::ffi::OsString>, honoured: bool) -> Option<PathBuf> {
+    value.filter(|v| honoured && !v.is_empty()).map(PathBuf::from)
+}
+
+/// The World Editor's start: the hook with the arguments the editor would get (`-launch -loadfile <map>`, paths as on
+/// this machine: the hook turns them into Wine's), else `launch`. Either way a child the caller waits on, so the
+/// editor's end (the hook ends with it) ends the "● World Editor" mark.
+fn launch_world_editor(exe: &str, map: &str, hook: Option<PathBuf>) -> CmdResult<std::process::Child> {
+    match hook {
+        Some(hook) => world_editor_hook_command(&hook, map).spawn().map_err(|e| format!("W3PROJ_WE_LAUNCH {}: {e}", hook.display())),
+        None => launch(exe, map, &[]),
+    }
+}
+
+fn world_editor_hook_command(hook: &Path, map: &str) -> Command {
+    let mut cmd = Command::new(hook);
+    cmd.args(["-launch", "-loadfile", map]);
+    cmd
+}
+
 /// Opens a map in the World Editor and watches it. Every time the editor
 /// saves, `w3://map-saved` is emitted so the UI can sync the project.
 #[tauri::command]
 fn world_editor_open(app: AppHandle, watches: State<Watches>, exe: String, map: String, root: String) -> CmdResult<()> {
-    let mut child = launch(&exe, &map, &[])?;
+    let hook = we_launch_hook(std::env::var_os("W3PROJ_WE_LAUNCH"), cfg!(debug_assertions));
+    let mut child = launch_world_editor(&exe, &map, hook)?;
     let map_path = PathBuf::from(&map);
     watches.0.lock().unwrap().push(map_path.clone());
     std::thread::spawn(move || {
@@ -1551,6 +1577,54 @@ mod config_dir_tests {
         assert_eq!(chosen_config_dir(Some("smoke/config".into()), system).unwrap(), PathBuf::from("smoke/config"));
         assert_eq!(chosen_config_dir(Some("".into()), system).unwrap(), PathBuf::from("system"));
         assert_eq!(chosen_config_dir(None, system).unwrap(), PathBuf::from("system"));
+    }
+}
+
+#[cfg(test)]
+mod we_launch_hook_tests {
+    use super::{launch_world_editor, we_launch_hook, world_editor_hook_command};
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_hook_is_honoured_only_when_set_in_a_test_build() {
+        assert_eq!(we_launch_hook(Some("/t/we-launch.sh".into()), true), Some(PathBuf::from("/t/we-launch.sh")));
+        // A release build ignores it, set or not.
+        assert_eq!(we_launch_hook(Some("/t/we-launch.sh".into()), false), None);
+        assert_eq!(we_launch_hook(None, true), None);
+        assert_eq!(we_launch_hook(Some("".into()), true), None);
+    }
+
+    #[test]
+    fn the_hook_gets_the_editors_arguments() {
+        let cmd = world_editor_hook_command(std::path::Path::new("/t/we-launch.sh"), "/p/build/p.edit.w3x");
+        assert_eq!(cmd.get_program(), "/t/we-launch.sh");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, ["-launch", "-loadfile", "/p/build/p.edit.w3x"]);
+    }
+
+    #[test]
+    fn without_the_hook_the_configured_editor_is_started() {
+        // The control: no hook, so the editor's own path is checked (and isn't there); with the hook it isn't looked at.
+        let gone = std::env::temp_dir().join("w3proj-no-such-dir").join("World Editor.exe");
+        let e = launch_world_editor(&gone.to_string_lossy(), "/m.w3x", None).unwrap_err();
+        assert!(e.contains("not found"), "{e}");
+        let e = launch_world_editor(&gone.to_string_lossy(), "/m.w3x", Some(gone.with_file_name("no-hook"))).unwrap_err();
+        assert!(e.starts_with("W3PROJ_WE_LAUNCH"), "{e}");
+    }
+
+    /// The hook's child is the one the app waits on: its exit code comes through.
+    #[cfg(unix)]
+    #[test]
+    fn the_hooks_exit_is_seen() {
+        let dir = std::env::temp_dir().join(format!("w3proj-we-hook-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hook = dir.join("hook.sh");
+        std::fs::write(&hook, "#!/bin/sh\n[ \"$1 $2\" = \"-launch -loadfile\" ] && exit 7\nexit 1\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut child = launch_world_editor("/nowhere/World Editor.exe", "/m.w3x", Some(hook)).unwrap();
+        assert_eq!(child.wait().unwrap().code(), Some(7));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 
