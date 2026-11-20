@@ -838,11 +838,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed, undo: `undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; ${checkpointed ? "the checkpoint just made stays." : "no checkpoint was made: the Checkpoints extension is off."}` };
     }),
-    w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
+    w3.mcp.registerTool("check_path", async ({ from, to, unitSize, movement }) => {
+      if (movement !== undefined && movement !== "walk" && movement !== "float") throw new Error('movement must be "walk" or "float".');
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE;
       const { handle } = await liveEditor("read");
-      return pathReport(walkSource(handle), start, goal, size);
+      return pathReport(walkSource(handle), start, goal, size, movement ?? "walk");
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");

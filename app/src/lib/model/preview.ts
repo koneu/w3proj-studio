@@ -3,6 +3,7 @@
 // `_HD.w3mod\` version first), else the game's: through the graphics mode, or (`prefer`) the
 // Classic or the Reforged (DE, then HD) files first, whatever the graphics mode is.
 
+import { mdxPathOf } from "./mdxpath";
 import type { W3Api } from "../../extensions/api";
 import { importedPath, ownNames, previewMode } from "../imports";
 import { decodeImage } from "../image/index.ts";
@@ -124,7 +125,7 @@ export class ModelPreview {
    *  `animProps` is the look to show, for a model that holds several. MDX and MDL text are told apart by content. */
   show(path: string | null, animProps = "") {
     this.props = parseAnimProps(animProps);
-    const mdx = !path || path === "_" ? null : this.opts.exact ? path : path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx");
+    const mdx = !path || path === "_" ? null : this.opts.exact ? path : mdxPathOf(path);
     if (mdx === this.path) return;
     this.showPath(mdx);
   }
