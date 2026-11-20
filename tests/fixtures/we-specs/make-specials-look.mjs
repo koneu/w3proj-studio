@@ -7,7 +7,11 @@
 //   cliffs on the plateau's two-layer faces: south (y 27) YCl2 YCd2 LCc0, north (y 34) YCg2 YCc2 LCc2,
 //          west (x 25) LCc0 at y 29 and YCr2 at y 32, east (x 38) YCd1 at y 29 and YCc3 at y 32
 //
-//   node tests/fixtures/we-specs/make-specials-look.mjs <w3proj cli> <game folder> [--out DIR] [--allow-stale]
+//   node tests/fixtures/we-specs/make-specials-look.mjs <w3proj cli> <game folder> [--out DIR] [--lone ID] [--allow-stale]
+//
+// `--lone ID` writes lone-ID.w3x instead: flat.w3x (the World Editor's own new 64x64 map, level 2, no doodads) with the
+// one special ID on tile 31,31 (world -128,-128), under the editor's opening camera (test.md "Painting a layer under a
+// special redraws it": a special no doodad hides).
 //
 // A tile (x, y) is world -4096 + x * 128, -4096 + y * 128. Look at a group with we-drive `--look X,Y,D` and
 // app-drive `--camera we:X,Y,D`: flatA 0,-2560; flatB 0,-1792; flatC 0,1536; the plateau 0,-128.
@@ -24,10 +28,14 @@ const [cli, game] = argv.slice(0, 2).map((p) => (p ? resolve(p) : p));
 if (!game) { console.error("usage: make-specials-look.mjs <w3proj cli> <game folder> [--out DIR]"); process.exit(2); }
 requireFresh(cli, "cli");
 let out = resolve(here, "..", "..", "..", "target", "specials-look");
+let lone = null;
 for (let i = 2; i < argv.length; i++) {
   if (argv[i] === "--out") out = resolve(argv[++i]);
+  else if (argv[i] === "--lone") lone = argv[++i];
   else if (argv[i] !== "--allow-stale") throw new Error(`unknown argument ${argv[i]}`);
 }
+if (lone !== null && !/^[A-Za-z0-9]{4}$/.test(lone)) { console.error(`--lone takes a doodad id of 4 letters or digits, not ${lone}`); process.exit(2); }
+const outName = lone ? `lone-${lone}.w3x` : "specials-look.w3x";
 const run = (...args) => {
   const r = spawnSync(cli, args, { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`w3proj ${args.join(" ")}: ${r.stderr}${r.stdout}`);
@@ -45,15 +53,15 @@ const SPECIALS = [
 const scratch = mkdtempSync(join(tmpdir(), "we-specials-look-"));
 try {
   const dir = join(scratch, "map");
-  run("unpack", join(here, "plateau.w3x"), dir, "--game", game);
+  run("unpack", join(here, lone ? "flat.w3x" : "plateau.w3x"), dir, "--game", game);
   const dooFile = join(dir, "map", "war3map.doo.json");
   const doo = JSON.parse(readFileSync(dooFile, "utf8"));
-  doo.specials = SPECIALS;
+  doo.specials = lone ? [{ id: lone, z: 0, x: 31, y: 31 }] : SPECIALS;
   writeFileSync(dooFile, JSON.stringify(doo, null, 1));
   run("rebuild", dir, "--only", "wpm,shd,minimap", "--game", game);
   mkdirSync(out, { recursive: true });
-  run("pack", dir, "-o", join(out, "specials-look.w3x"), "--force-stale");
+  run("pack", dir, "-o", join(out, outName), "--force-stale");
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
-console.log(`made ${join(out, "specials-look.w3x")}`);
+console.log(`made ${join(out, outName)}`);

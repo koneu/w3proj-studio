@@ -86,6 +86,28 @@ test("the 3.0 art draws the Exterior Wall (EW00) from its HD model when its plai
   assert.equal((await bare.load("doodads", [{ ...placed(0), id: "EW00" }], new Map([["EW00", classic]]), () => 0)).problems.length, 1);
 });
 
+test("the Exterior Tower (ET00) beside the Exterior Wall (EW00) in the 3.0 art is drawn from its own HD model, not the wall's", async () => {
+  // Both name the plain Classic file RuinsWall0 no DE layer holds; their HD art differs (World Editor --mode de,
+  // branch we-batch-4: a tower with arches and a statue beside the wall; Studio drew the wall twice).
+  const plain = "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0";
+  const wallSkin: Skin = { ...nagaSkin, kind: "w3d", file: plain, reforgedFile: "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall", moveType: undefined };
+  const towerSkin: Skin = { ...wallSkin, reforgedFile: "Doodads\\RuinTomb\\Structures\\ExteriorTower\\ExteriorTower" };
+  const models: Record<string, Uint8Array> = {
+    "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall.mdx": mdxOfSequences([["Stand", 0, 1000]]),
+    "Doodads\\RuinTomb\\Structures\\ExteriorTower\\ExteriorTower.mdx": mdxOfSequences([["Stand", 0, 2000]]),
+  };
+  const loader = new ObjectLoader(fakeGl(), (path) => (models[path] ? Promise.resolve(models[path]) : Promise.reject(new Error(`not found: ${path}`))), () => {});
+  const wall = { ...placed(0), id: "EW00" }, tower = { ...placed(500), id: "ET00" };
+  const out = await loader.load("doodads", [wall, tower], new Map([["EW00", wallSkin], ["ET00", towerSkin]]), () => 0);
+  const end = (p: Placed) => out.batches.find((b) => b.instances.some((i) => i.pick?.placed === p))?.gpu.model.sequences[0]?.end;
+  assert.equal(end(wall), 1000, "the wall's model");
+  assert.equal(end(tower), 2000, "the tower's model");
+  assert.deepEqual(out.problems, []);
+  // A second load from the same loader (its model cache) keeps them apart too.
+  const again = await loader.load("doodads", [tower], new Map([["ET00", towerSkin]]), () => 0);
+  assert.equal(again.batches[0]?.gpu.model.sequences[0]?.end, 2000);
+});
+
 test("a Reforged model's empty placeholder emitters count as no effects, so the classic ones stand in", () => {
   const emitter = (segmentAlpha: number[]) => ({ segmentAlpha }) as unknown as ParticleEmitter2;
   // The HD Lordaeron brazier (LObr): two emitters, colours and alphas all 0, beside its PopcornFX fire.

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "special-paint-ground",
+    "description": "test.md 'Painting a layer under a special redraws it': lone-LCc0.w3x (make-specials-look.mjs --lone LCc0: flat.w3x with one cave LCc0 on tile 31,31, nothing else near) in a fresh editor, the Grass tile (1409,144) painted at size 3 on the cave (771,379 at the opening camera): the ground changes, the cave stays (branch we-batch-4, 2026-11-20)",
+    "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
+    "we": { "mode": "sd", "freshEditor": true, "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1409,144"], ["--click", "1456,569"], ["--click", "771,379"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Paint:"], ["texture", "Lgrs"], ["size", 3], ["click", 771, 379]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed" }, { "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "special-paint-level",
+    "description": "lone-LCc0.w3x, the cliff brush Level (1473,282) with Grass Cliff (1409,367) at size 3 on the cave (771,379): the editor takes the cave out of war3map.doo's specials (none left; the view shows the ground and the start location under it at once), and types the corners Grass Cliff; Studio keeps it (known difference, bugs.md 'A cliff brush takes specials out in the editor'). On this made-up map a Level click anywhere (300,800, far from the cave) takes every special out, also all 25 of specials-look.w3x; on AutumnLeaves only those whose corners changed (branch we-batch-4, 2026-11-20)",
+    "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1473,282"], ["--click", "1409,367"], ["--click", "771,379"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "Level:"], ["cliff", "Grass"], ["tool", "Level:"], ["size", 3], ["click", 771, 379]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["specials[]"] }, { "file": "war3map.w3e", "as": "w3e" }]
+  },
+  {
+    "name": "special-paint-up1",
+    "description": "lone-LCc0.w3x, Increase One (1505,282) with Grass Cliff at size 3 on the cave (771,379): a grass plateau, and the cave taken out of the specials as by Level; Studio keeps it (known difference, as special-paint-level) (branch we-batch-4, 2026-11-20)",
+    "input": { "map": "${REPO}/target/specials-look/lone-LCc0.w3x" },
+    "we": { "mode": "sd", "saveAccept": ["Warning"], "steps": [["--key", "t"], ["--click", "1456,569"], ["--click", "1505,282"], ["--click", "1409,367"], ["--click", "771,379"], ["--sleep", "1500"]] },
+    "studio": { "steps": [{ "terrain": true }, { "ui": [["tab", "Terrain"], ["view", "we"], ["tool", "+1:"], ["cliff", "Grass"], ["tool", "+1:"], ["size", 3], ["click", 771, 379]] }, { "sleep": 1000 }] },
+    "compare": [{ "file": "war3map.doo", "as": "parsed", "expect": "differs", "expectPaths": ["specials[]"] }, { "file": "war3map.w3e", "as": "w3e" }]
+  }
+]

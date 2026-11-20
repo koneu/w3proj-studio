@@ -37,6 +37,8 @@
 //                     ability, a custom buff, a changed original upgrade
 //   preview-unlisted  flat.w3x with a war3mapPreview.tga that the import list doesn't name
 //   preview-listed    the same with war3map.imp naming it (flags 29, as WormWar's list does)
+//   units9-cliff-tavern  smoketest cliff.w3m (units file subversion 9) with a tavern ntav of Neutral Passive at
+//                     (1024, -512): a save sets w3i flag 0x4000 and writes the units file as subversion 11
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -274,6 +276,18 @@ for (const listed of [false, true]) {
   writeFileSync(join(dir, "map", "war3mapPreview.tga"), tga());
   if (listed) writeJson(join(dir, "map", "war3map.imp.json"), { format: "w3proj.imports/1", version: 1, files: [{ flags: 29, path: "war3mapPreview.tga" }] });
   pack(dir, name);
+}
+
+// smoketest_maps/cliff.w3m (the editor's own save: units file subversion 9, w3i flags without 0x4000) with a tavern ntav
+// of Neutral Passive at (1024, -512), whose version 1 makes a save set 0x4000 and so the units layout of 11.
+if (want("units9-cliff-tavern")) {
+  const dir = unpack("units9-cliff-tavern", join(maps, "cliff.w3m"));
+  const file = join(dir, "map", "war3mapUnits.doo.json");
+  const doc = readJson(file);
+  if (doc.subversion !== 9 || !doc.units.length) throw new Error("cliff.w3m's units file isn't subversion 9 with a start location");
+  doc.units.push({ ...doc.units[0], id: "ntav", skinId: "ntav", position: [1024, -512, 0], player: 15, hp: -1, mana: -1, randomLevel: "010000", editorId: doc.units.length });
+  writeJson(file, doc);
+  pack(dir, "units9-cliff-tavern");
 }
 
 rmSync(work, { recursive: true, force: true });
