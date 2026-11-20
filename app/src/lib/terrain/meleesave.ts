@@ -268,7 +268,7 @@ export function meleeFiles(w3: Pick<W3Api, "workspace" | "game">): MeleeFiles {
     readText: (p) => w3.workspace.readText(p),
     readBytes: (p) => w3.workspace.readBytes(p),
     gameText: (p) => w3.game.readText(p),
-    gameBytes: (p) => w3.game.read(p),
+    gameBytes: (p) => w3.game.read(p, { shared: true }),
     typeVersions: () => {
       let got = versionsByGame.get(w3.game);
       if (!got) {

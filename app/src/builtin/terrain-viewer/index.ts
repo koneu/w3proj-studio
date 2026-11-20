@@ -163,9 +163,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   const game = async () => {
     if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
       const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
-      try { return { buf: await w3.game.read(hd), name: hd }; } catch { /* classic texture */ }
+      try { return { buf: await w3.game.read(hd, { shared: true }), name: hd }; } catch { /* classic texture */ }
     }
-    return { buf: await w3.game.read(path), name: path };
+    return { buf: await w3.game.read(path, { shared: true }), name: path };
   };
   if (doc.path.startsWith("game:") || !w3.workspace.project()) return game();
   return importOr(readImport(w3, path).then((buf) => ({ buf, name: path })), game);

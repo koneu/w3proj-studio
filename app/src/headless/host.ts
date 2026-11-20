@@ -145,7 +145,7 @@ export function headless(manifests: ExtensionManifest[], fixed: Record<string, u
       list: () => game.list(),
       resolve: (p: string, o?: { tileset?: string }) => game.resolve(p, o?.tileset),
       resolveMany: (paths: string[], o?: { tileset?: string }) => game.resolveMany(paths, o?.tileset),
-      read: (p: string, o?: { tileset?: string; background?: boolean }) => game.read(p, o?.tileset, o?.background === true),
+      read: (p: string, o?: { tileset?: string; background?: boolean; shared?: boolean }) => game.read(p, o?.tileset, o?.background === true, o?.shared === true),
       readText: (p: string, o?: { tileset?: string; background?: boolean }) => game.readText(p, o?.tileset, o?.background === true),
       reload: () => game.reload(),
     },

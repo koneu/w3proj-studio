@@ -76,6 +76,18 @@ test("each caller gets its own bytes: changing them doesn't change the next read
   assert.deepEqual([...await game.read("Units\\UnitData.slk")], [1, 2, 3]);
 });
 
+test("a shared read returns the kept bytes, a plain read a copy of them", async () => {
+  const { game } = make();
+  const a = await game.read("Units\\UnitData.slk", undefined, false, true);
+  const b = await game.read("units/unitdata.slk", undefined, false, true);
+  assert.equal(a, b, "shared reads are the one kept array");
+  const copy = await game.read("Units\\UnitData.slk");
+  assert.notEqual(copy, a);
+  assert.notEqual(copy.buffer, a.buffer);
+  assert.deepEqual([...copy], [...a]);
+  assert.equal(game.backendReads, 1);
+});
+
 test("a file that isn't there is remembered as such; another failure is asked again", async () => {
   const { game } = make();
   await assert.rejects(game.read("Nothing.tif"), /not found/);
