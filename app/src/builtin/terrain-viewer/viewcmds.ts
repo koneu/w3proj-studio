@@ -272,9 +272,9 @@ export function groundPathingColors(cells: ArrayLike<number>, edge?: EdgeTiles |
 export interface RegionBox { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }
 
 /** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
- *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top.
- *  Over the border the fill has no darker edge. `linear`: HD's alpha (REGION_FILL_ALPHA), else SD's (SD_LAYER_ALPHA). */
-export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, edge?: EdgeTiles | null, linear = false): Uint8Array {
+ *  `offsetY`): each region filled with its colour, larger ones first so that small ones stay on top. The outline is
+ *  regionOutline's, not texels. `linear`: HD's alpha (REGION_FILL_ALPHA), else SD's (SD_LAYER_ALPHA). */
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number, _edge?: EdgeTiles | null, linear = false): Uint8Array {
   const rgba = new Uint8Array(width * height * 4);
   const cell = 32;
   const fill = linear ? REGION_FILL_ALPHA : SD_LAYER_ALPHA.regions;
@@ -287,13 +287,48 @@ export function regionColors(regions: readonly RegionBox[], width: number, heigh
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const i = y * width + x;
-        if (edgeCell(edge, i)) { rgba.set([c.red, c.green, c.blue, fill], i * 4); continue; }
-        const rim = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
-        rgba.set(rim ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, fill], i * 4);
+        rgba.set([c.red, c.green, c.blue, fill], i * 4);
       }
     }
   }
   return rgba;
+}
+
+/** A region's outline as the World Editor draws it (we-drive, branch region-outline, 2026-11-20, SD, region-outline.w3m,
+ *  boxes crossing the playable edge and inside it): a thin black line on the region's own edge, over the playable map and
+ *  the border alike, about 3 px black at 1.33 px a unit (so a line of world width: 2.3 units, 3 px more at 0.66 px a
+ *  unit), its inside edge sharp over 1 to 2 px and a soft fall-off outside of 4.5 units. Loops of the box grown by `d`
+ *  (negative: shrunk) with black at alpha `a`; the strips between them are blended across. */
+export const REGION_OUTLINE: readonly { d: number; a: number }[] = [{ d: -1, a: 0 }, { d: 0, a: 1 }, { d: 2, a: 1 }, { d: 6.5, a: 0 }];
+
+/** The triangles (x, y, alpha per corner, flat) of a region's outline, each side cut every `step` units so that a
+ *  caller can lay them on the ground. Empty for a box with a non-finite or inverted edge. */
+export function regionOutline(r: RegionBox, step = 32): number[] {
+  if (![r.left, r.right, r.bottom, r.top].every(Number.isFinite) || !(r.right > r.left) || !(r.top > r.bottom)) return [];
+  const mx = (r.left + r.right) / 2, my = (r.bottom + r.top) / 2;
+  // The sides' corners: bottom west to east, east south to north, top east to west, west north to south.
+  const counts = [r.right - r.left, r.top - r.bottom, r.right - r.left, r.top - r.bottom].map((len) => Math.max(1, Math.ceil(len / step)));
+  const loop = (d: number): [number, number][] => {
+    const l = Math.min(r.left - d, mx), rt = Math.max(r.right + d, mx), b = Math.min(r.bottom - d, my), t = Math.max(r.top + d, my);
+    const corners: [number, number][] = [[l, b], [rt, b], [rt, t], [l, t]];
+    const out: [number, number][] = [];
+    for (let s = 0; s < 4; s++) {
+      const [x0, y0] = corners[s], [x1, y1] = corners[(s + 1) % 4];
+      for (let i = 0; i < counts[s]; i++) out.push([x0 + ((x1 - x0) * i) / counts[s], y0 + ((y1 - y0) * i) / counts[s]]);
+    }
+    return out;
+  };
+  const loops = REGION_OUTLINE.map((o) => loop(o.d));
+  const out: number[] = [];
+  for (let k = 0; k + 1 < loops.length; k++) {
+    const a = loops[k], b = loops[k + 1], n = a.length, ak = REGION_OUTLINE[k].a, bk = REGION_OUTLINE[k + 1].a;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      out.push(a[i][0], a[i][1], ak, b[i][0], b[i][1], bk, b[j][0], b[j][1], bk,
+        a[i][0], a[i][1], ak, b[j][0], b[j][1], bk, a[j][0], a[j][1], ak);
+    }
+  }
+  return out;
 }
 
 /** Layers of equal size laid over each other, the first at the bottom (alpha over); null leaves a layer out. Null when none is left.

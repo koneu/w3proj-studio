@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gridDefault, boxOf, composeLayers, linearToSrgb, srgbToLinear, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import { gridDefault, boxOf, composeLayers, regionOutline, REGION_OUTLINE, linearToSrgb, srgbToLinear, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import * as viewcmds from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
@@ -219,20 +219,49 @@ test("groundPathingColors: magenta where nothing walks, blue where nothing is bu
   assert.equal(px(4)[3], 0);
 });
 
-test("regionColors: each region filled in its colour inside a darker edge, small ones over large ones, nothing outside", () => {
+test("regionColors: each region filled in its colour, no texel rim, small ones over large ones, nothing outside", () => {
   // 8 × 4 cells of 32 from (-128, -64): a large red region over all of it, a small blue one at cells 1–2 × 1–2.
   const big = { left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } };
   const small = { left: -96, bottom: -32, right: 0, top: 64, color: { red: 0, green: 0, blue: 255 } };
   const rgba = regionColors([small, big], 8, 4, -128, -64);
   const px = (x: number, y: number) => [...rgba.slice((y * 8 + x) * 4, (y * 8 + x) * 4 + 4)];
-  assert.deepEqual(px(0, 0).slice(0, 3), [255 * 0.3, 0, 0].map(Math.floor), "the big one's edge");
+  assert.deepEqual(px(0, 0), [255, 0, 0, 140], "the big one's corner cell: fill, the outline is drawn apart (regionOutline)");
   assert.deepEqual(px(5, 1), [255, 0, 0, 140], "the big one's inside");
-  assert.equal(px(2, 2)[2], 255, "the small one's inside, over the big one");
-  assert.equal(px(2, 2)[0], 0);
-  assert.equal(px(1, 1)[3], 235, "the small one's edge");
+  assert.deepEqual(px(1, 1), [0, 0, 255, 140], "the small one's corner cell, over the big one");
   // Outside the map and broken numbers: nothing, no throw.
   const none = regionColors([{ left: 1000, bottom: 1000, right: 2000, top: 2000 }, { left: NaN, bottom: 0, right: 1, top: 1 }], 8, 4, -128, -64);
   assert.ok(none.every((v) => v === 0));
+});
+
+test("regionOutline: a thin black strip on the box's own edge, in and out of the playable map alike (we-drive, region-outline.w3m)", () => {
+  const box = { left: -3968, bottom: -640, right: -3200, top: 640 };
+  const tri = regionOutline(box, 32);
+  assert.ok(tri.length > 0 && tri.length % 9 === 0, "whole triangles of (x, y, alpha)");
+  const xs: number[] = [], ys: number[] = [];
+  for (let i = 0; i < tri.length; i += 3) { xs.push(tri[i]); ys.push(tri[i + 1]); assert.ok(tri[i + 2] >= 0 && tri[i + 2] <= 1); }
+  const grow = REGION_OUTLINE[REGION_OUTLINE.length - 1].d, shrink = REGION_OUTLINE[0].d;
+  // The strip reaches as far past the edge as the fall-off says, and as far in as the inner loop, nowhere else: a
+  // 32 unit wide rim (the old outline) is gone, and the edge at x -3968 (past the playable edge) has its strip.
+  assert.equal(Math.min(...xs), box.left - grow); assert.equal(Math.max(...xs), box.right + grow);
+  assert.equal(Math.min(...ys), box.bottom - grow); assert.equal(Math.max(...ys), box.top + grow);
+  assert.ok(xs.some((x) => x === box.left + shrink), "the inner loop");
+  assert.ok(REGION_OUTLINE.filter((o) => o.a === 1).every((o) => o.d >= -2 && o.d <= 3), "the black part is a few units wide: about 3 px at 1.33 px a unit");
+  assert.ok(grow - REGION_OUTLINE.find((o) => o.a === 1 && o.d > 0)!.d <= 6, "the fall-off outside is a few units");
+  // Along the west edge the strip is cut every 32 units (to lie on the ground).
+  const onWest = new Set<number>();
+  for (let i = 0; i < tri.length; i += 3) if (tri[i] === box.left) onWest.add(tri[i + 1]);
+  assert.ok(onWest.size >= 40, `cut for the ground: ${onWest.size} heights`);
+  // Control: the box's inside has nothing (no corner deeper than the thin strip).
+  assert.ok(!xs.some((x, i) => x > box.left + 8 && x < box.right - 8 && ys[i] > box.bottom + 8 && ys[i] < box.top - 8));
+});
+
+test("regionOutline: a box thinner than its strip stays a clean shape; broken or empty boxes give nothing", () => {
+  const thin = regionOutline({ left: 200, bottom: 200, right: 202, top: 400 }, 32);
+  assert.ok(thin.length > 0);
+  for (let i = 0; i < thin.length; i += 3) assert.ok(Number.isFinite(thin[i]) && Number.isFinite(thin[i + 1]));
+  assert.deepEqual(regionOutline({ left: NaN, bottom: 0, right: 1, top: 1 }), []);
+  assert.deepEqual(regionOutline({ left: 5, bottom: 0, right: 5, top: 1 }), [], "no width");
+  assert.deepEqual(regionOutline({ left: 9, bottom: 0, right: 1, top: 1 }), [], "inverted");
 });
 
 // ---- over the map's border (we-drive, border128x96 with regions regedge, 2026-11-14) ----------------------------
@@ -263,14 +292,6 @@ test("regionColors, SD: the editor's plain blend over grass and the border; regi
   near(overGround(both.subarray(0, 4), [6, 17, 6]), [170, 174, 31]);
   // Control: the pathing over the region instead gives a blue far from it.
   assert.ok(overGround(composeLayers([yellow, groundPathingColors(new Array(32).fill(0), EDGE)])!.subarray(0, 4), [6, 17, 6])[2] > 50);
-});
-
-test("regionColors: over the border the fill carries no darker edge", () => {
-  const rgba = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64, EDGE);
-  assert.deepEqual([...rgba.subarray(0, 4)], [255, 0, 0, 140]); // the region's own corner cell, over the border
-  assert.deepEqual([...rgba.subarray(4 * 4, 4 * 4 + 4)].slice(3), [235]); // the rim inside the playable part stays dark
-  const without = regionColors([{ left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } }], 8, 4, -128, -64);
-  assert.equal(without[3], 235); // control: without the border it is the rim
 });
 
 test("splitEdge: the border's cells go to one picture, the rest to the other", () => {

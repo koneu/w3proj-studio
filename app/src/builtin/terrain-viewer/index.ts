@@ -5332,6 +5332,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const on = groundLayersOn();
             // The cameras aren't on the ground: one marker each, as the World Editor's (cameraMarkers).
             if (!on.cameras) renderer.setShapes("cameras", null);
+            if (!on.regions) renderer.setRegionOutlines(null);
             if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
             // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
@@ -5360,7 +5361,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             show();
             const late: Promise<void>[] = [];
-            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { if (latest()) renderer.setRegionOutlines(list); parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY, { tiles: renderer.edgeTiles(), tilesX: terrain.width - 1 }, linear); show(); }));
             if (on.naval || on.pathing) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
