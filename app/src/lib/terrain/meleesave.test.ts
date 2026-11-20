@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
-import { writeWtgJson } from "../triggers/wtg";
+import { writeWtg, writeWtgJson } from "../triggers/wtg";
 import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
@@ -97,6 +97,32 @@ test("the facts come from the project; missing and unreadable files set nothing"
   // The ground being saved wins over the project's.
   const given = await readMeleeFacts(files({ "map/war3map.w3e": new Uint8Array([1]) }), t);
   assert.equal(given.terrain, t);
+});
+
+// A project keeps war3map.wtg raw when its unpack couldn't read it with the game's TriggerData; Studio reads it without
+// argument counts. A GUI trigger with arguments is a custom trigger: the World Editor's save takes Melee off for one
+// (melee-flag-we c1, c8; corpus-saves-melee-gui-args), so Studio's must too, not keep the flag as if the file were unreadable.
+test("a raw war3map.wtg whose GUI triggers have arguments counts as custom triggers; a damaged one stays unknown", async () => {
+  const arg = (value: string) => ({ type: 3, value });
+  const display = { kind: 2, name: "DisplayTextToForce", enabled: true, children: [],
+    params: [{ type: 2, value: "GetPlayersAll", call: { kind: 3, name: "GetPlayersAll", hasParams: false, params: [], trailer: 0 } }, arg("hello")] };
+  const second = defaultTriggerFile("x");
+  second.items.push({ ...structuredClone(second.items.find((i) => i.type === 8)!), name: "Hello", id: 0x03000001, ecas: [{ kind: 0, name: "MapInitializationEvent", enabled: true, params: [], children: [] }, display] } as never);
+  second.counts[3].count = 2;
+  const replaced = defaultTriggerFile("x");
+  const melee = replaced.items.find((i) => i.type === 8)! as { ecas: unknown[] };
+  melee.ecas[3] = display;
+  const keptWith = async (bytes: Uint8Array) => (await savedMelee(files({ "map/war3map.wtg": bytes }), { flags: MELEE }, [], null)).flags;
+  assert.equal(await keptWith(defaultWtg("x")), MELEE, "control: the raw default triggers keep it");
+  assert.equal(await keptWith(writeWtg(second)), OFF, "a second trigger with arguments");
+  assert.equal(await keptWith(writeWtg(replaced)), OFF, "a melee action replaced by one with arguments");
+  const cut = writeWtg(second).subarray(0, 200);
+  assert.equal(await keptWith(cut), MELEE, "control: a cut-off file before any other function is unknown: the flag stays");
+  assert.equal(await keptWith(new Uint8Array([1, 2, 3])), MELEE, "control: not a trigger file");
+  // The flag 0x4000 rule reads the same facts: a raw file with arguments is custom, so the flag isn't cleared.
+  const facts = await readMeleeFacts(files({ "map/war3map.wtg": writeWtg(second) }));
+  assert.equal(facts.customTriggers, true);
+  assert.equal(facts.triggersKnown, true);
 });
 
 test("nothing is read when the map isn't a melee map and war3map.w3i or the units tell why", async () => {

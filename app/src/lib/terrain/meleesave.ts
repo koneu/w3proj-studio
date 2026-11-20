@@ -15,7 +15,7 @@
 import type { W3Api } from "../../extensions/api";
 import { readIni } from "../formats/iniedit";
 import { parseSlk } from "../formats/text";
-import { hasCustomTriggers, isDefaultTriggers, parseWtgWithoutArgs } from "../triggers/defaults";
+import { hasCustomTriggers, isDefaultTriggers, NotDefaultFunction, parseWtgWithoutArgs } from "../triggers/defaults";
 import { parseWtgJson, wtgPath } from "../triggers/wtg";
 import { meleeBlockers, MELEE_MAP, hasCustomConstants, type MeleeInfo } from "./owner";
 import { decodeImage, type Mip } from "../image/index.ts";
@@ -360,8 +360,8 @@ export async function readMeleeFacts(ws: MeleeFiles, terrain?: Terrain | null, f
   const versions = await readTypeVersions(ws);
   if (versions) facts.typeVersions = versions;
   facts.customData = await customDataState(ws, files);
-  const { triggers, known } = await readTriggers(ws, files);
-  if (triggers && hasCustomTriggers(triggers)) facts.customTriggers = true;
+  const { triggers, known, custom } = await readTriggers(ws, files);
+  if (custom) facts.customTriggers = true;
   if (known) facts.triggersKnown = true;
   if (forSet) {
     facts.constantsKnown = !miscPath || misc !== null;
@@ -383,14 +383,19 @@ async function readGround(ws: MeleeFiles, files: readonly string[]): Promise<Ter
   try { return bytes ? parseW3e(bytes) : null; } catch { return null; }
 }
 
-/** The project's trigger file, parsed (null when there is none or it can't be read), and whether that is known: no
- *  file, or one that was read. */
-async function readTriggers(ws: MeleeFiles, files: readonly string[]): Promise<{ triggers: ReturnType<typeof parseWtgJson> | null; known: boolean }> {
+/** The project's trigger file, parsed (null when there is none or it can't be read), whether that is known: no file,
+ *  or one that was read, and whether it holds custom triggers (hasCustomTriggers; also a raw war3map.wtg read up to a
+ *  function the default trigger doesn't use, which can't be parsed further without the game's TriggerData). */
+async function readTriggers(ws: MeleeFiles, files: readonly string[]): Promise<{ triggers: ReturnType<typeof parseWtgJson> | null; known: boolean; custom: boolean }> {
   const wtg = wtgPath(files.map((path) => ({ path })));
-  if (!wtg) return { triggers: null, known: true };
+  if (!wtg) return { triggers: null, known: true, custom: false };
   try {
-    return { triggers: wtg.toLowerCase().endsWith(".json") ? parseWtgJson(await ws.readText(wtg)) : parseWtgWithoutArgs(await ws.readBytes(wtg)), known: true };
-  } catch { return { triggers: null, known: false }; }
+    const triggers = wtg.toLowerCase().endsWith(".json") ? parseWtgJson(await ws.readText(wtg)) : parseWtgWithoutArgs(await ws.readBytes(wtg));
+    return { triggers, known: true, custom: hasCustomTriggers(triggers) };
+  } catch (e) {
+    if (e instanceof NotDefaultFunction) return { triggers: null, known: true, custom: true };
+    return { triggers: null, known: false, custom: false };
+  }
 }
 
 /** Whether flag 0x4000 may be cleared (tftFlagsAfter's `mayClear`): no custom object data and no custom triggers, both
@@ -497,8 +502,8 @@ export async function savedMelee(ws: MeleeFiles, info: MeleeInfo, placed: readon
       const files = ws.files().map((f) => f.path);
       // The object data first: it is small, and decides most custom maps without parsing their triggers.
       if (await customDataState(ws, files) === false) {
-        const { triggers, known } = await readTriggers(ws, files);
-        mayClear = tftMayClear({ customData: false, triggersKnown: known, customTriggers: !!triggers && hasCustomTriggers(triggers) });
+        const { known, custom } = await readTriggers(ws, files);
+        mayClear = tftMayClear({ customData: false, triggersKnown: known, customTriggers: custom });
       }
     }
     const ground = terrain !== undefined ? terrain : await readGround(ws, ws.files().map((f) => f.path));
