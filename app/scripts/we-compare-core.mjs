@@ -41,6 +41,8 @@ export function checkUiActions(actions, where = "ui") {
     if (["view", "tab", "tool", "texture", "cliff", "shape"].includes(kind)) { if (typeof a[0] !== "string") bad("wants a name"); }
     else if (kind === "size") { if (!num(a[0])) bad("wants a number"); }
     else if (kind === "sleep") { if (!(num(a[0]) && a[0] >= 0)) bad("wants milliseconds"); }
+    // The modifier held during the next drag, as we-drive's --drag-mod (Ctrl and the left button: face the pointer).
+    else if (kind === "dragMod") { if (!(a.length === 1 && ["alt", "shift", "ctrl"].includes(a[0]))) bad("wants alt, shift or ctrl"); }
     else if (kind === "key") { if (typeof a[0] !== "string" || !a[0] || (a[1] !== undefined && typeof a[1] !== "string")) bad("wants a key (and a code)"); }
     else if (kind === "clickGround") { if (!(a.length >= 2 && a.length <= 3 && a.every(num))) bad("wants X, Y[, Z] world units"); }
     else if (kind === "click") { if (!(a.length === 2 && a.every(num))) bad("wants X, Y"); if (!inWeView(a[0], a[1])) bad("is outside the editor's terrain view (156,79 to 1340,923)"); }

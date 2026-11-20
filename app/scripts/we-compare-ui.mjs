@@ -6,7 +6,7 @@
 //
 // Actions: tab NAME (the terrain editor's tab, "Terrain"); view SPEC (the terrain view at the editor's size, the camera "we" or "we:X,Y[,distance…]" as app-drive's
 // --camera); tool PREFIX (the toolbar button whose title starts so: "Paint:", "−2:"); texture TILE (a ground tile in the
-// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2[,MS] (the left button, at editor positions inside its view; MS the drag's time, 20 moves, else 30 ms a move);
+// painter's options); cliff NAME (the Cliff type choice whose text starts so: "Dirt"); shape round|square (the brush shape); size N (the brush size slider, within its range); key KEY [CODE] (pressed on the view's canvas: "d" is code KeyD, "Numpad6" key 6 code Numpad6); clickGround X,Y[,Z] (a world point where Studio's camera shows it); click X,Y and drag X,Y,X2,Y2[,MS] (the left button, at editor positions inside its view; MS the drag's time, 20 moves, else 30 ms a move); dragMod alt|shift|ctrl (held during the next drag, as we-drive's --drag-mod);
 // sleep MS. Needs window.__driveEd (the "terrain" step). Positions and tool names are those of the page, not a copy.
 
 import { Hands, sleep } from "./cdp.mjs";
@@ -38,6 +38,8 @@ export async function uiStep(page, actions) {
   const settled = () => page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
   // The kinds, the numbers, clicks and drags inside the editor's view (parseSpec checks the same before the run).
   checkUiActions(actions);
+  // dragMod's key, held during the next drag only (DevTools' bits: 1 Alt, 2 Ctrl, 8 Shift).
+  let dragModifiers = 0;
   for (const [kind, ...a] of actions) {
     if (kind === "view") await view(page, a[0]);
     else if (kind === "tab") {
@@ -78,10 +80,12 @@ export async function uiStep(page, actions) {
     } else if (kind === "drag") {
       // a[4]: the drag's time (as the editor's --drag @MS): the painter re-applies a held brush at most every
       // HEIGHT_TICK (40 ms), so moves 30 ms apart drop some, and which ones (the stroke's end too) went by the timing.
-      await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30);
+      await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30, dragModifiers);
+      dragModifiers = 0;
       await sleep(500);
       await settled();
-    } else if (kind === "sleep") await sleep(a[0]);
+    } else if (kind === "dragMod") dragModifiers = { alt: 1, ctrl: 2, shift: 8 }[a[0]];
+    else if (kind === "sleep") await sleep(a[0]);
     else throw new Error(`unknown ui action ${kind}`);
   }
 }

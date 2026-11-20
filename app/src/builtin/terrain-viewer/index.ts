@@ -4009,7 +4009,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Facing with Ctrl and the button held: it ends when the button is let go. */
         let faceHeld = false;
         const startFacing = () => {
-          const entries = selectedEntries();
+          // A building keeps its facing, as under the turn keys (rotateSelected): the World Editor's Ctrl+drag turns a
+          // peasant toward the pointer, never a farm (we-compare building-face-*, branch we-terrain-items).
+          const entries = selectedEntries().filter((e) => isDoodadType(e.id) || !buildingCells.get(e.id));
           if (!editable || !entries.length) return;
           facing = { entries, before: entries.map(poseOf) };
           modeHint.textContent = "Facing the pointer: click to apply · Esc to cancel";
@@ -5832,7 +5834,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (g) {
               e.preventDefault();
               if (control === "moveToPointer") startMoveTo(g);
-              else { startFacing(); faceHeld = true; faceToward(g); }
+              else {
+                startFacing();
+                // Nothing to turn when every selected object is a building (startFacing leaves them).
+                if (facing) { faceHeld = true; faceToward(g); }
+              }
               refreshGroupRings();
               return;
             }
