@@ -18,7 +18,7 @@ import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { heldPan, wheelPivot, zoomPivotRow, zoomStep } from "./wheelzoom";
 import { toolWaterRefusal } from "./toollimits";
 import { givenNumber, placedValueProblem } from "./values";
-import { doodadGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { doodadGround, dropToGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, unitGround, unitZTolerance, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -3584,7 +3584,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("button", { title: "Swap what's selected for another type, where it stands", onclick: () => void replaceSelected().catch((e) => w3.window.showError(String(e))) }, "Replace…"),
         ];
 
-        // ---- heights: Set Uniform Doodad Heights, Reset Fixed Object Heights ---------------------
+        // ---- heights: Set Uniform Doodad Heights, Reset Selected Doodad Heights ---------------------
         const selectedDoodads = () => selectedEntries().filter((p) => dooFile?.list.includes(p));
         const heightCommands: HeightCommands = {
           uniformDefaultHeight: () => uniformDefaultHeight(selectedDoodads()),
@@ -3610,9 +3610,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
         };
         toolGroups.heightCommands.set(doc.path, heightCommands);
-        const heightButtons = () => !selectedDoodads().length ? [] : [
+        const heightButtons = (includeReset = true) => !selectedDoodads().length ? [] : [
           h("button", { title: "Put the selected doodads at one height (command: Set Uniform Doodad Heights)", onclick: () => void w3.commands.execute("w3.terrain.setUniformDoodadHeights").then(() => keysToMap()) }, "Set height…"),
-          h("button", { title: "Put the selected doodads that have a height of their own back onto the ground (command: Reset Fixed Object Heights)", onclick: () => void w3.commands.execute("w3.terrain.resetFixedObjectHeights").then(() => keysToMap()) }, "Reset height"),
+          ...(includeReset ? [h("button", { title: "Put the selected doodads that have a height of their own back onto the ground and let them follow it again (command: Reset Selected Doodad Heights)", onclick: () => void w3.commands.execute("w3.terrain.resetFixedObjectHeights").then(() => keysToMap()) }, "Reset height")] : []),
         ];
 
         // ---- copy and paste ----------------------------------------------------------------
@@ -4315,7 +4315,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("div.terrain-sel-actions.wrap", {},
                 quick("Select all of these types", "Select every object of the selected types", selectSameTypes),
                 quick("Face point", `Turn every selected object toward the pointer (${faceKey()}); click to apply`, startFacing),
-                ...turnButtons(), ...heightButtons(),
+                ...turnButtons(), ...heightButtons(false),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
                 quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
                   const n = skinOf(p)?.numVar ?? 1;
@@ -4327,7 +4327,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   const k = sk.minScale + Math.random() * (sk.maxScale - sk.minScale);
                   return { scale: [k, k, k] };
                 })),
-                quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], groundFor(p.id, p.position[0], p.position[1])] }))),
+                quick("Drop to ground", "Put every selected object onto the ground under it and clear fixed doodad heights", () => applyMass(group, (p) => dropToGround({ position: p.position, flags: flagsOf(p) }, groundFor(p.id, p.position[0], p.position[1]), !!dooFile?.list.includes(p)))),
                 h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
               h("div.muted", {}, `Drag one to move all · [ ] turn each · ${faceKey()} face point · Del delete · Ctrl+click adds/removes · Shift+box adds`),
             ] : []),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadGround, ELEVATION_RADIUS_UNKNOWN, ELEVATION_SAMPLE_OFFSET, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitGround, unitZTolerance } from "./objheights";
+import { doodadGround, dropToGround, ELEVATION_RADIUS_UNKNOWN, ELEVATION_SAMPLE_OFFSET, movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, savedUnitZ, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitGround, unitZTolerance } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
 import { floatingLevelAt, heightAt, parseW3e, waterSurfaceAt } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
@@ -90,6 +90,15 @@ test("resetting a fixed height puts the object on the ground and lets it follow 
   assert.deepEqual(r, { position: [10, 20, 96], flags: 2 | 1 });
   assert.equal(resetFixedHeight({ position: [10, 20, 300], flags: 2 }, 96), null, "no fixed height, nothing to reset");
   assert.equal(resetFixedHeight({ position: [10, 20, 300] }, 96), null);
+});
+
+test("dropToGround puts objects on the ground and clears fixed height only for doodads", () => {
+  assert.deepEqual(dropToGround({ position: [10, 20, 300], flags: 2 | FIXED_HEIGHT | 1 }, 96, true), { position: [10, 20, 96], flags: 2 | 1 });
+  assert.deepEqual(dropToGround({ position: [10, 20, 96], flags: 2 | FIXED_HEIGHT }, 96, true), { position: [10, 20, 96], flags: 2 });
+  assert.deepEqual(dropToGround({ position: [10, 20, 300], flags: 2 }, 96, true), { position: [10, 20, 96] });
+  assert.equal(dropToGround({ position: [10, 20, 96], flags: 2 }, 96, true), null);
+  assert.deepEqual(dropToGround({ position: [10, 20, 300], flags: FIXED_HEIGHT }, 96, false), { position: [10, 20, 96] });
+  assert.equal(dropToGround({ position: [10, 20, 96] }, 96, false), null);
 });
 
 // we-drive 2026-11-12: a rock with flags 6 at 300 over ground 256, nudged right once: on (the default) it was saved at

@@ -69,7 +69,7 @@ export interface ViewCommands {
 export interface HeightCommands {
   /** Set Uniform Doodad Heights: the selected doodads to one height (world units; their mean height when none is given, as the World Editor does). */
   setUniformHeights(height?: number): Promise<string | null>;
-  /** Reset Fixed Object Heights: the selected objects with a height of their own back onto the ground. */
+  /** Reset Selected Doodad Heights: the selected objects with a height of their own back onto the ground. */
   resetFixedHeights(): string | null;
   /** The selected doodads' mean height (uniformDefaultHeight), for a prompt's start value; null with none selected. */
   uniformDefaultHeight(): number | null;
@@ -129,7 +129,7 @@ export class TerrainToolRegistry implements TerrainService {
   readonly settleView = new Map<string, () => Promise<void>>();
   /** Set by each open terrain editor, by its file: the View commands (command palette) on that editor. */
   readonly viewCommands = new Map<string, ViewCommands>();
-  /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Fixed Object Heights. */
+  /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Selected Doodad Heights. */
   readonly heightCommands = new Map<string, HeightCommands>();
   /** Set by each open terrain editor, by its file: Replace Cliff Type, Tiles, Doodads and Units. */
   readonly replaceTypes = new Map<string, ReplaceTypes>();

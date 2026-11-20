@@ -115,7 +115,7 @@
       { "id": "w3.terrain.togglePreserveCopiedHeight", "when": "project", "title": "Toggle Preserve Copied Object Height", "category": "Terrain" },
       { "id": "w3.terrain.setUniformDoodadHeights", "when": "terrain", "title": "Set Uniform Doodad Heights", "category": "Terrain" },
       { "id": "w3.terrain.setUniformDoodadHeightsToMean", "when": "terrain", "title": "Set Uniform Doodad Heights (Mean Height, No Dialog)", "category": "Terrain" },
-      { "id": "w3.terrain.resetFixedObjectHeights", "when": "terrain", "title": "Reset Fixed Object Heights", "category": "Terrain" },
+      { "id": "w3.terrain.resetFixedObjectHeights", "when": "terrain", "title": "Reset Selected Doodad Heights", "category": "Terrain" },
       { "id": "w3.terrain.toggleResetFixedHeights", "when": "project", "title": "Toggle Reset Fixed Object Heights (on move)", "category": "Terrain" },
       { "id": "w3.terrain.toggleEnforceWaterLimits", "when": "project", "title": "Toggle Enforce Water Height Limits", "category": "Terrain" },
       { "id": "w3.terrain.toggleEnforceCameraBounds", "when": "project", "title": "Toggle Enforce Camera Bounds", "category": "Terrain" },

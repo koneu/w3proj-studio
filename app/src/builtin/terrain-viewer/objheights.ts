@@ -1,5 +1,5 @@
 // Heights of placed doodads, with no editor state: what a paste keeps of the height over the ground,
-// Set Uniform Doodad Heights and Reset Fixed Object Heights. A doodad with FIXED_HEIGHT (flag 4) has a
+// Set Uniform Doodad Heights and Reset Selected Doodad Heights. A doodad with FIXED_HEIGHT (flag 4) has a
 // height of its own; any other stands on the ground, and follows it when the ground is edited.
 
 import { DEEP_WATER } from "../../lib/terrain/pathing";
@@ -158,11 +158,19 @@ export function uniformHeight(p: HeightHolder, z: number): HeightChange | null {
   return { position: [p.position[0], p.position[1], z], flags: (p.flags ?? PLAIN) | FIXED_HEIGHT };
 }
 
-/** Reset Fixed Object Heights for one object: if it has a height of its own, it goes onto the ground
+/** Reset Selected Doodad Heights for one object: if it has a height of its own, it goes onto the ground
  *  there (`ground` is the ground's height under it) and follows it again. Null for any other object. */
 export function resetFixedHeight(p: HeightHolder, ground: number): HeightChange | null {
   if (!isFixed(p)) return null;
   return { position: [p.position[0], p.position[1], ground], flags: (p.flags ?? PLAIN) & ~FIXED_HEIGHT };
+}
+
+/** Multi-select "Drop to ground" for one object: puts it at `ground` and, for a doodad with a fixed height, clears
+ *  FIXED_HEIGHT so it follows the ground again. Null when already there (and unfixed). */
+export function dropToGround(p: HeightHolder, ground: number, isDoodad: boolean): Partial<HeightChange> | null {
+  if (isDoodad && isFixed(p)) return resetFixedHeight(p, ground);
+  if (p.position[2] === ground) return null;
+  return { position: [p.position[0], p.position[1], ground] };
 }
 
 /** The height a doodad without a height of its own stands at, x, y: the ground there (heightAt), or for a floating type
