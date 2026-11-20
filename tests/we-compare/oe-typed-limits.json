@@ -1,0 +1,54 @@
+[
+  {
+    "limit": 40,
+    "name": "negative-typed-allow-true",
+    "description": "A typed negative over an unreal field with Allow negative real values on as File > Preferences writes it ([Object Editor] Allow Negative Values=true, through we.prefs; 2026-11-20): negative-reals.w3x (make-negative-reals.mjs), Object Editor (F6), Abilities, the custom Heal A000 (End, Right), the field list's End, a double-click on Level 1 - Stats - Cast Range (350.000, 380,383), 'Edit Ability Value - Real', Ctrl+A, -7, Return: the editor shows and saves 0.000, as Studio's Object Editor does with its setting off (objectedit.ts clampsToZero). So the preference changes nothing here either (misc checks 4 (4) saw the same with =1). Studio with objectEditor.allowNegativeReals on keeps the -7 (not this spec)",
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "we": {
+      "mode": "sd",
+      "freshEditor": true,
+      "prefs": { "Object Editor": { "Allow Negative Values": "true" } },
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "458,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "380,243"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "1000"],
+        ["--double-click", "380,383"], ["--wait-window", "Edit Ability Value"], ["--key", "ctrl+a"], ["--type", "-7"], ["--sleep", "500"],
+        ["--key", "Return"], ["--sleep", "1500"], ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3a', 'A000'); for (let i = 0; i < 300 && document.querySelectorAll('.obj-table .obj-value-cell').length < 20; i++) await new Promise((r) => setTimeout(r, 100)); const s = document.querySelector('input.obj-field-search'); s.value = 'aran'; s.dispatchEvent(new Event('input')); for (let i = 0; i < 50 && document.querySelectorAll('.obj-table .obj-value-cell input:not(.color-tools-picker)').length !== 3; i++) await new Promise((r) => setTimeout(r, 100)); const inp = document.querySelector('.obj-table .obj-value-cell input:not(.color-tools-picker)'); inp.value = '-7'; inp.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 1000)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3a", "as": "parsed" }]
+  },
+  {
+    "limit": 40,
+    "name": "oe-typed-past-max",
+    "description": "Numbers typed past a field's maxVal in the Object Editor (negative-reals.w3x's custom Heal A000; 2026-11-20): Level 1 - Stats - Mana Cost (int, maxVal 1000) typed 5000, Level 3 - Cooldown (unreal, 3600) 9999, Level 2 - Cast Range (unreal, 99999) 123456, each through its 'Edit Ability Value' dialog, Ctrl+A, the number, Return: the editor saves 1000, 3600 and 99999, its maxVal, without a word. Studio saves what was typed and notes the range in the field's tooltip (lib/objects/limits.ts: the game's own maps go past the ranges): the expected difference, by path, until that is decided",
+    "input": { "map": "${REPO}/target/negative-reals/negative-reals.w3x" },
+    "we": {
+      "mode": "sd",
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "458,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "380,243"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "1000"],
+        ["--double-click", "380,635"], ["--wait-window", "Edit Ability"], ["--key", "ctrl+a"], ["--type", "5000"], ["--key", "Return"], ["--sleep", "1500"],
+        ["--double-click", "380,495"], ["--wait-window", "Edit Ability"], ["--key", "ctrl+a"], ["--type", "9999"], ["--key", "Return"], ["--sleep", "1500"],
+        ["--double-click", "380,397"], ["--wait-window", "Edit Ability"], ["--key", "ctrl+a"], ["--type", "123456"], ["--key", "Return"], ["--sleep", "1500"],
+        ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3a', 'A000'); for (let i = 0; i < 300 && document.querySelectorAll('.obj-table .obj-value-cell').length < 20; i++) await new Promise((r) => setTimeout(r, 100)); const type = async (field, nth, value) => { const s = document.querySelector('input.obj-field-search'); s.value = field; s.dispatchEvent(new Event('input')); const inputs = () => document.querySelectorAll('.obj-table .obj-value-cell input:not(.color-tools-picker)'); for (let i = 0; i < 50 && inputs().length !== 3; i++) await new Promise((r) => setTimeout(r, 100)); const inp = inputs()[nth]; inp.value = value; inp.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 500)); }; await type('amcs', 0, '5000'); await type('acdn', 2, '9999'); await type('aran', 1, '123456'); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [{ "file": "war3map.w3a", "as": "parsed", "expect": "differs", "expectPaths": ["custom[0].mods[3].value", "custom[0].mods[6].value", "custom[0].mods[7].value"] }]
+  }
+]

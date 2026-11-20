@@ -606,6 +606,14 @@ test("we-x11 settle: two equal pictures in a row, else up to the timeout (python
   if (skipWithoutPython(t, run("--hashes", "a"))) return;
   assert.deepEqual(JSON.parse(run("--hashes", "a,b,b,c", "--interval", "200").stdout), { settled: true, ms: 400, grabs: 3 });
   assert.deepEqual(JSON.parse(run("--hashes", "a,b,c,d,e,f", "--interval", "400", "--timeout", "1000").stdout), { settled: false, ms: 1200, grabs: 4 });
+  // --still: a part that never stops (a start location's turning marker: 1.2 % of the view at distance 3000, 9.1 % at
+  // 800, branch we-batch-5) counts as standing still once two differences in a row are that small
+  const changes = (c, timeout = "10000") => JSON.parse(run("--changes", c, "--still", "0.2", "--interval", "200", "--timeout", timeout).stdout);
+  assert.deepEqual(changes("-,0.97,0.95,0.012,0.012"), { settled: true, ms: 800, grabs: 5, changed: 0.012 });
+  assert.deepEqual(changes("-,0.97,0"), { settled: true, ms: 400, grabs: 3, changed: 0 });
+  // the controls: one small difference alone isn't enough (a camera move's last frames), nor are larger ones
+  assert.deepEqual(changes("-,0.97,0.1,0.9,0.1,0.21", "2000"), { settled: false, ms: 1200, grabs: 6, changed: 0.21 });
+  assert.equal(spawnSync("python3", ["-I", X11_HELPER, "settle", "--dry", "--changes", "-,0.1", "--still", "20"], { encoding: "utf8" }).status, 1, "a share past 1 is refused");
 });
 
 // ---- the Session against a fake editor, a fake X server and a fake clock ------------------------------------
@@ -841,6 +849,7 @@ test("Session: waitReady isn't ready while a reopened module window covers the v
   const ready = await r.s.waitReady();
   assert.equal(ready.ready, true, JSON.stringify(ready));
   assert.equal(open, false, "the window is closed when ready is reported");
+  assert.equal(ready.modulesLeft, undefined, "a module that took the close isn't named as left open");
   assert.ok(closes.length >= 2, `closed again: ${closes}`);
   assert.ok(r.clock.t - t0 >= 5000, "not ready while the module window was open");
 });
@@ -863,6 +872,7 @@ test("Session: a module window that ignores the close is raised over by the main
   assert.equal(ready.ready, true, JSON.stringify(ready));
   assert.ok(raised >= 1, "the main window was raised");
   assert.ok(r.clock.t - t0 >= 9000, "not ready before the close had been tried for a while");
+  assert.deepEqual(ready.modulesLeft, ["Object Editor"], "ready says the module is still open behind the main window");
   // the control: with the view still grey after the raise, it isn't ready
   const c = rig(t, { timeout: 30 });
   await c.s.start(c.maps["a.w3m"]);

@@ -591,6 +591,12 @@ test("World Editor 2.0 picks random items with ChooseRandomItemExWithFilter, any
   has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 100 )");
   // The game's older maps keep theirs.
   has(dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }]], 6113), "        call RandomDistAddItem( ChooseRandomItemEx( ITEM_TYPE_ANY, 2 ), 50 )");
+  // An entry given an equipment type or tag in the editor's Choose Item: its "Z" id (randomids.ts) and the editor's
+  // script of it (we-drive, branch we-batch-5: tests/we-compare/drop-random.json).
+  const filtered = dropFunction("Unit000001_DropItems", [[{ id: "0x5a45490a", chance: 50 }], [{ id: "0x5a0d490d", chance: 100 }]], 7003);
+  has(filtered, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 2, EQUIPMENT_TYPE_HEAD, ITEMTAG_TYPE_DROPPABLE ), 50 )");
+  has(filtered, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_CHARGED, 3, EQUIPMENT_TYPE_NONE, ITEMTAG_TYPE_UNDEFINED ), 100 )");
+  hasNot(filtered, "'0x5a");
 });
 
 test("newer editors colour every item, whatever its stored colour; World Editor 2.0 of build 24371 with 24", () => {

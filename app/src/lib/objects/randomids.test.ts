@@ -22,6 +22,30 @@ test("the level is the character after '0', '/' any level; levels above 9 go on 
   assert.throws(() => randomObjectId({ kind: "item", level: 1, itemClass: 8 }), /no item class/);
 });
 
+// The editor's saves of item set entries given an equipment type or a tag in Choose Item (we-drive, branch we-batch-5;
+// the editor's script for each in the comment).
+test("an item set entry with an equipment type or tag is the 'Z' form: class + 9 equipment + 90 tag + 810 (level + 1)", () => {
+  const seen: [string, object][] = [
+    ["0x5a45490a", { kind: "item", level: 2, itemClass: 1, equipment: 1, tag: 1 }], // PERMANENT, 2, HEAD, DROPPABLE
+    ["0x5a914909", { kind: "item", level: 2, itemClass: 1, equipment: 1 }], // PERMANENT, 2, HEAD, ANY
+    ["0x5a33490a", { kind: "item", level: 2, itemClass: 1, tag: 1 }], // PERMANENT, 2, ANY, DROPPABLE
+    ["0x5a6a490c", { kind: "item", level: 2, itemClass: 1, equipment: 2, tag: 7 }], // PERMANENT, 2, CHEST, SHOP
+    ["0x5a0d490d", { kind: "item", level: 3, itemClass: 2, equipment: 0, tag: 0 }], // CHARGED, 3, NONE, UNDEFINED
+  ];
+  for (const [id, r] of seen) {
+    assert.deepEqual(parseRandomId(id), r, id);
+    assert.equal(randomObjectId(r as Parameters<typeof randomObjectId>[0]), id, `back to ${id}`);
+  }
+  // any level and class: class and level digits 0 (the high byte stays below 0x20, so the id is always written in hex)
+  assert.equal(randomObjectId({ kind: "item", level: -1, itemClass: 0, tag: 7 }), "0x5ad04902");
+  assert.deepEqual(parseRandomId("0x5ad04902"), { kind: "item", level: -1, itemClass: 0, tag: 7 });
+  // the controls: no 'I' third, a level past 8 (a printable high byte), a class past the list are other ids
+  assert.equal(parseRandomId("0x5a45480a"), undefined);
+  assert.equal(parseRandomId("ZaI!"), undefined, "a printable high byte would be level 9 and up");
+  assert.equal(parseRandomId("0x5a084900"), undefined, "class 8 isn't one");
+  assert.equal(randomIdLabel("0x5a45490a"), "Random Level 2 Permanent Item", "the editor's tree names it as before");
+});
+
 test("the World Editor's names of the probe group's ids, and none for ids it left unnamed", () => {
   const named: [string, string | undefined][] = [
     ["YYU1", "Random Level 1 Neutral Hostile Unit"], ["YYU/", "Random Any Level Neutral Hostile Unit"],

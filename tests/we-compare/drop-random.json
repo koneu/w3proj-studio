@@ -1,0 +1,27 @@
+[
+  {
+    "name": "drop-random-filter",
+    "description": "A random item of a placed unit's item set given an equipment type and a tag (test.md 'A drop table's random item (Y?I?)'; branch we-batch-5, 2026-11-20): drop-random.w3x (tests/fixtures/we-specs/make-drop-random.mjs: a footman at 0,0 with the sets YiI2 50 % and YYI/ 100 %; the opening view shows it at 745,390), u, Escape, a double-click on it (745,390), Unit Properties' Items Dropped tab (785,414), the first entry (650,480), Edit Item (807,555): Choose Item offers for Random a level, a class, an equipment type and a tag; Head (the list at 1015,337, its row 381) and Droppable (1015,361, row 405), OK, OK. The editor's war3mapUnits.doo keeps the entry as id 0x5a45490a ('Z', class + 9 equipment + 90 tag + 810 (level + 1) as two bytes around 'I': lib/objects/randomids.ts) and its script ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 2, EQUIPMENT_TYPE_HEAD, ITEMTAG_TYPE_DROPPABLE ). Studio has no equipment or tag in its random item picker, so its step writes that id into the project and generates the script; the drop lines are compared",
+    "input": { "map": "${REPO}/target/drop-random/drop-random.w3x" },
+    "we": {
+      "mode": "sd",
+      "steps": [
+        ["--key", "u"], ["--key", "Escape"], ["--double-click", "745,390"], ["--wait-window", "Unit Properties"],
+        ["--click", "785,414"], ["--sleep", "1500"], ["--click", "650,480"], ["--sleep", "500"], ["--click", "807,555"], ["--wait-window", "Choose Item"], ["--sleep", "6000"],
+        ["--click", "1015,337"], ["--sleep", "1000"], ["--click", "1000,381"], ["--sleep", "1000"],
+        ["--click", "1015,361"], ["--sleep", "1000"], ["--click", "1000,405"], ["--sleep", "1000"],
+        ["--click", "993,737"], ["--sleep", "1500"], ["--click", "733,630"], ["--sleep", "1500"]
+      ]
+    },
+    "studio": {
+      "settings": { "script.generateOnSave": true },
+      "steps": [
+        { "eval": "const f = 'map/war3mapUnits.doo.json'; const doo = JSON.parse(await w3.workspace.readText(f)); const foot = doo.units.find((u) => u.id === 'hfoo'); if (foot?.itemSets?.[0]?.[0]?.id !== 'YiI2') throw new Error('the footman has no YiI2 first'); foot.itemSets[0][0].id = '0x5a45490a'; await w3.workspace.writeText(f, JSON.stringify(doo, null, 1)); await w3.workspace.refresh();" },
+        { "command": "w3.script.generate", "args": { "quiet": true, "force": true } }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.j", "as": "text", "lines": "RandomDistAddItem" }
+    ]
+  }
+]

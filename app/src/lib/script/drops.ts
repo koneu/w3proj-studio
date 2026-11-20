@@ -5,7 +5,7 @@
 // (Unit000114_DropItems). Each item set picks one item by chance; random items
 // ("YiI2") become ChooseRandomItemEx( type, level ).
 
-import { ITEM_CLASSES, parseRandomId } from "../objects/randomids";
+import { EQUIPMENT_TYPES, ITEM_CLASSES, ITEM_TAGS, parseRandomId, type ItemFilter } from "../objects/randomids";
 
 const EOL = "\r\n";
 
@@ -27,9 +27,19 @@ export function randomItem(type: string, level: number | string, editorVersion: 
   return type === "ANY" && editorVersion >= 7000 ? `ChooseRandomItem( ${level} )` : `ChooseRandomItemEx( ITEM_TYPE_${type}, ${level} )`;
 }
 
+/** A random item's call with the equipment type and tag a "Z" id holds (randomids.ts; ANY for the "Y" form). */
+function filteredRandomItem(r: { level: number; itemClass: number } & ItemFilter, editorVersion: number): string {
+  const name = (names: string[], n: number | undefined) => (n === undefined ? "ANY" : names[n] ?? "ANY");
+  return randomItem(ITEM_CLASSES[r.itemClass].type, r.level, editorVersion, name(EQUIPMENT_TYPES, r.equipment), name(ITEM_TAGS, r.tag));
+}
+
 function itemExpr(id: string, editorVersion: number): string {
   // An empty slot drops nothing.
   if (!id || id === "0x00000000") return "-1";
+  // An item set entry given an equipment type or tag ("Z" id; Head and Droppable: EQUIPMENT_TYPE_HEAD,
+  // ITEMTAG_TYPE_DROPPABLE in the editor's script, branch we-batch-5).
+  const r = parseRandomId(id);
+  if (r?.kind === "item" && (r.equipment !== undefined || r.tag !== undefined)) return filteredRandomItem(r, editorVersion);
   const m = /^Y(.)I(.)$/.exec(id);
   if (!m || !RANDOM_TYPES[m[1]]) return `'${id}'`;
   return randomItem(RANDOM_TYPES[m[1]], m[2] === "/" ? -1 : m[2], editorVersion);
@@ -99,7 +109,7 @@ function groupEntry(id: string | undefined, editorVersion: number): string {
   const r = parseRandomId(id);
   if (r?.kind === "creep") return `ChooseRandomCreep( ${r.level} )`;
   if (r?.kind === "building") return "ChooseRandomNPBuilding(  )";
-  if (r?.kind === "item") return randomItem(ITEM_CLASSES[r.itemClass].type, r.level, editorVersion);
+  if (r?.kind === "item") return filteredRandomItem(r, editorVersion);
   return `'${id}'`;
 }
 

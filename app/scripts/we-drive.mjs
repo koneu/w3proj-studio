@@ -259,6 +259,11 @@ export const isReopenedModule = (title) => REOPENED_MODULES.has(title) || /^(Cam
 // The tool palette (at 1356,30 in the display): the first row of the camera layer's list, the rows' height, and
 // View Selected Camera, from the palette's corner (docs/testing/cameras-and-views.md, "Applying a camera object").
 const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, y: 89 } };
+/** The share of the view --look's wait lets change between pictures of a settled view, two in a row (we-x11 settle
+ *  --still): a start location's marker turns without end (1.2 % of the view at distance 3000, 9.1 % at 800 with an
+ *  idle footman beside it; the message lines scroll too), so a map with one never came out the same twice and every
+ *  look waited its 10 s (branch we-batch-3); a camera move changes most of the view (branch we-batch-5). */
+export const LOOK_STILL = "0.2";
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
@@ -1432,7 +1437,10 @@ export class Session {
             const layout = layoutProblem(main, palettes);
             if (layout) return { ready: false, layout, main: main.rect, palettes: palettes.map((p) => ({ title: p.title, rect: p.rect })), screen: this.dialogShot("layout") };
           }
-          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls, render: this.renderInfo(main) };
+          // A reopened module that ignored every close (the Trigger Editor, with --keep-prefs' Visible UI Elements) is
+          // still open behind the main window: said, as it takes keys and changes the save (mapAction's comment).
+          const modulesLeft = dialogs.filter((d) => isReopenedModule(d.title)).map((d) => d.title);
+          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: this.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls, render: this.renderInfo(main), ...(modulesLeft.length ? { modulesLeft } : {}) };
         }
       } else readySince = 0;
       if (this.now() > deadline) {
@@ -1686,15 +1694,16 @@ export class Session {
       row(this.looks.length + parked);
     }
     // The view draws about 14 frames a second in SD and 2 in HD: after a first wait, until two pictures of the view in
-    // a row (a frame's time apart) are the same, at most 10 s (a turning day never stands still).
+    // a row (a frame's time apart) are the same but for LOOK_STILL of their pixels, twice (a start location's marker
+    // turns all the time), at most 10 s (a turning day never stands still).
     const hd = this.opts.mode !== "sd";
     await this.wait(hd ? 1000 : 300);
-    const still = this.x("settle", "--rect", this.viewRect(main).join(","), "--interval", hd ? 1000 : 200, "--timeout", 10000);
+    const still = this.x("settle", "--rect", this.viewRect(main).join(","), "--interval", hd ? 1000 : 200, "--timeout", 10000, "--still", LOOK_STILL);
     let studio = null;
     try { studio = studioCamera(look); } catch { /* not fitted for this angle or field of view */ }
     const camera = studio && Object.entries(studio).map(([k, v]) => `${k}=${v}`).join(",");
     const selected = parked === null ? null : [this.parks[parked].x, this.parks[parked].y];
-    return { row: i, look: { x: look.x, y: look.y, distance: look.distance, aoa: look.aoa, fov: look.fov, rotation: look.rotation }, studioCamera: camera, selectedParkingCamera: selected, viewSettled: still.settled, settledMs: still.ms };
+    return { row: i, look: { x: look.x, y: look.y, distance: look.distance, aoa: look.aoa, fov: look.fov, rotation: look.rotation }, studioCamera: camera, selectedParkingCamera: selected, viewSettled: still.settled, settledMs: still.ms, changedShare: still.changed ?? null };
   }
 
   async close() {
