@@ -52,6 +52,9 @@
 //                 before each start of its editor (we-drive --pref); specs with other prefs get another we-drive
 //                 process. Pinned for every run unless --keep-prefs: Enforce Water Limits, Enforce Camera Boundaries,
 //                 Reset Fixed Z When Moving Objects, Show Creep Camps (we-drive PINNED_PREFS).
+//               "frameCap": 0  the editor's frame cap for this spec (we-drive --frame-cap; we-compare's --frame-cap
+//                 wins); specs with another cap get another we-drive process. None is set: drags hold still at both
+//                 ends (we-drive --drag-hold) and keys are messages, so the cap of 10 gave the same results
 //               "expectCrash": true  the editor must crash while closing after this spec's save (it is closed right
 //                 after it): no crash is the spec's error (close-crash-light-ranges tests that crash)
 //   studio      { "settings": { key: value }, "steps": [ { "mcp": "tool", "args": {} }, { "eval": "js" }, { "sleep": ms },
