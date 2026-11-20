@@ -5,8 +5,9 @@
 //
 //   out = enc(through(p) · dec(bed) + own(p) · dec(deep) + reflect(d) · (k · sky(R) − dim · (through · bed + own · deep)))
 //
-// d the depth (world units, ground to surface), p the length of the view's path through the water (hdWaterPath: d over
-// the cosine of the view's angle from straight down), deep the tileset's deep colour (hdWaterColor; towards its shallow
+// d the depth (world units, ground to surface), p the water's thickness along the camera's axis (hdWaterPath: the view's
+// path through it, d over the cosine of the view's angle from straight down, times the cosine of the view's angle from
+// the camera's axis, less as the camera tilts: HD_WATER_TILT), deep the tileset's deep colour (hdWaterColor; towards its shallow
 // colour in shallow water where it has one: hdShallowAt), R the view reflected on
 // a flat surface, k = reflectivity / 10 · environment map reflectivity / 100, dim = HD_REFLECT_DIM · reflectivity / 10.
 // The water shader (renderer.ts WATER_FS) does the same through HD_WATER_GLSL; hdWaterPixel is the same in TypeScript.
@@ -15,24 +16,35 @@
  *  maps, 0 and the depth where all is water. */
 export const HD_WATER_DEPTHS = [0, 4, 12, 24, 38.4, 64, 96, 200] as const;
 /**
- * Path lengths through the water (world units, hdWaterPath) of HD_WATER_THROUGH and HD_WATER_OWN.
+ * The water's thicknesses along the camera's axis (world units, hdWaterPath) of HD_WATER_THROUGH and HD_WATER_OWN.
  */
-export const HD_WATER_PATHS = [0, 4, 12, 24, 40, 56, 72, 88, 100, 112, 124, 136, 200] as const;
+export const HD_WATER_PATHS = [0, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 148] as const;
 /**
- * How much of the bed shows through (linear light) and how much of the tileset's deep colour is added, by the length of
- * the view's path through the water (we-drive, HD, game view, branch hd-deep-water, 2026-11-20: Lordaeron maps of bands
- * 8 to 800 deep, the w3i's reflectivity 0, the editor's camera at angle of attack 304 from 600, 1200 and 2400, boxes of
- * 60 rows across each band against the dry ground's 133, 92, 27). The editor's water shows less of the bed the more
- * slanted the view: through 64 deep water 0.28 of it looking down at 15° from straight down, 0.07 at 50°, the same
- * at any distance, as the path's length gives it (every band's mean within 1.5 levels, single boxes up to 9 where the
- * waves' blotches are; Barrens, not fitted on, within 2; a straight path fits as well as one bent by refraction
- * would, water's own 1.33 worse). No bed from 136 on, all the deep colour from 200 (the 4 point from the straight-down
- * fit before). The straight-down fit on View Entire Map (branch
- * water-render-we) agrees up to 38.4 deep; past that the editor's View Entire Map isn't the game view's (on a 64 x 64
- * map 32 deep water there shows 28, 45, 58 and 64 deep water none of the bed).
+ * How much of the bed shows through (linear light) and how much of the tileset's deep colour is added, by the water's
+ * thickness along the camera's axis (hdWaterPath): the view's path through it times the cosine of the view's angle from
+ * that axis, what a depth picture's difference gives, and less the more the camera tilts from straight down
+ * (HD_WATER_TILT). Looking straight down (we-drive, HD, game view, branch we-look-hd2, 2026-11-20: Lordaeron maps of
+ * bands 8 to 800 deep, the w3i's reflectivity 0, `--look 0,Y,1200,270,70,90` over each band's middle, against the dry
+ * ground's 133.8, 92.9, 27.6 there) the editor's water is one colour across the whole picture, also at its sides, 28°
+ * off straight down, where the path through it is 13 % longer (96 deep: red 24 to 30 in every column): not the path.
+ * The bed's share there at 8 to 112 deep: 0.861, 0.761, 0.643, 0.481, 0.397, 0.315, 0.243, 0.190, 0.127, 0.049, 0.005
+ * (8, 16, 24, 40, 48, 56, 64, 72, 80, 96, 112), none from 128, the tables' knots. Through the angle of attack 304
+ * (branch hd-deep-water's boxes, and the same session's 48 and 80 deep) the share is alike in the three columns of a
+ * row and falls from the bottom row to the top as the thickness grows (0.98 to 1.49 of the depth), not as the path does
+ * (the side columns' longer than the middle's). View Entire Map looks straight down as well (64 × 64 maps: the 96 deep
+ * band 23 to 28, 44, 59 against the look's 27, 44, 58; 128 deep and more the deep colour alone). Fitted together with
+ * HD_WATER_TILT on both: band means within 1.6 levels straight down and through 304, Barrens within 1.5 (not fitted on).
  */
-export const HD_WATER_THROUGH = [1, 0.925, 0.828, 0.674, 0.516, 0.373, 0.222, 0.139, 0.078, 0.025, 0.003, 0, 0] as const;
-export const HD_WATER_OWN = [0, 0.026, 0.084, 0.165, 0.253, 0.349, 0.469, 0.576, 0.659, 0.762, 0.857, 0.964, 1] as const;
+export const HD_WATER_THROUGH = [1, 0.925, 0.861, 0.762, 0.646, 0.567, 0.484, 0.401, 0.314, 0.239, 0.197, 0.133, 0.073, 0.047, 0.024, 0.005, 0.002, 0, 0] as const;
+export const HD_WATER_OWN = [0, 0.026, 0.061, 0.116, 0.171, 0.222, 0.272, 0.328, 0.399, 0.461, 0.501, 0.567, 0.669, 0.696, 0.782, 0.84, 0.863, 0.988, 1] as const;
+/**
+ * How much less water a camera tilted from straight down counts (hdWaterPath: the thickness times 1 − HD_WATER_TILT ×
+ * (1 − the sine of the camera's angle below the horizon)). Through the same thickness the editor's angle of attack 304
+ * shows more of the bed than its straight-down camera, in one session alike (48 deep: 0.42 of it where straight down
+ * shows 0.36 at that thickness; 80 deep 0.124 against 0.098): as through 0.90 to 0.96 of the thickness. Fitted on
+ * those two cameras only (a camera nearer the horizon is a guess).
+ */
+export const HD_WATER_TILT = 0.38;
 /** The flattest view the path is taken for (the cosine of its angle from straight down): a view along the surface
  *  would make the path endless. */
 export const HD_PATH_FLATTEST = 0.2;
@@ -123,11 +135,16 @@ const table = (t: readonly number[], d: number, D: readonly number[] = HD_WATER_
   return t[D.length - 1];
 };
 
-/** The length of the view's path through water of a depth (world units): the depth over the cosine of the view's
- *  angle from straight down (`view` from the eye to the point, any length; no flatter than HD_PATH_FLATTEST). */
-export function hdWaterPath(depth: number, view: readonly number[]): number {
-  const len = Math.hypot(view[0], view[1], view[2]);
-  return depth / Math.max(len > 0 ? -view[2] / len : 1, HD_PATH_FLATTEST);
+/** The thickness of water of a depth (world units) along the camera's axis as the tables count it: the view's path
+ *  through it (the depth over the cosine of the view's angle from straight down, no flatter than HD_PATH_FLATTEST)
+ *  times the cosine of the view's angle from the camera's axis, less by the camera's tilt (HD_WATER_TILT). `view` from
+ *  the eye to the point and `forward` the camera's axis, any length; a camera looking straight down when not given. */
+export function hdWaterPath(depth: number, view: readonly number[], forward: readonly number[] = [0, 0, -1]): number {
+  const len = Math.hypot(view[0], view[1], view[2]), flen = Math.hypot(forward[0], forward[1], forward[2]);
+  const path = depth / Math.max(len > 0 ? -view[2] / len : 1, HD_PATH_FLATTEST);
+  if (!(len > 0 && flen > 0)) return path;
+  const along = (view[0] * forward[0] + view[1] * forward[1] + view[2] * forward[2]) / (len * flen);
+  return path * Math.max(along, HD_PATH_FLATTEST) * (1 - HD_WATER_TILT * (1 + forward[2] / flen));
 }
 
 /** HD water at a depth (world units) seen along a path through it (world units, hdWaterPath; the depth itself
@@ -232,11 +249,12 @@ export const encode = (l: number): number => { const c = Math.min(1, Math.max(0,
  * `deep` (sRGB 0–1, hdWaterColor), seen along the view `view` (from the eye to the point; any length), with the map's
  * water settings; `shallow` the tileset's shallow colour where it has one (sRGB 0–1, hdWaterShallow; else the deep colour
  * all the way); `lean` where a wave is (the normal map's green away from its mean, both layers added: HD_WAVE_LIGHT;
- * 0 for flat water); `flatSky` the tileset's sky where it has one of its own (hdSkyFlat). What the water shader draws,
- * without its shadows, edge and fog.
+ * 0 for flat water); `flatSky` the tileset's sky where it has one of its own (hdSkyFlat); `forward` the camera's axis
+ * (any length; straight down when not given: hdWaterPath). What the water shader draws, without its shadows, edge and
+ * fog.
  */
-export function hdWaterPixel(bed: readonly number[], depth: number, deep: readonly number[], view: readonly number[], settings: HdReflectSettings & { waves?: number } = HD_WATER_DEFAULTS, shallow: readonly number[] = deep, lean = 0, flatSky: FlatSky | null = null): [number, number, number] {
-  const { through, own, reflect } = hdWaterAt(depth, hdWaterPath(depth, view));
+export function hdWaterPixel(bed: readonly number[], depth: number, deep: readonly number[], view: readonly number[], settings: HdReflectSettings & { waves?: number } = HD_WATER_DEFAULTS, shallow: readonly number[] = deep, lean = 0, flatSky: FlatSky | null = null, forward: readonly number[] = [0, 0, -1]): [number, number, number] {
+  const { through, own, reflect } = hdWaterAt(depth, hdWaterPath(depth, view, forward));
   const [k, dim] = hdReflectScale(settings);
   const sky = flatSky?.sky ?? hdSky([view[0], view[1], -view[2]]);
   const wave = hdWaveLight({ waves: settings.waves ?? HD_WATER_DEFAULTS.waves }).map((v) => v * (flatSky?.waves ?? 1));
@@ -264,8 +282,10 @@ float ${name}(float t[${k.length}], float d) {
 /** GLSL of the above: hdWaterPath, hdWaterAt (as vec3 through, own, reflect), hdShallowAt, hdSky, hdWaveLean, srgbDec,
  *  srgbEnc. */
 export const HD_WATER_GLSL = `${tableGlsl("hdTable", "HD_DEPTHS", HD_WATER_DEPTHS)}${tableGlsl("hdPathTable", "HD_PATHS", HD_WATER_PATHS)}${tableGlsl("hdShallowTable", "HD_SHALLOW_DEPTHS", HD_SHALLOW_DEPTHS)}
-// view: unit, from the eye to the point.
-float hdWaterPath(float d, vec3 view) { return d / max(-view.z, ${f(HD_PATH_FLATTEST)}); }
+// view: unit, from the eye to the point; forward: unit, the camera's axis.
+float hdWaterPath(float d, vec3 view, vec3 forward) {
+  return d / max(-view.z, ${f(HD_PATH_FLATTEST)}) * max(dot(view, forward), ${f(HD_PATH_FLATTEST)}) * (1.0 - ${f(HD_WATER_TILT)} * (1.0 + forward.z));
+}
 vec3 hdWaterAt(float d, float p) {
   return vec3(hdPathTable(${arr(HD_WATER_THROUGH)}, p), hdPathTable(${arr(HD_WATER_OWN)}, p), hdTable(${arr(HD_REFLECT_DEPTH)}, d));
 }

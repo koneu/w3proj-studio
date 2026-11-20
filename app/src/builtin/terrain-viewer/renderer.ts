@@ -212,13 +212,13 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // The bed, the deep colour and the sky's reflection by the depth and the view's path through the water (hdWaterAt,
-    // hdWaterPath), the depth being that of the water in front of what's behind (seenDepth); the sky along the view
-    // reflected on the flat surface (hdSky).
+    // The bed, the deep colour and the sky's reflection by the depth and the water's thickness along the camera's axis
+    // (hdWaterAt, hdWaterPath), the depth being that of the water in front of what's behind (seenDepth); the sky along the
+    // view reflected on the flat surface (hdSky).
     float depth = seenDepth(vDepth * 128.0) * t.a;
     // In high precision: the squares of world distances overflow medium precision (16-bit floats on some drivers).
     highp vec3 view = normalize(vWorld - uEye);
-    vec3 w = hdWaterAt(depth, hdWaterPath(depth, view));
+    vec3 w = hdWaterAt(depth, hdWaterPath(depth, view, normalize(uForward)));
     vec3 bed = srgbDec(texelFetch(uBed, ivec2(gl_FragCoord.xy), 0).rgb);
     // The waves: the game's water normal map, two layers drifting against each other (hdwater.ts HD_WAVES), away
     // from its mean adds to the reflection or takes from it (hdWaveLean, HD_WAVE_LIGHT): the mean stays.
