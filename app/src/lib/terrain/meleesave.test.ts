@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTriggerFile, defaultWtg } from "../triggers/defaults";
 import { writeWtg, writeWtgJson } from "../triggers/wtg";
-import { meleeAfterSave, meleeSetBlockers, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
+import { MINE_CLEARANCE, meleeAfterSave, meleeSetBlockers, newStartPlaces, readMeleeFacts, savedMelee, startPathing, startsPastPlayable, startsPlainlyValid, startsUnderWater, validStartPlace, type MeleeFacts, type MeleeFiles } from "./meleesave";
 import { NO_WALK, type PathingStamp } from "./pathing";
 import { markMapEdge, writeW3e, type Corner, type Terrain } from "./w3e";
 
@@ -472,4 +472,40 @@ test("a start Map Size took off the map goes to the nearest plainly valid place 
   const allRock = flat(17, (c) => { c.texture = 1; });
   assert.equal(validStartPlace(allRock, fromEast, [], around(allRock)), null);
   assert.equal(validStartPlace(t, fromEast, [], around(flat(9))), null, "a pathing map of another size");
+});
+
+test("starts added for players without one: valid, on the 64 grid, apart, off the mines, the same every save (branch all-starts)", () => {
+  const t = flat(33);
+  const area = { left: 0, right: 32 * 128, bottom: 0, top: 32 * 128 };
+  const a = around(t);
+  // Four players all at one w3i start (ns-strip's w3i holds 0, 0 for every player), a mine near it.
+  const mine = { id: "ngol", player: 27, position: [2048, 2560, 0] };
+  const wanted = [0, 1, 2, 3].map((id) => ({ id, start: [2048, 2048] }));
+  const places = newStartPlaces(t, wanted, [mine], a, area);
+  assert.deepEqual([...places.keys()], [0, 1, 2, 3]);
+  const starts = [...places].map(([player, [x, y]]) => ({ id: "sloc", player, position: [x, y, 0] }));
+  for (const s of starts) {
+    assert.equal(s.position[0] % 64, 0); assert.equal(s.position[1] % 64, 0);
+    assert.ok(Math.hypot(s.position[0] - 2048, s.position[1] - 2560) >= MINE_CLEARANCE, `${s.position} keeps off the mine`);
+  }
+  // The oracle: the World Editor's rules (startsPlainlyValid) on all of them at once: squares on buildable ground, no two
+  // overlapping, none nearer to the mine than 750.
+  assert.ok(startsPlainlyValid(t, [mine, ...starts], a), JSON.stringify(starts.map((s) => s.position)));
+  // Control: four starts at the w3i's own place would not be.
+  assert.equal(startsPlainlyValid(t, [mine, ...wanted.map((w) => ({ id: "sloc", player: w.id, position: [2048, 2048, 0] }))], a), false);
+  // Stable: the same input gives the same places (the editor's are drawn anew each save).
+  assert.deepEqual(newStartPlaces(t, wanted, [mine], a, area), places);
+  // The first takes the nearest valid place to its w3i start; a start already placed counts as the others do.
+  const one = newStartPlaces(t, [{ id: 5, start: [1000, 1000] }], [], a, area);
+  assert.deepEqual(one.get(5), validStartPlace(t, [1000, 1000], [], a));
+  const besides = newStartPlaces(t, [{ id: 5, start: [1024, 1024] }], [{ id: "sloc", player: 0, position: [1024, 1024, 0] }], a, area).get(5)!;
+  assert.ok(Math.max(Math.abs(besides[0] - 1024), Math.abs(besides[1] - 1024)) >= 512, `${besides} doesn't overlap the start there`);
+  // A start the w3i can't hold: from the playable area's middle.
+  assert.deepEqual(newStartPlaces(t, [{ id: 0, start: [NaN, 3] }], [], a, area).get(0), [2048, 2048]);
+  // No valid place, or surroundings unknown: the w3i's start as it is (the mini map's, too small for a square), or the
+  // middle for one that isn't a number.
+  const allRock = flat(33, (c) => { c.texture = 1; });
+  assert.deepEqual(newStartPlaces(allRock, [{ id: 0, start: [1000, 9000] }], [], around(allRock), area).get(0), [1000, 9000]);
+  assert.deepEqual(newStartPlaces(t, [{ id: 0, start: [-50, 1000] }], [], null, area).get(0), [-50, 1000]);
+  assert.deepEqual(newStartPlaces(t, [{ id: 0, start: [Infinity, 1000] }], [], null, area).get(0), [2048, 2048]);
 });

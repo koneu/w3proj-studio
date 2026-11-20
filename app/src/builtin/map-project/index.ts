@@ -244,7 +244,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const needStartLocation = async () => {
     const units = await w3.workspace.readText("map/war3mapUnits.doo.json").catch(() => null);
     if (units !== null && !units.includes('"sloc"')) {
-      throw new Error("This map has no start location, so the game can't start it. Place one, or save in the terrain view, which adds Player 1's.");
+      throw new Error("This map has no start location, so the game can't start it. Place one, or save in the terrain view, which adds one for each of the map's players.");
     }
   };
 

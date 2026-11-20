@@ -1,0 +1,418 @@
+[
+  {
+    "name": "all-starts-mixed",
+    "description": "No start location, six players of every controller (user 0 and 7, computer 1, neutral 2, rescuable 3, controller 0 for 5; make-melee-valid.mjs ns-mixed): the editor's save gives each one a start at a random valid place of the playable map (the w3i's start the drawn point, within 32 of it); Studio's the valid place nearest to the w3i's start (meleesave.ts newStartPlaces). Positions ignored (random); the users' ally masks (0 and 7 each other's High) compared; Studio's eval checks the starts: one per w3i player, on the 64 grid, squares inside the playable map and apart, the w3i's starts on them (branch all-starts) The editor counts the added starts as an edit (saves 1 to 2; Studio's save never counts) and writes hit points and mana 0 on them (its next save -1, which Studio's writes at once: owner.ts savedUnitValues): expected differences",
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-ns-mixed.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].start"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "saves"
+        ]
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].hp",
+          "units[].mana"
+        ]
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "all-starts-partial",
+    "description": "Three players, only player 0 with a start location (ns-partial): the editor's save adds starts for players 1 (user) and 2 (computer) and keeps player 0's; positions ignored, ally masks compared (0 and 1 each other's High); Studio's eval as in all-starts-mixed (branch all-starts) The editor counts the added starts as an edit (saves 1 to 2; Studio's save never counts) and writes hit points and mana 0 on them (its next save -1, which Studio's writes at once: owner.ts savedUnitValues): expected differences",
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-ns-partial.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].start"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "saves"
+        ]
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].hp",
+          "units[].mana"
+        ]
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "all-starts-strip",
+    "description": "Four users, no start location, all of the map but a strip along the west edge under shallow water (ns-strip): every start in the strip, its square on buildable ground and apart from the others, in both; positions and the masks worked out from them ignored (random in the editor); Studio's eval as in all-starts-mixed (branch all-starts) The editor counts the added starts as an edit (saves 1 to 2; Studio's save never counts) and writes hit points and mana 0 on them (its next save -1, which Studio's writes at once: owner.ts savedUnitValues): expected differences",
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-ns-strip.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].start",
+          "players[].allyLow",
+          "players[].allyHigh"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "saves"
+        ]
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].hp",
+          "units[].mana"
+        ]
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "all-starts-mines",
+    "description": "Six users, no start location, 25 gold mines 1536 apart (ns-mines): every start at least 750 from every mine in both (18 of 18 editor starts in three saves; a random place would be in only a quarter of the map); positions and masks ignored; Studio's eval checks the 750 too (branch all-starts) The editor counts the added starts as an edit (saves 1 to 2; Studio's save never counts) and writes hit points and mana 0 on them (its next save -1, which Studio's writes at once: owner.ts savedUnitValues): expected differences",
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-ns-mines.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].start",
+          "players[].allyLow",
+          "players[].allyHigh"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "saves"
+        ]
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].hp",
+          "units[].mana"
+        ]
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "all-starts-none",
+    "description": "No start location and a w3i without players (ns-none): neither save adds one, the editor's counts no edit (saves stays 1). Studio before branch all-starts added Player 1 and its start in the middle",
+    "input": {
+      "map": "${REPO}/target/melee-valid/melee-valid-ns-none.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "players[].start"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 30
+  },
+  {
+    "name": "all-starts-matrix",
+    "description": "MatrixPCDefense_v4.3 with echo's triggers (make-studio-paths.mjs matrix.w3x): no start location, eight users and computer player 11: all nine get one, in the editor at random (inside the playable map, not the camera bounds: -9024 against -8960 in one run), in Studio by newStartPlaces; positions and masks ignored. Ignored as in studio-paths-matrix-masks: scriptType, supportedModes, gameDataVersion and the enemy masks of the editor's newer w3i version (branch all-starts) The editor counts the added starts as an edit (saves 1 to 2; Studio's save never counts) and writes hit points and mana 0 on them (its next save -1, which Studio's writes at once: owner.ts savedUnitValues): expected differences",
+    "input": {
+      "map": "${REPO}/target/studio-paths/matrix.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const units = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')).units; const w3i = JSON.parse(await w3.workspace.readText('map/war3map.w3i.json')); const w3e = await w3.workspace.readText('map/war3map.w3e.txt'); const line = (k) => w3e.split('\\n').find((l) => l.startsWith(k + ' ')).split(' ').slice(1).map(Number); const [W, H] = line('corners'), [ox, oy] = line('offset'), c = w3i.cameraComplements; const play = [ox + c[0] * 128, ox + (W - 1 - c[1]) * 128, oy + c[2] * 128, oy + (H - 1 - c[3]) * 128]; const starts = units.filter((u) => u.id === 'sloc'), mines = units.filter((u) => u.id === 'ngol'), bad = []; const ids = w3i.players.map((p) => p.id).sort((a, b) => a - b); if (JSON.stringify(starts.map((u) => u.player).sort((a, b) => a - b)) !== JSON.stringify(ids)) bad.push(`start players ${starts.map((u) => u.player)} against the w3i's ${ids}`); for (const u of starts) { const [x, y] = u.position; if (x % 64 || y % 64) bad.push(`${x},${y} off the 64 grid`); if (x - 256 < play[0] || x + 256 > play[1] || y - 256 < play[2] || y + 256 > play[3]) bad.push(`${x},${y}: its square leaves the playable map ${play}`); for (const o of starts) if (o !== u && Math.max(Math.abs(o.position[0] - x), Math.abs(o.position[1] - y)) < 512) bad.push(`${x},${y} overlaps ${o.position}`); for (const m of mines) if (Math.hypot(m.position[0] - x, m.position[1] - y) < 750) bad.push(`${x},${y} within 750 of the mine at ${m.position}`); const p = w3i.players.find((q) => q.id === u.player); if (!p || p.start[0] !== x || p.start[1] !== y) bad.push(`player ${u.player}'s w3i start ${p?.start} isn't its start location ${x},${y}`); } if (bad.length) throw new Error(`the added start locations (newStartPlaces): ${bad.join('; ')}`);"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "scriptType",
+          "supportedModes",
+          "gameDataVersion",
+          "players[].enemyLow",
+          "players[].enemyHigh",
+          "players[].start",
+          "players[].allyLow",
+          "players[].allyHigh"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "saves"
+        ]
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "skinIds",
+          "units[].preFlags",
+          "units[].trailer",
+          "units[].extras",
+          "units[].position"
+        ],
+        "tolerance": 0.01,
+        "expect": "differs",
+        "expectPaths": [
+          "units[].hp",
+          "units[].mana"
+        ]
+      }
+    ],
+    "limit": 30
+  }
+]
