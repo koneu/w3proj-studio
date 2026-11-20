@@ -1,0 +1,92 @@
+[
+  {
+    "limit": 40,
+    "name": "skin-fields-paste",
+    "description": "Paste of objects whose names live in the Skin files (skin-fields.w3x, tests/fixtures/we-specs/make-skin-fields.mjs: H001 on Hpal with unam and upro in war3mapSkin.w3u and hit points in war3map.w3u, A001 on AHhb with anam in war3mapSkin.w3a, B001 on BHab with fnam and ftip in war3mapSkin.w3h; 2026-11-20): the Object Editor (F6) on Abilities, Units and Buffs/Effects, each custom object selected (End, Right), Edit > Copy, Edit > Paste, the Object ID dialog's default taken with Return. The editor keeps the copy's Skin fields in the Skin file (H000, A000, B000 there, their hit points and levels in the main file), as Studio's Ctrl+C, Ctrl+V. The editor's save makes every plain text of the Skin files a string of war3map.wts (TRIGSTR_003 on, in the order units, abilities, buffs; also unchanged ones, as its plain save of the input does), so the Skin files' values and war3map.wts are left out: where each field lands is the question",
+    "input": { "map": "${REPO}/target/skin-fields/skin-fields.w3x" },
+    "we": {
+      "mode": "sd",
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "458,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "193,171"], ["--sleep", "800"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "195,188"], ["--sleep", "2000"],
+        ["--key", "Return"], ["--sleep", "2000"],
+        ["--click", "155,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "193,171"], ["--sleep", "800"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "195,188"], ["--sleep", "2000"],
+        ["--key", "Return"], ["--sleep", "2000"],
+        ["--click", "545,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "193,171"], ["--sleep", "800"],
+        ["--click", "159,151"], ["--sleep", "800"], ["--click", "195,188"], ["--sleep", "2000"],
+        ["--key", "Return"], ["--sleep", "2000"], ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "const paste = async (kind, id) => { await w3.commands.execute('w3.objectEditor.open', kind, id); await new Promise((r) => setTimeout(r, 500)); for (let i = 0; i < 100 && !document.querySelector('.obj-list'); i++) await new Promise((r) => setTimeout(r, 100)); const list = document.querySelector('.obj-list'); list.focus(); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 1000)); list.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true })); await new Promise((r) => setTimeout(r, 2000)); await w3.editors.saveAll(); await w3.editors.closeAll(); await new Promise((r) => setTimeout(r, 500)); }; await paste('w3a', 'A001'); await paste('w3u', 'H001'); await paste('w3h', 'B001');" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3u", "as": "parsed" },
+      { "file": "war3map.w3a", "as": "parsed" },
+      { "file": "war3map.w3h", "as": "parsed" },
+      { "file": "war3mapSkin.w3u", "as": "parsed", "ignore": ["custom[].mods[].value"] },
+      { "file": "war3mapSkin.w3a", "as": "parsed", "ignore": ["custom[].mods[].value"] },
+      { "file": "war3mapSkin.w3h", "as": "parsed", "ignore": ["custom[].mods[].value"] }
+    ]
+  },
+  {
+    "limit": 40,
+    "name": "skin-fields-rename",
+    "description": "A name renamed in the Object Editor where the Skin file holds it and war3map.w3u hides another (skin-fields-hidden.w3x of make-skin-fields.mjs: H001's unam 'Skin Hero' in war3mapSkin.w3u, 'Main Hero' in war3map.w3u; 2026-11-20): Units, H001 selected, the field list's End, a double-click on Text - Name (380,775), 'Edit Unit Value - String', Ctrl+A, 'Renamed Hero', Return. The editor writes the new name into war3mapSkin.w3u as TRIGSTR_003 (war3map.wts: '// Units: H001 (Renamed Hero), Name (Name)'; the proper name and the other kinds' texts become strings too, unchanged as they are) and drops 'Main Hero' from war3map.w3u, as Studio does (skin.ts: a changed field leaves the other file). Studio writes the typed text into war3mapSkin.w3u itself, and the unchanged proper name stays plain: the expected difference, by path",
+    "input": { "map": "${REPO}/target/skin-fields/skin-fields-hidden.w3x" },
+    "we": {
+      "mode": "sd",
+      "steps": [
+        ["--click", "700,500"], ["--key", "F6"], ["--sleep", "90000"],
+        ["--click", "155,198"], ["--sleep", "3000"],
+        ["--click", "200,240"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "500"],
+        ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--key", "Right"], ["--sleep", "1500"],
+        ["--click", "380,243"], ["--sleep", "500"], ["--key", "End"], ["--sleep", "1000"],
+        ["--double-click", "380,775"], ["--wait-window", "Edit Unit Value"], ["--key", "ctrl+a"], ["--type", "Renamed Hero"], ["--sleep", "500"],
+        ["--key", "Return"], ["--sleep", "1500"], ["--close-modules"]
+      ]
+    },
+    "studio": {
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3u', 'H001'); for (let i = 0; i < 300 && document.querySelectorAll('.obj-table .obj-value-cell').length < 20; i++) await new Promise((r) => setTimeout(r, 100)); const s = document.querySelector('input.obj-field-search'); s.value = 'unam'; s.dispatchEvent(new Event('input')); for (let i = 0; i < 50 && document.querySelectorAll('.obj-table .obj-value-cell input:not(.color-tools-picker)').length !== 1; i++) await new Promise((r) => setTimeout(r, 100)); const inp = document.querySelector('.obj-table .obj-value-cell input:not(.color-tools-picker)'); inp.value = 'Renamed Hero'; inp.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 1000)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3u", "as": "parsed" },
+      { "file": "war3mapSkin.w3u", "as": "parsed", "expect": "differs", "expectPaths": ["custom[0].mods[0].value", "custom[0].mods[1].value"] }
+    ]
+  },
+  {
+    "limit": 40,
+    "name": "skin-fields-studio-resave",
+    "description": "A Studio edit of a Skin field reopened in the editor (skin-fields-hidden.w3x; 2026-11-20): Studio renames H001 to 'Renamed Hero' and saves (war3mapSkin.w3u gets the text, 'Main Hero' leaves war3map.w3u), the editor opens Studio's map and saves it unchanged: every Skin field stays in the Skin file where Studio put it (the editor's values are its TRIGSTR_ strings, left out), the main files keep only the main fields",
+    "input": { "map": "${REPO}/target/skin-fields/skin-fields-hidden.w3x" },
+    "we": { "mode": "sd", "from": "studio", "steps": [] },
+    "studio": {
+      "steps": [
+        { "eval": "await w3.commands.execute('w3.objectEditor.open', 'w3u', 'H001'); for (let i = 0; i < 300 && document.querySelectorAll('.obj-table .obj-value-cell').length < 20; i++) await new Promise((r) => setTimeout(r, 100)); const s = document.querySelector('input.obj-field-search'); s.value = 'unam'; s.dispatchEvent(new Event('input')); for (let i = 0; i < 50 && document.querySelectorAll('.obj-table .obj-value-cell input:not(.color-tools-picker)').length !== 1; i++) await new Promise((r) => setTimeout(r, 100)); const inp = document.querySelector('.obj-table .obj-value-cell input:not(.color-tools-picker)'); inp.value = 'Renamed Hero'; inp.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 1000)); await w3.editors.saveAll();" }
+      ]
+    },
+    "compare": [
+      { "file": "war3map.w3u", "as": "parsed" },
+      { "file": "war3map.w3a", "as": "parsed" },
+      { "file": "war3map.w3h", "as": "parsed" },
+      { "file": "war3mapSkin.w3u", "as": "parsed", "ignore": ["custom[].mods[].value"] },
+      { "file": "war3mapSkin.w3a", "as": "parsed", "ignore": ["custom[].mods[].value"] },
+      { "file": "war3mapSkin.w3h", "as": "parsed", "ignore": ["custom[].mods[].value"] }
+    ]
+  }
+]
