@@ -41,6 +41,10 @@ jobs:
       - name: UI smoke test
         working-directory: app
         run: npm run ui-smoke
+      # Builds app/dist-demo and drives it in the runner's Edge (found by scripts/demo-check.mjs, ~15 s).
+      - name: Web demo build and check
+        working-directory: app
+        run: node scripts/demo-check.mjs --build
 
       # Version and components (clippy) come from rust-toolchain.toml.
       - name: Rust toolchain
