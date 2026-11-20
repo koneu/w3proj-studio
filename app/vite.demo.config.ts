@@ -7,14 +7,17 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 /** The title bar module of the workbench, whichever way it is imported, is the demo's. */
 function demoTitleBar(): Plugin {
-  const own = here("./src/workbench/titlebar.ts");
+  // Vite's resolved ids use '/' also on Windows; fileURLToPath gives '\' there: compare the '/' forms (the Windows
+  // CI found the real title bar, with its window buttons, in the demo build).
+  const slashes = (p: string) => p.replace(/\\/g, "/");
+  const own = slashes(here("./src/workbench/titlebar.ts"));
   return {
     name: "demo-titlebar",
     enforce: "pre",
     async resolveId(source, importer, options) {
       if (!importer || !/(^|\/)titlebar$/.test(source)) return null;
       const r = await this.resolve(source, importer, { ...options, skipSelf: true });
-      return r?.id === own ? here("./src/demo/titlebar.ts") : null;
+      return r && slashes(r.id) === own ? here("./src/demo/titlebar.ts") : null;
     },
   };
 }
