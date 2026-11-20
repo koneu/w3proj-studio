@@ -61,7 +61,7 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
   for water with a deep middle. Rivers can run at any angle with points.
 - shallow and deep put a cliff all round the water, so units can't get in without a ramp. That suits a sunken
   pool or a moat, not a river to wade through.
-- Run check_path after any water: it can split a map in two.
+- Run check_path after any water: it can split a map in two. Give it movement "float" to test a ship's way, which also sails shallow water that walking units wade through.
 
 ## Cliffs
 
