@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  decode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
+  decode, HD_PATH_FLATTEST, HD_REFLECT_DEPTH, HD_WATER_TILT, HD_SHALLOW_DEPTHS, HD_SHALLOW_SHARE, HD_WATER_DEFAULTS, HD_WATER_DEPTHS, HD_WATER_GLSL, HD_WATER_OWN, HD_WATER_PATHS, HD_WATER_THROUGH, HD_WAVE_LIGHT,
   HD_WAVE_RED, HD_WAVES, hdReflectScale, hdShallowAt, hdSky, hdSkyFlat, HD_SKY_FLAT, type FlatSky, hdWaterAt, hdWaterPath, hdWaterPixel, hdWaterSettings, hdWaveLean, hdWaveLight,
   hdWaveShift,
 } from "./hdwater";
@@ -23,6 +23,10 @@ function ray(cam: { target: number[]; distance: number; yaw: number; pitch: numb
   const r = norm(cross(f, [0, 0, 1])), u = cross(r, f);
   const t = Math.tan(fov / 2), nx = (2 * (px + 0.5)) / W - 1, ny = 1 - (2 * (py + 0.5)) / H;
   return norm([0, 1, 2].map((i) => f[i] + nx * t * (W / H) * r[i] + ny * t * u[i]));
+}
+/** The camera's axis (from the eye to the target, unit). */
+function axis(cam: { distance: number; yaw: number; pitch: number }): number[] {
+  return [-Math.cos(cam.pitch) * Math.cos(cam.yaw), -Math.cos(cam.pitch) * Math.sin(cam.yaw), -Math.sin(cam.pitch)];
 }
 /** View Entire Map of the 128 × 96 maps (Studio's, at the editor's field of view, which the pictures line up with). */
 const ENTIRE = { target: [704, -2867.5, -161.5], distance: 17168, yaw: -Math.PI / 2, pitch: 1.5688, fov: 0.7166 };
@@ -47,19 +51,28 @@ test("HD water's tables: none of the water at 0, all of it from 200 deep, linear
   });
   HD_WATER_DEPTHS.forEach((d, i) => assert.ok(near(hdWaterAt(d, 1000).reflect, HD_REFLECT_DEPTH[i]), `at ${d}`));
   assert.deepEqual(hdWaterAt(24), hdWaterAt(24, 24), "the path is the depth unless given");
-  const half = hdWaterAt(18);
-  assert.ok(Math.abs(half.through - (HD_WATER_THROUGH[2] + HD_WATER_THROUGH[3]) / 2) < 1e-9, "18 is halfway between 12 and 24");
-  // The path: the depth over the cosine of the view's angle from straight down, of any length, never flatter than 0.2.
+  const half = hdWaterAt(20);
+  assert.ok(Math.abs(half.through - (HD_WATER_THROUGH[3] + HD_WATER_THROUGH[4]) / 2) < 1e-9, "20 is halfway between 16 and 24");
+  // The thickness along the camera's axis: the path through the water (the depth over the cosine of the view's angle
+  // from straight down, never flatter than 0.2) times the cosine of the view's angle from the axis, less by the
+  // camera's tilt; any lengths. A camera looking straight down (the default): the depth anywhere in its picture.
   assert.equal(hdWaterPath(50, [0, 0, -3]), 50);
-  assert.ok(near(hdWaterPath(50, [0, 3, -4]), 62.5));
-  assert.equal(hdWaterPath(50, [1, 0, 0]), 50 / HD_PATH_FLATTEST, "along the surface");
-  assert.equal(hdWaterPath(50, [0, 0, 0]), 50);
+  assert.ok(near(hdWaterPath(50, [0, 3, -4]), 50), "the side of a straight-down camera's picture");
+  assert.ok(near(hdWaterPath(50, [0, 3, -4], [0, 0, -7]), 50));
+  assert.equal(hdWaterPath(50, [0, 0, 0]), 50, "no view: the depth");
+  // A camera 0.8 below the horizon (sine), looking along the view: the path, 1 − 0.2 × HD_WATER_TILT of it.
+  const tilt = 1 - HD_WATER_TILT * 0.2;
+  assert.ok(near(hdWaterPath(50, [0, 3, -4], [0, 6, -8]), 62.5 * tilt));
+  assert.ok(near(hdWaterPath(50, [0, 0, -1], [0, 3, -4]), 50 * 0.8 * tilt), "straight down through that camera's picture");
+  assert.ok(near(hdWaterPath(50, [1, 0, 0], [1, 0, 0]), (50 / HD_PATH_FLATTEST) * (1 - HD_WATER_TILT)), "along the surface: no flatter than 0.2");
+  assert.ok(near(hdWaterPath(50, [0, 0, -1], [1, 0, 0]), 50 * HD_PATH_FLATTEST * (1 - HD_WATER_TILT)), "never less than the flattest share of the view");
   // The shader holds the same tables, in the same places: the depths, the paths, then hdWaterAt's through, own,
   // reflect in that order, and the same flattest view.
   assert.deepEqual(glslTables(/const float HD_DEPTHS\[8\] = (float\[8\]\([^)]*\))/), [[...HD_WATER_DEPTHS]]);
   assert.deepEqual(glslTables(/const float HD_PATHS\[\d+\] = (float\[\d+\]\([^)]*\))/), [[...HD_WATER_PATHS]]);
   assert.deepEqual(glslTables(/vec3 hdWaterAt\(float d, float p\) \{\s*return vec3\((.*?)\);\s*\}/s), [[...HD_WATER_THROUGH], [...HD_WATER_OWN], [...HD_REFLECT_DEPTH]]);
-  assert.equal(Number(/return d \/ max\(-view\.z, ([\d.]+)\);/.exec(HD_WATER_GLSL)?.[1]), HD_PATH_FLATTEST);
+  const glslPath = /return d \/ max\(-view\.z, ([\d.]+)\) \* max\(dot\(view, forward\), ([\d.]+)\) \* \(1\.0 - ([\d.]+) \* \(1\.0 \+ forward\.z\)\);/.exec(HD_WATER_GLSL);
+  assert.deepEqual([Number(glslPath?.[1]), Number(glslPath?.[2]), Number(glslPath?.[3])], [HD_PATH_FLATTEST, HD_PATH_FLATTEST, HD_WATER_TILT]);
 });
 
 /** The `float[n](…)` tables inside the part of the shader a pattern's first group matches, as numbers. */
@@ -144,7 +157,7 @@ function checkBands(bands: GameBand[], distance: number, settings: Parameters<ty
   for (const [y, depth, boxes] of bands) {
     const cam = gameCam(y, depth, distance), sum = [0, 0, 0], want = [0, 0, 0];
     for (const [px, py, editor] of boxes) {
-      const got = hdWaterPixel(bed, depth, deep(ts), ray(cam, px, py), settings, hdWaterShallow(ts, false));
+      const got = hdWaterPixel(bed, depth, deep(ts), ray(cam, px, py), settings, hdWaterShallow(ts, false), 0, null, axis(cam));
       within(got, editor, boxTol, `${depth} deep from ${distance}, the box at ${px}, ${py}`);
       got.forEach((v, k) => { sum[k] += v / boxes.length; want[k] += editor[k] / boxes.length; });
     }
@@ -152,7 +165,7 @@ function checkBands(bands: GameBand[], distance: number, settings: Parameters<ty
   }
 }
 
-test("without the reflection (w3i reflectivity 0) HD water is the bed and the deep colour by the view's path through it, as in the editor's game view", () => {
+test("without the reflection (w3i reflectivity 0) HD water is the bed and the deep colour by its thickness along the camera, as in the editor's game view", () => {
   const off = { reflectivity: 0, environment: 100 };
   // Every band's mean within 2 levels; single boxes up to 8 (64 deep) and 9 (96 deep, the last row before the slope
   // down to 128) off, where the bed shows least evenly.
@@ -163,9 +176,9 @@ test("without the reflection (w3i reflectivity 0) HD water is the bed and the de
   // The control (the open point this closes): through 96 deep water at the view's own slant the editor shows almost
   // none of the bed (red 7 in the middle box), where the depth alone, as if looking straight down, shows much more.
   const [y, depth, boxes] = GAME_OFF[7], [px, py, editor] = boxes[4], view = ray(gameCam(y, depth), px, py);
-  const straight = hdWaterPixel(GAME_BED, depth, deep("L"), [0, 0, -1], off), slanted = hdWaterPixel(GAME_BED, depth, deep("L"), view, off);
-  assert.ok(straight[0] - editor[0] > 20 && slanted[0] < 12, `96 deep: ${straight.map(Math.round)} by the depth, ${slanted.map(Math.round)} by the path, the editor's ${editor}`);
-  assert.ok(hdWaterPath(depth, view) > 1.2 * depth, "a slanted view's path is longer than the depth");
+  const straight = hdWaterPixel(GAME_BED, depth, deep("L"), [0, 0, -1], off), slanted = hdWaterPixel(GAME_BED, depth, deep("L"), view, off, undefined, 0, null, axis(gameCam(y, depth)));
+  assert.ok(straight[0] - editor[0] > 20 && slanted[0] < 12, `96 deep: ${straight.map(Math.round)} by the depth, ${slanted.map(Math.round)} along the slanted camera, the editor's ${editor}`);
+  assert.ok(hdWaterPath(depth, view, axis(gameCam(y, depth))) > 1.1 * depth, "a slanted camera's thickness is more than the depth");
 
   // Looking straight down (View Entire Map, branch water-render-we, 2026-11-14: [depth, bed, the editor's water] in the
   // middle column): the shallow bands of the four tilesets, where the editor's View Entire Map agrees with its game
@@ -182,6 +195,48 @@ test("without the reflection (w3i reflectivity 0) HD water is the bed and the de
   }
   // And deep: the tileset's colour itself.
   within(hdWaterPixel([255, 255, 255], 800, deep("B"), [0, 0, -1], off), [6, 31, 27], 0.5, "Barrens 800 deep");
+});
+
+/**
+ * The editor's game view looking straight down (we-drive, HD, branch we-look-hd2, 2026-11-20: `--look 0,Y,1200,270,70,90`
+ * over the middle of each band of the -r0 maps of GAME_OFF, the mean of rows 200 to 640 and columns 300 to 900 in linear
+ * light): [depth, the editor's colour]. The colour is the same across the picture (96 deep: red 24 to 30 in every column
+ * from the middle to the sides, 28° off straight down).
+ */
+const STRAIGHT_DOWN: [number, number[]][] = [
+  [8, [124.5, 87.0, 30.2]], [16, [117.6, 82.9, 32.5]], [24, [108.6, 77.7, 35.3]], [40, [94.6, 69.7, 39.5]], [48, [86.3, 65.4, 42.0]],
+  [56, [77.0, 60.8, 44.9]], [64, [67.4, 56.4, 47.5]], [72, [59.8, 54.1, 49.8]], [80, [48.3, 49.4, 52.8]], [96, [27.4, 44.4, 57.8]],
+  [112, [3.9, 44.4, 62.9]], [144, [0, 49.0, 69.0]], [176, [0, 48.3, 69.0]],
+];
+
+/** GAME_OFF's looks through the angle of attack 304 in STRAIGHT_DOWN's session (48 and 80 deep on the 8, 48, 80, … map,
+ *  64 and 96 deep on the 32, 64, 96, … map), the same boxes. */
+const GAME_OFF_SAME_SESSION: GameBand[] = [
+  [2624, 48, [[320, 130, [71, 59, 47]], [592, 130, [71, 58, 47]], [934, 130, [72, 59, 46]], [320, 370, [79, 62, 44]], [592, 370, [77, 61, 45]], [934, 370, [80, 62, 44]], [320, 610, [89, 67, 41]], [592, 610, [89, 67, 41]], [934, 610, [88, 66, 42]]]],
+  [1600, 80, [[320, 130, [10, 43, 61]], [592, 130, [8, 44, 62]], [934, 130, [8, 45, 62]], [320, 370, [29, 45, 57]], [592, 370, [31, 45, 57]], [934, 370, [35, 47, 56]], [320, 610, [49, 51, 53]], [592, 610, [47, 49, 53]], [934, 610, [47, 48, 53]]]],
+  [576, 112, [[320, 130, [0, 46, 69]], [592, 130, [0, 47, 69]], [934, 130, [0, 48, 69]], [320, 370, [0, 49, 68]], [592, 370, [0, 48, 68]], [934, 370, [0, 46, 69]], [320, 610, [0, 44, 64]], [592, 610, [0, 44, 64]], [934, 610, [1, 45, 64]]]],
+  [2624, 64, [[320, 130, [45, 50, 54]], [592, 130, [46, 50, 53]], [934, 130, [44, 48, 54]], [320, 370, [53, 51, 51]], [592, 370, [55, 52, 51]], [934, 370, [56, 51, 50]], [320, 610, [67, 56, 48]], [592, 610, [71, 59, 46]], [934, 610, [68, 57, 47]]]],
+  [1600, 96, [[320, 130, [0, 50, 68]], [592, 130, [0, 48, 68]], [934, 130, [0, 49, 68]], [320, 370, [3, 44, 63]], [592, 370, [5, 43, 63]], [934, 370, [8, 44, 62]], [320, 610, [30, 46, 57]], [592, 610, [29, 46, 57]], [934, 610, [25, 46, 58]]]],
+];
+
+test("HD water goes by its thickness along the camera's axis: looking straight down, the same colour across the picture", () => {
+  const off = { reflectivity: 0, environment: 100 }, down = [0, 0, -1];
+  // Every band within 3 levels of the editor's (the tables lie half way between these and the slanted views of GAME_OFF).
+  for (const [depth, editor] of STRAIGHT_DOWN) within(hdWaterPixel(GAME_BED, depth, deep("L"), down, off, undefined, 0, null, down), editor, 3, `${depth} deep, straight down`);
+  // At the picture's side (28° off straight down) the same colour as in its middle: the camera's axis counts, not the view.
+  const side = [Math.sin(0.49), 0, -Math.cos(0.49)];
+  assert.deepEqual(hdWaterPixel(GAME_BED, 96, deep("L"), side, off, undefined, 0, null, down), hdWaterPixel(GAME_BED, 96, deep("L"), down, off, undefined, 0, null, down));
+  // The control: by the path through the water (the view taken as the axis) the side would show far less of the bed
+  // than the editor's 24 to 30 red.
+  const byPath = hdWaterPixel(GAME_BED, 96, deep("L"), side, off, undefined, 0, null, side);
+  assert.ok(byPath[0] < 20, `96 deep at the side by the path: ${byPath.map(Math.round)}`);
+  // Through the angle of attack 304 in the same session (not fitted on): every band within 3, every box within 7.
+  checkBands(GAME_OFF_SAME_SESSION, 1200, off, 3, 7);
+  // The control: without the camera's tilt (HD_WATER_TILT) the slanted view shows too little of the bed there.
+  const [y, depth, boxes] = GAME_OFF_SAME_SESSION[1], [px, py, editor] = boxes[4], cam = gameCam(y, depth), f = axis(cam), v = ray(cam, px, py);
+  // (Lordaeron has one water colour and the reflection is off, so straight down through water as thick is the same.)
+  const untilted = hdWaterPixel(GAME_BED, hdWaterPath(depth, v, f) / (1 - HD_WATER_TILT * (1 + f[2])), deep("L"), [0, 0, -1], off);
+  assert.ok(editor[0] - untilted[0] > 4, `80 deep at 592, 370 without the tilt: ${untilted.map(Math.round)} against the editor's ${editor}`);
 });
 
 /**
@@ -208,7 +263,7 @@ test("Sunken Ruins' HD water is turquoise in the shallows and blue in the deep: 
   checkBands(GAME_Z, 1200, off, 4, 16, "Z", bed);
   // The control: with the deep colour alone the green is far short in the shallows (the open point this closed).
   const [y, depth, boxes] = GAME_Z[4], [px, py, editor] = boxes[4];
-  const plain = hdWaterPixel(bed, depth, deep("Z"), ray(gameCam(y, depth), px, py), off);
+  const plain = hdWaterPixel(bed, depth, deep("Z"), ray(gameCam(y, depth), px, py), off, undefined, 0, null, axis(gameCam(y, depth)));
   assert.ok(editor[1] - plain[1] > 6, `one colour: ${plain.map(Math.round)} at 56 deep against the editor's ${editor}`);
   // The shallow colour to 60 deep, the deep colour from 72 (Water.slk's levels); the shader holds the same table.
   assert.equal(hdShallowAt(0), 1);
@@ -236,7 +291,7 @@ test("HD water reflects a sky that is brighter in the west: the editor's water l
       ["east", 12, [121, 79, 37], [109, 75, 42]], ["east", 38.4, [121, 79, 37], [91, 71, 54]], ["east", 800, [119, 78, 37], [50, 60, 59]]],
   };
   for (const [ts, rows] of Object.entries(bands)) for (const [col, d, bed, editor] of rows) {
-    within(hdWaterPixel(bed, d, deep(ts), ray(ENTIRE, COLS[col], ROWS[d])), editor, 6, `${ts} ${col} ${d} deep`);
+    within(hdWaterPixel(bed, d, deep(ts), ray(ENTIRE, COLS[col], ROWS[d]), undefined, undefined, 0, null, axis(ENTIRE)), editor, 6, `${ts} ${col} ${d} deep`);
   }
   // The open point this closes: deep Lordaeron water 67 red in the west, 39 in the east; Studio's was a flat 22.
   const west = hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]));
@@ -258,7 +313,7 @@ const GAME_ON: GameBand[] = [
   [-1472, 200, [[320, 130, [25, 56, 74]], [320, 310, [36, 63, 79]], [320, 550, [63, 84, 92]], [592, 130, [23, 56, 73]], [592, 310, [31, 60, 77]], [592, 550, [36, 64, 80]], [934, 130, [28, 58, 76]], [934, 310, [33, 60, 79]], [934, 550, [25, 57, 75]]]],
 ];
 
-test("HD water in the editor's game view with the reflection: the bed, the deep colour and the sky by the path, 8 to 200 deep", () => {
+test("HD water in the editor's game view with the reflection: the bed, the deep colour and the sky by the thickness, 8 to 200 deep", () => {
   // Band means within 3 levels (before the path, deep water was 9 to 14 too red from 56 to 128 deep: the open point's
   // "too much bed"); single boxes up to 16 off, deep water too: the sky's fit (HD_SKY) and the waves.
   checkBands(GAME_ON, 1200, undefined, 3, 17);
@@ -343,7 +398,7 @@ test("the w3i's reflectivity scales the reflection, its environment map reflecti
   for (const [reflectivity, environment, deepWater, shallow] of cases) {
     const s = { reflectivity, environment };
     within(hdWaterPixel([1, 125, 0], 800, deep("L"), ray(ENTIRE, COLS.west, ROWS[800]), s), deepWater, 7, `reflectivity ${reflectivity}, environment ${environment}, deep`);
-    within(hdWaterPixel([1, 125, 0], 38.4, deep("L"), ray(ENTIRE, COLS.west, ROWS[38.4]), s), shallow, 7, `reflectivity ${reflectivity}, environment ${environment}, 38.4 deep`);
+    within(hdWaterPixel([1, 125, 0], 38.4, deep("L"), ray(ENTIRE, COLS.west, ROWS[38.4]), s, undefined, 0, null, axis(ENTIRE)), shallow, 7, `reflectivity ${reflectivity}, environment ${environment}, 38.4 deep`);
   }
 });
 
