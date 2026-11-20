@@ -81,11 +81,19 @@ export function unlistedFiles(projectFiles: readonly string[], entries: readonly
 /** The extension of an archive or project path (".ogg"), "" for none. */
 const extensionAt = (p: string) => { const i = p.lastIndexOf("."); return i > p.lastIndexOf("/") && i > p.lastIndexOf("\\") ? i : -1; };
 
+/** The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, and the
+ *  preview image (war3mapPreview.*). Not others: Blizzard's own maps list .mdl models held as .mdx and a .tga held as
+ *  .dds (ForgottenHollow, SilverpineSprint, Dalaran), which looks like the editor's own conversion, and the map's own
+ *  files (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says. */
+const PREVIEW = /^war3mapPreview\.[^\\/]+$/i;
+const measuredSwap = (entry: string, held: string) => (SOUND.test(entry) && SOUND.test(held)) || (PREVIEW.test(entry) && PREVIEW.test(held));
+
 /** The entries of the import list whose file the project holds only under another extension (`projectFiles`: project
- *  paths, "map/…"): (12)WormWar lists war3mapPreview.tga and nine sounds as .flac and holds a .dds and .ogg files. The
- *  World Editor's save drops such a file without a word (we-compare corpus-saves-wormwar, branch we-corpus-saves);
- *  Studio packs it (and the game reads a sound under its other extensions, `candidates`). Each with the entry's path and
- *  the project file. The same rule as the pack's warning (crates/w3proj project.rs imports_under_other_extension). */
+ *  paths, "map/…"), of the kinds measuredSwap names: (12)WormWar lists war3mapPreview.tga and nine sounds as .flac and
+ *  holds a .dds and .ogg files. The World Editor's save drops such a file without a word (we-compare
+ *  corpus-saves-wormwar, branch we-corpus-saves); Studio packs it (and the game reads a sound under its other
+ *  extensions, `candidates`). Each with the entry's path and the project file. The same rule as the pack's warning
+ *  (crates/w3proj project.rs imports_under_other_extension). */
 export function otherExtensionImports(projectFiles: readonly string[], entries: readonly ImportEntry[], folder: string): { entry: string; file: string }[] {
   const inMap = projectFiles.map((p) => p.replace(/\\/g, "/")).filter((p) => p.toLowerCase().startsWith("map/"));
   const lower = new Set(inMap.map((p) => p.toLowerCase()));
@@ -101,7 +109,7 @@ export function otherExtensionImports(projectFiles: readonly string[], entries: 
     const forms = (STANDARD_FLAGS.includes(e.flags) ? [`${folder}\\${path}`, path] : [path]).map((f) => projectPath(f).toLowerCase());
     if (forms.some((f) => lower.has(f))) continue;
     const file = forms.map((f) => { const i = extensionAt(f); return i >= 0 ? byStem.get(f.slice(0, i)) : undefined; }).find((f) => f !== undefined);
-    if (file) out.push({ entry: path, file });
+    if (file && measuredSwap(path, archivePath(file))) out.push({ entry: path, file });
   }
   return out;
 }

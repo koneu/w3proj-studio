@@ -110,16 +110,17 @@ fn an_import_listed_under_another_extension_is_kept_with_a_warning() {
     let imported = project.join("map/war3mapImported");
     fs::write(imported.join("Song.ogg"), b"OggS").unwrap();
     fs::write(imported.join("Fine.mdx"), b"MDLX").unwrap();
-    fs::write(imported.join("Std.blp"), b"BLP1").unwrap();
+    fs::write(imported.join("Tune.wav"), b"RIFF").unwrap();
     fs::write(project.join("map/war3mapPreview.dds"), b"DDS ").unwrap();
     let codecs = Registry::default();
-    // Control: every entry has its file under its own name (Std.blp by the standard path flags 8, in the import
-    // folder; readme.txt listed with a `/`), one has none at all: no warning of this kind.
-    let control = imp(&[(13, "war3mapImported\\Fine.mdx"), (8, "Std.blp"), (13, "war3mapImported/readme.txt"), (13, "war3mapImported\\Gone.mdx")]);
+    // Control: every entry has its file under its own name (Tune.wav by the standard path flags 8, in the import
+    // folder; readme.txt listed with a `/`), one has none at all, a model listed as .mdl is held as .mdx (Blizzard's
+    // maps do that; not a swap the editor was seen to drop): no warning of this kind.
+    let control = imp(&[(13, "war3mapImported\\Fine.mdx"), (8, "Tune.wav"), (13, "war3mapImported/readme.txt"), (13, "war3mapImported\\Gone.mdx"), (13, "war3mapImported\\Fine.mdl")]);
     fs::write(project.join("map/war3map.imp"), control).unwrap();
     let r = w3proj::pack(&project, Some(&dir.join("control.w3x")), &codecs).unwrap();
     assert!(r.warnings.is_empty(), "{:?}", r.warnings);
-    let list = imp(&[(13, "war3mapImported\\Fine.mdx"), (13, "war3mapImported\\Song.flac"), (29, "war3mapPreview.tga"), (8, "Std.dds")]);
+    let list = imp(&[(13, "war3mapImported\\Fine.mdx"), (13, "war3mapImported\\Song.flac"), (29, "war3mapPreview.tga"), (8, "Tune.mp3")]);
     fs::write(project.join("map/war3map.imp"), list).unwrap();
     let out = dir.join("other.w3x");
     let r = w3proj::pack(&project, Some(&out), &codecs).unwrap();
@@ -127,10 +128,10 @@ fn an_import_listed_under_another_extension_is_kept_with_a_warning() {
     assert!(r.warnings.iter().all(|w| w.contains(OTHER_EXTENSION)), "{:?}", r.warnings);
     assert!(r.warnings[0].contains("lists war3mapImported\\Song.flac, but the map holds it as war3mapImported\\Song.ogg"), "{:?}", r.warnings);
     assert!(r.warnings[1].contains("lists war3mapPreview.tga, but the map holds it as war3mapPreview.dds"), "{:?}", r.warnings);
-    assert!(r.warnings[2].contains("lists Std.dds, but the map holds it as war3mapImported\\Std.blp"), "{:?}", r.warnings);
+    assert!(r.warnings[2].contains("lists Tune.mp3, but the map holds it as war3mapImported\\Tune.wav"), "{:?}", r.warnings);
     // The pack keeps the files.
     let packed = names(&out);
-    for n in ["war3mapimported\\song.ogg", "war3mappreview.dds", "war3mapimported\\std.blp"] {
+    for n in ["war3mapimported\\song.ogg", "war3mappreview.dds", "war3mapimported\\tune.wav"] {
         assert!(packed.contains(&n.to_string()), "{n} in {packed:?}");
     }
     // A damaged list (its count past the entries) is read as far as it goes and doesn't stop the pack.

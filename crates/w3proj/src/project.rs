@@ -1167,8 +1167,19 @@ fn import_entries(bytes: &[u8]) -> Vec<(u8, String)> {
     out
 }
 
-/// Import list entries whose file the archive (`encoded`: archive name → bytes) holds only under another extension,
-/// as warnings: (12)WormWar lists `war3mapPreview.tga` and nine sounds as `.flac` and holds a `.dds` and `.ogg` files.
+/// The kinds of swap the World Editor's save was seen to drop: a sound listed under another sound extension, and the
+/// preview image (`war3mapPreview.*`). Not others: Blizzard's own maps list `.mdl` models held as `.mdx` and a `.tga`
+/// held as `.dds` (ForgottenHollow, SilverpineSprint, Dalaran), which looks like the editor's own conversion, and the
+/// map's own files (war3mapMap.blp listed as war3mapmap.tga) are written by its save whatever the list says.
+fn measured_swap(entry: &str, held: &str) -> bool {
+    let ext = |p: &str| p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let sound = |p: &str| matches!(ext(p).as_str(), "flac" | "ogg" | "mp3" | "wav");
+    let preview = |p: &str| !p.contains('\\') && p.to_ascii_lowercase().starts_with("war3mappreview.");
+    (sound(entry) && sound(held)) || (preview(entry) && preview(held))
+}
+
+/// Import list entries whose file the archive (`encoded`: archive name → bytes) holds only under another extension
+/// (of the kinds `measured_swap` names), as warnings: (12)WormWar lists `war3mapPreview.tga` and nine sounds as `.flac` and holds a `.dds` and `.ogg` files.
 /// The World Editor's save drops such a file without a word (we-compare corpus-saves-wormwar, branch we-corpus-saves,
 /// 2026-11-20); this pack keeps it (the game reads a sound under its other extensions). An entry with the standard
 /// path flags (5, 8) names its file in the import folder or as listed; a `/` in a path is a `\`.
@@ -1198,7 +1209,7 @@ fn imports_under_other_extension(encoded: &BTreeMap<String, Vec<u8>>) -> Vec<Str
                 continue;
             }
             let held = forms.iter().filter(|f| *f != &stem(f)).find_map(|f| by_stem.get(&stem(f)).and_then(|v| v.first()));
-            if let Some(held) = held {
+            if let Some(held) = held.filter(|held| measured_swap(&path, held)) {
                 out.push(format!(
                     "{MAP_DIR}/{list} lists {path}, but the map holds it as {held}: this pack keeps the file, the World \
                      Editor's save drops it without a warning"
