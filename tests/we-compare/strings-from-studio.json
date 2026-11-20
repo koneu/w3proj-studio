@@ -1,0 +1,55 @@
+[
+  {
+    "name": "strings-from-studio-plain-names",
+    "description": "test.md 'Whether the World Editor accepts packed maps with the new player and force name strings' (branch we-script-items): plain-names-a.w3m (make-plain-names.mjs) packed by Studio, whose pack makes the plain player and force names strings (namestrings.ts), then opened and saved by the editor: its w3i and the names' lines of its string table against Studio's pack",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/plain-names-a.w3m" },
+    "we": { "from": "studio", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] },
+      { "file": "war3map.wts", "as": "text", "lines": "^(STRING [45]|Plain (player|force).*)$" }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "strings-from-studio-map-size",
+    "description": "test.md 'Whether the World Editor accepts the w3i string entries Studio adds on Map Size' (branch we-script-items): resize-strings.w3m (make-resize-objects.mjs strings) after Studio's Map Size (resize-strings-border's border), whose w3i texts become strings 3 to 11, packed by Studio, then opened and saved by the editor: its w3i and the texts' lines of its string table against Studio's pack",
+    "input": { "map": "${REPO}/tests/fixtures/we-specs/resize-strings.w3m" },
+    "we": { "from": "studio", "saveAccept": ["Warning"], "steps": [] },
+    "studio": {
+      "settings": { "mcp.writeTools": true, "mcp.confirmResize": false },
+      "steps": [{ "mcp": "save_project" }, { "mcp": "resize_map", "args": { "border": [7, 6, 4, 9] } }]
+    },
+    "compare": [
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["saves"] },
+      { "file": "war3map.wts", "as": "text", "lines": "^(STRING ([4-9]|1[01])|Just another Warcraft III map|Beliebig|Nondescript|Unknown|Loading (title|subtitle|text)|Plain (player|force))$" }
+    ],
+    "limit": 60
+  },
+  {
+    "name": "strings-from-studio-matrix",
+    "description": "test.md 'Matrix and CrazyHero (no war3map.wts; the pack now creates one)' (branch we-script-items): target/studio-paths/matrix.w3x (make-studio-paths.mjs: MatrixPCDefense_v4.3 with echo's trigger files, as the editor refuses it without a war3map.wtg; no war3map.wts) packed by Studio, whose pack writes a war3map.wts for the player and force names, then opened and saved by the editor. As studio-paths-matrix-masks the editor places start locations of its own at random (the map has none) and counts that as an edit, so the starts and saves differ and the masks are ignored; the string table's lines",
+    "input": { "map": "${REPO}/target/studio-paths/matrix.w3x" },
+    "we": { "from": "studio", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["version", "editorVersion", "gameVersion", "loadingScreen.crestRace", "terrainFog", "cameraZoom", "water", "playerHudSkins", "players[].hudSkin", "scriptType", "supportedModes", "gameDataVersion", "players[].enemyLow", "players[].enemyHigh", "players[].allyLow", "players[].allyHigh"], "tolerance": 0.01,
+        "expect": "differs", "expectPaths": ["saves", "players[].start"] },
+      { "file": "war3map.wts", "as": "text", "lines": "^(STRING ([2-9]|10)|Defender [1-8]|Horde|Defenders)$" }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "strings-from-studio-crazyhero",
+    "description": "as strings-from-studio-matrix: target/corpus-saves/zero-crazyherosiege.w3x (make-corpus-saves.mjs: CrazyHeroSiegeAI_v2.0 with flat.w3x's trigger files; no war3map.wts) packed by Studio, then opened and saved by the editor (its own random starts: corpus-saves-zero-crazyherosiege)",
+    "input": { "map": "${REPO}/target/corpus-saves/zero-crazyherosiege.w3x" },
+    "we": { "from": "studio", "saveAccept": ["Warning"], "steps": [] },
+    "studio": { "steps": [{ "mcp": "save_project" }] },
+    "compare": [
+      { "file": "war3map.w3i", "as": "parsed", "ignore": ["version", "editorVersion", "gameVersion", "loadingScreen.crestRace", "terrainFog", "cameraZoom", "water", "playerHudSkins", "players[].hudSkin", "scriptType", "supportedModes", "gameDataVersion", "players[].enemyLow", "players[].enemyHigh", "players[].allyLow", "players[].allyHigh"], "tolerance": 0.01,
+        "expect": "differs", "expectPaths": ["saves", "players[].start"] },
+      { "file": "war3map.wts", "as": "text", "lines": "^(STRING ([2-9]|10)|Hero [1-8]|Demon Horde|Heroes)$" }
+    ],
+    "limit": 40
+  }
+]
