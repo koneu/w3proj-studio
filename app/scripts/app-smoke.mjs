@@ -27,7 +27,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -96,6 +96,11 @@ function freePort() {
 
 const game = chosenGamePath();
 const installArgs = game ? ["--install", game] : [];
+
+/** worldEditorReal starts the real World Editor (we-launch.mjs, slot 0): only when asked for by name. The app is then
+ *  started with W3PROJ_WE_LAUNCH naming a wrapper of it (`ctl`: the folder it's driven through). */
+const REAL_WE = process.argv.includes("--only=worldEditorReal");
+const WE_REAL = { dir: join(work, "we-real"), ctl: join(work, "we-real", "ctl"), wrapper: join(work, "we-real", "we-launch.sh"), launcher: join(app, "scripts", "we-launch.mjs") };
 
 /** What World Editor 3.0.1 writes for a new map, by project file. */
 const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3c.json", "war3map.wtg.json", "war3map.wct.txt",
@@ -13417,6 +13422,129 @@ async function worldEditorSync(page, found) {
   }
 }
 
+/** Open in World Editor with the real editor: the app started with W3PROJ_WE_LAUNCH naming we-launch.mjs (a wrapper,
+ *  WE_REAL), which starts World Editor.exe on slot 0 in we-drive's sandbox (own display, no network, the game's files
+ *  read-only, Proton's runinprefix as the app uses) with the app's edit build itself. On a real map (cliff.w3m, imported
+ *  through the app) with two tabs open: the "● World Editor" mark while the editor loads, a save there (Ctrl+S, through
+ *  the control folder: we-launch's cmd/done files) asks "Sync changes into the project?" (project.syncOnWorldEditorSave
+ *  "ask"), Sync clicked brings the project up to date and the two tabs back, and the editor's close ends the mark (the
+ *  app's child is we-launch, which ends when the editor's Proton does). Runs only with --only=worldEditorReal (it holds
+ *  slot 0's lock for minutes); skipped with a message without the game, a slot farm or the map. */
+async function worldEditorReal(page, found) {
+  const fail = (what) => found.push(`World Editor (real): ${what}`);
+  const say = (m) => console.log(`  World Editor (real): ${m}`);
+  if (!REAL_WE) { console.log("World Editor (real): skipped, it starts the real World Editor on slot 0: run it with --only=worldEditorReal"); return; }
+  if (!LINUX) { console.log("World Editor (real): skipped, the World Editor runs in we-drive's sandbox, on Linux only"); return; }
+  const check = spawnSync(process.execPath, [WE_REAL.launcher, "--check", "--slot", "0"], { encoding: "utf8", timeout: 60000 });
+  let said = null;
+  try { said = JSON.parse(check.stdout.trim().split("\n").at(-1)); } catch { /* said below */ }
+  if (!said) return fail(`we-launch --check said: ${check.stdout}${check.stderr}`);
+  if (said.skipped) { console.log(`World Editor (real): skipped, ${said.skipped}`); return; }
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
+  if (!existsSync(map)) { console.log(`World Editor (real): skipped, ${map} isn't there`); return; }
+  const proj = join(WE_REAL.dir, "cliff"), ctl = WE_REAL.ctl;
+  rmSync(proj, { recursive: true, force: true });
+  rmSync(ctl, { recursive: true, force: true });
+  mkdirSync(ctl, { recursive: true });
+  const readCtl = (name) => { try { return JSON.parse(readFileSync(join(ctl, name), "utf8")); } catch { return null; } };
+  let sent = 0;
+  /** A step for the editor (we-launch's control folder), and its result. */
+  const step = async (name, ms) => {
+    const n = ++sent, tmp = join(ctl, `.cmd-${n}.tmp`);
+    writeFileSync(tmp, JSON.stringify({ step: name }));
+    renameSync(tmp, join(ctl, `cmd-${n}.json`));
+    return until(`the editor's ${name}`, () => readCtl(`done-${n}.json`) ?? (readCtl("exit.json") ? { error: `we-launch ended: ${readCtl("exit.json").why}` } : null), ms);
+  };
+  const mark = () => page.evaluate(`document.querySelector('.statusbar-item[data-id="w3.project.we"]')?.textContent ?? null`);
+  const toasts = () => page.evaluate(`[...document.querySelectorAll(".toast")].map((t) => ({ text: t.querySelector(".toast-body")?.textContent ?? "", asks: t.hasAttribute("data-asks") }))`);
+  const hands = new Hands(page);
+  const before = await page.evaluate(`({ sync: w3.settings.get("project.syncOnWorldEditorSave") ?? null })`);
+  const TABS = ["map/war3map.w3i.json", "map/war3mapUnits.doo.json"];
+  const t0 = Date.now(), at = () => `${((Date.now() - t0) / 1000).toFixed(1)} s`;
+  try {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${lit(map)}, dir: ${lit(proj)}, allowIncomplete: false, install: ${lit(game ?? gamePath(repo))} }); await w3.workspace.open(${lit(proj)}); })()`, { timeout: 300000 });
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${lit(proj)}`));
+    for (const t of TABS) await page.evaluate(`w3.editors.open(${lit(t)}, "w3.textEditor")`);
+    await until("the two tabs", () => page.evaluate(`${lit(TABS)}.every((t) => w3.editors.openPaths().includes(t))`), 30000);
+    await page.evaluate(`(async () => {
+      window.__weErrors = [];
+      window.__weKeptError = w3.window.showError;
+      w3.window.showError = (m, ...rest) => { window.__weErrors.push(String(m)); return window.__weKeptError(m, ...rest); };
+      await w3.settings.set("project.syncOnWorldEditorSave", "ask");
+      document.querySelectorAll(".toast").forEach((t) => t.remove());
+    })()`);
+    const err = await page.evaluate(`w3.commands.execute("w3.project.openInWorldEditor").then(() => null, (e) => String(e))`, { timeout: 300000 });
+    if (err) return fail(`Open in World Editor: ${err}`);
+    if (await mark() !== "● World Editor") fail(`with the editor starting the status bar shows ${lit(await mark())}`);
+    const started = await until("we-launch started the editor", () => readCtl("started.json") ?? (readCtl("exit.json") ? { gone: readCtl("exit.json") } : null), 15 * 60000);
+    if (started.gone) return fail(`we-launch ended before starting the editor: ${lit(started.gone)}`);
+    const ready = await until("the editor ready", () => readCtl("ready.json") ?? (readCtl("exit.json") ? { ready: false, gone: readCtl("exit.json") } : null), 10 * 60000);
+    if (!ready.ready) return fail(`the editor didn't get ready: ${lit(ready)}`);
+    say(`editor ready at ${at()} (${ready.readyMs} ms after its start, "${ready.title}")`);
+    if (await mark() !== "● World Editor") fail(`with the editor open the status bar shows ${lit(await mark())}`);
+
+    // A save in the editor: its Ctrl+S writes the edit build itself, which the app watches.
+    const QUESTION = "The World Editor saved the map. Sync changes into the project?";
+    // The control: opening (the edit build packed, the editor loading it) asked nothing.
+    if ((await toasts()).some((t) => t.text === QUESTION)) return fail("the Sync question came before the editor saved (control)");
+    const mapBefore = snapshot(join(proj, "map"));
+    const sentAt = Date.now();
+    const saved = await step("save", 10 * 60000);
+    if (!saved.saved) return fail(`the editor's save: ${lit(saved)}`);
+    say(`saved at ${at()} (${saved.bytes} bytes, written ${saved.writes?.[0]?.ms ?? "?"} ms after Ctrl+S; answered ${lit(saved.answered)})`);
+    const asked = await until("the Sync question", async () => (await toasts()).find((t) => t.text === QUESTION) ?? null, 120000)
+      .catch(async () => { fail(`no "Sync changes?" question after the editor's save; toasts: ${lit(await toasts())}`); return null; });
+    if (!asked) return;
+    say(`the question came ${Date.now() - sentAt} ms after Ctrl+S`);
+    await page.evaluate(`(() => { const t = [...document.querySelectorAll(".toast")].find((t) => t.querySelector(".toast-body")?.textContent === ${lit(QUESTION)}); const b = [...t.querySelectorAll(".toast-actions button")].find((b) => b.textContent === "Sync"); b.id = "we-real-sync"; })()`);
+    await hands.click("#we-real-sync");
+    const done = await until("the sync's answer", async () => {
+      const ts = await toasts();
+      const other = ts.find((t) => t.asks && t.text !== QUESTION);
+      if (other) return { other: other.text };
+      return ts.find((t) => /^Project (synced|already up to date)/.test(t.text)) ?? null;
+    }, 300000).catch(async () => ({ other: `nothing said; toasts: ${lit(await toasts())}` }));
+    if (done.other) return fail(`after Sync: ${done.other}`);
+    const mapAfter = snapshot(join(proj, "map"));
+    const changed = [...new Set([...mapBefore.keys(), ...mapAfter.keys()])].filter((f) => mapBefore.get(f) !== mapAfter.get(f)).sort();
+    say(`sync: "${done.text}" at ${at()}; changed in map/: ${changed.join(", ") || "nothing"}`);
+    const updated = Number(/(\d+) files updated/.exec(done.text)?.[1] ?? 0);
+    if (!updated) fail(`the editor's save changed nothing in the project ("${done.text}"): the tabs had nothing to come back from`);
+    await until("the tabs back", () => page.evaluate(`${lit(TABS)}.every((t) => w3.editors.openPaths().includes(t))`), 60000)
+      .catch(async () => fail(`after the sync the tabs are ${lit(await page.evaluate(`w3.editors.openPaths()`))}, not ${lit(TABS)}`));
+
+    // The editor closed: the mark ends.
+    const closed = await step("close", 5 * 60000);
+    if (!closed.closed) fail(`the editor's close: ${lit(closed)}`);
+    const closedAt = Date.now();
+    const exit = await until("we-launch's end", () => readCtl("exit.json"), 120000).catch(() => null);
+    if (!exit) fail("we-launch didn't end after the editor closed");
+    else say(`we-launch ended ${Date.now() - closedAt} ms after the close (${lit(exit)})`);
+    await until("the mark gone", async () => (await mark()) === "", 30000)
+      .catch(async () => fail(`after the editor closed the status bar still shows ${lit(await mark())}`));
+    say(`the mark went ${Date.now() - closedAt} ms after the close`);
+    const errors = await page.evaluate(`window.__weErrors`);
+    if (errors.length) fail(`errors shown: ${lit(errors)}`);
+  } finally {
+    // Nothing of the editor stays: an editor still running is killed (we-launch's kill step, else its process ended).
+    const started = readCtl("started.json");
+    if (started && !readCtl("exit.json")) {
+      const n = ++sent;
+      writeFileSync(join(ctl, `.cmd-${n}.tmp`), JSON.stringify({ step: "kill" }));
+      renameSync(join(ctl, `.cmd-${n}.tmp`), join(ctl, `cmd-${n}.json`));
+      const gone = await until("we-launch's end after the kill", () => readCtl("exit.json"), 60000).catch(() => null);
+      if (!gone) try { process.kill(started.pid, "SIGTERM"); } catch { /* gone */ }
+      await until("we-launch's end", () => readCtl("exit.json"), 60000).catch(() => fail(`we-launch (pid ${started.pid}) didn't end`));
+    }
+    await page.evaluate(`(async () => {
+      if (window.__weKeptError) w3.window.showError = window.__weKeptError;
+      await w3.settings.set("project.syncOnWorldEditorSave", ${lit(before.sync)} ?? undefined);
+      document.querySelectorAll(".toast").forEach((t) => t.remove());
+      await w3.editors.closeAll();
+    })()`).catch(() => {});
+  }
+}
+
 /** "Check with JassHelper" on a vJASS text (Trigger Editor), with the game's jasshelper.exe (through Proton on Linux):
  *  the text is compiled inside the map's script, so a library that requires another text's library and names a placed
  *  unit's global has no errors, where the same text alone has two (the control: what the check did before). An error
@@ -15938,6 +16066,16 @@ async function run() {
     "game.installDir": game ?? gamePath(repo), "game.askForFolder": false,
   }));
   const triggerData = join(repo, "tests", "fixtures", "TriggerData.txt");
+  // --only=worldEditorReal: "Open in World Editor" starts we-launch.mjs (the real editor in we-drive's sandbox) through a
+  // wrapper; the game's own TriggerData then, as for a user (the map goes to the real editor and comes back).
+  let appEnv = { W3PROJ_TRIGGERDATA: triggerData, ...configEnv };
+  if (REAL_WE && LINUX) {
+    mkdirSync(WE_REAL.dir, { recursive: true });
+    const sq = (s) => `'${s.replace(/'/g, "'\\''")}'`;
+    writeFileSync(WE_REAL.wrapper, `#!/bin/sh\nexec ${sq(process.execPath)} ${sq(WE_REAL.launcher)} --slot 0 --mode sd --ctl ${sq(WE_REAL.ctl)} --work ${sq(join(WE_REAL.dir, "we"))} -- "$@"\n`);
+    chmodSync(WE_REAL.wrapper, 0o755);
+    appEnv = { W3PROJ_WE_LAUNCH: WE_REAL.wrapper, ...configEnv };
+  }
   // Windows: the app's WebView2 over the DevTools Protocol. Linux: WebKitGTK over WebDriver (webdriver.mjs),
   // which gives a page that takes the same calls.
   let stop = async () => {}, exited = () => null, appStarted = false;
@@ -15945,7 +16083,7 @@ async function run() {
   try {
     let page;
     if (LINUX) {
-      const launched = await launch(exe, { W3PROJ_TRIGGERDATA: triggerData, ...configEnv });
+      const launched = await launch(exe, appEnv);
       ({ page, stop, exited } = launched);
       appStarted = true;
     } else {
@@ -16132,6 +16270,7 @@ async function run() {
         waterPathing,
         wholeMapGround,
         workbenchState,
+        worldEditorReal,
         worldEditorSync,
       };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
@@ -16352,6 +16491,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "vjassCheck", found);
   await worldEditorSync(page, found).catch((e) => found.push(`World Editor sync: ${e.message}`));
   await leftOpen(page, "worldEditorSync", found);
+  await worldEditorReal(page, found).catch((e) => found.push(`World Editor (real): ${e.message}`));
+  await leftOpen(page, "worldEditorReal", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
   await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
