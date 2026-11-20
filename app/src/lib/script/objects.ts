@@ -27,11 +27,18 @@ export function abilityOrders(tables: Iterable<Map<string, Map<string, string>>>
 }
 
 /** The orders of an ability placed switched on, a map's own ability's through its base (war3map.w3a and its Skin file):
- *  World Editor 2.0 writes "healon" for a custom ability based on Heal (we-drive, 2026-11-10). */
+ *  World Editor 2.0 writes "healon" for a custom ability based on Heal (we-drive, 2026-11-10), "slowoff" for one on Slow
+ *  switched off. A base with an Order/Unorder pair only (Defend, Searing Arrows) gives a custom ability none: the editor
+ *  writes "" for it, on or off (tests/we-compare/script-items.json), and "defend" / "flamingarrows" for the game's own. */
 export function autocastOrdersOf(orders: ReadonlyMap<string, AbilityOrders>, files: (ObjectFile | null | undefined)[]): (ability: string) => AbilityOrders | undefined {
   const bases = new Map<string, string>();
   for (const f of files) for (const o of f?.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
-  return (id) => orders.get(id) ?? orders.get(bases.get(id) ?? "");
+  return (id) => {
+    const own = orders.get(id);
+    if (own) return own;
+    const base = orders.get(bases.get(id) ?? "");
+    return base?.off !== undefined ? base : undefined;
+  };
 }
 
 /** The game's unit types that allow a custom team colour (the customTeamColor column of Units\unitUI.slk, parsed:

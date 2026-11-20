@@ -131,13 +131,9 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   }
   if (u.hp !== -1) lines.push(`    set life = GetUnitState( ${v}, UNIT_STATE_LIFE )`, `    call SetUnitState( ${v}, UNIT_STATE_LIFE, ${(u.hp / 100).toFixed(2)} * life )`);
   if (u.mana !== -1) lines.push(`    call SetUnitState( ${v}, UNIT_STATE_MANA, ${u.mana} )`);
-  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
-  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call). After the
-  // hero level and the mana (the game's maps: 308 times after the mana, 10 after the level, never before either).
-  if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
-  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
-  // The colour comes before the learned skills (World Editor, TestMapOrcCampaign's hero: SetHeroLevel, SetUnitColor,
-  // SelectHeroSkill); a waygate's stays after its destination (the game's maps).
+  // The colour comes after the mana and before the acquisition range and the learned skills (World Editor 2.0,
+  // tests/we-compare/script-items.json: a hero with level, attributes, life, mana, range and skills, a footman with
+  // life and range); a waygate's stays after its destination (the game's maps).
   const waygate = isWaygate(i, u.id);
   const pushColor = () => {
     const custom = i.customColor ? i.customColor(u.id) : waygate;
@@ -145,15 +141,25 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
   };
   if (!waygate) pushColor();
+  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
+  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call). After the
+  // hero level and the mana (the game's maps: 308 times after the mana, 10 after the level, never before either).
+  if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
+  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
+  // Only heroes (an id with a capital first letter, as the game tells them) learn skills: a footman's ability levels
+  // write none (World Editor 2.0, script-items.json; no map of the game's has SelectHeroSkill on another unit).
+  const hero = /^[A-Z]/.test(u.id);
   for (const a of u.abilities) {
-    for (let l = 0; l < a.level; l++) lines.push(`    call SelectHeroSkill( ${v}, '${a.id}' )`);
+    if (hero) for (let l = 0; l < a.level; l++) lines.push(`    call SelectHeroSkill( ${v}, '${a.id}' )`);
     // Autocast abilities are switched on or off as placed; a hero ability not learned (level 0) isn't.
     if (a.level === 0 && i.heroAbility?.(a.id)) continue;
     const orders = i.autocastOrders?.(a.id), order = a.autocast ? orders?.on : orders?.off;
     if (order) lines.push(`    call IssueImmediateOrder( ${v}, "${order}" )`);
-    // A learned custom ability without an autocast order gets an empty order (World Editor 2.0: TestMapOrcCampaign's
-    // XAC1 on Impale, Forsaken09's A649 and A65N, which no map file defines; the game's own abilities get none).
-    else if (!orders && a.level > 0 && i.customAbility?.(a.id)) lines.push(`    call IssueImmediateOrder( ${v}, "" )`);
+    // A custom ability without an autocast order gets an empty order, on or off, learned or not (World Editor 2.0:
+    // TestMapOrcCampaign's XAC1 on Impale, Forsaken09's A649 and A65N, which no map file defines; script-items.json:
+    // on Storm Bolt, Brilliance Aura, Pillage at level 0, and on Searing Arrows and Defend, whose Order/Unorder pair
+    // the editor doesn't take for a custom ability: autocastOrdersOf); the game's own abilities get none.
+    else if (!orders && i.customAbility?.(a.id)) lines.push(`    call IssueImmediateOrder( ${v}, "" )`);
   }
   for (const it of u.inventory) lines.push(`    call UnitAddItemToSlotById( ${v}, '${it.id}', ${it.slot} )`);
   // Other units store 0 here, and in the colour field: only waygates mean them.

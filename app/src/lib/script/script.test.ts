@@ -344,17 +344,48 @@ test("a type's team colour goes on placed units", () => {
   has(units([unit({ id: "ntav" })], { teamColor: () => 0 }), "    call SetUnitColor( u, ConvertPlayerColor(0) )");
 });
 
-test("a coloured hero's SetUnitColor comes after SetHeroLevel and before SelectHeroSkill", () => {
-  const s = units([unit({ id: "O61R", level: 10, abilities: [{ id: "XAC1", level: 1, autocast: 0 }] })], { teamColor: () => 3 });
-  const at = (t: string) => s.indexOf(t);
-  assert.ok(at("SetHeroLevel") < at("SetUnitColor") && at("SetUnitColor") < at("SelectHeroSkill"));
+test("a coloured unit's SetUnitColor comes after its mana and before its acquisition range and skills", () => {
+  // World Editor 2.0 (script-items.json): H000 with level, attributes, life, mana, range and skills; h000 with life and range.
+  const s = units([unit({ id: "O61R", level: 10, strength: 30, agility: 20, intelligence: 25, hp: 50, mana: 100, targetAcquisition: 500, abilities: [{ id: "XAC1", level: 1, autocast: 0 }] })], { teamColor: () => 3 });
+  const want = ["    call SetHeroInt( u, 25, true )", "    set life = GetUnitState( u, UNIT_STATE_LIFE )", "    call SetUnitState( u, UNIT_STATE_LIFE, 0.50 * life )",
+    "    call SetUnitState( u, UNIT_STATE_MANA, 100 )", "    call SetUnitColor( u, ConvertPlayerColor(3) )", "    call SetUnitAcquireRange( u, 500.0 )", "    call SelectHeroSkill( u, 'XAC1' )"].join(EOL);
+  assert.ok(s.includes(want), `not in this order:\n${s}`);
+  const f = units([unit({ id: "h000", hp: 80, targetAcquisition: 300 })], { teamColor: () => 7 });
+  assert.ok(f.includes(["    call SetUnitColor( u, ConvertPlayerColor(7) )", "    call SetUnitAcquireRange( u, 300.0 )"].join(EOL)), f);
 });
 
-test("a learned custom ability without an autocast order gets an empty order", () => {
-  const abilities = [{ id: "XAC1", level: 2, autocast: 0 }, { id: "AUav", level: 1, autocast: 0 }, { id: "XAC9", level: 0, autocast: 0 }];
-  const s = units([unit({ abilities })], { customAbility: (id: string) => id.startsWith("X") });
-  assert.equal(s.split('IssueImmediateOrder( u, "" )').length - 1, 1);
+test("only heroes learn skills: a unit's ability levels write no SelectHeroSkill", () => {
+  const abilities = [{ id: "Ahea", level: 1, autocast: 1 }];
+  has(units([unit({ id: "Hpal", abilities })]), "    call SelectHeroSkill( u, 'Ahea' )");
+  has(units([unit({ id: "H000", abilities })]), "    call SelectHeroSkill( u, 'Ahea' )");
+  hasNot(units([unit({ id: "hfoo", abilities })]), "SelectHeroSkill");
+  hasNot(units([unit({ id: "h000", abilities })]), "SelectHeroSkill");
+});
+
+test("a custom ability without an autocast order gets an empty order, learned or not, but a hero's unlearned one", () => {
+  const abilities = [{ id: "XAC1", level: 2, autocast: 0 }, { id: "AUav", level: 1, autocast: 0 }, { id: "XAC9", level: 0, autocast: 1 }];
+  const customAbility = (id: string) => id.startsWith("X");
+  const count = (s: string) => s.split('IssueImmediateOrder( u, "" )').length - 1;
+  // A footman's XAC9 at level 0 too (World Editor 2.0, script-items-2: h001's A00A on Pillage).
+  assert.equal(count(units([unit({ abilities })], { customAbility })), 2);
   hasNot(units([unit({ abilities })], {}), 'IssueImmediateOrder( u, "" )');
+  // A hero's unlearned hero ability gets none (script-items: H000's A004 on Divine Shield).
+  assert.equal(count(units([unit({ id: "H000", level: 3, abilities })], { customAbility, heroAbility: (id) => id === "XAC9" })), 1);
+});
+
+test("a custom ability on a base with only an Order/Unorder pair gets no autocast order", () => {
+  // World Editor 2.0 (script-items, script-items-2): "" for custom abilities on Searing Arrows and Defend, on or off;
+  // "flamingarrows" and "defend" for the game's own switched on, "healoff" for a custom one on Heal switched off.
+  const orders = autocastOrdersOf(new Map([["Ahea", { on: "healon", off: "healoff" }], ["AHfa", { on: "flamingarrows" }], ["Adef", { on: "defend" }]]),
+    [{ custom: [{ id: "A000", base: "AHfa" }, { id: "A001", base: "Adef" }, { id: "A002", base: "Ahea" }] }]);
+  assert.deepEqual([orders("AHfa"), orders("Adef"), orders("A000"), orders("A001"), orders("A002")],
+    [{ on: "flamingarrows" }, { on: "defend" }, undefined, undefined, { on: "healon", off: "healoff" }]);
+  const placed = (id: string, autocast: number) => units([unit({ id: "Emoo", level: 3, abilities: [{ id, autocast, level: 1 }] })], { autocastOrders: orders, customAbility: (a) => a.startsWith("A0") });
+  has(placed("AHfa", 1), '    call IssueImmediateOrder( u, "flamingarrows" )');
+  hasNot(placed("AHfa", 0), "IssueImmediateOrder");
+  has(placed("A000", 1), '    call IssueImmediateOrder( u, "" )');
+  has(placed("A001", 1), '    call IssueImmediateOrder( u, "" )');
+  has(placed("A002", 0), '    call IssueImmediateOrder( u, "healoff" )');
 });
 
 test("team colours: the game's, changed by the map, inherited by custom units", () => {
@@ -998,18 +1029,36 @@ test("a sound's length comes from outside, if known", () => {
   hasNot(soundSection({}), "SetSoundDuration");
 });
 
-test("dialogue keys: all of a spoken dialogue, else those set from editor 7000 on", () => {
-  const keys = (extra: object, editorVersion = 6127) => soundSection({ dialogueTextKey: 60, speakerNameKey: -1, speakerUnitType: "", unknown2: 1, ...extra }, { info: info({ editorVersion }) });
-  // Undead04 / HumanX04 of editor 6127: nothing; the same sounds in the 7003 versions: the key set.
+test("dialogue keys: both on a sound with a facial animation label, else those set by editor 7000 before build 24371", () => {
+  const keys = (extra: object, editorVersion = 6127, build?: number) => soundSection({ dialogueTextKey: 60, speakerNameKey: -1, speakerUnitType: "", unknown2: 1, ...extra },
+    { info: info({ editorVersion, ...(build ? { gameVersion: [1, 32, 0, build] } : {}) }) });
+  const facial = { facialAnimationLabel: "S04Huntress03", facialAnimationGroupLabel: "Map-Huntress" };
+  // Undead04 / HumanX04 of editor 6127: nothing; the same sounds in the 7003 versions (before build 24371): the key set.
   hasNot(keys({}), "SetDialogue");
   has(keys({}, 7003), '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_60" )');
   hasNot(keys({}, 7003), "SetDialogueSpeakerNameKey");
-  // OrcX02_02: a speaker unit type with the word at 0 writes both keys, -1 too.
-  const spoken = keys({ dialogueTextKey: -1, speakerNameKey: 370, speakerUnitType: "Hjai", unknown2: 0 });
-  has(spoken, '    call SetDialogueSpeakerNameKey( gg_snd_S, "TRIGSTR_370" )');
-  has(spoken, '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_-1" )');
-  // A sound with the word at 0 and no dialogue (Studio's Sound Editor made such sounds before 2026-11): nothing.
-  hasNot(keys({ dialogueTextKey: -1, unknown2: 0 }, 7003), "SetDialogue");
+  // World Editor 2.0 (build 24371, script-items-2): none without the label, whatever the speaker and the word say.
+  hasNot(keys({}, 7003, 24371), "SetDialogue");
+  hasNot(keys({ dialogueTextKey: -1, speakerNameKey: 903, speakerUnitType: "Hjai", unknown2: 0 }, 7003, 24371), "SetDialogue");
+  // The label writes both, -1 too (OrcX02_02 of editor 6127; script-items-2's FacialTextOnly and FacialNoKeys).
+  for (const [ev, build] of [[6127, undefined], [7003, 24371]] as const) {
+    const spoken = keys({ ...facial, dialogueTextKey: -1, speakerNameKey: 370, speakerUnitType: "Hjai", unknown2: 0 }, ev, build);
+    has(spoken, '    call SetDialogueSpeakerNameKey( gg_snd_S, "TRIGSTR_370" )');
+    has(spoken, '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_-1" )');
+    const none = keys({ ...facial, dialogueTextKey: -1 }, ev, build);
+    has(none, '    call SetDialogueSpeakerNameKey( gg_snd_S, "TRIGSTR_-1" )');
+    has(none, '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_-1" )');
+  }
+});
+
+test("a sound's facial animation group and file are written only with its label", () => {
+  const all = soundSection({ facialAnimationLabel: "S04Huntress03", facialAnimationGroupLabel: "Map-Huntress", facialAnimationSetFile: "a.animset" });
+  has(all, '    call SetSoundFacialAnimationLabel( gg_snd_S, "S04Huntress03" )');
+  has(all, '    call SetSoundFacialAnimationGroupLabel( gg_snd_S, "Map-Huntress" )');
+  has(all, '    call SetSoundFacialAnimationSetFilepath( gg_snd_S, "a.animset" )');
+  // World Editor 2.0 (script-items-2's FacialGroupOnly and FacialFileOnly): neither alone.
+  hasNot(soundSection({ facialAnimationGroupLabel: "Map-Huntress" }), "SetSoundFacial");
+  hasNot(soundSection({ facialAnimationSetFile: "a.animset" }), "SetSoundFacial");
 });
 
 test("the script's sound lengths: per sound, so sounds of one unreadable file keep their own (Roundabout)", () => {

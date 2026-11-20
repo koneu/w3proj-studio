@@ -288,16 +288,19 @@ export function sounds(i: ScriptInput): string {
     const f = (bit: number) => ((s.flags & bit) !== 0 ? "true" : "false");
     lines.push(`    set ${n} = CreateSound( ${str(s.file)}, ${f(1)}, ${f(2)}, ${f(4)}, ${s.fadeInRate}, ${s.fadeOutRate}, ${str(s.eaxEffect)} )`);
     if (s.assetLabel && s.assetLabel !== "") lines.push(`    call SetSoundParamsFromLabel( ${n}, ${str(s.assetLabel)} )`);
-    // A facial animation label without its group isn't written.
+    // A facial animation label without its group isn't written; the group and the file without the label aren't either
+    // (World Editor 2.0, tests/we-compare/script-items.json script-items-2; no map of the game's has them alone).
+    const facial = !!s.facialAnimationLabel;
     if (s.facialAnimationLabel && s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationLabel( ${n}, ${str(s.facialAnimationLabel)} )`);
-    if (s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationGroupLabel( ${n}, ${str(s.facialAnimationGroupLabel)} )`);
-    if (s.facialAnimationSetFile) lines.push(`    call SetSoundFacialAnimationSetFilepath( ${n}, ${str(s.facialAnimationSetFile)} )`);
-    // The dialogue keys, by the word after the facial animation file ("unknown2"), as counted over the game's maps:
-    // 0 on a dialogue (a speaker unit type or a key set) writes both as they are, -1 too (OrcX02_02); otherwise the
-    // keys set are written from editor 7000 on, none before (Undead04, HumanX04 in their 6127 and 7003 versions).
-    // The game's maps have no 0 on a sound without a dialogue: the Sound Editor gives a new sound 1, as they have.
-    const spoken = s.unknown2 === 0 && (!!s.speakerUnitType || (s.speakerNameKey ?? -1) >= 0 || (s.dialogueTextKey ?? -1) >= 0);
-    const dialogue = (key: number | undefined) => key !== undefined && (spoken || (editorVersion(i) >= 7000 && key >= 0));
+    if (facial && s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationGroupLabel( ${n}, ${str(s.facialAnimationGroupLabel)} )`);
+    if (facial && s.facialAnimationSetFile) lines.push(`    call SetSoundFacialAnimationSetFilepath( ${n}, ${str(s.facialAnimationSetFile)} )`);
+    // The dialogue keys: both, -1 too, on a sound with a facial animation label, none on another, whatever its speaker
+    // unit type, keys and the word after the facial animation file ("unknown2") say (World Editor 2.0, script-items-2:
+    // the word 0 with a speaker unit type and keys wrote nothing; the label with no keys TRIGSTR_-1 twice). The game's
+    // maps agree (7280 sounds), but for HumanX04's three of editor 7003 before build 24371, which wrote the keys set
+    // without a label (its 6127 version none).
+    const keysSet = editorVersion(i) >= 7000 && (gameBuild(i) ?? 0) < 24371;
+    const dialogue = (key: number | undefined) => key !== undefined && (facial || (keysSet && key >= 0));
     if (dialogue(s.speakerNameKey)) lines.push(`    call SetDialogueSpeakerNameKey( ${n}, "TRIGSTR_${s.speakerNameKey}" )`);
     if (dialogue(s.dialogueTextKey)) lines.push(`    call SetDialogueTextKey( ${n}, "TRIGSTR_${s.dialogueTextKey}" )`);
     const duration = i.soundDuration?.(s.file, n);
