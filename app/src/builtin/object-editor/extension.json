@@ -86,7 +86,7 @@
     "configuration": {
       "title": "Object Editor",
       "properties": {
-        "objectEditor.allowNegativeReals": { "type": "boolean", "default": false, "description": "Allow negative real values: fields the game reads as unsigned reals (unreal) take values below 0, typed or set by a tool. Off, as in the World Editor, such a value is refused." }
+        "objectEditor.allowNegativeReals": { "type": "boolean", "default": false, "description": "Allow negative real values: fields the game reads as unsigned reals (unreal) take values below 0, typed or set by a tool. Off, as in the World Editor, such a value is refused. On goes beyond the World Editor, whose own checkbox changes nothing in its Edit and Auto Fill dialogs." }
       }
     }
   }
