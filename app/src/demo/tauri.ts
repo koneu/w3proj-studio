@@ -6,6 +6,12 @@
 
 const samples = import.meta.glob("./sample/**/*", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
+// The made-up trigger definitions (src/demo/gamedata, in the format of the game's UI/TriggerData.txt and its strings): the
+// only "game files" the demo has. Everything else under game_read is refused, so icons and unit names stay unavailable.
+const gameData = import.meta.glob("./gamedata/*.txt", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const gameFiles = new Map(Object.entries(gameData).map(([k, v]) => [k.slice("./gamedata/".length).toLowerCase(), enc0(v)]));
+function enc0(text: string) { return new TextEncoder().encode(text); }
+
 export const ROOT = "/demo/sample-map";
 export const SETTINGS = "/demo/config/settings.json";
 const NEEDS = "This needs the desktop app: it isn't available in the web demo.";
@@ -61,6 +67,13 @@ const handlers: Record<string, Handler> = {
   game_maps_folder: () => null,
   mcp_clients: () => [],
   mcp_serve: () => undefined,
+  // The three made-up UI files (TriggerData, TriggerStrings, WorldEditStrings); anything else needs the desktop app.
+  game_read: ({ path }) => {
+    const name = norm(String(path)).split("/").pop()!.toLowerCase();
+    const bytes = norm(String(path)).toLowerCase().startsWith("ui/") ? gameFiles.get(name) : undefined;
+    if (!bytes) { refused.game_read = (refused.game_read ?? 0) + 1; throw `${NEEDS} (game_read ${path})`; }
+    return bytes.slice().buffer;
+  },
   project_open: ({ path }) => {
     const root = norm(String(path)).replace(/\/w3proj\.toml$/, "");
     if (root !== ROOT) throw `${path}: only the sample project can be opened in the web demo`;
