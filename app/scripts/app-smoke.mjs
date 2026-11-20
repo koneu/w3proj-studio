@@ -2831,6 +2831,43 @@ async function objectListSuffix(page, found) {
   } finally { await page.evaluate(`w3.editors.closeAll()`).catch(() => {}); await restoreWindow(page); }
 }
 
+/** The Object Editor watches the raw Skin file it reads (war3mapSkin.w3u, when the project holds no .json one): a hooked
+ *  raw write of it reopens the editor with the new name. Control: the same write that skips the hook (the Tauri invoke
+ *  itself) leaves the editor, its DOM node and its name alone. */
+async function objectEditorRawSkin(page, found) {
+  const fail = (what) => found.push(`object editor raw skin: ${what}`);
+  const k = await heightKit(page, "OeRawSkin");
+  try {
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Raw Skin Main" })).id;
+    await k.save();
+    const skin = (name) => JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: unit, mods: [{ field: "unam", type: "string", value: name }] }] });
+    const write = (name, hooked) => page.evaluate(`(async () => {
+      const args = { root: w3.workspace.project().root, path: "map/war3mapSkin.w3u", text: ${lit(skin(name))} };
+      if (${hooked}) await w3.backend.invoke("codec_write", args); else await window.__TAURI_INTERNALS__.invoke("codec_write", args);
+    })()`);
+    // The project holds the raw Skin file alone (the editor reads the .json one when there is one).
+    rmSync(join(k.root, "map", "war3mapSkin.w3u.json"), { force: true });
+    await write("Raw Skin One", true);
+    await page.evaluate(`w3.workspace.refresh()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${lit(unit)})`);
+    const ed = `[...document.querySelectorAll(".object-editor")].find((d) => d.offsetParent !== null)`;
+    const rowText = () => page.evaluate(`[...(${ed}?.querySelectorAll(".obj-item") ?? [])].find((x) => x.querySelector("code")?.textContent === ${lit(unit)})?.querySelector("span")?.textContent ?? null`);
+    await until("the unit with the raw Skin name", async () => (await rowText()) === "Raw Skin One", 30000).catch(async () => fail(`the editor shows ${lit(await rowText())}`));
+    await page.evaluate(`window.__oeNode = ${ed}`);
+    const same = () => page.evaluate(`window.__oeNode === ${ed}`);
+    await write("Raw Skin Hidden", false);
+    await new Promise((r) => setTimeout(r, 2500));
+    if (!(await same()) || (await rowText()) !== "Raw Skin One") fail("a write that skips the hook changed the editor (control)");
+    await write("Raw Skin Two", true);
+    await until("the reopened editor", async () => !(await same()) && (await rowText()) === "Raw Skin Two", 20000)
+      .catch(async () => fail(`a hooked raw Skin write didn't reopen the editor (same node ${await same()}, name ${lit(await rowText())})`));
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+    await restoreWindow(page);
+  }
+}
+
 /** The Object Editor's pickers list standard units as "Name - Editor Suffix" (the game's suffix, read from its profile
  *  table: nmr3 is a Mercenary Camp "(Lordaeron Winter)"), for "Edit standard…" and "New … based on…", and the search
  *  box finds a row by its suffix word. */
@@ -16026,6 +16063,7 @@ async function run() {
         objectListSuffix,
         objectManagerLive,
         objectManagerSkin,
+        objectEditorRawSkin,
         objectPickerSuffix,
         objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
@@ -16372,6 +16410,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
   await leftOpen(page, "objectManagerLive", found);
+  await objectEditorRawSkin(page, found).catch((e) => found.push(`object editor raw skin: ${e.message}`));
+  await leftOpen(page, "objectEditorRawSkin", found);
   await objectManagerSkin(page, found).catch((e) => found.push(`object manager skin: ${e.message}`));
   await leftOpen(page, "objectManagerSkin", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));

@@ -72,6 +72,36 @@ test("check_path movement: float is stopped by land (0x40), walk by what can't b
   assert.equal(await ok(NO_WATER), true);
 });
 
+test("check_path float: deep water (0x02 only) is sailed, the ground's own no-walk cells aren't a blocker for a ship", async () => {
+  const t = parseW3e(w3eFromText(terrainText));
+  const from: [number, number] = [t.offsetX + 2 * 32, t.offsetY + 4 * 32], to: [number, number] = [t.offsetX + 14 * 32, t.offsetY + 4 * 32];
+  /** A column of `flag` cells; blockers() as the real sources give them: with the ground's no-walk cells (Occupancy.build)
+   *  unless objectsOnly (Occupancy.mask), and `standing` cells for what is placed. */
+  const lake = (flag: number, standing: number[] = []): WalkSource => {
+    const cells = new Uint8Array(16 * 8);
+    for (let y = 0; y < 8; y++) cells[y * 16 + 8] = flag;
+    return {
+      ...source([], []),
+      pathing: async () => ({ cells, width: 16, height: 8 }),
+      blockers: async (objectsOnly) => { const b = new Uint8Array(16 * 8); for (let i = 0; i < b.length; i++) if ((!objectsOnly && cells[i] & NO_WALK) || standing.includes(i)) b[i] = 1; return b; },
+    };
+  };
+  const ok = async (src: WalkSource, movement?: "walk" | "float") => (await pathReport(src, from, to, 0, movement)).walkable;
+  // Deep water: walk is blocked, float crosses (the report's start isn't "inside something that blocks" either).
+  assert.equal(await ok(lake(NO_WALK), "walk"), false);
+  assert.equal(await ok(lake(NO_WALK), "float"), true);
+  assert.equal((await walkGrid(lake(NO_WALK), "float")).blocked.every((b) => b === 0), true);
+  // Shallow ford (no flags): both cross.
+  assert.equal(await ok(lake(0), "walk"), true);
+  assert.equal(await ok(lake(0), "float"), true);
+  // Land: float blocked, walk not.
+  assert.equal(await ok(lake(NO_WATER), "float"), false);
+  assert.equal(await ok(lake(NO_WATER), "walk"), true);
+  // A placed object in the water stops a ship (control: the objects still count).
+  const wall = Array.from({ length: 8 }, (_, y) => y * 16 + 8);
+  assert.equal(await ok(lake(NO_WALK, wall), "float"), false);
+});
+
 /** A project with these files (path → text); `broken` are listed but can't be read. */
 function project(files: Record<string, string>, broken: string[] = []) {
   return {
@@ -92,6 +122,9 @@ test("the saved project's source: no placement files is no objects; one that is 
   const src = await projectWalkSource(project({ "map/war3map.w3e.txt": terrainText }), opts);
   assert.deepEqual(src.list(), []);
   assert.equal(src.terrain.width, 5);
+  // The real source's objects-only blockers (ships): no objects, so nothing blocks (control: it runs and has the grid's size).
+  const only = await src.blockers(true).catch((e) => e);
+  assert.ok(only instanceof Uint8Array && only.length === 16 * 8 && only.every((b) => b === 0), String(only));
   await assert.rejects(projectWalkSource(project({ "map/war3map.w3e.txt": terrainText }, ["map/war3mapUnits.doo.json"]), opts), /can't read/);
   await assert.rejects(projectWalkSource(project({}), opts), /no terrain/);
 });

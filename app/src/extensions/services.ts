@@ -370,7 +370,8 @@ export interface TerrainObjects {
   backdrop(kind: string, x: number, y: number): boolean;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
    *  walking unit. Unlike occupancy(), units and items don't count. */
-  blockers(): Promise<Uint8Array>;
+  blockers(objectsOnly?: boolean): Promise<Uint8Array>;
+  /* objectsOnly: leave out the ground's own no-walk cells (a ship sails deep water that isn't walkable). */
   /** How long a type's model is, in world units, and whether that's along x at facing 0, so which
    *  way it has to turn to run along a line. Null without a model. */
   modelShape(id: string): Promise<{ length: number; alongX: boolean } | null>;

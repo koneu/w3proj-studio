@@ -616,7 +616,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const walkSource = (handle: TerrainEditorHandle): WalkSource => ({
     terrain: handle.terrain,
     pathing: () => handle.pathing(),
-    blockers: () => handle.objects.blockers(),
+    blockers: (objectsOnly) => handle.objects.blockers(objectsOnly),
     list: () => handle.objects.list() as unknown as Placed[],
     baseOf: (id) => handle.objects.baseOf(id),
   });
@@ -4843,14 +4843,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 redraw();
               }).catch(() => { renderer.ghost = null; redraw(); });
             },
-            blockers: () => (walkPromise ??= (async () => {
-              pathingData = pathing();
-              const data = await pathingData;
-              // Units walk off and items are walked over: of those, only buildings stay in the way.
-              const buildings = (unitsFile?.list ?? []).filter((e) => data.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" }));
-              const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
-              return (await Occupancy.build(terrain, data, placed)).blocked;
-            })()),
+            blockers: (objectsOnly) => {
+              const blocked = async () => {
+                pathingData = pathing();
+                const data = await pathingData;
+                // Units walk off and items are walked over: of those, only buildings stay in the way.
+                const buildings = (unitsFile?.list ?? []).filter((e) => data.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" }));
+                const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
+                return objectsOnly ? Occupancy.mask(terrain, data, placed) : (await Occupancy.build(terrain, data, placed)).blocked;
+              };
+              return objectsOnly ? blocked() : (walkPromise ??= blocked());
+            },
             standing: () => (standingPromise ??= (async () => {
               pathingData = pathing();
               const data = await pathingData;
