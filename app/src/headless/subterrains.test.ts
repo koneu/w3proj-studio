@@ -15,11 +15,13 @@ import { parseW3e, writeW3e } from "../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../lib/terrain/w3etext";
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { projectWalkSource } from "../builtin/terrain-viewer/meleefacts";
-import { loadPlacedFile, savePlacedFile } from "../builtin/terrain-viewer/placement";
+import { loadPlacedFile, newEntry, savePlacedFile } from "../builtin/terrain-viewer/placement";
+import { loadIdLayout } from "../lib/terrain/creationids";
+import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { FLAT_FILES, isSplit, mergeTerrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { checkTerrainIds, FLAT_FILES, isSplit, mergeTerrain, splitTerrain } from "../builtin/terrain-layout/index";
 
 const cache = join(repoPath("app", "node_modules"), ".cache", "w3-layout-test");
 mkdirSync(cache, { recursive: true });
@@ -163,6 +165,95 @@ test("merge puts the flat files back, and the project reads as before", async ()
   const a = snapshot(flatRoot), b = snapshot(gridRoot);
   assert.deepEqual(changedFiles(a, b), []);
   await assert.rejects(mergeTerrain(grid, { quiet: true }), /isn't split/);
+});
+
+// ---- creation numbers (lib/terrain/creationids.ts over the real backend: terrain_id_layout, write_flat, terrain_check) ----
+
+/** A new split 2×2 copy of the mini map (5×3 corners at -128, -64: sw x < 128, y < 64; ne x >= 128, y >= 64; ranges sw
+ *  10000, se 20000, nw 30000, ne 40000), opened. */
+async function splitProject(name: string): Promise<{ w3: W3Api; root: string }> {
+  const root = project(name);
+  const w3 = await open(root);
+  await splitTerrain(w3, { layout: "2x2", quiet: true });
+  return { w3, root };
+}
+const SW = [-50, -30, 0] as [number, number, number], NE = [300, 200, 0] as [number, number, number];
+const idOf = (e: unknown) => (e as { editorId: number }).editorId;
+const subUnits = (root: string, sub: string) => (JSON.parse(readFileSync(join(root, "map", "terrain", sub, "units.json"), "utf8")).units as { editorId: number }[]).map((u) => u.editorId);
+
+/** Places a unit as the terrain editor does (newEntry into the loaded file) and saves the file. */
+async function placeUnits(w3: W3Api, at: [number, number, number][]): Promise<number[]> {
+  const f = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!;
+  const made = at.map((p) => newEntry(f, "hfoo", p, 0, "w3u"));
+  f.list.push(...made);
+  await savePlacedFile(w3, f);
+  return made.map(idOf);
+}
+
+test("a new object in a split project is numbered from its subterrain's range and saved there; a flat project's as before", async () => {
+  const { w3, root } = await splitProject("ids");
+  assert.deepEqual(await placeUnits(w3, [SW, NE, SW]), [10000, 40000, 10001]);
+  assert.deepEqual(subUnits(root, "sw"), [2, 10000, 10001], "the footman (2) and the new ones in sw");
+  assert.deepEqual(subUnits(root, "ne"), [40000]);
+  // Doodads are their own namespace; a region is numbered by its minimum corner's subterrain.
+  const doo = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+  assert.equal(idOf(newEntry(doo, "LTlt", [NE[0], NE[1], 0])), 40000);
+  const layout = await loadIdLayout(w3);
+  assert.ok(layout && doo.idLayout === layout, "one layout object for every allocation of the project");
+  const regions = await readMapDocStrict<{ regions: { index: number }[] }>(w3, "map/war3map.w3r.json");
+  assert.equal(nextRegionIndex(regions!.regions, layout, [-100, 100]), 30000, "nw holds (-100, 100)");
+  // Moved over the seam, the number stays and the object changes file; Check Terrain IDs reports it as information.
+  const f = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!;
+  const moved = f.list.find((u) => idOf(u) === 40000)!;
+  moved.position = [-60, -40, 0];
+  await savePlacedFile(w3, f);
+  assert.deepEqual([subUnits(root, "sw"), subUnits(root, "ne")], [[2, 10000, 10001, 40000], []]);
+  const report = await checkTerrainIds(w3, { quiet: true });
+  assert.equal(report.errors, false, report.lines.join("\n"));
+  assert.deepEqual(report.outside.filter((o) => o.kind === "units"), [{ subterrain: "sw", kind: "units", count: 2, examples: [2, 40000] }]);
+  // The control: the flat project numbers one past the highest (the footman's 2).
+  assert.deepEqual(await placeUnits(flat, [SW]), [3]);
+  assert.equal((await loadPlacedFile(flat, "war3mapUnits.doo", "units"))!.idLayout, null);
+  await assert.rejects(checkTerrainIds(flat, { quiet: true }), /isn't split/);
+});
+
+test("a full range: the next block above every range, recorded in terrain.json by the save", async () => {
+  const { w3, root } = await splitProject("full");
+  const path = join(root, "map", "terrain", "terrain.json");
+  writeFileSync(path, readFileSync(path, "utf8").replace("\"idRange\": [10000, 19999]", "\"idRange\": [10000, 10001]"));
+  await w3.workspace.refresh();
+  assert.deepEqual(await placeUnits(w3, [SW, SW, SW]), [10000, 10001, 50000]);
+  const sw = (JSON.parse(readFileSync(path, "utf8")) as { subterrains: { name: string; idRange: unknown }[] }).subterrains.find((s) => s.name === "sw");
+  assert.deepEqual(sw?.idRange, [[10000, 10001], [50000, 59999]]);
+  // Read again, the layout has it: the next unit in sw goes on in it; one in ne stays in ne's own range.
+  await w3.workspace.refresh();
+  assert.deepEqual((await loadIdLayout(w3))!.subterrains[0].idRanges, [[10000, 10001], [50000, 59999]]);
+  assert.deepEqual(await placeUnits(w3, [SW, NE]), [50001, 40000]);
+  assert.equal((await checkTerrainIds(w3, { quiet: true })).errors, false);
+});
+
+test("two branches placing in different subterrains merge without a duplicate number; in the same one they collide (the control)", async () => {
+  const a = await splitProject("branch-a"), b = await splitProject("branch-b");
+  assert.deepEqual(await placeUnits(a.w3, [SW]), [10000]);
+  assert.deepEqual(await placeUnits(b.w3, [NE]), [40000]);
+  // The merge: b changed ne/units.json only, a sw/units.json only, so git takes both files as they are.
+  assert.deepEqual(changedFiles(snapshot(a.root), snapshot(b.root)), ["map/terrain/ne/units.json", "map/terrain/sw/units.json"], "terrain.json and the rest alike");
+  cpSync(join(b.root, "map", "terrain", "ne", "units.json"), join(a.root, "map", "terrain", "ne", "units.json"));
+  await a.w3.workspace.refresh();
+  const merged = (await loadPlacedFile(a.w3, "war3mapUnits.doo", "units"))!;
+  assert.deepEqual(merged.list.map(idOf).sort(), [10000, 2, 40000].sort());
+  assert.equal((await checkTerrainIds(a.w3, { quiet: true })).errors, false);
+  // The control: b places in sw too and gets a's number; a merge of both entries is a duplicate, refused on load and listed.
+  assert.deepEqual(await placeUnits(b.w3, [SW]), [10000]);
+  const swA = JSON.parse(readFileSync(join(a.root, "map", "terrain", "sw", "units.json"), "utf8"));
+  const swB = JSON.parse(readFileSync(join(b.root, "map", "terrain", "sw", "units.json"), "utf8"));
+  swA.units.push(swB.units.find((u: { editorId: number }) => u.editorId === 10000));
+  writeFileSync(join(a.root, "map", "terrain", "sw", "units.json"), JSON.stringify(swA, null, 2) + "\n");
+  await a.w3.workspace.refresh();
+  await assert.rejects(loadPlacedFile(a.w3, "war3mapUnits.doo", "units"), /creation number 10000 twice/);
+  const report = await checkTerrainIds(a.w3, { quiet: true });
+  assert.equal(report.errors, true);
+  assert.deepEqual(report.duplicates, [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"] }]);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

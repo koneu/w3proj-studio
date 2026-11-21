@@ -6027,6 +6027,25 @@ async function subterrains(page, found) {
     const layout = JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8"));
     const ne = layout.subterrains.find((s) => s.name === "ne");
     const at = (c, i) => layout.offset[i] + 128 * c;
+    // A unit placed in the south-west and one in the north-east subterrain (the AI tool, as the palette would): numbered
+    // from each one's idRange (lib/terrain/creationids.ts), saved into each one's units.json.
+    {
+      const sw = layout.subterrains.find((s) => s.name === "sw");
+      const centre = (s) => ({ x: at(s.x + Math.floor(s.w / 2), 0), y: at(s.y + Math.floor(s.h / 2), 1) });
+      const unitsOf = (s) => JSON.parse(readFileSync(join(map, "terrain", s.folder, "units.json"), "utf8")).units.map((u) => u.editorId);
+      const had = { sw: unitsOf(sw), ne: unitsOf(ne) };
+      for (const s of [sw, ne]) await tool("place_objects", { objects: [{ id: "hfoo", ...centre(s), player: 1 }], ignoreRoom: true });
+      await tool("save_project");
+      await settled(page);
+      for (const s of [sw, ne]) {
+        const added = unitsOf(s).filter((n) => !had[s.name].includes(n));
+        const [lo, hi] = s.idRange;
+        if (added.length !== 1 || !(added[0] >= lo && added[0] <= hi)) fail(`the unit placed in ${s.name} got ${lit(added)}, not one number from its idRange ${lo}–${hi}`);
+      }
+      if (existsSync(join(map, "war3mapUnits.doo.json"))) fail("the units' save wrote a flat map/war3mapUnits.doo.json next to the subterrains");
+      const checked = await page.evaluate(`w3.commands.execute("w3.terrainLayout.checkIds", { quiet: true }).then((r) => ({ errors: r.errors, numbers: r.numbers }), (e) => String(e?.message ?? e))`);
+      if (typeof checked === "string" || checked.errors || checked.numbers < 2) fail(`Check Terrain IDs after placing gave ${lit(checked)}`);
+    }
     // A tile the map has already: terrain.json (the palette) stays as it is.
     const tile = layout.ground[layout.ground.length > 1 ? 1 : 0];
     before = snapshot(map);

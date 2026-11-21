@@ -3,11 +3,12 @@
   "name": "Subterrains",
   "version": "0.1.0",
   "description": "Splits the map's terrain and placed objects into subterrains (map/terrain/: one folder per rectangle, so several people can edit different parts of a large map and merge in git), and merges them back into the single files. The map is the same either way; every editor reads and saves it as before.",
-  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge"],
+  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds"],
   "contributes": {
     "commands": [
       { "id": "w3.terrainLayout.split", "when": "project", "title": "Split Terrain into Subterrains…", "category": "Terrain" },
-      { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" }
+      { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" },
+      { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" }
     ]
   }
 }

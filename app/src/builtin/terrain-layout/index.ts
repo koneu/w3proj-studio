@@ -6,9 +6,10 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { checkpointOrStop } from "../../lib/checkpoint";
 import { errorText } from "../../lib/oserror";
+import { LAYOUT_FILE } from "../../lib/terrain/creationids";
 
 /** The project's layout file when its terrain is split. */
-export const LAYOUT_FILE = "map/terrain/terrain.json";
+export { LAYOUT_FILE };
 /** The flat files the split layout stands for (terrain_layout.rs FLAT_NAMES). */
 export const FLAT_FILES = ["map/war3map.w3e.txt", "map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json"];
 
@@ -88,8 +89,48 @@ export async function mergeTerrain(w3: W3Api, arg?: { quiet?: boolean }): Promis
   return convert(w3, "Merge Subterrains", (root) => w3.backend.invoke<Converted>("terrain_merge", { root }), arg?.quiet === true);
 }
 
+/** What Check Terrain IDs found (terrain_ids.rs Report, backend flatview.rs check). */
+export interface IdCheck {
+  duplicates: { kind: string; number: number; files: string[] }[];
+  overlaps: { a: string; aRange: [number, number]; b: string; bRange: [number, number] }[];
+  /** Information only: moved objects and imported maps have numbers outside their subterrain's ranges. */
+  outside: { subterrain: string; kind: string; count: number; examples: number[] }[];
+  numbers: number;
+  /** A number twice or ranges that overlap. */
+  errors: boolean;
+  /** The report as text, as `w3proj terrain check` prints it. */
+  lines: string[];
+}
+
+/** Check Terrain IDs: creation numbers found twice per kind, overlapping id ranges (errors), numbers outside their
+ *  subterrain's ranges (information), as `w3proj terrain check`. The report goes to the Subterrains output; a message
+ *  says the outcome. Rejects when the terrain isn't split or its files can't be read. */
+export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Promise<IdCheck> {
+  const project = w3.workspace.project();
+  if (!project) throw new Error("Check Terrain IDs: no project is open.");
+  if (!isSplit(w3)) throw new Error("Check Terrain IDs: the terrain isn't split (there is no map/terrain/terrain.json).");
+  let report: IdCheck;
+  try {
+    report = await w3.backend.invoke<IdCheck>("terrain_check", { root: project.root });
+  } catch (e) {
+    throw new Error(`Check Terrain IDs: ${errorText(e).replace(/\.?$/, ".")}`);
+  }
+  if (w3.workspace.project()?.root !== project.root || arg?.quiet) return report;
+  const out = w3.output.channel("Subterrains");
+  out.clear();
+  for (const line of report.lines) out.append(line);
+  const twice = report.duplicates.length, overlaps = report.overlaps.length;
+  if (report.errors) {
+    out.show();
+    void w3.window.showError(`Check Terrain IDs: ${[twice ? `${twice} creation number${twice === 1 ? "" : "s"} found twice` : "", overlaps ? `${overlaps} overlapping id range${overlaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")}. The Subterrains output lists them.`);
+  } else {
+    void w3.window.showInfo(`Check Terrain IDs: ${report.numbers} creation numbers, none twice, no overlapping ranges.`);
+  }
+  return report;
+}
+
 /** A command's failure as an error message (the reason the backend gave), and again for the caller. */
-const shown = <A>(w3: W3Api, run: (arg?: A) => Promise<Converted | null>) => async (arg?: A) => {
+const shown = <A, R>(w3: W3Api, run: (arg?: A) => Promise<R>) => async (arg?: A) => {
   try {
     return await run(arg);
   } catch (e) {
@@ -102,5 +143,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
+    w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),
   );
 }
