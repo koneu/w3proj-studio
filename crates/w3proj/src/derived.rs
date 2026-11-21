@@ -139,6 +139,201 @@ fn parse(bytes: &[u8]) -> Option<Sources> {
         .collect()
 }
 
+// ---- where the derived files are: map/ (flat layout) or the local store (split layout) ----
+//
+// In a project whose terrain is split (`map/terrain/`, `crate::terrain_layout`) the derived files aren't tracked in git:
+// they live in `.w3proj/derived/` under the names they have in `map/` (git-ignored, `IGNORED`), and the app's file
+// layer answers the `map/` names from there (crates/backend flatview.rs). A flat project keeps them in `map/`.
+
+/// The store of a split project's derived files, relative to the project.
+pub const STORE_DIR: [&str; 2] = [".w3proj", "derived"];
+
+/// The derived files' names under `map/` (any case): pathing, shadows, the minimap and its icons (raw or as JSON).
+pub const FILES: [&str; 5] = ["war3map.wpm", "war3map.shd", "war3mapMap.blp", "war3map.mmp", "war3map.mmp.json"];
+
+/// What a pack of a split project needs, one entry per file (any of its names).
+const REQUIRED: [&[&str]; 4] = [&["war3map.wpm"], &["war3map.shd"], &["war3mapMap.blp"], &["war3map.mmp", "war3map.mmp.json"]];
+
+/// The `.gitignore` lines a split project needs: the store and the record are local, never committed.
+pub const IGNORED: [&str; 2] = ["/.w3proj/derived/", "/.w3proj/derived-from.json"];
+
+/// Whether a file name under `map/` is a derived file's (`FILES`, any case): the name as `FILES` has it.
+pub fn derived_name(name: &str) -> Option<&'static str> {
+    FILES.iter().copied().find(|f| f.eq_ignore_ascii_case(name))
+}
+
+/// The project's store folder (`STORE_DIR`).
+pub fn store_dir(project: &Path) -> std::path::PathBuf {
+    STORE_DIR.iter().fold(project.to_path_buf(), |p, c| p.join(c))
+}
+
+/// Whether the project's terrain is split (its derived files then live in the store).
+pub fn uses_store(project: &Path) -> Result<bool> {
+    crate::terrain_layout::is_split_on_disk(&project.join(MAP_DIR))
+}
+
+/// The derived files in a folder (`map/` or the store): name as on disk → bytes. A file that is there and can't be read is
+/// an error; a folder that isn't there has none.
+fn read_derived_in(dir: &Path, shown: &str) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut out = BTreeMap::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(Error::Project(format!("{shown} can't be read: {e}"))),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if derived_name(&name).is_none() || !entry.file_type()?.is_file() {
+            continue;
+        }
+        let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{shown}/{name} can't be read: {e}")))?;
+        out.insert(name, bytes);
+    }
+    Ok(out)
+}
+
+/// The derived files in the project's store: name under `map/` → bytes.
+pub fn read_store(project: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    read_derived_in(&store_dir(project), &STORE_DIR.join("/"))
+}
+
+/// The derived files among project files (relative to `map/`), taken out of them: name → bytes.
+pub fn take(files: &mut BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    let names: Vec<String> = files.keys().filter(|k| derived_name(k).is_some()).cloned().collect();
+    names.into_iter().filter_map(|n| files.remove(&n).map(|b| (n, b))).collect()
+}
+
+/// Makes the store hold exactly `derived` (name under `map/` → bytes): those written where they differ, other derived
+/// files there removed (a map without shadows leaves none behind). A name in another case than the one there replaces it.
+pub fn sync_store(project: &Path, derived: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    let dir = store_dir(project);
+    for (name, _) in read_derived_in(&dir, &STORE_DIR.join("/"))? {
+        if !derived.contains_key(&name) {
+            fs::remove_file(dir.join(&name))?;
+        }
+    }
+    for (name, bytes) in derived {
+        crate::project::write_if_changed(&dir.join(name), bytes)?;
+    }
+    let _ = fs::remove_dir(&dir);
+    Ok(())
+}
+
+/// The derived files at `from` and at `to`; an error when one is at both places and differs (which one the project means
+/// can't be told).
+type Both = (BTreeMap<String, Vec<u8>>, BTreeMap<String, Vec<u8>>);
+
+fn both_places(from: &Path, from_shown: &str, to: &Path, to_shown: &str) -> Result<Both> {
+    let found = read_derived_in(from, from_shown)?;
+    let there = read_derived_in(to, to_shown)?;
+    for (name, bytes) in &found {
+        if let Some((other, b)) = there.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
+            if b != bytes {
+                return Err(Error::Project(format!(
+                    "{from_shown}/{name} and {to_shown}/{other} are both there and differ: keep one (delete the other), then try again"
+                )));
+            }
+        }
+    }
+    Ok((found, there))
+}
+
+/// Whether `into_store` (`into`) or `out_of_store` would go through: an error when a file is at both places and differs.
+/// For a conversion, before it writes anything.
+pub fn can_move(project: &Path, into: bool) -> Result<()> {
+    let (map, store) = (project.join(MAP_DIR), store_dir(project));
+    let store_shown = STORE_DIR.join("/");
+    if into {
+        both_places(&map, MAP_DIR, &store, &store_shown).map(|_| ())
+    } else {
+        both_places(&store, &store_shown, &map, MAP_DIR).map(|_| ())
+    }
+}
+
+/// What `into_store` and `out_of_store` moved: the names.
+fn move_derived(from: &Path, from_shown: &str, to: &Path, to_shown: &str) -> Result<Vec<String>> {
+    let (found, there) = both_places(from, from_shown, to, to_shown)?;
+    let mut moved = Vec::new();
+    for name in found.keys() {
+        // The same bytes at both places: the moved one takes the other's place (its name wins).
+        if let Some((other, _)) = there.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
+            fs::remove_file(to.join(other))?;
+        }
+        fs::create_dir_all(to)?;
+        fs::rename(from.join(name), to.join(name))?;
+        moved.push(name.clone());
+    }
+    Ok(moved)
+}
+
+/// Moves the derived files in `map/` into the store (a split; a project split before the store existed). Both there
+/// and different: an error, nothing moved.
+pub fn into_store(project: &Path) -> Result<Vec<String>> {
+    move_derived(&project.join(MAP_DIR), MAP_DIR, &store_dir(project), &STORE_DIR.join("/"))
+}
+
+/// Moves the store's derived files back into `map/` (a merge); the empty store folder goes.
+pub fn out_of_store(project: &Path) -> Result<Vec<String>> {
+    let dir = store_dir(project);
+    let moved = move_derived(&dir, &STORE_DIR.join("/"), &project.join(MAP_DIR), MAP_DIR)?;
+    let _ = fs::remove_dir(&dir);
+    Ok(moved)
+}
+
+/// A split project whose derived files are still in `map/` (split before the store existed): moved into the store, and
+/// its `.gitignore` gets `IGNORED`. Nothing for a flat project. What was moved.
+pub fn migrate(project: &Path) -> Result<Vec<String>> {
+    if !uses_store(project)? {
+        return Ok(Vec::new());
+    }
+    let moved = into_store(project)?;
+    if !moved.is_empty() || store_dir(project).is_dir() {
+        ensure_ignored(project)?;
+    }
+    Ok(moved)
+}
+
+/// The derived files a pack needs that a split project's store lacks (`REQUIRED`, the first name of each). None in a
+/// flat project (its pack takes what `map/` has, as always).
+pub fn missing(project: &Path) -> Result<Vec<&'static str>> {
+    if !uses_store(project)? {
+        return Ok(Vec::new());
+    }
+    let have = read_store(project)?;
+    Ok(REQUIRED.iter().filter(|names| !have.keys().any(|k| names.iter().any(|n| n.eq_ignore_ascii_case(k)))).map(|names| names[0]).collect())
+}
+
+/// Adds the `IGNORED` lines the project's `.gitignore` lacks (makes the file when there is none). A file that is there
+/// but can't be read is an error, never written over. Whether it was changed.
+pub fn ensure_ignored(project: &Path) -> Result<bool> {
+    ensure_lines(project, &IGNORED)
+}
+
+/// Adds `lines` the project's `.gitignore` lacks (`ensure_ignored`).
+pub fn ensure_lines(project: &Path, lines: &[&str]) -> Result<bool> {
+    let path = project.join(".gitignore");
+    let mut text = match fs::read(&path) {
+        Ok(b) => String::from_utf8(b).map_err(|_| Error::Project(format!("{} isn't UTF-8 text: add {} to it by hand", path.display(), lines.join(", "))))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(Error::Project(format!("{} can't be read ({e}): add {} to it by hand", path.display(), lines.join(", ")))),
+    };
+    let have: Vec<&str> = text.lines().map(str::trim).collect();
+    let add: Vec<&str> = lines.iter().copied().filter(|l| !have.contains(l)).collect();
+    if add.is_empty() {
+        return Ok(false);
+    }
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    for l in add {
+        text.push_str(l);
+        text.push('\n');
+    }
+    write_atomic(&path, text.as_bytes())?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

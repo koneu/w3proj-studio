@@ -319,13 +319,22 @@ fn packed_projects(project: &std::path::Path) -> Vec<(String, PathBuf)> {
 }
 
 /// Pathing, shadows and the minimap that no longer follow the terrain and doodads (`w3proj::derived`) stop a pack, in the
-/// project and its chapter maps: the app makes them again a moment after an edit, this program can't.
-fn check_derived(project: &std::path::Path) -> Result<()> {
+/// project and its chapter maps: the app makes them again a moment after an edit, this program can't. `force_stale`:
+/// stale ones go in as they are (not the check of a split project's missing ones). `terrain_only`
+/// (`--allow-terrain-only-derived`): nothing stops the pack of a split project; what goes in stale or is left out is said.
+fn check_derived(project: &std::path::Path, force_stale: bool, terrain_only: bool) -> Result<()> {
     use w3proj::derived::{check, Freshness, DERIVED, STAMP_FILE};
     let projects = packed_projects(project);
     let again = "`w3proj rebuild` makes them again (W3Proj Studio does a few seconds after an edit made there and on every \
                  terrain save), then pack again; --force-stale packs them as they are";
     for (at, dir) in projects {
+        if w3proj::derived::uses_store(&dir).with_context(|| format!("checking {}", dir.display()))? {
+            check_split_derived(&at, &dir, force_stale, terrain_only)?;
+            continue;
+        }
+        if force_stale {
+            continue;
+        }
         match check(&dir).with_context(|| format!("checking {}", dir.display()))? {
             Freshness::Fresh | Freshness::Unknown => {}
             Freshness::Stale(files) => {
@@ -336,6 +345,52 @@ fn check_derived(project: &std::path::Path) -> Result<()> {
                 anyhow::bail!("{at}{why}, so it can't be told whether {DERIVED} follow the terrain and doodads: {again} (that writes {at}{STAMP_FILE} anew)");
             }
         }
+    }
+    Ok(())
+}
+
+/// `check_derived` for a project whose terrain is split (map/terrain/): its derived files are in the store
+/// (.w3proj/derived/, not in git) and go into the map only when the record says they follow the sources. Missing or
+/// not known to follow (stale, no record, a record that can't be read): the pack stops, saying which and why, unless
+/// `terrain_only`, which packs them as they are (none left out is computed: this program can't make them) and says so.
+/// `force_stale` lets stale ones go in, never missing ones.
+fn check_split_derived(at: &str, dir: &std::path::Path, force_stale: bool, terrain_only: bool) -> Result<()> {
+    use w3proj::derived::{check, missing, Freshness, STAMP_FILE};
+    // A project split before the store existed: its derived files in map/ go there first.
+    for path in w3proj::terrain_layout::migrate_split(dir).with_context(|| format!("moving the derived files and pathing overrides of {} out of git", dir.display()))? {
+        println!("moved      {at}{path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
+    }
+    let store = format!("{at}.w3proj/derived/");
+    let missing = missing(dir)?;
+    let stale = match check(dir).with_context(|| format!("checking {}", dir.display()))? {
+        Freshness::Fresh => None,
+        Freshness::Stale(files) => Some(format!("{} changed since they were made", files.iter().map(|f| format!("{at}map/{f}")).collect::<Vec<_>>().join(", "))),
+        Freshness::Unknown => Some(format!("there is no {at}{STAMP_FILE} saying what they were made from")),
+        Freshness::Unreadable(why) => Some(format!("{at}{why}")),
+    };
+    let fix = "open the project in W3Proj Studio and save the terrain, or run `w3proj rebuild` (both need the game's data), \
+               then pack again; --allow-terrain-only-derived packs without them";
+    if terrain_only {
+        if !missing.is_empty() {
+            eprintln!(
+                "warning: --allow-terrain-only-derived: {} left out of the map ({store} doesn't have them; this program can't make them)",
+                missing.join(", ")
+            );
+        }
+        if let Some(why) = &stale {
+            eprintln!("warning: --allow-terrain-only-derived: the derived files in {store} go into the map as they are, though {why}");
+        }
+        return Ok(());
+    }
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "{} {} missing in {store} (the terrain is split, so its derived files aren't in git and are made by W3Proj Studio): {fix}",
+            missing.join(", "),
+            if missing.len() == 1 { "is" } else { "are" }
+        );
+    }
+    if let (Some(why), false) = (&stale, force_stale) {
+        anyhow::bail!("the derived files in {store} may not follow the terrain: {why}. {fix}; --force-stale packs them as they are");
     }
     Ok(())
 }
@@ -405,6 +460,12 @@ enum Cmd {
         /// changed since they were made (the app makes them again a moment after an edit).
         #[arg(long)]
         force_stale: bool,
+        /// A project whose terrain is split (map/terrain/) keeps its derived files out of git, in .w3proj/derived/,
+        /// and packs only when they follow the terrain. This packs them as they are even when they don't, and leaves
+        /// out the ones that are missing (none is computed: units would walk through trees and buildings). Not for a
+        /// release.
+        #[arg(long)]
+        allow_terrain_only_derived: bool,
         /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
         /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
         /// --only script` makes it (so it follows changed players, start locations and ally
@@ -694,10 +755,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale, keep_script, game } => {
-            if !force_stale {
-                check_derived(&project)?;
-            }
+        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, keep_script, game } => {
+            check_derived(&project, force_stale, allow_terrain_only_derived)?;
             // The script Studio wrote last, made again from the files now there (the pack works out war3map.w3i's ally
             // priorities as the generator does, so the two agree); one that isn't Studio's goes in as it is, and
             // allies.rs's check of it warns when its priorities aren't those.

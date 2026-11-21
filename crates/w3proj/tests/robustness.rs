@@ -442,6 +442,70 @@ fn damaged_split_terrain_regressions() {
     }
 }
 
+/// The subterrains' hand-painted pathing (`pathing.txt`) comes from git merges and hand edits like the rest of the
+/// layout: a damaged one is an error naming its line, never a panic and never fewer overrides. What is accepted holds
+/// every line of the file (each parses on its own, and the assembled overrides count exactly their cells), and a pack's
+/// read of the layout (`flatten`) accepts what the Pathing tool's read accepts.
+#[test]
+fn damaged_pathing_txt_is_an_error_never_fewer_overrides() {
+    use w3proj::terrain_layout as tl;
+    use w3proj::terrain_pathing as tp;
+    let (mut layout_files, _) = split_fixture();
+    let layout = tl::Layout::parse(&layout_files[tl::LAYOUT_FILE]).unwrap();
+    let json = tp::sample_json(layout.corners()).unwrap();
+    let pathing = tp::slice(&json, &layout).unwrap();
+    assert!(pathing.len() >= 3, "the sample overrides cross the seams: {:?}", pathing.keys());
+    layout_files.extend(pathing.clone());
+    let mut total = Found::default();
+    for name in pathing.keys().cloned().collect::<Vec<_>>() {
+        let sub = layout.subterrains.iter().find(|s| tp::path(s) == name).unwrap().clone();
+        let [_, _, w, h] = tp::cell_rect(&sub, layout.corners());
+        let runs = par_seeds(&format!("pathing.txt {name}"), seeds(rounds()), |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                guarded(&mut found.failures, || format!("{name} damaged, seed {seed}"), || {
+                    let mut files = layout_files.clone();
+                    let bad = damage(&layout_files[&name], &mut Rng::new(seed + 1));
+                    files.insert(name.clone(), bad.clone());
+                    let read = tp::assemble(&layout, &|p| files.get(p).cloned());
+                    let packed = tl::flatten(&mut files.clone());
+                    assert_eq!(read.is_ok(), packed.is_ok(), "the pack's read and the Pathing tool's disagree");
+                    match read {
+                        Err(e) => {
+                            assert!(e.to_string().contains("pathing.txt"), "the error names the file: {e}");
+                            found.rejected += 1;
+                        }
+                        Ok(assembled) => {
+                            // Every line of the damaged file parses on its own: none was skipped.
+                            let text = std::str::from_utf8(&bad).expect("accepted text is UTF-8");
+                            let body = text.strip_suffix('\n').unwrap_or(text);
+                            let mut cells = 0;
+                            for line in body.split('\n').filter(|_| !body.is_empty()) {
+                                cells += tp::parse_txt("line", line.as_bytes(), w, h).unwrap_or_else(|e| panic!("an accepted file has a line that doesn't parse: {e}")).len();
+                            }
+                            let others: usize = pathing.iter().filter(|(k, _)| **k != name).map(|(k, v)| {
+                                let s = layout.subterrains.iter().find(|s| tp::path(s) == *k).unwrap();
+                                let [_, _, w, h] = tp::cell_rect(s, layout.corners());
+                                tp::parse_txt(k, v, w, h).unwrap().len()
+                            }).sum();
+                            let doc: serde_json::Value = serde_json::from_slice(&assembled.expect("files are there")).unwrap();
+                            assert_eq!(doc["cells"].as_array().unwrap().len(), cells + others, "the assembled file lost or gained overrides");
+                            found.accepted += 1;
+                        }
+                    }
+                });
+            }
+            found
+        });
+        total.merge(Found::all(runs));
+    }
+    let Found { failures, accepted, rejected, .. } = total;
+    report(failures);
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+    }
+}
+
 /// The mini map split 2×2 (`terrain_layout::split`), and how many entries each object kind has.
 type Counts = Vec<(w3proj::terrain_objects::Kind, usize)>;
 

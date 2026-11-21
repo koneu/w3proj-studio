@@ -58,6 +58,12 @@ pub fn to_project_path(archive_name: &str) -> String {
         .join("/")
 }
 
+/// A `/`-separated relative path (as project files are named) under `base`, joined one component at a time: the result
+/// has the platform's separator throughout (a `/` left inside would be mixed with `\` on Windows).
+pub fn join_rel(base: &std::path::Path, rel: &str) -> std::path::PathBuf {
+    rel.split('/').filter(|c| !c.is_empty()).fold(base.to_path_buf(), |p, c| p.join(c))
+}
+
 /// Relative project path → archive name.
 pub fn to_archive_name(project_path: &str) -> String {
     project_path

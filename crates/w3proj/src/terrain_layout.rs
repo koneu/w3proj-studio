@@ -723,9 +723,17 @@ pub fn assemble(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
 /// Project files (relative to `map/`) in the split layout become those of the flat one: the layout's
 /// files go, `war3map.w3e.txt` holds the assembled terrain and the flat object files the merged
 /// objects. Files of the flat layout stay as they are; one of an object kind the subterrains hold is
-/// an error (both layouts). Another file under `terrain/` is an error (this version keeps nothing
-/// else there). Returns whether the files were in the split layout.
+/// an error (both layouts). The subterrains' hand-painted pathing (`pathing.txt`, `crate::terrain_pathing`)
+/// isn't part of the map: it is read (a damaged one is an error) and left out. Another file under
+/// `terrain/` is an error (this version keeps nothing else there). Returns whether the files were in
+/// the split layout.
 pub fn flatten(files: &mut BTreeMap<String, Vec<u8>>) -> Result<bool> {
+    flatten_with(files, true)
+}
+
+/// `flatten`; `check_pathing`: the subterrains' `pathing.txt` are read too (the app's view of the terrain leaves that to
+/// the Pathing tool's file, so a damaged one doesn't keep the terrain from opening).
+fn flatten_with(files: &mut BTreeMap<String, Vec<u8>>, check_pathing: bool) -> Result<bool> {
     if !is_split(files)? {
         return Ok(false);
     }
@@ -733,6 +741,10 @@ pub fn flatten(files: &mut BTreeMap<String, Vec<u8>>) -> Result<bool> {
     let t = assemble_terrain(&layout, &|p| files.get(p).cloned())?;
     let mut ours: HashSet<String> = layout.subterrains.iter().map(Subterrain::ground_path).collect();
     ours.insert(LAYOUT_FILE.to_string());
+    ours.extend(layout.subterrains.iter().map(crate::terrain_pathing::path));
+    if check_pathing {
+        crate::terrain_pathing::assemble(&layout, &|p| files.get(p).cloned())?;
+    }
     for kind in KINDS.into_iter().filter(|k| layout.objects.has(*k)) {
         ours.extend(layout.subterrains.iter().map(|s| s.object_path(kind)));
         if let Some(flat) = key(files, kind.flat()).or_else(|| key(files, kind.raw())) {
@@ -745,8 +757,9 @@ pub fn flatten(files: &mut BTreeMap<String, Vec<u8>>) -> Result<bool> {
     if let Some(other) = files.keys().find(|k| under_dir(k) && !ours.contains(*k)) {
         let objects: Vec<&str> = KINDS.iter().filter(|k| layout.objects.has(**k)).map(|k| k.file()).collect();
         return Err(Error::Project(format!(
-            "map/{other} isn't part of the terrain layout (map/{DIR}/ holds terrain.json and each subterrain's {GROUND_FILE}{} only)",
-            objects.iter().map(|f| format!(", {f}")).collect::<String>()
+            "map/{other} isn't part of the terrain layout (map/{DIR}/ holds terrain.json and each subterrain's {GROUND_FILE}{} and {} only)",
+            objects.iter().map(|f| format!(", {f}")).collect::<String>(),
+            crate::terrain_pathing::FILE
         )));
     }
     let merged = objects::assemble(&layout.objects, &layout.subterrains, &|p| files.get(p).cloned())?;
@@ -788,12 +801,16 @@ pub fn split(files: &mut BTreeMap<String, Vec<u8>>, rects: &[Rect]) -> Result<()
 /// them, its default corner and objects' header; the header follows the map). A flat project's files
 /// stay as they are. Errors when the map's terrain can't go into the layout: stored raw, missing,
 /// reaching outside the rectangles with other corners than the default, or the map has files of its
-/// own under `terrain/`.
-pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
+/// own under `terrain/`. The subterrains' hand-painted pathing (`pathing.txt`) stays as it is (it isn't
+/// in the map). The map's derived files (`crate::derived::FILES`) are taken out of `files` and returned:
+/// a split project keeps them in its store (`crate::derived::sync_store`), not in `map/`. A flat
+/// project returns none.
+pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>> {
     if !is_split_on_disk(map_dir)? {
-        return Ok(());
+        return Ok(BTreeMap::new());
     }
     let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE))?)?;
+    let pathing: Vec<String> = layout.subterrains.iter().map(crate::terrain_pathing::path).collect();
     if let Some(k) = files.keys().find(|k| under_dir(k)) {
         return Err(Error::Project(format!("the map has a file map/{k}, but the project keeps its terrain in map/{DIR}/: merge the terrain first (`w3proj terrain merge`)")));
     }
@@ -814,7 +831,8 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
         files.remove(name);
     }
     files.extend(sliced);
-    Ok(())
+    read_if_there(map_dir, &pathing.iter().map(String::as_str).collect::<Vec<_>>(), files)?;
+    Ok(crate::derived::take(files))
 }
 
 /// Writes `files` (relative to `map_dir`) whose bytes differ from those on disk, each in one step
@@ -822,7 +840,7 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
 pub fn write_changed(map_dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<String>> {
     let mut written = Vec::new();
     for (rel, bytes) in files {
-        if crate::project::write_if_changed(&map_dir.join(rel), bytes)? {
+        if crate::project::write_if_changed(&crate::paths::join_rel(map_dir, rel), bytes)? {
             written.push(rel.clone());
         }
     }
@@ -835,7 +853,7 @@ pub(crate) fn read_layout_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u
     let mut files = BTreeMap::new();
     for rel in crate::project::walk(&map_dir.join(DIR))? {
         let path = format!("{DIR}/{rel}");
-        let bytes = fs::read(map_dir.join(&path)).map_err(|e| Error::Project(format!("map/{path} can't be read: {e}")))?;
+        let bytes = fs::read(crate::paths::join_rel(map_dir, &path)).map_err(|e| Error::Project(format!("map/{path} can't be read: {e}")))?;
         files.insert(path, bytes);
     }
     Ok(files)
@@ -858,7 +876,7 @@ fn derived_fresh(project: &Path) -> Result<bool> {
 /// Reads `names` under `map_dir` into `files` where they are there.
 fn read_if_there(map_dir: &Path, names: &[&str], files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
     for name in names {
-        match fs::read(map_dir.join(name)) {
+        match fs::read(crate::paths::join_rel(map_dir, name)) {
             Ok(b) => {
                 files.insert(name.to_string(), b);
             }
@@ -869,9 +887,20 @@ fn read_if_there(map_dir: &Path, names: &[&str], files: &mut BTreeMap<String, Ve
     Ok(())
 }
 
+/// `.gitignore` gets the derived files' store and record (`crate::derived::IGNORED`); the path written, if it changed.
+fn ignore_store(project: &Path, lines: &[&str]) -> Result<Option<String>> {
+    Ok(crate::derived::ensure_lines(project, lines)?.then(|| ".gitignore".to_string()))
+}
+
 /// Splits a flat project's terrain and placed objects into `map/terrain/` (`split`): the layout's
 /// files are written first, then `map/war3map.w3e.txt` and the flat object files go. Nothing is
 /// written when the split can't be lossless. An object file packed raw stays where it is.
+///
+/// The derived files (`crate::derived::FILES`) move from `map/` into the store `.w3proj/derived/`, which
+/// `.gitignore` then ignores with the record `.w3proj/derived-from.json` (still valid: the sources are
+/// the same terrain). The Pathing tool's `.w3proj/pathing.json` goes into the subterrains' `pathing.txt`
+/// (`crate::terrain_pathing`) and is kept as `.w3proj/pathing.json.bak`; one that can't go there
+/// refuses the split.
 pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let manifest = crate::project::Manifest::load(project)?;
@@ -890,20 +919,43 @@ pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
     let before: Vec<String> = [FLAT_FILE].into_iter().chain(object_names).filter(|n| files.contains_key(*n)).map(str::to_string).collect();
     let fresh = derived_fresh(project)?;
     split(&mut files, rects)?;
+    // Everything that could refuse, before anything is written.
+    let pathing_json = crate::terrain_pathing::read_json(project)?;
+    if let Some(json) = &pathing_json {
+        let layout = Layout::parse(&files[LAYOUT_FILE])?;
+        let sliced = crate::terrain_pathing::slice(json, &layout).map_err(|e| Error::Project(format!("{e}: fix or move away {} first", crate::terrain_pathing::JSON_NAME)))?;
+        files.extend(sliced);
+    }
+    let backup = pathing_json.as_ref().map(|_| crate::terrain_pathing::backup_path(project)).transpose()?;
+    crate::derived::can_move(project, true)?;
     let written = write_changed(&map_dir, &files)?;
     let removed: Vec<&String> = before.iter().filter(|n| !files.contains_key(*n)).collect();
     for name in &removed {
         fs::remove_file(map_dir.join(name))?;
     }
+    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
+    let mut done = Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() };
+    let store = crate::derived::STORE_DIR.join("/");
+    for name in crate::derived::into_store(project)? {
+        done.removed.push(at(&name));
+        done.written.push(format!("{store}/{name}"));
+    }
+    if let Some(backup) = backup {
+        fs::rename(crate::terrain_pathing::json_path(project), &backup)?;
+        done.removed.push(crate::terrain_pathing::JSON_NAME.to_string());
+        done.written.push(format!(".w3proj/{}", backup.file_name().unwrap_or_default().to_string_lossy()));
+    }
+    done.written.extend(ignore_store(project, &crate::derived::IGNORED)?);
     if fresh {
         crate::derived::record_now(project)?;
     }
-    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
-    Ok(Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() })
+    Ok(done)
 }
 
 /// Merges a split project's terrain and objects back into `map/war3map.w3e.txt` and the flat object
-/// files (`flatten`): those are written first, then the layout's files go.
+/// files (`flatten`): those are written first, then the layout's files go. The subterrains' `pathing.txt`
+/// become `.w3proj/pathing.json` again (none: no file), the store's derived files go back into `map/`
+/// (`.gitignore` keeps ignoring the store, which a flat project doesn't have).
 pub fn merge_project(project: &Path) -> Result<Converted> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let map_dir = project.join(crate::project::MAP_DIR);
@@ -917,17 +969,40 @@ pub fn merge_project(project: &Path) -> Result<Converted> {
     let flat_names: Vec<&str> = KINDS.iter().flat_map(|k| [k.flat(), k.raw()]).collect();
     read_if_there(&map_dir, &flat_names, &mut files)?;
     let fresh = derived_fresh(project)?;
+    // Everything that could refuse, before anything is written: the pathing overrides read, no pathing.json in the way,
+    // the derived files movable.
+    let layout = Layout::parse(&files[LAYOUT_FILE])?;
+    let pathing = crate::terrain_pathing::assemble(&layout, &|p| files.get(p).cloned())?;
+    if pathing.is_some() && crate::terrain_pathing::read_json(project)?.is_some() {
+        return Err(Error::Project(format!(
+            "{} is there besides the subterrains' {}: move it away first (the merge writes the overrides there)",
+            crate::terrain_pathing::JSON_NAME,
+            crate::terrain_pathing::FILE
+        )));
+    }
+    crate::derived::can_move(project, false)?;
     flatten(&mut files)?;
     let written = write_changed(&map_dir, &files)?;
+    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
+    let mut done = Converted { written: written.iter().map(at).collect(), removed: layout_paths.iter().map(at).collect() };
+    if let Some(json) = &pathing {
+        crate::project::write_atomic(&crate::terrain_pathing::json_path(project), json)?;
+        done.written.push(crate::terrain_pathing::JSON_NAME.to_string());
+    }
     for p in &layout_paths {
-        fs::remove_file(map_dir.join(p))?;
+        fs::remove_file(crate::paths::join_rel(&map_dir, p))?;
     }
     remove_empty(&map_dir.join(DIR));
+    let store = crate::derived::STORE_DIR.join("/");
+    for name in crate::derived::out_of_store(project)? {
+        done.removed.push(format!("{store}/{name}"));
+        done.written.push(at(&name));
+    }
+    done.written.extend(ignore_store(project, &crate::derived::IGNORED[..1])?);
     if fresh {
         crate::derived::record_now(project)?;
     }
-    let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
-    Ok(Converted { written: written.iter().map(at).collect(), removed: layout_paths.iter().map(at).collect() })
+    Ok(done)
 }
 
 // ---- the flat files a split project stands for (the app's file layer) ----
@@ -945,8 +1020,8 @@ pub struct FlatView {
 }
 
 /// The flat files a project's `map/` folder stands for: None in the flat layout. The terrain is made from
-/// `terrain.json` and every file under `map/terrain/` that isn't an object file of a kind the subterrains hold
-/// (a stray file there changes it too: reading it then says why); each object kind in `objects` from
+/// `terrain.json` and every file under `map/terrain/` that isn't an object file of a kind the subterrains hold or a
+/// subterrain's `pathing.txt` (a stray file there changes it too: reading it then says why); each object kind in `objects` from
 /// `terrain.json` and its subterrains' files. A `terrain.json` that can't be read gives the terrain alone, made
 /// from every file under `map/terrain/`: reading it says what is wrong, rather than the map losing its terrain.
 pub fn flat_views(map_dir: &Path) -> Result<Option<Vec<FlatView>>> {
@@ -959,7 +1034,9 @@ pub fn flat_views(map_dir: &Path) -> Result<Option<Vec<FlatView>>> {
         Err(_) => return Ok(Some(vec![FlatView { name: FLAT_FILE, sources: all }])),
     };
     let kinds: Vec<Kind> = KINDS.into_iter().filter(|k| layout.objects.has(*k)).collect();
-    let objects: HashSet<String> = kinds.iter().flat_map(|k| layout.subterrains.iter().map(|s| s.object_path(*k))).collect();
+    // The objects' files and the hand-painted pathing (`.w3proj/pathing.json`'s, not the terrain's).
+    let mut objects: HashSet<String> = kinds.iter().flat_map(|k| layout.subterrains.iter().map(|s| s.object_path(*k))).collect();
+    objects.extend(layout.subterrains.iter().map(crate::terrain_pathing::path));
     let mut out = vec![FlatView { name: FLAT_FILE, sources: all.into_iter().filter(|p| !objects.contains(p)).collect() }];
     for kind in kinds {
         let sources = std::iter::once(LAYOUT_FILE.to_string()).chain(layout.subterrains.iter().map(|s| s.object_path(kind))).collect();
@@ -973,7 +1050,7 @@ fn read_flat_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut files = read_layout_files(map_dir)?;
     let flat_names: Vec<&str> = KINDS.iter().flat_map(|k| [k.flat(), k.raw()]).collect();
     read_if_there(map_dir, &flat_names, &mut files)?;
-    if !flatten(&mut files)? {
+    if !flatten_with(&mut files, false)? {
         return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
     }
     Ok(files)
@@ -1029,6 +1106,114 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, files[k.flat()].clone())).collect();
     let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats)?;
     write_changed(map_dir, &sliced)
+}
+
+// ---- the Pathing tool's file of a split project (the app's file layer) ----
+
+/// A split project's layout, for its pathing files.
+fn pathing_layout(project: &Path) -> Result<(std::path::PathBuf, Layout)> {
+    let map_dir = project.join(crate::project::MAP_DIR);
+    let bytes = fs::read(map_dir.join(DIR).join("terrain.json")).map_err(|e| Error::Project(format!("map/{LAYOUT_FILE} can't be read: {e}")))?;
+    Ok((map_dir, Layout::parse(&bytes)?))
+}
+
+/// A `.w3proj/pathing.json` on disk in a split project: the overrides are in the subterrains, so it is in the way.
+fn pathing_json_in_the_way(project: &Path) -> Result<()> {
+    let p = crate::terrain_pathing::json_path(project);
+    if p.try_exists().map_err(|e| Error::Project(format!("{} can't be checked: {e}", p.display())))? {
+        return Err(Error::Project(format!(
+            "{} is there, but the terrain is split and its pathing overrides are in map/{DIR}/<subterrain>/{}: move {} away (its overrides aren't read)",
+            crate::terrain_pathing::JSON_NAME,
+            crate::terrain_pathing::FILE,
+            crate::terrain_pathing::JSON_NAME
+        )));
+    }
+    Ok(())
+}
+
+/// The subterrains' `pathing.txt` that are there (relative to `map/`), of a split project.
+pub fn pathing_files(project: &Path) -> Result<Vec<String>> {
+    let (map_dir, layout) = pathing_layout(project)?;
+    let mut out = Vec::new();
+    for p in layout.subterrains.iter().map(crate::terrain_pathing::path) {
+        let at = crate::paths::join_rel(&map_dir, &p);
+        if at.try_exists().map_err(|e| Error::Project(format!("map/{p} can't be checked: {e}")))? {
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+/// A split project's `.w3proj/pathing.json` as the Pathing tool reads it, assembled from the subterrains' `pathing.txt`
+/// (`crate::terrain_pathing::assemble`): None when no subterrain has one. A damaged one is an error naming its line, never
+/// fewer overrides; so is a real `.w3proj/pathing.json` beside them.
+pub fn read_pathing(project: &Path) -> Result<Option<Vec<u8>>> {
+    let (map_dir, layout) = pathing_layout(project)?;
+    pathing_json_in_the_way(project)?;
+    let mut files = BTreeMap::new();
+    let paths: Vec<String> = layout.subterrains.iter().map(crate::terrain_pathing::path).collect();
+    read_if_there(&map_dir, &paths.iter().map(String::as_str).collect::<Vec<_>>(), &mut files)?;
+    crate::terrain_pathing::assemble(&layout, &|p| files.get(p).cloned())
+}
+
+/// Writes a split project's `.w3proj/pathing.json` into the subterrains' `pathing.txt` (`crate::terrain_pathing::slice`):
+/// only files whose bytes change are written, a subterrain left without overrides loses its file. The paths written and
+/// removed (relative to `map/`). Nothing is written when the content can't be kept there.
+pub fn write_pathing(project: &Path, bytes: &[u8]) -> Result<(Vec<String>, Vec<String>)> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    let (map_dir, layout) = pathing_layout(project)?;
+    pathing_json_in_the_way(project)?;
+    let sliced = crate::terrain_pathing::slice(bytes, &layout)?;
+    let written = write_changed(&map_dir, &sliced)?;
+    let mut removed = Vec::new();
+    for p in layout.subterrains.iter().map(crate::terrain_pathing::path).filter(|p| !sliced.contains_key(p)) {
+        match fs::remove_file(crate::paths::join_rel(&map_dir, &p)) {
+            Ok(()) => removed.push(p),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Error::Project(format!("map/{p} can't be removed: {e}"))),
+        }
+    }
+    Ok((written, removed))
+}
+
+/// A project split before derived files and pathing overrides moved out of `map/` and `.w3proj/pathing.json` (stage 1):
+/// its derived files go into the store (`crate::derived::migrate`), its `.w3proj/pathing.json` into the subterrains'
+/// `pathing.txt` when none has one yet (kept as `.w3proj/pathing.json.bak`). Nothing for a flat project. What moved,
+/// relative to the project. A pathing.json that can't go into the subterrains is an error (it stays where it is).
+pub fn migrate_split(project: &Path) -> Result<Vec<String>> {
+    if !is_split_on_disk(&project.join(crate::project::MAP_DIR))? {
+        return Ok(Vec::new());
+    }
+    let mut moved: Vec<String> = crate::derived::migrate(project)?.into_iter().map(|n| format!("{}/{n}", crate::project::MAP_DIR)).collect();
+    if let Some(json) = crate::terrain_pathing::read_json(project)? {
+        if pathing_files(project)?.is_empty() {
+            // The same overrides in other files: derived files that followed them still do.
+            let fresh = derived_fresh(project)?;
+            let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+            let (map_dir, layout) = pathing_layout(project)?;
+            let sliced = crate::terrain_pathing::slice(&json, &layout)?;
+            let backup = crate::terrain_pathing::backup_path(project)?;
+            write_changed(&map_dir, &sliced)?;
+            fs::rename(crate::terrain_pathing::json_path(project), backup)?;
+            moved.push(crate::terrain_pathing::JSON_NAME.to_string());
+            if fresh {
+                crate::derived::record_now(project)?;
+            }
+        }
+    }
+    Ok(moved)
+}
+
+/// Deletes a split project's `.w3proj/pathing.json`: every subterrain's `pathing.txt`. The paths removed (relative to `map/`).
+pub fn delete_pathing(project: &Path) -> Result<Vec<String>> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    let (map_dir, _) = pathing_layout(project)?;
+    let mut removed = Vec::new();
+    for p in pathing_files(project)? {
+        fs::remove_file(crate::paths::join_rel(&map_dir, &p))?;
+        removed.push(p);
+    }
+    Ok(removed)
 }
 
 /// Removes `dir` and the folders below it that are empty (a folder holding anything stays).
@@ -1427,6 +1612,74 @@ mod tests {
         let se: Value = serde_json::from_slice(&sync["terrain/se/units.json"]).unwrap();
         let ids: Vec<&Value> = se["units"].as_array().unwrap().iter().map(|u| &u["editorId"]).collect();
         assert_eq!(ids, vec![&Value::from(0), &Value::from(1)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Stage 3 on disk: a split moves the derived files into the store and `.w3proj/pathing.json` into the subterrains'
+    /// `pathing.txt` (kept as `.bak`), the record stays fresh; what would refuse refuses before anything is written; a
+    /// project split before (its derived files in map/, a pathing.json) is moved by `migrate_split`; a merge gives
+    /// both back byte for byte.
+    #[test]
+    fn a_split_moves_derived_files_and_pathing_and_a_merge_moves_them_back() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-stage3-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        crate::project::create(&dir, None).unwrap();
+        let map_dir = dir.join("map");
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        with_objects(&mut flat, 8);
+        write_changed(&map_dir, &flat).unwrap();
+        fs::write(map_dir.join("war3map.wpm"), b"pathing").unwrap();
+        crate::derived::record_now(&dir).unwrap();
+        let json = crate::terrain_pathing::sample_json([t.width, t.height]).unwrap();
+        let pj = crate::terrain_pathing::json_path(&dir);
+        fs::write(&pj, &json).unwrap();
+        let snapshot = || crate::project::walk(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(crate::paths::join_rel(&dir, &p)).unwrap())).collect::<BTreeMap<_, _>>();
+        let grid = grid_2x2(t.width, t.height);
+
+        // Refused before anything is written: a store file that differs, a pathing.json a split can't keep.
+        let store = crate::derived::store_dir(&dir);
+        fs::create_dir_all(&store).unwrap();
+        fs::write(store.join("war3map.wpm"), b"other").unwrap();
+        let before = snapshot();
+        assert!(split_project(&dir, &grid).unwrap_err().to_string().contains("both there and differ"));
+        assert_eq!(snapshot(), before);
+        fs::remove_file(store.join("war3map.wpm")).unwrap();
+        let noted = String::from_utf8(json.clone()).unwrap().replacen("\"format\"", "\"note\": 1,\n  \"format\"", 1);
+        fs::write(&pj, &noted).unwrap();
+        let before = snapshot();
+        assert!(split_project(&dir, &grid).unwrap_err().to_string().contains("\"note\""));
+        assert_eq!(snapshot(), before);
+        fs::write(&pj, &json).unwrap();
+
+        let done = split_project(&dir, &grid).unwrap();
+        assert!(!map_dir.join("war3map.wpm").exists() && fs::read(store.join("war3map.wpm")).unwrap() == b"pathing");
+        assert!(done.removed.contains(&"map/war3map.wpm".to_string()) && done.removed.contains(&".w3proj/pathing.json".to_string()), "{done:?}");
+        assert!(!pj.exists() && fs::read(pj.with_file_name("pathing.json.bak")).unwrap() == json);
+        assert_eq!(read_pathing(&dir).unwrap().as_deref(), Some(&json[..]));
+        assert!(pathing_files(&dir).unwrap().len() >= 3, "the overrides cross the seams");
+        assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
+        assert!(fs::read_to_string(dir.join(".gitignore")).unwrap().contains("/.w3proj/derived-from.json\n"));
+
+        // As a project split before stage 3 has it: migrated, the record still fresh.
+        fs::rename(store.join("war3map.wpm"), map_dir.join("war3map.wpm")).unwrap();
+        delete_pathing(&dir).unwrap();
+        fs::write(&pj, &json).unwrap();
+        let moved = migrate_split(&dir).unwrap();
+        assert_eq!(moved, ["map/war3map.wpm", ".w3proj/pathing.json"]);
+        assert!(store.join("war3map.wpm").is_file() && !pj.exists() && pj.with_file_name("pathing.json.bak2").is_file());
+        assert_eq!(read_pathing(&dir).unwrap().as_deref(), Some(&json[..]));
+        assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
+        assert!(migrate_split(&dir).unwrap().is_empty(), "nothing more to move");
+
+        merge_project(&dir).unwrap();
+        assert_eq!(fs::read(&pj).unwrap(), json, "pathing.json back byte for byte");
+        assert_eq!(fs::read(map_dir.join("war3map.wpm")).unwrap(), b"pathing");
+        assert!(!store.exists());
+        for (name, bytes) in &flat {
+            assert_eq!(&fs::read(map_dir.join(name)).unwrap(), bytes, "{name}");
+        }
+        assert_eq!(crate::derived::check(&dir).unwrap(), crate::derived::Freshness::Fresh);
         let _ = fs::remove_dir_all(&dir);
     }
 

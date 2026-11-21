@@ -59,6 +59,10 @@ pub struct Options {
 pub fn run(o: Options) -> Result<ExitCode> {
     let info = backend::open_project(&o.project.to_string_lossy()).map_err(anyhow::Error::msg).with_context(|| format!("opening {}", o.project.display()))?;
     let root = PathBuf::from(&info.root);
+    // A project split before derived files and pathing overrides moved out of git: moved first, so they are written there.
+    for path in w3proj::terrain_layout::migrate_split(&root)? {
+        println!("moved      {path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
+    }
     let mut parts = due(&o, &root)?;
     // Taken before anything is made: a terrain or doodad file written meanwhile shows as changed since.
     let sources = derived::sources(&root)?;
@@ -247,7 +251,12 @@ fn due(o: &Options, root: &Path) -> Result<Due> {
     let mut fresh = Vec::new();
     let mut skipped = Vec::new();
     let freshness = derived::check(root)?;
-    if freshness == Freshness::Fresh && !o.force {
+    // A split project's store (.w3proj/derived/, not in git) may lack some even when the record says they follow.
+    let missing = derived::missing(root)?;
+    if !missing.is_empty() {
+        println!("note: {} missing in .w3proj/derived/; pathing, shadows and the minimap are made again", missing.join(", "));
+    }
+    if freshness == Freshness::Fresh && missing.is_empty() && !o.force {
         fresh.extend(DERIVED_PARTS);
         skipped.push((DERIVED_PARTS.to_vec(), "they follow the terrain and doodads (--force makes them again)".to_string()));
     } else {

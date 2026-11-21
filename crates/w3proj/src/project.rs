@@ -755,7 +755,8 @@ pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result
     let old_raw = Manifest::load(project).map(|m| m.pack.raw).unwrap_or_default();
     // The files as the sync writes them (a split terrain layout kept: `terrain_layout::prepare_sync`).
     let mut files = ex.files.clone();
-    crate::terrain_layout::prepare_sync(&project.join(MAP_DIR), &mut files)?;
+    // A split project's derived files go into the store, not map/.
+    let _derived = crate::terrain_layout::prepare_sync(&project.join(MAP_DIR), &mut files)?;
     let (gone, _) = extra_files(&project.join(MAP_DIR), &files)?;
     out.extend(
         gone.into_iter()
@@ -857,8 +858,9 @@ const GITATTRIBUTES_V1: &str = "\
 *.toc diff
 ";
 
-/// `.*.tmp`: a file being saved (`crate::atomic`) or one a crash left half written.
-const GITIGNORE: &str = "build/\n.*.tmp\n";
+/// `.*.tmp`: a file being saved (`crate::atomic`) or one a crash left half written. `/.w3proj/derived/`: the derived
+/// files of a split terrain (`crate::derived::STORE_DIR`; a flat project has none there).
+const GITIGNORE: &str = "build/\n.*.tmp\n/.w3proj/derived/\n";
 
 /// Writes an extracted archive into a project directory. Existing pack
 /// settings in the manifest are kept.
@@ -985,8 +987,10 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     } else {
         keep_mdl_header_only(&map_dir, &mut ex.files)?
     };
-    // A project with the split terrain layout keeps it: the map's terrain goes into its subterrains.
-    crate::terrain_layout::prepare_sync(&map_dir, &mut ex.files)?;
+    // A project with the split terrain layout keeps it: the map's terrain goes into its subterrains, its derived files
+    // into the store (`crate::derived`; ones in map/ from before the store existed go, the map's replace them).
+    let split = crate::terrain_layout::is_split_on_disk(&map_dir)?;
+    let derived = crate::terrain_layout::prepare_sync(&map_dir, &mut ex.files)?;
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -1021,6 +1025,12 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     report.kept_classic.extend(kept.into_iter().map(|p| format!("{MAP_DIR}/{p}")));
     report.kept_mdl.extend(kept_mdl.into_iter().map(|p| format!("{MAP_DIR}/{p}")));
     sync_dir(&map_dir, MAP_DIR, &ex.files, &mut report)?;
+    if split {
+        crate::derived::sync_store(project, &derived)?;
+        if top {
+            crate::derived::ensure_ignored(project)?;
+        }
+    }
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
@@ -1250,8 +1260,20 @@ pub fn read_project(project: &Path) -> Result<ProjectContents> {
     for rel in walk(&map_dir)? {
         files.insert(rel.clone(), fs::read(map_dir.join(&rel))?);
     }
-    // Either terrain layout: a split one (map/terrain/) is assembled into war3map.w3e.txt here.
-    crate::terrain_layout::flatten(&mut files)?;
+    // Either terrain layout: a split one (map/terrain/) is assembled into war3map.w3e.txt here, and its derived files
+    // come from the store (`crate::derived`). Whether they may go into a map is the caller's to decide (`w3proj pack`
+    // checks the record); one also left in map/ is an error, as two of anything else.
+    if crate::terrain_layout::flatten(&mut files)? {
+        for (name, bytes) in crate::derived::read_store(project)? {
+            if let Some(k) = files.keys().find(|k| k.eq_ignore_ascii_case(&name)) {
+                return Err(Error::Project(format!(
+                    "{MAP_DIR}/{k} and {}/{name} are both there: a split project keeps its derived files in the store; delete the one in {MAP_DIR}/",
+                    crate::derived::STORE_DIR.join("/")
+                )));
+            }
+            files.insert(name, bytes);
+        }
+    }
     Ok((manifest, prefix, files))
 }
 
@@ -1679,7 +1701,10 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
 /// The map's terrain and placed objects (chapter maps' too) split into the `map/terrain/` layout as a
 /// 2×2 grid and read back (`terrain_layout::split`, then `flatten` as `read_project` reads it): the
 /// project files have to come back byte for byte, and the map packed from them has to be the one
-/// packed from the flat files. A terrain kept raw has nothing to split.
+/// packed from the flat files. The derived files go into the store and back (`derived::take`, as
+/// a split moves them), and a Pathing tool file with overrides over the seams
+/// (`terrain_pathing::sample_json`) into the subterrains' `pathing.txt` and back, byte for byte. A
+/// terrain kept raw has nothing to split.
 fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>) {
     use crate::terrain_layout as tl;
     let text = ex.files.keys().find(|k| k.eq_ignore_ascii_case(tl::FLAT_FILE));
@@ -1687,7 +1712,17 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
         let result = w3e::terrain_from_text(&ex.files[text]).and_then(|t| {
             let mut files = ex.files.clone();
             tl::split(&mut files, &tl::grid_2x2(t.width, t.height))?;
+            let store = crate::derived::take(&mut files);
+            if let Some(json) = crate::terrain_pathing::sample_json([t.width, t.height]) {
+                let layout = tl::Layout::parse(&files[tl::LAYOUT_FILE])?;
+                let sliced = crate::terrain_pathing::slice(&json, &layout)?;
+                if crate::terrain_pathing::assemble(&layout, &|p| sliced.get(p).cloned())?.as_deref() != Some(&json[..]) {
+                    return Ok(Some("pathing.json"));
+                }
+                files.extend(sliced);
+            }
             tl::flatten(&mut files)?;
+            files.extend(store);
             if files != ex.files {
                 return Ok(Some("project files"));
             }
