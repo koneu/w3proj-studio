@@ -16,6 +16,7 @@ pub mod project;
 pub mod terrain_ids;
 pub mod terrain_layout;
 pub mod terrain_objects;
+pub mod terrain_open;
 pub mod terrain_pathing;
 pub mod triggerdata;
 pub mod w3o;

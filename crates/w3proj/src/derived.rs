@@ -32,6 +32,33 @@ pub const DERIVED: &str = "pathing (war3map.wpm), shadows (war3map.shd) and the 
 pub type Sources = BTreeMap<String, String>;
 
 pub fn sources(project: &Path) -> Result<Sources> {
+    // The split terrain layout: every file under map/terrain/ counts (`terrain/<path>`).
+    read_sources(project, &|_| false)
+}
+
+/// The key of a record made while subterrains were closed (`sources_open`): how many. Not a file name (`?` can't be one
+/// on Windows), so it never stands for a source.
+pub const CLOSED_KEY: &str = "?closed-subterrains";
+
+/// The sources as the app records them after making the derived files from what it has loaded: `sources`, but with
+/// subterrains closed (`crate::terrain_open`) their files are left out (never read) and `CLOSED_KEY` says how many there
+/// were, so `check` takes the files for stale whatever else matches (they can't follow a map that wasn't all there).
+pub fn sources_open(project: &Path) -> Result<Sources> {
+    let map = project.join(MAP_DIR);
+    if !crate::terrain_layout::is_split_on_disk(&map)? {
+        return sources(project);
+    }
+    let bytes = fs::read(map.join(crate::terrain_layout::DIR).join("terrain.json")).map_err(|e| Error::Project(format!("map/{} can't be read: {e}", crate::terrain_layout::LAYOUT_FILE)))?;
+    let layout = crate::terrain_layout::Layout::parse(&bytes)?;
+    let Some(partial) = crate::terrain_open::of_map_dir(&map, &layout)? else { return sources(project) };
+    let closed: Vec<String> = layout.subterrains.iter().zip(&partial.open).filter(|(_, o)| !**o).map(|(s, _)| format!("{}/{}/", crate::terrain_layout::DIR, s.folder)).collect();
+    let mut out = read_sources(project, &|path| closed.iter().any(|c| path.starts_with(c.as_str())))?;
+    out.insert(CLOSED_KEY.to_string(), partial.closed_count().to_string());
+    Ok(out)
+}
+
+/// The source files' fingerprints (`sources`), those under `map/` whose path `skip` names left out unread.
+fn read_sources(project: &Path, skip: &dyn Fn(&str) -> bool) -> Result<Sources> {
     let map = project.join(MAP_DIR);
     let mut out = Sources::new();
     let entries = match fs::read_dir(&map) {
@@ -48,11 +75,13 @@ pub fn sources(project: &Path) -> Result<Sources> {
         let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
         out.insert(name, fingerprint(&bytes));
     }
-    // The split terrain layout: every file under map/terrain/ counts (`terrain/<path>`).
     if crate::terrain_layout::is_split_on_disk(&map)? {
         for rel in crate::project::walk(&map.join(crate::terrain_layout::DIR))? {
             let path = format!("{}/{rel}", crate::terrain_layout::DIR);
-            let bytes = fs::read(map.join(&path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+            if skip(&path) {
+                continue;
+            }
+            let bytes = fs::read(crate::paths::join_rel(&map, &path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
             out.insert(path, fingerprint(&bytes));
         }
     }
@@ -100,6 +129,19 @@ pub enum Freshness {
     Stale(Vec<String>),
     /// The record is there but can't be read (why).
     Unreadable(String),
+    /// They were made while this many subterrains were closed (`sources_open`): they follow part of the map only.
+    Partial(usize),
+}
+
+impl Freshness {
+    /// What a refusal says about a record that was made with subterrains closed.
+    pub fn partial_text(n: usize) -> String {
+        format!(
+            "{n} subterrain{} {} closed when they were saved, so they follow part of the map only: open all subterrains in Studio and save, or run `w3proj rebuild`",
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "was" } else { "were" }
+        )
+    }
 }
 
 pub fn check(project: &Path) -> Result<Freshness> {
@@ -113,6 +155,9 @@ pub fn check(project: &Path) -> Result<Freshness> {
         Some(r) => r,
         None => return Ok(Freshness::Unreadable(format!("{STAMP_FILE} isn't a record of the derived files' sources"))),
     };
+    if let Some(n) = recorded.get(CLOSED_KEY) {
+        return Ok(Freshness::Partial(n.parse().unwrap_or(1)));
+    }
     let now = sources(project)?;
     let lower = |m: &Sources| m.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect::<BTreeMap<_, _>>();
     let (was, is) = (lower(&recorded), lower(&now));

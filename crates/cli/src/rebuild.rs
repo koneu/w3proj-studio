@@ -59,6 +59,9 @@ pub struct Options {
 pub fn run(o: Options) -> Result<ExitCode> {
     let info = backend::open_project(&o.project.to_string_lossy()).map_err(anyhow::Error::msg).with_context(|| format!("opening {}", o.project.display()))?;
     let root = PathBuf::from(&info.root);
+    // A rebuild is of the whole map: every subterrain open, whatever .w3proj/open-subterrains.json says (it makes the
+    // derived files fresh after a partial open's save marked them stale).
+    w3proj::terrain_open::set_override(Some(w3proj::terrain_open::Choice::All));
     // A project split before derived files and pathing overrides moved out of git: moved first, so they are written there.
     for path in w3proj::terrain_layout::migrate_split(&root)? {
         println!("moved      {path} (a split terrain keeps derived files in .w3proj/derived/ and pathing overrides in map/terrain/*/pathing.txt)");
@@ -526,7 +529,13 @@ impl Server {
                 self.writable(&Path::new(root()?).join(path()?).to_string_lossy())?;
                 to_json(backend::codec_write(root()?, path()?, arg(args, "text")?, &self.formats)?)
             }
-            "derived_sources" => to_json(w3proj::derived::sources(Path::new(root()?)).map_err(backend::err)?),
+            "derived_sources" => to_json(w3proj::derived::sources_open(Path::new(root()?)).map_err(backend::err)?),
+            "terrain_open_state" => to_json(backend::flatview::open_state(root()?)?),
+            "terrain_set_open" => {
+                self.writable(&Path::new(root()?).join(".w3proj").to_string_lossy())?;
+                let names: Vec<String> = args.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                to_json(backend::flatview::set_open(root()?, &names)?)
+            }
             // The CLI records what the files follow itself, once the job is done and only if all of them do (rebuild::run).
             "derived_record" => Ok(Answer::Json(Value::Null)),
             "game_read" => {

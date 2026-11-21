@@ -197,11 +197,12 @@ async fn project_pack(app: AppHandle, root: String, output: Option<String>) -> C
 }
 
 /// The project's terrain and doodad files as they are now (`w3proj::derived`), taken before pathing, shadows and the
-/// minimap are made from them.
+/// minimap are made from them. With subterrains closed, those of the open ones and how many are closed
+/// (`sources_open`): the record then says the files follow part of the map only.
 #[tauri::command]
 async fn derived_sources(root: String) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || {
-        let s = w3proj::derived::sources(Path::new(&root)).map_err(err)?;
+        let s = w3proj::derived::sources_open(Path::new(&root)).map_err(err)?;
         serde_json::to_value(&s).map_err(err)
     })
     .await
@@ -240,6 +241,22 @@ async fn terrain_merge(root: String) -> CmdResult<Value> {
 #[tauri::command]
 async fn terrain_id_layout(root: String) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::id_layout(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// Which subterrains of a split project are open (`backend::flatview::open_state`); null for a flat one.
+#[tauri::command]
+async fn terrain_open_state(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::open_state(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// Open Subterrains…: opens these subterrains (`backend::flatview::set_open`); the new state.
+#[tauri::command]
+async fn terrain_set_open(root: String, names: Vec<String>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::set_open(&root, &names)?).map_err(err))
         .await
         .map_err(err)?
 }
@@ -1155,6 +1172,8 @@ pub fn run() {
             terrain_merge,
             terrain_id_layout,
             terrain_check,
+            terrain_open_state,
+            terrain_set_open,
             objects_canonicalize,
             objects_export,
             objects_import,

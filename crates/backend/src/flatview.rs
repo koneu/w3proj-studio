@@ -27,7 +27,7 @@ impl Flat {
     pub fn stamp(&self) -> Stamp {
         let (mut size, mut modified) = (0, 0);
         for s in &self.sources {
-            if let Ok(meta) = std::fs::metadata(self.map_dir.join(s)) {
+            if let Ok(meta) = std::fs::metadata(join_rel(&self.map_dir, s)) {
                 size += meta.len();
                 modified = modified.max(modified_ms(&meta));
             }
@@ -40,7 +40,7 @@ impl Flat {
     pub fn hash(&self) -> CmdResult<String> {
         let mut all = Vec::new();
         for s in &self.sources {
-            match std::fs::read(self.map_dir.join(s)) {
+            match std::fs::read(join_rel(&self.map_dir, s)) {
                 Ok(b) => {
                     all.extend_from_slice(s.as_bytes());
                     all.push(0);
@@ -385,6 +385,28 @@ pub fn merge(root: &str) -> CmdResult<layout::Converted> {
     layout::merge_project(Path::new(root)).map_err(err)
 }
 
+/// "terrain_open_state": which subterrains of a split project are open (`w3proj::terrain_open::state`: names, rectangles,
+/// open or read for the halo, sizes on disk, the corner mask the terrain editor draws by); None for a flat project. A
+/// choice that can't be used (a damaged `.w3proj/open-subterrains.json`) is in its `error`, not an error of the call: the
+/// Subterrains view still lists the subterrains so they can be picked again.
+pub fn open_state(root: &str) -> CmdResult<Option<w3proj::terrain_open::State>> {
+    w3proj::terrain_open::state(Path::new(root)).map_err(err)
+}
+
+/// "terrain_set_open" (Open Subterrains…): opens `names` (every subterrain removes `.w3proj/open-subterrains.json`, the
+/// default); the new state. Refused for a flat project, no names, or a name the layout doesn't have.
+pub fn set_open(root: &str, names: &[String]) -> CmdResult<Option<w3proj::terrain_open::State>> {
+    let project = Path::new(root);
+    let map_dir = project.join(w3proj::project::MAP_DIR);
+    if !layout::is_split_on_disk(&map_dir).map_err(err)? {
+        return Err("the terrain isn't split into subterrains (there is no map/terrain/terrain.json)".into());
+    }
+    let bytes = std::fs::read(join_rel(&map_dir, layout::LAYOUT_FILE)).map_err(|e| format!("map/{} can't be read: {e}", layout::LAYOUT_FILE))?;
+    let l = layout::Layout::parse(&bytes).map_err(err)?;
+    w3proj::terrain_open::store(project, &l, names).map_err(err)?;
+    open_state(root)
+}
+
 /// One subterrain as the app's creation-number allocator needs it (`terrain_id_layout`).
 #[derive(Serialize, Debug, PartialEq)]
 pub struct IdSubterrain {
@@ -712,6 +734,37 @@ mod tests {
         let fj = flat.join(".w3proj").join("pathing.json");
         crate::write_bytes(&fj, one.as_bytes()).unwrap();
         assert_eq!(fs::read_to_string(&fj).unwrap(), one);
+        let _ = fs::remove_dir_all(flat.parent().unwrap());
+    }
+
+    /// Open Subterrains… through the file commands: with only the north-east open, its corner is written into its file
+    /// alone (named in `also`), the south-west's (read-only halo here) is refused with nothing written, the state says
+    /// which are open and the mask; opening all again removes the choice. A flat project has no state.
+    #[test]
+    fn a_partial_open_through_the_file_commands() {
+        let (flat, split) = split_mini("partial");
+        let root = split.to_string_lossy().into_owned();
+        assert!(open_state(&flat.to_string_lossy()).unwrap().is_none(), "control: a flat project");
+        assert!(set_open(&flat.to_string_lossy(), &["ne".into()]).is_err());
+        let s = set_open(&root, &["ne".into()]).unwrap().unwrap();
+        assert!(s.partial && s.mask.len() == 15);
+        assert_eq!(s.subterrains.iter().map(|x| (x.name.as_str(), x.open)).collect::<Vec<_>>(), [("sw", false), ("se", false), ("nw", false), ("ne", true)]);
+        let w3e = split.join("map/war3map.w3e.txt");
+        let text = String::from_utf8(read_bytes(&w3e).unwrap()).unwrap();
+        // The north row's last corner (north-east) and the south row's first (south-west).
+        let ne = text.replacen("[height]\n0*4 -12\n", "[height]\n0*4 4\n", 1);
+        assert_ne!(ne, text);
+        let stamp = crate::write_bytes(&w3e, ne.as_bytes()).unwrap();
+        assert_eq!(stamp.also.iter().map(|a| a.path.as_str()).collect::<Vec<_>>(), [join_rel(&split.join("map"), "terrain/ne/terrain.txt").to_string_lossy()]);
+        let before = layout_files(&split);
+        let sw = ne.replacen("\n-12 0*4\n", "\n-8 0*4\n", 1);
+        assert_ne!(sw, ne);
+        let e = crate::write_bytes(&w3e, sw.as_bytes()).unwrap_err();
+        assert!(e.contains("subterrain \"sw\"") && e.contains("nothing was written"), "{e}");
+        assert_eq!(layout_files(&split), before);
+        set_open(&root, &["sw".into(), "se".into(), "nw".into(), "ne".into()]).unwrap();
+        assert!(!split.join(".w3proj").join("open-subterrains.json").exists());
+        assert!(!open_state(&root).unwrap().unwrap().partial);
         let _ = fs::remove_dir_all(flat.parent().unwrap());
     }
 

@@ -344,6 +344,8 @@ fn check_derived(project: &std::path::Path, force_stale: bool, terrain_only: boo
             Freshness::Unreadable(why) => {
                 anyhow::bail!("{at}{why}, so it can't be told whether {DERIVED} follow the terrain and doodads: {again} (that writes {at}{STAMP_FILE} anew)");
             }
+            // Only a split project records closed subterrains; a flat one with such a record (merged since) is stale.
+            Freshness::Partial(n) => anyhow::bail!("{DERIVED}: {}; {again}", Freshness::partial_text(n)),
         }
     }
     Ok(())
@@ -367,6 +369,7 @@ fn check_split_derived(at: &str, dir: &std::path::Path, force_stale: bool, terra
         Freshness::Stale(files) => Some(format!("{} changed since they were made", files.iter().map(|f| format!("{at}map/{f}")).collect::<Vec<_>>().join(", "))),
         Freshness::Unknown => Some(format!("there is no {at}{STAMP_FILE} saying what they were made from")),
         Freshness::Unreadable(why) => Some(format!("{at}{why}")),
+        Freshness::Partial(n) => Some(Freshness::partial_text(n)),
     };
     let fix = "open the project in W3Proj Studio and save the terrain, or run `w3proj rebuild` (both need the game's data), \
                then pack again; --allow-terrain-only-derived packs without them";

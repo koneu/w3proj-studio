@@ -91,8 +91,8 @@ pub struct DooHeader {
 /// subterrains.
 #[derive(Clone)]
 pub struct Layout {
-    head: Terrain,
-    default_corner: Corner,
+    pub(crate) head: Terrain,
+    pub(crate) default_corner: Corner,
     pub doo_header: Option<DooHeader>,
     /// The object files in the subterrains (`terrain.json`'s `objects`, with `dooHeader`).
     pub objects: Heads,
@@ -482,13 +482,13 @@ impl Layout {
 // ---- terrain.txt ----
 
 /// A subterrain's ground file: `corners w h`, then the grid sections of war3map.w3e.txt.
-fn ground_text(corners: &[Corner], w: usize, h: usize, version: u32) -> Vec<u8> {
+pub(crate) fn ground_text(corners: &[Corner], w: usize, h: usize, version: u32) -> Vec<u8> {
     let mut s = format!("corners {w} {h}\n");
     w3e::write_grids(&mut s, corners, w, version);
     s.into_bytes()
 }
 
-fn parse_ground(path: &str, bytes: &[u8], w: usize, h: usize, version: u32) -> Result<Vec<Corner>> {
+pub(crate) fn parse_ground(path: &str, bytes: &[u8], w: usize, h: usize, version: u32) -> Result<Vec<Corner>> {
     let what = format!("map/{path}");
     let text = std::str::from_utf8(bytes).map_err(|_| Error::Format(format!("{what}: not UTF-8")))?;
     let mut lines = w3e::text_lines(text);
@@ -1034,12 +1034,21 @@ pub fn flat_views(map_dir: &Path) -> Result<Option<Vec<FlatView>>> {
         Err(_) => return Ok(Some(vec![FlatView { name: FLAT_FILE, sources: all }])),
     };
     let kinds: Vec<Kind> = KINDS.into_iter().filter(|k| layout.objects.has(*k)).collect();
+    // With subterrains closed, the files of the open and halo ones only (a closed one's are never read, and its changes
+    // don't change what the app sees); one that can't be told (a damaged choice) lists them all, and reading says why.
+    let partial = crate::terrain_open::of_map_dir(map_dir, &layout).ok().flatten();
+    let loaded = |i: usize| partial.as_ref().is_none_or(|p| p.loaded(i));
+    let closed_dirs: Vec<String> = layout.subterrains.iter().enumerate().filter(|(i, _)| !loaded(*i)).map(|(_, s)| format!("{DIR}/{}/", s.folder)).collect();
     // The objects' files and the hand-painted pathing (`.w3proj/pathing.json`'s, not the terrain's).
     let mut objects: HashSet<String> = kinds.iter().flat_map(|k| layout.subterrains.iter().map(|s| s.object_path(*k))).collect();
     objects.extend(layout.subterrains.iter().map(crate::terrain_pathing::path));
-    let mut out = vec![FlatView { name: FLAT_FILE, sources: all.into_iter().filter(|p| !objects.contains(p)).collect() }];
+    let ground = all.into_iter().filter(|p| !objects.contains(p) && !closed_dirs.iter().any(|d| p.starts_with(d.as_str())));
+    // The choice itself: changing it changes what the flat files hold.
+    let choice = format!("../{}", crate::terrain_open::NAME);
+    let mut out = vec![FlatView { name: FLAT_FILE, sources: ground.chain(std::iter::once(choice.clone())).collect() }];
     for kind in kinds {
-        let sources = std::iter::once(LAYOUT_FILE.to_string()).chain(layout.subterrains.iter().map(|s| s.object_path(kind))).collect();
+        let subs = layout.subterrains.iter().enumerate().filter(|(i, _)| loaded(*i)).map(|(_, s)| s.object_path(kind));
+        let sources = std::iter::once(LAYOUT_FILE.to_string()).chain(subs).chain(std::iter::once(choice.clone())).collect();
         out.push(FlatView { name: kind.flat(), sources });
     }
     Ok(Some(out))
@@ -1059,8 +1068,26 @@ fn read_flat_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
 /// The flat file `name` (one of `FLAT_NAMES`) of a split project's `map/` folder, assembled from the subterrains: the
 /// bytes `w3proj terrain merge` would write. Anything the layout's files have wrong is an error, never an empty file.
 pub fn read_flat(map_dir: &Path, name: &str) -> Result<Vec<u8>> {
-    let mut files = read_flat_files(map_dir)?;
+    let mut files = match partial_of(map_dir)? {
+        Some((layout, p)) => crate::terrain_open::read_flat_files(map_dir, &layout, &p)?,
+        None => read_flat_files(map_dir)?,
+    };
     files.remove(name).ok_or_else(|| Error::Project(format!("map/{name} isn't one the split terrain holds (map/{LAYOUT_FILE})")))
+}
+
+/// The layout of a split project's `map/` folder (read and checked).
+fn layout_of(map_dir: &Path) -> Result<Layout> {
+    Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).map_err(|e| Error::Project(format!("map/{LAYOUT_FILE} can't be read: {e}")))?)
+}
+
+/// A split project's layout and partial load (`crate::terrain_open`) when some of its subterrains are closed; None when
+/// all are open. A layout or choice that can't be read is an error.
+fn partial_of(map_dir: &Path) -> Result<Option<(Layout, crate::terrain_open::Partial)>> {
+    if !is_split_on_disk(map_dir)? {
+        return Ok(None);
+    }
+    let layout = layout_of(map_dir)?;
+    Ok(crate::terrain_open::of_map_dir(map_dir, &layout)?.map(|p| (layout, p)))
 }
 
 /// One write of a split project's files at a time (`write_flat`, `split_project`, `merge_project`): each reads what
@@ -1074,7 +1101,12 @@ static FLAT_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// that isn't the default, another canvas size, content that doesn't parse or come back the same.
 pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String>> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).map_err(|e| Error::Project(format!("map/{LAYOUT_FILE} can't be read: {e}")))?)?;
+    // Some subterrains closed: only the open ones' files are written (crate::terrain_open::write_flat).
+    if let Some((mut layout, p)) = partial_of(map_dir)? {
+        let files = crate::terrain_open::write_flat(map_dir, &mut layout, &p, name, bytes)?;
+        return write_changed(map_dir, &files);
+    }
+    let layout = layout_of(map_dir)?;
     let mut files = read_flat_files(map_dir)?;
     if !files.contains_key(name) {
         return Err(Error::Project(format!("map/{name} isn't one the split terrain holds (map/{LAYOUT_FILE})")));
@@ -1134,6 +1166,9 @@ fn pathing_json_in_the_way(project: &Path) -> Result<()> {
 /// The subterrains' `pathing.txt` that are there (relative to `map/`), of a split project.
 pub fn pathing_files(project: &Path) -> Result<Vec<String>> {
     let (map_dir, layout) = pathing_layout(project)?;
+    if let Some(p) = crate::terrain_open::of_map_dir(&map_dir, &layout)? {
+        return crate::terrain_open::pathing_files(&map_dir, &layout, &p);
+    }
     let mut out = Vec::new();
     for p in layout.subterrains.iter().map(crate::terrain_pathing::path) {
         let at = crate::paths::join_rel(&map_dir, &p);
@@ -1150,6 +1185,9 @@ pub fn pathing_files(project: &Path) -> Result<Vec<String>> {
 pub fn read_pathing(project: &Path) -> Result<Option<Vec<u8>>> {
     let (map_dir, layout) = pathing_layout(project)?;
     pathing_json_in_the_way(project)?;
+    if let Some(p) = crate::terrain_open::of_map_dir(&map_dir, &layout)? {
+        return crate::terrain_open::read_pathing(&map_dir, &layout, &p);
+    }
     let mut files = BTreeMap::new();
     let paths: Vec<String> = layout.subterrains.iter().map(crate::terrain_pathing::path).collect();
     read_if_there(&map_dir, &paths.iter().map(String::as_str).collect::<Vec<_>>(), &mut files)?;
@@ -1163,10 +1201,18 @@ pub fn write_pathing(project: &Path, bytes: &[u8]) -> Result<(Vec<String>, Vec<S
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let (map_dir, layout) = pathing_layout(project)?;
     pathing_json_in_the_way(project)?;
-    let sliced = crate::terrain_pathing::slice(bytes, &layout)?;
+    // Some subterrains closed: the open ones' files only, and only when nothing outside them changed.
+    let (sliced, removable) = match crate::terrain_open::of_map_dir(&map_dir, &layout)? {
+        Some(p) => crate::terrain_open::write_pathing(&map_dir, &layout, &p, bytes)?,
+        None => {
+            let sliced = crate::terrain_pathing::slice(bytes, &layout)?;
+            let removable = layout.subterrains.iter().map(crate::terrain_pathing::path).filter(|p| !sliced.contains_key(p)).collect();
+            (sliced, removable)
+        }
+    };
     let written = write_changed(&map_dir, &sliced)?;
     let mut removed = Vec::new();
-    for p in layout.subterrains.iter().map(crate::terrain_pathing::path).filter(|p| !sliced.contains_key(p)) {
+    for p in removable {
         match fs::remove_file(crate::paths::join_rel(&map_dir, &p)) {
             Ok(()) => removed.push(p),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1207,9 +1253,12 @@ pub fn migrate_split(project: &Path) -> Result<Vec<String>> {
 /// Deletes a split project's `.w3proj/pathing.json`: every subterrain's `pathing.txt`. The paths removed (relative to `map/`).
 pub fn delete_pathing(project: &Path) -> Result<Vec<String>> {
     let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
-    let (map_dir, _) = pathing_layout(project)?;
+    let (map_dir, layout) = pathing_layout(project)?;
+    // Some subterrains closed: only the open ones' files go (a closed one's, halo or not, is never touched).
+    let partial = crate::terrain_open::of_map_dir(&map_dir, &layout)?;
+    let open: HashSet<String> = layout.subterrains.iter().enumerate().filter(|(i, _)| partial.as_ref().is_none_or(|p| p.open[*i])).map(|(_, s)| crate::terrain_pathing::path(s)).collect();
     let mut removed = Vec::new();
-    for p in pathing_files(project)? {
+    for p in pathing_files(project)?.into_iter().filter(|p| open.contains(p)) {
         fs::remove_file(crate::paths::join_rel(&map_dir, &p))?;
         removed.push(p);
     }
@@ -1704,7 +1753,11 @@ mod tests {
         assert_eq!(views.iter().map(|v| v.name).collect::<Vec<_>>(), FLAT_NAMES.to_vec());
         assert!(views[0].sources.contains(&"terrain/terrain.json".to_string()) && views[0].sources.contains(&"terrain/ne/terrain.txt".to_string()));
         assert!(!views[0].sources.iter().any(|s| s.ends_with("units.json")), "{:?}", views[0].sources);
-        assert_eq!(views[2].sources, ["terrain/terrain.json", "terrain/sw/units.json", "terrain/se/units.json", "terrain/nw/units.json", "terrain/ne/units.json"]);
+        // The choice of open subterrains too (`crate::terrain_open`): changing it changes what the flat files hold.
+        assert_eq!(
+            views[2].sources,
+            ["terrain/terrain.json", "terrain/sw/units.json", "terrain/se/units.json", "terrain/nw/units.json", "terrain/ne/units.json", "../.w3proj/open-subterrains.json"]
+        );
         for name in FLAT_NAMES {
             assert_eq!(read_flat(&dir, name).unwrap(), flat[name], "{name}");
         }

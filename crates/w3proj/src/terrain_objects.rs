@@ -601,15 +601,45 @@ fn read_sub(kind: Kind, path: &str, bytes: &[u8], version: u32) -> Result<Vec<Ve
 /// the subterrains' files (`get`: path relative to `map/` → bytes). A subterrain without its file,
 /// a file that can't be read and a creation number found twice are errors.
 pub(crate) fn assemble(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Flats> {
+    assemble_with(heads, subs, [0.0, 0.0], &|_| Some(true), &|_| true, get)
+}
+
+/// An entry's area in world units, `[left, bottom, right, top]`: a placed object's or special doodad's position twice,
+/// a region's rectangle.
+fn area(kind: Kind, list: List, e: &Entry, offset: [f32; 2]) -> std::result::Result<[f64; 4], String> {
+    if kind == Kind::Regions {
+        let f = |k: &str| e.get(k).and_then(float).ok_or_else(|| "a region's left, bottom, right and top aren't numbers".to_string());
+        return Ok([f("left")?, f("bottom")?, f("right")?, f("top")?]);
+    }
+    let (x, y) = position(kind, list, e, offset)?;
+    Ok([x, y, x, y])
+}
+
+/// `assemble` of some subterrains (a partial load, `crate::terrain_open`): `take(i)` says for subterrain `i` whether
+/// its files are read (None: never asked for) and whether it is taken whole (`Some(true)`) or only its entries whose
+/// area (`area`, on a canvas at `offset`) is `near` (`Some(false)`: the halo).
+pub(crate) fn assemble_with(
+    heads: &Heads,
+    subs: &[Subterrain],
+    offset: [f32; 2],
+    take: &dyn Fn(usize) -> Option<bool>,
+    near: &dyn Fn([f64; 4]) -> bool,
+    get: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<Flats> {
     let mut out = BTreeMap::new();
     let version = doodads_version(heads);
     for kind in KINDS.into_iter().filter(|k| heads.has(*k)) {
         let mut per_list: Vec<Vec<Item>> = lists(kind).iter().map(|_| Vec::new()).collect();
         let mut seen: HashMap<u32, String> = HashMap::new();
-        for s in subs {
+        for (si, s) in subs.iter().enumerate() {
+            let Some(whole) = take(si) else { continue };
             let path = s.object_path(kind);
             let bytes = get(&path).ok_or_else(|| Error::Format(format!("map/{path} is missing: subterrain \"{}\" has no {} file", s.name, kind.name())))?;
-            for (li, items) in read_sub(kind, &path, &bytes, version)?.into_iter().enumerate() {
+            for (li, mut items) in read_sub(kind, &path, &bytes, version)?.into_iter().enumerate() {
+                if !whole {
+                    let list = lists(kind)[li];
+                    items.retain(|it| area(kind, list, &it.entry, offset).is_ok_and(near));
+                }
                 for item in &items {
                     if let SortKey::Number(n) = item.key {
                         if !assigned(kind, n) {
@@ -677,6 +707,135 @@ pub(crate) fn flat_numbers(kind: Kind, bytes: &[u8], offset: [f32; 2]) -> Result
         }
     }
     Ok(out)
+}
+
+/// The open subterrains' files for a flat object file written as `new` in a partial load (`crate::terrain_open`;
+/// `take` and `near` as for `assemble_with`, `get` the loaded subterrains' files): every entry of the new file goes to
+/// the open subterrain owning it; one whose owner isn't open must be an entry the load read unchanged (from the halo, or
+/// one an open subterrain's file holds outside its rectangle: it stays in that file); every halo entry must still be
+/// there unchanged; the header can't change (closed files are read by it). A refusal is an `Error::Project` starting
+/// "refused: " (the caller says what is closed). Only files whose entries changed are returned; an entry as it was
+/// keeps its `order`, a new or changed one has none (sorted in by its number).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_partial(
+    kind: Kind,
+    new: &[u8],
+    heads: &Heads,
+    subs: &[Subterrain],
+    offset: [f32; 2],
+    take: &dyn Fn(usize) -> Option<bool>,
+    near: &dyn Fn([f64; 4]) -> bool,
+    get: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    let refused = |m: String| Error::Project(format!("refused: map/{}: {m}", kind.flat()));
+    let (h_new, lists_new) = read_flat(kind, new)?;
+    let same_head = match kind {
+        Kind::Doodads => h_new.doodads == heads.doodads,
+        Kind::Units => h_new.units == heads.units,
+        Kind::Regions => h_new.regions == heads.regions,
+    };
+    if !same_head {
+        return Err(refused("its header (magic, version, skin ids) changed, and closed subterrains' files are read by it".into()));
+    }
+    let version = doodads_version(heads);
+    let canon = |e: &Entry| serde_json::to_string(e).expect("JSON serializes");
+    let open: Vec<bool> = (0..subs.len()).map(|i| take(i) == Some(true)).collect();
+    // The loaded subterrains' files as they are: per subterrain, per list, the items (an open one's all, a halo one's
+    // near ones).
+    let mut current: Vec<Option<Vec<Vec<Item>>>> = Vec::with_capacity(subs.len());
+    for (i, s) in subs.iter().enumerate() {
+        let Some(whole) = take(i) else {
+            current.push(None);
+            continue;
+        };
+        let path = s.object_path(kind);
+        let bytes = get(&path).ok_or_else(|| Error::Format(format!("map/{path} is missing: subterrain \"{}\" has no {} file", s.name, kind.name())))?;
+        let mut read = read_sub(kind, &path, &bytes, version)?;
+        if !whole {
+            for (li, items) in read.iter_mut().enumerate() {
+                let list = lists(kind)[li];
+                items.retain(|it| area(kind, list, &it.entry, offset).is_ok_and(near));
+            }
+        }
+        current.push(Some(read));
+    }
+    // Per subterrain, per list: (sort key, index in the new file, entry).
+    let mut per_sub: Vec<Vec<Vec<(SortKey, usize, Entry)>>> = vec![vec![Vec::new(); lists(kind).len()]; subs.len()];
+    for (li, (&list, entries)) in lists(kind).iter().zip(lists_new).enumerate() {
+        let key = list_key(kind, list);
+        // What the load read that stays where it is when it comes back unchanged, by text → the subterrains whose files
+        // hold it: every halo entry (never written, whoever owns its position), and an open file's entries whose owner
+        // isn't open (they stay in that file).
+        let mut kept: HashMap<String, Vec<usize>> = HashMap::new();
+        for (si, read) in current.iter().enumerate() {
+            let Some(read) = read else { continue };
+            for it in &read[li] {
+                let (x, y) = position(kind, list, &it.entry, offset).map_err(|m| flat_err(kind, m))?;
+                if !open[si] || !open[owner(subs, offset, x, y)] {
+                    kept.entry(canon(&it.entry)).or_default().push(si);
+                }
+            }
+        }
+        let mut seen: HashMap<u32, usize> = HashMap::new();
+        for (i, e) in entries.into_iter().enumerate() {
+            let k = sort_key(kind, list, version, &e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
+            if let SortKey::Number(n) = k {
+                if assigned(kind, n) {
+                    if let Some(first) = seen.insert(n, i) {
+                        return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
+                    }
+                }
+            }
+            let (x, y) = position(kind, list, &e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
+            let o = owner(subs, offset, x, y);
+            match kept.get_mut(&canon(&e)).and_then(Vec::pop) {
+                // Unchanged: an open file's entry stays in it, a halo entry isn't written.
+                Some(si) => {
+                    if open[si] {
+                        per_sub[si][li].push((k, i, e));
+                    }
+                }
+                None if open[o] => per_sub[o][li].push((k, i, e)),
+                None => return Err(refused(format!("{key}[{i}] at ({x:.0}, {y:.0}) lies in subterrain \"{}\", which isn't open: it can't be placed, moved or changed there", subs[o].name))),
+            }
+        }
+        if let Some(si) = kept.values().flatten().find(|si| !open[**si]) {
+            return Err(refused(format!("an entry of {key} in subterrain \"{}\" (read-only, beside an open one) was removed or changed", subs[*si].name)));
+        }
+        // An open file's entry outside the open rectangles that is gone was removed: allowed (the file is open).
+    }
+    let mut files = BTreeMap::new();
+    for (((s, is_open), found), old) in subs.iter().zip(&open).zip(per_sub).zip(current) {
+        let (true, Some(old)) = (*is_open, old) else { continue };
+        let path = s.object_path(kind);
+        let mut doc = Map::new();
+        let mut changed = false;
+        for ((&list, mut items), old_items) in lists(kind).iter().zip(found).zip(old) {
+            // The old entries' orders by their text (alike entries: each keeps one of theirs).
+            let mut orders: HashMap<String, Vec<Option<u64>>> = HashMap::new();
+            for it in &old_items {
+                orders.entry(canon(&it.entry)).or_default().push(it.order);
+            }
+            let mut before_texts: Vec<String> = old_items.iter().map(|it| canon(&it.entry)).collect();
+            let mut after_texts: Vec<String> = items.iter().map(|(_, _, e)| canon(e)).collect();
+            before_texts.sort();
+            after_texts.sort();
+            changed |= before_texts != after_texts;
+            items.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+            let values = items
+                .into_iter()
+                .map(|(_, _, e)| {
+                    let order = orders.get_mut(&canon(&e)).and_then(|v| v.pop()).flatten();
+                    with_order(order, e)
+                })
+                .collect();
+            doc.insert(list_key(kind, list).into(), Value::Array(values));
+        }
+        if changed {
+            files.insert(path, pretty(&Value::Object(doc)));
+        }
+    }
+    Ok(files)
 }
 
 /// An assigned creation number in a subterrain's file (`sub_numbers`).

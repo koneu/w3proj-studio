@@ -145,7 +145,7 @@ pub fn txt(cells: &[Cell]) -> Vec<u8> {
 /// project can't keep is an error saying why: another format, fields of its own (the subterrains' files hold the
 /// overrides only), another map size, a cell outside the map or twice, a bit both set and cleared, numbers that aren't
 /// bytes.
-fn parse_json(bytes: &[u8], corners: [usize; 2]) -> Result<Vec<Cell>> {
+pub(crate) fn parse_json(bytes: &[u8], corners: [usize; 2]) -> Result<Vec<Cell>> {
     let bad = |why: String| Error::Format(format!("{JSON_NAME} can't go into the subterrains' {FILE}: {why}"));
     let doc = crate::terrain_objects::strict_json(bytes).map_err(|e| bad(format!("it isn't JSON ({e})")))?;
     let o = doc.as_object().ok_or_else(|| bad("it isn't a JSON object".into()))?;
@@ -190,7 +190,7 @@ fn parse_json(bytes: &[u8], corners: [usize; 2]) -> Result<Vec<Cell>> {
 }
 
 /// `.w3proj/pathing.json` as the Pathing tool writes it (resize.ts `pathingOverridesText`), for absolute cells.
-fn json_text(corners: [usize; 2], cells: &[Cell]) -> Vec<u8> {
+pub(crate) fn json_text(corners: [usize; 2], cells: &[Cell]) -> Vec<u8> {
     let [w, h] = map_size(corners);
     let mut cells = cells.to_vec();
     cells.sort();
@@ -200,7 +200,7 @@ fn json_text(corners: [usize; 2], cells: &[Cell]) -> Vec<u8> {
 }
 
 /// For each cell of the pathing map, the index of the subterrain holding it (None: in none).
-fn owners(layout: &Layout) -> (usize, Vec<Option<u32>>) {
+pub(crate) fn owners(layout: &Layout) -> (usize, Vec<Option<u32>>) {
     let corners = layout.corners();
     let [w, h] = map_size(corners);
     let mut owner = vec![None; w * h];
