@@ -299,6 +299,20 @@ MPQ archive. The archive holds files like:
 | `war3map.wct` | custom script: the map header and each trigger's text | **text** (`war3map.wct.txt`, one section per trigger) |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
 
+A large map's terrain can be split into named rectangles (**Split Terrain into Subterrains…**, `w3proj terrain split`):
+`map/terrain/terrain.json` and one folder per subterrain with its `terrain.txt`, `doodads.json`, `units.json`,
+`regions.json` and `pathing.txt`, so people working on different parts merge in git without conflicts. **Open
+Subterrains…** (or the Subterrains view beside Terrain) opens only some of them: the choice is local
+(`.w3proj/open-subterrains.json`, git-ignored; no file opens all), the others aren't read, drawn or saved, and a strip
+of two corners around the open ones comes from the neighbours read-only. Every file command, AI tool and the headless
+tools go through the same layer: a save changes only the open subterrains' files, and an edit that would change
+anything outside them is refused with nothing written. `W3PROJ_OPEN_SUBTERRAINS` (`all`, or names separated by commas)
+overrides the file for one process; `w3proj rebuild` and `w3proj check` always work on the whole map, and the AI tools
+that judge the whole map (check_melee, check_path, check_route, find_pockets, find_spots) refuse while some are closed.
+Pathing, shadows and the minimap saved with subterrains closed are recorded as following part of the map:
+`w3proj pack` and Pack refuse them until everything is opened again (the terrain editor then makes them anew) or
+`w3proj rebuild` runs.
+
 Every codec is checked on unpack: a file is only stored as JSON or text if
 `encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
 lose anything. This was run over 676 local maps without a mismatch.
