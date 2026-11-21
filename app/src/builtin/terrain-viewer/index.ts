@@ -97,7 +97,7 @@ import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerra
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
-import { DERIVED_CLOSED_KEY, loadOpenState, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
+import { DERIVED_CLOSED_KEY, editableAt, loadOpenState, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
@@ -1655,6 +1655,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return {};
           }
         }
+        /** Whether a placed object lies in an open subterrain (always, when every one is open): the open rules (Snap and
+         *  Fix Doodads on Load, Units on the Ground on Save) change only those; the others are read-only. */
+        const inOpenArea = (p: { position: readonly number[] }) => editableAt(partial, terrain.offsetX, terrain.offsetY, p.position[0], p.position[1]);
         const partialHiddenTiles = () => (partial ? partial.hiddenTiles.reduce<number[]>((out, v, i) => (v ? (out.push(i), out) : out), []) : []);
         const partialHiddenAt = (x: number, y: number) => {
           if (!partial) return false;
@@ -2938,7 +2941,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (disposed) return;
             // The facings the World Editor reads war3mapUnits.doo with (doodadedit.ts unitAnglesAsOpened), with the
             // doodads' (setting Snap Doodads on Load): not an edit either; the next save writes them.
-            if (uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(uf.list)) objectsTouched = unitAnglesUnsaved = true;
+            if (uf && unitsFile === uf && snapsDoodads() && unitAnglesAsOpened(partial ? uf.list.filter(inOpenArea) : uf.list)) objectsTouched = unitAnglesUnsaved = true;
             // Auto Cycle Random Groups: a group's objects are drawn as one of its lines from the start, a random one.
             if (autoCycleOn()) {
               const g = await readRandomGroups();
@@ -2966,6 +2969,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let changed = false;
           for (const p of unitsFile.list) {
             if (p.id !== "sloc" && !skinOf(p)) continue;
+            // A partial load: what lies outside the open subterrains is read-only (the backend refuses its change).
+            if (!inOpenArea(p)) continue;
             const [x, y, z] = p.position;
             if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
             const skin = skinOf(p), moveType = skin?.moveType;
@@ -3084,7 +3089,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return 0;
           }
           if (!still()) return 0;
-          return snapAsOpened(list, openRuleSource(null), moved);
+          return snapAsOpened(partial ? list.filter(inOpenArea) : list, openRuleSource(null), moved);
         }
         /** What Snap and Fix Doodads on Load go by now (doodadedit.ts). A fixed rotation the map's own data may change
          *  isn't known while that data can't be read: angles only come into 0..360 then. */
@@ -3132,7 +3137,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!still() || !objCtx) return 0;
           if (!info) console.warn("doodad flags kept: the map's w3i couldn't be read");
           if (!scales) console.warn("doodad scales kept: the map's doodad or destructable data couldn't be read");
-          return fixAsOpened(list, openRuleSource(info ? playableArea(info, terrain) : null, scales));
+          return fixAsOpened(partial ? list.filter(inOpenArea) : list, openRuleSource(info ? playableArea(info, terrain) : null, scales));
         }
         /** What opening the map does to the doodads of a list (Snap and Fix Doodads on Load, as the settings have them
          *  now), in place: an AI tool's edit of war3map.doo starts from the doodads as the open editor holds them. */
@@ -6392,7 +6397,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               unitsFile = f;
               savedStarts = startLocations(f.list);
               // As after the open (unitAnglesAsOpened): the facings the World Editor would read the file with.
-              unitAnglesUnsaved = snapsDoodads() && unitAnglesAsOpened(f.list) > 0;
+              unitAnglesUnsaved = snapsDoodads() && unitAnglesAsOpened(partial ? f.list.filter(inOpenArea) : f.list) > 0;
               if (unitAnglesUnsaved) objectsTouched = true;
             }
             if (selected || group.length) clearSelection();
