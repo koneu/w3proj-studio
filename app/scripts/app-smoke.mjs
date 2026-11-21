@@ -9272,7 +9272,10 @@ async function moduleFunctionsChecks(page, found) {
     const units = json(join(a, "map", "war3mapUnits.doo.json"));
     const doodads = json(join(a, "map", "war3map.doo.json"));
     const hfoo = units.units[0];
-    units.units.push({ ...hfoo, id: "zzzz", skinId: "zzzz" }, { ...hfoo, id: "sloc", skinId: "sloc" }, { ...hfoo, id: "zzzz", skinId: "zzzz" });
+    // Each copy a creation number of its own, as the editor gives them: one number twice is a broken map (verify's
+    // split check refuses it).
+    const next = Math.max(...units.units.map((u) => u.editorId)) + 1;
+    units.units.push({ ...hfoo, id: "zzzz", skinId: "zzzz", editorId: next }, { ...hfoo, id: "sloc", skinId: "sloc", editorId: next + 1 }, { ...hfoo, id: "zzzz", skinId: "zzzz", editorId: next + 2 });
     doodads.doodads.push({ ...doodads.doodads[0], id: "QQQQ", skinId: "QQQQ" });
     put(join(a, "map", "war3mapUnits.doo.json"), units);
     put(join(a, "map", "war3map.doo.json"), doodads);
