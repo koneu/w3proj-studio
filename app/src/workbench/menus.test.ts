@@ -7,12 +7,10 @@ import { menuFor, menuTree, nextEnabled, shortcutText, whyBlocked } from "./menu
 
 const cmd = (id: string, menu?: string, keybinding?: string): CommandContribution => ({ id, title: id, ...(menu ? { menu } : {}), ...(keybinding ? { keybinding } : {}) });
 
-test("menus come in the World Editor's order, and only those in use", () => {
+// [Merged] Consolidated "a command without a menu stays out of them" into the menu order test.
+test("menus come in the World Editor's order, and commands without a menu stay out", () => {
   const tree = menuTree([cmd("a", "Help"), cmd("b", "Tools"), cmd("c", "File"), cmd("d")]);
   assert.deepEqual(tree.map((m) => m.name), ["File", "Tools", "Help"]);
-});
-
-test("a command without a menu stays out of them", () => {
   assert.deepEqual(menuTree([cmd("a")]), []);
 });
 
@@ -48,18 +46,18 @@ test("what a user looks for first is in the menus of the built-in extensions", (
   })();
 
   const builtin = join(appSrc, "builtin");
-  const placed = new Map(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
+  // [Refactored] Read and parse builtin/*/extension.json manifests once instead of twice.
+  const allCommands = readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
     const m = JSON.parse(readFileSync(join(builtin, d.name, "extension.json"), "utf8")) as { contributes?: { commands?: CommandContribution[] } };
-    return (m.contributes?.commands ?? []).filter((c) => c.menu).map((c) => [c.id, c.menu as string] as const);
-  }));
+    return m.contributes?.commands ?? [];
+  });
+  const placed = new Map(allCommands.filter((c) => c.menu).map((c) => [c.id, c.menu as string] as const));
   for (const [id, menu] of [["w3.map.new", "File"], ["w3.project.testMap", "File"], ["w3.terrain.open", "Module"], ["w3.objectEditor.open", "Module"], ["w3.triggers.open", "Module"], ["w3.mapInfo.open", "Scenario"], ["w3.problems.run", "Tools"]]) {
     assert.ok(placed.get(id)?.startsWith(menu), id);
   }
   assert.ok(placed.size >= 30);
   // Item tables (unit drops) aren't only a section deep in Map Properties: their own entry, right after it.
-  const scenario = menuTree(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) =>
-    (JSON.parse(readFileSync(join(builtin, d.name, "extension.json"), "utf8")) as { contributes?: { commands?: CommandContribution[] } }).contributes?.commands ?? []))
-    .find((m) => m.name === "Scenario")!.groups.flat().map((e) => e.id);
+  const scenario = menuTree(allCommands).find((m) => m.name === "Scenario")!.groups.flat().map((e) => e.id);
   assert.equal(scenario.indexOf("w3.mapInfo.itemTables"), scenario.indexOf("w3.mapInfo.open") + 1, scenario.join(", "));
 });
 

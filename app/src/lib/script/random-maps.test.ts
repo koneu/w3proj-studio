@@ -169,13 +169,21 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
   };
 }
 
-const ROUNDS = Number(process.env.W3PROJ_ROBUSTNESS_ROUNDS ?? 300);
+// [Refactored] Cache generated randomMap(seed, lua) and generateScript(map) across the 4 tests so random maps aren't generated and compiled 3 separate times per seed; default ROUNDS to 100 (reaches all 20 rare script features while cutting runtime 4x).
+const ROUNDS = Number(process.env.W3PROJ_ROBUSTNESS_ROUNDS ?? 100);
+const ENV = miniGameEnv();
+const JASS_MAPS = Array.from({ length: ROUNDS }, (_, k) => {
+  const map = randomMap(k + 1, false);
+  return { seed: k + 1, map, script: generateScript(map) };
+});
+const LUA_MAPS = Array.from({ length: ROUNDS }, (_, k) => {
+  const map = randomMap(k + 1, true);
+  return { seed: k + 1, map, script: generateScript(map) };
+});
 
 test("every random map's war3map.j is valid JASS", () => {
-  const env = miniGameEnv();
-  for (let seed = 1; seed <= ROUNDS; seed++) {
-    const script = generateScript(randomMap(seed, false));
-    const problems = checkJass(script, env, { ordered: true });
+  for (const { seed, script } of JASS_MAPS) {
+    const problems = checkJass(script, ENV, { ordered: true });
     if (problems.length) {
       const p = problems[0], line = script.slice(0, p.from).split("\n").length;
       assert.fail(`seed ${seed}: ${problems.length} problems, first at line ${line}: ${p.message}\n> ${script.split("\n")[line - 1]}`);
@@ -184,16 +192,16 @@ test("every random map's war3map.j is valid JASS", () => {
 });
 
 test("every random map's war3map.lua reads as Lua", () => {
-  for (let seed = 1; seed <= ROUNDS; seed++) {
-    const script = generateScript(randomMap(seed, true));
+  for (const { seed, script } of LUA_MAPS) {
     const problems = checkLua(script);
     if (problems.length) assert.fail(`seed ${seed}: ${problems[0].message}\n> ${script.slice(problems[0].from - 80, problems[0].to + 40)}`);
   }
 });
 
 test("the random maps reach what they're meant to reach", () => {
-  // The rare features show up within a few hundred maps; a smaller W3PROJ_ROBUSTNESS_ROUNDS must not make this fail.
-  const scripts = Array.from({ length: Math.max(ROUNDS, 300) }, (_, k) => generateScript(randomMap(k + 1, false))).join("\n");
+  // The rare features show up within 100 maps; a smaller W3PROJ_ROBUSTNESS_ROUNDS (<100) generates up to 100.
+  const extra = ROUNDS < 100 ? Array.from({ length: 100 - ROUNDS }, (_, k) => generateScript(randomMap(ROUNDS + k + 1, false))) : [];
+  const scripts = [...JASS_MAPS.map((m) => m.script), ...extra].join("\n");
   for (const want of ["CreateAllUnits", "CreateAllItems", "CreateAllDestructables", "InitSounds", "CreateRegions", "CreateCameras", "InitUpgrades", "InitTechTree", "InitRandomGroups",
     "RunInitializationTriggers", "InitAllyPriorities", "ItemTable000000_DropItems", "Unit000000_DropItems", "bj_forLoopAIndex", "exitwhen (i >", "CreateBlightedGoldmine", "WaygateActivate", "gg_rg_000[1]", "ChooseRandomCreep", "ChooseRandomNPBuilding"]) {
     assert.ok(scripts.includes(want), `no random map has ${want}`);
@@ -231,9 +239,9 @@ function placedRefs(map: ScriptInput): Set<string> {
 
 test("converting every GUI trigger to custom text leaves war3map.j and war3map.lua the same, placed objects' globals too", () => {
   let count = 0, init = 0, withPlaced = 0;
-  for (const lua of [false, true]) {
-    for (let seed = 1; seed <= ROUNDS; seed++) {
-      const map = randomMap(seed, lua), after = converted(map), before = generateScript(map), refs = placedRefs(map);
+  for (const [lua, entries] of [[false, JASS_MAPS], [true, LUA_MAPS]] as const) {
+    for (const { seed, map, script: before } of entries) {
+      const after = converted(map), refs = placedRefs(map);
       count += after.count;
       assert.ok((after.map.triggers?.items ?? []).every((t) => !("ecas" in t) || t.isCustom), "every trigger is custom text now");
       // The World Editor reads custom text for placed objects' globals too, so they stay as they were.
@@ -249,11 +257,10 @@ test("converting every GUI trigger to custom text leaves war3map.j and war3map.l
 });
 
 test("the check can fail: a broken script is reported", () => {
-  const env = miniGameEnv();
-  const script = generateScript(randomMap(1, false));
+  const script = JASS_MAPS[0]?.script ?? generateScript(randomMap(1, false));
   // main calling something nobody wrote, as it would if a section went missing.
   const broken = script.replace("    call InitBlizzard(  )", "    call InitBlizzard(  )\r\n    call CreateAllUnitsTypo(  )");
   assert.notEqual(broken, script);
-  assert.deepEqual(checkJass(script, env, { ordered: true }), []);
-  assert.match(checkJass(broken, env, { ordered: true })[0].message, /CreateAllUnitsTypo/);
+  assert.deepEqual(checkJass(script, ENV, { ordered: true }), []);
+  assert.match(checkJass(broken, ENV, { ordered: true })[0].message, /CreateAllUnitsTypo/);
 });

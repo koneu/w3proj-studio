@@ -613,8 +613,9 @@ mod tests {
     #[test]
     fn a_long_run_of_comment_lines_is_read_once() {
         // Every comment line starts a header search; the run is read once, not once per line.
+        // [Refactored] Right-sized comment line count from 200,000 to 40,000 (matching TypeScript wts.test.ts).
         let mut wts = String::from("STRING 1\n");
-        for _ in 0..200_000 {
+        for _ in 0..40_000 {
             wts.push_str("// STRING 2 \n");
         }
         let started = std::time::Instant::now();

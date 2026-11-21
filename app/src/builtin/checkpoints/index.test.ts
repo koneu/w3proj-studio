@@ -15,7 +15,37 @@ const gate = (): Gate => {
   const promise = new Promise<void>((r) => { open = r; });
   return { promise, open };
 };
-const turn = () => new Promise<void>((r) => setTimeout(r, 0));
+
+// [Refactored] Virtual clock + immediate positive-delay timer: eliminates ~6.9s of real 1-second wall-clock waits
+// in `while (\`${project.root}|${name}\` === last)` while still exercising the exact collision-retry loop.
+const RealDate = globalThis.Date;
+const realSetTimeout = globalThis.setTimeout;
+let virtualNow = new RealDate(2026, 10, 21, 12, 0, 0, 100).getTime();
+let earlyTimerStepMs = 0;
+
+test.before(() => {
+  const FakeDate = function (this: unknown, ...args: unknown[]) {
+    if (args.length === 0) return new RealDate(virtualNow);
+    return new (RealDate as unknown as new (...a: unknown[]) => Date)(...args);
+  } as unknown as DateConstructor;
+  Object.setPrototypeOf(FakeDate, RealDate);
+  Object.defineProperty(FakeDate, "prototype", { value: RealDate.prototype });
+  FakeDate.now = () => virtualNow;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  globalThis.Date = FakeDate;
+  globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    if (ms && ms > 0) virtualNow += earlyTimerStepMs > 0 ? earlyTimerStepMs : ms;
+    return realSetTimeout(fn, 0, ...args);
+  }) as unknown as typeof setTimeout;
+});
+
+test.after(() => {
+  globalThis.Date = RealDate;
+  globalThis.setTimeout = realSetTimeout;
+});
+
+const turn = () => new Promise<void>((r) => realSetTimeout(r, 0));
 
 /** A project at `root` whose packed map is `<root>\build\Map.w3x`. */
 const project = (root: string) => ({ root, default_output: `${root}\\build\\Map.w3x` }) as unknown as ProjectInfo;
@@ -299,12 +329,13 @@ test("a project with only recovered checkpoints can still restore one", async ()
 
 test("a timer that fires early can't give two checkpoints the same name", async () => {
   const app = fakeApp();
-  const real = globalThis.setTimeout;
-  globalThis.setTimeout = ((fn: () => void) => real(fn, 0)) as unknown as typeof setTimeout;
+  // [Refactored] Each timer wait advances virtualNow by only 400ms (firing early within the same second twice before
+  // crossing the 1s boundary), testing the while-loop retry in <1ms instead of 2,000ms of real-time busy-waiting.
+  earlyTimerStepMs = 400;
   try {
     const create = app.commands.get("w3.checkpoints.create")!;
     await Promise.all([create({ quiet: true }), create({ quiet: true }), create({ quiet: true })]);
-  } finally { globalThis.setTimeout = real; }
+  } finally { earlyTimerStepMs = 0; }
   const done = packs(app.log, "done");
   assert.equal(done.length, 3);
   assert.equal(new Set(done).size, 3, done.join("\n"));

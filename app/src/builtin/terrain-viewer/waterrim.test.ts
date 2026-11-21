@@ -8,12 +8,18 @@ import { parseW3e, type Terrain } from "../../lib/terrain/w3e";
 /** A file of tests/fixtures/water-brush: the w3e of Ashenvale's 12a_RoC_Orc04Interlude_v0_control.w3m as it was, and
  *  as the World Editor saved it after one Shallow (and one Deep) brush click on corner 50,24, found from where the
  *  tests run (app/ or the repository). */
+// [Refactored] Parse ash-before.w3e once at module load and clone its corners instead of reading and parsing from disk 4 times.
+const FIXTURES = new Map<string, Terrain>();
 function load(name: string): Terrain {
-  for (let dir = process.cwd(); ; dir = dirname(dir)) {
-    const p = join(dir, "tests", "fixtures", "water-brush", name);
-    if (existsSync(p)) return parseW3e(new Uint8Array(readFileSync(p)));
-    if (dirname(dir) === dir) throw new Error(`tests/fixtures/water-brush/${name} not found`);
+  let cached = FIXTURES.get(name);
+  if (!cached) {
+    for (let dir = process.cwd(); ; dir = dirname(dir)) {
+      const p = join(dir, "tests", "fixtures", "water-brush", name);
+      if (existsSync(p)) { cached = parseW3e(new Uint8Array(readFileSync(p))); FIXTURES.set(name, cached); break; }
+      if (dirname(dir) === dir) throw new Error(`tests/fixtures/water-brush/${name} not found`);
+    }
   }
+  return { ...cached!, corners: cached!.corners.map((c) => ({ ...c })) };
 }
 const X = 50, Y = 24;
 /** What the World Editor's click changed, per corner: ground height, layer, water, cliff type. */

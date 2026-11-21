@@ -5,13 +5,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join, normalize, resolve } from "node:path";
 import * as core from "./we-compare-core.mjs";
 import * as w3e from "./we-compare-w3e.mjs";
 import * as run from "./we-compare.mjs";
-import { checkFresh } from "../../tests/binfresh.mjs";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
 
@@ -228,30 +226,7 @@ test("runLines: a program that can't start rejects instead of hanging", async ()
   await assert.rejects(run.runLines(join(scratchDir("we-compare-noprog-"), "no-such-program"), []), /ENOENT/);
 });
 
-// ---------------------------------------------------------------- 6: the app's web sources
-
-test("a prebuilt app older than a file of app/src is stale", () => {
-  const root = scratchDir("binfresh-app-");
-  try {
-    for (const f of ["Cargo.lock", "app/src-tauri/main.rs", "app/src/main.ts", "app/index.html", "app/package-lock.json"]) {
-      mkdirSync(join(root, f, ".."), { recursive: true });
-      writeFileSync(join(root, f), "");
-      utimesSync(join(root, f), 1000, 1000);
-    }
-    execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["add", "."], { cwd: root });
-    const bin = join(root, "w3proj-studio");
-    writeFileSync(bin, "");
-    utimesSync(bin, 1500, 1500);
-    assert.equal(checkFresh(bin, { root, kind: "app" }), bin, "control: older sources");
-    utimesSync(join(root, "app/src/main.ts"), 2000, 2000);
-    assert.throws(() => checkFresh(bin, { root, kind: "app" }), /app\/src\/main\.ts/);
-    assert.equal(checkFresh(bin, { root, kind: "cli" }), bin, "the CLI doesn't embed the page");
-    utimesSync(join(root, "app/src/main.ts"), 1000, 1000);
-    utimesSync(join(root, "app/package-lock.json"), 2000, 2000);
-    assert.throws(() => checkFresh(bin, { root, kind: "app" }), /package-lock\.json/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
+// [Removed] Duplicate binfresh test ("a prebuilt app older than a file of app/src is stale"): covered by app/scripts/binfresh.test.mjs.
 
 // ---------------------------------------------------------------- 7: names and the work folder
 
@@ -261,20 +236,36 @@ test("spec names: we-compare's own folders are refused, in any case; two names d
   assert.throws(() => core.parseSpecFile(JSON.stringify([good(), { ...good(), name: "Ramp" }]), "/s/f.json"), /two specs are named/);
 });
 
-test("the work folder's lock: a live holder stops a second run, a dead one's lock is taken over, release frees it", async () => {
+// [Refactored] Merged the two lockWork tests and replaced 3 dummy child `spawn(process.execPath)` calls with
+// a guaranteed-dead PID (2**22 + 12345) and live parent PID (process.ppid).
+test("the work folder's lock: live holder, dead holder takeover, empty lock grace period, and race recovery", () => {
   const work = scratchDir("we-compare-lock-");
+  const file = join(work, "we-compare.lock");
+  const deadPid = 2 ** 22 + 12345;
+  const livePid = process.ppid;
   try {
     const release = run.lockWork(work);
-    assert.equal(readFileSync(join(work, "we-compare.lock"), "utf8"), String(process.pid));
+    assert.equal(readFileSync(file, "utf8"), String(process.pid));
     assert.throws(() => run.lockWork(work), /another we-compare \(pid \d+\) uses/);
     release();
     // A lock left by a process that has ended.
-    const child = spawn(process.execPath, ["-e", ""]);
-    await new Promise((ok) => child.on("close", ok));
-    writeFileSync(join(work, "we-compare.lock"), String(child.pid));
+    writeFileSync(file, String(deadPid));
     const again = run.lockWork(work);
-    assert.equal(readFileSync(join(work, "we-compare.lock"), "utf8"), String(process.pid));
+    assert.equal(readFileSync(file, "utf8"), String(process.pid));
     again();
+    // Between another run's create and its write: empty and fresh, so not stale.
+    writeFileSync(file, "");
+    assert.throws(() => run.lockWork(work), /has no pid yet/);
+    // Control: an empty lock older than the grace is a run that died between the two: taken over.
+    const old = (Date.now() - 60000) / 1000;
+    utimesSync(file, old, old);
+    run.lockWork(work)();
+    // A stale lock of an ended process, and another run that takes the lock just before the rename: its lock stays.
+    writeFileSync(file, String(deadPid));
+    const steal = () => { rmSync(file); writeFileSync(file, String(livePid)); };
+    assert.throws(() => run.lockWork(work, process.pid, { beforeRename: steal }), new RegExp(`another we-compare \\(pid ${livePid}\\) uses`));
+    assert.equal(readFileSync(file, "utf8"), String(livePid), "the other run's lock is where it was");
+    assert.deepEqual(readdirSync(work).filter((n) => n.includes("stale")), [], "nothing left behind");
   } finally { rmSync(work, { recursive: true, force: true }); }
 });
 
@@ -494,30 +485,7 @@ test("parsed compares: a World Editor save the codecs don't give back is ERROR f
   assert.deepEqual(core.applyRoundtrip(files, {}), files, "control: nothing to say");
 });
 
-test("the work folder's lock: a lock without a pid yet is live for a grace; a lock taken while taking over a stale one is put back", async () => {
-  const work = scratchDir("we-compare-lock2-");
-  const file = join(work, "we-compare.lock");
-  try {
-    // Between another run's create and its write: empty and fresh, so not stale.
-    writeFileSync(file, "");
-    assert.throws(() => run.lockWork(work), /has no pid yet/);
-    // Control: an empty lock older than the grace is a run that died between the two: taken over.
-    const old = (Date.now() - 60000) / 1000;
-    utimesSync(file, old, old);
-    run.lockWork(work)();
-    // A stale lock of an ended process, and another run that takes the lock just before the rename: its lock stays.
-    const child = spawn(process.execPath, ["-e", ""]);
-    await new Promise((ok) => child.on("close", ok));
-    writeFileSync(file, String(child.pid));
-    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"]);
-    try {
-      const steal = () => { rmSync(file); writeFileSync(file, String(other.pid)); };
-      assert.throws(() => run.lockWork(work, process.pid, { beforeRename: steal }), new RegExp(`another we-compare \\(pid ${other.pid}\\) uses`));
-      assert.equal(readFileSync(file, "utf8"), String(other.pid), "the other run's lock is where it was");
-      assert.deepEqual(readdirSync(work).filter((n) => n.includes("stale")), [], "nothing left behind");
-    } finally { other.kill(); }
-  } finally { rmSync(work, { recursive: true, force: true }); }
-});
+// [Merged] Second lockWork test merged into "the work folder's lock" test above.
 
 // ---------------------------------------------------------------- 13: second review round of 2026-11-17 (fix-we-infra)
 

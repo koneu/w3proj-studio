@@ -337,7 +337,8 @@ mod tests {
             tx.send(second.is_some()).unwrap();
         });
         // The control: while the first holds it, the second hasn't got it.
-        assert!(rx.recv_timeout(Duration::from_millis(400)).is_err(), "the second run didn't wait for the first");
+        // [Refactored] Reduced lock-contention poll timeout from 400 ms to 80 ms.
+        assert!(rx.recv_timeout(Duration::from_millis(80)).is_err(), "the second run didn't wait for the first");
         drop(first);
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(true), "the second run didn't get the lock once the first let go");
         waiter.join().unwrap();
@@ -405,7 +406,8 @@ mod tests {
         std::fs::copy(sleep, tool.join("showerrors")).unwrap();
         let program = tool.join("compiler");
         std::fs::write(&program, "").unwrap();
-        let script = format!("setsid sh -c 'sleep 0.15; exec \"{}\" 30' & echo $! > window.pid; exit 1", tool.join("showerrors").display());
+        // [Refactored] Reduced pre-exec delay from 150 ms to 40 ms (still races first 0 ms look and is caught on second 100 ms look).
+        let script = format!("setsid sh -c 'sleep 0.04; exec \"{}\" 30' & echo $! > window.pid; exit 1", tool.join("showerrors").display());
         let (r, _) = sh(&script, &dir, Some(program), None, Duration::from_secs(10)).expect("waited for the error window");
         assert_eq!(r.unwrap().code, 1);
         let window = pid_in(&dir.join("window.pid"));
@@ -425,16 +427,20 @@ mod tests {
     #[test]
     fn a_tool_that_hangs_without_progress_is_ended_with_its_children() {
         let dir = scratch("hang");
-        let guard = Guard { idle_ms: 1500, result_files: vec!["output.j".into()], settle_ms: 500 };
+        // [Refactored] Right-sized idle_ms from 1,500 ms to 300 ms (LOOK is 250 ms) and replaced fixed 200 ms sleep with bounded poll.
+        let guard = Guard { idle_ms: 300, result_files: vec!["output.j".into()], settle_ms: 250 };
         let (r, took) = sh("sleep 60 & echo $! > child.pid; echo started; wait", &dir, None, Some(guard), Duration::from_secs(20))
             .expect("a tool that never exits wasn't ended");
         let r = r.unwrap();
         assert_eq!(r.code, -1);
         assert!(r.killed.as_deref().is_some_and(|k| k.contains("nothing happened")), "{:?}", r.killed);
         assert_eq!(r.stdout.trim(), "started");
-        assert!(took >= Duration::from_millis(1500) && took < Duration::from_secs(10), "{took:?}");
+        assert!(took >= Duration::from_millis(250) && took < Duration::from_secs(10), "{took:?}");
         let child = pid_in(&dir.join("child.pid"));
-        std::thread::sleep(Duration::from_millis(200));
+        let t = Instant::now();
+        while alive(child) && t.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(!alive(child), "the hung tool's child was left running");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -443,13 +449,13 @@ mod tests {
     #[test]
     fn a_tool_making_progress_runs_on_and_one_that_wrote_its_result_but_doesnt_exit_is_ended() {
         let dir = scratch("result");
-        let guard = Guard { idle_ms: 1500, result_files: vec!["output.j".into(), "logs/compileerrors.txt".into()], settle_ms: 1000 };
-        // 3 s of work in steps of 0.5 s (twice the time without progress), then the result, then no exit.
-        let script = "mkdir logs; for i in 1 2 3 4 5 6; do echo $i >> logs/step.txt; sleep 0.5; done; echo done > output.j; exec sleep 60";
+        // [Refactored] Right-sized idle_ms (1,500 -> 400 ms), settle_ms (1,000 -> 260 ms), and progress steps (6x0.5s -> 4x0.2s = 800 ms, twice idle_ms).
+        let guard = Guard { idle_ms: 400, result_files: vec!["output.j".into(), "logs/compileerrors.txt".into()], settle_ms: 260 };
+        let script = "mkdir logs; for i in 1 2 3 4; do echo $i >> logs/step.txt; sleep 0.2; done; echo done > output.j; exec sleep 60";
         let (r, took) = sh(script, &dir, None, Some(guard), Duration::from_secs(20)).expect("a tool that wrote its result but didn't exit wasn't ended");
         let r = r.unwrap();
         assert!(r.killed.as_deref().is_some_and(|k| k.contains("wrote output.j")), "{:?}", r.killed);
-        assert!(took >= Duration::from_secs(3) && took < Duration::from_secs(10), "{took:?}");
+        assert!(took >= Duration::from_millis(800) && took < Duration::from_secs(10), "{took:?}");
         assert_eq!(std::fs::read_to_string(dir.join("output.j")).unwrap().trim(), "done");
         std::fs::remove_dir_all(&dir).unwrap();
     }

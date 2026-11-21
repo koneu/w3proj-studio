@@ -40,6 +40,8 @@ import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repo = resolve(here, "..", "..");
+let cachedMain;
+const repoMain = () => (cachedMain ??= mainCheckout(repo));
 
 // ---- slots: several World Editors at once, each with a farm, a prefix and a lock of its own ----------------------
 
@@ -67,7 +69,7 @@ function userName() {
  * checkout, or W3PROJ_WE_DIR/slotN, and the lock with "-slotN" added (w3proj-we-slotN.lock, W3PROJ_WE_LOCK-slotN).
  * `env`, `main`, `tmp` and `user` are parameters for the tests.
  */
-export function slotPaths(slot, { env = process.env, main = mainCheckout(repo), tmp = tmpdir(), user = userName() } = {}) {
+export function slotPaths(slot, { env = process.env, main = repoMain(), tmp = tmpdir(), user = userName() } = {}) {
   const n = parseSlot(slot);
   const tag = n === 0 ? "" : `-slot${n}`;
   const base = env.W3PROJ_WE_DIR ? resolve(env.W3PROJ_WE_DIR) : null;
@@ -118,7 +120,7 @@ function realish(p) {
 export function guardedWeDir(game) {
   const dir = realish(weDir());
   const inside = (d, r) => d !== r && d.startsWith(r.endsWith(sep) ? r : r + sep);
-  if (![repo, mainCheckout(repo)].some((r) => inside(dir, realish(r)))) throw new Error(`W3PROJ_WE_DIR ${dir} isn't inside the repository (${repo}) or the main checkout: refusing to build or delete there`);
+  if (![repo, repoMain()].some((r) => inside(dir, realish(r)))) throw new Error(`W3PROJ_WE_DIR ${dir} isn't inside the repository (${repo}) or the main checkout: refusing to build or delete there`);
   const g = realish(game);
   if (dir === g || inside(dir, g) || inside(g, dir)) throw new Error(`W3PROJ_WE_DIR ${dir} and the game folder ${g} contain one another: refusing`);
   return weDir();
@@ -366,7 +368,7 @@ export async function takeLock(say, timeoutMs = 30 * 60 * 1000, { beforeRename =
         say(`waiting for the World Editor run of ${held ? `${held.repo} (process ${held.pid}, since ${held.since})` : "another session"}: ${dir}`);
         told = Date.now();
       }
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(10, Math.floor(timeoutMs / 4)))));
     }
   }
 }

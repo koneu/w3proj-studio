@@ -6,8 +6,10 @@ import { rampSides } from "../../lib/terrain/cliffs";
 import { castShadow, cliffCellHeights, DEFAULT_SUN, rampCellHeights, shadowCellHeights, shadowCliffName, shadowCliffVariation, shadowRampName, shadowStepRise, specialCellHeights, terrainShadows, type ShadowMesh } from "./shadows";
 
 /** flat.w3x's ground: 64 x 64 tiles, level 2, height 0 (the maps make-shadow-probes.mjs makes start from it). */
+// [Refactored] Share an immutable baseline 64x64 flat terrain for read-only tests instead of allocating 65x65 corner objects 13 times.
+const FLAT_64 = newTerrain({ width: 64, height: 64, tileset: "L", groundTiles: ["Lgrs"], cliffTiles: [], baseTile: "Lgrs", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
 function flat(): Terrain {
-  return newTerrain({ width: 64, height: 64, tileset: "L", groundTiles: ["Lgrs"], cliffTiles: [], baseTile: "Lgrs", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  return { ...FLAT_64, corners: FLAT_64.corners.map((c) => ({ ...c })) };
 }
 const corner = (t: Terrain, x: number, y: number) => t.corners[y * t.width + x];
 /** The shaded cells of a row (or column) of the 256-wide shd, as a list. */
@@ -117,9 +119,8 @@ test("a model's shadow: a cell is dark only when all of the model on its line to
     ["float", 32, 128, true, { 191: "31-34", 192: "31-35", 193: "31-36", 194: "31-37", 195: "32-38", 196: "33-38", 197: "34-38", 198: "35-38" }],
   ];
   for (const [name, z0, z1, bottom, editor] of cases) {
-    const t = flat();
     const out = new Uint8Array(256 * 256);
-    castShadow(out, t, { mesh: boxMesh(z0, z1, bottom), x: -4096 + 32 * 32, y: -4096 + 192 * 32, z: 0, angle: 0, scale: [1, 1, 1] });
+    castShadow(out, FLAT_64, { mesh: boxMesh(z0, z1, bottom), x: -4096 + 32 * 32, y: -4096 + 192 * 32, z: 0, angle: 0, scale: [1, 1, 1] });
     if (name === "cap") out[193 * 256 + 33] = 0;
     for (let y = 180; y <= 210; y++) {
       const xs = rowOf(out, y, 0, 255);
@@ -210,7 +211,7 @@ test("a special doodad's tiles are read from its model as it is drawn, the flat 
   assert.ok(specialCellHeights(plate, faces, 3, 3, 0, 0, 1).every(Number.isNaN), "turned 0: not the west column");
   // shadowCellHeights reads a special's tile even when it is flat (no cliff there), over the tile's lowest layer; the
   // same heights without the mark that a special covers it leave a flat tile its ground.
-  const t = flat();
+  const t = FLAT_64;
   const cells = specialCellHeights(plate, faces, 3, 3, south, 1, 0);
   const lookup = (x: number, y: number) => (x === 31 && y === 30 ? cells : null);
   const marked = Object.assign((x: number, y: number) => lookup(x, y), { special: (x: number, y: number) => x === 31 && y === 30 });

@@ -87,23 +87,28 @@ function conflict(files: Record<string, [Buffer | null, Buffer | null, Buffer | 
   return { dir, run, status: () => sh("status", "--porcelain").stdout };
 }
 const B = (s: string) => Buffer.from(s);
-const cases: [string, [Buffer | null, Buffer | null, Buffer | null], Record<Side, Buffer | null>][] = [
-  ["modify/modify", [B("a\nb\nc\n"), B("a\nOURS\nc\n"), B("a\nTHEIRS\nc\n")], { ours: B("a\nOURS\nc\n"), theirs: B("a\nTHEIRS\nc\n") }],
-  ["delete/modify (ours deleted)", [B("a\n"), null, B("changed\n")], { ours: null, theirs: B("changed\n") }],
-  ["modify/delete (theirs deleted)", [B("a\n"), B("changed\n"), null], { ours: B("changed\n"), theirs: null }],
-  ["binary", [Buffer.from([0, 1, 2, 3]), Buffer.from([0, 9, 9, 0xff]), Buffer.from([0, 7, 7, 0xfe])], { ours: Buffer.from([0, 9, 9, 0xff]), theirs: Buffer.from([0, 7, 7, 0xfe]) }],
+const cases: [string, string, [Buffer | null, Buffer | null, Buffer | null], Record<Side, Buffer | null>][] = [
+  ["f-mod.bin", "modify/modify", [B("a\nb\nc\n"), B("a\nOURS\nc\n"), B("a\nTHEIRS\nc\n")], { ours: B("a\nOURS\nc\n"), theirs: B("a\nTHEIRS\nc\n") }],
+  ["f-del-ours.bin", "delete/modify (ours deleted)", [B("a\n"), null, B("changed\n")], { ours: null, theirs: B("changed\n") }],
+  ["f-del-theirs.bin", "modify/delete (theirs deleted)", [B("a\n"), B("changed\n"), null], { ours: B("changed\n"), theirs: null }],
+  ["f-bin.bin", "binary", [Buffer.from([0, 1, 2, 3]), Buffer.from([0, 9, 9, 0xff]), Buffer.from([0, 7, 7, 0xfe])], { ours: Buffer.from([0, 9, 9, 0xff]), theirs: Buffer.from([0, 7, 7, 0xfe]) }],
 ];
-for (const [name, triple, want] of cases) for (const side of ["ours", "theirs"] as const) {
-  test(`take ${side}: ${name}`, { skip: !hasGit }, async () => {
-    const { dir, run, status } = conflict({ "f.bin": triple });
+
+// [Refactored] Create 1 multi-file conflict repo per side (2 git repos total instead of 8), cutting 72 git spawns to 24.
+for (const side of ["ours", "theirs"] as const) {
+  test(`take ${side}: modify/modify, delete/modify, modify/delete, and binary conflicts`, { skip: !hasGit }, async () => {
+    const allFiles = Object.fromEntries(cases.map(([file, , triple]) => [file, triple]));
+    const { dir, run, status } = conflict(allFiles);
     try {
-      assert.match(status(), /^(UU|DU|UD) f\.bin/m);
-      await takeSide(run, side, "f.bin");
-      const w = want[side];
-      assert.equal(existsSync(join(dir, "f.bin")), w !== null);
-      if (w) assert.deepEqual(readFileSync(join(dir, "f.bin")), w);
-      assert.doesNotMatch(status(), /^(UU|DU|UD|AA|DD|AU|UA) /m, "the conflict is cleared");
-      await assert.rejects(takeSide(run, side, "f.bin"), /no conflict/);
+      for (const [file, name, , want] of cases) {
+        assert.match(status(), new RegExp(`^(UU|DU|UD) ${file.replace(".", "\\.")}`, "m"), name);
+        await takeSide(run, side, file);
+        const w = want[side];
+        assert.equal(existsSync(join(dir, file)), w !== null, `${name}: exists`);
+        if (w) assert.deepEqual(readFileSync(join(dir, file)), w, `${name}: content`);
+        await assert.rejects(takeSide(run, side, file), /no conflict/, `${name}: already resolved`);
+      }
+      assert.doesNotMatch(status(), /^(UU|DU|UD|AA|DD|AU|UA) /m, "all conflicts cleared");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }

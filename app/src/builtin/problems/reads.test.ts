@@ -67,16 +67,20 @@ function walk(dir: string, base = dir): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name), base) : [join(dir, e.name).slice(base.length + 1).replace(/\\/g, "/")]));
 }
 
+// [Refactored] Hoisted fixture root and directory walk to module scope so fakeApp() does not re-walk disk on every test.
+const ROOT = fixture();
+const DISK_FILES = walk(ROOT);
+
 /** The part of the app the checks and the service use, over the mini map, counting every call that
  *  would go to the backend (key: "what path"). */
 function fakeApp(more: { overlay?: Record<string, string>; game?: Record<string, string>; stored?: string[] } = {}) {
   const OVERLAY = { ...BASE_OVERLAY, ...more.overlay }, GAME = { ...BASE_GAME, ...more.game };
   const STORED = new Set([...BASE_STORED, ...(more.stored ?? []).map((p) => p.toLowerCase())]);
-  const root = fixture();
+  const root = ROOT;
   const calls = new Map<string, number>();
   const count = (key: string) => calls.set(key, (calls.get(key) ?? 0) + 1);
   const onDisk = (p: string) => existsSync(join(root, p)) && statSync(join(root, p)).isFile();
-  const files: FileInfo[] = [...new Set([...walk(root), ...Object.keys(OVERLAY)])].sort().map((path) => ({ path, size: 1, modified: 1 }));
+  const files: FileInfo[] = [...new Set([...DISK_FILES, ...Object.keys(OVERLAY)])].sort().map((path) => ({ path, size: 1, modified: 1 }));
   const text = (p: string) => {
     if (p in OVERLAY) return OVERLAY[p];
     if (onDisk(p)) return readFileSync(join(root, p), "utf8");

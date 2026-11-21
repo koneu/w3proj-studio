@@ -162,8 +162,9 @@ test("a child process uses the slot lock its parent holds for it, and waits with
   const lock = join(scratchDir("we-slots-lock-"), "l");
   const we = scratchDir("we-slots-we-");
   const url = pathToFileURL(repoPath("app", "scripts", "we-setup.mjs")).href;
+  // [Refactored] Lowered negative timeout from 300ms to 40ms (now that takeLock clamps its poll interval).
   const child = (extra) => spawnSync(process.execPath, ["--input-type=module", "-e",
-    `import { takeLock } from ${JSON.stringify(url)}; try { const r = await takeLock(() => {}, 300); r(); console.log("took"); } catch (e) { console.log(e.message); }`], {
+    `import { takeLock } from ${JSON.stringify(url)}; try { const r = await takeLock(() => {}, 40); r(); console.log("took"); } catch (e) { console.log(e.message); }`], {
     env: { ...process.env, W3PROJ_WE_LOCK: lock, W3PROJ_WE_DIR: we, W3PROJ_WE_SLOT: "1", ...extra }, encoding: "utf8", timeout: 30000,
   });
   await withVars({ W3PROJ_WE_LOCK: lock, W3PROJ_WE_DIR: we }, async () => {
@@ -265,13 +266,14 @@ test("takeAllSlots takes every existing slot's lock in ascending order, waits fo
     const all = await takeAllSlots(() => {});
     assert.ok(slotBusy(0) && slotBusy(2) && !slotBusy(1));
     const said = [];
-    await assert.rejects(takeAllSlots((m) => said.push(m), { timeoutMs: 300 }), /still holds/);
+    // [Refactored] Lowered negative timeoutMs from 300 to 40.
+    await assert.rejects(takeAllSlots((m) => said.push(m), { timeoutMs: 40 }), /still holds/);
     assert.ok(slotBusy(0) && slotBusy(2), "a failed takeAllSlots leaves the other holder's locks");
     all();
     assert.ok(!slotBusy(0) && !slotBusy(2));
     // A held slot 2 makes it wait; slot 0, taken first, is let go again when it gives up.
     const two = await takeLock(() => {}, 1000, { slot: 2 });
-    await assert.rejects(takeAllSlots(() => {}, { timeoutMs: 300 }), /still holds/);
+    await assert.rejects(takeAllSlots(() => {}, { timeoutMs: 40 }), /still holds/);
     assert.ok(!slotBusy(0), "what it took is let go");
     two();
   });

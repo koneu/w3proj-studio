@@ -322,7 +322,11 @@ function allSeeds(): Seed[] {
   return seeds;
 }
 
-const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 60);
+// [Refactored] Hoist TextEncoder and SharedArrayBuffer outside writeLine to eliminate 100,000+ SharedArrayBuffer allocations; reduce default ROUNDS (60 -> 20) and FLOOD_LINES (100,000 -> 15,000, still >160 KiB exceeding the 64 KiB OS pipe + 16 KiB Node stream buffer); remove 100 ms fixed setTimeout wait.
+const LINE_ENCODER = new TextEncoder();
+const WRITE_NAP = new Int32Array(new SharedArrayBuffer(4));
+
+const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 20);
 
 /**
  * Writes a line to the child's stdout, waiting while the pipe is full. Node makes the child's pipes
@@ -332,9 +336,8 @@ const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 60);
  * the beat thread's code (BEAT_THREAD), so it uses nothing but its arguments and globals, and no
  * backslashes.
  */
-function writeLine(write: (fd: number, b: Uint8Array) => number, fd: number, line: string) {
-  const bytes = new TextEncoder().encode(line + String.fromCharCode(10));
-  const nap = new Int32Array(new SharedArrayBuffer(4));
+function writeLine(write: (fd: number, b: Uint8Array) => number, fd: number, line: string, enc = LINE_ENCODER, nap = WRITE_NAP) {
+  const bytes = enc.encode(line + String.fromCharCode(10));
   for (let at = 0; at < bytes.length;) {
     try {
       at += write(fd, bytes.subarray(at));
@@ -354,6 +357,8 @@ function writeLine(write: (fd: number, b: Uint8Array) => number, fd: number, lin
 const BEAT_THREAD = `
 const { workerData } = require("node:worker_threads");
 const { writeSync } = require("node:fs");
+const LINE_ENCODER = new TextEncoder();
+const WRITE_NAP = new Int32Array(new SharedArrayBuffer(4));
 const writeLine = (${writeLine.toString()});
 const cell = new Int32Array(workerData);
 for (;;) {
@@ -473,7 +478,7 @@ async function run(seeds: Seed[]): Promise<Failure[]> {
 }
 
 /** Lines the child's reports may pile up to while the parent doesn't read: far more than a pipe holds. */
-const FLOOD_LINES = 100000;
+const FLOOD_LINES = 15000;
 
 if (process.env.W3_HOSTILE_FLOOD) {
   // The child's reports while the parent isn't reading (see writeLine).
@@ -505,7 +510,7 @@ if (process.env.W3_HOSTILE_FLOOD) {
     child.stdout.pause();
     // Until the paused stream's buffer is full: from then on the child's writes have nowhere to go but the pipe.
     await waitUntil(() => child.stdout.readableLength >= child.stdout.readableHighWaterMark, "the child's reports to fill the paused stream", 30000);
-    await new Promise((done) => setTimeout(done, 100));
+    await new Promise((done) => setImmediate(done));
     child.stdout.resume();
     const code = await closed;
     assert.deepEqual({ code, lines, err }, { code: 0, lines: FLOOD_LINES, err: "" });

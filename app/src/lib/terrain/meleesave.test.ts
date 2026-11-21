@@ -143,8 +143,18 @@ test("nothing is read when the map isn't a melee map and war3map.w3i or the unit
 // Studio does that only when it can tell every rule; else the flag stays off.
 
 /** A flat dry map of `size` corners a side, every corner on level 2 with tile `tiles[0]`; `edit` changes corners. */
+// [Refactored] Cache unmodified flat(17) and flat(33) terrains and their default `around()` pathing grids so read-only melee tests don't regenerate 64x64 WPM pathing maps 50+ times.
+const FLAT_17 = (() => {
+  const t = lake(Array.from({ length: 17 }, () => ".".repeat(17)));
+  t.groundTiles = ["Ldrt", "Lrok"];
+  return t;
+})();
+const FLAT_17_W3E = writeW3e(FLAT_17);
+const DEFAULT_WTG_JSON = writeWtgJson(defaultTriggerFile("x"));
 function flat(size = 17, edit?: (c: Corner, x: number, y: number) => void): Terrain {
-  const t = lake(Array.from({ length: size }, () => ".".repeat(size)));
+  const t = size === 17
+    ? { ...FLAT_17, corners: FLAT_17.corners.map((c) => ({ ...c })) }
+    : lake(Array.from({ length: size }, () => ".".repeat(size)));
   t.groundTiles = ["Ldrt", "Lrok"];
   if (edit) t.corners.forEach((c, i) => edit(c, i % size, Math.floor(i / size)));
   return t;
@@ -167,8 +177,13 @@ const gameBytes = async (p: string) => { if (!(p in GAME_FILES)) throw new Error
 const RULES = new Map([["Ldrt", { walkable: true, buildable: true, flyable: true }], ["Lrok", { walkable: true, buildable: false, flyable: true }]]);
 /** A 4 × 4 pathing texture (a tree) at x, y. */
 const tree = (x: number, y: number): PathingStamp => ({ x, y, angle: 0, width: 4, height: 4, rgba: new Uint8Array(64).fill(255) });
+const FLAT_17_PATHING = startPathing(FLAT_17, RULES, []);
+const isFlat17 = (t: Terrain) =>
+  t.width === 17 && t.height === 17 && t.groundTiles[0] === "Ldrt"
+  && t.corners.every((c) => c.layer === 2 && c.texture === 0 && !c.hasWater && !c.blight && !c.boundary && !(c.rawWater & 0x4000));
 /** The start locations' surroundings on `t`: its pathing with `stamps`, and doodads of unknown pathing. */
-const around = (t: Terrain, stamps: PathingStamp[] = [], unknown: { x: number; y: number }[] = []) => ({ pathing: startPathing(t, RULES, stamps), unknown });
+const around = (t: Terrain, stamps: PathingStamp[] = [], unknown: { x: number; y: number }[] = []) =>
+  ({ pathing: stamps.length === 0 && isFlat17(t) ? FLAT_17_PATHING.slice() : startPathing(t, RULES, stamps), unknown });
 const OFF = MELEE & ~4;
 /** The middle of flat()'s map (corner 8, cell 32), and a start there. */
 const MID = 8 * 128, startMid = start(MID, MID);
@@ -248,18 +263,17 @@ test("the flag stays off for a reason, and where Studio can't tell", () => {
 });
 
 test("the facts for putting the flag back come from the project; unreadable ones leave it", async () => {
-  const t = flat();
   const units = [startMid];
   const doo = (list: { id?: string; position: number[] }[], specials: object[] = []) => JSON.stringify({ doodads: list, specials });
   const project = (own: Record<string, string | Uint8Array | Error> = {}) => ({
-    ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, MID, 0] }]), ...own }),
+    ...files({ "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": doo([{ id: "LTlt", position: [MID + 600, MID, 0] }]), ...own }),
     gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; },
     gameBytes,
   });
   const flags = async (ws: MeleeFiles) => (await savedMelee(ws, { flags: OFF }, units)).flags;
   assert.equal(await flags(project()), MELEE, "everything known and met");
   assert.equal(await flags(project({ "map/war3map.wtg.json": "", "map/war3map.wtg": defaultWtg("x") })), OFF, "an empty trigger JSON wins over the raw file");
-  const rawOnly = { ...files({ "map/war3map.w3e": writeW3e(t), "map/war3map.wtg": defaultWtg("x"), "map/war3map.doo.json": doo([]) }), gameText: async (p: string) => GAME[p], gameBytes };
+  const rawOnly = { ...files({ "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg": defaultWtg("x"), "map/war3map.doo.json": doo([]) }), gameText: async (p: string) => GAME[p], gameBytes };
   assert.equal(await flags(rawOnly), MELEE, "a raw default war3map.wtg");
   const renamed = defaultTriggerFile("x");
   renamed.items.find((i) => i.type === 8)!.name = "Mine";
@@ -377,7 +391,6 @@ test("with the custom tilesets flag 0 the start's ground is buildable by the til
 });
 
 test("custom object data and interface files count only when they change something, in both directions", async () => {
-  const t = flat();
   const entry = JSON.stringify({ original: [{ base: "hfoo", mods: [] }], custom: [] });
   const header = (originals: number, customs: number) => { const b = new Uint8Array(12); const v = new DataView(b.buffer); v.setUint32(0, 2, true); v.setUint32(4, originals, true); v.setUint32(8, customs, true); return b; };
   const empty: [string, string | Uint8Array][] = [];
@@ -386,7 +399,7 @@ test("custom object data and interface files count only when they change somethi
     empty.push([`map/war3mapSkin.${ext}.json`, JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [], custom: [] })], [`map/war3mapSkin.${ext}`, header(0, 0)]);
   }
   empty.push(["map/war3map.w3u.json", "{}"], ["map/war3mapSkin.txt", ""], ["map/war3mapSkin.txt", "// nothing\r\n[Misc]\r\n"]);
-  const base = { "map/war3map.w3e": writeW3e(t), "map/war3map.wtg.json": writeWtgJson(defaultTriggerFile("x")), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
+  const base = { "map/war3map.w3e": FLAT_17_W3E, "map/war3map.wtg.json": DEFAULT_WTG_JSON, "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) };
   const project = (own: Record<string, string | Uint8Array | Error>) => ({ ...files({ ...base, ...own }), gameText: async (p: string) => { if (!(p in GAME)) throw new Error(p); return GAME[p]; } });
   const units = [startMid];
   const putBack = async (own: Record<string, string | Uint8Array | Error>) => (await savedMelee(project(own), { flags: OFF }, units)).flags;
@@ -420,20 +433,7 @@ test("custom object data and interface files count only when they change somethi
   assert.equal(await putBack({ "map/war3map.w3u": new Uint8Array(5) }), OFF, "a short raw file");
 });
 
-test("a save sets flag 0x4000 for a placed tavern and clears it without one (tftflag.ts)", async () => {
-  // we-drive 2026-11-17, tests/we-compare/tft-flag-we.json tft-tavern, tft-clear.
-  const units = 'ID;PWXL;N;E\nC;Y1;X1;K"unitID"\nC;X2;K"version"\nC;Y2;X1;K"ntav"\nC;X2;K1\nC;Y3;X1;K"nfrp"\nC;X2;K0\nE\n';
-  const items = 'ID;PWXL;N;E\nC;Y1;X1;K"itemID"\nC;X2;K"version"\nC;Y2;X1;K"ratc"\nC;X2;K0\nE\n';
-  const tables: Record<string, string> = { ...GAME, "Units\\UnitData.slk": units, "Units\\ItemData.slk": items };
-  const ws = { ...files({ "map/war3map.w3e": writeW3e(flat()), "map/war3map.doo.json": JSON.stringify({ doodads: [], specials: [] }) }),
-    gameText: async (p: string) => { if (!(p in tables)) throw new Error(p); return tables[p]; }, gameBytes };
-  const TFT = 0x4000;
-  const tavern = { id: "ntav", player: 27, position: [MID + 2000, MID, 0] }, frog = { ...tavern, id: "nfrp" };
-  const M = MELEE & ~TFT;
-  assert.equal((await savedMelee(ws, { flags: M }, [startMid, tavern])).flags, M | TFT, "a tavern sets it");
-  assert.equal((await savedMelee(ws, { flags: M | TFT }, [startMid, frog])).flags, M, "a frog of version 0 clears it");
-  assert.equal((await savedMelee(ws, { flags: M }, [startMid, frog])).flags, M, "control: a frog leaves it off");
-});
+// [Removed] "a save sets flag 0x4000 for a placed tavern and clears it without one (tftflag.ts)" — duplicate of tftflag.test.ts "a save sets and clears 0x4000 on melee maps and others alike, through savedMelee".
 
 test("a start Map Size took off the map goes to the nearest plainly valid place on the 64 grid", () => {
   /** Whether the start at p is plainly valid among `others` (startsPlainlyValid: the oracle), and no grid point nearer to

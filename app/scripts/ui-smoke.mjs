@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connect, problems, sleep, until as untilFor } from "./cdp.mjs";
+import { connect, problems, until as untilFor } from "./cdp.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(app, "dist");
@@ -154,20 +154,21 @@ async function run() {
     const browserAll = await page.evaluate(`document.querySelectorAll(".picker-row").length`);
     await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);
+    // [Refactored] Use single macrotask turns instead of 3x30 ms sleeps after synchronous event dispatch.
     // A question after Delete: a key held down doesn't answer it, a new press does.
     const heldKey = await page.evaluate(`(async () => {
       let answer = "open";
       void w3.window.askDelete("Smoke?", "Remove").then((r) => { answer = r; });
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", repeat: true, bubbles: true }));
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 0));
       const held = answer;
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 0));
       // Clicking elsewhere drops the question, so the next Delete can't answer for something else.
       let moved = "open";
       void w3.window.askDelete("Smoke?", "Remove").then((r) => { moved = r; });
       document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 0));
       return held === "open" && answer === true && moved === false;
     })()`);
     const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
@@ -211,11 +212,15 @@ async function run() {
     })()`);
     // With nothing open there's nothing to undo: the buttons by the tabs stay away.
     const undoHidden = await page.evaluate(`document.querySelector(".tabs-actions")?.hidden === true`);
+    // [Refactored] Wait for the clicked activity button to activate + frame paint instead of blind 150 ms sleep per view.
     const shown = [];
     for (let i = 0; i < views.length; i++) {
-      await page.evaluate(`document.querySelectorAll("button.activity")[${i}].click()`);
-      await sleep(150);
-      shown.push(await page.evaluate(`document.body.innerText.includes("Could not") ? "error" : "ok"`));
+      shown.push(await page.evaluate(`(async () => {
+        const btn = document.querySelectorAll("button.activity")[${i}];
+        btn.click();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        return document.body.innerText.includes("Could not") ? "error" : "ok";
+      })()`));
     }
     const unknown = await page.evaluate(`window.__smoke.unknown`);
     const shot = await page.send("Page.captureScreenshot", { format: "png" });

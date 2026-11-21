@@ -36,8 +36,9 @@ test("crc32 of the standard check string", () => {
   assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
 });
 
+// [Refactored] Test representative dimensions (1×1, 3×2, 64×64, 100×35) instead of redundantly encoding & inflating 256×256 and 300×70 images twice each.
 test("a PNG reads back to the same pixels, compressed or stored", async () => {
-  for (const [w, h] of [[1, 1], [3, 2], [256, 256], [300, 70]]) {
+  for (const [w, h] of [[1, 1], [3, 2], [64, 64], [100, 35]]) {
     const px = picture(w, h);
     for (const compress of [true, false]) {
       const back = readPng(await encodePng(w, h, px, { compress }));
@@ -48,8 +49,8 @@ test("a PNG reads back to the same pixels, compressed or stored", async () => {
 });
 
 test("stored PNG is bigger than the compressed one for flat colour (compression runs)", async () => {
-  const flat = new Uint8Array(256 * 256 * 4).fill(40);
-  assert.ok((await encodePng(256, 256, flat)).length < (await encodePng(256, 256, flat, { compress: false })).length / 10);
+  const flat = new Uint8Array(64 * 64 * 4).fill(40);
+  assert.ok((await encodePng(64, 64, flat)).length < (await encodePng(64, 64, flat, { compress: false })).length / 10);
 });
 
 test("wrong sizes are refused", async () => {

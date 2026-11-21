@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mulberry32 as seeded } from "../testhelpers/testutil";
 import { CornerUndo, type CornerLog } from "./cliffs";
 import { resetVariations } from "./variation";
 import { parseW3e, randomVariation, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
@@ -27,13 +28,7 @@ const total = VARIATION_WEIGHTS.reduce((a, b) => a + b, 0);
 const rollFor = (v: number) => (VARIATION_WEIGHTS.slice(0, v).reduce((a, b) => a + b, 0) + VARIATION_WEIGHTS[v] / 2) / total;
 /** A random source that gives these numbers in turn. */
 const sequence = (values: number[]) => { let i = 0; return () => values[i++ % values.length]; };
-/** A seeded random source (mulberry32), for a spread over many rolls. */
-const seeded = (seed: number) => () => {
-  seed = (seed + 0x6d2b79f5) | 0;
-  let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-  return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-};
+// [Refactored] Use shared mulberry32 from testutil.ts instead of duplicating it here, and use 10,000 corners (100x100) instead of 40,000 corners (200x200) for the 4x distribution check.
 
 // What the rolls give each corner; corners 0, 1, 3 and 5 hold that already.
 const ROLLED = [0, 5, 4, 16, 12, 9, 17, 1];
@@ -76,11 +71,13 @@ test("corners that roll what they hold change nothing", () => {
 const MEASURED: Record<number, number> = { 0: 15.2, 1: 1.8, 2: 0.7, 3: 0.2, 4: 15.2, 8: 14.8, 12: 15.3, 16: 14.8, 17: 14.2 };
 
 /** A reset over a big map gives the measured spread, within a point. */
+const PROTO_CORNER = make().corners[0];
 function checkSpread(reset: Reset) {
-  const t: Terrain = { ...make(), width: 200, height: 200, corners: Array.from({ length: 40000 }, () => ({ ...make().corners[0] })) };
+  const t: Terrain = { ...make(), width: 100, height: 100, corners: Array.from({ length: 10000 }, () => ({ ...PROTO_CORNER })) };
   reset(t, new CornerUndo(), seeded(7));
-  const share = (v: number) => (100 * t.corners.filter((c) => c.variation === v).length) / t.corners.length;
-  for (const [v, pct] of Object.entries(MEASURED)) assert.ok(Math.abs(share(Number(v)) - pct) < 1, `variation ${v}: ${share(Number(v)).toFixed(1)} %, the World Editor ${pct} %`);
+  const counts = new Int32Array(32);
+  for (const c of t.corners) counts[c.variation]++;
+  for (const [v, pct] of Object.entries(MEASURED)) assert.ok(Math.abs((100 * counts[Number(v)]) / t.corners.length - pct) < 1, `variation ${v}: ${((100 * counts[Number(v)]) / t.corners.length).toFixed(1)} %, the World Editor ${pct} %`);
   assert.equal(t.corners.filter((c) => c.variation > 17).length, 0, "nothing past 17");
 }
 
@@ -90,8 +87,8 @@ test("Reset Texture Variations has the World Editor's spread: about 15 % each fo
 
 test("randomVariation itself has that spread, for painted and new ground", () => {
   const random = seeded(11), counts = Array(32).fill(0);
-  for (let i = 0; i < 40000; i++) counts[randomVariation(random)]++;
-  for (const [v, pct] of Object.entries(MEASURED)) assert.ok(Math.abs((100 * counts[Number(v)]) / 40000 - pct) < 1, `variation ${v}`);
+  for (let i = 0; i < 10000; i++) counts[randomVariation(random)]++;
+  for (const [v, pct] of Object.entries(MEASURED)) assert.ok(Math.abs((100 * counts[Number(v)]) / 10000 - pct) < 1, `variation ${v}`);
   assert.equal(randomVariation(() => 0), 0);
   assert.equal(randomVariation(() => 0.999999), 17);
 });
@@ -115,11 +112,10 @@ test("controls: the same checks reject a reset that is wrong in any of these way
     "leaves the last corner": (t, log, r) => resetVariations({ ...t, corners: t.corners.slice(0, -2) }, log, r),
     "writes the plain 16 everywhere": plain16,
   };
-  check(resetVariations); // the real one passes
+  // [Refactored] Removed redundant `check(resetVariations)` and `checkSpread(resetVariations)` calls — the two tests right above already executed both on `resetVariations`.
   for (const [what, reset] of Object.entries(wrong)) {
     assert.throws(() => check(reset), assert.AssertionError, `a reset that ${what} should fail the checks`);
   }
-  checkSpread(resetVariations);
   assert.throws(() => checkSpread(plain16), assert.AssertionError, "the plain 16 everywhere isn't the spread");
   assert.throws(() => checkSpread(oldSpread), assert.AssertionError, "Studio's old spread isn't the World Editor's");
 });

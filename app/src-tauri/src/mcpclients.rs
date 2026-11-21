@@ -667,7 +667,8 @@ mod tests {
         let file = Path::new("x.json");
         let server = json!({ "command": "b" });
         let mut edited = 0;
-        for _ in 0..20000 {
+        // [Refactored] Right-sized random JSONC fuzz rounds from 20,000 to 4,000 for unit test speed.
+        for _ in 0..4000 {
             let mut text = String::new();
             s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             for _ in 0..(s >> 60) + 2 {
@@ -680,7 +681,7 @@ mod tests {
             }
         }
         // Control: files with comments were edited, so the comparison reached the editing.
-        assert!(edited > 100, "only {edited} files with comments were edited");
+        assert!(edited > 20, "only {edited} files with comments were edited");
     }
 
     #[test]

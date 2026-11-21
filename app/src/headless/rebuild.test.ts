@@ -88,14 +88,11 @@ test("shadows without the game's data keep the stored war3map.shd and say why; t
   assert.match(shd?.note ?? "", /war3map\.shd is kept/);
   assert.deepEqual([...readFileSync(join(project, "map", "war3map.shd"))], [...baked], "the stored shadows are untouched");
 
-  // The control: the mini map without doodads (cliffs only is right then) writes its shadows.
-  const bare = join(work, "bare");
-  cpSync(mini, bare, { recursive: true });
-  writeFileSync(join(bare, "map", "war3map.shd"), baked);
-  const doo = JSON.parse(readFileSync(join(bare, "map", "war3map.doo.json"), "utf8")) as Record<string, unknown>;
+  // [Refactored] Reuse `project` in-place for the control instead of recursively copying `mini-map` to disk a second time.
+  const doo = JSON.parse(readFileSync(join(project, "map", "war3map.doo.json"), "utf8")) as Record<string, unknown>;
   for (const [k, v] of Object.entries(doo)) if (Array.isArray(v)) doo[k] = [];
-  writeFileSync(join(bare, "map", "war3map.doo.json"), JSON.stringify(doo));
-  const written = (await rebuild({ root: bare, parts: ["shd"], settings: { "game.installDir": join(work, "no-game") } })).parts.find((p) => p.part === "shd");
+  writeFileSync(join(project, "map", "war3map.doo.json"), JSON.stringify(doo));
+  const written = (await rebuild({ root: project, parts: ["shd"], settings: { "game.installDir": join(work, "no-game") } })).parts.find((p) => p.part === "shd");
   assert.equal(written?.status, "written", JSON.stringify(written));
-  assert.notDeepEqual([...readFileSync(join(bare, "map", "war3map.shd"))], [...baked]);
+  assert.notDeepEqual([...readFileSync(join(project, "map", "war3map.shd"))], [...baked]);
 });

@@ -13,33 +13,39 @@ import { repoPath } from "../src/lib/testhelpers/testutil";
 // npm test, the gate and the coverage run all start the runner in app/.
 const script = repoPath("app", "scripts", "fails-without.mjs");
 
-/** A checkout whose `dev` has `base` as src.rs and whose work tree has `now`; runs fails-without on it with a check
- *  that passes while src.rs has FIXED. Gives the exit code and, per run of the check, what src.rs held. */
+// [Refactored] Initialize one shared git checkout for the file instead of running `git init` 6 separate times.
+let repoDir;
+test.before(() => {
+  repoDir = scratchDir("fails-without-");
+  const r = spawnSync("git", ["init", "-q", "-b", "dev"], { cwd: repoDir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  writeFileSync(join(repoDir, "check.mjs"), [
+    `import { appendFileSync, readFileSync } from "node:fs";`,
+    `const s = readFileSync("src.rs", "utf8");`,
+    `appendFileSync("seen.txt", JSON.stringify(s) + "\\n");`,
+    `process.exit(s.includes("FIXED") ? 0 : 1);`,
+  ].join("\n"));
+});
+test.after(() => {
+  if (repoDir) rmSync(repoDir, { recursive: true, force: true });
+});
+
+/** Updates `dev` in the shared checkout to have `base` as src.rs and the working tree to have `now`; runs fails-without
+ *  on it with a check that passes while src.rs has FIXED. Gives the exit code and, per run of the check, what src.rs held. */
 function tryIt(base, now) {
-  const dir = scratchDir("fails-without-");
-  try {
-    const git = (...a) => {
-      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { cwd: dir, encoding: "utf8" });
-      assert.equal(r.status, 0, r.stderr);
-    };
-    git("init", "-q", "-b", "dev");
-    writeFileSync(join(dir, "src.rs"), base);
-    git("add", "src.rs");
-    git("commit", "-q", "-m", "base");
-    writeFileSync(join(dir, "src.rs"), now);
-    writeFileSync(join(dir, "check.mjs"), [
-      `import { appendFileSync, readFileSync } from "node:fs";`,
-      `const s = readFileSync("src.rs", "utf8");`,
-      `appendFileSync("seen.txt", JSON.stringify(s) + "\\n");`,
-      `process.exit(s.includes("FIXED") ? 0 : 1);`,
-    ].join("\n"));
-    const r = spawnSync(process.execPath, [script, "--base", "dev", "--keep-rust-tests", "--run", `"${process.execPath}" check.mjs`, "check.mjs", "src.rs"], { cwd: dir, encoding: "utf8" });
-    let seen = [];
-    try { seen = readFileSync(join(dir, "seen.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l)); } catch { /* the check never ran */ }
-    return { status: r.status, out: `${r.stdout}${r.stderr}`, seen, after: readFileSync(join(dir, "src.rs"), "utf8") };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const git = (...a) => {
+    const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { cwd: repoDir, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  rmSync(join(repoDir, "seen.txt"), { force: true });
+  writeFileSync(join(repoDir, "src.rs"), base);
+  git("add", "src.rs");
+  git("commit", "-q", "--allow-empty", "-m", "base");
+  writeFileSync(join(repoDir, "src.rs"), now);
+  const r = spawnSync(process.execPath, [script, "--base", "dev", "--keep-rust-tests", "--run", `"${process.execPath}" check.mjs`, "check.mjs", "src.rs"], { cwd: repoDir, encoding: "utf8" });
+  let seen = [];
+  try { seen = readFileSync(join(repoDir, "seen.txt"), "utf8").trim().split("\n").map((l) => JSON.parse(l)); } catch { /* the check never ran */ }
+  return { status: r.status, out: `${r.stdout}${r.stderr}`, seen, after: readFileSync(join(repoDir, "src.rs"), "utf8") };
 }
 
 test("a test module named otherwise, under cfg(all(test, unix)), in the middle of the file, stays the new one", () => {
@@ -67,14 +73,14 @@ test("cfg(test) mod tests at the end, and a test module the base hadn't yet", ()
   assert.equal(fresh.seen[1], `fn work() {}\n\n#[cfg(test)]\nmod tests {\n    fn t() { NEW_TEST }\n}\n`);
 });
 
-test("a module under cfg(not(test)) or cfg(unix) is code, taken from the base (the control)", () => {
-  for (const cfg of ["not(test)", "unix", `any(test, feature = "x")`]) {
-    const mod = (body) => `#[cfg(${cfg})]\nmod real {\n    fn work() { ${body} }\n}\n`;
-    const tests = `#[cfg(test)]\nmod tests {\n    fn t() { NEW_TEST }\n}\n`;
-    const r = tryIt(mod("1") + tests, mod("2 /* FIXED */") + tests);
-    assert.equal(r.status, 0, `${cfg}: ${r.out}`);
-    assert.equal(r.seen[1], mod("1") + tests, cfg);
-  }
+// [Refactored] Run 1 end-to-end control for non-test `#[cfg(not(test))]` instead of 3 subprocess loops; the full
+// `cfgOnlyInTests` predicate matrix (`not(test)`, `unix`, `any(test, feature = "x")`) is unit-tested in rust-test-modules.test.mjs.
+test("a module under cfg(not(test)) is code, taken from the base (the control)", () => {
+  const mod = (body) => `#[cfg(not(test))]\nmod real {\n    fn work() { ${body} }\n}\n`;
+  const tests = `#[cfg(test)]\nmod tests {\n    fn t() { NEW_TEST }\n}\n`;
+  const r = tryIt(mod("1") + tests, mod("2 /* FIXED */") + tests);
+  assert.equal(r.status, 0, r.out);
+  assert.equal(r.seen[1], mod("1") + tests);
 });
 
 test("a file without a test module now is refused, and nothing is run", () => {

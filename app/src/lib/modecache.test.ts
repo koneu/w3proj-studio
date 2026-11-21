@@ -23,7 +23,8 @@ test("a value whose mode changed while it was made isn't kept", async () => {
   mode = "sd";
   release("mixed");
   assert.equal(await first, "mixed", "the caller still gets it");
-  await new Promise((r) => setTimeout(r, 0));
+  // [Refactored] Use setImmediate instead of setTimeout(r, 0).
+  await new Promise((r) => setImmediate(r));
   mode = "hd";
   assert.equal(await cache.get(() => mode, "k", async () => "fresh"), "fresh", "made again, not the one read during the change");
   assert.equal(cache.size, 1);
@@ -33,7 +34,7 @@ test("a failed make isn't kept: the next ask makes it again; a make that catches
   const cache = new ModeCache<string | null>();
   const v = await cache.get(() => "hd", "k", async () => { throw new Error("no file"); }).catch(() => null);
   assert.equal(v, null, "the caller sees the failure");
-  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setImmediate(r));
   assert.equal(await cache.get(() => "hd", "k", async () => "read"), "read", "made again after the failure (the control: a kept rejection throws here)");
   let made = 0;
   const fallback = () => cache.get(() => "hd", "f", async () => { made++; return null; });

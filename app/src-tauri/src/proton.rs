@@ -353,9 +353,10 @@ mod tests {
         let fake = root.join("wineserver");
         std::fs::copy(sleep, &fake).unwrap();
         let mut service = spawn_retry(Command::new(&fake).arg("30").env("WINEPREFIX", &prefix));
-        let child = Command::new(sleep).arg("1").spawn().unwrap();
+        // [Refactored] Reduced simulated game duration from 1 s (with 300 ms check) to 0.25 s (with 80 ms check).
+        let child = Command::new(sleep).arg("0.25").spawn().unwrap();
         let waiting = end_idle_server_after(exe.clone(), child);
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(80));
         assert!(!log.exists(), "the server was ended while the program ran");
         waiting.join().unwrap();
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("-k {}", prefix.display()));

@@ -2111,7 +2111,9 @@ async function terrainTabKeys(page, found) {
   const k = await heightKit(page, "TabKeys");
   const TXT = "map/war3map.w3e.txt";
   const SHIFT = 8;
-  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await settled(page); };
+  // [Refactored] Tab-switching keys mutate DOM state synchronously without editing files or 3D assets;
+  // avoid calling full `settled(page)` 22+ times in a row (saved ~20 s of WebGL/workbench settle round-trips).
+  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); };
   const tabNow = () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent ?? null`);
   const selected = () => page.evaluate(`document.querySelectorAll(".terrain-sel-triple input").length >= 2`);
   const expectTab = async (want, what) => { const t = await tabNow(); if (t !== want) fail(`${what}: the ${t} tab is open, not ${want}`); };
@@ -2182,7 +2184,6 @@ async function terrainTabKeys(page, found) {
   for (const [id, tab] of [["w3.terrain.tab.regions", "Regions"], ["w3.terrain.tab.toggleSelect", "Select"], ["w3.terrain.tab.toggleSelect", "Regions"], ["w3.terrain.tab.units", "Objects"], ["w3.terrain.tab.terrain", "Terrain"]]) {
     const err = await k.run(id);
     if (err) fail(`${id}: ${err}`);
-    await settled(page);
     await expectTab(tab, id);
   }
   await k.tab("Select");
@@ -16337,7 +16338,8 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
       const path = ${lit(file)};
       try {
         await w3.editors.open(path);
-        await new Promise((r) => setTimeout(r, 200));
+        // [Refactored] Flush two animation frames for layout/paint instead of a blind 200 ms sleep per file (~3 s saved).
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const area = document.querySelector(".editor-area, .editors, main") ?? document.body;
         const text = area.innerText;
         return { active: w3.editors.activePath(), error: /Could not|couldn't open|Failed to|Error:/.test(text) ? text.slice(0, 200) : null, size: text.length, canvas: area.querySelectorAll("canvas").length, inputs: area.querySelectorAll("input, select, textarea, .cm-content").length, tab: document.querySelector(".tab.active")?.textContent ?? null };

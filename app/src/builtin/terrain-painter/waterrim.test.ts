@@ -11,8 +11,18 @@ import { fixturePath } from "../../lib/testhelpers/testutil";
 /** A file of tests/fixtures/water-brush: the w3e of Ashenvale's 12a_RoC_Orc04Interlude_v0_control.w3m as it was, and
  *  as the World Editor saved it after one Shallow (and one Deep) brush click on corner 50,24, found from where the
  *  tests run (app/ or the repository). */
+// [Refactored] Cache parsed binary and text W3E fixtures in memory and clone corners on demand instead of re-reading and re-parsing 65x65 text W3E grids 45+ times.
+const W3E_CACHE = new Map<string, Terrain>();
+function cloneTerrain(t: Terrain): Terrain {
+  return { ...t, corners: t.corners.map((c) => ({ ...c })) };
+}
 function load(name: string): Terrain {
-  return parseW3e(new Uint8Array(readFileSync(fixturePath("water-brush", name))));
+  let cached = W3E_CACHE.get(name);
+  if (!cached) {
+    cached = parseW3e(new Uint8Array(readFileSync(fixturePath("water-brush", name))));
+    W3E_CACHE.set(name, cached);
+  }
+  return cloneTerrain(cached);
 }
 const X = 50, Y = 24;
 const at = (t: Terrain, x: number, y: number) => t.corners[y * t.width + x];
@@ -52,11 +62,11 @@ function json<T>(name: string): T {
 }
 
 /** The empty map the World Editor's size 2 and 3 clicks were made on: 65 x 65 corners, layer 2, height 0, Dirt. */
+const EMPTY_LORDAERON = parseW3e(w3eFromText(["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt Ldro Ldrg Lrok Lgrs Lgrd", "cliffs CLdi CLgr", "corners 65 65",
+  "offset -4096 -4096", "[height] all 0", "[water] all 0", "[water-bits] all 0", "[texture] all 0", "[variation] all 0",
+  "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags] all 0"].join("\n")));
 function emptyLordaeron(): Terrain {
-  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt Ldro Ldrg Lrok Lgrs Lgrd", "cliffs CLdi CLgr", "corners 65 65",
-    "offset -4096 -4096", "[height] all 0", "[water] all 0", "[water-bits] all 0", "[texture] all 0", "[variation] all 0",
-    "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags] all 0"].join("\n");
-  return parseW3e(w3eFromText(text));
+  return cloneTerrain(EMPTY_LORDAERON);
 }
 
 for (const size of [2, 3]) {
@@ -122,14 +132,20 @@ test("the AI tools' rim takes the height of the nearest wet corner", () => {
 interface SlopeClick { name: string; input: "slope" | "edge"; mode: "shallow" | "deep"; size: number; centre: [number, number]; changes: number[][] }
 
 /** tests/fixtures/we-specs/slope.w3x (or slope-edge.w3x) as a terrain: make-slope.mjs and make-water-inputs.mjs. */
+const SLOPE_MAPS = new Map<boolean, Terrain>();
 function slopeMap(edge: boolean): Terrain {
-  const rows = (f: (x: number) => string, sep = "") => Array.from({ length: 65 }, () => Array.from({ length: 65 }, (_, x) => f(x)).join(sep));
-  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt Ldro Ldrg Lrok Lgrs Lgrd", "cliffs CLdi CLgr", "corners 65 65",
-    "offset -4096 -4096", "[height]", ...rows((x) => String((x - 32) * 24), " "), "[water] all 0", "[water-bits] all 0", "[texture] all 0",
-    "[variation] all 0", "[cliff-variation] all 0",
-    ...(edge ? ["[cliff-texture]", ...rows((x) => (x === 33 || x === 34 ? "0" : "f")), "[layer]", ...rows((x) => (x >= 34 ? "3" : "2"))] : ["[cliff-texture] all f", "[layer] all 2"]),
-    "[flags] all 0"].join("\n");
-  return parseW3e(w3eFromText(text));
+  let cached = SLOPE_MAPS.get(edge);
+  if (!cached) {
+    const rows = (f: (x: number) => string, sep = "") => Array.from({ length: 65 }, () => Array.from({ length: 65 }, (_, x) => f(x)).join(sep));
+    const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt Ldro Ldrg Lrok Lgrs Lgrd", "cliffs CLdi CLgr", "corners 65 65",
+      "offset -4096 -4096", "[height]", ...rows((x) => String((x - 32) * 24), " "), "[water] all 0", "[water-bits] all 0", "[texture] all 0",
+      "[variation] all 0", "[cliff-variation] all 0",
+      ...(edge ? ["[cliff-texture]", ...rows((x) => (x === 33 || x === 34 ? "0" : "f")), "[layer]", ...rows((x) => (x >= 34 ? "3" : "2"))] : ["[cliff-texture] all f", "[layer] all 2"]),
+      "[flags] all 0"].join("\n");
+    cached = parseW3e(w3eFromText(text));
+    SLOPE_MAPS.set(edge, cached);
+  }
+  return cloneTerrain(cached);
 }
 
 /** What a corner holds that the fixture lists: ground (stored, minus 0x2000), layer, water flag, water word, cliff type. */

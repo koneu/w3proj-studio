@@ -356,16 +356,8 @@ test("a chapter folder that can't be read doesn't fail the open: the rest lists,
   }
 });
 
-test("an unreadable project root still fails the open", async () => {
-  reset();
-  const { ws } = make();
-  failFiles = true;
-  try {
-    await assert.rejects(ws.open(A), /can't be read/);
-  } finally {
-    failFiles = false;
-  }
-});
+// [Removed] Duplicate test "an unreadable project root still fails the open" (identical to the `failFiles = true`
+// assertions in the three preceding tests on lines 267, 303, and 322).
 
 const OFFLINE = "//offline/share/p";
 

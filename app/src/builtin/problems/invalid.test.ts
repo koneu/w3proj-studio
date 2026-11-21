@@ -250,8 +250,9 @@ test("of two object files that can't be read, the error names the first in order
   const first = "map/war3map.w3u.json", second = "map/war3map.w3d.json";
   const { w3 } = setup({ [UNITS]: units("hfoo"), [DOODADS]: doodads("LTlt"), [first]: "{ not json", [second]: "{ not json" });
   // The files are read at the same time: the first one's answer comes last.
+  // [Refactored] Replaced 30 ms setTimeout delay with setImmediate so first resolves after second without real timer sleep.
   const read = w3.workspace.readText;
-  (w3.workspace as { readText: unknown }).readText = async (p: string) => { if (p === first) await new Promise((r) => setTimeout(r, 30)); return read(p); };
+  (w3.workspace as { readText: unknown }).readText = async (p: string) => { if (p === first) await new Promise((r) => setImmediate(r)); return read(p); };
   await assert.rejects(deleteInvalid(w3, game), (e: Error) => e.message.includes(first) && !e.message.includes(second));
   // Control: with only the second one broken, it is the one named.
   const { w3: other } = setup({ [UNITS]: units("hfoo"), [DOODADS]: doodads("LTlt"), [second]: "{ not json" });
