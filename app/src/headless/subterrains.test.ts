@@ -11,8 +11,9 @@ import type { ExtensionManifest, W3Api } from "../extensions/api";
 import { headless } from "./host";
 import { rustBackend } from "./rustbackend";
 import { fixturePath, repoPath } from "../lib/testhelpers/testutil";
-import { parseW3e, writeW3e } from "../lib/terrain/w3e";
-import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../lib/terrain/w3etext";
+import { parseW3e, setGroundHeight, writeW3e } from "../lib/terrain/w3e";
+import { readTerrainBytes, terrainPath, w3eToText, writeTerrainBytes } from "../lib/terrain/w3etext";
+import { CLOSED, DERIVED_CLOSED_KEY, partialMask } from "../lib/terrain/openset";
 import { readMapDocStrict } from "../lib/formats/mapdoc";
 import { projectWalkSource } from "../builtin/terrain-viewer/meleefacts";
 import { loadPlacedFile, newEntry, savePlacedFile } from "../builtin/terrain-viewer/placement";
@@ -21,7 +22,7 @@ import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { checkTerrainIds, FLAT_FILES, isSplit, mergeTerrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { checkTerrainIds, FLAT_FILES, isSplit, mergeTerrain, openSubterrains, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -301,6 +302,127 @@ test("a split project's derived files are read and written under their map/ name
   assert.throws(() => statSync(join(root, "map", "war3map.wpm")), "nothing written into map/");
   assert.deepEqual([...await workspaceOf(w3).externalChanges()], [], "the store's file was the app's own write");
   assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.w3proj\/derived\/$/m);
+});
+
+// ---- stage 4: partial load (Open Subterrains…, crates/w3proj terrain_open.rs) ----
+
+/** A 25×17-corner copy of the mini map (its tiles and first corner repeated, heights varied; offset 0, 0: corner c at
+ *  world 128·c), doodads every third tile, split into 3×2 subterrains by the command: south row a0 a1 a2, north row b0
+ *  b1 b2 (x 0/8/16, y 0/8). Opened. */
+async function bigSplit(name: string): Promise<{ w3: W3Api; root: string }> {
+  const root = project(name);
+  const mini = parseW3e(await readTerrainBytes("map/war3map.w3e.txt", { readText: async () => readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"), readBytes: async () => { throw new Error("text"); } }));
+  const W = 25, H = 17;
+  const corners = Array.from({ length: W * H }, (_, i) => {
+    const c = { ...mini.corners[0], texture: i % 3, variation: i % 5, hasWater: false, boundary: false, ramp: false, blight: false };
+    setGroundHeight(c, (i % 7) * 4);
+    return c;
+  });
+  const t = { ...mini, width: W, height: H, offsetX: 0, offsetY: 0, corners };
+  writeFileSync(join(root, "map", "war3map.w3e.txt"), w3eToText(writeW3e(t)));
+  const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+  doo.doodads = [];
+  for (let ty = 0; ty < H - 1; ty += 3) for (let tx = 0; tx < W - 1; tx += 3) {
+    doo.doodads.push({ id: "ATtr", variation: 0, position: [128 * tx + 40, 128 * ty + 40, 0], angle: 0.5, scale: [1, 1, 1], skinId: "ATtr", flags: 2, life: 100, itemTable: -1, itemSets: [], editorId: doo.doodads.length + 1 });
+  }
+  doo.specials = [];
+  writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
+  const units = JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
+  units.units[0].position = [200, 200, 0];
+  writeFileSync(join(root, "map", "war3mapUnits.doo.json"), JSON.stringify(units, null, 2));
+  const regions = JSON.parse(readFileSync(join(root, "map", "war3map.w3r.json"), "utf8"));
+  regions.regions[0] = { ...regions.regions[0], left: 100, bottom: 100, right: 300, top: 300 };
+  writeFileSync(join(root, "map", "war3map.w3r.json"), JSON.stringify(regions, null, 2));
+  const w3 = await open(root);
+  await splitTerrain(w3, { layout: ["a0:0,0,8,8", "a1:8,0,8,8", "a2:16,0,9,8", "b0:0,8,8,9", "b1:8,8,8,9", "b2:16,8,9,9"], quiet: true });
+  return { w3, root };
+}
+
+/** A subterrain folder's files: name → bytes and last write. */
+function folderState(root: string, sub: string): string {
+  const dir = join(root, "map", "terrain", sub);
+  return readdirSync(dir).sort().map((f) => `${f}:${statSync(join(dir, f)).mtimeMs}:${readFileSync(join(dir, f)).toString("latin1")}`).join("|");
+}
+
+test("Open Subterrains: closed ones are default-filled and left out, edits save into the open one only, edits outside are refused", async () => {
+  const { w3, root } = await bigSplit("partial");
+  const whole = await loaded(w3);
+  const state = await openSubterrains(w3, { names: ["a0"] });
+  assert.ok(state?.partial, "partial");
+  assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"a0\"]\n}\n");
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.w3proj\/open-subterrains\.json$/m);
+  const closed = ["a2", "b2"].map((s) => folderState(root, s));
+  const halo = ["a1", "b0", "b1"].map((s) => folderState(root, s));
+  // What the terrain editor loads: a0 whole, the halo (two corners into a1, b0, b1), the default corner elsewhere.
+  const part = await loaded(w3);
+  const mask = partialMask(state, 25, 17)!;
+  const layout = JSON.parse(readFileSync(join(root, "map", "terrain", "terrain.json"), "utf8"));
+  for (let i = 0; i < 25 * 17; i++) {
+    if (mask.corners[i] === CLOSED) assert.equal(part.terrain.corners[i].texture, layout.defaultCorner.texture, `closed corner ${i}`);
+    else assert.deepEqual(part.terrain.corners[i], whole.terrain.corners[i], `corner ${i}`);
+  }
+  const xs = part.placed.filter((p) => p.id === "ATtr").map((p) => p.position);
+  assert.ok(xs.length > 0 && xs.length < whole.placed.filter((p) => p.id === "ATtr").length, "fewer doodads");
+  assert.ok(xs.every(([x, y]) => x < 1280 && y < 1280), "a0's and the halo's only");
+  // An edit in a0, saved as the terrain editor saves it: a0's terrain.txt only.
+  const path = "map/war3map.w3e.txt";
+  const io = { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path), writeText: (t: string) => w3.workspace.writeText(path, t), writeBytes: (b: Uint8Array) => w3.workspace.writeBytes(path, b) };
+  let before = snapshot(root);
+  const t = parseW3e(await readTerrainBytes(path, io));
+  t.corners[2 * 25 + 3].variation = (t.corners[2 * 25 + 3].variation + 1) % 16;
+  await writeTerrainBytes(path, writeW3e(t), io);
+  assert.deepEqual(changedFiles(before, snapshot(root)), ["map/terrain/a0/terrain.txt"]);
+  // One in the halo (corner 9, 0 in a1) and one in b2: refused, nothing written.
+  for (const i of [9, 16 * 25 + 20]) {
+    before = snapshot(root);
+    const u = parseW3e(await readTerrainBytes(path, io));
+    u.corners[i].variation = (u.corners[i].variation + 1) % 16;
+    await assert.rejects(writeTerrainBytes(path, writeW3e(u), io), /nothing was written/);
+    assert.deepEqual(changedFiles(before, snapshot(root)), [], `corner ${i}`);
+  }
+  // A unit placed in a0: numbered from a0's range, saved into a0's units.json; one placed in b2: refused.
+  before = snapshot(root);
+  assert.deepEqual(await placeUnits(w3, [[300, 300, 0]]), [10000]);
+  assert.deepEqual(changedFiles(before, snapshot(root)), ["map/terrain/a0/units.json"]);
+  before = snapshot(root);
+  await assert.rejects(placeUnits(w3, [[2500, 1900, 0]]), /lies in subterrain "b2", which isn't open/);
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
+  // A halo doodad moved: refused.
+  const f = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+  const haloTree = f.list.find((p) => p.position[0] >= 1024)!;
+  haloTree.position = [haloTree.position[0] + 10, haloTree.position[1], 0];
+  await assert.rejects(savePlacedFile(w3, f), /isn't open/);
+  // The closed subterrains' files and the halo's: the same bytes and times through all of it.
+  assert.deepEqual(["a2", "b2"].map((s) => folderState(root, s)), closed);
+  assert.deepEqual(["a1", "b0", "b1"].map((s) => folderState(root, s)), halo);
+  // The derived files' sources say subterrains were closed.
+  const sources = await w3.backend.invoke<Record<string, string>>("derived_sources", { root });
+  assert.equal(sources[DERIVED_CLOSED_KEY], "5");
+  assert.ok(!Object.keys(sources).some((k) => k.includes("/b2/")));
+  // All open again: the file goes, the whole map reads with the edits.
+  await openSubterrains(w3, { all: true });
+  assert.throws(() => statSync(join(root, ".w3proj", "open-subterrains.json")));
+  const after = await loaded(w3);
+  assert.equal(after.terrain.corners.length, whole.terrain.corners.length);
+  assert.equal(after.placed.filter((p) => p.id === "ATtr").length, whole.placed.filter((p) => p.id === "ATtr").length);
+});
+
+test("a damaged .w3proj/open-subterrains.json is an error when the terrain is read, never a guess of what's open", async () => {
+  const { w3, root } = await bigSplit("damaged-open");
+  mkdirSync(join(root, ".w3proj"), { recursive: true });
+  for (const [text, why] of [["{ not json", /isn't JSON/], ['{"format": "w3proj.open-subterrains/1", "open": []}', /opens no subterrain/], ['{"format": "w3proj.open-subterrains/1", "open": ["zz"]}', /"zz"/]] as const) {
+    writeFileSync(join(root, ".w3proj", "open-subterrains.json"), text);
+    await w3.workspace.refresh();
+    await assert.rejects(w3.workspace.readText("map/war3map.w3e.txt"), why);
+    const s = await w3.backend.invoke<{ error: string | null; partial: boolean; subterrains: unknown[] }>("terrain_open_state", { root });
+    assert.ok(s.error && !s.partial && s.subterrains.length === 6, text);
+    assert.ok(w3.workspace.files().some((f) => f.path === "map/war3map.w3e.txt"), "still listed");
+  }
+  // Picked again: it reads.
+  await openSubterrains(w3, { names: ["b1"] });
+  assert.ok((await w3.workspace.readText("map/war3map.w3e.txt")).startsWith("W3E"));
+  await assert.rejects(openSubterrains(w3, { names: ["nope"] }), /no subterrain "nope".*Nothing was changed/);
+  await assert.rejects(openSubterrains(w3, { names: [] }), /at least one/);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

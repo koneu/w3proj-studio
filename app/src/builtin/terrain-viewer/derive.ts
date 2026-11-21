@@ -14,6 +14,7 @@ import { buildPathingMap, readMapJson, specialsOf, type SpecialDoodad } from "./
 import { doodadTypes, predictShadows, readSpecialShadows, shadowVerdict, type ShadowStats } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile } from "./placement";
+import { loadOpenState, mergeOpenPathing, partialMask, type PartialMask } from "../../lib/terrain/openset";
 import type { Placed, loadSkins } from "./objects";
 
 export type Skins = Awaited<ReturnType<typeof loadSkins>>;
@@ -128,6 +129,10 @@ export interface DeriveSources {
   stillOpen?: () => boolean;
   /** Made from an editor's edits not saved yet: they don't follow the project's files, so that isn't recorded. */
   unsaved?: boolean;
+  /** A partial load (Open Subterrains…): only the open subterrains' share is made (the pathing map's cells there; the
+   *  shadows change only where the open ground and doodads did), the minimap and its icons, which need the whole map,
+   *  are left as they are, and the record says the files follow part of the map (the backend's derived_sources). */
+  partial?: PartialMask | null;
 }
 
 /** Writes pathing, shadows and the minimap as the settings ask; each failure is shown and the others go on. When all
@@ -151,8 +156,11 @@ async function writeDerivedNow(w3: W3Api, s: DeriveSources) {
   const sources = root && !s.unsaved ? await w3.backend.invoke<Record<string, string>>("derived_sources", { root }).catch(() => null) : null;
   let failed = false;
   if (cfg<boolean>("pathing.regenerate")) try {
-    const { wpm, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"), s.specials);
-    await s.filterPathing(wpm);
+    const { wpm: made, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"), s.specials);
+    await s.filterPathing(made);
+    // A partial load: outside the open subterrains the stored cells stay (absent is made whole; unreadable throws).
+    const listed = s.partial && w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.wpm");
+    const wpm = s.partial ? mergeOpenPathing(made, listed ? await w3.workspace.readBytes("map/war3map.wpm") : null, s.partial) : made;
     if (gone()) return;
     await w3.workspace.writeBytes("map/war3map.wpm", wpm);
     const said = [
@@ -196,7 +204,8 @@ async function writeDerivedNow(w3: W3Api, s: DeriveSources) {
     w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
   }
   // The minimap is redrawn when something changed since the last save (by default).
-  const minimapMode = cfg<string>("minimap.regenerate");
+  // A partial load leaves the minimap and its icons as they are: they show the whole map.
+  const minimapMode = s.partial ? "never" : cfg<string>("minimap.regenerate");
   if (minimapMode === "always" || (minimapMode !== "never" && s.minimapStale)) {
     try {
       const blp = await buildMinimap(w3, s.now, s.doodads, s.read, minimapSettings(w3), cfg<number>("minimap.jpegQuality"));
@@ -260,7 +269,13 @@ export async function deriveFromProject(w3: W3Api, opts: {
     opts.objects(),
   ]);
   const doodads = dooFile?.list ?? [];
+  // A split project with subterrains closed: what the backend gave is the open part (openset.ts).
+  const root = w3.workspace.project()?.root;
+  const split = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/terrain/terrain.json");
+  const state = root && split ? await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), root) : null;
+  if (state?.error) throw new Error(state.error);
   await writeDerived(w3, {
+    partial: partialMask(state, now.width, now.height),
     now, doodads, specials: specialsOf(dooFile?.doc),
     baseTerrain: opts.from.terrain ?? now,
     baseDoodads: opts.from.doodads,

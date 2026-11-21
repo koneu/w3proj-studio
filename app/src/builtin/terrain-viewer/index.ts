@@ -97,6 +97,7 @@ import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerra
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
+import { DERIVED_CLOSED_KEY, loadOpenState, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
@@ -445,6 +446,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  Its camera and the selected objects (found again by id and creation number, else spot) come back. */
   let lastView: { key: string; view: TerrainView; selection: PlacedRef[] } | null = null;
 
+  /** Refuses an AI tool that looks at the whole map (check_melee, check_path, …) while subterrains are closed (Open
+   *  Subterrains…): its answer would leave them out. `w3proj check` checks the whole map whatever is open. */
+  const refusePartial = async (tool: string) => {
+    const root = w3.workspace.project()?.root;
+    if (!root || !w3.workspace.files().some((f) => f.path.toLowerCase() === "map/terrain/terrain.json")) return;
+    const s = await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), root);
+    if (s?.error) throw new Error(`${tool}: ${s.error}`);
+    if (s?.partial) {
+      const closed = s.subterrains.filter((x) => !x.open).length;
+      throw new Error(`${tool} looks at the whole map, and ${closed} of the ${s.subterrains.length} subterrains are closed: open them all (Open Subterrains…) first, or run \`w3proj check\`, which checks the whole map.`);
+    }
+  };
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
   /** The editor of the project's terrain, opened if need be. For an edit (the default) it is refused while its 3D view is lost. */
   /** With `path`, that terrain file's editor (one of the project's, see pictureTarget) instead. */
@@ -845,6 +858,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { ...result, objectsRemoved: done.removed, undo: `undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; ${checkpointed ? "the checkpoint just made stays." : "no checkpoint was made: the Checkpoints extension is off."}` };
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize, movement }) => {
+      await refusePartial("check_path");
       if (movement !== undefined && movement !== "walk" && movement !== "float") throw new Error('movement must be "walk" or "float".');
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE;
@@ -853,11 +867,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
+      await refusePartial("check_route");
       const { handle } = await liveEditor("read");
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : DEFAULT_UNIT_SIZE, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
       return withNeighbour(handle, checkRoute(await walkGrid(handle), points as [number, number][], size, wide));
     }),
     w3.mcp.registerTool("find_pockets", async (args) => {
+      await refusePartial("find_pockets");
       const { handle } = await liveEditor("read");
       const grid = await walkGrid(handle), bounds = await playable().catch(() => null);
       // What's past the playable part isn't ground anyone walks on.
@@ -996,11 +1012,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
+      await refusePartial("check_melee");
       const { handle } = await liveEditor("read");
       return meleeReport(w3, walkSource(handle), typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
     }),
     w3.mcp.registerTool("find_spots", async ({ kind, count, mirror }) => {
       if (kind !== "camp" && kind !== "expansion") throw new Error("kind must be camp or expansion.");
+      await refusePartial("find_spots");
       const f = await meleeFacts(32);
       const starts = f.units.filter((u) => u.id === "sloc").map((u) => [u.x, u.y] as [number, number]);
       if (!starts.length) throw new Error("Place the start locations (sloc) first: spots go by them.");
@@ -1615,6 +1633,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  locations or the tileset writes that file, so nothing is edited, rather than an edit refused at its save. A
          *  chapter inside its campaign project isn't the project's own terrain and edits as before. Null: editable. */
         const lockedText = doc.readOnly ? null : await terrainInfoLock(w3, doc.path, projectTerrain(w3));
+        /** A partial load of a split project (Open Subterrains…, lib/terrain/openset.ts): the backend gave the closed
+         *  subterrains' corners as the default corner and left their objects out; they aren't drawn, the halo around the
+         *  open ones is drawn dimmed, and no edit changes either (the backend refuses a save that would). */
+        let openState: OpenState | null = null, partial: PartialMask | null = null;
+        if (doc.path === projectTerrain(w3) && w3.workspace.files().some((f) => f.path.toLowerCase() === "map/terrain/terrain.json")) {
+          try {
+            openState = await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), w3.workspace.project()!.root);
+            if (openState?.error) throw new Error(openState.error);
+            partial = partialMask(openState, terrain.width, terrain.height);
+          } catch (e) {
+            el.append(errorView(`Can't tell which subterrains are open: ${errorText(e)}`, h("button.link-inline", { onclick: () => void w3.commands.execute("w3.terrainLayout.openSubterrains") }, "Open Subterrains…")));
+            return {};
+          }
+        }
+        const partialHiddenTiles = () => (partial ? partial.hiddenTiles.reduce<number[]>((out, v, i) => (v ? (out.push(i), out) : out), []) : []);
+        const partialHiddenAt = (x: number, y: number) => {
+          if (!partial) return false;
+          const tx = Math.floor((x - terrain.offsetX) / 128), ty = Math.floor((y - terrain.offsetY) / 128);
+          return tx < 0 || ty < 0 || tx >= terrain.width - 1 || ty >= terrain.height - 1 || partial.hiddenTiles[ty * (terrain.width - 1) + tx] === 1;
+        };
         const canvas = h("canvas.model-canvas");
         /** The keys go back to the map (after a toolbar control was used). Once now and once after the event: WebKitGTK
          *  (Linux) focuses a checkbox or button after its click handlers ran, which would take the keys back. */
@@ -1628,7 +1666,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // mode opens the editor again (reopenForArt).
         const openedMode = artMode();
         try {
-          renderer = new TerrainRenderer(canvas, terrain);
+          renderer = new TerrainRenderer(canvas, terrain, partial);
           renderer.tone = toneOf(openedMode);        } catch (e) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
@@ -1685,6 +1723,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const artSettled = async () => { while (artLoads.size) await Promise.allSettled([...artLoads]); };
         const labelLayer = h("div.terrain-labels");
         let labels: { x: number; y: number; el: HTMLElement }[] = [];
+        /** A partial load: each closed subterrain's name over the middle of its (empty) rectangle. */
+        const closedLabels = (openState?.partial ? openState.subterrains.filter((s) => !s.open) : []).map((s) => ({
+          x: terrain.offsetX + 128 * (s.x + s.w / 2), y: terrain.offsetY + 128 * (s.y + s.h / 2),
+          el: h("span.terrain-label.subterrain-closed", { title: `Subterrain ${s.name} is closed: Open Subterrains… opens it` }, `${s.name} (closed)`),
+        }));
+        labelLayer.append(...closedLabels.map((l) => l.el));
 
         // ---- day/night lighting ---------------------------------------------------------
         // Settings: on/off (off: an even light) and the hour; both remembered across maps.
@@ -1703,6 +1747,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const gameViewOn = () => w3.settings.get<boolean>("terrain.gameView", false) === true;
         /** In the view's upper right while game view is on, as the World Editor's "Game View Settings". */
         const gameBadge = h("div.terrain-gameview-badge", { hidden: !gameViewOn(), title: "Game view (V): lit and fogged as in the game, without the editor's marks" }, "Game View");
+        /** A partial load says so: closed subterrains aren't drawn, the dimmed strip beside the open ones is read-only. */
+        const partialBadge = h("div.terrain-partial-badge", { hidden: !openState?.partial }, openState?.partial ? `${openSummary(openState)} · the dimmed strip is read-only` : "");
         /** Set with the View commands (below): draws the view again after a setting it depends on changed. */
         let viewChanged = () => {};
         /** Set with the View commands (below): the Camera Bounds line again, after the bounds or the choice changed. */
@@ -2341,7 +2387,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const gen = ++shoreGen;
           const flags = lighting?.flags ?? CLIFF_SHORE_WAVES | ROLLING_SHORE_WAVES;
           const waves = { cliffShores: (flags & CLIFF_SHORE_WAVES) !== 0, rollingShores: (flags & ROLLING_SHORE_WAVES) !== 0 };
-          const { batches } = await loader.loadModels("shoreline", planShoreline(terrain, shoreModels, waves));
+          // A partial load draws no shore in the closed subterrains.
+          const plan = planShoreline(terrain, shoreModels, waves).map((r) => (partial ? { ...r, instances: r.instances.filter((i) => !partialHiddenAt(i.world[12], i.world[13])) } : r));
+          const { batches } = await loader.loadModels("shoreline", plan.filter((r) => r.instances.length));
           if (gen !== shoreGen) return;
           renderer.setGroup("shoreline", batches);
           redraw();
@@ -2353,7 +2401,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const gen = ++cliffGen;
           const hidden = specialCliffTiles(terrain, specialRects);
           cliffsHidden = [...hidden].join();
-          const { requests, groundOverrides, hiddenTiles } = planCliffs(terrain, cliffData.types, cliffData.exists, hidden);
+          // A partial load places no cliffs in the closed subterrains (their tiles aren't drawn either).
+          const noCliffs = partial ? new Set([...hidden, ...partialHiddenTiles()]) : hidden;
+          const { requests, groundOverrides, hiddenTiles } = planCliffs(terrain, cliffData.types, cliffData.exists, noCliffs);
           // The specials take the cliff texture and the layer of their ground.
           if (specialsPlaced.length && specialLooks(specialsPlaced, specialRects) !== specialsLook) void rebuildObjects();
           const { batches, failed } = await loader.loadModels("cliffs", requests);
@@ -4915,7 +4965,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           setLabels: (list) => {
             labels = (list ?? []).map(({ x, y, text, rgb }) => ({ x, y, el: h("span.terrain-label", { style: rgb ? { color: `rgb(${rgb.join(",")})` } : {} }, text) }));
-            labelLayer.replaceChildren(...labels.map((l) => l.el));
+            labelLayer.replaceChildren(...[...labels, ...closedLabels].map((l) => l.el));
             redraw();
           },
           pathing: async (opts) => {
@@ -5731,7 +5781,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
               h("span.muted", {}, dragHint, cameraHint)),
             ...(editable ? [tabsEl, groupBar] : lockedText ? [h("div.terrain-locked", { role: "status" }, lockedText)] : []),
-            h("div.model-stage", {}, canvas, labelLayer, gameBadge, minimapPanel.el, glLost)),
+            h("div.model-stage", {}, canvas, labelLayer, gameBadge, partialBadge, minimapPanel.el, glLost)),
           side));
         // Keys bound under terrainFocus are the map's while it has the keyboard (Ctrl+R: Regions, not Reload Window): the
         // workbench leaves them to the keydown handler below.
@@ -6085,7 +6135,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Names over the map: HTML over the canvas, placed again whenever the view is drawn. */
         const placeLabels = () => {
-          for (const { el, x, y } of labels) {
+          for (const { el, x, y } of [...labels, ...closedLabels]) {
             const at = renderer.project([x, y, renderer.groundHeight(x, y)]);
             el.hidden = !at;
             if (at) el.style.transform = `translate(-50%, -50%) translate(${Math.round(at[0])}px, ${Math.round(at[1])}px)`;
@@ -6121,7 +6171,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take(), unsaved = false) => {
           const icons = units ?? unitsFile?.list;
           await writeDerived(w3, {
-            unsaved,
+            unsaved, partial,
             now, doodads, specials: specialsOf(dooFile?.doc), baseTerrain, baseDoodads,
             units: unitsFile && icons ? icons : null,
             skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
@@ -6271,6 +6321,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // A read-only editor of a game map never derives: it isn't the project's. The project's own terrain locked by
         // its map info is listed all the same, for the tools that only read (edits refuse there: liveEditor).
         if (editable || lockedText) openedBy.set(doc.path, record);
+        // A split project opened whole after a save with subterrains closed: its pathing, shadows and minimap follow part
+        // of the map only (derived-from.json counts the closed ones, and `w3proj pack` refuses them): made again now.
+        if (editable && openState && !openState.partial) {
+          void w3.workspace.readText(".w3proj/derived-from.json").then((t) => {
+            if (!disposed && t.includes(`"${DERIVED_CLOSED_KEY}"`)) rebuildSoon(() => ({ doodads: dooFile?.list ?? [] }));
+          }, () => {});
+        }
         /** A change from outside, in place: nothing is torn down, so what's loaded stays. Only a
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {

@@ -2,13 +2,15 @@
   "id": "w3.terrainLayout",
   "name": "Subterrains",
   "version": "0.1.0",
-  "description": "Splits the map's terrain and placed objects into subterrains (map/terrain/: one folder per rectangle, so several people can edit different parts of a large map and merge in git), and merges them back into the single files. The map is the same either way; every editor reads and saves it as before.",
-  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds"],
+  "description": "Splits the map's terrain and placed objects into subterrains (map/terrain/: one folder per rectangle, so several people can edit different parts of a large map and merge in git), and merges them back into the single files. The map is the same either way; every editor reads and saves it as before. Open Subterrains… (and the Subterrains view) opens only some of them: the others aren't read, drawn or saved, and a strip of two corners around the open ones is shown read-only.",
+  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds", "onCommand:w3.terrainLayout.openSubterrains", "onView:w3.terrainLayout.subterrains"],
   "contributes": {
+    "views": [{ "id": "w3.terrainLayout.subterrains", "title": "Subterrains", "container": "terrain" }],
     "commands": [
       { "id": "w3.terrainLayout.split", "when": "project", "title": "Split Terrain into Subterrains…", "category": "Terrain" },
       { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" },
-      { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" }
+      { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" },
+      { "id": "w3.terrainLayout.openSubterrains", "when": "project", "title": "Open Subterrains…", "category": "Terrain" }
     ]
   }
 }

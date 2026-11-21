@@ -927,7 +927,7 @@ export class TerrainRenderer {
   /** Brush outline under the pointer (editing tools). */
   private brush: Mesh | null = null;
 
-  constructor(readonly canvas: HTMLCanvasElement, readonly terrain: Terrain) {
+  constructor(readonly canvas: HTMLCanvasElement, readonly terrain: Terrain, partial: Parameters<TerrainRenderer["setPartial"]>[0] = null) {
     // Opaque: blended layers (leaves, the boundary's shade) would otherwise leave the picture part see-through,
     // and the page behind lightened them, as pale ghosts in a fog that hides everything else.
     const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
@@ -945,6 +945,7 @@ export class TerrainRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.noShadow);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
     this.textures =terrain.groundTiles.map(() => null);
+    this.partial = partial && { hidden: partial.hiddenTiles, halo: partial.haloTiles, locked: partial.locked.map((index) => ({ index, corner: { ...terrain.corners[index] } })) };
     this.placeholder = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([110, 110, 100, 255]));
@@ -978,9 +979,26 @@ export class TerrainRenderer {
     this.ground = this.buildGround(tiles, overrides);
   }
 
+  /** A partial load (lib/terrain/openset.ts): tiles not drawn (a corner of them in a closed subterrain), tiles drawn
+   *  dimmed (in the halo, locked), and the corners no edit may change (they get their values of now back at every
+   *  terrainChanged, so a stroke or an undo over them changes nothing there). Null: everything open. */
+  private partial: { hidden: Uint8Array; halo: Uint8Array; locked: { index: number; corner: Terrain["corners"][number] }[] } | null = null;
+
+  setPartial(p: { hiddenTiles: Uint8Array; haloTiles: Uint8Array; locked: readonly number[] } | null) {
+    this.partial = p && { hidden: p.hiddenTiles, halo: p.haloTiles, locked: p.locked.map((index) => ({ index, corner: { ...this.terrain.corners[index] } })) };
+    this.terrainChanged();
+  }
+
+  /** Whether a tile is left out (partial load). */
+  tileHidden(x: number, y: number): boolean {
+    return !!this.partial?.hidden[y * (this.terrain.width - 1) + x];
+  }
+
   /** Rebuilds everything derived from the corners after an edit. */
   terrainChanged() {
     const gl = this.gl;
+    // Corners outside the open subterrains are as they were loaded, whatever changed them.
+    if (this.partial) for (const { index, corner } of this.partial.locked) Object.assign(this.terrain.corners[index], corner);
     this.setCliffTiles(this.cliffTiles, this.groundOverrides);
     this.heightRange = null;
     this.freeVao(this.water.vao);
@@ -1007,14 +1025,15 @@ export class TerrainRenderer {
 
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
-        if (skip.has(y * (t.width - 1) + x)) continue;
+        if (skip.has(y * (t.width - 1) + x) || this.partial?.hidden[y * (t.width - 1) + x]) continue;
         const bl = this.corner(x, y), br = this.corner(x + 1, y), tl = this.corner(x, y + 1), tr = this.corner(x + 1, y + 1);
         // Blight covers everything, so it gets its own slot drawn last.
         const tex = (cx: number, cy: number) => (this.corner(cx, cy).blight && this.showBlight ? BLIGHT_TEXTURE : overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture);
         const [tBl, tBr, tTl, tTr] = [tex(x, y), tex(x + 1, y), tex(x, y + 1), tex(x + 1, y + 1)];
         const used = [...new Set([tBl, tBr, tTl, tTr])].sort((a, b) => a - b);
         // Tiles at the camera boundary are shown darkened, like the editor does.
-        const shade = bl.boundary || br.boundary || tl.boundary || tr.boundary ? 0.35 : 1;
+        // The halo of a partial load (read-only) is dimmed too.
+        const shade = (bl.boundary || br.boundary || tl.boundary || tr.boundary ? 0.35 : 1) * (this.partial?.halo[y * (t.width - 1) + x] ? 0.6 : 1);
         used.forEach((id, i) => {
           const cell = i === 0
             ? -1 - bl.variation
@@ -1100,6 +1119,7 @@ export class TerrainRenderer {
     const dark = darkWaterCorners(t, this.edgeTiles());
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
+        if (this.partial?.hidden[y * (t.width - 1) + x]) continue;
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
         const tile = waterTile(cs);
         if (!tile) continue;

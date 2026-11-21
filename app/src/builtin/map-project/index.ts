@@ -6,6 +6,7 @@ import { checkOpenedProject, offerStrayMoves } from "./strays";
 import { dropUnusedStrings } from "./prunestrings";
 import { namesToStringTable } from "./namestrings";
 import { blocksPacking, countProblems } from "../../lib/problemcount";
+import { loadOpenState } from "../../lib/terrain/openset";
 import { deleteQuestion, wouldDelete } from "../../lib/syncdeletes";
 
 interface UnpackReport {
@@ -146,6 +147,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.commands.execute("w3.script.settle").catch(() => {});
     // Likewise pathing, shadows and the minimap, which follow a terrain edit a few seconds later.
     await w3.commands.execute("w3.terrain.settle").catch(() => {});
+    // A split project with subterrains closed (Open Subterrains…): its derived files follow part of the map only.
+    if (w3.workspace.files().some((f) => f.path.toLowerCase() === "map/terrain/terrain.json")) {
+      const state = await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), root());
+      if (state?.error) throw new Error(`Not packed: ${state.error}`);
+      if (state?.partial) {
+        const closed = state.subterrains.filter((s) => !s.open).length;
+        throw new Error(`Not packed: ${closed} of the ${state.subterrains.length} subterrains are closed, so pathing, shadows and the minimap follow part of the map only. Open them all (Open Subterrains…), then build.`);
+      }
+    }
     // The destructables' flag "placed by the game" as the script in the build has it (the extension can be off).
     await w3.commands.execute("w3.script.followFlags").catch(() => {});
     if (check) {

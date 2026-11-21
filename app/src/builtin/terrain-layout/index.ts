@@ -7,6 +7,8 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { checkpointOrStop } from "../../lib/checkpoint";
 import { errorText } from "../../lib/oserror";
 import { LAYOUT_FILE } from "../../lib/terrain/creationids";
+import { loadOpenState, openSummary, type OpenState } from "../../lib/terrain/openset";
+import { h } from "../../workbench/dom";
 
 /** The project's layout file when its terrain is split. */
 export { LAYOUT_FILE };
@@ -129,6 +131,111 @@ export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Pro
   return report;
 }
 
+// ---- Open Subterrains… (spec "Working on Part of the Map") ----
+
+/** The project's open state (terrain_open_state); rejects for a flat project. */
+async function openState(w3: W3Api, what: string): Promise<OpenState> {
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  if (!isSplit(w3)) throw new Error(`${what}: the terrain isn't split into subterrains (Split Terrain into Subterrains… first).`);
+  const s = await loadOpenState((cmd, args) => w3.backend.invoke(cmd, args), project.root);
+  if (!s) throw new Error(`${what}: the terrain isn't split into subterrains.`);
+  return s;
+}
+
+/** Opens `names` (all of them removes the choice): refused while an editor has unsaved changes (the terrain editor
+ *  reloads, and what it holds would be saved into the other subterrains' files, or lost); the derived work of the last
+ *  edit first; afterwards the file list read again and the editors of the flat files opened again. The new state. */
+export async function setOpenSubterrains(w3: W3Api, names: string[]): Promise<OpenState | null> {
+  const what = "Open Subterrains";
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  const unsaved = w3.editors.unsavedPaths();
+  if (unsaved.length) throw new Error(`${what}: save or discard the changes in ${unsaved.join(", ")} first.`);
+  await w3.commands.execute("w3.terrain.settle").catch(() => {});
+  const root = project.root;
+  let state: OpenState | null;
+  try {
+    state = await w3.backend.invoke<OpenState | null>("terrain_set_open", { root, names });
+  } catch (e) {
+    throw new Error(`${what}: ${errorText(e).replace(/\.?$/, ".")} Nothing was changed.`);
+  }
+  if (w3.workspace.project()?.root !== root) return state;
+  await w3.workspace.refresh();
+  for (const p of w3.editors.openPaths().filter((p) => FLAT_FILES.includes(p.replace(/\\/g, "/").toLowerCase()))) await w3.editors.reopen(p);
+  w3.views.refresh(SUBTERRAINS_VIEW);
+  return state;
+}
+
+/** Open Subterrains…: `arg.names` (MCP, app-smoke) or `arg.all` skip the questions; otherwise a pick that toggles one
+ *  subterrain at a time until "Open the ticked ones". Resolves with the new state, null when cancelled. */
+export async function openSubterrains(w3: W3Api, arg?: { names?: string[]; all?: boolean }): Promise<OpenState | null> {
+  const s = await openState(w3, "Open Subterrains");
+  if (arg?.all) return setOpenSubterrains(w3, s.subterrains.map((x) => x.name));
+  if (arg?.names) return setOpenSubterrains(w3, arg.names);
+  const ticked = new Set(s.error ? s.subterrains.map((x) => x.name) : s.subterrains.filter((x) => x.open).map((x) => x.name));
+  for (;;) {
+    type Pick = { kind: "apply" } | { kind: "all" } | { kind: "toggle"; name: string };
+    const pick = await w3.window.quickPick<Pick>([
+      { label: `Open the ticked ones (${ticked.size} of ${s.subterrains.length})`, value: { kind: "apply" }, disabled: ticked.size ? undefined : "Tick at least one" },
+      { label: "Open all", description: "The whole map, as without subterrains", value: { kind: "all" } },
+      ...s.subterrains.map((x) => ({
+        label: `${ticked.has(x.name) ? "☑" : "☐"} ${x.name}`,
+        description: `${x.w}×${x.h} corners at ${x.x},${x.y} · ${sizeText(x.bytes)}${x.open ? "" : " · closed now"}`,
+        value: { kind: "toggle" as const, name: x.name },
+      })),
+    ], { placeholder: s.error ? `The choice can't be read (${s.error}): pick again` : "Pick a subterrain to tick or untick it; closed ones aren't read, drawn or saved" });
+    if (!pick?.value) return null;
+    if (pick.value.kind === "apply") return setOpenSubterrains(w3, [...ticked]);
+    if (pick.value.kind === "all") return setOpenSubterrains(w3, s.subterrains.map((x) => x.name));
+    const n = pick.value.name;
+    if (ticked.has(n)) ticked.delete(n);
+    else ticked.add(n);
+  }
+}
+
+const sizeText = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+/** The side view listing the subterrains with a box each: ticking one opens it, unticking closes it (the terrain
+ *  editor reloads); a closed one isn't read, drawn or saved. */
+export const SUBTERRAINS_VIEW = "w3.terrainLayout.subterrains";
+
+function renderView(w3: W3Api, el: HTMLElement) {
+  if (!w3.workspace.project()) {
+    el.append(h("div.view-empty", {}, "Open a project to see its subterrains."));
+    return;
+  }
+  if (!isSplit(w3)) {
+    el.append(h("div.view-empty", {}, "The terrain isn't split into subterrains. ", h("button.link-inline", { onclick: () => void w3.commands.execute("w3.terrainLayout.split").catch(() => {}) }, "Split Terrain into Subterrains…")));
+    return;
+  }
+  const body = h("div.tree", {}, h("div.muted", {}, "Reading the subterrains…"));
+  el.append(body);
+  void openState(w3, "Subterrains").then((s) => {
+    const rows: HTMLElement[] = [];
+    const summary = s.error ? `The choice can't be read: ${s.error}` : `${openSummary(s)}${s.partial ? " · closed ones aren't read, drawn or saved" : ""}`;
+    rows.push(h("div.muted.subterrain-summary", {}, summary));
+    const choose = (names: string[]) => void setOpenSubterrains(w3, names).catch((e) => w3.window.showError(errorText(e)));
+    for (const x of s.subterrains) {
+      const box = h("input", { type: "checkbox", checked: x.open, title: x.open ? `Close ${x.name}` : `Open ${x.name}` }) as HTMLInputElement;
+      box.addEventListener("change", () => {
+        const names = new Set(s.subterrains.filter((y) => y.open).map((y) => y.name));
+        if (box.checked) names.add(x.name);
+        else names.delete(x.name);
+        if (!names.size) { box.checked = true; void w3.window.showWarning("At least one subterrain stays open."); return; }
+        choose([...names]);
+      });
+      rows.push(h("label.tree-row.subterrain-row", { title: `${x.name}: corners ${x.x}–${x.x + x.w - 1}, ${x.y}–${x.y + x.h - 1}` },
+        box,
+        h("span.tree-label", {}, x.name),
+        h("span.muted", {}, ` ${x.w}×${x.h} · ${sizeText(x.bytes)}${x.halo ? " · halo" : ""}`)));
+    }
+    rows.push(h("div.tree-row", {},
+      h("button.link-inline", { onclick: () => choose(s.subterrains.map((y) => y.name)) }, "Open all")));
+    body.replaceChildren(...rows);
+  }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
+}
+
 /** A command's failure as an error message (the reason the backend gave), and again for the caller. */
 const shown = <A, R>(w3: W3Api, run: (arg?: A) => Promise<R>) => async (arg?: A) => {
   try {
@@ -144,5 +251,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),
+    w3.commands.register("w3.terrainLayout.openSubterrains", shown(w3, (arg?: { names?: string[]; all?: boolean }) => openSubterrains(w3, arg))),
+    w3.views.register(SUBTERRAINS_VIEW, { render: (el) => renderView(w3, el) }),
+    w3.workspace.onDidChange(() => w3.views.refresh(SUBTERRAINS_VIEW)),
   );
 }
