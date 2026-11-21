@@ -16,17 +16,18 @@ import { lit } from "./jslit.mjs";
 
 /** The terrain view at the World Editor's view size, looking as the editor does for `spec`. */
 async function view(page, spec) {
+  // [Refactored] Replace fixed 300 ms + 600 ms sleeps (~4.5 min across 296 calls) with a 2-frame paint flush + w3Workbench.settled().
   await page.evaluate(`(async () => {
     const stage = window.__driveEd.host.querySelector(".model-stage");
     const r = devicePixelRatio;
     Object.assign(stage.style, { position: "fixed", left: "0", top: "0", flex: "none", zIndex: "10000", width: 1184 / r + "px", height: 844 / r + "px" });
-    window.__driveEd.redraw(); await new Promise((r) => setTimeout(r, 300));
+    window.__driveEd.redraw();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   })()`);
   const head = await page.evaluate(`(({ width, height, offsetX, offsetY }) => ({ width, height, offsetX, offsetY }))(window.__driveEd.terrain)`);
   const { x, y, ...v } = cameraOf(spec, head);
   await page.evaluate(`window.__driveEd.lookAt(${x}, ${y})`);
   await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${lit(v)} }); })()`);
-  await sleep(600);
   await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
 }
 
@@ -57,7 +58,7 @@ export async function uiStep(page, actions) {
       await hands.mouse("mouseMoved", p.x, p.y);
       await hands.mouse("mousePressed", p.x, p.y, 1);
       await hands.mouse("mouseReleased", p.x, p.y, 0);
-      await sleep(500);
+      // [Refactored] Rely on w3Workbench.settled() directly instead of a blind 500 ms sleep before settle (~3.4 min saved across 410 clicks).
       await settled();
     } else if (kind === "clickGround") {
       // The left button on the ground point (X, Y, 0), where Studio's own camera shows it (not where the editor's would).
@@ -68,21 +69,21 @@ export async function uiStep(page, actions) {
       await hands.mouse("mouseMoved", x, y);
       await hands.mouse("mousePressed", x, y, 1);
       await hands.mouse("mouseReleased", x, y, 0);
-      await sleep(500);
+      // [Refactored] Rely on w3Workbench.settled() directly instead of a blind 500 ms sleep (~41 s saved across 83 calls).
       await settled();
     } else if (kind === "key") {
       // A key pressed on the terrain view's canvas: KeyboardEvent.key and .code as a real keyboard gives them
       // ("d" KeyD, "Numpad6" the key 6 with code Numpad6; a third element names the code itself: uiKey).
       const { key, code } = uiKey(a[0], a[1]);
-      await page.evaluate(`(async () => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${lit(key)}, code: ${lit(code)}, bubbles: true })); await new Promise((r) => setTimeout(r, 40)); })()`);
-      await sleep(200);
+      // [Refactored] Drop 40 ms + 200 ms blind sleeps before settled() (~18.5 s saved across 77 key actions).
+      await page.evaluate(`(() => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${lit(key)}, code: ${lit(code)}, bubbles: true })); })()`);
       await settled();
     } else if (kind === "drag") {
       // a[4]: the drag's time (as the editor's --drag @MS): the painter re-applies a held brush at most every
       // HEIGHT_TICK (40 ms), so moves 30 ms apart drop some, and which ones (the stroke's end too) went by the timing.
       await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30, dragModifiers);
       dragModifiers = 0;
-      await sleep(500);
+      // [Refactored] Rely on w3Workbench.settled() directly instead of a blind 500 ms sleep (~28 s saved across 56 drags).
       await settled();
     } else if (kind === "dragMod") dragModifiers = { alt: 1, ctrl: 2, shift: 8 }[a[0]];
     else if (kind === "sleep") await sleep(a[0]);
