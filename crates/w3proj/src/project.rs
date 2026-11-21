@@ -1676,11 +1676,11 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
     }
 }
 
-/// The map's terrain (chapter maps' too) split into the `map/terrain/` layout as a 2×2 grid and read
-/// back (`terrain_layout::split`, then `flatten` as `read_project` reads it): the project files have
-/// to come back byte for byte, so the split layout packs into the same map. A terrain kept raw has
-/// nothing to split.
-fn split_terrain_round_trip(ex: &Extracted, at: &str, out: &mut Vec<String>) {
+/// The map's terrain and placed objects (chapter maps' too) split into the `map/terrain/` layout as a
+/// 2×2 grid and read back (`terrain_layout::split`, then `flatten` as `read_project` reads it): the
+/// project files have to come back byte for byte, and the map packed from them has to be the one
+/// packed from the flat files. A terrain kept raw has nothing to split.
+fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>) {
     use crate::terrain_layout as tl;
     let text = ex.files.keys().find(|k| k.eq_ignore_ascii_case(tl::FLAT_FILE));
     if let Some(text) = text.filter(|k| !ex.manifest.pack.raw.contains(k)) {
@@ -1688,16 +1688,26 @@ fn split_terrain_round_trip(ex: &Extracted, at: &str, out: &mut Vec<String>) {
             let mut files = ex.files.clone();
             tl::split(&mut files, &tl::grid_2x2(t.width, t.height))?;
             tl::flatten(&mut files)?;
-            Ok(files == ex.files)
+            if files != ex.files {
+                return Ok(Some("project files"));
+            }
+            let packed = |files: &BTreeMap<String, Vec<u8>>| -> Result<Vec<u8>> {
+                let mut encoded = encode_files(files, &ex.manifest.pack.raw, codecs)?;
+                for (dir, inner) in &ex.nested {
+                    encoded.insert(paths::to_archive_name(dir), pack_extracted(inner, codecs)?);
+                }
+                build_archive(&ex.manifest, &prefix_of(ex), encoded)
+            };
+            Ok((packed(&files)? != packed(&ex.files)?).then_some("packed map"))
         });
         match result {
-            Ok(true) => {}
-            Ok(false) => out.push(format!("{at}war3map.w3e (split into map/terrain/ and merged)")),
-            Err(e) => out.push(format!("{at}war3map.w3e (split into map/terrain/: {e})")),
+            Ok(None) => {}
+            Ok(Some(what)) => out.push(format!("{at}war3map.w3e and placed objects (split into map/terrain/ and merged: another {what})")),
+            Err(e) => out.push(format!("{at}war3map.w3e and placed objects (split into map/terrain/: {e})")),
         }
     }
     for (dir, chapter) in &ex.nested {
-        split_terrain_round_trip(chapter, &format!("{at}{dir}/"), out);
+        split_terrain_round_trip(chapter, codecs, &format!("{at}{dir}/"), out);
     }
 }
 
@@ -1710,7 +1720,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
     let packed = Archive::from_bytes(pack_extracted(&ex, codecs)?)?;
     let mut mismatches = Vec::new();
     compare(&archive, &packed, &ex, "", &mut mismatches);
-    split_terrain_round_trip(&ex, "", &mut mismatches);
+    split_terrain_round_trip(&ex, codecs, "", &mut mismatches);
     Ok(VerifyReport {
         files: ex.report.files.len(),
         codec_files: ex.report.files.iter().filter(|f| f.codec.is_some()).count(),
@@ -1909,22 +1919,42 @@ mod tests {
         assert_eq!(encode(&def_units, &dec.value).unwrap(), non_empty);
     }
 
-    /// verify's split-terrain round trip passes a map whose terrain comes back, and reports one whose project
-    /// file doesn't (here: a terrain text that isn't the one unpack writes, so the merged text differs).
+    /// verify's split-terrain round trip (terrain and placed objects) passes a map whose files come back, and
+    /// reports one whose project files don't (a terrain text, or an object file, that isn't the one unpack
+    /// writes, so the merged text differs) or that can't be split.
     #[test]
     fn verify_splits_the_terrain_and_reports_what_doesnt_come_back() {
-        let text = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map/map/war3map.w3e.txt")).unwrap();
+        let mini = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map/map");
+        let codecs = Registry::default();
+        let text = fs::read(mini.join("war3map.w3e.txt")).unwrap();
         let mut b = ArchiveBuilder::new(WriteOptions::default());
         b.add("war3map.w3e", w3e::from_text(&text).unwrap());
         b.add("war3map.w3i", w3i_bytes(31, 6114));
-        let ex = extract_with(&Archive::from_bytes(b.write(b"").unwrap()).unwrap(), &Registry::default(), &[]);
+        for name in ["war3map.doo", "war3mapUnits.doo", "war3map.w3r"] {
+            let json = fs::read(mini.join(format!("{name}.json"))).unwrap();
+            b.add(name, codecs.for_project_path(&format!("{name}.json")).unwrap().1.encode(name, &json).unwrap());
+        }
+        let ex = extract_with(&Archive::from_bytes(b.write(b"").unwrap()).unwrap(), &codecs, &[]);
         assert_eq!(ex.files["war3map.w3e.txt"], text);
+        assert!(ex.files.contains_key("war3map.doo.json") && ex.files.contains_key("war3mapUnits.doo.json") && ex.files.contains_key("war3map.w3r.json"));
         let mut out = Vec::new();
-        split_terrain_round_trip(&ex, "", &mut out);
+        split_terrain_round_trip(&ex, &codecs, "", &mut out);
         assert!(out.is_empty(), "{out:?}");
         let mut odd = ex;
         odd.files.insert("war3map.w3e.txt".into(), [&b"# a comment\n"[..], &text].concat());
-        split_terrain_round_trip(&odd, "", &mut out);
-        assert_eq!(out, vec!["war3map.w3e (split into map/terrain/ and merged)".to_string()]);
+        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        assert_eq!(out, vec!["war3map.w3e and placed objects (split into map/terrain/ and merged: another project files)".to_string()]);
+        // An object file in another form than unpack writes (the same JSON on one line).
+        odd.files.insert("war3map.w3e.txt".into(), text.clone());
+        let units: serde_json::Value = serde_json::from_slice(&odd.files["war3mapUnits.doo.json"]).unwrap();
+        odd.files.insert("war3mapUnits.doo.json".into(), serde_json::to_vec(&units).unwrap());
+        out.clear();
+        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        assert_eq!(out, vec!["war3map.w3e and placed objects (split into map/terrain/ and merged: another project files)".to_string()]);
+        // One that can't be split.
+        odd.files.insert("war3mapUnits.doo.json".into(), b"{ broken".to_vec());
+        out.clear();
+        split_terrain_round_trip(&odd, &codecs, "", &mut out);
+        assert!(out.len() == 1 && out[0].contains("war3mapUnits.doo.json can't go into map/terrain/"), "{out:?}");
     }
 }

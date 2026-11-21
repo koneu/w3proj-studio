@@ -4,6 +4,7 @@
 //! ```text
 //! map/terrain/terrain.json        canvas, palettes, the corner uncovered corners get, the subterrains
 //! map/terrain/<folder>/terrain.txt   one subterrain's corners, in the grid text of war3map.w3e.txt
+//! map/terrain/<folder>/doodads.json, units.json, regions.json   its placed objects (`terrain_objects`)
 //! ```
 //!
 //! The flat `map/war3map.w3e.txt` stays the default; a project has one layout or the other. Reading
@@ -18,8 +19,10 @@
 //! a corner is left out of the files only where it equals `defaultCorner`; a slice that would have to
 //! drop another one is refused.
 //!
-//! Placed objects (war3map.doo, war3mapUnits.doo) and regions (war3map.w3r) are not split here yet:
-//! they stay in their flat files. `dooHeader` is read and kept when present, not made.
+//! Placed objects (war3map.doo.json, war3mapUnits.doo.json) and regions (war3map.w3r.json) go into
+//! the subterrains by position (`terrain_objects`); what those files hold besides their lists is in
+//! `terrain.json` (`dooHeader`, `objects`). A kind whose flat file isn't there (or is kept raw) has no
+//! files in the subterrains and no entry in `objects`; a raw one stays in `map/` as it is.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -27,6 +30,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
+use crate::terrain_objects::{self as objects, Flats, Heads, Kind, KINDS};
 use crate::w3e::{self, Corner, Terrain};
 use crate::{Error, Result};
 
@@ -42,7 +46,7 @@ pub const FLAT_FILE: &str = "war3map.w3e.txt";
 /// The flat terrain kept raw (its text form couldn't be read when it was unpacked).
 const FLAT_RAW: &str = "war3map.w3e";
 
-fn bad(m: impl Into<String>) -> Error {
+pub(crate) fn bad(m: impl Into<String>) -> Error {
     Error::Format(format!("map/{LAYOUT_FILE}: {}", m.into()))
 }
 
@@ -64,10 +68,15 @@ impl Subterrain {
     pub fn ground_path(&self) -> String {
         format!("{DIR}/{}/{GROUND_FILE}", self.folder)
     }
+
+    /// Its file of placed objects of a kind, relative to `map/`.
+    pub fn object_path(&self, kind: Kind) -> String {
+        format!("{DIR}/{}/{}", self.folder, kind.file())
+    }
 }
 
 /// The placed objects' file headers (`war3map.doo`, `war3mapUnits.doo`) once objects live in the
-/// subterrains (not made by this version, kept when there).
+/// subterrains (`Heads::doo_header`); kept when there without objects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DooHeader {
     pub doodads_version: u32,
@@ -84,6 +93,8 @@ pub struct Layout {
     head: Terrain,
     default_corner: Corner,
     pub doo_header: Option<DooHeader>,
+    /// The object files in the subterrains (`terrain.json`'s `objects`, with `dooHeader`).
+    pub objects: Heads,
     pub subterrains: Vec<Subterrain>,
 }
 
@@ -138,7 +149,7 @@ pub fn check_folder(name: &str) -> std::result::Result<(), String> {
 
 // ---- terrain.json ----
 
-fn object<'a>(v: &'a Value, what: &str, keys: &[&str], optional: &[&str]) -> Result<&'a Map<String, Value>> {
+pub(crate) fn object<'a>(v: &'a Value, what: &str, keys: &[&str], optional: &[&str]) -> Result<&'a Map<String, Value>> {
     let o = v.as_object().ok_or_else(|| bad(format!("{what} isn't an object")))?;
     if let Some(k) = o.keys().find(|k| !keys.contains(&k.as_str()) && !optional.contains(&k.as_str())) {
         return Err(bad(format!("{what} has an unknown key \"{k}\"")));
@@ -149,7 +160,7 @@ fn object<'a>(v: &'a Value, what: &str, keys: &[&str], optional: &[&str]) -> Res
     Ok(o)
 }
 
-fn uint(v: &Value, what: &str, max: u64) -> Result<u64> {
+pub(crate) fn uint(v: &Value, what: &str, max: u64) -> Result<u64> {
     v.as_u64().filter(|&n| n <= max).ok_or_else(|| bad(format!("{what} isn't a whole number from 0 to {max}")))
 }
 
@@ -200,8 +211,8 @@ const DOO: &[&str] = &["doodadsVersion", "doodadsSubversion", "unitsVersion", "u
 impl Layout {
     /// Reads and checks `terrain.json` (`check`).
     pub fn parse(bytes: &[u8]) -> Result<Layout> {
-        let doc: Value = serde_json::from_slice(bytes).map_err(|e| bad(format!("isn't JSON: {e}")))?;
-        let o = object(&doc, "the file", TOP, &["dooHeader"])?;
+        let doc = objects::strict_json(bytes).map_err(|e| bad(format!("isn't JSON: {e}")))?;
+        let o = object(&doc, "the file", TOP, &["dooHeader", "objects"])?;
         if o["format"].as_str() != Some(FORMAT) {
             return Err(bad(format!("format isn't \"{FORMAT}\"")));
         }
@@ -251,6 +262,10 @@ impl Layout {
                 })
             }
         };
+        let objects = match o.get("objects") {
+            None => Heads::default(),
+            Some(v) => Heads::parse(v, doo_header.as_ref())?,
+        };
         let list = o["subterrains"].as_array().ok_or_else(|| bad("subterrains isn't a list"))?;
         let mut subterrains = Vec::with_capacity(list.len().min(1024));
         for (i, s) in list.iter().enumerate() {
@@ -270,7 +285,7 @@ impl Layout {
                 id_range: [id(lo)?, id(hi)?],
             });
         }
-        let layout = Layout { head, default_corner, doo_header, subterrains };
+        let layout = Layout { head, default_corner, doo_header, objects, subterrains };
         layout.check()?;
         Ok(layout)
     }
@@ -364,6 +379,7 @@ impl Layout {
                 d.doodads_version, d.doodads_subversion, d.units_version, d.units_subversion, d.skin_ids
             );
         }
+        s += &self.objects.to_json(self.doo_header.as_ref());
         let subs: Vec<String> = self
             .subterrains
             .iter()
@@ -434,15 +450,20 @@ fn assemble_terrain(layout: &Layout, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -
     Ok(t)
 }
 
-/// The files of a layout (relative to `map/`) holding the whole terrain `t`: `terrain.json` with
-/// `t`'s header and the given subterrains, default corner and objects' header, and each
-/// subterrain's ground. A corner outside every subterrain that isn't `default_corner` can't be
-/// stored: an error. The result is assembled again and compared with `t` before it is returned.
-fn slice_terrain(t: &Terrain, subterrains: Vec<Subterrain>, default_corner: Corner, doo_header: Option<DooHeader>) -> Result<BTreeMap<String, Vec<u8>>> {
+/// The files of a layout (relative to `map/`) holding the whole terrain `t` and the flat object
+/// files `flats` (kind → bytes): `terrain.json` with `t`'s header, the given subterrains and default
+/// corner and the objects' headers (`doo_header` is kept when there are no doodads and units), each
+/// subterrain's ground and object files. A corner outside every subterrain that isn't
+/// `default_corner` can't be stored: an error. The result is read again and compared with `t` and
+/// `flats` before it is returned.
+fn slice_terrain(t: &Terrain, subterrains: Vec<Subterrain>, default_corner: Corner, doo_header: Option<DooHeader>, flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut head = t.clone();
     head.corners = Vec::new();
-    let layout = Layout { head, default_corner, doo_header, subterrains };
+    let mut layout = Layout { head, default_corner, doo_header, objects: Heads::default(), subterrains };
     layout.check()?;
+    let (heads, object_files) = objects::slice(flats, &layout.subterrains, t.offset)?;
+    layout.doo_header = heads.doo_header().or(layout.doo_header);
+    layout.objects = heads;
     let mut covered = vec![false; t.width * t.height];
     let mut files = BTreeMap::new();
     for s in &layout.subterrains {
@@ -461,13 +482,47 @@ fn slice_terrain(t: &Terrain, subterrains: Vec<Subterrain>, default_corner: Corn
             i / t.width
         )));
     }
+    files.extend(object_files);
     files.insert(LAYOUT_FILE.to_string(), layout.to_json()?);
     // Never store what can't be read back as it was.
-    let again = assemble_terrain(&Layout::parse(&files[LAYOUT_FILE])?, &|p| files.get(p).cloned())?;
+    let read = Layout::parse(&files[LAYOUT_FILE])?;
+    let again = assemble_terrain(&read, &|p| files.get(p).cloned())?;
     if w3e::write(&again) != w3e::write(t) {
         return Err(Error::Format("the subterrains don't assemble into the same terrain again (nothing was written)".into()));
     }
+    let merged = objects::assemble(&read.objects, &read.subterrains, &|p| files.get(p).cloned())?;
+    for (kind, bytes) in flats {
+        if !merged.get(kind).is_some_and(|m| objects::same(bytes, m)) {
+            return Err(Error::Format(format!(
+                "map/{} doesn't come back from the subterrains as it was (it isn't in the form unpack writes?), so it can't be split (nothing was written)",
+                kind.flat()
+            )));
+        }
+    }
     Ok(files)
+}
+
+/// The flat object files among project `files` (relative to `map/`) that go into the subterrains:
+/// kind → its file's name there. A kind kept raw, or without a file, has none. A name in another
+/// case than unpack writes it is an error (the merge would write it in that one).
+fn flat_objects(files: &BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<Kind, String>> {
+    let mut out = BTreeMap::new();
+    for kind in KINDS {
+        if let Some(k) = key(files, kind.flat()) {
+            if k != kind.flat() {
+                return Err(Error::Project(format!("map/{k} can't go into map/{DIR}/ under another name: rename it to {} first", kind.flat())));
+            }
+            out.insert(kind, k.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// The flat object files (`flat_objects`) of `files`: kind → bytes, and their names.
+fn flat_object_files(files: &BTreeMap<String, Vec<u8>>) -> Result<(Flats, Vec<String>)> {
+    let names = flat_objects(files)?;
+    let flats = names.iter().map(|(k, name)| (*k, files[name].clone())).collect();
+    Ok((flats, names.into_values().collect()))
 }
 
 /// The corner most corners are (the first such in corner order on a tie).
@@ -483,8 +538,8 @@ fn most_common(corners: &[Corner]) -> Corner {
 /// New layout files for the whole terrain `t`, cut into `rects` (none: one subterrain `main` over
 /// the whole canvas). Subterrain i gets idRange `[(i + 1) · 10000, (i + 1) · 10000 + 9999]`. The
 /// default corner is the one every uncovered corner holds (they must all be alike), or with no
-/// uncovered corner the most common one.
-fn split_terrain(t: &Terrain, rects: &[Rect]) -> Result<BTreeMap<String, Vec<u8>>> {
+/// uncovered corner the most common one. The flat object files `flats` go into the subterrains.
+fn split_terrain(t: &Terrain, rects: &[Rect], flats: &Flats) -> Result<BTreeMap<String, Vec<u8>>> {
     let whole = [Rect { name: "main".into(), x: 0, y: 0, w: t.width, h: t.height }];
     let rects = if rects.is_empty() { &whole[..] } else { rects };
     let mut subterrains = Vec::with_capacity(rects.len());
@@ -506,7 +561,7 @@ fn split_terrain(t: &Terrain, rects: &[Rect]) -> Result<BTreeMap<String, Vec<u8>
         Some(first) => *first,
         None => most_common(&t.corners),
     };
-    slice_terrain(t, subterrains, default_corner, None)
+    slice_terrain(t, subterrains, default_corner, None, flats)
 }
 
 /// A 2×2 grid over the canvas (`sw`, `se`, `nw`, `ne`); a canvas narrower or lower than 2 corners
@@ -581,9 +636,10 @@ pub fn assemble(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
 }
 
 /// Project files (relative to `map/`) in the split layout become those of the flat one: the layout's
-/// files go and `war3map.w3e.txt` holds the assembled terrain. Files of the flat layout stay as they
-/// are. Another file under `terrain/` is an error (this version keeps nothing else there). Returns
-/// whether the files were in the split layout.
+/// files go, `war3map.w3e.txt` holds the assembled terrain and the flat object files the merged
+/// objects. Files of the flat layout stay as they are; one of an object kind the subterrains hold is
+/// an error (both layouts). Another file under `terrain/` is an error (this version keeps nothing
+/// else there). Returns whether the files were in the split layout.
 pub fn flatten(files: &mut BTreeMap<String, Vec<u8>>) -> Result<bool> {
     if !is_split(files)? {
         return Ok(false);
@@ -592,13 +648,26 @@ pub fn flatten(files: &mut BTreeMap<String, Vec<u8>>) -> Result<bool> {
     let t = assemble_terrain(&layout, &|p| files.get(p).cloned())?;
     let mut ours: HashSet<String> = layout.subterrains.iter().map(Subterrain::ground_path).collect();
     ours.insert(LAYOUT_FILE.to_string());
+    for kind in KINDS.into_iter().filter(|k| layout.objects.has(*k)) {
+        ours.extend(layout.subterrains.iter().map(|s| s.object_path(kind)));
+        if let Some(flat) = key(files, kind.flat()).or_else(|| key(files, kind.raw())) {
+            return Err(Error::Project(format!(
+                "the project has its {} both in map/{flat} and in map/{DIR}/: keep one (`w3proj terrain merge` makes the flat file)",
+                kind.name()
+            )));
+        }
+    }
     if let Some(other) = files.keys().find(|k| under_dir(k) && !ours.contains(*k)) {
+        let objects: Vec<&str> = KINDS.iter().filter(|k| layout.objects.has(**k)).map(|k| k.file()).collect();
         return Err(Error::Project(format!(
-            "map/{other} isn't part of the terrain layout (map/{DIR}/ holds terrain.json and each subterrain's {GROUND_FILE} only)"
+            "map/{other} isn't part of the terrain layout (map/{DIR}/ holds terrain.json and each subterrain's {GROUND_FILE}{} only)",
+            objects.iter().map(|f| format!(", {f}")).collect::<String>()
         )));
     }
+    let merged = objects::assemble(&layout.objects, &layout.subterrains, &|p| files.get(p).cloned())?;
     files.retain(|k, _| !ours.contains(k));
     files.insert(FLAT_FILE.to_string(), w3e::terrain_text(&t)?);
+    files.extend(merged.into_iter().map(|(kind, bytes)| (kind.flat().to_string(), bytes)));
     Ok(true)
 }
 
@@ -619,8 +688,12 @@ pub fn split(files: &mut BTreeMap<String, Vec<u8>>, rects: &[Rect]) -> Result<()
         }));
     };
     let t = w3e::terrain_from_text(&files[&flat])?;
-    let layout = split_terrain(&t, rects)?;
+    let (flats, names) = flat_object_files(files)?;
+    let layout = split_terrain(&t, rects, &flats)?;
     files.remove(&flat);
+    for name in &names {
+        files.remove(name);
+    }
     files.extend(layout);
     Ok(())
 }
@@ -647,9 +720,14 @@ pub fn prepare_sync(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Re
         }));
     };
     let t = w3e::terrain_from_text(&files[&flat])?;
-    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header)
-        .map_err(|e| Error::Project(format!("the map's terrain doesn't fit the project's subterrains ({e}): merge the terrain first (`w3proj terrain merge`), then split it again")))?;
+    let (flats, names) = flat_object_files(files)?;
+    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats).map_err(|e| {
+        Error::Project(format!("the map's terrain and objects don't fit the project's subterrains ({e}): merge the terrain first (`w3proj terrain merge`), then split it again"))
+    })?;
     files.remove(&flat);
+    for name in &names {
+        files.remove(name);
+    }
     files.extend(sliced);
     Ok(())
 }
@@ -692,19 +770,9 @@ fn derived_fresh(project: &Path) -> Result<bool> {
     Ok(crate::derived::check(project)? == crate::derived::Freshness::Fresh)
 }
 
-/// Splits a flat project's terrain into `map/terrain/` (`split`): the layout's files are written
-/// first, then `map/war3map.w3e.txt` goes. Nothing is written when the split can't be lossless.
-pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
-    let manifest = crate::project::Manifest::load(project)?;
-    if manifest.pack.raw.iter().any(|r| r.eq_ignore_ascii_case(FLAT_FILE)) {
-        return Err(Error::Project(format!("map/{FLAT_FILE} is packed raw (w3proj.toml [pack] raw): it isn't the map's terrain text")));
-    }
-    let map_dir = project.join(crate::project::MAP_DIR);
-    if is_split_on_disk(&map_dir)? {
-        return Err(Error::Project("the terrain is split already".into()));
-    }
-    let mut files = read_layout_files(&map_dir)?;
-    for name in [FLAT_FILE, FLAT_RAW] {
+/// Reads `names` under `map_dir` into `files` where they are there.
+fn read_if_there(map_dir: &Path, names: &[&str], files: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
+    for name in names {
         match fs::read(map_dir.join(name)) {
             Ok(b) => {
                 files.insert(name.to_string(), b);
@@ -713,19 +781,43 @@ pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
             Err(e) => return Err(Error::Project(format!("map/{name} can't be read: {e}"))),
         }
     }
+    Ok(())
+}
+
+/// Splits a flat project's terrain and placed objects into `map/terrain/` (`split`): the layout's
+/// files are written first, then `map/war3map.w3e.txt` and the flat object files go. Nothing is
+/// written when the split can't be lossless. An object file packed raw stays where it is.
+pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
+    let manifest = crate::project::Manifest::load(project)?;
+    let packed_raw = |name: &str| manifest.pack.raw.iter().any(|r| r.eq_ignore_ascii_case(name));
+    if packed_raw(FLAT_FILE) {
+        return Err(Error::Project(format!("map/{FLAT_FILE} is packed raw (w3proj.toml [pack] raw): it isn't the map's terrain text")));
+    }
+    let map_dir = project.join(crate::project::MAP_DIR);
+    if is_split_on_disk(&map_dir)? {
+        return Err(Error::Project("the terrain is split already".into()));
+    }
+    let mut files = read_layout_files(&map_dir)?;
+    read_if_there(&map_dir, &[FLAT_FILE, FLAT_RAW], &mut files)?;
+    let object_names: Vec<&str> = KINDS.iter().map(|k| k.flat()).filter(|n| !packed_raw(n)).collect();
+    read_if_there(&map_dir, &object_names, &mut files)?;
+    let before: Vec<String> = [FLAT_FILE].into_iter().chain(object_names).filter(|n| files.contains_key(*n)).map(str::to_string).collect();
     let fresh = derived_fresh(project)?;
     split(&mut files, rects)?;
     let written = write_changed(&map_dir, &files)?;
-    fs::remove_file(map_dir.join(FLAT_FILE))?;
+    let removed: Vec<&String> = before.iter().filter(|n| !files.contains_key(*n)).collect();
+    for name in &removed {
+        fs::remove_file(map_dir.join(name))?;
+    }
     if fresh {
         crate::derived::record_now(project)?;
     }
     let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
-    Ok(Converted { written: written.iter().map(at).collect(), removed: vec![at(&FLAT_FILE.to_string())] })
+    Ok(Converted { written: written.iter().map(at).collect(), removed: removed.into_iter().map(at).collect() })
 }
 
-/// Merges a split project's terrain back into `map/war3map.w3e.txt` (`flatten`): that file is
-/// written first, then the layout's files go.
+/// Merges a split project's terrain and objects back into `map/war3map.w3e.txt` and the flat object
+/// files (`flatten`): those are written first, then the layout's files go.
 pub fn merge_project(project: &Path) -> Result<Converted> {
     let map_dir = project.join(crate::project::MAP_DIR);
     if !is_split_on_disk(&map_dir)? {
@@ -733,6 +825,10 @@ pub fn merge_project(project: &Path) -> Result<Converted> {
     }
     let mut files = read_layout_files(&map_dir)?;
     let layout_paths: Vec<String> = files.keys().cloned().collect();
+    // Flat object files already there: kept when the subterrains don't hold that kind, else both
+    // layouts (an error).
+    let flat_names: Vec<&str> = KINDS.iter().flat_map(|k| [k.flat(), k.raw()]).collect();
+    read_if_there(&map_dir, &flat_names, &mut files)?;
     let fresh = derived_fresh(project)?;
     flatten(&mut files)?;
     let written = write_changed(&map_dir, &files)?;
@@ -999,6 +1095,136 @@ mod tests {
         prepare_sync(&dir, &mut sync).unwrap();
         assert_eq!(write_changed(&dir, &sync).unwrap(), vec!["terrain/ne/terrain.txt".to_string()]);
         assert_eq!(assemble(&read_layout_files(&dir).unwrap()).unwrap(), w3e::write(&edited));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Flat object files for `terrain`'s canvas (offset -576, 0.25; corners 9×7): a doodad and a unit in each
+    /// corner of the canvas, a region, a special doodad.
+    fn with_objects(files: &mut BTreeMap<String, Vec<u8>>, doodads_version: u32) {
+        let pretty = |v: Value| [serde_json::to_vec_pretty(&v).unwrap(), b"\n".to_vec()].concat();
+        let at = [(-500.0, 10.0), (400.0, 10.0), (-500.0, 700.0), (400.0, 700.0)];
+        let doodads: Vec<Value> = at.iter().enumerate().map(|(i, (x, y))| serde_json::json!({"id": "LTlt", "position": [x, y, 0.0], "editorId": 10 - i})).collect();
+        let units: Vec<Value> = at.iter().enumerate().map(|(i, (x, y))| serde_json::json!({"id": "hfoo", "position": [x, y, 0.0], "editorId": i})).collect();
+        let mut doo = serde_json::json!({"format": "w3proj.doodads/1", "magic": "W3do", "version": doodads_version, "subversion": 11, "skinIds": true, "doodads": doodads, "specialVersion": 2, "specials": [{"id": "YTlc", "z": 0, "x": 7, "y": 6}]});
+        if doodads_version != 8 {
+            doo.as_object_mut().unwrap().shift_remove("skinIds");
+        }
+        files.insert("war3map.doo.json".into(), pretty(doo));
+        files.insert("war3mapUnits.doo.json".into(), pretty(serde_json::json!({"format": "w3proj.units/1", "magic": "W3do", "version": 8, "subversion": 9, "skinIds": false, "units": units})));
+        files.insert("war3map.w3r.json".into(), pretty(serde_json::json!({"format": "w3proj.regions/1", "version": 5, "regions": [{"left": 300.0, "bottom": 600.0, "name": "r", "index": 0}]})));
+    }
+
+    #[test]
+    fn objects_split_with_the_terrain() {
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        with_objects(&mut flat, 8);
+        let mut files = flat.clone();
+        split(&mut files, &grid_2x2(t.width, t.height)).unwrap();
+        for name in ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"] {
+            assert!(!files.contains_key(name), "{name} stayed flat");
+        }
+        let names = |path: &str, list: &str, key: &str| -> Vec<Value> {
+            let v: Value = serde_json::from_slice(&files[path]).unwrap();
+            v[list].as_array().unwrap().iter().map(|e| e[key].clone()).collect()
+        };
+        // Grid split at corner 4 (world x -64) and 3 (world y 384.25).
+        assert_eq!(names("terrain/sw/units.json", "units", "editorId"), vec![Value::from(0)]);
+        assert_eq!(names("terrain/ne/units.json", "units", "editorId"), vec![Value::from(3)]);
+        assert_eq!(names("terrain/ne/doodads.json", "doodads", "editorId"), vec![Value::from(7)]);
+        assert_eq!(names("terrain/ne/doodads.json", "specials", "id"), vec![Value::from("YTlc")]);
+        assert_eq!(names("terrain/ne/regions.json", "regions", "name"), vec![Value::from("r")]);
+        assert_eq!(names("terrain/nw/regions.json", "regions", "name"), Vec::<Value>::new());
+        // dooHeader from the flat files' headers; what it lacks in objects; read and written again, the same text.
+        let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
+        assert_eq!(layout.doo_header, Some(DooHeader { doodads_version: 8, doodads_subversion: 11, units_version: 8, units_subversion: 9, skin_ids: true }));
+        let json = String::from_utf8(files[LAYOUT_FILE].clone()).unwrap();
+        assert!(
+            json.contains(
+                "  \"objects\": {\n    \"doodads\": { \"magic\": \"W3do\", \"specialVersion\": 2 },\n    \"units\": { \"magic\": \"W3do\", \"skinIds\": false },\n    \"regions\": { \"version\": 5 }\n  },\n"
+            ),
+            "{json}"
+        );
+        assert_eq!(layout.to_json().unwrap(), files[LAYOUT_FILE]);
+        let mut back = files.clone();
+        assert!(flatten(&mut back).unwrap());
+        assert_eq!(back, flat);
+
+        // A flat object file next to the subterrains' of that kind: both layouts, an error.
+        for name in ["war3map.doo.json", "war3map.doo"] {
+            let mut both = files.clone();
+            both.insert(name.into(), b"{}".to_vec());
+            assert!(flatten(&mut both).unwrap_err().to_string().contains("both"), "{name}");
+        }
+        // A kind's file gone from a subterrain: an error, never a map without it.
+        let mut gone = files.clone();
+        gone.remove("terrain/se/regions.json");
+        assert!(flatten(&mut gone).unwrap_err().to_string().contains("map/terrain/se/regions.json is missing"));
+        // terrain.json without objects: the subterrains' object files aren't part of the layout.
+        let mut no_objects = files.clone();
+        let mut layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
+        layout.objects = Heads::default();
+        no_objects.insert(LAYOUT_FILE.into(), layout.to_json().unwrap());
+        assert!(flatten(&mut no_objects).unwrap_err().to_string().contains("isn't part of the terrain layout"));
+    }
+
+    /// A kind without a flat file, or kept raw, has no files in the subterrains and stays as it is; a layout of
+    /// stage 1a (no objects) keeps flat object files beside it.
+    #[test]
+    fn object_kinds_that_stay_flat() {
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        with_objects(&mut flat, 13);
+        flat.remove("war3mapUnits.doo.json");
+        let doo = flat.remove("war3map.doo.json").unwrap();
+        flat.insert("war3map.doo".into(), doo);
+        let mut files = flat.clone();
+        split(&mut files, &[]).unwrap();
+        assert!(files.contains_key("war3map.doo") && files.contains_key("terrain/main/regions.json"));
+        assert!(!files.keys().any(|k| k.ends_with("units.json") || k.ends_with("doodads.json")), "{:?}", files.keys());
+        let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
+        assert_eq!(layout.doo_header, None);
+        assert_eq!(layout.objects, Heads { regions: Some(5), ..Heads::default() });
+        let mut back = files.clone();
+        flatten(&mut back).unwrap();
+        assert_eq!(back, flat);
+        // Stage 1a: only the terrain split, the objects flat.
+        let mut ground_only = flat_files(&t);
+        let mut grounds = ground_only.clone();
+        split(&mut grounds, &[]).unwrap();
+        with_objects(&mut ground_only, 8);
+        with_objects(&mut grounds, 8);
+        flatten(&mut grounds).unwrap();
+        assert_eq!(grounds, ground_only);
+        // A flat object file named in another case can't go into the subterrains.
+        let mut odd = flat_files(&t);
+        odd.insert("War3map.w3r.json".into(), b"{}".to_vec());
+        assert!(split(&mut odd, &[]).unwrap_err().to_string().contains("rename it to war3map.w3r.json"));
+    }
+
+    /// An object moved over a seam changes file on the next slice, with its creation number; only the two files
+    /// it left and entered are written.
+    #[test]
+    fn an_object_moved_over_a_seam_changes_file() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-objects-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let t = terrain(12, false);
+        let mut files = flat_files(&t);
+        files.remove("war3map.j");
+        with_objects(&mut files, 8);
+        let flat = files.clone();
+        split(&mut files, &grid_2x2(t.width, t.height)).unwrap();
+        write_changed(&dir, &files).unwrap();
+        // Unit 0 goes from the south-west to the south-east.
+        let mut sync = flat.clone();
+        let units = String::from_utf8(sync["war3mapUnits.doo.json"].clone()).unwrap().replacen("-500.0", "100.0", 1);
+        sync.insert("war3mapUnits.doo.json".into(), units.into_bytes());
+        prepare_sync(&dir, &mut sync).unwrap();
+        assert_eq!(write_changed(&dir, &sync).unwrap(), vec!["terrain/se/units.json".to_string(), "terrain/sw/units.json".to_string()]);
+        let se: Value = serde_json::from_slice(&sync["terrain/se/units.json"]).unwrap();
+        let ids: Vec<&Value> = se["units"].as_array().unwrap().iter().map(|u| &u["editorId"]).collect();
+        assert_eq!(ids, vec![&Value::from(0), &Value::from(1)]);
         let _ = fs::remove_dir_all(&dir);
     }
 

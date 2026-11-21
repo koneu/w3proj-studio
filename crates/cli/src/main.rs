@@ -542,7 +542,9 @@ enum Cmd {
 enum TerrainCmd {
     /// Split map/war3map.w3e.txt into map/terrain/: one subterrain "main" over the whole canvas, or
     /// the --rect rectangles. Corners no rectangle covers must all be alike (they become
-    /// defaultCorner); otherwise nothing is written. Placed objects and regions stay where they are.
+    /// defaultCorner); otherwise nothing is written. Placed doodads, units and regions
+    /// (war3map.doo.json, war3mapUnits.doo.json, war3map.w3r.json) go into the subterrain their
+    /// position lies in (outside every rectangle: the nearest one).
     Split {
         project: PathBuf,
         /// A subterrain: name:x,y,w,h in corners, (0,0) the south-west corner; the name is its folder.
@@ -550,7 +552,7 @@ enum TerrainCmd {
         #[arg(long = "rect", value_name = "NAME:X,Y,W,H")]
         rects: Vec<w3proj::terrain_layout::Rect>,
     },
-    /// Merge map/terrain/ back into map/war3map.w3e.txt.
+    /// Merge map/terrain/ back into map/war3map.w3e.txt and the flat object files.
     Merge { project: PathBuf },
 }
 

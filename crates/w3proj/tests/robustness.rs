@@ -393,14 +393,28 @@ fn damaged_project_files_are_errors() {
     report(total.failures);
 }
 
-/// The split terrain layout (map/terrain/: terrain.json and each subterrain's terrain.txt) comes from git
-/// merges and hand edits: a damaged file is an error, never a panic, and what is accepted assembles into a
-/// terrain that packs.
+/// The split terrain layout (map/terrain/: terrain.json and each subterrain's terrain.txt, doodads.json,
+/// units.json and regions.json) comes from git merges and hand edits: a damaged file is an error, never a
+/// panic, and what is accepted assembles into a terrain that packs and object files with every object (a
+/// damaged object file never ships a map without its objects).
 #[test]
 fn damaged_split_terrain_files_are_errors() {
     use w3proj::terrain_layout as tl;
-    let mut layout = BTreeMap::from([(tl::FLAT_FILE.to_string(), fs::read(fixture().join("map").join(tl::FLAT_FILE)).unwrap())]);
+    use w3proj::terrain_objects::KINDS;
+    let map = fixture().join("map");
+    let mut layout = BTreeMap::from([(tl::FLAT_FILE.to_string(), fs::read(map.join(tl::FLAT_FILE)).unwrap())]);
+    let mut counts = Vec::new();
+    for kind in KINDS {
+        let bytes = fs::read(map.join(kind.flat())).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let n = doc[kind.name()].as_array().unwrap().len();
+        assert!(n > 0, "the fixture has {}", kind.name());
+        counts.push((kind, n));
+        layout.insert(kind.flat().to_string(), bytes);
+    }
     tl::split(&mut layout, &tl::grid_2x2(5, 3)).unwrap();
+    assert!(layout.keys().any(|k| k.ends_with("/units.json")), "the objects went into the subterrains");
+    let codecs = w3proj::codec::Registry::default();
     let mut total = Found::default();
     for name in layout.keys().cloned().collect::<Vec<_>>() {
         let runs = par_seeds(&format!("split terrain {name}"), seeds(rounds()), |chunk| {
@@ -414,6 +428,13 @@ fn damaged_split_terrain_files_are_errors() {
                     Ok(true) => {
                         found.accepted += 1;
                         assert!(w3proj::w3e::from_text(&files[tl::FLAT_FILE]).is_ok(), "an accepted layout assembled into a terrain that doesn't pack");
+                        for (kind, n) in &counts {
+                            let flat = files.get(kind.flat()).unwrap_or_else(|| panic!("an accepted layout lost {}", kind.flat()));
+                            let doc: serde_json::Value = serde_json::from_slice(flat).expect("merged object files are JSON");
+                            assert_eq!(doc[kind.name()].as_array().map(Vec::len), Some(*n), "an accepted layout lost {}", kind.name());
+                            // What the merge made goes through the codec (an error is the pack's refusal, not a panic).
+                            let _ = codecs.for_project_path(kind.flat()).unwrap().1.encode(kind.raw(), flat);
+                        }
                     }
                     Err(_) => found.rejected += 1,
                 });

@@ -904,18 +904,22 @@ fn verify_finds_no_map_in_an_empty_folder_and_says_so() {
     assert!(text(&o).contains("1 ok"), "{}", text(&o));
 }
 
-/// The split terrain layout (map/terrain/) packs into the same map as the flat war3map.w3e.txt it was split from,
-/// keeps the derived files' record fresh (a pack without --force-stale goes ahead), stays split when the map is
-/// unpacked into the project again, and merges back into the very same war3map.w3e.txt.
+/// The split terrain layout (map/terrain/, terrain with placed objects and regions) packs into the same map as the
+/// flat war3map.w3e.txt and object files it was split from, keeps the derived files' record fresh (a pack without
+/// --force-stale goes ahead), stays split when the map is unpacked into the project again, and merges back into
+/// the very same flat files.
 #[test]
 fn a_split_terrain_packs_the_same_map_and_merges_back() {
     let dir = workdir("terrain_split");
     let first = dir.join("first.w3x");
     pack(&fixture(), &first);
     let flat_text = fs::read(fixture().join("map/war3map.w3e.txt")).unwrap();
-    for (name, rects) in [("main", vec![]), ("grid", vec!["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"])] {
+    const OBJECTS: [&str; 3] = ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"];
+    let grid = vec!["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"];
+    for (name, rects) in [("main", vec![]), ("grid", grid.clone())] {
         let project = dir.join(format!("project-{name}"));
         unpack(&first, &project);
+        let flat_objects: Vec<Vec<u8>> = OBJECTS.iter().map(|f| fs::read(project.join("map").join(f)).unwrap()).collect();
         let mut args = vec!["terrain", "split", s(&project)];
         for r in &rects {
             args.extend(["--rect", r]);
@@ -926,8 +930,15 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
         assert!(!map.join("war3map.w3e.txt").exists());
         let folders: Vec<&str> = if rects.is_empty() { vec!["main"] } else { vec!["sw", "se", "nw", "ne"] };
         for f in &folders {
-            assert!(map.join("terrain").join(f).join("terrain.txt").is_file(), "{f}");
+            for file in ["terrain.txt", "doodads.json", "units.json", "regions.json"] {
+                assert!(map.join("terrain").join(f).join(file).is_file(), "{f}/{file}");
+            }
         }
+        for f in OBJECTS {
+            assert!(!map.join(f).exists(), "{name}: {f} stayed flat");
+        }
+        let layout = fs::read_to_string(map.join("terrain/terrain.json")).unwrap();
+        assert!(layout.contains("\"dooHeader\": {") && layout.contains("\"objects\": {"), "{layout}");
         let second = dir.join(format!("{name}.w3x"));
         pack(&project, &second);
         assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "{name}: the split project packs another map");
@@ -940,11 +951,41 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
         let said = ok(&["terrain", "merge", s(&project)]);
         assert!(said.contains("merged into map/war3map.w3e.txt"), "{said}");
         assert_eq!(fs::read(map.join("war3map.w3e.txt")).unwrap(), flat_text, "{name}: merged back into another text");
+        for (f, bytes) in OBJECTS.iter().zip(&flat_objects) {
+            assert_eq!(&fs::read(map.join(f)).unwrap(), bytes, "{name}: {f} merged back into another file");
+        }
         assert!(!map.join("terrain").exists(), "{name}: map/terrain/ is left behind");
         let third = dir.join(format!("{name}-merged.w3x"));
         pack(&project, &third);
         assert_eq!(fs::read(&first).unwrap(), fs::read(&third).unwrap());
     }
+
+    // The footman (creation number 2) at 0,0 lies in sw; moved to the north-east, it goes into ne/units.json on the
+    // next sync with its creation number, and only the two files change.
+    let project = dir.join("project-move");
+    unpack(&first, &project);
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in &grid {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    let units = |sub: &str| -> serde_json::Value { serde_json::from_slice(&fs::read(project.join(format!("map/terrain/{sub}/units.json"))).unwrap()).unwrap() };
+    let mut sw = units("sw");
+    assert_eq!(sw["units"][0]["editorId"], 2);
+    assert_eq!(units("ne")["units"].as_array().unwrap().len(), 0);
+    sw["units"][0]["position"] = serde_json::json!([300.0, 200.0, 0.0]);
+    fs::write(project.join("map/terrain/sw/units.json"), serde_json::to_vec_pretty(&sw).unwrap()).unwrap();
+    let moved = dir.join("moved.w3x");
+    // A subterrain's units.json is a source of the derived files: the pack sees the edit.
+    let o = w3proj(&["pack", s(&project), "-o", s(&moved)]);
+    assert!(!o.status.success() && text(&o).contains("map/terrain/sw/units.json changed"), "{}", text(&o));
+    ok(&["pack", s(&project), "-o", s(&moved), "--force-stale"]);
+    let said = unpack(&moved, &project);
+    assert!(said.contains("2 written"), "{said}");
+    assert_eq!(units("sw")["units"].as_array().unwrap().len(), 0);
+    let ne = units("ne");
+    assert_eq!(ne["units"][0]["editorId"], 2);
+    assert_eq!(ne["units"][0]["position"], serde_json::json!([300.0, 200.0, 0.0]));
 
     // A split that would drop corners (the rest of the canvas isn't one corner value) writes nothing.
     let project = dir.join("project-partial");
