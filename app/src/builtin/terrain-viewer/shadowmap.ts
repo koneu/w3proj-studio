@@ -6,7 +6,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { neverStoredLast, textureCandidates } from "../../lib/model/texpath";
 import { ModeCache } from "../../lib/modecache";
-import type { loadSkins, Placed } from "./objects";
+import { modelPath, plainModelPath, reforgedModelPath, type loadSkins, type Placed, type Skin } from "./objects";
 import { parseSlk } from "../../lib/formats/text";
 import { alphaTexturePaths, castShadow, cliffCellHeights, shadowCliffName, shadowCliffVariation, shadowMesh, shadowRampName, rampCellHeights, shadowCellHeights, specialCellHeights, terrainShadows, terrainShadowsInSteps, type AlphaMap, type CliffCells, type ShadowMesh, type Sun } from "./shadows";
 import type { SpecialDoodad } from "./pathmap";
@@ -234,6 +234,20 @@ export function shadowVerdict(stats: ShadowStats, doodads: number, types: number
   return { write: true, leftOut: stats.unreadable };
 }
 
+/** Model paths tried for a doodad's shadow: own variation, unnumbered Classic file (YSw5), and DE's HD fallback (EW00/ET00/EMt0). */
+function shadowPaths(skin: Pick<Skin, "file" | "numVar" | "reforgedFile">, variation: number): string[] {
+  const out = [modelPath(skin, variation)];
+  const plain = plainModelPath(skin);
+  if (plain) out.push(plain);
+  const reforged = reforgedModelPath(skin, variation);
+  if (reforged) out.push(reforged);
+  if (skin.reforgedFile) {
+    const rPlain = plainModelPath({ file: skin.reforgedFile, numVar: skin.numVar });
+    if (rPlain) out.push(rPlain);
+  }
+  return out;
+}
+
 /** `pause`: the terrain's part is done a few rows at a time, waiting for it in between (the terrain view, where it
  *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects).
  *  `artMode`: the graphics mode `readFile` reads in (game.graphicsMode), which the models' meshes are kept by.
@@ -255,8 +269,11 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     const skin = skins.get(d.id) ?? skins.get(baseOf(d.id) ?? "");
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
-    const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
-    const mesh = await modelMesh(path, readFile, artMode, failed);
+    let mesh: ShadowMesh | typeof NO_FACES | null = null;
+    for (const path of shadowPaths(skin, d.variation)) {
+      mesh = await modelMesh(path, readFile, artMode, failed);
+      if (mesh !== null) break;
+    }
     // Only a model that couldn't be read is unreadable; one read with nothing to cast is used (as nothing).
     if (stats) { stats.wanted++; if (mesh === null) stats.unreadable++; }
     // The model's own scale on top of the placed one, as it is drawn: in HD its defScale:hd (objects.ts

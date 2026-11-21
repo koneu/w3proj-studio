@@ -10,9 +10,9 @@ import { doodadTypes, predictShadows, shadowVerdict, specialShadows, type Shadow
 import { terrainShadows } from "./shadows";
 import { writeDerived } from "./derive";
 
-/** A model of one opaque box, 100 wide and 1000 high, standing on its origin. `filterMode` 2 (blended): it casts nothing. */
-function towerModel(filterMode = 0): Uint8Array {
-  const [w, h] = [50, 1000];
+/** A model of one opaque box, 100 wide and `h` high, standing on its origin. `filterMode` 2 (blended): it casts nothing. */
+function towerModel(filterMode = 0, h = 1000): Uint8Array {
+  const w = 50;
   const positions: number[] = [];
   for (const z of [0, h]) for (const [x, y] of [[-w, -w], [w, -w], [w, w], [-w, w]]) positions.push(x, y, z);
   // The four sides and the top, two triangles each.
@@ -352,4 +352,47 @@ test("the save's shadow update leaves the stored war3map.shd as it is when the m
   const flaky = await save("sd-save-flaky", async (p) => { if (/\.mdx$/i.test(p) && calls++ === 0) throw new Error("flaky"); return tower; });
   assert.deepEqual(flaky.writes, [], "a flaky read doesn't half-update the file");
   assert.equal(flaky.warnings.length, 1);
+});
+
+test("predictShadows in DE falls back to the HD model when the plain Classic file is missing (EW00, ET00, EMt0)", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": [
+      "[EW00]", "numVar=1", "file=Doodads\\TestDeShared\\Shared", "file:hd=Doodads\\TestDeWall\\Wall", "shadow=1",
+      "[ET00]", "numVar=1", "file=Doodads\\TestDeShared\\Shared", "file:hd=Doodads\\TestDeTower\\Tower", "shadow=1",
+    ].join("\n"),
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const terrain = flatTerrain();
+  const wallModel = towerModel(0, 300), tallModel = towerModel(0, 1500);
+  const reads: string[] = [];
+  const read = async (p: string) => {
+    reads.push(p);
+    if (/TestDeWall[\\/]Wall\.mdx$/i.test(p)) return wallModel;
+    if (/TestDeTower[\\/]Tower\.mdx$/i.test(p)) return tallModel;
+    throw new Error(`not found: ${p}`);
+  };
+  const ground = terrainShadows(terrain);
+  const shadowed = (m: Uint8Array) => m.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0);
+  const placed = (id: string, tx: number): Placed => ({
+    id, variation: 0, position: [terrain.offsetX + tx * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [1, 1, 1],
+  });
+  const skinsFor = (mode: string) =>
+    loadSkins({ settings: { get: () => mode }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api);
+
+  const deSkins = await skinsFor("de");
+  const stats: ShadowStats = { wanted: 0, unreadable: 0 };
+  const both = await predictShadows(terrain, [placed("EW00", 10), placed("ET00", 22)], deSkins, () => undefined, read, undefined, undefined, () => "de", stats);
+  assert.deepEqual(stats, { wanted: 2, unreadable: 0 });
+  assert.equal(reads.filter((p) => /TestDeShared[\\/]Shared\.mdx$/i.test(p)).length, 1, "missing Classic path is failed once");
+  const wallOnly = shadowed(await predictShadows(terrain, [placed("EW00", 10)], deSkins, () => undefined, read, undefined, undefined, () => "de"));
+  const towerOnly = shadowed(await predictShadows(terrain, [placed("ET00", 22)], deSkins, () => undefined, read, undefined, undefined, () => "de"));
+  assert.ok(wallOnly > 0 && towerOnly > wallOnly, `wall=${wallOnly}, tower=${towerOnly}`);
+  assert.equal(shadowed(both), wallOnly + towerOnly, "EW00 and ET00 each cast their own HD model");
+
+  // Control: SD has no HD fallback, so both remain unreadable and cast nothing.
+  const sdSkins = await skinsFor("sd");
+  const sdStats: ShadowStats = { wanted: 0, unreadable: 0 };
+  const sdOut = await predictShadows(terrain, [placed("EW00", 10), placed("ET00", 22)], sdSkins, () => undefined, read, undefined, undefined, () => "sd", sdStats);
+  assert.deepEqual(sdStats, { wanted: 2, unreadable: 2 });
+  assert.equal(shadowed(sdOut), 0);
 });

@@ -649,3 +649,46 @@ test("minimapObjects: a doodad whose model can't be read is a grey dot whatever 
       cells: async () => [4, 4], pathMask: async () => maskOf(Array(4).fill("####")) });
   assert.deepEqual(objects.map((o) => o.rgb), [[183, 183, 183], [183, 183, 183]]);
 });
+
+test("modelTextureColor and minimapBase in DE fall back to the HD model when the plain Classic file isn't stored (EW00, ET00, EMt0)", async () => {
+  const slk = (rows: string[][]) => ["ID;PWXL;N;E", ...rows.flatMap((row, y) => row.map((v, x) => `C;X${x + 1};Y${y + 1};K"${v}"`)), "E"].join("\r\n");
+  const tables: Record<string, string> = {
+    "TerrainArt\\Terrain.slk": slk([["tileID", "dir", "file"], ["Zdrt", "TerrainArt\\Test", "Test_Dirt"]]),
+    "TerrainArt\\CliffTypes.slk": slk([["cliffID", "texDir", "texFile"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height", "mmAlpha", "mmRed", "mmGreen", "mmBlue"]]),
+    "Doodads\\Doodads.slk": slk([["doodID", "showInMM", "useMMColor", "pathTex"], ["EW00", "1", "0", "none"], ["ET00", "1", "0", "none"]]),
+    "Units\\DestructableData.slk": slk([["DestructableID"]]),
+    "Doodads\\DoodadSkins.txt": [
+      "[EW00]", "numVar=1", "file=Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0", "file:hd=Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall",
+      "[ET00]", "numVar=1", "file=Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0", "file:hd=Doodads\\RuinTomb\\Structures\\ExteriorTower\\ExteriorTower",
+    ].join("\r\n"),
+  };
+  const files = new Map<string, Uint8Array>([
+    ["TerrainArt\\Test\\Test_Dirt.blp", tgaOf([50, 60, 70])],
+    ["Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall.mdx", mdxOfTextures([[0, "Doodads\\RuinTomb\\Wall.blp"]])],
+    ["Doodads\\RuinTomb\\Wall.blp", tgaOf([120, 40, 30])],
+    ["Doodads\\RuinTomb\\Structures\\ExteriorTower\\ExteriorTower.mdx", mdxOfTextures([[0, "Doodads\\RuinTomb\\Tower.blp"]])],
+    ["Doodads\\RuinTomb\\Tower.blp", tgaOf([30, 80, 140])],
+  ]);
+  const read = async (p: string) => { const f = files.get(p); if (!f) throw new Error(`no ${p}`); return f; };
+  assert.deepEqual(await modelTextureColor({
+    file: "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0",
+    reforgedFile: "Doodads\\RuinTomb\\Structures\\ExteriorWall\\ExteriorWall",
+    numVar: 1, texId: -1, texFile: "",
+  }, read, true), [120, 40, 30]);
+  assert.equal(await modelTextureColor({
+    file: "Doodads\\Ruins\\Terrain\\RuinsWall0\\RuinsWall0",
+    numVar: 1, texId: -1, texFile: "",
+  }, read, true), null, "control: without reforgedFile it stays unread");
+
+  const t = { ...flat(2, 2), tileset: "Z", groundTiles: ["Zdrt"], cliffTiles: [] } as unknown as Terrain;
+  const placed = [{ id: "EW00", position: [0, 64, 0], angle: 0 }, { id: "ET00", position: [128, 64, 0], angle: 0 }];
+  const colorsIn = async (mode: string) => {
+    const w3 = { settings: { get: (k: string) => (k === "game.graphicsMode" ? mode : undefined) },
+      game: { readText: async (p: string) => tables[p] ?? "", resolve: async (p: string) => `War3.w3mod:${p}` }, workspace: { files: () => [] } } as unknown as W3Api;
+    const b = await minimapBase(w3, t, placed as unknown as Parameters<typeof minimapBase>[2], read);
+    return b.objects.map((o) => o.rgb);
+  };
+  assert.deepEqual(await colorsIn("de"), [[120, 40, 30], [30, 80, 140]]);
+  assert.deepEqual(await colorsIn("sd"), [[183, 183, 183], [183, 183, 183]], "control: SD has no HD fallback");
+});
