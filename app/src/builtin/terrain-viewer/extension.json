@@ -97,6 +97,7 @@
       { "id": "w3.terrain.toggleLargeGrid", "when": "terrain", "title": "Toggle Large Grid Display", "category": "Terrain" },
       { "id": "w3.terrain.cycleGrid", "when": "terrain", "title": "Grid Display: None, Large, Medium, Small", "category": "Terrain" },
       { "id": "w3.terrain.toggleCameraBounds", "when": "terrain", "title": "Toggle Camera Bounds Display", "category": "Terrain" },
+      { "id": "w3.terrain.toggleSubterrains", "when": "terrain", "title": "Toggle Subterrain Overlay", "category": "Terrain" },
       { "id": "w3.terrain.toggleFogEffects", "when": "terrain", "title": "Toggle Fog Effects", "category": "Terrain" },
       { "id": "w3.terrain.toggleCliffs", "when": "terrain", "title": "Toggle Cliff Display", "category": "Terrain" },
       { "id": "w3.terrain.toggleEffects", "when": "terrain", "title": "Toggle Effects Display", "category": "Terrain" },

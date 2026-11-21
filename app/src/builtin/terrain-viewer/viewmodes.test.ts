@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { WHEEL_ZOOM } from "./wheelzoom";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, pathingSwitch, shownView, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, pathingSwitch, shownView, subterrainOutline, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand, selectionEditOf } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 import { repoPath } from "../../lib/testhelpers/testutil";
@@ -21,8 +21,17 @@ const keyOf = (command: string) => { const k = primaryKey(bindings, command); re
 const chosen: ViewSet = {
   terrain: "wireframe", doodads: false, units: true, water: false, blight: false, cliffs: false, effects: false, weather: false,
   lighting: false, fog: false, grid: "small", naval: true, heights: true, cameras: true, pathing: true, regions: true, lightRanges: true,
-  cameraBounds: true, info: true,
+  cameraBounds: true, info: true, subterrains: true,
 };
+
+test("the subterrain overlay: an outline of the corners a subterrain owns, shared with its neighbour; game view hides it", () => {
+  // Corners 2–4 by 0–1 of a canvas whose corner (0, 0) lies at -256, -128: to the line where corner 5 / row 2 starts.
+  assert.deepEqual(subterrainOutline({ x: 2, y: 0, w: 3, h: 2 }, -256, -128), [[0, -128], [384, -128], [384, 128], [0, 128]]);
+  const west = subterrainOutline({ x: 0, y: 0, w: 2, h: 2 }, -256, -128);
+  assert.equal(west[1][0], 0, "the west neighbour's east line is the east one's west line");
+  assert.equal(shownView(chosen, false).subterrains, true);
+  assert.equal(shownView(chosen, true).subterrains, false, "an editor's mark, gone in game view");
+});
 
 test("shownView: without game view, what was chosen, start locations included", () => {
   assert.deepEqual(shownView(chosen, false), { ...chosen, starts: true });

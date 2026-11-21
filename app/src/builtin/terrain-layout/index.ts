@@ -263,7 +263,9 @@ function renderView(w3: W3Api, el: HTMLElement) {
         h("span.muted", {}, ` ${x.w}×${x.h} · ${sizeText(x.bytes)}${x.halo ? " · halo" : ""}`)));
     }
     rows.push(h("div.tree-row", {},
-      h("button.link-inline", { onclick: () => choose(s.subterrains.map((y) => y.name)) }, "Open all")));
+      h("button.link-inline", { onclick: () => choose(s.subterrains.map((y) => y.name)) }, "Open all"),
+      " · ",
+      h("button.link-inline", { title: "Toggle Subterrain Overlay: the rectangles and names over the terrain editor's map", onclick: () => void w3.commands.execute("w3.terrain.toggleSubterrains").catch((e) => w3.window.showError(errorText(e))) }, "Show on the map")));
     body.replaceChildren(...rows);
   }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
 }

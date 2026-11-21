@@ -23,7 +23,7 @@ import { doodadGround, dropToGround, ELEVATION_RADIUS_UNKNOWN, movedHeight, pars
 import { fitsSnapped, insetBy, strictlyInside, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { initialViewState, composeLayers, splitEdge, cycleIndex, viewOrder, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, pathingSwitch, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, SUBTERRAIN_RGB, subterrainOutline, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraMarkers, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { textureCandidates } from "../../lib/model/texpath";
@@ -209,6 +209,7 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleWeather", async (v) => why(await v.toggleSetting("weather"))],
   ["w3.terrain.toggleFogEffects", async (v) => why(await v.toggleSetting("fog"))],
   ["w3.terrain.toggleCameraBounds", (v) => why(v.toggleLayer("cameraBounds"))],
+  ["w3.terrain.toggleSubterrains", (v) => why(v.toggleLayer("subterrains"))],
   ["w3.terrain.toggleCliffs", (v) => why(v.toggleLayer("cliffs"))],
   ["w3.terrain.toggleEffects", (v) => why(v.toggleLayer("effects"))],
   ["w3.terrain.cycleSky", (v) => v.cycleSky()],
@@ -1740,6 +1741,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el: h("span.terrain-label.subterrain-closed", { title: `Subterrain ${s.name} is closed: Open Subterrains… opens it` }, `${s.name} (closed)`),
         }));
         labelLayer.append(...closedLabels.map((l) => l.el));
+        /** The subterrain overlay's names (showSubterrains), when it is on. */
+        let subterrainLabels: { x: number; y: number; el: HTMLElement }[] = [];
 
         // ---- day/night lighting ---------------------------------------------------------
         // Settings: on/off (off: an even light) and the hour; both remembered across maps.
@@ -1764,6 +1767,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewChanged = () => {};
         /** Set with the View commands (below): the Camera Bounds line again, after the bounds or the choice changed. */
         let showCameraBounds = (_again?: boolean) => {};
+        /** Set with the View commands (below): the subterrain overlay again, after the choice changed or edits. */
+        let showSubterrains = (_again?: boolean) => {};
         /** Set with the minimap panel (below): its picture again after edits, its outline after the camera moved, and
          *  the panel shown or not after its setting changed. */
         let minimapPanelSoon = (_ms?: number) => {}, minimapOutline = () => {}, minimapSetting = () => {};
@@ -4978,7 +4983,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           setLabels: (list) => {
             labels = (list ?? []).map(({ x, y, text, rgb }) => ({ x, y, el: h("span.terrain-label", { style: rgb ? { color: `rgb(${rgb.join(",")})` } : {} }, text) }));
-            labelLayer.replaceChildren(...[...labels, ...closedLabels].map((l) => l.el));
+            labelLayer.replaceChildren(...[...labels, ...closedLabels, ...subterrainLabels].map((l) => l.el));
             redraw();
           },
           pathing: async (opts) => {
@@ -5477,6 +5482,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (shown.lightRanges) showLightRanges();
           showDropRings();
           showCameraBounds(true);
+          showSubterrains(true);
           minimapPanelSoon();
           if (!anyGroundLayer(shown)) return;
           clearTimeout(layerTimer);
@@ -5542,6 +5548,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners), crisp: true }] : []);
           redraw();
         };
+        /** The subterrain overlay (Toggle Subterrain Overlay): a split terrain's rectangles, following the ground, and
+         *  their names; closed ones too (a partial load names them "(closed)" anyway, so they keep that label). Made
+         *  again when the choice changed, and after edits (`again`: the ground under the lines may have moved). */
+        let subterrainsOn = false;
+        showSubterrains = (again = false) => {
+          const subs = shown.subterrains ? openState?.subterrains ?? [] : [];
+          if (subterrainsOn === subs.length > 0 && !(again && subs.length)) return;
+          subterrainsOn = subs.length > 0;
+          renderer.setRings("subterrains", subs.map((s) => ({ x: 0, y: 0, r: 0, rgb: SUBTERRAIN_RGB, outline: lineAlong(subterrainOutline(s, terrain.offsetX, terrain.offsetY)), crisp: true })));
+          subterrainLabels = subs.filter((s) => !(openState?.partial && !s.open)).map((s) => ({
+            x: terrain.offsetX + 128 * (s.x + s.w / 2), y: terrain.offsetY + 128 * (s.y + s.h / 2),
+            el: h("span.terrain-label.subterrain-name", { title: `Subterrain ${s.name}: corners ${s.x}–${s.x + s.w - 1}, ${s.y}–${s.y + s.h - 1}${s.halo ? " (read-only strip)" : ""}` }, s.name),
+          }));
+          labelLayer.replaceChildren(...[...labels, ...closedLabels, ...subterrainLabels].map((l) => l.el));
+          redraw();
+        };
         /** Draws what `shown` says, after the choice or game view changed. */
         const applyView = () => {
           const was = shown;
@@ -5572,6 +5594,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           showLightRanges();
           showDropRings();
           showCameraBounds();
+          showSubterrains();
           // A selected start location can't stay selected where it isn't shown.
           if (!shown.starts && selectedEntries().some((p) => p.id === "sloc")) clearSelection();
           viewSyncs.forEach((f) => f());
@@ -5591,6 +5614,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const byTabNow = () => Object.fromEntries((["regions", "pathing", "cameras"] as const).filter(shownByTab).map((l) => [l, true]));
         const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
         const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
+          if (layer === "subterrains" && !openState) return "The terrain isn't split into subterrains: Split Terrain into Subterrains… makes them.";
           const no = refusedInGameView() ?? (shownByTab(layer) ? TAB_LAYERS[layer]!.note : null);
           if (no) return no;
           viewState[layer] = !viewState[layer];
@@ -5783,6 +5807,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 layerToggle("Light ranges", "How far the lights of placed objects reach: a ring in each light's colour, wider the brighter it is, as the World Editor draws it", "lightRanges", "w3.terrain.toggleLightRanges"),
                 layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
                 layerToggle("Info", "Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
+                ...(openState ? [layerToggle("Subterrains", "The split terrain's subterrains: their rectangles (where the files a corner or object is saved in change) and names, closed ones too", "subterrains", "w3.terrain.toggleSubterrains")] : []),
                 layerBusy),
               ...(editable ? [toggleGroup("Behaviour", "How edits behave",
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
@@ -6148,7 +6173,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Names over the map: HTML over the canvas, placed again whenever the view is drawn. */
         const placeLabels = () => {
-          for (const { el, x, y } of [...labels, ...closedLabels]) {
+          for (const { el, x, y } of [...labels, ...closedLabels, ...subterrainLabels]) {
             const at = renderer.project([x, y, renderer.groundHeight(x, y)]);
             el.hidden = !at;
             if (at) el.style.transform = `translate(-50%, -50%) translate(${Math.round(at[0])}px, ${Math.round(at[1])}px)`;

@@ -37,13 +37,16 @@ export interface ViewSet {
   cameraBounds: boolean;
   /** View > Info Display (I): the start locations, and a ring round each unit that drops items. */
   info: boolean;
+  /** A split terrain's subterrains: their rectangles (where corner and object ownership changes) and names. Studio's
+   *  own mark (the World Editor has no subterrains); game view hides it with the editor's marks. */
+  subterrains: boolean;
 }
 
 /** The layers that are a picture laid over the ground (built per pathing cell, see refreshLayers). */
 export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 /** The layers a View command switches on and off. */
-export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info" | "effects" | "cliffs";
+export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info" | "effects" | "cliffs" | "subterrains";
 
 export interface Shown extends ViewSet {
   /** The start locations and the start buildings drawn in their rings (with Info Display). */
@@ -68,8 +71,21 @@ export function shownView(set: ViewSet, gameView: boolean): Shown {
     terrain: "textured", doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true, weather: true,
     lighting: true, fog: true,
     grid: "none", naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
-    cameraBounds: false, info: false, starts: false,
+    cameraBounds: false, info: false, starts: false, subterrains: false,
   };
+}
+
+// ---- subterrains -------------------------------------------------------------------------------
+
+/** The colour of the subterrain overlay's lines. */
+export const SUBTERRAIN_RGB: [number, number, number] = [255, 196, 64];
+
+/** A subterrain's outline on the ground, world coordinates: the rectangle of corners it owns, from its first corner to
+ *  where the next subterrain's first corner would be (an object is owned by the rectangle `[offset + 128·x,
+ *  offset + 128·(x + w))`, crates/w3proj terrain_objects.rs), so neighbours share the line between them. */
+export function subterrainOutline(s: { x: number; y: number; w: number; h: number }, offsetX: number, offsetY: number): [number, number][] {
+  const x0 = offsetX + 128 * s.x, y0 = offsetY + 128 * s.y, x1 = offsetX + 128 * (s.x + s.w), y1 = offsetY + 128 * (s.y + s.h);
+  return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 }
 
 // ---- info display ------------------------------------------------------------------------------

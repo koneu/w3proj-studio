@@ -141,7 +141,7 @@ export function gridDefault(value: unknown): GridSize {
  *  the camera bounds on, the other layers off, the terrain textured. */
 export function initialViewState(gridSetting: unknown) {
   return {
-    grid: gridDefault(gridSetting), naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: true, info: true,
+    grid: gridDefault(gridSetting), naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: true, info: true, subterrains: false,
     terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
   };
 }

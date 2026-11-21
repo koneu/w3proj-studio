@@ -6135,6 +6135,18 @@ async function subterrains(page, found) {
       if (!/1 of 4 subterrains open/.test(badge ?? "")) fail(`the partial terrain editor's badge says ${lit(badge)}`);
       const closedLabels = await page.evaluate(`[...document.querySelectorAll(".terrain-label.subterrain-closed")].map((e) => e.textContent).sort()`);
       if (lit(closedLabels) !== lit(["nw (closed)", "se (closed)", "sw (closed)"])) fail(`the closed subterrains' names over the map: ${lit(closedLabels)}`);
+      // Stage 5: Toggle Subterrain Overlay (the palette command; the toolbar box is the same switch): every subterrain's
+      // outline, closed ones too, and the open one's name besides the closed ones' labels; off again, none.
+      {
+        const overlay = () => page.evaluate(`(async () => { const s = (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state(); return { on: s?.subterrains, rings: s?.rings?.subterrains ?? 0, names: [...document.querySelectorAll(".terrain-label.subterrain-name")].map((e) => e.textContent).sort(), box: [...document.querySelectorAll("label.model-toggle")].some((l) => l.textContent.trim() === "Subterrains") }; })()`);
+        const toggled = await run("w3.terrain.toggleSubterrains");
+        if (toggled) fail(`Toggle Subterrain Overlay failed: ${toggled}`);
+        const on = await overlay();
+        if (!on.on || on.rings !== 4 || lit(on.names) !== lit(["ne"]) || !on.box) fail(`the subterrain overlay with only ne open: ${lit(on)}`);
+        await run("w3.terrain.toggleSubterrains");
+        const off = await overlay();
+        if (off.on || off.rings !== 0 || off.names.length) fail(`the subterrain overlay turned off: ${lit(off)}`);
+      }
       const before = others.map(folderState);
       await tool("paint_terrain", { tile, left: at(ne.x + 6, 0), bottom: at(ne.y + 6, 1), right: at(ne.x + 14, 0), top: at(ne.y + 14, 1) });
       await tool("save_project");
@@ -6182,6 +6194,15 @@ async function subterrains(page, found) {
       if (cliPack.status !== 0) fail(`\`w3proj pack\` after opening all again refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
       if (await page.evaluate(`!!document.querySelector(".terrain-partial-badge:not([hidden])")`)) fail("the whole terrain editor still shows the partial badge");
       assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
+    }
+
+    // Stage 5: Check Terrain Seams through its MCP tool, and `w3proj terrain seams`: the paints over the seams were the
+    // brushes', so there are no issues; both read the four subterrains.
+    {
+      const seams = JSON.parse(await tool("check_terrain_seams"));
+      if (seams.errors !== 0 || seams.warnings !== 0 || seams.seams?.length !== 6) fail(`check_terrain_seams after the paints: ${lit({ errors: seams.errors, warnings: seams.warnings, seams: seams.seams, first: seams.issues?.[0] })}`);
+      const cliSeams = spawnSync(cli, ["terrain", "seams", root], { encoding: "utf8" });
+      if (cliSeams.status !== 0 || !/no seam issues: 6 seams/.test(cliSeams.stdout)) fail(`\`w3proj terrain seams\`: exit ${cliSeams.status}, ${(cliSeams.stdout + cliSeams.stderr).trim().slice(-300)}`);
     }
 
     // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
