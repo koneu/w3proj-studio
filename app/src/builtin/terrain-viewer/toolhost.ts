@@ -62,7 +62,9 @@ export interface ViewCommands {
     /** Corners of the solid marks drawn per set (the Camera Objects layer's "cameras", the open tab's "tab"). */
     shapes: Record<string, number>;
     /** Rings drawn per named set (the light ranges' "lights", the open tab's "tab": the selected cameras' circles). */
-    rings: Record<string, number> };
+    rings: Record<string, number>;
+    /** The selected placed objects: type and position. */
+    selection: { id: string; position: number[] }[] };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */

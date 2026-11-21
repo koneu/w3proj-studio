@@ -6127,6 +6127,11 @@ async function subterrains(page, found) {
       const folderState = (s) => readdirSync(join(map, "terrain", s.folder)).sort().map((f) => `${f}:${statSync(join(map, "terrain", s.folder, f)).mtimeMs}:${readFileSync(join(map, "terrain", s.folder, f), "latin1")}`).join("|");
       // The terrain editor's handle (as a tool group gets it), for a save of the editor itself.
       await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__subGroup = s.registerToolGroup({ id: "smoke-sub", title: "smoke-sub", order: 999, create: (ed) => { window.__subEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
+      // A footman in nw beside ne's west edge: in the read-only strip once only ne is open (stage 5 below).
+      const haloAt = { x: at(ne.x - 1, 0) + 40, y: at(ne.y + 8, 1) };
+      await tool("place_objects", { objects: [{ id: "hfoo", ...haloAt, player: 1 }], ignoreRoom: true });
+      await tool("save_project");
+      await settled(page);
       const opened = await run("w3.terrainLayout.openSubterrains", { names: ["ne"] });
       if (opened) fail(`Open Subterrains (ne) failed: ${opened}`);
       await editorUp();
@@ -6146,6 +6151,19 @@ async function subterrains(page, found) {
         await run("w3.terrain.toggleSubterrains");
         const off = await overlay();
         if (off.on || off.rings !== 0 || off.names.length) fail(`the subterrain overlay turned off: ${lit(off)}`);
+        // Read-only objects aren't selected: Select All takes ne's footman, not the one in the strip; placing into a
+        // closed subterrain is refused at once, not at the save.
+        const picked = await page.evaluate(`(async () => {
+          try {
+            await w3.commands.execute("w3.terrain.selectAll");
+            const s = (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).state();
+            return s.selection.map((p) => [p.id, Math.round(p.position[0]), Math.round(p.position[1])]);
+          } catch (e) { return [["error", String(e?.message ?? e)]]; }
+        })()`);
+        const inStrip = picked.filter(([, x, y]) => Math.abs(x - haloAt.x) < 2 && Math.abs(y - haloAt.y) < 2);
+        if (!picked.some(([id]) => id === "hfoo") || inStrip.length) fail(`Select All with only ne open took ${lit(picked)} (the strip's footman at ${haloAt.x},${haloAt.y} must not be among them, ne's must)`);
+        const placedClosed = await page.evaluate(`(() => { const r = window.__subEd.objects.create("w3u", "hfoo", { x: ${at(ne.x - 16, 0)}, y: ${at(ne.y - 16, 1)}, player: 0, angle: 0 }); return typeof r === "string" ? r : "placed"; })()`);
+        if (!/isn't in an open subterrain/.test(placedClosed)) fail(`placing a footman in the closed sw gave ${lit(placedClosed)}`);
       }
       const before = others.map(folderState);
       await tool("paint_terrain", { tile, left: at(ne.x + 6, 0), bottom: at(ne.y + 6, 1), right: at(ne.x + 14, 0), top: at(ne.y + 14, 1) });

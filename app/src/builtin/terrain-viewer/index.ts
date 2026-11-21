@@ -4155,7 +4155,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const row = (label: string, value: string) => h("div.terrain-sel-row", {}, h("span.muted", {}, label), h("span", {}, value));
         const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
         let selected: ObjectInstance | null = null;
+        /** What the selection says when a click or box took only read-only objects of a partial load. */
+        const READ_ONLY_PICK = "That is outside the open subterrains (the dimmed strip or a closed one): read-only here, so it can't be selected. Open Subterrains… opens it.";
         const selectObject = (inst: ObjectInstance) => {
+          // A partial load: objects outside the open subterrains are read-only, so they aren't selected (nor moved,
+          // turned or deleted with a selection).
+          if (inst.pick && !inOpenArea(inst.pick.placed)) {
+            clearSelection();
+            selInfo.replaceChildren(READ_ONLY_PICK);
+            return;
+          }
           pendingSel = null;
           selected = inst;
           const p = inst.pick!, pl = p.placed;
@@ -4312,8 +4321,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Selects these entries: none clears, one shows its details, more a summary. */
         const selectEntries = (entries: Placed[]) => {
           pendingSel = null;
-          const insts = entries.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
-          if (!insts.length) { clearSelection(); return; }
+          const open = partial ? entries.filter(inOpenArea) : entries;
+          const insts = open.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
+          if (!insts.length) { clearSelection(); if (open.length < entries.length) selInfo.replaceChildren(READ_ONLY_PICK); return; }
           if (insts.length === 1) { group = []; selectObject(insts[0]); return; }
           selected = null;
           group = insts.map((i) => i.pick!.placed);
@@ -4845,6 +4855,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
+              // A partial load: only into the open subterrains (the save would refuse it), said at once.
+              if (!inOpenArea({ position: [at.x, at.y] })) return "Not placed: that spot isn't in an open subterrain (the dimmed strip and the closed area are read-only). Open Subterrains… opens it.";
               // A ship in water on the surface, as the World Editor saves it; anything else on the ground.
               const moveType = kind === "w3u" ? (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.moveType : undefined;
               const entry = newEntry(f, id, [at.x, at.y, savedUnitZ(moveType, kind === "w3d" ? groundFor(id, at.x, at.y) : heightAt(terrain, at.x, at.y), waterSurfaceAt(terrain, at.x, at.y))], at.player, kind, startGold);
@@ -5673,7 +5685,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, shadowsDrawn: renderer.showShadows, minimap: minimapPanel.state(), shapes: renderer.shapeCounts(), rings: renderer.ringCounts(), selection: selectedEntries().map((p) => ({ id: p.id, position: [...p.position] })) }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
