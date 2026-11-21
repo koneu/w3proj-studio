@@ -91,7 +91,9 @@ pub fn w3i_skin_status_in_dir(map_dir: &Path, codecs: &Registry) -> W3iSkinStatu
     let mut json_path = None;
     let mut raw_path = None;
     for entry in entries {
-        let Ok(entry) = entry else { continue };
+        let Ok(entry) = entry else {
+            return W3iSkinStatus::Unreadable;
+        };
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name.eq_ignore_ascii_case("war3map.w3i.json") {
@@ -122,11 +124,14 @@ fn placed_list_key(archive_name: &str) -> Option<&'static str> {
 
 /// Resolves `skinIds` on decoded empty version-8 `war3map.doo` / `war3mapUnits.doo` JSON from
 /// `war3map.w3i` status, returning a diagnostic note if the file is an empty version-8 placement file.
+/// When `war3map.w3i` is `Unreadable`, `preserve_on_unreadable` (if `Some`) keeps the caller's
+/// existing flag instead of defaulting to `false`.
 pub fn resolve_empty_v8_skin_ids(
     archive_name: &str,
     json_bytes: &mut Vec<u8>,
     status: impl FnOnce() -> W3iSkinStatus,
     codecs: &Registry,
+    preserve_on_unreadable: Option<bool>,
 ) -> Option<String> {
     let list_key = placed_list_key(archive_name)?;
     let mut doc: serde_json::Value = serde_json::from_slice(json_bytes).ok()?;
@@ -141,11 +146,15 @@ pub fn resolve_empty_v8_skin_ids(
         return None;
     }
     let w3i = status();
-    let target = matches!(w3i, W3iSkinStatus::Known(true));
+    let target = match w3i {
+        W3iSkinStatus::Known(v) => v,
+        W3iSkinStatus::Absent => false,
+        W3iSkinStatus::Unreadable => preserve_on_unreadable.unwrap_or(false),
+    };
     let note = match w3i {
         W3iSkinStatus::Known(v) => format!("skinIds={v} from war3map.w3i (empty v8 list fits both)"),
         W3iSkinStatus::Absent => "skinIds=false (war3map.w3i absent; empty v8 list fits both)".into(),
-        W3iSkinStatus::Unreadable => "skinIds=false (war3map.w3i unreadable; empty v8 list fits both)".into(),
+        W3iSkinStatus::Unreadable => format!("skinIds={target} (war3map.w3i unreadable; empty v8 list fits both)"),
     };
     if doc.get("skinIds").and_then(serde_json::Value::as_bool) != Some(target) {
         if let Some(obj) = doc.as_object_mut() {
@@ -497,7 +506,7 @@ fn finish(
             continue;
         };
         let status = *w3i.get_or_insert_with(|| w3i_skin_status_in_map(&files, &report.errors, codecs));
-        if let Some(note) = resolve_empty_v8_skin_ids(&entry.archive_name, &mut bytes, || status, codecs) {
+        if let Some(note) = resolve_empty_v8_skin_ids(&entry.archive_name, &mut bytes, || status, codecs, None) {
             files.insert(entry.project_path.clone(), bytes);
             entry.info.retain(|n| !n.starts_with("variants skinIds="));
             entry.info.push(note);

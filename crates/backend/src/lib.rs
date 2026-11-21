@@ -311,6 +311,9 @@ pub fn codec_canonicalize(root: &str, path: &str, text: &str, formats: &[PathBuf
         .for_project_path(rel)
         .ok_or_else(|| format!("{path} is not a codec-backed file"))?;
     let name = w3proj::paths::to_archive_name(&stem);
+    let preserve = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v.get("skinIds").and_then(serde_json::Value::as_bool));
     let bin = codec.encode(&name, text.as_bytes()).map_err(err)?;
     let mut canonical = codec.decode(&name, &bin).map_err(err)?;
     let full = Path::new(root).join(path);
@@ -319,6 +322,7 @@ pub fn codec_canonicalize(root: &str, path: &str, text: &str, formats: &[PathBuf
         &mut canonical,
         || w3proj::project::w3i_skin_status_in_dir(full.parent().unwrap_or_else(|| Path::new(root)), &registry),
         &registry,
+        preserve,
     );
     String::from_utf8(canonical).map_err(err)
 }
@@ -342,6 +346,7 @@ pub fn codec_decode(root: &str, path: &str, formats: &[PathBuf]) -> CmdResult<St
                     &mut json,
                     || w3proj::project::w3i_skin_status_in_dir(full.parent().unwrap_or_else(|| Path::new(root)), &registry),
                     &registry,
+                    None,
                 );
                 return String::from_utf8(json).map_err(err);
             }
@@ -509,12 +514,27 @@ mod codec_tests {
         assert_eq!(dec_raw_w3i["skinIds"], true);
         std::fs::remove_file(dir.join("map/war3map.w3i")).unwrap();
 
-        // Absent or unreadable war3map.w3i -> safe false without failing raw decode.
+        // Absent war3map.w3i -> false for raw decode and canonicalize alike.
         let dec_absent: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
         assert_eq!(dec_absent["skinIds"], false);
+        let can_absent: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_true, &[]).unwrap()).unwrap();
+        assert_eq!(can_absent["skinIds"], false);
+
+        // Corrupt/unreadable war3map.w3i -> raw decode defaults false, while canonicalize preserves the input's flag.
         std::fs::write(dir.join("map/war3map.w3i.json"), b"{corrupt").unwrap();
         let dec_corrupt: serde_json::Value = serde_json::from_str(&codec_decode(root, "map/war3mapUnits.doo", &[]).unwrap()).unwrap();
         assert_eq!(dec_corrupt["skinIds"], false);
+        let can_corrupt_true: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_true, &[]).unwrap()).unwrap();
+        let can_corrupt_false: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_false, &[]).unwrap()).unwrap();
+        let can_corrupt_doo_true: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3map.doo.json", doo_with_true, &[]).unwrap()).unwrap();
+        assert_eq!(can_corrupt_true["skinIds"], true);
+        assert_eq!(can_corrupt_false["skinIds"], false);
+        assert_eq!(can_corrupt_doo_true["skinIds"], true);
+
+        // Missing map subfolder (unreadable dir) also preserves input flag instead of treating as Absent.
+        std::fs::remove_dir_all(dir.join("map")).unwrap();
+        let can_unreadable_dir: serde_json::Value = serde_json::from_str(&codec_canonicalize(root, "map/war3mapUnits.doo.json", units_with_true, &[]).unwrap()).unwrap();
+        assert_eq!(can_unreadable_dir["skinIds"], true);
 
         let _ = std::fs::remove_dir_all(dir);
     }
