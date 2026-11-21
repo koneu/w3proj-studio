@@ -86,6 +86,12 @@ pub struct Also {
     pub modified: u64,
 }
 
+/// `rel` (a `/`-separated path under `map/`, as the layout names its files) joined to `base` one component at a time, so
+/// the result has the platform's separator throughout (a `/` left in after `terrain` would otherwise be mixed with `\` on Windows).
+fn join_rel(base: &std::path::Path, rel: &str) -> std::path::PathBuf {
+    rel.split('/').fold(base.to_path_buf(), |p, c| p.join(c))
+}
+
 /// Writes a flat file of a split project into its subterrains (`w3proj::terrain_layout::write_flat`): only the files
 /// whose bytes change are written. The flat file's stamp, with every file written and every other flat file made
 /// from one of them in `also`. Refused, nothing written, when the content can't be kept in the layout.
@@ -93,7 +99,7 @@ pub fn write_flat(f: &Flat, bytes: &[u8]) -> CmdResult<Stamp> {
     let written = layout::write_flat(&f.map_dir, f.name, bytes).map_err(|e| format!("map/{} wasn't saved into map/terrain/: {e}", f.name))?;
     let mut also = Vec::new();
     for rel in &written {
-        let at = f.map_dir.join(rel);
+        let at = join_rel(&f.map_dir, rel);
         let s = crate::stamp_of(&at)?;
         also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
     }
@@ -283,7 +289,7 @@ mod tests {
         assert_ne!(edited, text.as_bytes());
         let stamp = crate::write_bytes(&w3e, &edited).unwrap();
         let written: Vec<&str> = stamp.also.iter().map(|a| a.path.as_str()).collect();
-        assert_eq!(written, [split.join("map/terrain/ne/terrain.txt").to_string_lossy()], "only the owning subterrain");
+        assert_eq!(written, [join_rel(&split.join("map"), "terrain/ne/terrain.txt").to_string_lossy()], "only the owning subterrain");
         assert_eq!(read_bytes(&w3e).unwrap(), edited);
         let after = crate::stat_hashed(&w3e).unwrap();
         assert_ne!(after.hash, before.hash);
