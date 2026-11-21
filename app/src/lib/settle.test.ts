@@ -9,7 +9,8 @@ function gate<T = void>() {
   return { promise, resolve, reject };
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0));
+// [Refactored] Use setImmediate instead of setTimeout(r, 0) for instant event-loop turn flushing.
+const tick = () => new Promise((r) => setImmediate(r));
 
 test("idle waits for every running job, and for jobs started while it waits", async () => {
   const work = new PendingWork();
