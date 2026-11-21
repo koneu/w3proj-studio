@@ -6007,6 +6007,8 @@ async function subterrains(page, found) {
     if (!refused || !/would be lost/.test(refused) || !/Nothing was changed/.test(refused)) fail(`the split leaving the border out was refused with ${lit(refused)}`);
     await until("the refusal's message", async () => /would be lost/.test(await toasts()), 10000).catch(async () => fail(`no message said why the split was refused: ${(await toasts()).slice(0, 300)}`));
     if (differ(before, snapshot(map)).length) fail(`the refused split changed ${differ(before, snapshot(map)).join(", ")}`);
+    // The error message stays until closed: it would lie over the views of the checks after this one.
+    await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
 
     // Split 2×2 by the command.
     const split = await run("w3.terrainLayout.split", { layout: "2x2", quiet: true });
