@@ -48,7 +48,7 @@ import { buildPathingMap, loadPathingData, specialsOf, type PathingData } from "
 import { specialBase, specialCliffTiles, specialCliffType, specialFootprints, specialPlacements, specialTextures, specialTileCliffType, specialTiles, type Footprint, type TileRect } from "./specials";
 import { skinTextures } from "../../lib/model/replaceable";
 import type { FollowFlags } from "../../lib/script/destructables";
-import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
+import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, resolveV8SkinIds, savePlacedFile, START_CELLS, unitGridCells, type PlacedFile } from "./placement";
 import { hasPathSize, presetFixedRot, snapSize, type PathSize } from "./doodadgrid";
 import { savedFlags } from "./doodadrules";
 import { doodadNudgeSteps, placedNudgeSteps, doodadPose, doodadTurn, fixAsOpened, settleDoodad, snapAsOpened, unitAnglesAsOpened, type DoodadRuleSource, type OpenRuleSource } from "./doodadedit";
@@ -498,6 +498,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (text === null) throw new Error(`This project has no ${name}.`);
       const doc = JSON.parse(text) as Record<string, unknown>;
       const list = (doc[key] ??= []) as Placed[];
+      await resolveV8SkinIds(w3, doc, list, read);
       splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
       // The open editor holds the doodads as opening the map put them (Snap and Fix Doodads on Load), which the file

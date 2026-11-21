@@ -4,9 +4,85 @@
 // the raw file by the backend (`codec_write`).
 
 import type { W3Api } from "../../extensions/api";
+import { errorText } from "../../lib/oserror";
 import { NEUTRAL_PASSIVE } from "../../lib/terrain/owner";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import type { Placed } from "./objects";
+
+/** First World Editor build whose version-8 placement files (war3map.doo, war3mapUnits.doo)
+ *  carry skinId (Reforged 1.32; measured in World Editor: 6088 crashes with skinId, 6089 opens cleanly). */
+export const REFORGED_SKIN_ID_EDITOR_VERSION = 6089;
+
+const W3I_JSON = "map/war3map.w3i.json";
+const W3I_RAW = "map/war3map.w3i";
+
+const findProjectPath = (w3: W3Api, lower: string) =>
+  w3.workspace.files().find((f) => f.path.toLowerCase() === lower)?.path ?? null;
+
+async function readW3iReforged(w3: W3Api, read?: (path: string) => Promise<string | null>): Promise<boolean | null> {
+  const root = w3.workspace.project?.()?.root;
+  const jsonPath = findProjectPath(w3, W3I_JSON);
+  const rawPath = findProjectPath(w3, W3I_RAW);
+  let text: string | null = null;
+  if (jsonPath) {
+    try {
+      text = read ? await read(jsonPath) : await w3.workspace.readText(jsonPath);
+    } catch (e) {
+      throw new Error(`war3map.w3i is there but can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
+    }
+    if (text === null) throw new Error("war3map.w3i is there but can't be read, so version 8 skinIds can't be told.");
+  } else if (rawPath) {
+    try {
+      text = root ? await w3.backend.invoke<string>("codec_decode", { root, path: rawPath }) : null;
+    } catch (e) {
+      throw new Error(`war3map.w3i is there but can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
+    }
+    if (text === null) throw new Error("war3map.w3i is there but can't be read, so version 8 skinIds can't be told.");
+  } else if (read) {
+    try {
+      text = await read(W3I_JSON);
+    } catch (e) {
+      throw new Error(`war3map.w3i can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
+    }
+    if (text === null) return null;
+  } else {
+    return null;
+  }
+  if (w3.workspace.project?.()?.root !== root) throw new Error("The project changed meanwhile; nothing was read.");
+  let info: unknown;
+  try {
+    info = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`war3map.w3i is there but can't be parsed (${errorText(e)}), so version 8 skinIds can't be told.`);
+  }
+  if (!info || typeof info !== "object" || Array.isArray(info)) {
+    throw new Error("war3map.w3i is there but can't be read, so version 8 skinIds can't be told.");
+  }
+  const ev = (info as { editorVersion?: unknown }).editorVersion;
+  if (typeof ev !== "number" || !Number.isSafeInteger(ev) || ev < 0 || ev > 0xffffffff) {
+    throw new Error("war3map.w3i has no valid editorVersion, so version 8 skinIds can't be told.");
+  }
+  return ev >= REFORGED_SKIN_ID_EDITOR_VERSION;
+}
+
+const hasSkinId = (list: Placed[]) => list.some((e) => "skinId" in e);
+
+/** Resolves `doc.skinIds` on version-8 placement docs: non-empty lists use the entries' own layout,
+ *  and empty lists (including stale unpacked `.json` with `skinIds: true`) use `war3map.w3i`
+ *  (false when pre-Reforged or absent; throws when `war3map.w3i` is present but unreadable). */
+export async function resolveV8SkinIds(
+  w3: W3Api,
+  doc: Record<string, unknown>,
+  list: Placed[],
+  read?: (path: string) => Promise<string | null>,
+): Promise<void> {
+  if (Number(doc.version) !== 8) return;
+  if (list.length > 0) {
+    if (!hasSkinId(list)) doc.skinIds = false;
+    return;
+  }
+  doc.skinIds = (await readW3iReforged(w3, read)) === true;
+}
 
 export interface PlacedFile {
   /** Archive name: war3map.doo or war3mapUnits.doo. */
@@ -24,15 +100,19 @@ export interface PlacedFile {
 }
 
 export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "units"): Promise<PlacedFile | null> {
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const root = w3.workspace.project?.()?.root;
   const path = `map/${name}`;
+  const jsonPath = findProjectPath(w3, `${path}.json`.toLowerCase());
+  const rawPath = findProjectPath(w3, path.toLowerCase());
   let text: string, json: boolean;
-  if (files.has(`${path}.json`.toLowerCase())) { text = await w3.workspace.readText(`${path}.json`); json = true; }
-  else if (files.has(path.toLowerCase())) { text = await w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()!.root, path }); json = false; }
+  if (jsonPath) { text = await w3.workspace.readText(jsonPath); json = true; }
+  else if (rawPath) { text = await w3.backend.invoke<string>("codec_decode", { root: root!, path: rawPath }); json = false; }
   else return null;
+  if (w3.workspace.project?.()?.root !== root) throw new Error("The project changed meanwhile; nothing was loaded.");
   const doc = JSON.parse(text) as Record<string, unknown>;
   const list = (doc[key] ?? []) as Placed[];
   doc[key] = list;
+  await resolveV8SkinIds(w3, doc, list);
   splitOwners(list);
   return { name, key, doc, list, json, dirty: false };
 }
@@ -59,7 +139,7 @@ const UNSET = 0xffffffff;
  *  with nothing to copy: a new map has no doodads yet. */
 function blankEntry(f: PlacedFile): Entry {
   const version = Number(f.doc.version), subversion = Number(f.doc.subversion);
-  const skin = version >= 12 || (version === 8 && f.doc.skinIds === true);
+  const skin = version >= 12 || (version === 8 && f.doc.skinIds === true && (f.list.length === 0 || hasSkinId(f.list)));
   const base = { id: "", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1] } as Entry;
   if (skin) base.skinId = "";
   if (version >= 12) base.preFlags = UNSET;

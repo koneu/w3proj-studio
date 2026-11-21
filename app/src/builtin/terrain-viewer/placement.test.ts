@@ -303,3 +303,139 @@ test("the paste grid takes half-way values up and never gives -0", () => {
   assert.ok(Object.is(pasteCentreAt(-10, -31)[0], 0) && Object.is(pasteCentreAt(-10, -31)[1], 0));
   assert.deepEqual(pasteCentreAt(31.9, 32), [0, 64]);
 });
+
+const emptyV8 = (key: "doodads" | "units", skinIds: boolean) => JSON.stringify({
+  format: key === "doodads" ? "w3proj.doodads/1" : "w3proj.units/1",
+  magic: "W3do",
+  version: 8,
+  subversion: 11,
+  skinIds,
+  [key]: [],
+  ...(key === "doodads" ? { specialVersion: 0, specials: [] } : {}),
+});
+
+function mockWorkspace(files: Record<string, string>, raw?: Record<string, string>, root = "/maps/M") {
+  const written: Record<string, string> = {};
+  const list = [
+    ...Object.keys(files).map((path) => ({ path })),
+    ...Object.keys(raw ?? {}).map((path) => ({ path })),
+  ];
+  let currentRoot = root;
+  const w3 = {
+    workspace: {
+      files: () => list,
+      readText: async (path: string) => {
+        if (!(path in files)) throw new Error(`ENOENT: ${path}`);
+        return files[path];
+      },
+      writeText: async (path: string, text: string) => { written[path] = text; },
+      project: () => ({ root: currentRoot }),
+    },
+    backend: {
+      invoke: async (cmd: string, args: { path?: string; text?: string }) => {
+        if (cmd === "codec_decode") {
+          if (args.path && raw && args.path in raw) return raw[args.path];
+          throw new Error(`decode failed: ${args.path}`);
+        }
+        if (cmd === "codec_canonicalize") return args.text;
+        throw new Error(`unexpected cmd: ${cmd}`);
+      },
+    },
+  } as unknown as W3Api;
+  return { w3, written, setRoot: (next: string) => { currentRoot = next; } };
+}
+
+test("empty v8 files with stale skinIds: true resolve to false on pre-Reforged maps and omit skinId", async () => {
+  for (const [label, ed] of [["v25 ed=6059", 6059], ["v28 ed=6088", 6088]] as const) {
+    const { w3 } = mockWorkspace({
+      "map/war3map.w3i.json": JSON.stringify({ version: 25, editorVersion: ed }),
+      "map/war3mapUnits.doo.json": emptyV8("units", true),
+      "map/war3map.doo.json": emptyV8("doodads", true),
+    });
+    const units = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!;
+    const doodads = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+    assert.equal(units.doc.skinIds, false, label);
+    assert.equal(doodads.doc.skinIds, false, label);
+    const sloc = newEntry(units, "sloc", [0, 0, 0], 0) as unknown as Record<string, unknown>;
+    const tree = newEntry(doodads, "LTlt", [0, 0, 0]) as unknown as Record<string, unknown>;
+    const pasted = pastedEntry(units, { entry: { id: "hfoo", skinId: "hfoo", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1] }, angle: 0 }, [64, 0, 0]) as unknown as Record<string, unknown>;
+    assert.ok(!("skinId" in sloc), `${label}: sloc`);
+    assert.ok(!("skinId" in tree), `${label}: tree`);
+    assert.ok(!("skinId" in pasted), `${label}: pasted`);
+  }
+
+  // Raw war3map.w3i works too, and editPlaced's read callback uses unsaved buffer text.
+  const { w3: rawW3 } = mockWorkspace(
+    { "map/war3mapUnits.doo.json": emptyV8("units", true) },
+    { "map/war3map.w3i": JSON.stringify({ version: 25, editorVersion: 6059 }) },
+  );
+  const rawUnits = (await loadPlacedFile(rawW3, "war3mapUnits.doo", "units"))!;
+  assert.equal(rawUnits.doc.skinIds, false);
+  assert.ok(!("skinId" in (newEntry(rawUnits, "sloc", [0, 0, 0], 0) as unknown as Record<string, unknown>)));
+});
+
+test("empty v8 files on Reforged maps (editorVersion >= 6089) resolve skinIds: true and include skinId", async () => {
+  for (const ed of [6089, 6117]) {
+    const { w3 } = mockWorkspace({
+      "map/war3map.w3i.json": JSON.stringify({ version: 33, editorVersion: ed }),
+      "map/war3mapUnits.doo.json": emptyV8("units", false),
+      "map/war3map.doo.json": emptyV8("doodads", false),
+    });
+    const units = (await loadPlacedFile(w3, "war3mapUnits.doo", "units"))!;
+    const doodads = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+    assert.equal(units.doc.skinIds, true, `ed=${ed}`);
+    assert.equal(doodads.doc.skinIds, true, `ed=${ed}`);
+    const sloc = newEntry(units, "sloc", [0, 0, 0], 0) as unknown as Record<string, unknown>;
+    const tree = newEntry(doodads, "LTlt", [0, 0, 0]) as unknown as Record<string, unknown>;
+    const pasted = pastedEntry(units, { entry: { id: "hfoo", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1] }, angle: 0 }, [64, 0, 0]) as unknown as Record<string, unknown>;
+    assert.equal(sloc.skinId, "sloc");
+    assert.equal(tree.skinId, "LTlt");
+    assert.equal(pasted.skinId, "hfoo");
+  }
+});
+
+test("non-empty v8 files follow entry layout and handle absent vs unreadable war3map.w3i", async () => {
+  // Non-empty Reforged v8 file keeps skinIds: true even if war3map.w3i is unreadable (cut-off chapter).
+  const refUnit = newEntry(file("units", 8, 11, { skinIds: true }), "hfoo", [0, 0, 0], 0);
+  const { w3: tco } = mockWorkspace({
+    "map/war3map.w3i.json": "{broken",
+    "map/war3mapUnits.doo.json": JSON.stringify({ format: "w3proj.units/1", magic: "W3do", version: 8, subversion: 11, skinIds: true, units: [refUnit] }),
+  });
+  const refLoaded = (await loadPlacedFile(tco, "war3mapUnits.doo", "units"))!;
+  assert.equal(refLoaded.doc.skinIds, true);
+  assert.equal((newEntry(refLoaded, "hkni", [64, 0, 0], 0) as unknown as Record<string, unknown>).skinId, "hkni");
+
+  // Non-empty pre-Reforged file whose only entries are randomType != 0 still omits skinId even with stale skinIds: true.
+  const randUnit = { ...(newEntry(file("units", 8, 11, { skinIds: false }), "uDNR", [0, 0, 0]) as unknown as Record<string, unknown>), randomType: 1 };
+  const { w3: staleRand } = mockWorkspace({
+    "map/war3mapUnits.doo.json": JSON.stringify({ format: "w3proj.units/1", magic: "W3do", version: 8, subversion: 11, skinIds: true, units: [randUnit] }),
+  });
+  const randLoaded = (await loadPlacedFile(staleRand, "war3mapUnits.doo", "units"))!;
+  assert.equal(randLoaded.doc.skinIds, false);
+  assert.ok(!("skinId" in (newEntry(randLoaded, "hfoo", [0, 0, 0], 0) as unknown as Record<string, unknown>)));
+
+  // Absent w3i on empty v8 -> false; unreadable w3i -> rejects (never silently false).
+  const { w3: absent } = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", true) });
+  const absentLoaded = (await loadPlacedFile(absent, "war3mapUnits.doo", "units"))!;
+  assert.equal(absentLoaded.doc.skinIds, false);
+
+  for (const badW3i of ["{not json", "[]", JSON.stringify({ version: 25 })]) {
+    const { w3: bad } = mockWorkspace({
+      "map/war3map.w3i.json": badW3i,
+      "map/war3mapUnits.doo.json": emptyV8("units", false),
+    });
+    await assert.rejects(loadPlacedFile(bad, "war3mapUnits.doo", "units"), /war3map\.w3i/);
+  }
+  const { w3: badRaw } = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", false) }, { "map/war3map.w3i": "{corrupt" });
+  await assert.rejects(loadPlacedFile(badRaw, "war3mapUnits.doo", "units"), /war3map\.w3i/);
+
+  // Project switch while reading throws instead of applying another project's w3i.
+  const sw = mockWorkspace({ "map/war3map.w3i.json": JSON.stringify({ version: 33, editorVersion: 6117 }), "map/war3mapUnits.doo.json": emptyV8("units", false) });
+  const origRead = sw.w3.workspace.readText.bind(sw.w3.workspace);
+  sw.w3.workspace.readText = async (p: string) => {
+    const out = await origRead(p);
+    if (p.includes("w3i")) sw.setRoot("/maps/OTHER");
+    return out;
+  };
+  await assert.rejects(loadPlacedFile(sw.w3, "war3mapUnits.doo", "units"), /project changed/i);
+});
