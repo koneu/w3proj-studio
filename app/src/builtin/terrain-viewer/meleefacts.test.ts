@@ -143,3 +143,26 @@ test("a map looks like a ladder map with 2+ starts and a gold mine; fewer of eit
   assert.equal(ladderLook(u("sloc", "sloc", "hfoo")).ladder, false, "no mine");
   assert.equal(ladderLook([]).ladder, false);
 });
+
+test("walkGrid uses objects-only blockers even for walk movement so walkable bridges stayed open", async () => {
+  const t = parseW3e(w3eFromText(terrainText));
+  const from: [number, number] = [t.offsetX + 2 * 32, t.offsetY + 4 * 32], to: [number, number] = [t.offsetX + 14 * 32, t.offsetY + 4 * 32];
+  // Column 8 was NO_WALK terrain cleared by a bridge in pathing(), while non-objectsOnly blockers() (Occupancy.build)
+  // re-blocks it without bridges. Placed objects (objectsOnly = true) block only cell (3, 14) off the bridge.
+  const bridgeCells = new Set(Array.from({ length: 8 }, (_, y) => y * 16 + 8));
+  const standingCell = 3 * 16 + 14;
+  const src: WalkSource = {
+    terrain: t,
+    pathing: async () => ({ cells: new Uint8Array(16 * 8), width: 16, height: 8 }),
+    blockers: async (objectsOnly) => {
+      const b = new Uint8Array(16 * 8);
+      if (!objectsOnly) for (const i of bridgeCells) b[i] = 1;
+      b[standingCell] = 1;
+      return b;
+    },
+    list: () => [],
+    baseOf: () => undefined,
+  };
+  assert.equal((await pathReport(src, from, to, 0, "walk")).walkable, true);
+  assert.equal((await walkGrid(src, "walk")).blocked[standingCell], 1, "control: placed object still blocks");
+});

@@ -71,10 +71,11 @@ export async function projectWalkSource(w3: W3Api, opts: {
 /** How a unit moves: "walk" is stopped by the pathing map's no-walk cells, "float" (ships) by its no-water cells. */
 export type Movement = "walk" | "float";
 
-/** What a unit can't walk on (or, for "float", sail on): the pathing map, and what stands there, which it leaves out.
- *  A ship isn't stopped by the ground's plain no-walk cells (deep water), so its blockers are the objects alone. */
+/** What a unit can't walk on (or, for "float", sail on): the pathing map (which already applies walkable destructables
+ *  and manual pathing overrides), and the placed objects that stand in the way. Using objects-only blockers avoids
+ *  re-blocking bridges and stairs that Occupancy.build doesn't know about. */
 export async function walkGrid(src: WalkSource, movement: Movement = "walk"): Promise<Grid> {
-  const [pathing, blockers] = await Promise.all([src.pathing(), src.blockers(movement === "float")]);
+  const [pathing, blockers] = await Promise.all([src.pathing(), src.blockers(true)]);
   const t = src.terrain;
   const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
   return { blocked: pathing.cells.map((c, i) => (c & (movement === "float" ? NO_WATER : NO_WALK) || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };

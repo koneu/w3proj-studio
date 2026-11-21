@@ -249,3 +249,32 @@ test("a unit's level is the map's own (ulev) where it sets one, else the game's,
   const camps = campsOf([unit("nogr", 0, 0), unit("nogr", 200, 0), unit("n000", 0, 200)], { level });
   assert.deepEqual(camps.map((c) => [c.level, c.strongest]), [[15, 7]]);
 });
+
+test("camp access counts the creeps' ground around a building and treats unreachable camps with transport as warnings", () => {
+  const ring = [unit("nogr", -200, 0), unit("nogr", 200, 0, { drops: false }), unit("ngno", 0, 200, { drops: false })];
+  const aroundBuilding: MeleeFacts = {
+    ...map(ring),
+    // Centroid at (0, 67) is blocked by a neutral building in the middle, while the creeps stand in open ground.
+    widestTo: (x, y) => (Math.hypot(x - 0, y - 67) < 100 ? 0 : 480),
+  };
+  assert.deepEqual(checkMelee(aroundBuilding).findings.filter((x) => x.rule === "camp access"), []);
+  // Control: if both centroid and every creep stand in a narrow pocket, camp access still errors.
+  const boxed: MeleeFacts = {
+    ...map(ring),
+    widestTo: (x, y) => (Math.hypot(x, y) < 300 ? 96 : 480),
+  };
+  assert.ok(checkMelee(boxed).findings.some((x) => x.rule === "camp access" && x.severity === "error"));
+
+  // Completely unreachable (way === 0): error without transport, warning with ngad/nshp/nwgt; narrow choke (< 160) stays error.
+  const island = (extra: MeleeUnit[] = []): MeleeFacts => ({
+    ...map([...camp(0, 0), ...extra]),
+    widestTo: (x, y) => (Math.hypot(x, y) < 200 ? 0 : 480),
+  });
+  assert.ok(checkMelee(island()).findings.some((x) => x.rule === "camp access" && x.severity === "error"));
+  const withLab = checkMelee(island([neutral("ngad", 1000, 1000)])).findings.filter((x) => x.rule === "camp access");
+  assert.equal(withLab.length, 1);
+  assert.equal(withLab[0].severity, "warning");
+  assert.match(withLab[0].message, /transport/i);
+  assert.ok(checkMelee({ ...map([...camp(0, 0), neutral("ngad", 1000, 1000)]), widestTo: (x, y) => (Math.hypot(x, y) < 200 ? 96 : 480) })
+    .findings.some((x) => x.rule === "camp access" && x.severity === "error"), "narrow choke still errors with transport");
+});
