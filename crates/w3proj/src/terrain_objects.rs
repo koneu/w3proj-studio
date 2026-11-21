@@ -27,9 +27,10 @@
 //! that sorted order keeps the index as `"order"`. Merging puts every entry with an `order` at that
 //! index and fills the other places with the rest in sorted order, so a map split and merged without
 //! edits gives back the same flat file. A creation number twice is an error naming both files; it is
-//! never renumbered (scripts refer to it). 0 and 4294967295 aren't assignments (old maps give every
-//! doodad editorId 0): they may be there any number of times, and entries with equal numbers are
-//! sorted by subterrain, then by their flat order (`order` where that isn't their flat place).
+//! never renumbered (scripts refer to it). For doodads and units 0 and 4294967295 aren't assignments
+//! (old maps give every doodad editorId 0): they may be there any number of times, and entries with
+//! equal numbers are sorted by subterrain, then by their flat order (`order` where that isn't their
+//! flat place). A region's index is always an assignment (the first region of a map has index 0).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -256,10 +257,11 @@ fn lists(kind: Kind) -> &'static [List] {
     }
 }
 
-/// Whether a creation number is a real assignment: 0 (old maps give every doodad editorId 0) and 4294967295 (unset)
-/// aren't, and never count as a creation number found twice. Entries with equal numbers keep their flat order.
-pub(crate) fn assigned(n: u32) -> bool {
-    n != 0 && n != u32::MAX
+/// Whether a creation number of a kind is a real assignment. For doodads and units 0 (old maps give every doodad
+/// editorId 0) and 4294967295 (unset) aren't, and never count as a creation number found twice; entries with equal
+/// numbers keep their flat order. A region's index is always one: the first region of a map is 0.
+pub(crate) fn assigned(kind: Kind, n: u32) -> bool {
+    kind == Kind::Regions || (n != 0 && n != u32::MAX)
 }
 
 /// An entry's sort key; `version`: the doodads' (version 13 numbers them by `trailer[0]`).
@@ -494,7 +496,7 @@ pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2]) -> Res
             for (i, e) in entries.iter().enumerate() {
                 let k = sort_key(kind, list, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 if let SortKey::Number(n) = k {
-                    if assigned(n) {
+                    if assigned(kind, n) {
                         if let Some(first) = seen.insert(n, i) {
                             return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
                         }
@@ -610,7 +612,7 @@ pub(crate) fn assemble(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) ->
             for (li, items) in read_sub(kind, &path, &bytes, version)?.into_iter().enumerate() {
                 for item in &items {
                     if let SortKey::Number(n) = item.key {
-                        if !assigned(n) {
+                        if !assigned(kind, n) {
                             continue;
                         }
                         if let Some(other) = seen.insert(n, path.clone()) {
@@ -668,7 +670,7 @@ pub(crate) fn flat_numbers(kind: Kind, bytes: &[u8], offset: [f32; 2]) -> Result
     for (i, e) in lists.into_iter().next().unwrap_or_default().iter().enumerate() {
         let k = sort_key(kind, List::Main, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
         if let SortKey::Number(n) = k {
-            if assigned(n) {
+            if assigned(kind, n) {
                 let (x, y) = position(kind, List::Main, e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 out.push((n, x, y));
             }
@@ -701,7 +703,7 @@ pub(crate) fn sub_numbers(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str)
             let lists = read_sub(kind, &path, &bytes, version)?;
             for item in lists.into_iter().next().unwrap_or_default() {
                 if let SortKey::Number(n) = item.key {
-                    if assigned(n) {
+                    if assigned(kind, n) {
                         out.push(Numbered { kind, sub: i, path: path.clone(), number: n });
                     }
                 }
@@ -854,6 +856,30 @@ mod tests {
         let names = |p: &str| entries(&files, p, "regions").iter().map(|e| e["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!(names("terrain/a/regions.json"), vec!["r0", "r2"]);
         assert_eq!(names("terrain/b/regions.json"), vec!["r1"]);
+    }
+
+    /// A region's index 0 is a real number (the first region of a map has it), unlike a doodad's or unit's 0: a map
+    /// whose single region is 0 round-trips, and a region 0 twice is an error, in a flat file and across subterrains.
+    #[test]
+    fn region_zero_is_a_creation_number() {
+        let region = |index: u32, left: f64| serde_json::json!({"left": left, "bottom": -100.0, "right": left + 10.0, "top": -90.0, "name": format!("r{index}"), "index": index, "weather": "0x00000000", "sound": "", "color": {"blue": 1, "green": 2, "red": 3, "alpha": 255}});
+        let flat = |regions: Vec<Value>| pretty(&serde_json::json!({"format": "w3proj.regions/1", "version": 5, "regions": regions}));
+        let one = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0)]))]);
+        let (heads, files) = round_trip(&one, &subs());
+        assert_eq!(entries(&files, "terrain/b/regions.json", "regions")[0]["index"], 0);
+        let twice = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0), region(0, -500.0)]))]);
+        let e = slice(&twice, &subs(), OFF).unwrap_err().to_string();
+        assert!(e.contains("regions[0] and regions[1] have the same creation number 0"), "{e}");
+        // Across subterrains: a's region renumbered to b's 0 by hand.
+        let two = BTreeMap::from([(Kind::Regions, flat(vec![region(0, 10.0), region(1, -500.0)]))]);
+        let (heads2, mut f) = slice(&two, &subs(), OFF).unwrap();
+        let a = String::from_utf8(f["terrain/a/regions.json"].clone()).unwrap().replace("\"index\": 1", "\"index\": 0");
+        f.insert("terrain/a/regions.json".into(), a.into_bytes());
+        let e = assemble(&heads2, &subs(), &|p| f.get(p).cloned()).unwrap_err().to_string();
+        assert!(e.contains("creation number 0 is in map/terrain/"), "{e}");
+        // The control: doodads 0 twice are no duplicates.
+        assert!(slice(&BTreeMap::from([(Kind::Doodads, doo_flat(&[(0, 10.0, -50.0), (0, -500.0, -50.0)], &[]))]), &subs(), OFF).is_ok());
+        let _ = heads;
     }
 
     #[test]

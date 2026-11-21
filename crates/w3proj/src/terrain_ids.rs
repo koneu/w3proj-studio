@@ -41,7 +41,8 @@ pub fn block_of(n: u32) -> [u32; 2] {
 /// nothing. 0 and 4294967295 never do.
 pub fn record_new(subs: &mut [Subterrain], new: impl IntoIterator<Item = (u32, usize)>) {
     for (n, i) in new {
-        if !objects::assigned(n) || i >= subs.len() {
+        // 0 and 4294967295 record nothing for any kind (a region 0 lies below every range anyway).
+        if !objects::assigned(Kind::Units, n) || i >= subs.len() {
             continue;
         }
         let top = subs.iter().flat_map(|s| s.id_ranges.iter().map(|r| r[1])).max();

@@ -69,6 +69,15 @@ test("split: never 0 or 4294967295, even where a range holds them", () => {
   assert.equal(nextRange(l), null);
 });
 
+test("regions: index 0 is a used number (the first region of a flat map has it), never handed out again", () => {
+  assert.equal(allocateNumber("regions", [0], {}, null, [0, 0]), 1, "flat: one past 0");
+  assert.equal(allocateNumber("regions", [], {}, null, [0, 0]), 0, "flat: the first region gets 0, as the World Editor numbers it");
+  const l: IdLayout = { offset: [0, 0], subterrains: [{ name: "a", x: 0, y: 0, w: 4, h: 4, idRanges: [[0, 2]] }] };
+  assert.equal(allocateNumber("regions", [0], {}, l, [10, 10]), 1);
+  assert.equal(allocateNumber("regions", [0, 1], {}, l, [10, 10]), 2);
+  assert.equal(allocateNumber("regions", [1, 2], {}, l, [10, 10]), 3, "0 itself is never handed out: the range is full, the next one starts above it");
+});
+
 test("split: a full range takes the next block above every range, kept in the layout, valid and used by later calls", () => {
   const l = grid();
   const full = Array.from({ length: 10000 }, (_, i) => 10000 + i);
