@@ -86,8 +86,7 @@ test("the grain: even between 0 and 1, the same on every drawing, different from
   assert.ok(Math.abs(low - 0.1) < 0.01, String(low));
   assert.equal(grainAt(17, 33), grainAt(17, 33));
   assert.ok(new Set(values.slice(0, 1000)).size > 990);
-  // Two drawings of a map are the same picture (a saved minimap doesn't change without an edit).
-  assert.equal(digest(renderMinimap(base())), digest(renderMinimap(base())));
+  // [Removed] Redundant `assert.equal(digest(renderMinimap(base())), digest(renderMinimap(base())))` — line 58 already asserts `digest(renderMinimap(base())) === "21f816b2fd4c1424"`.
 });
 
 test("smallestMipColor: the file's smallest mip level, averaged by alpha, not the full-size picture's average", () => {
@@ -620,10 +619,27 @@ test("modelTextureColor on the game's own models and textures: each dot the colo
     ["DTrc", [156, 69, 66], [75, 40, 38]], ["NTbd", [160, 147, 126], [106, 87, 70]],
   ];
   for (const [mode, layers] of [["sd", ["War3.w3mod:"]], ["hd", ["War3.w3mod:_HD.w3mod:", "War3.w3mod:"]]] as const) {
+    // [Refactored] Cache gameFiles lookups per mode and batch-prefetch model paths in one CLI call instead of spawning a subprocess per read.
+    const cache = new Map<string, Uint8Array | null>();
+    const modelCandidates = editor.flatMap(([id]) => {
+      const s = skinOf(id, mode);
+      const base = s.file.replace(/\\/g, "/");
+      return layers.flatMap((l) => (s.numVar > 1 ? [`${l}${base}0.mdx`, `${l}${base}.mdx`] : [`${l}${base}.mdx`]));
+    });
+    for (const hit of gameFiles(modelCandidates)) cache.set(hit.name.toLowerCase(), hit.bytes);
+    for (const c of modelCandidates) if (!cache.has(c.toLowerCase())) cache.set(c.toLowerCase(), null);
+
     const read = async (path: string) => {
-      for (const layer of layers) {
-        const [hit] = gameFiles([layer + path.replace(/\\/g, "/")]);
-        if (hit) return hit.bytes;
+      const norm = path.replace(/\\/g, "/");
+      const specs = layers.map((l) => l + norm);
+      const uncached = specs.filter((s) => !cache.has(s.toLowerCase()));
+      if (uncached.length > 0) {
+        for (const hit of gameFiles(uncached)) cache.set(hit.name.toLowerCase(), hit.bytes);
+        for (const s of uncached) if (!cache.has(s.toLowerCase())) cache.set(s.toLowerCase(), null);
+      }
+      for (const s of specs) {
+        const bytes = cache.get(s.toLowerCase());
+        if (bytes) return bytes;
       }
       throw new Error(`not stored: ${path}`);
     };

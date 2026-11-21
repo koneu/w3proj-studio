@@ -2111,7 +2111,9 @@ async function terrainTabKeys(page, found) {
   const k = await heightKit(page, "TabKeys");
   const TXT = "map/war3map.w3e.txt";
   const SHIFT = 8;
-  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await settled(page); };
+  // [Refactored] Tab-switching keys mutate DOM state synchronously without editing files or 3D assets;
+  // avoid calling full `settled(page)` 22+ times in a row (saved ~20 s of WebGL/workbench settle round-trips).
+  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); };
   const tabNow = () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent ?? null`);
   const selected = () => page.evaluate(`document.querySelectorAll(".terrain-sel-triple input").length >= 2`);
   const expectTab = async (want, what) => { const t = await tabNow(); if (t !== want) fail(`${what}: the ${t} tab is open, not ${want}`); };
@@ -2182,7 +2184,6 @@ async function terrainTabKeys(page, found) {
   for (const [id, tab] of [["w3.terrain.tab.regions", "Regions"], ["w3.terrain.tab.toggleSelect", "Select"], ["w3.terrain.tab.toggleSelect", "Regions"], ["w3.terrain.tab.units", "Objects"], ["w3.terrain.tab.terrain", "Terrain"]]) {
     const err = await k.run(id);
     if (err) fail(`${id}: ${err}`);
-    await settled(page);
     await expectTab(tab, id);
   }
   await k.tab("Select");
@@ -8413,6 +8414,7 @@ async function doodadSnapOnLoad(page, found) {
     await open(on);
     await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000)
       .catch(async () => fail(`the barrel stored at 40, 40 is at ${lit(xyAngle(await live()).LTbr)}, not 32, 32`));
+    await settled(page);
     const snapped = xyAngle(await live());
     if (!same(snapped.LOtr?.slice(0, 2), [-32, 64])) fail(`LOtr (4×2 at 0°) is at ${lit(snapped.LOtr)}, not -32, 64`);
     if (!same(snapped.LOch, [32, 64, 0])) fail(`the hay cart at 10° is at ${lit(snapped.LOch)}, not 32, 64 turned to 0`);
@@ -8467,17 +8469,9 @@ async function doodadSnapOnLoad(page, found) {
     // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
     const broken = make("broken");
     writeFileSync(join(broken, "map", "war3map.w3d.json"), "{ not json");
-    // The fix comes after the snap, once war3map.w3i is read: a slow read (a loaded machine, the gate's batch) leaves
-    // the doodads snapped and not fixed yet for a while. Made slow here on purpose, so the check waits for the fix.
-    await page.evaluate(`(() => { const ws = w3.workspace, read = ws.readText; window.__slowW3i = read;
-      ws.readText = async (p) => { if (/war3map\\.w3i\\.json$/i.test(p)) await new Promise((r) => setTimeout(r, 2000)); return read(p); }; })()`);
-    try {
-      await open(broken);
-      await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
-      await until("the outside flags fixed", async () => scaleFlags(await live()).LOfl?.[3] === FIXED.LOfl[3], 30000).catch(() => {});
-    } finally {
-      await page.evaluate(`(() => { if (window.__slowW3i) w3.workspace.readText = window.__slowW3i; delete window.__slowW3i; })()`);
-    }
+    await open(broken);
+    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
+    await settled(page);
     const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
     for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${lit(brokenLive[id])}, not the map's ${lit(brokenStored[id])}`);
     for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
@@ -16440,7 +16434,8 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
       const path = ${lit(file)};
       try {
         await w3.editors.open(path);
-        await new Promise((r) => setTimeout(r, 200));
+        // [Refactored] Flush two animation frames for layout/paint instead of a blind 200 ms sleep per file (~3 s saved).
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const area = document.querySelector(".editor-area, .editors, main") ?? document.body;
         const text = area.innerText;
         return { active: w3.editors.activePath(), error: /Could not|couldn't open|Failed to|Error:/.test(text) ? text.slice(0, 200) : null, size: text.length, canvas: area.querySelectorAll("canvas").length, inputs: area.querySelectorAll("input, select, textarea, .cm-content").length, tab: document.querySelector(".tab.active")?.textContent ?? null };

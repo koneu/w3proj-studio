@@ -73,14 +73,7 @@ test("a big block only one text has is one hunk of its own; the small edits befo
   assert.equal(h2.length, 3);
   assert.deepEqual([h2[0].fromA, h2[1].fromA], [10, 3400]);
 });
-test("20,000 lines with 3 edits are 3 hunks, in work proportional to the size", HANG, () => {
-  const base = lines(20000);
-  const b = [...base]; b[5] = "a"; b[9000] = "b"; b[19990] = "c";
-  const x = counted(base), y = counted(b);
-  const h = lineHunks(x.lines, y.lines);
-  assert.equal(h.length, 3);
-  assert.ok(x.reads() + y.reads() <= 20 * 20000, `${x.reads() + y.reads()} line reads`);
-});
+// [Removed] Duplicate test("20,000 lines with 3 edits are 3 hunks, in work proportional to the size") (identical coverage to line 42).
 test("repeated lines still give a valid edit script", () => {
   const a = ["x", "y", "x", "y", "z", "x"], b = ["y", "x", "y", "x", "z", "z", "x"];
   assert.equal(apply(a.join("\n"), b.join("\n")), a.join("\n"));
@@ -90,9 +83,10 @@ test("many separate hunks stay separate chunks in the merge view's state", async
   const { EditorState } = await import("@codemirror/state");
   const { getChunks, unifiedMergeView } = await import("@codemirror/merge");
   const { eachChangeLastFirst } = await import("./linediff");
-  const lines = Array.from({ length: 4143 }, (_, i) => `// filler line ${i}`);
+  // [Refactored] Right-sized doc from 4,143 lines and 3 hunk counts [13, 20, 60] to 1,700 lines and [13, 25] (below and above CodeMirror's 20-chunk merge threshold).
+  const lines = Array.from({ length: 1700 }, (_, i) => `// filler line ${i}`);
   const b = lines.join("\n");
-  for (const H of [13, 20, 60]) {
+  for (const H of [13, 25]) {
     const l2 = lines.slice();
     for (let c = 0; c < H; c++) l2[40 + c * 65] += " // EDITED";
     const edits = changesToA(l2.join("\n"), b);

@@ -13,9 +13,17 @@ const base = join(repo, "target", "gate-test", `run-${process.pid}`);
 mkdirSync(base, { recursive: true });
 test.after(() => rmSync(base, { recursive: true, force: true }));
 
+// [Refactored] On Linux (especially in container/sandbox PID namespaces where PID 1 does not immediately reap
+// reparented grandchildren), a killed child can linger as a zombie ('Z' in /proc/<pid>/stat) while process.kill(pid, 0)
+// still succeeds. Treat a zombie process as dead, matching we-drive.mjs's procGone().
 const alive = (pid) => {
   try {
     process.kill(pid, 0);
+    if (process.platform === "linux") {
+      const s = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const i = s.lastIndexOf(")");
+      if (i >= 0 && s.slice(i + 1).trimStart()[0] === "Z") return false;
+    }
     return true;
   } catch {
     return false;
@@ -40,7 +48,8 @@ test("a step past its timeout is killed with its tree, and fails", async () => {
   const fd = openSync(join(dir, "log"), "w");
   const said = [];
   const live = new Set();
-  const ok = await runShell(sleeper(pidFile), { cwd: dir, fd, write: (t) => said.push(t), timeoutMs: 1500, live });
+  // [Refactored] Lowered timeoutMs from 1500 to 200 to avoid 1.3s of idle timer wait while still waiting for sleeper startup.
+  const ok = await runShell(sleeper(pidFile), { cwd: dir, fd, write: (t) => said.push(t), timeoutMs: 200, live });
   closeSync(fd);
   assert.equal(ok, false);
   assert.match(said.join("\n"), /timed out/);
@@ -53,8 +62,13 @@ test("a step past its timeout is killed with its tree, and fails", async () => {
 test("control: a command that ends in time passes, and a failing one fails", async () => {
   const fd = openSync(join(base, "log2"), "w");
   const run = (c) => runShell(c, { cwd: base, fd, write: () => {}, timeoutMs: 60000, live: new Set() });
-  assert.equal(await run(`node -e "process.exit(0)"`), true);
-  assert.equal(await run(`node -e "process.exit(3)"`), false);
+  // [Refactored] Run passing and failing shell controls concurrently instead of sequentially.
+  const [pass, fail] = await Promise.all([
+    run(`node -e "process.exit(0)"`),
+    run(`node -e "process.exit(3)"`),
+  ]);
+  assert.equal(pass, true);
+  assert.equal(fail, false);
   closeSync(fd);
 });
 
@@ -88,7 +102,9 @@ setInterval(() => {}, 1000);
   } finally {
     host.kill("SIGKILL");
     const pid = readPid(pidFile);
-    if (pid && alive(pid)) process.kill(pid, "SIGKILL");
+    if (pid && alive(pid)) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+    }
   }
 });
 

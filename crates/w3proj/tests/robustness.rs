@@ -139,12 +139,18 @@ fn tmp(name: &str) -> PathBuf {
     tmp_dir().join(name)
 }
 
-/// The fixture as a map. Tests run in parallel: each passes its own name.
-fn map_bytes(name: &str) -> Vec<u8> {
-    let _guard = TmpGuard::new();
-    let out = tmp(name);
-    w3proj::pack(&fixture(), Some(&out), &registry()).unwrap();
-    fs::read(out).unwrap()
+/// The fixture as a map. Cached once per test binary so `w3proj::pack(&fixture(), ...)` is not re-run 5 times.
+fn map_bytes(_name: &str) -> Vec<u8> {
+    // [Refactored] Cached packed mini-map bytes in OnceLock across all 5 tests in this binary.
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES
+        .get_or_init(|| {
+            let _guard = TmpGuard::new();
+            let out = tmp("shared-fixture.w3x");
+            w3proj::pack(&fixture(), Some(&out), &registry()).unwrap();
+            fs::read(out).unwrap()
+        })
+        .clone()
 }
 
 /// Files of the map that a codec reads.

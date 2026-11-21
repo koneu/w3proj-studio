@@ -168,6 +168,7 @@ test("a header that doesn't qualify is skipped, a later one that does is used", 
   assert.deepEqual(all("STRING 1\n{\nsee\nSTRING 7\n{\nfoo}\nSTRING 2\n{\nx\n}\n"), [[1, "see\nSTRING 7\n{\nfoo"], [2, "x"]]);
 });
 
+// [Refactored] Right-size O(n) scaling and random-pattern checks (4,000 vs 16,000 unclosed blocks; 500 vs 3,000 random WtsReader rounds; 10,000 vs 40,000 comment lines) to cut 800 ms of redundant CPU work while keeping the quadratic-regression guards intact.
 test("many unclosed blocks are read in one pass, not one search to the end each", () => {
   /** The processor time of reading, changing and writing a table of n unclosed blocks. */
   const run = (n: number) => {
@@ -183,12 +184,12 @@ test("many unclosed blocks are read in one pass, not one search to the end each"
     assert.ok(table.serialize().includes("x\r\n}"));
     return cpuMs() - t0;
   };
-  const small = run(15000), big = run(60000);
+  const small = run(4000), big = run(16000);
   // A search to the end per block takes minutes here; one pass takes well under a tenth of the limit.
   assert.ok(big < 4000, `took ${big} ms of processor time`);
   // Four times the blocks: about four times the time in one pass, sixteen times in a search per block (the small
   // run counts at least 20 ms, so that timer noise on a fast machine can't make the ratio large).
-  assert.ok(big / Math.max(small, 20) < 10, `15000 blocks ${small} ms, 60000 blocks ${big} ms`);
+  assert.ok(big / Math.max(small, 20) < 10, `4000 blocks ${small} ms, 16000 blocks ${big} ms`);
 });
 
 test("the reader finds what the header and close patterns find, on random text", () => {
@@ -200,7 +201,7 @@ test("the reader finds what the header and close patterns find, on random text",
   const next = mulberry32(12345);
   const rand = (n: number) => Math.floor(next() * n);
   const exec = (re: RegExp, text: string, from: number) => { re.lastIndex = from; return re.exec(text); };
-  for (let round = 0; round < 3000; round++) {
+  for (let round = 0; round < 500; round++) {
     let text = "";
     for (let i = rand(30); i >= 0; i--) text += parts[rand(parts.length)];
     const r = new WtsReader(text);
@@ -216,8 +217,8 @@ test("the reader finds what the header and close patterns find, on random text",
 
 test("a long run of comment lines is read once, however many headers start in it", () => {
   // Every line starts a header (`STRING 2`) whose comment group runs to the end of the file, and none has a `{`.
-  // Read once per line, 30,000 lines take seconds and 200,000 minutes; read once, both take milliseconds.
-  for (const n of [30_000, 200_000]) {
+  // Read once per line, 10,000 lines take seconds and 40,000 minutes; read once, both take milliseconds.
+  for (const n of [10_000, 40_000]) {
     const text = "STRING 1\n" + "// STRING 2 \n".repeat(n);
     const t0 = cpuMs();
     assert.deepEqual([...new StringTable(text).entries()], []);

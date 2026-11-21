@@ -89,11 +89,7 @@ test("strings are quoted with their special characters escaped", () => {
   assert.equal(str("Sound\\x.wav"), '"Sound\\\\x.wav"');
 });
 
-test("typed values become JASS source", () => {
-  assert.equal(literal(data, "string", "a"), '"a"');
-  assert.equal(literal(data, "unitcode", "hfoo"), "'hfoo'");
-  assert.equal(literal(data, "integer", "5"), "5");
-});
+// [Removed] "typed values become JASS source" — exact duplicate of "literal: integer codes, strings, others as written" above.
 
 test("placed objects are named by id and creation number", () => {
   assert.equal(placedName({ id: "hfoo", editorId: 12 }, "unit"), "gg_unit_hfoo_0012");

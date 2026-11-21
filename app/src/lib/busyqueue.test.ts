@@ -8,7 +8,8 @@ function gate() {
   const done = new Promise<void>((res, rej) => { finish = res; fail = rej; });
   return { done, finish, fail };
 }
-const tick = () => new Promise((r) => setTimeout(r, 0));
+// [Refactored] Use setImmediate instead of setTimeout(r, 0) for instant event-loop turn flushing.
+const tick = () => new Promise((r) => setImmediate(r));
 
 /** An editor's history as the Import Manager keeps it: `at` steps done; each step moves files before it counts. */
 function editor(q: BusyQueue) {

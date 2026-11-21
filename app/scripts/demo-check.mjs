@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connect, problems, sleep, until } from "./cdp.mjs";
+import { connect, problems, until } from "./cdp.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(app, "dist-demo");
@@ -64,10 +64,12 @@ try {
   if (!barState.menubarInTitlebar || barState.buttons !== 0) found.push(`title bar: menus missing, or window buttons shown (${bar})`);
   await shot("1-start");
 
+  // [Refactored] Replace fixed 200 ms / 600 ms / 300 ms sleeps with condition waits + paint flushes (~5 s faster, non-flaky).
+  const flushPaint = () => page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
   const views = await page.evaluate(`document.querySelectorAll("button.activity").length`);
   for (let i = 0; i < views; i++) {
     await page.evaluate(`document.querySelectorAll("button.activity")[${i}].click()`);
-    await sleep(200);
+    await flushPaint();
     if (/Could not|is not a function|undefined/.test(await text(".sidebar"))) found.push(`side bar view ${i} shows an error`);
     await shot(`view-${i}`);
   }
@@ -77,7 +79,8 @@ try {
   for (const path of ["map/war3map.wtg.json", "map/war3map.w3u.json", "map/war3map.j", "notes.txt", "README.md", "map/war3map.w3i.json"]) {
     try {
       await page.evaluate(`w3Workbench.editors.open(${JSON.stringify(path)})`);
-      await sleep(600);
+      await until(`tab for ${path}`, () => page.evaluate(`w3Workbench.editors.activePath() === ${JSON.stringify(path)} && !!document.querySelector(".tab.active")`), 10_000);
+      await flushPaint();
       opened[path] = await page.evaluate(`document.querySelector(".tab.active")?.innerText ?? ""`);
       await shot(`file-${path.replace(/[^a-z0-9]+/gi, "_")}`);
     } catch (e) { found.push(`opening ${path}: ${e?.message ?? e}`); }
@@ -97,14 +100,15 @@ try {
     await shot("trigger-score");
     // The ▾ in front of the category folds it.
     await page.evaluate(`[...document.querySelectorAll(".editor-area *")].find((e) => e.children.length === 0 && e.textContent.trim() === "\u25be")?.click()`);
-    await sleep(300);
-    const folded = await page.evaluate(`document.body.innerText.includes("Demo Init")`);
+    const folded = await until("category folded", () => page.evaluate(`!document.body.innerText.includes("Demo Init")`), 5_000).then(() => false, () => true);
     if (folded) found.push("a category does not fold");
+    await flushPaint();
     await shot("trigger-folded");
   } catch (e) { found.push(`trigger editor: ${e?.message ?? e}`); }
   // The command palette and a theme.
   void page.evaluate(`w3Workbench.commands.execute("workbench.commandPalette")`);
-  await sleep(300);
+  await until("command palette", () => page.evaluate(`document.querySelectorAll(".quickinput, .quick-input, .palette").length > 0`), 5_000).catch(() => {});
+  await flushPaint();
   const palette = await page.evaluate(`document.querySelectorAll(".quickinput, .quick-input, .palette").length`);
   await shot("palette");
   await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);

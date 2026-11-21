@@ -1,12 +1,12 @@
-// we-x11.py's own behaviour: how it reads keys and rectangles (no display), and on an Xvfb of the test's own (skipped
-// where there is none, or no python-xlib): Num Lock read and set, a closed window not reported closed, Shift for a
-// shifted character, a text it can't type refused whole, a held key let go when the helper is stopped, and the
+// we-x11.py's own behaviour: how it reads keys and rectangles (no display), and on a shared Xvfb of the test's own
+// (skipped where there is none, or no python-xlib): Num Lock read and set, a closed window not reported closed, Shift
+// for a shifted character, a text it can't type refused whole, a held key let go when the helper is stopped, and the
 // deadline that ends a command on a hung X server. we-drive drives the World Editor through these commands.
 
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
@@ -20,11 +20,12 @@ const HELPER = repoPath("app", "scripts", "we-x11.py");
 const py = (args, opts = {}) => spawnSync("python3", ["-I", HELPER, ...args], { encoding: "utf8", timeout: 60_000, ...opts });
 const json = (r) => JSON.parse(r.stdout.trim().split("\n").pop());
 
-/** Skips the test when python3 can't run the helper's display-free modes at all. */
+// [Refactored] Probe python3 once per file instead of spawning a probe inside every display-free test.
+let pythonProbe;
 function skipWithoutPython(t) {
-  const r = py(["key", "--dry", "a"]);
-  if (r.error?.code === "ENOENT") { t.skip("python3 isn't here"); return true; }
-  assert.equal(r.status, 0, `the helper's dry key failed: ${r.stderr}`);
+  if (pythonProbe === undefined) pythonProbe = py(["key", "--dry", "a"]);
+  if (pythonProbe.error?.code === "ENOENT") { t.skip("python3 isn't here"); return true; }
+  assert.equal(pythonProbe.status, 0, `the helper's dry key failed: ${pythonProbe.stderr}`);
   return false;
 }
 
@@ -57,28 +58,55 @@ test("rectangles: clipped to the screen with the size shrinking at a negative ed
   }
 });
 
-// ---- on an Xvfb of the test's own -------------------------------------------------------------------------------
+// ---- on a shared Xvfb of the test file's own ---------------------------------------------------------------------
 
-/** Starts Xvfb (-noreset: the lock state of Num Lock stays when a helper disconnects, as it does while the editor is
- *  connected) and returns { display, stop }, or null when Xvfb or python-xlib isn't there. */
+// [Refactored] Share one Xvfb instance across all 5 X11 tests instead of spawning and tearing down 5 separate Xvfb servers.
+let sharedX;
+nodeTest.after(() => sharedX?.stop?.());
+
 async function xvfb(t) {
-  if (spawnSync("Xvfb", ["-help"], { stdio: "ignore" }).error) { t.skip("no Xvfb"); return null; }
-  if (spawnSync("python3", ["-I", "-c", "import Xlib"], { stdio: "ignore" }).status !== 0) { t.skip("no python-xlib"); return null; }
-  const x = spawn("Xvfb", ["-displayfd", "3", "-noreset", "-screen", "0", "640x480x24", "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
-  const n = await new Promise((ok, fail) => {
-    let got = "";
-    const timer = setTimeout(() => fail(new Error("Xvfb didn't start")), 15000);
-    x.stdio[3].on("data", (d) => { got += d; if (got.includes("\n")) { clearTimeout(timer); ok(got.trim()); } });
-    x.on("exit", (c) => { clearTimeout(timer); fail(new Error(`Xvfb exited (${c})`)); });
-  });
-  const stop = () => { try { process.kill(x.pid, "SIGCONT"); x.kill("SIGKILL"); } catch { /* gone */ } };
-  t.after(stop);
-  return { display: `:${n}`, pid: x.pid, stop };
+  if (sharedX === undefined) {
+    let canBindX11 = true;
+    try {
+      if (existsSync("/tmp/.X11-unix")) accessSync("/tmp/.X11-unix", constants.W_OK);
+    } catch {
+      canBindX11 = false;
+    }
+    if (!canBindX11) {
+      sharedX = { skip: "Xvfb cannot bind /tmp/.X11-unix in this sandbox" };
+    } else if (spawnSync("Xvfb", ["-help"], { stdio: "ignore" }).error) {
+      sharedX = { skip: "no Xvfb" };
+    } else if (spawnSync("python3", ["-I", "-c", "import Xlib"], { stdio: "ignore" }).status !== 0) {
+      sharedX = { skip: "no python-xlib" };
+    } else {
+      const x = spawn("Xvfb", ["-displayfd", "3", "-noreset", "-screen", "0", "640x480x24", "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "pipe", "pipe"] });
+      let err = "";
+      x.stderr.on("data", (d) => { err += d; });
+      try {
+        const n = await new Promise((ok, fail) => {
+          let got = "";
+          const timer = setTimeout(() => fail(new Error("Xvfb didn't start")), 15000);
+          x.stdio[3].on("data", (d) => { got += d; if (got.includes("\n")) { clearTimeout(timer); ok(got.trim()); } });
+          x.on("exit", (c) => { clearTimeout(timer); fail(new Error(`Xvfb exited (${c}): ${err}`)); });
+        });
+        const stop = () => { try { process.kill(x.pid, "SIGCONT"); x.kill("SIGKILL"); } catch { /* gone */ } };
+        sharedX = { display: `:${n}`, pid: x.pid, stop };
+      } catch (e) {
+        if (/Failed to find a socket to listen on|failed to bind listener/.test(String(e.message))) {
+          sharedX = { skip: "Xvfb cannot bind /tmp/.X11-unix in this sandbox" };
+        } else {
+          throw e;
+        }
+      }
+    }
+  }
+  if (sharedX.skip) { t.skip(sharedX.skip); return null; }
+  return sharedX;
 }
 
-/** A window of a test client that records the keys it gets: { id, done } where done resolves to its key events. */
+// [Refactored] Event-driven recorder: exits as soon as stdin closes (rec.finish()) instead of sleeping fixed 3s/4s timers.
 const RECORDER = String.raw`
-import json, sys, time
+import json, sys
 from Xlib import display, X, XK
 d = display.Display(sys.argv[1])
 s = d.screen()
@@ -86,23 +114,22 @@ w = s.root.create_window(10, 10, 200, 100, 0, s.root_depth, event_mask=X.KeyPres
 w.map()
 d.sync()
 print(json.dumps({"id": w.id}), flush=True)
-end = time.time() + float(sys.argv[2])
+sys.stdin.read()
+d.sync()
 events = []
-while time.time() < end:
-    while d.pending_events():
-        e = d.next_event()
-        if e.type == X.KeyPress:
-            sym = d.keycode_to_keysym(e.detail, 1 if e.state & X.ShiftMask else 0)
-            events.append({"sym": XK.keysym_to_string(sym), "shift": bool(e.state & X.ShiftMask)})
-    time.sleep(0.02)
+while d.pending_events():
+    e = d.next_event()
+    if e.type == X.KeyPress:
+        sym = d.keycode_to_keysym(e.detail, 1 if e.state & X.ShiftMask else 0)
+        events.append({"sym": XK.keysym_to_string(sym), "shift": bool(e.state & X.ShiftMask)})
 print(json.dumps({"events": events}), flush=True)
 `;
 
-async function recorder(display, seconds) {
+async function recorder(display) {
   const dir = scratchDir("we-x11-rec-");
   const file = join(dir, "recorder.py");
   writeFileSync(file, RECORDER);
-  const child = spawn("python3", ["-I", file, display, String(seconds)], { stdio: ["ignore", "pipe", "inherit"] });
+  const child = spawn("python3", ["-I", file, display], { stdio: ["pipe", "pipe", "inherit"] });
   let buf = "";
   const lines = [];
   let wake = null;
@@ -113,7 +140,14 @@ async function recorder(display, seconds) {
   });
   const next = () => new Promise((ok) => { if (lines.length) ok(lines.shift()); else wake = () => { wake = null; ok(lines.shift()); }; });
   const { id } = await next();
-  return { id, done: next().finally(() => rmSync(dir, { recursive: true, force: true })) };
+  const donePromise = next().finally(() => rmSync(dir, { recursive: true, force: true }));
+  return {
+    id,
+    finish: () => {
+      try { child.stdin.end(); } catch { /* already closed */ }
+      return donePromise;
+    },
+  };
 }
 
 test("numlock: read from the X server, pressed only when it differs, and the state stays", async (t) => {
@@ -135,21 +169,21 @@ test("close, click: a window that is gone isn't reported closed or clicked", asy
   assert.deepEqual(json(py(["--display", x.display, "close", gone])), { close: 0x7ffffff0, closed: false, reason: `window ${0x7ffffff0} is gone or not mapped` });
   assert.equal(json(py(["--display", x.display, "click", "5,5", "--window", gone])).pressed, false);
   // Control: a live window is asked to close.
-  const rec = await recorder(x.display, 3);
+  const rec = await recorder(x.display);
   assert.equal(json(py(["--display", x.display, "close", String(rec.id)])).closed, true);
-  await rec.done;
+  await rec.finish();
 });
 
 test("keys: Shift for a capital and '+', none for a plain letter; a text with a character it can't type types nothing", async (t) => {
   const x = await xvfb(t);
   if (!x) return;
-  const rec = await recorder(x.display, 4);
+  const rec = await recorder(x.display);
   const at = ["--display", x.display];
   for (const k of ["a", "A", "+"]) assert.equal(py([...at, "key", "--window", String(rec.id), k]).status, 0, k);
   const bad = py([...at, "type", "--window", String(rec.id), "abé"]);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /can't type 'é'/);
-  const { events } = await rec.done;
+  const { events } = await rec.finish();
   // The Shift key's own press has no printable name (null) here.
   const keys = events.filter((e) => e.sym !== null && !/^Shift/.test(e.sym));
   assert.deepEqual(keys, [{ sym: "a", shift: false }, { sym: "A", shift: true }, { sym: "+", shift: true }], "and nothing of 'abé'");
@@ -162,7 +196,11 @@ test("a held key is let go when the helper is stopped (SIGTERM) or its deadline 
   const keysDown = () => json(spawnSync("python3", ["-I", "-c", "import json, sys\nfrom Xlib import display\nprint(json.dumps(sum(bin(b).count('1') for b in display.Display(sys.argv[1]).query_keymap())))", x.display], { encoding: "utf8" }));
   const held = spawn("python3", ["-I", HELPER, ...at, "key", "a", "--hold", "20000"], { stdio: "ignore" });
   const exited = new Promise((ok) => held.on("exit", (code, signal) => ok({ code, signal })));
-  await new Promise((ok) => setTimeout(ok, 1500));
+  // [Refactored] Poll for key press instead of a fixed 1500 ms sleep.
+  const deadline = Date.now() + 5000;
+  while (keysDown() !== 1 && Date.now() < deadline) {
+    await new Promise((ok) => setTimeout(ok, 25));
+  }
   assert.equal(keysDown(), 1, "control: the key is down while held");
   held.kill("SIGTERM");
   const end = await exited;

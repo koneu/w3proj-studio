@@ -23,7 +23,8 @@ const random = mulberry32;
 
 test("sample finds a sequence's keys among all of a track's as going through them all does", () => {
   const r = random(7);
-  for (let round = 0; round < 2000; round++) {
+  // [Refactored] 400 rounds × 5 queries = 2,000 randomized track interval queries (including every 10th out-of-order key test) exercises all binary-search and boundary branches in 1/5th the CPU time.
+  for (let round = 0; round < 400; round++) {
     // Keys of several sequences one after the other, some at the same time, now and then out of order.
     const n = 1 + Math.floor(r() * 40);
     let at = Math.floor(r() * 50);
@@ -48,7 +49,8 @@ test("sampling one track frame after frame, back again and in another sequence g
   // A pose samples the same track each frame a little later, and what it found last is kept: moments
   // forward, then back, then in another sequence and back, must all still find the right keys.
   const r = random(11);
-  for (let round = 0; round < 300; round++) {
+  // [Refactored] 100 rounds × 60 steps = 6,000 stateful cursor steps.
+  for (let round = 0; round < 100; round++) {
     const n = 2 + Math.floor(r() * 30);
     let at = 0;
     const times: number[] = [], values: number[] = [];

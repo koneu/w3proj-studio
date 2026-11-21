@@ -10,11 +10,14 @@ import { fixturePath } from "../testhelpers/testutil";
 import { addLocaleStrings, adjustStringTables, localeNumbers, localeOnlyNumbers, renumberLocaleTables } from "./localewts";
 import { compactStringIds, renumberWts, StringTable } from "./wts";
 
-const fixture = (): string => fixturePath("wts-prune");
+// [Refactored] Cache fixture texts once at module load instead of calling readFileSync 8 times across 5 tests.
+const FIXTURE_DIR = fixturePath("wts-prune");
 const DE_PATH = "map/_Locales/deDE.w3mod/war3map.wts";
 const FR_PATH = "map/_Locales/frFR.w3mod/war3map.wts";
-const mainText = (): string => readFileSync(join(fixture(), "map", "war3map.wts"), "utf8");
-const deText = (): string => readFileSync(join(fixture(), DE_PATH), "utf8");
+const MAIN_TEXT = readFileSync(join(FIXTURE_DIR, "map", "war3map.wts"), "utf8");
+const DE_TEXT = readFileSync(join(FIXTURE_DIR, DE_PATH), "utf8");
+const mainText = (): string => MAIN_TEXT;
+const deText = (): string => DE_TEXT;
 const block = (n: number, t: string, eol = "\r\n") => `STRING ${n}${eol}{${eol}${t}${eol}}${eol}${eol}`;
 /** A French table in CRLF holding none of the numbers that move. */
 const FR = block(1, "Nom de la carte") + block(2, "Fantassin");

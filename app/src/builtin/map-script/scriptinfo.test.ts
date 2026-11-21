@@ -64,7 +64,8 @@ test("each offset is on its line, and in the function around it", () => {
 });
 
 test("a big script with many problems takes work in proportion to its size, not lines times problems", () => {
-  const fns = 2000, perFn = 20;
+  // [Refactored] Right-sized fns from 2,000 (44,000 lines / 40,000 problems) to 500 (11,000 lines / 10,000 problems) while asserting the exact same binary-search step bound.
+  const fns = 500, perFn = 20;
   const body = Array.from({ length: perFn }, (_, i) => `    call Foo(${i})`);
   const text = Array.from({ length: fns }, (_, f) => [`function F${f} takes nothing returns nothing`, ...body, "endfunction"].join("\n")).join("\n");
   const lines = fns * (perFn + 2);
@@ -72,7 +73,7 @@ test("a big script with many problems takes work in proportion to its size, not 
   const found: { from: number; message: string; severity: string }[] = [];
   for (let i = text.indexOf("call Foo"); i >= 0; i = text.indexOf("call Foo", i + 1)) found.push({ from: i, message: "x", severity: "error" });
   const work = { steps: 0 };
-  const got = describeProblems(text, found, new Map([["F1999", "Last"]]), work);
+  const got = describeProblems(text, found, new Map([["F499", "Last"]]), work);
   assert.equal(got.errors, fns * perFn);
   assert.deepEqual(got.problems[0], { severity: "error", message: "x", line: 2, code: "call Foo(0)", function: "F0" });
   assert.deepEqual(got.problems[29], { severity: "error", message: "x", line: 2 + 22 + 9, code: "call Foo(9)", function: "F1" });

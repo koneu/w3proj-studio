@@ -7,7 +7,6 @@ const LINUX_ONLY = process.platform !== "linux" && "we-drive runs on Linux only"
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { encodePng } from "./pic-compare.mjs";
-import { tmpdir } from "node:os";
 import { scratchDir } from "../../tests/scratch.mjs";
 import { repoPath } from "../src/lib/testhelpers/testutil";
 import { basename, join } from "node:path";
@@ -17,7 +16,7 @@ import * as drive from "./we-drive.mjs";
 import { weOutcome } from "./we-compare-core.mjs";
 import { addCamerasToMap, classify, closeAction, crashDialogs, CRASH_MESSAGE, DEFAULT_DRAG_HOLD, DEFAULT_FRAME_CAP, EditorCrashed, fileIsWholeMpq, gpuIcds, isCrashDialog, isWholeMpq, lavapipeIcds, renderEnv, vulkanDriver, pruneArtefacts, wineserverPath, xvfbCommand, editorPrefs, PINNED_MINIMAP_PREFS, PINNED_PREFS, procGone, procState, programName, isReopenedModule, mapAction, NULL_ALSA_CONF, wineOverrides, openCopyName, openQuestion, parseArgs, questionDialogs, Session, setPrefs, textLocale, VIEW_ITEMS, viewChecks, waitExit, winePath, withEditorPrefs } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
-import { compare, isCopied, lockPath, takeLock, userCompatData } from "./we-setup.mjs";
+import { isCopied, userCompatData } from "./we-setup.mjs";
 
 const PREFS = ["[Misc]", "assetMode=-1", "Has Been Run=false", "hd=1", "Undo Limit=0", "", "[Test Map]", "hd=0", "teen=0", ""].join("\r\n");
 
@@ -159,27 +158,22 @@ test("we-x11 drag path: even steps from the press to exactly the release point (
   assert.deepEqual(JSON.parse(run("5,5", "5,5", "--steps", "0").stdout).path, [[5, 5]]);
 });
 
-test("parseArgs: --clipboard takes the file the clipboard's text goes into", () => {
+// [Merged] Consolidated single-option parseArgs tests (--clipboard, --keyboard, --screen, --close-modules).
+test("parseArgs: --clipboard, --keyboard, --screen, and --close-modules options and steps", () => {
   assert.deepEqual(parseArgs(["--start", "--clipboard", "clip.txt"]).steps, [["--start", null], ["--clipboard", "clip.txt"]]);
   assert.throws(() => parseArgs(["--start", "--clipboard"]), /--clipboard needs a value/);
-});
 
-test("parseArgs: --keyboard names an X layout (de, us, de(nodeadkeys)) and nothing else", () => {
   assert.equal(parseArgs(["--start"]).opts.keyboard, undefined);
   assert.equal(parseArgs(["--keyboard", "de", "--start"]).opts.keyboard, "de");
   assert.equal(parseArgs(["--keyboard", "de(nodeadkeys)", "--start"]).opts.keyboard, "de(nodeadkeys)");
   assert.throws(() => parseArgs(["--keyboard", "de; touch x", "--start"]), /X layout name/);
   assert.throws(() => parseArgs(["--keyboard", "-print", "--start"]), /X layout name/);
-});
 
-test("parseArgs: --screen sets the display's size, a held key keeps its @MS in the step", () => {
   assert.equal(parseArgs(["--start"]).opts.screen, undefined);
   assert.deepEqual(parseArgs(["--screen", "1200x700", "--start"]).opts.screen, [1200, 700]);
   assert.throws(() => parseArgs(["--screen", "1200,700", "--start"]), /WxH/);
   assert.deepEqual(parseArgs(["--start", "--key", "ctrl+Up@1500"]).steps, [["--start", null], ["--key", "ctrl+Up@1500"]]);
-});
 
-test("parseArgs: --close-modules is a step without a value", () => {
   assert.deepEqual(parseArgs(["--start", "--close-modules", "--sleep", "5"]).steps, [["--start", null], ["--close-modules", null], ["--sleep", "5"]]);
 });
 
@@ -271,60 +265,8 @@ test("userCompatData finds the Steam prefix around an install", () => {
   assert.equal(userCompatData("/games/Warcraft III"), null);
 });
 
-test("compare fails only on changes under the guarded paths", () => {
-  const e = (sha) => ({ size: 1, mtime: "1", ctime: "1", ino: "1", sha256: sha });
-  const a = { files: { "/p/install/a": e("x"), "/p/install/b": e("y"), "/p/logs/l": e("z") } };
-  const b = { files: { "/p/install/a": e("x"), "/p/install/c": e("w"), "/p/logs/l": e("q") } };
-  const r = compare(a, b, ["/p/install"]);
-  assert.deepEqual(r.guardedChanged.sort(), ["/p/install/b", "/p/install/c"]);
-  assert.deepEqual(r.elsewhereChanged, ["/p/logs/l"]);
-  assert.deepEqual(compare(a, a, ["/p/install"]).guardedChanged, []);
-  assert.deepEqual(compare(a, { files: { ...a.files, "/p/installer": e("n") } }, ["/p/install"]).guardedChanged, [], "a sibling with the same prefix isn't guarded");
-});
-
-test("the lock: a second run waits and gives up; a lock whose process is gone is taken over", async () => {
-  const dir = scratchDir("we-lock-");
-  const lock = join(dir, "machine.lock");
-  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
-  process.env.W3PROJ_WE_LOCK = lock;
-  try {
-    // Two holders with different farm folders: the lock is the same one.
-    process.env.W3PROJ_WE_DIR = join(dir, "farm-a");
-    const release = await takeLock(() => {});
-    assert.ok(existsSync(join(lock, "owner.json")));
-    process.env.W3PROJ_WE_DIR = join(dir, "farm-b");
-    const said = [];
-    await assert.rejects(takeLock((m) => said.push(m), 1500), /still holds/);
-    assert.equal(said.length, 1, "said once");
-    assert.match(said[0], /waiting for the World Editor run of .*process \d+, since \d{4}-/);
-    release();
-    assert.ok(!existsSync(lock));
-    // A process id that can't be running.
-    mkdirSync(lock);
-    writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 2 ** 22 + 12345, repo: "elsewhere", since: "then" }));
-    const took = [];
-    const again = await takeLock((m) => took.push(m), 5000);
-    assert.match(took.join("\n"), /took over the World Editor lock of elsewhere/);
-    again();
-  } finally {
-    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("the lock's place is per user, outside every farm", () => {
-  const save = { we: process.env.W3PROJ_WE_DIR, lock: process.env.W3PROJ_WE_LOCK };
-  delete process.env.W3PROJ_WE_LOCK;
-  try {
-    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-x");
-    const a = lockPath();
-    process.env.W3PROJ_WE_DIR = join(tmpdir(), "farm-y");
-    assert.equal(lockPath(), a);
-    assert.ok(!a.startsWith(join(tmpdir(), "farm-")));
-  } finally {
-    for (const [k, v] of [["W3PROJ_WE_DIR", save.we], ["W3PROJ_WE_LOCK", save.lock]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
-  }
-});
+// [Removed] Duplicate we-setup.mjs tests ("compare fails only on changes under the guarded paths",
+// "the lock: a second run waits...", "the lock's place is per user..."): covered in we-setup.test.mjs and we-slots.test.mjs.
 
 const win = (title, extra = {}) => ({ id: 1, title, class: null, rect: [0, 0, 400, 300], overrideRedirect: false, ...extra });
 
@@ -1384,13 +1326,9 @@ test("Session: idle with a window title waits for that window, and the error nam
   await assert.rejects(r.s.idle('a window titled "Object Editor"', { window: "Object Editor", timeoutMs: 1000 }), /waiting for a window titled "Object Editor"/);
 });
 
+// [Merged] Removed duplicate "parseArgs: --idle is a step without a value" test below.
 test("parseArgs: --wait-window takes a title, --idle none", () => {
-  const o = parseArgs(["--key", "F5", "--wait-window", "Sound Editor", "--idle"]);
-  assert.deepEqual(o.steps, [["--key", "F5"], ["--wait-window", "Sound Editor"], ["--idle", null]]);
+  const o = parseArgs(["--key", "F5", "--wait-window", "Sound Editor", "--idle", "--sleep", "100"]);
+  assert.deepEqual(o.steps, [["--key", "F5"], ["--wait-window", "Sound Editor"], ["--idle", null], ["--sleep", "100"]]);
   assert.throws(() => parseArgs(["--wait-window"]));
-});
-
-test("parseArgs: --idle is a step without a value", () => {
-  const o = parseArgs(["--key", "F5", "--idle", "--sleep", "100"]);
-  assert.deepEqual(o.steps.map(([s]) => s), ["--key", "--idle", "--sleep"]);
 });

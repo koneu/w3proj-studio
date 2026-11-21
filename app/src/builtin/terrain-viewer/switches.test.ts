@@ -48,12 +48,12 @@ const FRESH_WE: Record<string, boolean | string> = {
 };
 
 test("the settings Studio shares with the World Editor start as a fresh World Editor's", () => {
+  // [Merged] Absorbed duplicate `the settings' declared defaults are the switches' defaults` test, which asserted the exact same `declared(key) === value` loop over SWITCH_DEFAULTS.
   for (const [key, value] of Object.entries(FRESH_WE)) assert.equal(declared(key), value, key);
-  for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) assert.equal(FRESH_WE[key], value, key);
-});
-
-test("the settings' declared defaults are the switches' defaults", () => {
-  for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) assert.equal(declared(key), value, key);
+  for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) {
+    assert.equal(FRESH_WE[key], value, key);
+    assert.equal(declared(key), value, key);
+  }
 });
 
 test("a switch that isn't set is its default; a set one is what was set", () => {

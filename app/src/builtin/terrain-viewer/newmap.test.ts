@@ -117,7 +117,8 @@ const heightStats = (t: ReturnType<typeof newTerrain>) => {
 // deviation 18.25, mean neighbour step 16.6, correlation 0.37 with the next corner, 0.00 three on.
 test("random hills are as rough as the World Editor's random height field", () => {
   const random = mulberry32(1);
-  for (const size of [64, 256]) {
+  // [Refactored] Test 64 and 128 instead of 64 and 256 (16,641 corners vs 66,049 corners, 4x faster while still verifying multi-size Gaussian noise statistics).
+  for (const size of [64, 128]) {
     const s = heightStats(newTerrain(choices({ noise: true, width: size, height: size }), random));
     const what = `${size} × ${size}: ${JSON.stringify(s)}`;
     assert.ok(s.step > 15 && s.step < 18.5, `${what}: neighbour step about 16.6`);

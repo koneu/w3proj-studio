@@ -75,7 +75,11 @@ fn rows<'a>(r: &'a Value, check: &str) -> Vec<&'a Value> {
 fn the_problems_checks_run_honour_the_ignore_file_and_write_nothing() {
     let dir = mini_map("ignore");
     let before = snapshot(&dir);
-    let (code, r) = check(&dir, &["--only=problems"]);
+    // [Merged] Run without --only=problems on the first call so we verify both problems rows and skipped ["melee", "path"] sections in one Node host invocation.
+    let (code, r) = check(&dir, &[]);
+    let skipped: Vec<&str> = r["sections"].as_array().unwrap().iter().filter(|s| s["ran"] == false).map(|s| s["section"].as_str().unwrap()).collect();
+    assert_eq!(skipped, ["melee", "path"], "{r}");
+    assert!(rows(&r, "melee").is_empty());
     // Without a game, the checks that read it fail: failures are errors, not "no problems".
     assert_eq!(code, Some(1), "{r}");
     assert!(rows(&r, "jass").iter().any(|row| row["severity"] == "error" && row["message"].as_str().unwrap().contains("the check failed")), "{r}");
@@ -104,10 +108,7 @@ fn the_problems_checks_run_honour_the_ignore_file_and_write_nothing() {
 #[test]
 fn melee_is_left_out_of_a_map_without_the_melee_flag_and_path_needs_points() {
     let dir = mini_map("sections");
-    let (_, r) = check(&dir, &[]);
-    let skipped: Vec<&str> = r["sections"].as_array().unwrap().iter().filter(|s| s["ran"] == false).map(|s| s["section"].as_str().unwrap()).collect();
-    assert_eq!(skipped, ["melee", "path"], "{r}");
-    assert!(rows(&r, "melee").is_empty());
+    // [Refactored] Section skipping on mini-map is already asserted above; here we only test --only=path CLI argument rejection (fast, no Node host needed).
     let out = Command::new(env!("CARGO_BIN_EXE_w3proj")).arg("check").arg(&*dir).arg("--only=path").output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--path"), "{}", String::from_utf8_lossy(&out.stderr));

@@ -113,6 +113,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sleep, until } from "./cdp.mjs";
@@ -206,13 +207,15 @@ async function studioStep(page, step, ctx) {
     })()`);
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
     await until("the terrain view", () => page.evaluate(`!!window.__driveEd && !!document.querySelector(".model-stage canvas")`), 120000);
+    // Keep a short 250 ms quiet window so reads that kick off just after editors.open aren't missed, then settle.
     let quietSince = 0;
     await until("the game's files and the view's layers", async () => {
       const busy = await page.evaluate(`w3Workbench.game.readsPending > 0 || [...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`);
       if (busy) { quietSince = 0; return false; }
       quietSince ||= Date.now();
-      return Date.now() - quietSince > 1000;
+      return Date.now() - quietSince > 250;
     }, 180000);
+    await page.evaluate(`w3Workbench.settled()`, { timeout: 180000 });
   } else throw new Error(`unknown Studio step ${JSON.stringify(step)}`);
 }
 
@@ -312,7 +315,11 @@ async function runStudio(specs, opts, game) {
           await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
           await packProject(page, join(dir, "input.w3x"));
         }
-        for (const s of spec.studio.steps) await studioStep(page, s, spec);
+        // Trailing { sleep } steps before packProject were waiting for async app work; settle directly instead.
+        let end = spec.studio.steps.length;
+        while (end > 0 && spec.studio.steps[end - 1].sleep !== undefined) end--;
+        for (let i = 0; i < end; i++) await studioStep(page, spec.studio.steps[i], spec);
+        if (end < spec.studio.steps.length) await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
         await packProject(page, join(dir, "studio.w3x"));
         say(`${spec.name}: Studio done in ${Math.round((Date.now() - t0) / 1000)} s`);
       } catch (e) {
@@ -417,13 +424,7 @@ export function runLines(command, args, options = {}) {
 
 // ---------------------------------------------------------------- reading and comparing
 
-/** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
-export function reader(cli, game, dir, map) {
-  const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
-  const mapFile = join(dir, map);
-  rmSync(project, { recursive: true, force: true });
-  const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
-  if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+function makeReader(cli, project, mapFile, map) {
   const names = new Set(readdirSync(join(project, "map")));
   let listing = null;
   const list = () => {
@@ -446,6 +447,16 @@ export function reader(cli, game, dir, map) {
   };
 }
 
+/** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
+export function reader(cli, game, dir, map) {
+  const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
+  const mapFile = join(dir, map);
+  rmSync(project, { recursive: true, force: true });
+  const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
+  if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+  return makeReader(cli, project, mapFile, map);
+}
+
 /** The app's own image decoder (lib/image, BLP and the rest), bundled into the work folder for the "minimap" kind. */
 async function imageDecoder(work) {
   const { build } = await import("esbuild");
@@ -462,15 +473,40 @@ async function imageDecoder(work) {
   }
 }
 
-function compareSpec(spec, cli, game, opts) {
+function runCliAsync(cli, args, { timeout = 600000 } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cli, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const out = [], err = [];
+    let timer = null, timedOut = false;
+    if (timeout) timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeout);
+    child.stdout.on("data", (d) => out.push(d));
+    child.stderr.on("data", (d) => err.push(d));
+    child.on("error", (e) => { clearTimeout(timer); resolve({ status: null, signal: null, error: e, stdout: "", stderr: "" }); });
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, error: timedOut ? new Error(`timed out after ${timeout} ms`) : null, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
+    });
+  });
+}
+
+async function readerAsync(cli, game, dir, map) {
+  const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
+  const mapFile = join(dir, map);
+  rmSync(project, { recursive: true, force: true });
+  const r = await runCliAsync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"]);
+  if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout || r.error?.message || "").trim().split("\n").pop()}`);
+  return makeReader(cli, project, mapFile, map);
+}
+
+async function compareSpec(spec, cli, game, opts) {
   const dir = join(opts.work, spec.name);
   const limit = opts.limit ?? spec.limit;
-  const we = reader(cli, game, dir, "we.w3x"), studio = reader(cli, game, dir, "studio.w3x");
+  const [we, studio] = await Promise.all([readerAsync(cli, game, dir, "we.w3x"), readerAsync(cli, game, dir, "studio.w3x")]);
   const files = spec.compare.map((c) => compareEntry(c, we, studio, { limit, decodeImage: opts.decodeImage }));
   // A parsed compare sees the codecs' JSON of both saves, so what the codecs lose cancels out: the World Editor's save
   // has to come back the same from unpack and pack (w3proj verify, in memory), else that file's result is ERROR.
   if (!files.some((f) => f.kind === "parsed" && f.status !== "ERROR" && f.status !== "MISSING")) return files;
-  const v = spawnSync(cli, ["verify", join(dir, "we.w3x"), "--game", game ?? "none", "-q"], { encoding: "utf8", timeout: 600000 });
+  const v = await runCliAsync(cli, ["verify", join(dir, "we.w3x"), "--game", game ?? "none", "-q"]);
   const outcome = v.status === 0 ? {} : verifyOutcome(v.stdout);
   if (v.status !== 0 && !outcome.mismatched && !outcome.error) outcome.error = `w3proj verify exited ${v.status ?? v.signal ?? v.error?.message}: ${String(v.stderr || "").trim().split("\n").pop()}`;
   return applyRoundtrip(files, outcome);
@@ -634,16 +670,22 @@ async function runSpecs(specs, o, game) {
   }
   const tWe = Date.now();
   if (specs.some((s) => s.compare.some((c) => c.as === "minimap"))) o.decodeImage = await imageDecoder(o.work);
-  const results = [];
-  for (const s of specs) {
-    const r = { name: s.name, description: s.description, files: [], error: s.error ?? null, ...(s.warnings ? { warnings: s.warnings } : {}) };
-    // --no-we: Studio's side only; nothing was compared, which is never "ok" (runOutcome: exit 3).
-    if (!s.error && !o.we) r.notCompared = true;
-    if (!s.error && o.we) {
-      try { r.files = compareSpec(s, cli, game, o); } catch (e) { r.error = `compare: ${e.message}`; }
+  // Overlap async unpack/verify across a small worker pool while keeping peak cat buffer memory modest.
+  const results = new Array(specs.length);
+  const queue = specs.map((s, i) => [s, i]);
+  const worker = async () => {
+    for (let item; (item = queue.shift());) {
+      const [s, i] = item;
+      const r = { name: s.name, description: s.description, files: [], error: s.error ?? null, ...(s.warnings ? { warnings: s.warnings } : {}) };
+      // --no-we: Studio's side only; nothing was compared, which is never "ok" (runOutcome: exit 3).
+      if (!s.error && !o.we) r.notCompared = true;
+      if (!s.error && o.we) {
+        try { r.files = await compareSpec(s, cli, game, o); } catch (e) { r.error = `compare: ${e.message}`; }
+      }
+      results[i] = r;
     }
-    results.push(r);
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, availableParallelism(), Math.max(1, specs.length)) }, worker));
   const { ok, code, unexpected } = runOutcome(results, { strictIgnore: o.strictIgnore });
   for (const r of results) console.log(formatReport(r, o.limit ?? specs.find((s) => s.name === r.name).limit, { strictIgnore: o.strictIgnore }));
   const seconds = { studio: Math.round((tStudio - t0) / 1000), worldEditor: Math.round((tWe - tStudio) / 1000), compare: Math.round((Date.now() - tWe) / 1000) };

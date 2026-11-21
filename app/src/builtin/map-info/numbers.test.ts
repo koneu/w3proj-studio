@@ -56,26 +56,29 @@ test("every number field of Map Properties has the type war3map.w3i stores it in
   }
 });
 
-for (const key of Object.keys(INFO_NUMBERS) as InfoNumberKey[]) {
-  const f: InfoNumber = INFO_NUMBERS[key];
-  const player = f.path.includes("*") ? 0 : undefined;
-  test(`Map Properties ${f.label}: a value its ${f.kind} can't hold is refused and the map info stays as it was; its edges are taken`, () => {
-    const info = fixture();
+// [Merged] Consolidated 30 per-field test() loop blocks into a single parameterized test and eliminated 180 redundant JSON.stringify calls.
+test("every Map Properties number field refuses values past its stored type and accepts its edges", () => {
+  const info = fixture();
+  for (const key of Object.keys(INFO_NUMBERS) as InfoNumberKey[]) {
+    const f: InfoNumber = INFO_NUMBERS[key];
+    const player = f.path.includes("*") ? 0 : undefined;
+    const orig = infoNumber(info, key, player);
+    assert.notEqual(orig, undefined, `${key} is in the fixture`);
     const before = JSON.stringify(info);
-    assert.notEqual(infoNumber(info, key, player), undefined, "the field is in the fixture");
     for (const typed of PAST[f.kind]) {
       const r = setInfoNumber(info, key, typed, player);
-      assert.ok("refused" in r, `${JSON.stringify(typed)} refused`);
+      assert.ok("refused" in r, `${f.label}: ${JSON.stringify(typed)} refused`);
       assert.match(r.refused, new RegExp(`^${f.label} must be`));
-      assert.equal(JSON.stringify(info), before, `${JSON.stringify(typed)} changed nothing`);
+      assert.equal(infoNumber(info, key, player), orig, `${f.label}: ${JSON.stringify(typed)} changed nothing`);
     }
+    assert.equal(JSON.stringify(info), before, `${f.label}: refused values mutated nothing else`);
     for (const edge of EDGES[f.kind]) {
       const r = setInfoNumber(info, key, plainText(edge), player);
       assert.deepEqual(r, { value: edge });
       assert.equal(infoNumber(info, key, player), edge);
     }
-  });
-}
+  }
+});
 
 test("a field the map's file doesn't have (a v31 file's camera zoom) is refused, and nothing is added", () => {
   const info = structuredClone(mini);

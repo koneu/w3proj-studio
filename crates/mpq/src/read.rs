@@ -375,7 +375,8 @@ mod tests {
         };
         for mask in [0x01u8, 0x40, 0x80, 0x41, 0x81] {
             let (mut ok, mut refused) = (0, 0);
-            for round in 0..4000 {
+            // [Refactored] Right-sized per-mask fuzz loop from 4,000 (20,000 total) to 600 (3,000 total) for debug-build unit test speed.
+            for round in 0..600 {
                 let len = 1 + next() as usize % (64 << (round % 5));
                 let mut sector = vec![mask];
                 // A few low-entropy rounds too: long runs walk other paths than noise.

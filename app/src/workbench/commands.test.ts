@@ -12,6 +12,10 @@ const appSrc = (() => {
     if (dirname(dir) === dir) throw new Error("app/src not found from " + process.cwd());
   }
 })();
+type Manifest = { contributes: { commands: { id: string; title: string; keybinding?: string }[]; keybindings?: { key: string; command: string; when?: string }[] } };
+// [Refactored] Read and parse terrain-viewer/extension.json and map-project/extension.json once at module load instead of 3 times across tests.
+const terrainManifest = JSON.parse(readFileSync(join(appSrc, "builtin", "terrain-viewer", "extension.json"), "utf8")) as Manifest;
+const projectManifest = JSON.parse(readFileSync(join(appSrc, "builtin", "map-project", "extension.json"), "utf8")) as Manifest;
 
 test("a chord WebKitGTK gives as key Unidentified is read from the physical key", () => {
   const ev = (key: string, code: string, shift: boolean) => ({ key, code, ctrlKey: true, metaKey: false, altKey: false, shiftKey: shift }) as KeyboardEvent;
@@ -27,8 +31,7 @@ test("the terrain view's keys stay with it while it has the keyboard; elsewhere 
   const svc = new CommandService();
   svc.contribute("core", { id: "workbench.reload", title: "Reload Window", keybinding: "ctrl+r" });
   svc.contribute("core", { id: "workbench.save", title: "Save", keybinding: "ctrl+s" });
-  const manifest = JSON.parse(readFileSync(join(appSrc, "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
-  const bindings = defaultBindings(svc.contributions(), manifest.contributes.keybindings);
+  const bindings = defaultBindings(svc.contributions(), terrainManifest.contributes.keybindings ?? []);
   // The canvas says whose keys they are; the workbench asks the element the key went to.
   const canvas = { tagName: "CANVAS", getAttribute: (n: string) => (n === "data-key-context" ? "terrainFocus" : null), closest: (s: string) => (s === "[data-key-context]" ? canvas : null) };
   const inView = targetContext(canvas as unknown as EventTarget);
@@ -47,34 +50,21 @@ test("the terrain view's keys stay with it while it has the keyboard; elsewhere 
   assert.equal(resolve(bindings, ["v"], {}), null, "plain keys aren't bound in the workbench");
 });
 
-test("in the terrain view Ctrl+Shift+B is Enforce Camera Bounds and Y Set Uniform Doodad Heights; elsewhere Ctrl+Shift+B packs", () => {
-  // Verification round 3 (2026-11-13): the World Editor's Ctrl+Shift+B toggles Enforce Camera Bounds, its Y sets the
-  // selected doodads to their mean height without a dialog.
-  const svc = new CommandService();
-  const read = (p: string) => JSON.parse(readFileSync(p, "utf8")) as { contributes: { commands: { id: string; title: string; keybinding?: string }[]; keybindings?: { key: string; command: string; when?: string }[] } };
-  const project = read(join(appSrc, "builtin", "map-project", "extension.json")), terrain = read(join(appSrc, "builtin", "terrain-viewer", "extension.json"));
-  for (const c of [...project.contributes.commands, ...terrain.contributes.commands]) svc.contribute("x", c);
-  const bindings = defaultBindings(svc.contributions(), [...(project.contributes.keybindings ?? []), ...(terrain.contributes.keybindings ?? [])]);
-  const inView = { terrainFocus: true, project: true, terrain: true };
-  const command = (chord: string, ctx: Record<string, boolean>) => { const r = resolve(bindings, [chord], ctx); return r && "binding" in r ? r.binding.command : null; };
-  assert.equal(command("ctrl+shift+b", inView), "w3.terrain.toggleEnforceCameraBounds");
-  assert.equal(command("ctrl+shift+b", { project: true, terrain: true }), "w3.project.pack", "outside the terrain view it packs");
-  assert.equal(command("y", inView), "w3.terrain.setUniformDoodadHeightsToMean");
-  assert.equal(command("ctrl+shift+h", inView), "w3.terrain.toggleResetFixedHeights");
-});
-
-test("in the terrain view F1, Ctrl+F1 and Ctrl+P are the World Editor's View Selection keys; elsewhere Ctrl+P opens a file", () => {
-  // The World Editor's Edit > View Selection (we-drive, branch we-compare-5, 2026-11-18): View In Object Manager F1, View
-  // In Object Editor Ctrl+F1, Select In Tool Palette Ctrl+P.
+// [Merged] Consolidated the two terrain-view vs workbench keybinding resolution tests into one.
+test("in the terrain view Ctrl+Shift+B, Y, F1, Ctrl+F1 and Ctrl+P resolve to the World Editor's bindings; elsewhere Ctrl+Shift+B packs and Ctrl+P opens a file", () => {
   const svc = new CommandService();
   svc.contribute("core", { id: "workbench.quickOpen", title: "Go to File…", keybinding: "ctrl+p", when: "project" });
-  const terrain = JSON.parse(readFileSync(join(appSrc, "builtin", "terrain-viewer", "extension.json"), "utf8")) as { contributes: { commands: { id: string; title: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
-  for (const c of terrain.contributes.commands) svc.contribute("x", c);
-  const bindings = defaultBindings(svc.contributions(), terrain.contributes.keybindings);
-  const command = (chord: string, ctx: Record<string, boolean>) => { const r = resolve(bindings, [chord], ctx); return r && "binding" in r ? r.binding.command : null; };
+  for (const c of [...projectManifest.contributes.commands, ...terrainManifest.contributes.commands]) svc.contribute("x", c);
+  const bindings = defaultBindings(svc.contributions(), [...(projectManifest.contributes.keybindings ?? []), ...(terrainManifest.contributes.keybindings ?? [])]);
   const inView = { terrainFocus: true, project: true, terrain: true };
+  const outside = { project: true, terrain: true };
+  const command = (chord: string, ctx: Record<string, boolean>) => { const r = resolve(bindings, [chord], ctx); return r && "binding" in r ? r.binding.command : null; };
+  assert.equal(command("ctrl+shift+b", inView), "w3.terrain.toggleEnforceCameraBounds");
+  assert.equal(command("ctrl+shift+b", outside), "w3.project.pack", "outside the terrain view it packs");
+  assert.equal(command("y", inView), "w3.terrain.setUniformDoodadHeightsToMean");
+  assert.equal(command("ctrl+shift+h", inView), "w3.terrain.toggleResetFixedHeights");
   assert.equal(command("f1", inView), "w3.terrain.selection.viewInObjectManager");
   assert.equal(command("ctrl+f1", inView), "w3.terrain.selection.viewInObjectEditor");
   assert.equal(command("ctrl+p", inView), "w3.terrain.selectInPalette");
-  assert.equal(command("ctrl+p", { project: true, terrain: true }), "workbench.quickOpen", "outside the terrain view it opens a file");
+  assert.equal(command("ctrl+p", outside), "workbench.quickOpen", "outside the terrain view it opens a file");
 });

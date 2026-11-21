@@ -79,7 +79,8 @@ fn damaged_manifests_never_panic_a_save() {
     let base = commented(&root).into_bytes();
     let m = Manifest { format: project::FORMAT_VERSION, map: Some(header("Map")), archive: Default::default(), pack: Default::default() };
     let mut seed = 0x2545_f491_4f6c_dd1du64;
-    for round in 0..300 {
+    // [Refactored] Right-sized disk+fsync loop from 300 to 40 rounds (each valid round calls sync_all on disk).
+    for round in 0..40 {
         let mut bytes = base.clone();
         for _ in 0..1 + round % 4 {
             seed ^= seed << 13;

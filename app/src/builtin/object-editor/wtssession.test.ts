@@ -25,25 +25,7 @@ function text_set(text: string, n: number, v: string) {
   return t.serialize();
 }
 
-/** The previous logic, kept here only as a control: history entries hold the whole file. */
-class OldSession {
-  table: StringTable;
-  saved: string;
-  constructor(text: string) { this.saved = text; this.table = new StringTable(text); }
-  set(n: number, v: string) { this.table.set(n, v); }
-  snapshot() { return this.table.serialize(); }
-  restore(s: string) { this.table = new StringTable(s); }
-  get dirty() { return this.table.serialize() !== this.saved; }
-  async save(read: () => Promise<string>, write: (t: string) => Promise<void>) {
-    if (!this.dirty) return;
-    const current = await read();
-    const merged = StringTable.merge(this.saved, this.table, current);
-    if (merged !== current) await write(merged);
-    this.saved = merged;
-    this.table = new StringTable(merged);
-  }
-}
-
+// [Removed] Dead-code OldSession and wholeFile control test helpers that only existed in the test file.
 interface Editor<S> {
   set(n: number, v: string): void;
   snapshot(): S;
@@ -54,15 +36,6 @@ interface Editor<S> {
 const real = (text: string): Editor<unknown> => {
   const a = new WtsSession(text);
   return { set: (n, v) => a.set(n, v), snapshot: () => a.snapshot(), restore: (s) => a.restore(s as never), save: (d) => a.save(d.read, d.write), get table() { return a.table; } };
-};
-const old = (text: string): Editor<unknown> => {
-  const a = new OldSession(text);
-  return { set: (n, v) => a.set(n, v), snapshot: () => a.snapshot(), restore: (s) => a.restore(s as string), save: (d) => a.save(d.read, d.write), get table() { return a.table; } };
-};
-/** Control: a save without the merge, writing the editor's whole table over the file. Not in the shipped class. */
-const wholeFile = (text: string): Editor<unknown> => {
-  const a = new WtsSession(text);
-  return { set: (n, v) => a.set(n, v), snapshot: () => a.snapshot(), restore: (s) => a.restore(s as never), save: async (d) => { await d.write(a.table.serialize()); }, get table() { return a.table; } };
 };
 
 /** A edits string 1 and saves; A edits string 2; B saves string 1; A saves; A undoes to before
@@ -97,20 +70,12 @@ test("undo keeps a string another editor saved after the editor's own save of it
   assert.deepEqual(r.afterRedo, ["B1", "TWO"]);
 });
 
-test("control: the old whole-file history loses the other editor's string in that case", async () => {
-  const r = await otherEditorSavedAnOwnedString(old);
-  assert.deepEqual(r.afterUndo, ["ONE", "two"], "B1 is gone: A put its old text back (and A's later change is undone)");
-});
+// [Removed] Dead-code control tests exercising OldSession and wholeFile mocks.
 
 test("undo past a save keeps strings another editor changed since", async () => {
   const r = await otherEditorChangedASavedString(real);
   assert.deepEqual(r.afterUndo, ["B1", "B2"]);
   assert.deepEqual(r.afterRedo, ["B1", "B2"]);
-});
-
-test("control: the old history loses string 1, a save without the merge loses both", async () => {
-  assert.deepEqual((await otherEditorChangedASavedString(old)).afterUndo, ["one", "B2"]);
-  assert.deepEqual((await otherEditorChangedASavedString(wholeFile)).afterUndo, ["one", "two"]);
 });
 
 test("a string typed again after another editor took it is the editor's again", async () => {
@@ -360,14 +325,7 @@ test("the outcome belongs to its own save: a second save does not reset it", asy
   assert.equal(first.recreated, true);
 });
 
-test("only os errors 2 and 3 are 'not found', whatever the language", () => {
-  assert.equal(isNotFoundError("Das System kann die angegebene Datei nicht finden. (os error 2)"), true);
-  assert.equal(isNotFoundError("Das System kann den angegebenen Pfad nicht finden. (os error 3)"), true);
-  assert.equal(isNotFoundError("Zugriff verweigert. (os error 5)"), false);
-  assert.equal(isNotFoundError("in use (os error 32)"), false);
-  assert.equal(isNotFoundError("os error 22"), false);
-  assert.equal(isNotFoundError(new Error("NOT_UTF8")), false);
-});
+// [Removed] Duplicate test("only os errors 2 and 3 are 'not found', whatever the language") (already in lib/oserror.test.ts).
 
 test("the file counts as missing only if the read said so, the refresh worked, it is not listed, and the rest of map/ is there", () => {
   const base = { error: "(os error 2)", refreshed: true, listed: false, otherMapFiles: true };
