@@ -71,7 +71,11 @@ export function entryFile(e: ImportEntry, folder: string, has: (lowerPath: strin
  *  import replacing a game file), but the World Editor's Import Manager doesn't show them. Project paths, in the
  *  order given. */
 export function unlistedFiles(projectFiles: readonly string[], entries: readonly ImportEntry[], folder: string): string[] {
-  const inMap = projectFiles.map((p) => p.replace(/\\/g, "/")).filter((p) => p.toLowerCase().startsWith("map/"));
+  const all = projectFiles.map((p) => p.replace(/\\/g, "/"));
+  // A split terrain (map/terrain/terrain.json): what map/terrain/ holds is the map's own terrain and placed objects,
+  // never packed as files of their own (crates/w3proj terrain_layout.rs). Not imports, and never cleaned up as such.
+  const split = all.some((p) => p.toLowerCase() === "map/terrain/terrain.json");
+  const inMap = all.filter((p) => p.toLowerCase().startsWith("map/") && !(split && p.toLowerCase().startsWith("map/terrain/")));
   const byLower = new Map<string, string>();
   for (const p of inMap) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);
   const claimed = new Set(entries.map((e) => entryFile(e, folder, (l) => byLower.get(l))?.toLowerCase()).filter((x): x is string => !!x));

@@ -6,7 +6,12 @@ import { PendingWork } from "../lib/settle";
 
 /** A file's size and last write (ms) as the backend reports them. */
 /** A file's size and last write (ms); `hash`: of its contents, where asked for (`statHashed`). */
-export interface Stamp { size: number; modified: number; hash?: string }
+export interface Stamp {
+  size: number; modified: number; hash?: string;
+  /** Other files the write changed (absolute paths): a split terrain's flat file is written into the subterrain files
+   *  it stands for (backend flatview.rs), and the other flat files made from them change with them. */
+  also?: { path: string; size: number; modified: number }[];
+}
 import { timeLimit } from "./timelimit";
 import { validateSetting } from "./settingsvalidate";
 
@@ -317,9 +322,18 @@ export class WorkspaceService {
       if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
     }
     if (this.info?.root !== root) return;
+    this.noteOwn(at, stamp ? { size: stamp.size, modified: stamp.modified } : null, size, seq, root);
+    // The files the write went into besides (a split terrain's subterrain files): ours too, not another program's.
+    for (const a of stamp?.also ?? []) {
+      const other = this.keyOf(a.path, root);
+      if (other) this.noteOwn(other, { size: a.size, modified: a.modified }, a.size, seq, root);
+    }
+  }
+  /** Notes a file written by us (`trackedWrite`): its stamp as the write left it, its entry in the list. */
+  private noteOwn(at: { rel: string; key: string }, stamp: Stamp | null, size: number, seq: number, root: string | undefined) {
     const known = this.ownWrites.get(at.key);
     if (known && known.seq > seq) return;
-    this.ownWrites.set(at.key, { stamp: stamp ?? null, seq });
+    this.ownWrites.set(at.key, { stamp, seq });
     const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now() };
     const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => this.key(f.path, root) === at.key) : -1;
     if (i >= 0) {
