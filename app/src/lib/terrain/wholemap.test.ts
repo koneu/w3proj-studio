@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { gameCli, mainCheckout } from "../testhelpers/gamefiles";
-import { fixturePath, skipOrFail } from "../testhelpers/testutil";
+import { mainCheckout } from "../testhelpers/gamefiles";
+import { fixturePath, mulberry32 as seeded, skipOrFail } from "../testhelpers/testutil";
 import { CornerUndo } from "./cliffs";
 import { adjustCliffLevels, cliffShiftRange, RANDOM_DEFAULTS, randomizeHeightField, resetHeightField, TOP_LEVEL } from "./wholemap";
 import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
@@ -54,24 +54,24 @@ test("Reset Height Field flattens every corner over its cliff level and leaves t
 /** A file of tests/fixtures/height-random: a 65x65 test map's w3e as made for the World Editor (relief: spikes, a
  *  gradient, a cliff block one level up and a lake; noise: random heights) and as it saved it after Reset Height Field
  *  with Random at variation 0 (r3, r8: smoothing 3 and 8 on relief; n1: smoothing 1 on noise). */
+// [Refactored] Cache parsed 65x65 height-random W3E fixtures in memory and clone corners on demand instead of re-reading and re-parsing 65x65 binary files 32 times; use shared mulberry32 from testutil.ts.
+const FIXTURE_CACHE = new Map<string, Terrain>();
 function fixture(name: string): Terrain {
-  return parseW3e(new Uint8Array(readFileSync(fixturePath("height-random", name))));
+  let cached = FIXTURE_CACHE.get(name);
+  if (!cached) {
+    cached = parseW3e(new Uint8Array(readFileSync(fixturePath("height-random", name))));
+    FIXTURE_CACHE.set(name, cached);
+  }
+  return { ...cached, corners: cached.corners.map((c) => ({ ...c })) };
 }
 
-/** A seeded random source (mulberry32): a failure replays from its seed. */
-const seeded = (seed: number) => () => {
-  seed = (seed + 0x6d2b79f5) | 0;
-  let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-  return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-};
-
 /** The empty 65x65 map the World Editor's runs started from (empty_map_on_newest_world_editor.w3m): flat, level 2. */
-const flat65 = (): Terrain => {
+const FLAT_65_BASE = (() => {
   const t = fixture("noise.w3e");
   for (const c of t.corners) setGroundHeight(c, 0);
   return t;
-};
+})();
+const flat65 = (): Terrain => ({ ...FLAT_65_BASE, corners: FLAT_65_BASE.corners.map((c) => ({ ...c })) });
 
 const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 const sd = (v: number[]) => { const m = mean(v); return Math.sqrt(mean(v.map((x) => (x - m) ** 2))); };
@@ -116,8 +116,9 @@ test("Random's smoothing gives the World Editor's spread and neighbour correlati
   // The flat map, variation 20, one World Editor session per smoothing setting (s0…s8; s4 is b0): the changes' sd
   // and lag-1 correlation along x. A 65x65 sample: allow 8 % on the sd and 0.07 on the correlation.
   const WE = [[155.5, 0.013], [125.2, 0.071], [103.2, 0.206], [86.0, 0.253], [73.1, 0.379], [64.3, 0.484], [57.8, 0.571], [49.8, 0.603], [48.1, 0.685]];
+  const before = FLAT_65_BASE;
   WE.forEach(([weSd, weLag], smoothing) => {
-    const before = flat65(), t = flat65();
+    const t = flat65();
     randomizeHeightField(t, { variation: 20, smoothing, skipWater: true }, new CornerUndo(), seeded(100 + smoothing));
     const d = changes(before, t);
     assert.ok(Math.abs(sd(d) - weSd) < weSd * 0.08, `smoothing ${smoothing}: sd ${sd(d).toFixed(1)}, the World Editor's ${weSd}`);
@@ -309,10 +310,13 @@ const w3eCache = new Map<string, Uint8Array | null>();
 function realW3e(name: string): Uint8Array | null {
   const hit = w3eCache.get(name);
   if (hit !== undefined) return hit ? new Uint8Array(hit) : null;
-  const cli = gameCli(), map = corpusDir ? join(corpusDir, name) : "";
+  const where = mainCheckout();
+  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
+  const bin = where ? [process.env.W3PROJ_BIN, join(where.repo, "target", "release", exe), join(where.main, "target", "release", exe)].find((p) => p && existsSync(p)) : undefined;
+  const map = corpusDir ? join(corpusDir, name) : "";
   let w3e: Uint8Array | null = null;
-  if (cli && existsSync(map)) {
-    const r = spawnSync(cli.bin, ["cat", map, "war3map.w3e"], { maxBuffer: 1 << 26 });
+  if (bin && existsSync(map)) {
+    const r = spawnSync(bin, ["cat", map, "war3map.w3e"], { maxBuffer: 1 << 26 });
     if (r.status === 0) w3e = new Uint8Array(r.stdout);
   }
   w3eCache.set(name, w3e);
