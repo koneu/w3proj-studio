@@ -20,7 +20,8 @@ pub const STAMP_FILE: &str = ".w3proj/derived-from.json";
 
 const FORMAT: &str = "w3proj.derived-from/1";
 
-/// The files under `map/` the derived files are made from, raw or as text (any case).
+/// The files under `map/` the derived files are made from, raw or as text (any case), and with the
+/// split terrain layout every file under `map/terrain/` (`sources`).
 const SOURCES: &[&str] = &["war3map.w3e", "war3map.w3e.txt", "war3map.doo", "war3map.doo.json"];
 
 /// The files the sources go into, for messages.
@@ -46,6 +47,14 @@ pub fn sources(project: &Path) -> Result<Sources> {
         }
         let bytes = fs::read(entry.path()).map_err(|e| Error::Project(format!("{MAP_DIR}/{name} can't be read: {e}")))?;
         out.insert(name, fingerprint(&bytes));
+    }
+    // The split terrain layout: every file under map/terrain/ counts (`terrain/<path>`).
+    if crate::terrain_layout::is_split_on_disk(&map)? {
+        for rel in crate::project::walk(&map.join(crate::terrain_layout::DIR))? {
+            let path = format!("{}/{rel}", crate::terrain_layout::DIR);
+            let bytes = fs::read(map.join(&path)).map_err(|e| Error::Project(format!("{MAP_DIR}/{path} can't be read: {e}")))?;
+            out.insert(path, fingerprint(&bytes));
+        }
     }
     Ok(out)
 }
@@ -160,6 +169,21 @@ mod tests {
         fs::remove_file(dir.join("map/war3map.w3e.txt")).unwrap();
         fs::write(dir.join("map/war3map.w3e"), "raw").unwrap();
         assert_eq!(check(&dir).unwrap(), Freshness::Stale(vec!["war3map.w3e".into(), "war3map.w3e.txt".into()]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// With the split terrain layout every file under map/terrain/ is a source.
+    #[test]
+    fn every_file_of_a_split_terrain_is_a_source() {
+        let dir = project("split");
+        fs::remove_file(dir.join("map/war3map.w3e.txt")).unwrap();
+        fs::create_dir_all(dir.join("map/terrain/a")).unwrap();
+        fs::write(dir.join("map/terrain/terrain.json"), "{\"format\":\"w3proj.terrain/1\"}").unwrap();
+        fs::write(dir.join("map/terrain/a/terrain.txt"), "corners").unwrap();
+        record_now(&dir).unwrap();
+        assert_eq!(check(&dir).unwrap(), Freshness::Fresh);
+        fs::write(dir.join("map/terrain/a/terrain.txt"), "corners 1 1").unwrap();
+        assert_eq!(check(&dir).unwrap(), Freshness::Stale(vec!["terrain/a/terrain.txt".into()]));
         let _ = fs::remove_dir_all(&dir);
     }
 

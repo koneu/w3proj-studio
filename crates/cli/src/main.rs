@@ -518,6 +518,13 @@ enum Cmd {
         #[arg(long)]
         show: Option<String>,
     },
+    /// Convert a project's terrain between the flat layout (map/war3map.w3e.txt, the default) and the
+    /// split one (map/terrain/: terrain.json and one folder per subterrain). Both ways are lossless:
+    /// the project packs into the same map either way.
+    Terrain {
+        #[command(subcommand)]
+        cmd: TerrainCmd,
+    },
     /// Read the game's own data (CASC storage of the installed game).
     Game {
         #[command(subcommand)]
@@ -529,6 +536,22 @@ enum Cmd {
         #[arg(long, global = true, default_value = "sd")]
         mode: String,
     },
+}
+
+#[derive(Subcommand)]
+enum TerrainCmd {
+    /// Split map/war3map.w3e.txt into map/terrain/: one subterrain "main" over the whole canvas, or
+    /// the --rect rectangles. Corners no rectangle covers must all be alike (they become
+    /// defaultCorner); otherwise nothing is written. Placed objects and regions stay where they are.
+    Split {
+        project: PathBuf,
+        /// A subterrain: name:x,y,w,h in corners, (0,0) the south-west corner; the name is its folder.
+        /// Repeat for more.
+        #[arg(long = "rect", value_name = "NAME:X,Y,W,H")]
+        rects: Vec<w3proj::terrain_layout::Rect>,
+    },
+    /// Merge map/terrain/ back into map/war3map.w3e.txt.
+    Merge { project: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -795,6 +818,25 @@ fn run(cli: Cli) -> Result<ExitCode> {
             return check::run(check::Options { project, only, path, unit_size, warnings_fail, json, game, mode, formats: extra });
         }
         Cmd::Mcp => mcp::run()?,
+        Cmd::Terrain { cmd } => {
+            let (r, what) = match cmd {
+                TerrainCmd::Split { project, rects } => (
+                    w3proj::terrain_layout::split_project(&project, &rects).with_context(|| format!("splitting the terrain of {}", project.display()))?,
+                    "split into map/terrain/",
+                ),
+                TerrainCmd::Merge { project } => (
+                    w3proj::terrain_layout::merge_project(&project).with_context(|| format!("merging the terrain of {}", project.display()))?,
+                    "merged into map/war3map.w3e.txt",
+                ),
+            };
+            for f in &r.written {
+                println!("  wrote   {f}");
+            }
+            for f in &r.removed {
+                println!("  removed {f}");
+            }
+            println!("terrain {what}: {} written, {} removed", r.written.len(), r.removed.len());
+        }
         Cmd::Ls { map } => {
             let archive = mpq::Archive::open(&map)?;
             let ex = w3proj::project::extract(&archive, &Registry::empty());

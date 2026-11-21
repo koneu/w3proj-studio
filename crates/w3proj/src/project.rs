@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::Registry;
 use crate::header::MapHeader;
-use crate::{allies, names, paths, wts, Error, Result};
+use crate::{allies, names, paths, w3e, wts, Error, Result};
 
 pub const MANIFEST: &str = "w3proj.toml";
 pub const MAP_DIR: &str = "map";
@@ -646,7 +646,7 @@ fn scan_nested_map(bytes: Vec<u8>, out: &mut BTreeSet<String>) {
 
 /// Replaces `path` with `bytes` in one step (`crate::atomic::write_lazily`: a file replaced is flushed
 /// to disk first, a new one isn't) unless it holds them already.
-fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
+pub(crate) fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     if fs::read(path).ok().as_deref() == Some(bytes) {
         return Ok(false);
     }
@@ -660,7 +660,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(crate::atomic::write(path, bytes)?)
 }
 
-fn walk(root: &Path) -> Result<Vec<String>> {
+pub(crate) fn walk(root: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
     if !there(root)? {
         return Ok(out);
@@ -753,7 +753,10 @@ pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result
     let kept: BTreeSet<String> = ex.files.keys().map(|p| archive_key(p, &ex.manifest.pack.raw, codecs)).collect();
     // Raw files as the project on disk has them; a manifest that can't be read stops the sync anyway.
     let old_raw = Manifest::load(project).map(|m| m.pack.raw).unwrap_or_default();
-    let (gone, _) = extra_files(&project.join(MAP_DIR), &ex.files)?;
+    // The files as the sync writes them (a split terrain layout kept: `terrain_layout::prepare_sync`).
+    let mut files = ex.files.clone();
+    crate::terrain_layout::prepare_sync(&project.join(MAP_DIR), &mut files)?;
+    let (gone, _) = extra_files(&project.join(MAP_DIR), &files)?;
     out.extend(
         gone.into_iter()
             .filter(|p| !kept.contains(&archive_key(p, &old_raw, codecs)))
@@ -982,6 +985,8 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_hea
     } else {
         keep_mdl_header_only(&map_dir, &mut ex.files)?
     };
+    // A project with the split terrain layout keeps it: the map's terrain goes into its subterrains.
+    crate::terrain_layout::prepare_sync(&map_dir, &mut ex.files)?;
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -1245,6 +1250,8 @@ pub fn read_project(project: &Path) -> Result<ProjectContents> {
     for rel in walk(&map_dir)? {
         files.insert(rel.clone(), fs::read(map_dir.join(&rel))?);
     }
+    // Either terrain layout: a split one (map/terrain/) is assembled into war3map.w3e.txt here.
+    crate::terrain_layout::flatten(&mut files)?;
     Ok((manifest, prefix, files))
 }
 
@@ -1669,6 +1676,31 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
     }
 }
 
+/// The map's terrain (chapter maps' too) split into the `map/terrain/` layout as a 2×2 grid and read
+/// back (`terrain_layout::split`, then `flatten` as `read_project` reads it): the project files have
+/// to come back byte for byte, so the split layout packs into the same map. A terrain kept raw has
+/// nothing to split.
+fn split_terrain_round_trip(ex: &Extracted, at: &str, out: &mut Vec<String>) {
+    use crate::terrain_layout as tl;
+    let text = ex.files.keys().find(|k| k.eq_ignore_ascii_case(tl::FLAT_FILE));
+    if let Some(text) = text.filter(|k| !ex.manifest.pack.raw.contains(k)) {
+        let result = w3e::terrain_from_text(&ex.files[text]).and_then(|t| {
+            let mut files = ex.files.clone();
+            tl::split(&mut files, &tl::grid_2x2(t.width, t.height))?;
+            tl::flatten(&mut files)?;
+            Ok(files == ex.files)
+        });
+        match result {
+            Ok(true) => {}
+            Ok(false) => out.push(format!("{at}war3map.w3e (split into map/terrain/ and merged)")),
+            Err(e) => out.push(format!("{at}war3map.w3e (split into map/terrain/: {e})")),
+        }
+    }
+    for (dir, chapter) in &ex.nested {
+        split_terrain_round_trip(chapter, &format!("{at}{dir}/"), out);
+    }
+}
+
 pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) -> Result<VerifyReport> {
     let archive = Archive::open(map)?;
     let ex = extract_named(&archive, codecs, more_names);
@@ -1678,6 +1710,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
     let packed = Archive::from_bytes(pack_extracted(&ex, codecs)?)?;
     let mut mismatches = Vec::new();
     compare(&archive, &packed, &ex, "", &mut mismatches);
+    split_terrain_round_trip(&ex, "", &mut mismatches);
     Ok(VerifyReport {
         files: ex.report.files.len(),
         codec_files: ex.report.files.iter().filter(|f| f.codec.is_some()).count(),
@@ -1874,5 +1907,24 @@ mod tests {
         let dec = decode(&def_units, &non_empty).unwrap();
         assert_eq!(dec.value["skinIds"], true);
         assert_eq!(encode(&def_units, &dec.value).unwrap(), non_empty);
+    }
+
+    /// verify's split-terrain round trip passes a map whose terrain comes back, and reports one whose project
+    /// file doesn't (here: a terrain text that isn't the one unpack writes, so the merged text differs).
+    #[test]
+    fn verify_splits_the_terrain_and_reports_what_doesnt_come_back() {
+        let text = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map/map/war3map.w3e.txt")).unwrap();
+        let mut b = ArchiveBuilder::new(WriteOptions::default());
+        b.add("war3map.w3e", w3e::from_text(&text).unwrap());
+        b.add("war3map.w3i", w3i_bytes(31, 6114));
+        let ex = extract_with(&Archive::from_bytes(b.write(b"").unwrap()).unwrap(), &Registry::default(), &[]);
+        assert_eq!(ex.files["war3map.w3e.txt"], text);
+        let mut out = Vec::new();
+        split_terrain_round_trip(&ex, "", &mut out);
+        assert!(out.is_empty(), "{out:?}");
+        let mut odd = ex;
+        odd.files.insert("war3map.w3e.txt".into(), [&b"# a comment\n"[..], &text].concat());
+        split_terrain_round_trip(&odd, "", &mut out);
+        assert_eq!(out, vec!["war3map.w3e (split into map/terrain/ and merged)".to_string()]);
     }
 }

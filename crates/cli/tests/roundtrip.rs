@@ -904,3 +904,59 @@ fn verify_finds_no_map_in_an_empty_folder_and_says_so() {
     assert!(text(&o).contains("1 ok"), "{}", text(&o));
 }
 
+/// The split terrain layout (map/terrain/) packs into the same map as the flat war3map.w3e.txt it was split from,
+/// keeps the derived files' record fresh (a pack without --force-stale goes ahead), stays split when the map is
+/// unpacked into the project again, and merges back into the very same war3map.w3e.txt.
+#[test]
+fn a_split_terrain_packs_the_same_map_and_merges_back() {
+    let dir = workdir("terrain_split");
+    let first = dir.join("first.w3x");
+    pack(&fixture(), &first);
+    let flat_text = fs::read(fixture().join("map/war3map.w3e.txt")).unwrap();
+    for (name, rects) in [("main", vec![]), ("grid", vec!["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"])] {
+        let project = dir.join(format!("project-{name}"));
+        unpack(&first, &project);
+        let mut args = vec!["terrain", "split", s(&project)];
+        for r in &rects {
+            args.extend(["--rect", r]);
+        }
+        let said = ok(&args);
+        assert!(said.contains("terrain split into map/terrain/"), "{said}");
+        let map = project.join("map");
+        assert!(!map.join("war3map.w3e.txt").exists());
+        let folders: Vec<&str> = if rects.is_empty() { vec!["main"] } else { vec!["sw", "se", "nw", "ne"] };
+        for f in &folders {
+            assert!(map.join("terrain").join(f).join("terrain.txt").is_file(), "{f}");
+        }
+        let second = dir.join(format!("{name}.w3x"));
+        pack(&project, &second);
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "{name}: the split project packs another map");
+
+        // Unpacked again, the project keeps its layout and nothing in it changes.
+        let resync = unpack(&first, &project);
+        assert!(resync.contains("0 written"), "{resync}");
+        assert!(!map.join("war3map.w3e.txt").exists() && map.join("terrain/terrain.json").is_file());
+
+        let said = ok(&["terrain", "merge", s(&project)]);
+        assert!(said.contains("merged into map/war3map.w3e.txt"), "{said}");
+        assert_eq!(fs::read(map.join("war3map.w3e.txt")).unwrap(), flat_text, "{name}: merged back into another text");
+        assert!(!map.join("terrain").exists(), "{name}: map/terrain/ is left behind");
+        let third = dir.join(format!("{name}-merged.w3x"));
+        pack(&project, &third);
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&third).unwrap());
+    }
+
+    // A split that would drop corners (the rest of the canvas isn't one corner value) writes nothing.
+    let project = dir.join("project-partial");
+    unpack(&first, &project);
+    let o = w3proj(&["terrain", "split", s(&project), "--rect", "corner:0,0,2,2"]);
+    assert!(!o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("would be lost"), "{}", text(&o));
+    assert!(!project.join("map/terrain").exists());
+    assert_eq!(fs::read(project.join("map/war3map.w3e.txt")).unwrap(), flat_text);
+    // Merging a flat project, splitting a split one: refused.
+    assert!(!w3proj(&["terrain", "merge", s(&project)]).status.success());
+    ok(&["terrain", "split", s(&project)]);
+    assert!(!w3proj(&["terrain", "split", s(&project)]).status.success());
+}
+

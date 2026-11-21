@@ -393,6 +393,42 @@ fn damaged_project_files_are_errors() {
     report(total.failures);
 }
 
+/// The split terrain layout (map/terrain/: terrain.json and each subterrain's terrain.txt) comes from git
+/// merges and hand edits: a damaged file is an error, never a panic, and what is accepted assembles into a
+/// terrain that packs.
+#[test]
+fn damaged_split_terrain_files_are_errors() {
+    use w3proj::terrain_layout as tl;
+    let mut layout = BTreeMap::from([(tl::FLAT_FILE.to_string(), fs::read(fixture().join("map").join(tl::FLAT_FILE)).unwrap())]);
+    tl::split(&mut layout, &tl::grid_2x2(5, 3)).unwrap();
+    let mut total = Found::default();
+    for name in layout.keys().cloned().collect::<Vec<_>>() {
+        let runs = par_seeds(&format!("split terrain {name}"), seeds(rounds()), |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                let mut files = layout.clone();
+                files.insert(name.clone(), damage(&layout[&name], &mut Rng::new(seed + 1)));
+                guarded(&mut found.failures, || format!("flatten with {name} damaged, seed {seed}"), || match tl::flatten(&mut files) {
+                    // Damage never turns the project into a flat one without terrain.
+                    Ok(false) => panic!("a damaged layout was taken for the flat layout"),
+                    Ok(true) => {
+                        found.accepted += 1;
+                        assert!(w3proj::w3e::from_text(&files[tl::FLAT_FILE]).is_ok(), "an accepted layout assembled into a terrain that doesn't pack");
+                    }
+                    Err(_) => found.rejected += 1,
+                });
+            }
+            found
+        });
+        total.merge(Found::all(runs));
+    }
+    let Found { failures, accepted, rejected, .. } = total;
+    report(failures);
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+    }
+}
+
 #[test]
 fn archive_reader_survives_damaged_maps() {
     let bytes = map_bytes("archive.w3x");

@@ -13,6 +13,7 @@ pub mod names;
 pub mod objdata;
 pub mod paths;
 pub mod project;
+pub mod terrain_layout;
 pub mod triggerdata;
 pub mod w3o;
 pub mod w3e;
