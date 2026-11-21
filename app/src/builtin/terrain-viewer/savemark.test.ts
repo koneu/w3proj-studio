@@ -107,11 +107,12 @@ test("serial: a second call waits for the first and takes a fresh snapshot", asy
   const run = serial(async () => { await d.save(); });
   const a = run();
   const b = run();
-  await new Promise((r) => setTimeout(r, 5));
+  // [Refactored] Yield with setImmediate instead of real 5ms timer sleeps.
+  await new Promise((r) => setImmediate(r));
   d.list.push(2); // after the first took, before the second took
   d.finishWrite();
   await a;
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setImmediate(r));
   d.finishWrite();
   await b;
   assert.deepEqual(d.disk, [[1], [1, 2]]);
@@ -136,10 +137,10 @@ test("serial: control, the same two calls not chained start together", async () 
   const run = serial(work);
   order.length = 0; releases.length = 0;
   const c = run(), e = run();
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setImmediate(r));
   assert.deepEqual(order, ["start"]);
   releases[0](); await c;
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setImmediate(r));
   releases[1](); await e;
   assert.deepEqual(order, ["start", "end", "start", "end"]);
 });

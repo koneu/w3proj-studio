@@ -223,10 +223,12 @@ const fixture = (name: string): Uint8Array => new Uint8Array(readFileSync(fixtur
 const CLIFF_TILES: Record<string, Rgb> = { Ldrt: [145, 104, 60], Lgrs: [44, 108, 27] };
 const CLIFF_CLIFFS: Record<string, Rgb> = { CLgr: [96, 124, 66] };
 const CROP = { x: 80, y: 40, width: 128, height: 96 };
+// [Refactored] Parse cliff.w3e.txt once instead of on every cliffExport() call.
+const CLIFF_TERRAIN = parseW3e(w3eFromText(new TextDecoder().decode(fixture("cliff.w3e.txt"))));
 
 /** cliff.w3m exported with Export Minimap's defaults (as the editor's picture was). */
 function cliffExport(params: MinimapInput["params"] = {}) {
-  const terrain = parseW3e(w3eFromText(new TextDecoder().decode(fixture("cliff.w3e.txt"))));
+  const terrain = CLIFF_TERRAIN;
   const src: ExportSource = {
     base: {
       terrain, margins: [6, 6, 4, 8], waterColor: [0, 0, 192], objects: [],
@@ -330,19 +332,21 @@ const HB_PATHS: Record<string, number> = { "PathTextures\\4x4Default.tga": 1, "P
 /** The window's picture: 2 pixels per tile as on the map's 256 pixel minimap (128 playable tiles); the crop starts 3
  *  tiles in. */
 const HB = { size: 76, at: 6, crop: 64 };
+// [Refactored] Parse hillsbrad.w3e.txt and hillsbrad-doodads.json once instead of re-reading and re-parsing on every hillsbrad() call.
+const HB_TERRAIN = parseW3e(w3eFromText(new TextDecoder().decode(fixture("hillsbrad.w3e.txt"))));
+const HB_PLACED = (JSON.parse(new TextDecoder().decode(fixture("hillsbrad-doodads.json"))) as [string, number, number][])
+  .map(([id, x, y]) => ({ id, position: [x, y, 0] as [number, number, number] }));
+const HB_ROW_MAP = new Map(Object.entries(HB_ROWS).map(([id, v]) => {
+  const [showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex] = v.split(",");
+  return [id, { showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex }];
+}));
 
 /** The window drawn as a save draws war3mapMap.blp (minimapBase's objects, renderMinimap); `models`: the colours of
  *  the types without a minimap colour of their own. */
 async function hillsbrad(models: Record<string, Rgb> = HB_MODELS) {
-  const terrain = parseW3e(w3eFromText(new TextDecoder().decode(fixture("hillsbrad.w3e.txt"))));
-  const placed = (JSON.parse(new TextDecoder().decode(fixture("hillsbrad-doodads.json"))) as [string, number, number][])
-    .map(([id, x, y]) => ({ id, position: [x, y, 0] as [number, number, number] }));
-  const rows = new Map(Object.entries(HB_ROWS).map(([id, v]) => {
-    const [showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex] = v.split(",");
-    return [id, { showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex }];
-  }));
-  const objects = await minimapObjects(placed, {
-    rows, bases: new Map(),
+  const terrain = HB_TERRAIN;
+  const objects = await minimapObjects(HB_PLACED, {
+    rows: HB_ROW_MAP, bases: new Map(),
     modelColor: async (id) => models[id] ?? null,
     footprint: async (p) => HB_PATHS[p] ?? assert.fail(`pathing texture ${p}`),
   });

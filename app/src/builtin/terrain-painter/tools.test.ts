@@ -548,14 +548,18 @@ test("Noise spreads evenly over the 20 steps and reaches the rim, whatever the s
   const counts = new Map<number, number>();
   let rim = 0;
   const random = seeded(11);
+  // [Refactored] Reuse and reset a single 33x33 flatMap instance across the 200 iterations instead of allocating 217,800 corner objects.
+  const t = flatMap(), brush = { ...centre(t), radius: 7 };
   for (let k = 0; k < 200; k++) {
-    const t = flatMap(), s = new Stroke("noise");
-    applyHeight(t, { ...centre(t), radius: 7 }, "noise", 0, s, random);
-    t.corners.forEach((c, i) => {
+    const s = new Stroke("noise");
+    applyHeight(t, brush, "noise", 0, s, random);
+    for (const i of s.corners()) {
+      const c = t.corners[i];
       const v = c.rawHeight - 0x2000;
       if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
       if (v && Math.hypot((i % t.width) - 16, Math.floor(i / t.width) - 16) === 7) rim++;
-    });
+      setGroundHeight(c, 0);
+    }
   }
   assert.equal(counts.size, 20, "every nonzero step comes up");
   const all = [...counts.values()];
