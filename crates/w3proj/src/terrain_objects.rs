@@ -27,7 +27,9 @@
 //! that sorted order keeps the index as `"order"`. Merging puts every entry with an `order` at that
 //! index and fills the other places with the rest in sorted order, so a map split and merged without
 //! edits gives back the same flat file. A creation number twice is an error naming both files; it is
-//! never renumbered (scripts refer to it).
+//! never renumbered (scripts refer to it). 0 and 4294967295 aren't assignments (old maps give every
+//! doodad editorId 0): they may be there any number of times, and entries with equal numbers are
+//! sorted by subterrain, then by their flat order (`order` where that isn't their flat place).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -252,6 +254,12 @@ fn lists(kind: Kind) -> &'static [List] {
         Kind::Doodads => &[List::Main, List::Specials],
         _ => &[List::Main],
     }
+}
+
+/// Whether a creation number is a real assignment: 0 (old maps give every doodad editorId 0) and 4294967295 (unset)
+/// aren't, and never count as a creation number found twice. Entries with equal numbers keep their flat order.
+fn assigned(n: u32) -> bool {
+    n != 0 && n != u32::MAX
 }
 
 /// An entry's sort key; `version`: the doodads' (version 13 numbers them by `trailer[0]`).
@@ -481,26 +489,32 @@ pub(crate) fn slice(flats: &Flats, subs: &[Subterrain], offset: [f32; 2]) -> Res
         for (li, (&list, entries)) in lists(kind).iter().zip(entries).enumerate() {
             let key = list_key(kind, list);
             let mut keys = Vec::with_capacity(entries.len());
+            let mut owners = Vec::with_capacity(entries.len());
             let mut seen: HashMap<u32, usize> = HashMap::new();
             for (i, e) in entries.iter().enumerate() {
                 let k = sort_key(kind, list, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 if let SortKey::Number(n) = k {
-                    if let Some(first) = seen.insert(n, i) {
-                        return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
+                    if assigned(n) {
+                        if let Some(first) = seen.insert(n, i) {
+                            return Err(flat_err(kind, format!("{key}[{first}] and {key}[{i}] have the same creation number {n} (creation numbers are never renumbered: change one by hand)")));
+                        }
                     }
                 }
                 keys.push(k);
+                let (x, y) = position(kind, list, e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
+                owners.push(owner(subs, offset, x, y));
             }
+            // The sorted order merging gives the entries without `order`: by key, entries with equal keys (unassigned
+            // numbers) in subterrain order, then in their file's order (the flat order).
             let mut sorted: Vec<usize> = (0..entries.len()).collect();
-            sorted.sort_by(|&a, &b| keys[a].cmp(&keys[b]).then(a.cmp(&b)));
+            sorted.sort_by(|&a, &b| keys[a].cmp(&keys[b]).then(owners[a].cmp(&owners[b])).then(a.cmp(&b)));
             let mut rank = vec![0; entries.len()];
             for (r, &i) in sorted.iter().enumerate() {
                 rank[i] = r;
             }
             for (i, e) in entries.into_iter().enumerate() {
-                let (x, y) = position(kind, list, &e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
                 let order = (rank[i] != i).then_some(i as u64);
-                per_sub[owner(subs, offset, x, y)][li].push((keys[i].clone(), i, order, e));
+                per_sub[owners[i]][li].push((keys[i].clone(), i, order, e));
             }
         }
         for (s, mut found) in subs.iter().zip(per_sub) {
@@ -588,6 +602,9 @@ pub(crate) fn assemble(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) ->
             for (li, items) in read_sub(kind, &path, &bytes, version)?.into_iter().enumerate() {
                 for item in &items {
                     if let SortKey::Number(n) = item.key {
+                        if !assigned(n) {
+                            continue;
+                        }
                         if let Some(other) = seen.insert(n, path.clone()) {
                             return Err(Error::Format(if other == path {
                                 format!("map/{path} holds creation number {n} twice (creation numbers are never renumbered: change one by hand)")
@@ -788,11 +805,12 @@ mod tests {
         let flats = BTreeMap::from([(Kind::Units, units), (Kind::Doodads, doo)]);
         let (heads, files) = round_trip(&flats, &subs());
         assert!(files.values().all(|f| !String::from_utf8_lossy(f).contains("\"order\"")), "trailer[0] is already in order");
-        // The control: numbered by editorId (all -1), version 13 doodads would be duplicates.
+        // The control: numbered by editorId (all -1, unassigned), they keep their flat order by `order` where needed.
         let mut v12 = flats.clone();
         let text = String::from_utf8(v12[&Kind::Doodads].clone()).unwrap().replace("\"version\": 13", "\"version\": 12");
         v12.insert(Kind::Doodads, text.into_bytes());
-        assert!(slice(&v12, &subs(), OFF).unwrap_err().to_string().contains("same creation number 4294967295"));
+        let (_, v12_files) = round_trip(&v12, &subs());
+        assert!(v12_files.values().any(|f| String::from_utf8_lossy(f).contains("\"order\"")), "doodad 1 lies in a, before b's 0 and 2");
         assert_eq!(heads.doo_header().unwrap(), DooHeader { doodads_version: 13, doodads_subversion: 11, units_version: 13, units_subversion: 11, skin_ids: false });
         assert_eq!(heads.units.as_ref().unwrap().skin_ids, None);
     }
@@ -817,6 +835,39 @@ mod tests {
         let twice = BTreeMap::from([(Kind::Doodads, doo_flat(&[(4, 100.0, -50.0), (4, -500.0, -250.0)], &[]))]);
         let e = slice(&twice, &subs(), OFF).unwrap_err().to_string();
         assert!(e.contains("doodads[0] and doodads[1] have the same creation number 4"), "{e}");
+    }
+
+    /// 0 and 4294967295 aren't assigned creation numbers (old maps give every doodad editorId 0): not duplicates, kept
+    /// in their flat order across subterrains, merged back byte for byte, also after edits move one over a seam.
+    /// Assigned numbers twice stay an error (control).
+    #[test]
+    fn unassigned_creation_numbers() {
+        // a holds x < -256, b x >= 0: the flat order alternates between them, with assigned numbers among them.
+        let mixed: &[(u32, f64, f64)] = &[(0, 100.0, -50.0), (0, -500.0, -250.0), (7, 300.0, -10.0), (0, -450.0, -10.0), (u32::MAX, 200.0, -20.0), (0, 150.0, -30.0), (u32::MAX, -480.0, -40.0), (3, -300.0, -50.0)];
+        let flats = BTreeMap::from([(Kind::Doodads, doo_flat(mixed, &[]))]);
+        let (heads, files) = round_trip(&flats, &subs());
+        let ids = |p: &str| entries(&files, p, "doodads").iter().map(|e| (e.get("order").and_then(Value::as_u64), e["editorId"].as_u64().unwrap())).collect::<Vec<_>>();
+        // Within a file: by number, equal numbers in flat order.
+        assert_eq!(ids("terrain/a/doodads.json").iter().map(|e| e.1).collect::<Vec<_>>(), [0, 0, 3, u32::MAX as u64]);
+        assert_eq!(ids("terrain/b/doodads.json").iter().map(|e| e.1).collect::<Vec<_>>(), [0, 0, 7, u32::MAX as u64]);
+        // Every flat order of them comes back (all permutations of a smaller list).
+        let small: Vec<(u32, f64, f64)> = vec![(0, 100.0, -50.0), (0, -500.0, -250.0), (0, -450.0, -10.0), (0, 150.0, -30.0)];
+        let mut perm = small.clone();
+        for _ in 0..24 {
+            round_trip(&BTreeMap::from([(Kind::Doodads, doo_flat(&perm, &[]))]), &subs());
+            perm.rotate_left(1);
+            perm.swap(0, 2);
+        }
+        // An unassigned doodad moved over the seam by an edit: merged without loss, every entry once.
+        let mut f = files.clone();
+        let text = String::from_utf8(f["terrain/b/doodads.json"].clone()).unwrap().replacen("100.0", "-490.0", 1);
+        f.insert("terrain/b/doodads.json".into(), text.into_bytes());
+        let back = assemble(&heads, &subs(), &|p| f.get(p).cloned()).unwrap();
+        let n = |b: &[u8]| serde_json::from_slice::<Value>(b).unwrap()["doodads"].as_array().unwrap().len();
+        assert_eq!(n(&back[&Kind::Doodads]), mixed.len());
+        // The control: an assigned number twice is still refused.
+        let twice = BTreeMap::from([(Kind::Doodads, doo_flat(&[(0, 100.0, -50.0), (0, 1.0, -1.0), (5, 100.0, -50.0), (5, -500.0, -250.0)], &[]))]);
+        assert!(slice(&twice, &subs(), OFF).unwrap_err().to_string().contains("same creation number 5"));
     }
 
     #[test]
