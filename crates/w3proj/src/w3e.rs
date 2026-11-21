@@ -37,33 +37,39 @@ fn err(m: impl Into<String>) -> Error {
     Error::Format(format!("war3map.w3e: {}", m.into()))
 }
 
-#[derive(Default, Clone, Copy)]
-struct Corner {
-    height: i16,
-    water: u16,
-    texture: u8,
-    flags: u8,
-    texture_bits: u8,
-    variation: u8,
-    cliff_variation: u8,
-    cliff_texture: u8,
-    layer: u8,
+/// One corner as the file stores it (also used by `terrain_layout`).
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct Corner {
+    pub(crate) height: i16,
+    pub(crate) water: u16,
+    pub(crate) texture: u8,
+    pub(crate) flags: u8,
+    pub(crate) texture_bits: u8,
+    pub(crate) variation: u8,
+    pub(crate) cliff_variation: u8,
+    pub(crate) cliff_texture: u8,
+    pub(crate) layer: u8,
 }
 
-struct Terrain {
-    version: u32,
-    tileset: u8,
-    custom_tilesets: u32,
-    ground: Vec<[u8; 4]>,
-    cliffs: Vec<[u8; 4]>,
-    width: usize,
-    height: usize,
-    offset: [f32; 2],
-    corners: Vec<Corner>,
-    trailer: Vec<u8>,
+/// The whole file: header, corners (row 0 is the south row), trailer.
+#[derive(Clone)]
+pub(crate) struct Terrain {
+    pub(crate) version: u32,
+    pub(crate) tileset: u8,
+    pub(crate) custom_tilesets: u32,
+    pub(crate) ground: Vec<[u8; 4]>,
+    pub(crate) cliffs: Vec<[u8; 4]>,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) offset: [f32; 2],
+    pub(crate) corners: Vec<Corner>,
+    pub(crate) trailer: Vec<u8>,
 }
 
-fn parse(b: &[u8]) -> Result<Terrain> {
+/// Most corners a text grid may describe (also the limit of `terrain_layout`'s canvas).
+pub(crate) const MAX_CORNERS: usize = 1 << 24;
+
+pub(crate) fn parse(b: &[u8]) -> Result<Terrain> {
     let u32_at = |o: usize| -> Result<u32> {
         b.get(o..o + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap())).ok_or_else(|| err("truncated"))
     };
@@ -130,7 +136,7 @@ fn parse(b: &[u8]) -> Result<Terrain> {
     })
 }
 
-fn write(t: &Terrain) -> Vec<u8> {
+pub(crate) fn write(t: &Terrain) -> Vec<u8> {
     let per = if t.version == 12 { 8 } else { 7 };
     let mut out = Vec::with_capacity(13 + 8 + (t.ground.len() + t.cliffs.len()) * 4 + 16 + t.corners.len() * per);
     out.extend_from_slice(b"W3E!");
@@ -195,7 +201,7 @@ fn number_range(name: &str) -> (i32, i32) {
 
 /// Unprintable ids (e.g. four zero bytes in (10)DustwallowKeys) as `hex:XXXXXXXX`: always 12
 /// characters, so never mistaken for a 4-character id.
-fn id_text(id: &[u8; 4]) -> Result<String> {
+pub(crate) fn id_text(id: &[u8; 4]) -> Result<String> {
     if id.iter().all(|c| c.is_ascii_graphic()) {
         Ok(String::from_utf8(id.to_vec()).unwrap())
     } else {
@@ -203,12 +209,13 @@ fn id_text(id: &[u8; 4]) -> Result<String> {
     }
 }
 
-fn id_parse(id: &str) -> Result<[u8; 4]> {
+pub(crate) fn id_parse(id: &str) -> Result<[u8; 4]> {
     if let Ok(b) = id.as_bytes().try_into() {
         return Ok(b);
     }
     let bad = || err(format!("tile id \"{id}\" isn't 4 characters or hex:XXXXXXXX"));
-    let hex = id.strip_prefix("hex:").filter(|h| h.len() == 8).ok_or_else(bad)?;
+    // ASCII only: a multi-byte character would put the two-digit slices below inside it.
+    let hex = id.strip_prefix("hex:").filter(|h| h.len() == 8 && h.is_ascii()).ok_or_else(bad)?;
     let mut out = [0u8; 4];
     for (i, b) in out.iter_mut().enumerate() {
         *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| bad())?;
@@ -217,7 +224,7 @@ fn id_parse(id: &str) -> Result<[u8; 4]> {
 }
 
 /// Offsets are written as integers when they are whole numbers, otherwise as their bits.
-fn float_text(v: f32) -> String {
+pub(crate) fn float_text(v: f32) -> String {
     if v.fract() == 0.0 && v.abs() < 1e7 && !(v == 0.0 && v.is_sign_negative()) {
         format!("{}", v as i64)
     } else {
@@ -225,7 +232,7 @@ fn float_text(v: f32) -> String {
     }
 }
 
-fn parse_float(s: &str) -> Result<f32> {
+pub(crate) fn parse_float(s: &str) -> Result<f32> {
     match s.strip_prefix("bits:") {
         Some(h) => u32::from_str_radix(h, 16).map(f32::from_bits).map_err(|_| err(format!("bad offset {s}"))),
         None => s.parse::<i64>().map(|v| v as f32).map_err(|_| err(format!("bad offset {s}"))),
@@ -233,7 +240,11 @@ fn parse_float(s: &str) -> Result<f32> {
 }
 
 pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
-    let t = parse(bytes)?;
+    terrain_text(&parse(bytes)?)
+}
+
+/// The text of a whole terrain (`to_text` of its bytes).
+pub(crate) fn terrain_text(t: &Terrain) -> Result<Vec<u8>> {
     if !t.tileset.is_ascii_graphic() {
         return Err(err("tileset isn't a printable character"));
     }
@@ -250,9 +261,21 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
         float_text(t.offset[0]),
         float_text(t.offset[1]),
     );
+    write_grids(&mut s, &t.corners, t.width, t.version);
+    if !t.trailer.is_empty() {
+        s.push_str("\n[trailer]\n");
+        s.extend(t.trailer.iter().map(|b| format!("{b:02x}")));
+        s.push('\n');
+    }
+    Ok(s.into_bytes())
+}
+
+/// The grid sections of `corners` (`width` per row, row 0 the south one), each after a blank line.
+/// `[texture-bits]` only for version 12, and only when a corner has some.
+pub(crate) fn write_grids(s: &mut String, corners: &[Corner], width: usize, version: u32) {
     for f in FIELDS {
-        let values: Vec<i32> = t.corners.iter().map(f.get).collect();
-        if f.name == "texture-bits" && (t.version != 12 || values.iter().all(|&v| v == 0)) {
+        let values: Vec<i32> = corners.iter().map(f.get).collect();
+        if f.name == "texture-bits" && (version != 12 || values.iter().all(|&v| v == 0)) {
             continue;
         }
         s.push('\n');
@@ -262,7 +285,7 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
             continue;
         }
         s.push_str(&format!("[{}]\n", f.name));
-        for row in values.chunks(t.width.max(1)).rev() {
+        for row in values.chunks(width.max(1)).rev() {
             if f.numbers {
                 let mut tokens = Vec::new();
                 let mut i = 0;
@@ -282,25 +305,64 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
             s.push('\n');
         }
     }
-    if !t.trailer.is_empty() {
-        s.push_str("\n[trailer]\n");
-        s.extend(t.trailer.iter().map(|b| format!("{b:02x}")));
-        s.push('\n');
-    }
-    Ok(s.into_bytes())
 }
 
-fn digit(c: char, max: u8) -> Result<i32> {
+fn digit(what: &str, c: char, max: u8) -> Result<i32> {
     match DIGITS.iter().position(|&d| d as char == c) {
         Some(v) if v <= max as usize => Ok(v as i32),
-        _ => Err(err(format!("'{c}' isn't a value from 0 to {max}"))),
+        _ => Err(fail(what, format!("'{c}' isn't a value from 0 to {max}"))),
     }
+}
+
+fn fail(what: &str, m: impl Into<String>) -> Error {
+    Error::Format(format!("{what}: {}", m.into()))
+}
+
+/// The lines of a grid text that count: `\r` cut off, blank lines and `#` comments left out.
+pub(crate) fn text_lines(text: &str) -> std::iter::Peekable<impl Iterator<Item = &str>> {
+    text.lines().map(|l| l.trim_end_matches('\r')).filter(|l| !l.trim().is_empty() && !l.starts_with('#')).peekable()
+}
+
+/// Names of the per-corner fields, as the grid sections and `terrain_layout`'s `defaultCorner` call them
+/// (section name, JSON name).
+pub(crate) const FIELD_NAMES: &[(&str, &str)] = &[
+    ("height", "height"),
+    ("water", "water"),
+    ("water-bits", "waterBits"),
+    ("texture", "texture"),
+    ("texture-bits", "textureBits"),
+    ("variation", "variation"),
+    ("cliff-variation", "cliffVariation"),
+    ("cliff-texture", "cliffTexture"),
+    ("layer", "layer"),
+    ("flags", "flags"),
+];
+
+/// A field of a corner as its grid section writes it (`height` and `water` without their 0x2000 offset).
+pub(crate) fn field_get(c: &Corner, section: &str) -> Option<i32> {
+    FIELDS.iter().find(|f| f.name == section).map(|f| (f.get)(c))
+}
+
+/// Sets a field as its grid section reads it; a value out of its range is an error (the message names it).
+pub(crate) fn field_set(c: &mut Corner, section: &str, v: i64) -> std::result::Result<(), String> {
+    let f = FIELDS.iter().find(|f| f.name == section).ok_or_else(|| format!("unknown field {section}"))?;
+    let (lo, hi) = if f.numbers { number_range(f.name) } else { (0, f.max as i32) };
+    if v < lo as i64 || v > hi as i64 {
+        return Err(format!("{v} isn't a value from {lo} to {hi}"));
+    }
+    (f.set)(c, v as i32);
+    Ok(())
 }
 
 pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
+    Ok(write(&terrain_from_text(bytes)?))
+}
+
+/// A whole terrain from its text (`from_text` without the bytes).
+pub(crate) fn terrain_from_text(bytes: &[u8]) -> Result<Terrain> {
     let text = std::str::from_utf8(bytes).map_err(|_| err("not UTF-8"))?;
     // Header keys, then sections; blank lines and `#` comments anywhere.
-    let mut lines = text.lines().map(|l| l.trim_end_matches('\r')).filter(|l| !l.trim().is_empty() && !l.starts_with('#')).peekable();
+    let mut lines = text_lines(text);
     let mut head = std::collections::HashMap::new();
     while let Some(l) = lines.next_if(|l| !l.starts_with('[')) {
         let (k, v) = l.split_once(' ').unwrap_or((l, ""));
@@ -331,7 +393,22 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
     let [ox, oy] = off[..] else { return Err(err("\"offset\" needs x and y")) };
     let offset = [parse_float(ox)?, parse_float(oy)?];
 
-    let n = width.checked_mul(height).filter(|&n| n <= 1 << 24).ok_or_else(|| err("map too large"))?;
+    let (corners, trailer) = read_grids("war3map.w3e", &mut lines, width, height, version, true)?;
+    Ok(Terrain { version, tileset, custom_tilesets, ground, cliffs, width, height, offset, corners, trailer })
+}
+
+/// Reads the grid sections (all that's left of `lines`) of a `width` × `height` grid: corners (row 0
+/// the south one) and, where `trailer_allowed`, the `[trailer]` bytes. Errors start with `what`.
+pub(crate) fn read_grids<'a>(
+    what: &str,
+    lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+    width: usize,
+    height: usize,
+    version: u32,
+    trailer_allowed: bool,
+) -> Result<(Vec<Corner>, Vec<u8>)> {
+    let err = |m: String| fail(what, m);
+    let n = width.checked_mul(height).filter(|&n| n <= MAX_CORNERS).ok_or_else(|| err("map too large".into()))?;
     let mut corners = vec![Corner::default(); n];
     let mut seen = std::collections::HashSet::new();
     let mut trailer = Vec::new();
@@ -343,11 +420,11 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
         if !seen.insert(name.to_string()) {
             return Err(err(format!("[{name}] appears twice")));
         }
-        if name == "trailer" {
+        if name == "trailer" && trailer_allowed {
             let hex: String = lines.next_if(|l| !l.starts_with('[')).unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect();
             trailer = (0..hex.len())
                 .step_by(2)
-                .map(|i| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok()).ok_or_else(|| err("bad trailer hex")))
+                .map(|i| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok()).ok_or_else(|| err("bad trailer hex".into())))
                 .collect::<Result<_>>()?;
             continue;
         }
@@ -359,7 +436,7 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
             } else {
                 let mut cs = s.chars();
                 match (cs.next(), cs.next()) {
-                    (Some(c), None) => digit(c, f.max),
+                    (Some(c), None) => digit(what, c, f.max),
                     _ => Err(err(format!("[{name}]: bad value \"{s}\""))),
                 }
             }
@@ -379,11 +456,16 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
                         None => (tok, 1),
                     };
                     let v = value(v)?;
+                    // Checked as it grows: runs of a full row each in one long line would otherwise
+                    // fill the memory before the row's length is looked at.
+                    if values.len() + count > width {
+                        return Err(err(format!("[{name}] row {} has more than {width} values", height - y)));
+                    }
                     values.extend(std::iter::repeat_n(v, count));
                 }
             } else {
                 for c in row.trim().chars() {
-                    values.push(digit(c, f.max)?);
+                    values.push(digit(what, c, f.max)?);
                 }
             }
             if values.len() != width {
@@ -400,12 +482,12 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
         }
     }
     if version == 11 && seen.contains("texture-bits") {
-        return Err(err("[texture-bits] needs version 12"));
+        return Err(err("[texture-bits] needs version 12".into()));
     }
     if version == 11 && corners.iter().any(|c| c.texture > 15) {
-        return Err(err("version 11 holds textures 0–15 only"));
+        return Err(err("version 11 holds textures 0–15 only".into()));
     }
-    Ok(write(&Terrain { version, tileset, custom_tilesets, ground, cliffs, width, height, offset, corners, trailer }))
+    Ok((corners, trailer))
 }
 
 #[cfg(test)]
