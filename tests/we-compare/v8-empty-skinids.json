@@ -1,0 +1,142 @@
+[
+  {
+    "name": "v8-empty-skinids-matrix",
+    "description": "MatrixPCDefense_v4.3 (w3i v25 editorVersion 6059, empty 16-byte v8.11 war3mapUnits.doo): Studio opens terrain view and saves, adding all 9 start locations without skinId (skinIds: false); then the World Editor opens Studio's saved map (from: studio) and saves cleanly without crashing, with all 9 starts and ally masks matching Studio.",
+    "input": {
+      "map": "${REPO}/target/studio-paths/matrix.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const doc = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')); if (doc.skinIds !== false) throw new Error(`expected skinIds false, got ${doc.skinIds}`); const starts = doc.units.filter((u) => u.id === 'sloc'); if (starts.length !== 9) throw new Error(`expected 9 starts, got ${starts.length}`); if (starts.some((u) => 'skinId' in u)) throw new Error('pre-Reforged unit got skinId');"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "scriptType",
+          "supportedModes",
+          "gameDataVersion",
+          "players[].enemyLow",
+          "players[].enemyHigh"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].skinId",
+          "units[].preFlags",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  },
+  {
+    "name": "v8-empty-skinids-crazyhero",
+    "description": "CrazyHeroSiegeAI_v2.0 (w3i v25 editorVersion 6059, empty 16-byte v8.11 war3mapUnits.doo): Studio opens terrain view and saves, adding all 9 start locations without skinId (skinIds: false); then the World Editor opens Studio's saved map (from: studio) and saves cleanly without crashing, with all 9 starts and ally masks matching Studio.",
+    "input": {
+      "map": "${REPO}/target/corpus-saves/zero-crazyherosiege.w3x"
+    },
+    "we": {
+      "mode": "sd",
+      "from": "studio",
+      "saveAccept": [
+        "Warning"
+      ],
+      "steps": []
+    },
+    "studio": {
+      "steps": [
+        {
+          "terrain": true
+        },
+        {
+          "eval": "const s = await w3.services.get('w3.terrain'); for (let i = 0; i < 60 && !s.placedObjects()?.units; i++) await new Promise((r) => setTimeout(r, 500)); await w3.commands.execute('workbench.save'); await w3Workbench.settled(); const doc = JSON.parse(await w3.workspace.readText('map/war3mapUnits.doo.json')); if (doc.skinIds !== false) throw new Error(`expected skinIds false, got ${doc.skinIds}`); const starts = doc.units.filter((u) => u.id === 'sloc'); if (starts.length !== 9) throw new Error(`expected 9 starts, got ${starts.length}`); if (starts.some((u) => 'skinId' in u)) throw new Error('pre-Reforged unit got skinId');"
+        },
+        {
+          "sleep": 1000
+        }
+      ]
+    },
+    "compare": [
+      {
+        "file": "war3map.w3i",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "editorVersion",
+          "gameVersion",
+          "loadingScreen.crestRace",
+          "terrainFog",
+          "cameraZoom",
+          "water",
+          "playerHudSkins",
+          "players[].hudSkin",
+          "scriptType",
+          "supportedModes",
+          "gameDataVersion",
+          "players[].enemyLow",
+          "players[].enemyHigh"
+        ],
+        "tolerance": 0.01
+      },
+      {
+        "file": "war3mapUnits.doo",
+        "as": "parsed",
+        "ignore": [
+          "version",
+          "subversion",
+          "skinIds",
+          "units[].skinId",
+          "units[].preFlags",
+          "units[].itemTable",
+          "units[].strength",
+          "units[].agility",
+          "units[].intelligence",
+          "units[].trailer",
+          "units[].extras"
+        ],
+        "tolerance": 0.01
+      }
+    ],
+    "limit": 40
+  }
+]
