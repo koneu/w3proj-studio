@@ -6056,7 +6056,8 @@ async function subterrains(page, found) {
     const written = differ(before, snapshot(map));
     if (lit(written) !== lit(["terrain/ne/terrain.txt"])) fail(`the paint in the north-east saved ${written.join(", ") || "nothing"}, not map/terrain/ne/terrain.txt alone`);
     if (existsSync(join(map, "war3map.w3e.txt"))) fail("the save wrote a flat map/war3map.w3e.txt next to the subterrains");
-    const assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
+    // What the merge below must give back (the stage-4 paints change it again).
+    let assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
     if (assembled === assembledBefore) fail("the assembled terrain didn't change with the paint");
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is still unsaved after the save");
 
@@ -6115,6 +6116,59 @@ async function subterrains(page, found) {
       }
       await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select")?.click()`);
       await settled(page);
+    }
+
+    // Stage 4: Open Subterrains… with only the north-east open. The editor reopens partial; a paint in the north-east is
+    // saved into its terrain.txt alone; the other subterrains' files keep their bytes and times; the derived files'
+    // record says subterrains were closed, so `w3proj pack` and the app's Pack refuse saying so. Opened whole again, the
+    // editor makes the derived files again and the project packs.
+    {
+      const others = layout.subterrains.filter((s) => s.name !== "ne");
+      const folderState = (s) => readdirSync(join(map, "terrain", s.folder)).sort().map((f) => `${f}:${statSync(join(map, "terrain", s.folder, f)).mtimeMs}:${readFileSync(join(map, "terrain", s.folder, f), "latin1")}`).join("|");
+      const opened = await run("w3.terrainLayout.openSubterrains", { names: ["ne"] });
+      if (opened) fail(`Open Subterrains (ne) failed: ${opened}`);
+      await editorUp();
+      await settled(page);
+      const badge = await page.evaluate(`document.querySelector(".terrain-partial-badge:not([hidden])")?.textContent ?? null`);
+      if (!/1 of 4 subterrains open/.test(badge ?? "")) fail(`the partial terrain editor's badge says ${lit(badge)}`);
+      const closedLabels = await page.evaluate(`[...document.querySelectorAll(".terrain-label.subterrain-closed")].map((e) => e.textContent).sort()`);
+      if (lit(closedLabels) !== lit(["nw (closed)", "se (closed)", "sw (closed)"])) fail(`the closed subterrains' names over the map: ${lit(closedLabels)}`);
+      const before = others.map(folderState);
+      await tool("paint_terrain", { tile, left: at(ne.x + 6, 0), bottom: at(ne.y + 6, 1), right: at(ne.x + 14, 0), top: at(ne.y + 14, 1) });
+      await tool("save_project");
+      await settled(page);
+      if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the partial terrain editor is unsaved after the save");
+      const changed = others.filter((s, i) => folderState(s) !== before[i]).map((s) => s.name);
+      if (changed.length) fail(`a save with only ne open changed the closed subterrains' files: ${changed.join(", ")}`);
+      // A paint over the seam (the read-only strip and the closed area beyond): saved, and still only ne's file changes.
+      await tool("paint_terrain", { tile, left: at(ne.x - 6, 0), bottom: at(ne.y + 2, 1), right: at(ne.x + 3, 0), top: at(ne.y + 5, 1) });
+      await tool("save_project");
+      await settled(page);
+      const seamChanged = others.filter((s, i) => folderState(s) !== before[i]).map((s) => s.name);
+      if (seamChanged.length) fail(`a paint over the seam with only ne open changed ${seamChanged.join(", ")}`);
+      if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the paint over the seam left the editor unsaved (its save was refused?)");
+      const partialRecord = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
+      if (partialRecord.files?.["?closed-subterrains"] !== "3") fail(`the derived files' record after the partial save: ${lit(partialRecord.files?.["?closed-subterrains"])}`);
+      const cliRefused = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-partial.w3x"), "--keep-script"], { encoding: "utf8" });
+      if (cliRefused.status === 0 || !/3 subterrains were closed/.test(cliRefused.stdout + cliRefused.stderr)) fail(`\`w3proj pack\` after a partial save: exit ${cliRefused.status}, ${(cliRefused.stdout + cliRefused.stderr).trim().slice(-300)}`);
+      const appRefused = await run("w3.project.pack");
+      if (!appRefused || !/3 of the 4 subterrains are closed/.test(appRefused)) fail(`the app's Pack with subterrains closed: ${lit(appRefused)}`);
+      await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+      if (!/^\/\.w3proj\/open-subterrains\.json$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/open-subterrains.json");
+      // All open again: the editor reopens whole and makes the derived files again; then `w3proj pack` takes them.
+      const all = await run("w3.terrainLayout.openSubterrains", { all: true });
+      if (all) fail(`Open Subterrains (all) failed: ${all}`);
+      if (existsSync(join(root, ".w3proj", "open-subterrains.json"))) fail("opening all left .w3proj/open-subterrains.json");
+      await editorUp();
+      await settled(page);
+      await page.evaluate(`w3.commands.execute("w3.terrain.settle")`);
+      await settled(page);
+      const fresh = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
+      if (fresh.files?.["?closed-subterrains"] !== undefined) fail("opened whole, the editor didn't make the derived files again (the record still counts closed subterrains)");
+      const cliPack = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-whole.w3x"), "--keep-script"], { encoding: "utf8" });
+      if (cliPack.status !== 0) fail(`\`w3proj pack\` after opening all again refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
+      if (await page.evaluate(`!!document.querySelector(".terrain-partial-badge:not([hidden])")`)) fail("the whole terrain editor still shows the partial badge");
+      assembled = await page.evaluate(`w3.workspace.readText("map/war3map.w3e.txt")`);
     }
 
     // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.

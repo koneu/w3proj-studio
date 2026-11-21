@@ -97,7 +97,7 @@ import { drawnGroundTiles, paintSlot, replaceSlots, replaceTileNames, savedTerra
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
-import { DERIVED_CLOSED_KEY, loadOpenState, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
+import { DERIVED_CLOSED_KEY, loadOpenState, OPEN as OPEN_CORNER, openSummary, partialMask, type OpenState, type PartialMask } from "../../lib/terrain/openset";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, playersWithoutStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer } from "../../lib/terrain/startlocations";
 import { pushMoveEdit, refuseShift } from "./moveedit";
@@ -413,6 +413,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     followFlags: (follow: FollowFlags) => Promise<boolean>;
     /** Why it is read-only although it is the project's own terrain (its war3map.w3i can't be read); null: editable. */
     locked: string | null;
+    /** A partial load (Open Subterrains…): the corners no edit changes; null when every subterrain is open. */
+    partial: PartialMask | null;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -570,12 +572,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const text = await read(path);
       if (text === null) throw new Error("This project has no war3map.w3e.");
       const bytes = w3eFromText(text), terrain = await applyTilesetWater(w3, parseW3e(bytes));
-      const touched = change(terrain);
+      // The terrain as it was, read once more (the first reading is the one changed): for the limits and the derived files.
+      const was = await applyTilesetWater(w3, parseW3e(bytes));
+      let touched = change(terrain);
+      // Subterrains closed (Open Subterrains…): the edit changes nothing outside the open ones, as a brush there doesn't.
+      const partialNow = ownEditor()?.partial;
+      if (partialNow && partialNow.width === terrain.width && partialNow.height === terrain.height) {
+        for (const i of partialNow.locked) Object.assign(terrain.corners[i], was.corners[i]);
+        touched = touched.filter((i) => partialNow.corners[i] === OPEN_CORNER);
+      }
       corners = touched.length;
       if (!touched.length) return [];
       // Enforce Water Height Limits refuses the whole edit, as in the terrain editor: nothing is written.
-      // The terrain as it was, read once more (the first reading is the one changed): for the limits and the derived files.
-      const was = await applyTilesetWater(w3, parseW3e(bytes));
       const refused = toolWaterRefusal(w3, was, terrain, touched);
       if (refused) throw new Error(refused);
       // With the flag 0 the tileset's own list, and the cliffs' ground tiles, as the World Editor's save writes it (savedTerrain).
@@ -6274,7 +6282,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let handed = false;
         const record: OpenedEditor = {
           root: w3.workspace.project()?.root ?? "",
-          handle, ready, screenshot: takeScreenshot, locked: lockedText,
+          handle, ready, screenshot: takeScreenshot, locked: lockedText, partial,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();
