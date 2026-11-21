@@ -579,7 +579,15 @@ fn read_sub(kind: Kind, path: &str, bytes: &[u8], version: u32) -> Result<Vec<Ve
                 None => None,
                 Some(v) => Some(v.as_u64().ok_or_else(|| bad(format!("{key}[{i}].order isn't a whole number from 0")))?),
             };
-            let key = sort_key(kind, list, version, &entry).map_err(|m| bad(format!("{key}[{i}]: {m}")))?;
+            let name = key;
+            let key = sort_key(kind, list, version, &entry).map_err(|m| bad(format!("{name}[{i}]: {m}")))?;
+            // What a split needs of an entry, needed of what is merged too: damage that leaves a piece of an entry
+            // as an object of its own (a cut and a doubled part) must not pass for one more object. Unassigned
+            // creation numbers (0) don't tell it as a duplicate.
+            position(kind, list, &entry, [0.0, 0.0]).map_err(|m| bad(format!("{name}[{i}]: {m}")))?;
+            if list == List::Main && kind != Kind::Regions && !entry.get("id").is_some_and(Value::is_string) {
+                return Err(bad(format!("{name}[{i}]: its id isn't a string")));
+            }
             read.push(Item { order, key, entry });
         }
         out.push(read);

@@ -399,6 +399,47 @@ fn damaged_project_files_are_errors() {
 /// damaged object file never ships a map without its objects).
 #[test]
 fn damaged_split_terrain_files_are_errors() {
+    let (layout, counts) = split_fixture();
+    let mut total = Found::default();
+    for name in layout.keys().cloned().collect::<Vec<_>>() {
+        let runs = par_seeds(&format!("split terrain {name}"), seeds(rounds()), |chunk| {
+            let mut found = Found::default();
+            for seed in chunk.seeds() {
+                guarded(&mut found.failures, || format!("flatten with {name} damaged, seed {seed}"), || {
+                    if damaged_split(&layout, &counts, &name, seed) {
+                        found.accepted += 1;
+                    } else {
+                        found.rejected += 1;
+                    }
+                });
+            }
+            found
+        });
+        total.merge(Found::all(runs));
+    }
+    let Found { failures, accepted, rejected, .. } = total;
+    report(failures);
+    if !single_seed() {
+        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+    }
+}
+
+/// Seeds the 20,000 rounds found, kept in every run. 7893: a doubled part left the tail of a doodad
+/// (`itemTable`, `itemSets`, `editorId` 0) as an object of its own, merged as one doodad more once 0 stopped
+/// counting as a duplicate creation number.
+#[test]
+fn damaged_split_terrain_regressions() {
+    let (layout, counts) = split_fixture();
+    const FOUND: &[(&str, u64)] = &[("terrain/sw/doodads.json", 7893)];
+    for &(name, seed) in FOUND {
+        assert!(!damaged_split(&layout, &counts, name, seed), "{name}, seed {seed}: the damaged file was accepted");
+    }
+}
+
+/// The mini map split 2×2 (`terrain_layout::split`), and how many entries each object kind has.
+type Counts = Vec<(w3proj::terrain_objects::Kind, usize)>;
+
+fn split_fixture() -> (BTreeMap<String, Vec<u8>>, Counts) {
     use w3proj::terrain_layout as tl;
     use w3proj::terrain_objects::KINDS;
     let map = fixture().join("map");
@@ -414,39 +455,32 @@ fn damaged_split_terrain_files_are_errors() {
     }
     tl::split(&mut layout, &tl::grid_2x2(5, 3)).unwrap();
     assert!(layout.keys().any(|k| k.ends_with("/units.json")), "the objects went into the subterrains");
-    let codecs = w3proj::codec::Registry::default();
-    let mut total = Found::default();
-    for name in layout.keys().cloned().collect::<Vec<_>>() {
-        let runs = par_seeds(&format!("split terrain {name}"), seeds(rounds()), |chunk| {
-            let mut found = Found::default();
-            for seed in chunk.seeds() {
-                let mut files = layout.clone();
-                files.insert(name.clone(), damage(&layout[&name], &mut Rng::new(seed + 1)));
-                guarded(&mut found.failures, || format!("flatten with {name} damaged, seed {seed}"), || match tl::flatten(&mut files) {
-                    // Damage never turns the project into a flat one without terrain.
-                    Ok(false) => panic!("a damaged layout was taken for the flat layout"),
-                    Ok(true) => {
-                        found.accepted += 1;
-                        assert!(w3proj::w3e::from_text(&files[tl::FLAT_FILE]).is_ok(), "an accepted layout assembled into a terrain that doesn't pack");
-                        for (kind, n) in &counts {
-                            let flat = files.get(kind.flat()).unwrap_or_else(|| panic!("an accepted layout lost {}", kind.flat()));
-                            let doc: serde_json::Value = serde_json::from_slice(flat).expect("merged object files are JSON");
-                            assert_eq!(doc[kind.name()].as_array().map(Vec::len), Some(*n), "an accepted layout lost {}", kind.name());
-                            // What the merge made goes through the codec (an error is the pack's refusal, not a panic).
-                            let _ = codecs.for_project_path(kind.flat()).unwrap().1.encode(kind.raw(), flat);
-                        }
-                    }
-                    Err(_) => found.rejected += 1,
-                });
+    (layout, counts)
+}
+
+/// The split layout with file `name` damaged by `seed`, flattened: false when that is an error; true when it is
+/// accepted, after checking that what it gives packs and holds every object (a panic otherwise).
+fn damaged_split(layout: &BTreeMap<String, Vec<u8>>, counts: &Counts, name: &str, seed: u64) -> bool {
+    use w3proj::terrain_layout as tl;
+    let mut files = layout.clone();
+    files.insert(name.to_string(), damage(&layout[name], &mut Rng::new(seed + 1)));
+    match tl::flatten(&mut files) {
+        // Damage never turns the project into a flat one without terrain.
+        Ok(false) => panic!("a damaged layout was taken for the flat layout"),
+        Ok(true) => {
+            assert!(w3proj::w3e::from_text(&files[tl::FLAT_FILE]).is_ok(), "an accepted layout assembled into a terrain that doesn't pack");
+            static CODECS: std::sync::OnceLock<w3proj::codec::Registry> = std::sync::OnceLock::new();
+            let codecs = CODECS.get_or_init(w3proj::codec::Registry::default);
+            for (kind, n) in counts {
+                let flat = files.get(kind.flat()).unwrap_or_else(|| panic!("an accepted layout lost {}", kind.flat()));
+                let doc: serde_json::Value = serde_json::from_slice(flat).expect("merged object files are JSON");
+                assert_eq!(doc[kind.name()].as_array().map(Vec::len), Some(*n), "an accepted layout lost {}", kind.name());
+                // What the merge made goes through the codec (an error is the pack's refusal, not a panic).
+                let _ = codecs.for_project_path(kind.flat()).unwrap().1.encode(kind.raw(), flat);
             }
-            found
-        });
-        total.merge(Found::all(runs));
-    }
-    let Found { failures, accepted, rejected, .. } = total;
-    report(failures);
-    if !single_seed() {
-        assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+            true
+        }
+        Err(_) => false,
     }
 }
 
