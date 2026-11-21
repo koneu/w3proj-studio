@@ -20,13 +20,17 @@ async function view(page, spec) {
     const stage = window.__driveEd.host.querySelector(".model-stage");
     const r = devicePixelRatio;
     Object.assign(stage.style, { position: "fixed", left: "0", top: "0", flex: "none", zIndex: "10000", width: 1184 / r + "px", height: 844 / r + "px" });
-    window.__driveEd.redraw(); await new Promise((r) => setTimeout(r, 300));
+    window.__driveEd.redraw();
+    // Race two frames against a 300 ms fallback so a throttled/hidden window under Xvfb can never hang here.
+    await Promise.race([
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      new Promise((r) => setTimeout(r, 300)),
+    ]);
   })()`);
   const head = await page.evaluate(`(({ width, height, offsetX, offsetY }) => ({ width, height, offsetX, offsetY }))(window.__driveEd.terrain)`);
   const { x, y, ...v } = cameraOf(spec, head);
   await page.evaluate(`window.__driveEd.lookAt(${x}, ${y})`);
   await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${lit(v)} }); })()`);
-  await sleep(600);
   await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
 }
 
@@ -57,7 +61,6 @@ export async function uiStep(page, actions) {
       await hands.mouse("mouseMoved", p.x, p.y);
       await hands.mouse("mousePressed", p.x, p.y, 1);
       await hands.mouse("mouseReleased", p.x, p.y, 0);
-      await sleep(500);
       await settled();
     } else if (kind === "clickGround") {
       // The left button on the ground point (X, Y, 0), where Studio's own camera shows it (not where the editor's would).
@@ -68,21 +71,18 @@ export async function uiStep(page, actions) {
       await hands.mouse("mouseMoved", x, y);
       await hands.mouse("mousePressed", x, y, 1);
       await hands.mouse("mouseReleased", x, y, 0);
-      await sleep(500);
       await settled();
     } else if (kind === "key") {
       // A key pressed on the terrain view's canvas: KeyboardEvent.key and .code as a real keyboard gives them
       // ("d" KeyD, "Numpad6" the key 6 with code Numpad6; a third element names the code itself: uiKey).
       const { key, code } = uiKey(a[0], a[1]);
-      await page.evaluate(`(async () => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${lit(key)}, code: ${lit(code)}, bubbles: true })); await new Promise((r) => setTimeout(r, 40)); })()`);
-      await sleep(200);
+      await page.evaluate(`(() => { const c = document.querySelector(".model-stage canvas"); c.focus(); for (const type of ["keydown", "keyup"]) c.dispatchEvent(new KeyboardEvent(type, { key: ${lit(key)}, code: ${lit(code)}, bubbles: true })); })()`);
       await settled();
     } else if (kind === "drag") {
       // a[4]: the drag's time (as the editor's --drag @MS): the painter re-applies a held brush at most every
       // HEIGHT_TICK (40 ms), so moves 30 ms apart drop some, and which ones (the stroke's end too) went by the timing.
       await hands.drag(at(a[0], a[1]), at(a[2], a[3]), 20, a[4] ? a[4] / 20 : 30, dragModifiers);
       dragModifiers = 0;
-      await sleep(500);
       await settled();
     } else if (kind === "dragMod") dragModifiers = { alt: 1, ctrl: 2, shift: 8 }[a[0]];
     else if (kind === "sleep") await sleep(a[0]);
