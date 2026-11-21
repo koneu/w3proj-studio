@@ -13,7 +13,8 @@ function setup() {
     persist: (text) => new Promise<void>((resolve) => held.push(() => { landed.push(text); resolve(); })),
     setDirty: (d) => { dirty = d; },
   });
-  const tick = () => new Promise((r) => setTimeout(r, 0));
+  // [Refactored] Replaced setTimeout(r, 0) with setImmediate(r) to avoid timer clamping across 9 ticks.
+  const tick = () => new Promise<void>((r) => setImmediate(r));
   /** Lets the oldest held write land. */
   const release = async () => { await tick(); assert.ok(held.length, "a write is waiting"); held.shift()!(); await tick(); };
   return { list, landed, held, write, release, tick, dirty: () => dirty };

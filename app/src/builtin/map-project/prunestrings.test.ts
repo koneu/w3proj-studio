@@ -210,7 +210,8 @@ test("right after an open, while the file list is still read: the drop waits for
   // The control: the list as it is before the listing ends lacks the files that refer to 4 and 5.
   assert.ok(!w3.workspace.files().some((f) => f.path === "map/war3map.wct.txt"));
   const run = dropUnusedStrings(w3);
-  setTimeout(done, 20);
+  // [Refactored] Replaced 20 ms setTimeout with deterministic setImmediate after dropUnusedStrings awaits listing.
+  setImmediate(done);
   assert.deepEqual((await run).dropped, [3, 9]);
   assert.deepEqual(nums(files["map/war3map.wts"]), [1, 2, 4, 5, 6, 7, 8]);
 });
