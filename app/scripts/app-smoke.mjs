@@ -8324,6 +8324,7 @@ async function doodadSnapOnLoad(page, found) {
     await open(on);
     await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000)
       .catch(async () => fail(`the barrel stored at 40, 40 is at ${lit(xyAngle(await live()).LTbr)}, not 32, 32`));
+    await settled(page);
     const snapped = xyAngle(await live());
     if (!same(snapped.LOtr?.slice(0, 2), [-32, 64])) fail(`LOtr (4×2 at 0°) is at ${lit(snapped.LOtr)}, not -32, 64`);
     if (!same(snapped.LOch, [32, 64, 0])) fail(`the hay cart at 10° is at ${lit(snapped.LOch)}, not 32, 64 turned to 0`);
@@ -8380,6 +8381,7 @@ async function doodadSnapOnLoad(page, found) {
     writeFileSync(join(broken, "map", "war3map.w3d.json"), "{ not json");
     await open(broken);
     await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
+    await settled(page);
     const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
     for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${lit(brokenLive[id])}, not the map's ${lit(brokenStored[id])}`);
     for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
