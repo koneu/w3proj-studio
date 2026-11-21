@@ -11,6 +11,8 @@ use serde::Serialize;
 use serde_json::Value;
 use w3proj::{project, Registry};
 
+pub mod flatview;
+
 pub type CmdResult<T> = Result<T, String>;
 
 pub fn err(e: impl std::fmt::Display) -> String {
@@ -168,6 +170,8 @@ pub fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileIn
     }
     out.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+    // A split terrain's flat files (flatview): the app's code finds them as in a flat project.
+    flatview::list_flat(root, &mut out);
     Ok((out, unreadable))
 }
 
@@ -206,6 +210,9 @@ pub fn project_folders(root: &Path) -> CmdResult<Vec<String>> {
 pub struct Stamp {
     pub size: u64,
     pub modified: u64,
+    /// Other files the write changed (a split terrain's flat file: the subterrain files it went into).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<flatview::Also>,
 }
 
 pub fn modified_ms(meta: &std::fs::Metadata) -> u64 {
@@ -220,7 +227,7 @@ pub fn modified_ms(meta: &std::fs::Metadata) -> u64 {
 /// own save from a change by another program.
 pub fn stamp_of(path: &Path) -> CmdResult<Stamp> {
     let meta = std::fs::metadata(path).map_err(err)?;
-    Ok(Stamp { size: meta.len(), modified: modified_ms(&meta) })
+    Ok(Stamp { size: meta.len(), modified: modified_ms(&meta), also: Vec::new() })
 }
 
 /// Every save of the app: the folders above are made, then the file is replaced in one step
@@ -265,10 +272,72 @@ pub fn write_lands_inside(root: &Path, path: &Path) -> CmdResult<()> {
     }
 }
 
-/// A text file; `NOT_UTF8` when it is there but isn't UTF-8 (the workspace tells binary files by it).
+/// A text file; `NOT_UTF8` when it is there but isn't UTF-8 (the workspace tells binary files by it). A split
+/// terrain's flat file is assembled (`flatview`).
 pub fn read_text(path: &Path) -> CmdResult<String> {
-    let bytes = std::fs::read(path).map_err(err)?;
+    let bytes = flatview::read_bytes(path)?;
     String::from_utf8(bytes).map_err(|_| "NOT_UTF8".to_string())
+}
+
+/// A file's bytes (`fs_read_bytes`); a split terrain's flat file assembled (`flatview`).
+pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
+    flatview::read_bytes(path)
+}
+
+/// Writes a file the app saves (`fs_write_text`, `fs_write_bytes`): in one step (`write_file`), or for a split
+/// terrain's flat file into the subterrains it stands for (`flatview::write_flat`).
+pub fn write_bytes(path: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
+    match flatview::flat_of(path)? {
+        Some(f) => flatview::write_flat(&f, bytes),
+        None => write_file(path, |f| f.write_all(bytes)),
+    }
+}
+
+/// A file's size and time (`fs_stat`), None when there is none; a split terrain's flat file has its sources'.
+pub fn stat(path: &Path) -> Option<Stamp> {
+    match flatview::flat_of(path) {
+        Ok(Some(f)) => Some(f.stamp()),
+        _ => stamp_of(path).ok(),
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct HashedStamp {
+    pub size: u64,
+    pub modified: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+}
+
+/// Size, last write and a hash of the contents (`fs_stat_hashed`); None when there is no such file, no hash when it
+/// is there but can't be read (it isn't taken for missing). A split terrain's flat file: its sources'.
+pub fn stat_hashed(path: &Path) -> Option<HashedStamp> {
+    if let Ok(Some(f)) = flatview::flat_of(path) {
+        let s = f.stamp();
+        return Some(HashedStamp { size: s.size, modified: s.modified, hash: f.hash().ok() });
+    }
+    // Time first: a write between the two gives a hash of the newer bytes with the older time, which differs
+    // from the next look at the time anyway.
+    let stamp = stamp_of(path).ok()?;
+    let hash = std::fs::read(path).ok().map(|b| content_hash(&b));
+    Some(HashedStamp { size: stamp.size, modified: stamp.modified, hash })
+}
+
+/// FNV-1a, 64 bits, as hex: tells two contents of the same size apart (not a guard against someone making
+/// them collide on purpose).
+pub fn content_hash(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// Whether something is at the path (`fs_exists`), a split terrain's flat file too. A path that can't be checked is
+/// an error (`exists_checked`).
+pub fn exists(path: &Path) -> CmdResult<bool> {
+    Ok(flatview::flat_of(path)?.is_some() || exists_checked(path)?)
 }
 
 /// Whether something is at the path. A path that can't be checked (a folder above it may not be looked

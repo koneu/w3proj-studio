@@ -4,7 +4,6 @@
 //! The backend stays small on purpose. Features live in UI extensions, which
 //! reach the core only through these commands.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -24,9 +23,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use w3proj::{Registry, UnpackOptions};
 
 // The commands that need no window are the backend crate's, shared with `w3proj rebuild`'s headless host.
-use backend::{err, exists_checked, list_tree, normal_path, stamp_of, write_file, CmdResult, FileInfo, ProjectInfo, Stamp, Unreadable};
+use backend::{err, exists_checked, list_tree, normal_path, CmdResult, FileInfo, ProjectInfo, Stamp, Unreadable};
 #[cfg(test)]
-use backend::{keep_spelling, strip_verbatim};
+use backend::{keep_spelling, strip_verbatim, write_file};
+#[cfg(test)]
+use std::io::Write;
 
 #[derive(Default)]
 struct Watches(Mutex<Vec<PathBuf>>);
@@ -50,41 +51,18 @@ async fn project_open(path: String) -> CmdResult<ProjectInfo> {
 
 /// Size and last write of one file, as `project_files` reports them: what a write left, to tell it
 /// from a later change by another program. None when there is no such file.
+/// A split terrain's flat file (`backend::flatview`) has the size and time of the files it is made from.
 #[tauri::command]
 fn fs_stat(path: String) -> Option<Stamp> {
-    stamp_of(Path::new(&path)).ok()
+    backend::stat(Path::new(&path))
 }
 
 /// Size, last write and a hash of the contents: what an editor read or wrote. A write of the same size within
 /// the same millisecond leaves size and time alike; the hash still tells it. None when there is no such file;
 /// no hash when it is there but can't be read (it isn't taken for missing).
 #[tauri::command]
-fn fs_stat_hashed(path: String) -> Option<HashedStamp> {
-    let path = Path::new(&path);
-    // Time first: a write between the two gives a hash of the newer bytes with the older time, which differs
-    // from the next look at the time anyway.
-    let stamp = stamp_of(path).ok()?;
-    let hash = std::fs::read(path).ok().map(|b| content_hash(&b));
-    Some(HashedStamp { size: stamp.size, modified: stamp.modified, hash })
-}
-
-#[derive(Serialize)]
-struct HashedStamp {
-    size: u64,
-    modified: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hash: Option<String>,
-}
-
-/// FNV-1a, 64 bits, as hex: tells two contents of the same size apart (not a guard against someone making
-/// them collide on purpose).
-fn content_hash(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{h:016x}")
+fn fs_stat_hashed(path: String) -> Option<backend::HashedStamp> {
+    backend::stat_hashed(Path::new(&path))
 }
 
 /// All project files except build output and VCS metadata. Any folder that can't be read fails the
@@ -231,6 +209,24 @@ async fn derived_record(root: String, sources: std::collections::BTreeMap<String
         .map_err(err)?
 }
 
+/// Splits the project's terrain and placed objects into `map/terrain/` (`backend::flatview::split`): `rects` as
+/// `name:x,y,w,h`, none for one subterrain `main`. The refusal's reason (corners left uncovered that differ from
+/// the default corner, …) is the error; nothing is written then.
+#[tauri::command]
+async fn terrain_split(root: String, rects: Vec<String>) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::split(&root, &rects)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// Merges a split terrain back into `map/war3map.w3e.txt` and the flat object files (`backend::flatview::merge`).
+#[tauri::command]
+async fn terrain_merge(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::merge(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
 /// Validates object-data JSON by encoding it, and returns it in canonical
 /// formatting so edits from the UI produce minimal diffs.
 #[tauri::command]
@@ -364,9 +360,10 @@ fn fs_read_text(path: String) -> CmdResult<String> {
     backend::read_text(Path::new(&path))
 }
 
+/// A split terrain's flat file (`backend::flatview`) is written into its subterrains.
 #[tauri::command]
 fn fs_write_text(path: String, text: String) -> CmdResult<Stamp> {
-    write_file(Path::new(&path), |f| f.write_all(text.as_bytes()))
+    backend::write_bytes(Path::new(&path), text.as_bytes())
 }
 
 /// Writes the raw request body to the file named by the (URI-encoded) `path`
@@ -382,7 +379,7 @@ fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<Stamp> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected a raw byte body".into());
     };
-    write_file(Path::new(&path), |f| f.write_all(bytes))
+    backend::write_bytes(Path::new(&path), bytes)
 }
 
 /// Decodes `%XX` escapes (as produced by encodeURIComponent).
@@ -405,7 +402,7 @@ fn percent_decode(s: &str) -> CmdResult<String> {
 
 #[tauri::command]
 fn fs_read_bytes(path: String) -> CmdResult<tauri::ipc::Response> {
-    Ok(tauri::ipc::Response::new(std::fs::read(&path).map_err(err)?))
+    Ok(tauri::ipc::Response::new(backend::read_bytes(Path::new(&path))?))
 }
 
 #[cfg(windows)]
@@ -468,6 +465,7 @@ fn fs_rmdir(root: String, path: String) -> CmdResult<()> {
 /// Deletes a file of the project; empty folders it leaves behind go too (up to the root).
 #[tauri::command]
 fn fs_delete(root: String, path: String) -> CmdResult<()> {
+    backend::flatview::refuse_moving(Path::new(&path))?;
     let p = inside(&root, &path)?;
     std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     remove_empty_parents(&root, &p)
@@ -492,6 +490,7 @@ fn remove_empty_parents(root: &str, file: &Path) -> CmdResult<()> {
 /// leaves empty are removed.
 #[tauri::command]
 fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
+    backend::flatview::refuse_moving(Path::new(&from))?;
     let src = inside(&root, &from)?;
     // Checked as written before any folder is created, then again resolved.
     let target = Path::new(&to);
@@ -537,7 +536,7 @@ async fn fs_list_tree(path: String) -> CmdResult<Vec<String>> {
 /// into) is an error, never "not there": callers create or write over what they take for absent.
 #[tauri::command]
 fn fs_exists(path: String) -> CmdResult<bool> {
-    exists_checked(Path::new(&path))
+    backend::exists(Path::new(&path))
 }
 
 /// Stray files of the project at `root` (see `strays`): found, never changed.
@@ -1118,6 +1117,8 @@ pub fn run() {
             project_pack,
             derived_sources,
             derived_record,
+            terrain_split,
+            terrain_merge,
             objects_canonicalize,
             objects_export,
             objects_import,

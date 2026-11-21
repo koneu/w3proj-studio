@@ -344,6 +344,20 @@ pub(crate) fn run_host(job: &Value, server: &Server) -> Result<Value> {
     }
 }
 
+/// `w3proj serve-backend` (hidden, for the app's TypeScript tests): answers the backend commands framed on stdin (as
+/// app/src/headless/ipc.ts sends them) on stdout with `Server`, until stdin ends. The app's own code then runs in a
+/// test over the same Rust the app and `w3proj rebuild` answer it with.
+pub fn serve_stdio(project: &Path, formats: Vec<PathBuf>, read_only: bool) -> Result<()> {
+    let info = backend::open_project(&project.to_string_lossy()).map_err(anyhow::Error::msg)?;
+    let server = Server { root: PathBuf::from(&info.root), formats, game: backend::GameCache::default(), read_only };
+    let frames = read_frames(BufReader::new(std::io::stdin()));
+    let mut out = std::io::stdout().lock();
+    if let Some(done) = serve(&frames, &mut out, &server, Duration::from_secs(24 * 3600))? {
+        bail!("serve-backend got a report it doesn't take: {done}");
+    }
+    Ok(())
+}
+
 /// One frame of app/src/headless/ipc.ts: a JSON line, and the raw bytes its `len` counts.
 type Frame = (Value, Option<Vec<u8>>);
 
@@ -471,18 +485,29 @@ impl Server {
             }
             "project_folders" => to_json(backend::project_folders(Path::new(root()?))?),
             "path_normalize" => to_json(backend::normal_path(path()?)),
-            "fs_stat" => to_json(backend::stamp_of(Path::new(path()?)).ok()),
-            "fs_exists" => to_json(backend::exists_checked(Path::new(path()?))?),
+            // A split terrain's flat files are answered from map/terrain/ (backend::flatview), as the app answers them.
+            "fs_stat" => to_json(backend::stat(Path::new(path()?))),
+            "fs_stat_hashed" => to_json(backend::stat_hashed(Path::new(path()?))),
+            "fs_exists" => to_json(backend::exists(Path::new(path()?))?),
             "fs_read_text" => to_json(backend::read_text(Path::new(path()?))?),
-            "fs_read_bytes" => Ok(Answer::Bytes(std::fs::read(path()?).map_err(backend::err)?)),
+            "fs_read_bytes" => Ok(Answer::Bytes(backend::read_bytes(Path::new(path()?))?)),
             "fs_list_tree" => to_json(backend::list_tree(Path::new(path()?))?),
             "fs_write_text" => {
                 let text = arg(args, "text")?;
-                to_json(backend::write_file(&self.writable(path()?)?, |f| f.write_all(text.as_bytes()))?)
+                to_json(backend::write_bytes(&self.writable(path()?)?, text.as_bytes())?)
             }
             "fs_write_bytes" => {
                 let bytes = body.ok_or("expected a raw byte body")?;
-                to_json(backend::write_file(&self.writable(path()?)?, |f| f.write_all(&bytes))?)
+                to_json(backend::write_bytes(&self.writable(path()?)?, &bytes)?)
+            }
+            "terrain_split" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                let rects: Vec<String> = args.get("rects").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                to_json(backend::flatview::split(root()?, &rects)?)
+            }
+            "terrain_merge" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                to_json(backend::flatview::merge(root()?)?)
             }
             "codec_decode" => to_json(backend::codec_decode(root()?, path()?, &self.formats)?),
             "codec_canonicalize" => to_json(backend::codec_canonicalize(root()?, path()?, arg(args, "text")?, &self.formats)?),

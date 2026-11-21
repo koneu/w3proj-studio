@@ -507,6 +507,15 @@ enum Cmd {
     Ls { map: PathBuf },
     /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
     Mcp,
+    /// The app's backend commands over stdin and stdout, framed as `w3proj rebuild` answers them: for the app's
+    /// TypeScript tests (app/src/headless/rustbackend.ts).
+    #[command(hide = true)]
+    ServeBackend {
+        project: PathBuf,
+        /// Refuse every write.
+        #[arg(long)]
+        read_only: bool,
+    },
     /// Print one file from a map to stdout.
     Cat { map: PathBuf, file: String },
     /// List the format definitions in use (built-in, W3PROJ_FORMATS, project).
@@ -820,6 +829,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             return check::run(check::Options { project, only, path, unit_size, warnings_fail, json, game, mode, formats: extra });
         }
         Cmd::Mcp => mcp::run()?,
+        Cmd::ServeBackend { project, read_only } => rebuild::serve_stdio(&project, extra, read_only)?,
         Cmd::Terrain { cmd } => {
             let (r, what) = match cmd {
                 TerrainCmd::Split { project, rects } => (
