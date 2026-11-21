@@ -47,6 +47,31 @@ test("entries made before any is inserted get one number each (a scatter fill), 
   assert.equal((newEntry(units, "hfoo", [0, 0, 0], 0, "w3u") as unknown as { editorId: number }).editorId, 41);
 });
 
+test("in a split terrain a new object's number comes from the range of the subterrain at its position, per kind namespace", () => {
+  // West and east halves of a canvas at (0, 0), 4 corners wide: x < 256 is west.
+  const layout = () => ({ offset: [0, 0] as [number, number], subterrains: [{ name: "w", x: 0, y: 0, w: 2, h: 2, idRanges: [[10000, 19999]] as [number, number][] }, { name: "e", x: 2, y: 0, w: 2, h: 2, idRanges: [[20000, 29999]] as [number, number][] }] });
+  const shared = layout();
+  const units = { ...file("units", 8, 11), idLayout: shared }, doodads = { ...file("doodads", 13, 11), idLayout: shared }, old = { ...file("doodads", 8, 11), idLayout: shared };
+  units.list.push({ ...(newEntry(file("units", 8, 11), "hfoo", [0, 0, 0], 0, "w3u") as object), editorId: 3 } as unknown as Placed);
+  const id = (e: Placed) => (e as unknown as { editorId: number }).editorId;
+  const west = newEntry(units, "hfoo", [10, 10, 0], 0, "w3u"), east = newEntry(units, "hfoo", [300, 10, 0], 0, "w3u");
+  const item = newEntry(units, "ratc", [20, 10, 0], 0, "w3t");
+  assert.deepEqual([id(west), id(east), id(item)], [10000, 20000, 10001], "units and items share one namespace");
+  // Doodads are a namespace of their own: the same range gives them its first number again. A v13 doodad's is its trailer's.
+  const tree = newEntry(doodads, "LTlt", [10, 10, 0]) as unknown as { trailer: number[]; editorId: number };
+  assert.deepEqual([tree.trailer[0], tree.editorId], [10000, 0xffffffff]);
+  assert.equal(id(newEntry(old, "LTlt", [300, 10, 0])), 20000);
+  // Pasted (the clipboard's own number is never kept) and a start location (the melee tools): the same allocator.
+  const pasted = pastedEntry(units, { entry: { ...(west as unknown as Record<string, unknown>), editorId: 10000 }, angle: 0 }, [310, 10, 0]);
+  assert.equal(id(pasted), 20001);
+  assert.equal(id(newEntry(units, "sloc", [30, 10, 0], 1)), 10002);
+  // The control: the same file without the layout numbers as a flat project, one past the highest handed out.
+  const flat = file("units", 8, 11, {}, [...units.list]);
+  flat.issued = structuredClone(units.issued);
+  assert.equal(id(newEntry(flat, "hfoo", [300, 10, 0], 0, "w3u")), 20002, "flat: one past the highest");
+  assert.equal(id(newEntry({ ...file("units", 8, 11), list: [...units.list] }, "hfoo", [300, 10, 0], 0, "w3u")), 4);
+});
+
 test("a blank entry has only what the version has", () => {
   const old = newEntry(file("doodads", 7, 9), "LTlt", [0, 0, 0]) as unknown as Record<string, unknown>;
   for (const k of ["skinId", "preFlags", "itemTable", "itemSets", "trailer", "extras"]) assert.ok(!(k in old), k);

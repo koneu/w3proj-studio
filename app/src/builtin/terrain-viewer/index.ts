@@ -9,6 +9,7 @@ import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "../../lib/terrain/pickmatch";
+import { loadIdLayout } from "../../lib/terrain/creationids";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { errorText, isNotFoundError } from "../../lib/oserror";
@@ -506,7 +507,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const editor = key === "doodads" ? ownEditor() : null;
       if (editor) await editor.handle.objects.openRules(list);
       const startsBefore = key === "units" ? structuredClone(startLocations(list)) : null;
-      await change({ name, key, doc, list, json: true, dirty: false });
+      // New objects' creation numbers: a split terrain's ranges (a terrain.json that can't be read refuses the edit).
+      const idLayout = await loadIdLayout(w3);
+      await change({ name, key, doc, list, json: true, dirty: false, idLayout });
       // And what it writes is what the editor holds after reading it again (a replaced barrel's life as a doodad's): a
       // save then writes the same, which leaves the edit's undo possible.
       if (editor) await editor.handle.objects.openRules(list);

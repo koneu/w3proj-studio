@@ -3,6 +3,7 @@
 // 2026-11-15; docs/testing/refused-values.md).
 
 import { float32Text, storableFloat32 } from "../formats/float32";
+import { allocateNumber, type IdLayout } from "./creationids";
 
 /** A region's rectangle (world units; 32-bit floats in the file). */
 export interface RegionBox { left: number; bottom: number; right: number; top: number }
@@ -88,9 +89,11 @@ export function typedRegionEdge(r: RegionBox, key: RegionEdge, typed: string, wi
   return v === r[key] ? null : { change: { [key]: v } };
 }
 
-/** The number a new region gets: one past the highest, or why there is none (the highest is the largest the file holds;
- *  it isn't wrapped to 0). */
-export function nextRegionIndex(regions: readonly { index: number }[]): number | { refused: string } {
-  const next = 1 + Math.max(-1, ...regions.map((r) => r.index));
+/** The number a new region gets (allocateNumber): in a flat project (`layout` null) one past the highest, or why there
+ *  is none (the highest is the largest the file holds; it isn't wrapped to 0); in a split one the lowest free number of
+ *  the range of the subterrain holding its minimum corner `at` (left, bottom). */
+export function nextRegionIndex(regions: readonly { index: number }[], layout: IdLayout | null = null, at: readonly [number, number] = [0, 0]): number | { refused: string } {
+  const next = allocateNumber("regions", regions.map((r) => r.index), {}, layout, at);
+  if (next === null) return { refused: "no region number is free any more." };
   return Number.isInteger(next) && next <= MAX_REGION_INDEX ? next : { refused: `region numbers go up to ${MAX_REGION_INDEX}, and a region has the last one.` };
 }

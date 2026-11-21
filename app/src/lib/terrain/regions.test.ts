@@ -83,6 +83,14 @@ test("nextRegionIndex: one past the highest, refused (not wrapped to 0) past the
   assert.ok(typeof got === "object" && /4294967295/.test(got.refused));
 });
 
+test("nextRegionIndex in a split terrain: the lowest free number of the subterrain holding the region's minimum corner", () => {
+  const layout = { offset: [-256, -256] as [number, number], subterrains: [{ name: "s", x: 0, y: 0, w: 4, h: 2, idRanges: [[10000, 19999]] as [number, number][] }, { name: "n", x: 0, y: 2, w: 4, h: 2, idRanges: [[20000, 29999]] as [number, number][] }] };
+  const regions = [{ index: 0 }, { index: 10000 }, { index: 20001 }];
+  assert.equal(nextRegionIndex(regions, layout, [-200, -200]), 10001);
+  assert.equal(nextRegionIndex(regions, layout, [-200, 0]), 20000, "y 0 is the north one's lower edge");
+  assert.equal(nextRegionIndex(regions), 20002, "the control: flat");
+});
+
 test("regionBoxProblem and typedRegionEdge: a region outside the map is refused as the World Editor never makes one (we-drive 2026-11-16)", () => {
   const map = { left: -4096, bottom: -4096, right: 4096, top: 4096 };
   const box = { left: -64, bottom: -32, right: 64, top: 96 };

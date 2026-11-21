@@ -7,6 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { errorText } from "../../lib/oserror";
 import { NEUTRAL_PASSIVE } from "../../lib/terrain/owner";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
+import { allocateNumber, loadIdLayout, type IdLayout, type IssuedNumbers } from "../../lib/terrain/creationids";
 import type { Placed } from "./objects";
 
 /** First World Editor build whose version-8 placement files (war3map.doo, war3mapUnits.doo)
@@ -106,9 +107,12 @@ export interface PlacedFile {
   /** Kept as `map/<name>.json` in the project (else the raw file). */
   json: boolean;
   dirty: boolean;
-  /** The highest numbers newEntry has handed out (editorId, a v13 doodad's first trailer value): entries made before any
+  /** The numbers newEntry has handed out (editorId, a v13 doodad's first trailer value): entries made before any
    *  of them is put into `list` (a scatter fill makes them all, then inserts) still get one number each. */
-  issued?: { editorId?: number; trailer?: number };
+  issued?: { editorId?: IssuedNumbers; trailer?: IssuedNumbers };
+  /** The split terrain's subterrains and id ranges new numbers come from (lib/terrain/creationids.ts); null in a flat
+   *  project. loadPlacedFile sets it; a file made without it numbers as a flat project's. */
+  idLayout?: IdLayout | null;
   /** Set on a read-only load of an empty version-8 file when `war3map.w3i` couldn't be read; blocks `blankEntry`. */
   skinIdsError?: string;
 }
@@ -122,6 +126,8 @@ export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "
   if (jsonPath) { text = await w3.workspace.readText(jsonPath); json = true; }
   else if (rawPath) { text = await w3.backend.invoke<string>("codec_decode", { root: root!, path: rawPath }); json = false; }
   else return null;
+  // A split terrain's ranges: a terrain.json that can't be read stops the load (new objects would get flat numbers).
+  const idLayout = await loadIdLayout(w3);
   if (w3.workspace.project?.()?.root !== root) throw new ProjectSwitchedError("The project changed meanwhile; nothing was loaded.");
   const doc = JSON.parse(text) as Record<string, unknown>;
   const list = (doc[key] ?? []) as Placed[];
@@ -135,7 +141,7 @@ export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "
     skinIdsError = errorText(e);
   }
   splitOwners(list);
-  return skinIdsError ? { name, key, doc, list, json, dirty: false, skinIdsError } : { name, key, doc, list, json, dirty: false };
+  return skinIdsError ? { name, key, doc, list, json, dirty: false, idLayout, skinIdsError } : { name, key, doc, list, json, dirty: false, idLayout };
 }
 
 /** `text` is the file as taken earlier; without it the file is serialized now. */
@@ -214,12 +220,13 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   const e = structuredClone(template) as Entry;
   // A new unit isn't placed uprooted because the one it's copied from was.
   delete e.playerFlags;
-  // Above every number in the file and every one handed out before (not inserted yet, or taken out again by an undo):
-  // two objects with one number would share a gg_unit_ global and an Object Manager reference.
+  // A number no object in the file has and none handed out before (not inserted yet, or taken out again by an undo):
+  // two objects with one number would share a gg_unit_ global and an Object Manager reference. Flat: above all of them;
+  // split terrain: from the subterrain at `position` (allocateNumber).
   const issued = (f.issued ??= {});
   const nextOf = (get: (x: Entry) => unknown, key: "editorId" | "trailer") => {
-    const n = 1 + Math.max(-1, issued[key] ?? -1, ...list.map((x) => Number(get(x)) || 0).filter((v) => v < UNSET));
-    issued[key] = n;
+    const n = allocateNumber(f.key, list.map(get), (issued[key] ??= {}), f.idLayout ?? null, [position[0], position[1]]);
+    if (n === null) throw new Error(`No ${f.key === "units" ? "unit" : "doodad"} creation number is free any more.`);
     return n;
   };
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });

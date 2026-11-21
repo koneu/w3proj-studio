@@ -15,6 +15,7 @@ import { h } from "../../workbench/dom";
 import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
 import { nextRegionIndex, regionBoxProblem, regionEdgeOnGrid, regionsOnGrid, shiftInside, typedRegionEdge } from "../../lib/terrain/regions";
 import { worldRect } from "../../lib/terrain/resize";
+import { loadIdLayout, type IdLayout } from "../../lib/terrain/creationids";
 
 const FILE = "map/war3map.w3r";
 /** Regions snap to this grid (World Editor default). */
@@ -64,9 +65,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       for (const k of ["left", "bottom", "right", "top"] as const) if (typeof box[k] === "number") box[k] = regionEdgeOnGrid(box[k] as number);
       const problem = regionBoxProblem(box, facts && worldRect(facts));
       if (problem) throw new Error(`Not added: ${problem}`);
+      // A split terrain's ranges: the subterrain holding the minimum corner numbers it.
+      const idLayout = await loadIdLayout(w3);
       await editRegions(w3, `Add region ${name}`, (doc) => {
         if (doc.regions.some((r) => r.name.toLowerCase() === name.trim().toLowerCase())) throw new Error(`There's already a region "${name}".`);
-        const index = nextRegionIndex(doc.regions);
+        const index = nextRegionIndex(doc.regions, idLayout, [box.left as number, box.bottom as number]);
         if (typeof index !== "number") throw new Error(`Not added: ${index.refused}`);
         const [red, green, blue] = PALETTE[doc.regions.length % PALETTE.length];
         doc.regions.push({
@@ -156,9 +159,14 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let triggerService: TriggersService | null = null;
   void w3.services.get<TriggersService>(TRIGGERS_SERVICE).then((s) => { triggerService = s; }, () => {});
   const follow = (renamed: [string, string][]) => (renamed.length && triggerService ? triggerService.followRenames("rct", renamed, "Rename regions in triggers") : null);
+  /** A split terrain's subterrains and id ranges, for a new region's number (null: a flat project; undefined: not read,
+   *  or terrain.json couldn't be: then no region is drawn rather than numbered as in a flat project). */
+  let idLayout: IdLayout | null | undefined;
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
+    idLayout = undefined;
+    idLayout = await loadIdLayout(w3);
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
@@ -435,6 +443,14 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         const r = draft!;
         draft = null;
         if (r.right - r.left >= GRID && r.top - r.bottom >= GRID) {
+          // Numbered now its minimum corner is known: in a split terrain that corner's subterrain gives the number.
+          const index = idLayout === undefined ? { refused: "the split terrain's map/terrain/terrain.json couldn't be read." } : nextRegionIndex(doc.regions, idLayout, [r.left, r.bottom]);
+          if (typeof index !== "number") {
+            w3.window.showWarning(`No region drawn: ${index.refused}`);
+            render();
+            return;
+          }
+          r.index = index;
           r.name = `Region ${String(r.index).padStart(3, "0")}`;
           commit(doc.regions, [...doc.regions, r], r);
         } else render();
