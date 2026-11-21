@@ -207,9 +207,14 @@ async function studioStep(page, step, ctx) {
     })()`);
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
     await until("the terrain view", () => page.evaluate(`!!window.__driveEd && !!document.querySelector(".model-stage canvas")`), 120000);
-    // [Refactored] Wait for pending game reads + Working… indicator to clear and settle via w3Workbench.settled(),
-    // instead of idling an extra 1000 ms on every terrain step (~5.9 min saved across 354 terrain steps).
-    await until("the game's files and the view's layers", () => page.evaluate(`w3Workbench.game.readsPending === 0 && ![...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`), 180000);
+    // Keep a short 250 ms quiet window so reads that kick off just after editors.open aren't missed, then settle.
+    let quietSince = 0;
+    await until("the game's files and the view's layers", async () => {
+      const busy = await page.evaluate(`w3Workbench.game.readsPending > 0 || [...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`);
+      if (busy) { quietSince = 0; return false; }
+      quietSince ||= Date.now();
+      return Date.now() - quietSince > 250;
+    }, 180000);
     await page.evaluate(`w3Workbench.settled()`, { timeout: 180000 });
   } else throw new Error(`unknown Studio step ${JSON.stringify(step)}`);
 }
@@ -310,8 +315,7 @@ async function runStudio(specs, opts, game) {
           await page.evaluate(`w3Workbench.settled()`, { timeout: 120000 });
           await packProject(page, join(dir, "input.w3x"));
         }
-        // [Refactored] Replace trailing `{ sleep }` steps right before `packProject` (342 specs = ~6.5 min of blind sleeps)
-        // with `w3Workbench.settled()`, since `packProject` flushes saves, preparePack, and terrain settle immediately after.
+        // Trailing { sleep } steps before packProject were waiting for async app work; settle directly instead.
         let end = spec.studio.steps.length;
         while (end > 0 && spec.studio.steps[end - 1].sleep !== undefined) end--;
         for (let i = 0; i < end; i++) await studioStep(page, spec.studio.steps[i], spec);
@@ -420,13 +424,7 @@ export function runLines(command, args, options = {}) {
 
 // ---------------------------------------------------------------- reading and comparing
 
-/** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
-export function reader(cli, game, dir, map) {
-  const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
-  const mapFile = join(dir, map);
-  rmSync(project, { recursive: true, force: true });
-  const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
-  if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+function makeReader(cli, project, mapFile, map) {
   const names = new Set(readdirSync(join(project, "map")));
   let listing = null;
   const list = () => {
@@ -447,6 +445,16 @@ export function reader(cli, game, dir, map) {
     },
     listed: (f) => list().some((l) => l.endsWith(` ${f}`) || l === f),
   };
+}
+
+/** Both maps unpacked with the CLI (its codecs), once; `file(name)` reads one file's forms from an unpacked folder. */
+export function reader(cli, game, dir, map) {
+  const project = join(dir, `unpacked-${map.replace(/\.w3[xm]$/i, "")}`);
+  const mapFile = join(dir, map);
+  rmSync(project, { recursive: true, force: true });
+  const r = spawnSync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"], { encoding: "utf8", timeout: 600000 });
+  if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout).trim().split("\n").pop()}`);
+  return makeReader(cli, project, mapFile, map);
 }
 
 /** The app's own image decoder (lib/image, BLP and the rest), bundled into the work folder for the "minimap" kind. */
@@ -487,29 +495,9 @@ async function readerAsync(cli, game, dir, map) {
   rmSync(project, { recursive: true, force: true });
   const r = await runCliAsync(cli, ["unpack", mapFile, project, "--game", game ?? "none", "--allow-incomplete"]);
   if (r.status !== 0) throw new Error(`w3proj unpack ${map}: ${(r.stderr || r.stdout || r.error?.message || "").trim().split("\n").pop()}`);
-  const names = new Set(readdirSync(join(project, "map")));
-  let listing = null;
-  const list = () => {
-    if (listing) return listing;
-    const l = spawnSync(cli, ["ls", mapFile], { encoding: "utf8", maxBuffer: 1 << 26 });
-    if (l.status !== 0) throw new Error(`w3proj ls ${map}: ${String(l.stderr || l.error?.message || "").trim()}`);
-    return (listing = l.stdout.split("\n").map((x) => x.trim()));
-  };
-  return {
-    has: (f) => names.has(f) || names.has(`${f}.json`) || names.has(`${f}.txt`),
-    unpackedAs: (f) => (names.has(`${f}.json`) ? "json" : names.has(`${f}.txt`) ? "text" : names.has(f) ? "raw" : null),
-    json: (f) => JSON.parse(readFileSync(join(project, "map", `${f}.json`), "utf8")),
-    text: (f) => readFileSync(join(project, "map", names.has(`${f}.txt`) ? `${f}.txt` : f), "utf8"),
-    bytes: (f) => {
-      const c = spawnSync(cli, ["cat", mapFile, f], { maxBuffer: 1 << 29 });
-      if (c.status !== 0) throw new Error(`w3proj cat ${map} ${f}: ${String(c.stderr).trim()}`);
-      return c.stdout;
-    },
-    listed: (f) => list().some((l) => l.endsWith(` ${f}`) || l === f),
-  };
+  return makeReader(cli, project, mapFile, map);
 }
 
-// [Refactored] Unpack we.w3x + studio.w3x in parallel and run w3proj verify asynchronously so compareSpec scales across CPU cores.
 async function compareSpec(spec, cli, game, opts) {
   const dir = join(opts.work, spec.name);
   const limit = opts.limit ?? spec.limit;
@@ -682,7 +670,7 @@ async function runSpecs(specs, o, game) {
   }
   const tWe = Date.now();
   if (specs.some((s) => s.compare.some((c) => c.as === "minimap"))) o.decodeImage = await imageDecoder(o.work);
-  // [Refactored] Run compareSpec across a bounded parallel worker pool instead of serially (~6-8x faster compare phase).
+  // Overlap async unpack/verify across a small worker pool while keeping peak cat buffer memory modest.
   const results = new Array(specs.length);
   const queue = specs.map((s, i) => [s, i]);
   const worker = async () => {
@@ -697,7 +685,7 @@ async function runSpecs(specs, o, game) {
       results[i] = r;
     }
   };
-  await Promise.all(Array.from({ length: Math.min(8, availableParallelism(), Math.max(1, specs.length)) }, worker));
+  await Promise.all(Array.from({ length: Math.min(4, availableParallelism(), Math.max(1, specs.length)) }, worker));
   const { ok, code, unexpected } = runOutcome(results, { strictIgnore: o.strictIgnore });
   for (const r of results) console.log(formatReport(r, o.limit ?? specs.find((s) => s.name === r.name).limit, { strictIgnore: o.strictIgnore }));
   const seconds = { studio: Math.round((tStudio - t0) / 1000), worldEditor: Math.round((tWe - tStudio) / 1000), compare: Math.round((Date.now() - tWe) / 1000) };
