@@ -455,6 +455,35 @@ pub fn check(root: &str) -> CmdResult<serde_json::Value> {
     Ok(v)
 }
 
+/// One subterrain's rectangle (`terrain_whole`).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct SubterrainRect {
+    pub name: String,
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+}
+
+/// The whole terrain of a split project (`terrain_whole`): `war3map.w3e.txt` text assembled from every subterrain, closed
+/// ones too, and the rectangles.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct WholeTerrain {
+    pub text: String,
+    pub subterrains: Vec<SubterrainRect>,
+}
+
+/// "terrain_whole" (Check Terrain Seams): the split project's whole terrain from disk, whatever subterrains are open, None
+/// for a flat one. A layout or ground file that is there but can't be read is an error.
+pub fn whole(root: &str) -> CmdResult<Option<WholeTerrain>> {
+    let map_dir = Path::new(root).join(w3proj::project::MAP_DIR);
+    let Some((text, subs)) = layout::whole_ground(&map_dir).map_err(err)? else { return Ok(None) };
+    Ok(Some(WholeTerrain {
+        text: String::from_utf8(text).map_err(err)?,
+        subterrains: subs.into_iter().map(|s| SubterrainRect { name: s.name, x: s.x, y: s.y, w: s.w, h: s.h }).collect(),
+    }))
+}
+
 /// Refuses to delete or move a flat file of a split project: it isn't a file, the subterrains are. Moving a derived file
 /// or the Pathing tool's file of a split project is refused too (they stand for files elsewhere; deleting them is
 /// `delete_view`).

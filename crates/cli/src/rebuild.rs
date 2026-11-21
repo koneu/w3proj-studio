@@ -523,6 +523,7 @@ impl Server {
             }
             "terrain_id_layout" => to_json(backend::flatview::id_layout(root()?)?),
             "terrain_check" => to_json(backend::flatview::check(root()?)?),
+            "terrain_whole" => to_json(backend::flatview::whole(root()?)?),
             "codec_decode" => to_json(backend::codec_decode(root()?, path()?, &self.formats)?),
             "codec_canonicalize" => to_json(backend::codec_canonicalize(root()?, path()?, arg(args, "text")?, &self.formats)?),
             "codec_write" => {

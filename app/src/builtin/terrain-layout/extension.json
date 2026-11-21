@@ -3,13 +3,17 @@
   "name": "Subterrains",
   "version": "0.1.0",
   "description": "Splits the map's terrain and placed objects into subterrains (map/terrain/: one folder per rectangle, so several people can edit different parts of a large map and merge in git), and merges them back into the single files. The map is the same either way; every editor reads and saves it as before. Open Subterrains… (and the Subterrains view) opens only some of them: the others aren't read, drawn or saved, and a strip of two corners around the open ones is shown read-only.",
-  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds", "onCommand:w3.terrainLayout.openSubterrains", "onView:w3.terrainLayout.subterrains"],
+  "activationEvents": ["onCommand:w3.terrainLayout.split", "onCommand:w3.terrainLayout.merge", "onCommand:w3.terrainLayout.checkIds", "onCommand:w3.terrainLayout.checkSeams", "onCommand:w3.terrainLayout.openSubterrains", "onView:w3.terrainLayout.subterrains"],
   "contributes": {
     "views": [{ "id": "w3.terrainLayout.subterrains", "title": "Subterrains", "container": "terrain" }],
+    "mcpTools": [
+      { "name": "check_terrain_seams", "description": "Check Terrain Seams of a split terrain (map/terrain/): the saved terrain, every subterrain read, checked where two subterrains meet with the terrain brushes' rules (cliffs of more than two levels, ramp flags that don't climb one level, water that steps in a tile). Lists every corner the rules would change, with its subterrain; changes nothing. Errors stop `w3proj pack`.", "readOnly": true }
+    ],
     "commands": [
       { "id": "w3.terrainLayout.split", "when": "project", "title": "Split Terrain into Subterrains…", "category": "Terrain" },
       { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" },
       { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" },
+      { "id": "w3.terrainLayout.checkSeams", "when": "project", "title": "Check Terrain Seams", "category": "Terrain" },
       { "id": "w3.terrainLayout.openSubterrains", "when": "project", "title": "Open Subterrains…", "category": "Terrain" }
     ]
   }

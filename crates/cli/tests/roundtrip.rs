@@ -1158,6 +1158,55 @@ fn a_flat_project_keeps_its_derived_files_in_map() {
     ok(&["pack", s(&project), "-o", s(&second), "--force-stale"]);
 }
 
+/// `w3proj terrain seams` (the app's Check Terrain Seams, run in Node): two edits of neighbouring subterrains, each fine
+/// alone (a cliff of two levels), merged into a cliff of four across the seam, are reported (exit 1) with both corners
+/// and subterrains; `w3proj pack` refuses them unless --allow-seam-issues, which says so. A flat project has no seams.
+#[test]
+fn terrain_seams_reports_two_merged_edits_and_a_pack_refuses_them() {
+    let dir = workdir("terrain_seams");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    assert!(!w3proj(&["terrain", "seams", s(&project)]).status.success(), "flat: refused");
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in GRID {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    let said = ok(&["terrain", "seams", s(&project)]);
+    assert!(said.contains("no seam issues: 6 seams"), "control: the split itself has none: {said}");
+    // The mini map's grid: sw is 2×1 corners, se 3×1, all on level 2. Branch A raises sw's east corner (1,0) to 4,
+    // branch B lowers se's west corner (2,0) to 0.
+    let terrain = |sub: &str| project.join("map/terrain").join(sub).join("terrain.txt");
+    let (sw, se) = (fs::read_to_string(terrain("sw")).unwrap(), fs::read_to_string(terrain("se")).unwrap());
+    assert!(sw.contains("[layer] all 2\n") && se.contains("[layer] all 2\n"));
+    let (sw_a, se_b) = (sw.replace("[layer] all 2\n", "[layer]\n24\n"), se.replace("[layer] all 2\n", "[layer]\n022\n"));
+    for (file, edited, other, original) in [(terrain("sw"), &sw_a, terrain("se"), &se), (terrain("se"), &se_b, terrain("sw"), &sw)] {
+        fs::write(&file, edited).unwrap();
+        fs::write(&other, original).unwrap();
+        let said = ok(&["terrain", "seams", s(&project)]);
+        assert!(said.contains("no seam issues"), "one branch alone: {said}");
+    }
+    fs::write(terrain("sw"), &sw_a).unwrap();
+    fs::write(terrain("se"), &se_b).unwrap();
+    let o = w3proj(&["terrain", "seams", s(&project)]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("error cliff-height: a cliff of 4 levels between 1,0 (sw) on level 4 and 2,0 (se) on level 0"), "{}", text(&o));
+    let json: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&w3proj(&["terrain", "seams", s(&project), "--json"]).stdout)).unwrap();
+    assert_eq!(json["errors"], 1);
+    assert_eq!(json["issues"][0]["corners"], serde_json::json!([{ "x": 1, "y": 0, "subterrain": "sw" }, { "x": 2, "y": 0, "subterrain": "se" }]));
+    let out = dir.join("out.w3x");
+    let o = w3proj(&["pack", s(&project), "-o", s(&out), "--allow-terrain-only-derived"]);
+    assert!(!o.status.success() && text(&o).contains("the terrain's seams have 1 error") && text(&o).contains("--allow-seam-issues"), "{}", text(&o));
+    assert!(!out.exists(), "a refused pack writes no map");
+    let said = ok(&["pack", s(&project), "-o", s(&out), "--allow-terrain-only-derived", "--allow-seam-issues"]);
+    assert!(said.contains("packed anyway (--allow-seam-issues)") && out.is_file(), "{said}");
+    // The check never writes.
+    assert_eq!(fs::read_to_string(terrain("sw")).unwrap(), sw_a);
+    assert_eq!(fs::read_to_string(terrain("se")).unwrap(), se_b);
+}
+
 /// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
 /// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
 /// naming both files. A flat project has nothing to check.

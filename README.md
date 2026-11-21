@@ -313,6 +313,14 @@ Pathing, shadows and the minimap saved with subterrains closed are recorded as f
 `w3proj pack` and Pack refuse them until everything is opened again (the terrain editor then makes them anew) or
 `w3proj rebuild` runs.
 
+Separate files stop textual merge conflicts, not semantic ones: two branches editing either side of a seam can merge
+into cliffs, ramps or water no brush would leave. **Check Terrain Seams** (`w3proj terrain seams`, the MCP tool
+`check_terrain_seams`) reads the whole terrain as saved, every subterrain whatever is open, and applies the terrain
+brushes' rules where two subterrains meet: a cliff of more than two levels between neighbouring corners and ramp flags
+that don't climb one level are errors, water that steps within a tile a warning. It lists each corner with its
+subterrain and changes nothing. `w3proj pack` of a split project runs it first and refuses on errors (and when the check
+can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so.
+
 Every codec is checked on unpack: a file is only stored as JSON or text if
 `encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
 lose anything. This was run over 676 local maps without a mismatch.
@@ -498,7 +506,11 @@ w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.
                                     # (git-ignored) and its pathing overrides in map/terrain/*/pathing.txt; its
                                     # pack refuses derived files that are stale or missing (open and save it in
                                     # Studio, or `w3proj rebuild`); --allow-terrain-only-derived packs them as
-                                    # they are / leaves missing ones out (not for a release)
+                                    # they are / leaves missing ones out (not for a release); it also checks the
+                                    # seams (`w3proj terrain seams`) and refuses on errors unless
+                                    # --allow-seam-issues
+w3proj terrain seams MyMap/         # a split terrain's seams checked with the brushes' cliff, ramp and water
+                                    # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --mode sd|hd|de; --force also makes fresh ones and replaces a script

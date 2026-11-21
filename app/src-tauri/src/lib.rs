@@ -268,6 +268,15 @@ async fn terrain_check(root: String) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || backend::flatview::check(&root)).await.map_err(err)?
 }
 
+/// "Check Terrain Seams": the split project's whole terrain from disk, closed subterrains too, and its rectangles
+/// (`backend::flatview::whole`); null for a flat one.
+#[tauri::command]
+async fn terrain_whole(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::whole(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
 /// Validates object-data JSON by encoding it, and returns it in canonical
 /// formatting so edits from the UI produce minimal diffs.
 #[tauri::command]
@@ -1172,6 +1181,7 @@ pub fn run() {
             terrain_merge,
             terrain_id_layout,
             terrain_check,
+            terrain_whole,
             terrain_open_state,
             terrain_set_open,
             objects_canonicalize,

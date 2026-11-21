@@ -11,7 +11,7 @@ import type { ExtensionManifest, W3Api } from "../extensions/api";
 import { headless } from "./host";
 import { rustBackend } from "./rustbackend";
 import { fixturePath, repoPath } from "../lib/testhelpers/testutil";
-import { parseW3e, setGroundHeight, writeW3e } from "../lib/terrain/w3e";
+import { parseW3e, setGroundHeight, setLayer, writeW3e } from "../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, w3eToText, writeTerrainBytes } from "../lib/terrain/w3etext";
 import { CLOSED, DERIVED_CLOSED_KEY, partialMask } from "../lib/terrain/openset";
 import { readMapDocStrict } from "../lib/formats/mapdoc";
@@ -22,7 +22,7 @@ import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { checkTerrainIds, FLAT_FILES, isSplit, mergeTerrain, openSubterrains, splitTerrain } from "../builtin/terrain-layout/index";
+import { checkTerrainIds, checkTerrainSeams, FLAT_FILES, isSplit, mergeTerrain, openSubterrains, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -435,6 +435,50 @@ test("a damaged .w3proj/open-subterrains.json is an error when the terrain is re
   assert.ok((await w3.workspace.readText("map/war3map.w3e.txt")).startsWith("W3E"));
   await assert.rejects(openSubterrains(w3, { names: ["nope"] }), /no subterrain "nope".*Nothing was changed/);
   await assert.rejects(openSubterrains(w3, { names: [] }), /at least one/);
+});
+
+test("Check Terrain Seams: two saves that are each fine, merged as git merges them, leave a cliff the check reports; closed subterrains are read too", async () => {
+  const { w3, root } = await bigSplit("seams");
+  const path = "map/war3map.w3e.txt";
+  const io = { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path), writeText: (t: string) => w3.workspace.writeText(path, t), writeBytes: (b: Uint8Array) => w3.workspace.writeBytes(path, b) };
+  /** Corner (x, y) to cliff level `level`, saved as the terrain editor saves it. */
+  const setLevel = async (x: number, y: number, level: number) => {
+    const t = parseW3e(await readTerrainBytes(path, io));
+    setLayer(t.corners[y * t.width + x], level);
+    await writeTerrainBytes(path, writeW3e(t), io);
+  };
+  const a1 = join(root, "map", "terrain", "a1", "terrain.txt");
+  const original = readFileSync(a1);
+  const check = () => checkTerrainSeams(w3, { quiet: true });
+  const before = await check();
+  assert.deepEqual(before.issues, [], "control: the split itself has none");
+  assert.deepEqual(before.seams, [["a0", "a1"], ["a0", "b0"], ["a0", "b1"], ["a1", "a2"], ["a1", "b0"], ["a1", "b1"], ["a1", "b2"], ["a2", "b1"], ["a2", "b2"], ["b0", "b1"], ["b1", "b2"]]);
+  // Branch B lowers a1's corner 8,3 to level 0 (a cliff of two beside a0): fine.
+  await setLevel(8, 3, 0);
+  assert.deepEqual((await check()).issues, [], "branch B alone");
+  const branchB = readFileSync(a1);
+  assert.notDeepEqual(branchB, original);
+  writeFileSync(a1, original);
+  await w3.workspace.refresh();
+  // Branch A raises a0's corner 7,3 to level 4: fine.
+  await setLevel(7, 3, 4);
+  assert.deepEqual((await check()).issues, [], "branch A alone");
+  // Merged: a0 has A's file, a1 B's (different files, no git conflict). A cliff of four levels across the seam.
+  writeFileSync(a1, branchB);
+  await w3.workspace.refresh();
+  const merged = await check();
+  assert.equal(merged.errors, 1);
+  assert.deepEqual(merged.issues.map((i) => [i.rule, i.corners]), [["cliff-height", [{ x: 7, y: 3, subterrain: "a0" }, { x: 8, y: 3, subterrain: "a1" }]]]);
+  // With only a2 open (a0 and a1 closed, not even in its halo at 7,3), the check still reads the whole terrain from disk.
+  await openSubterrains(w3, { names: ["a2"] });
+  assert.deepEqual((await check()).issues, merged.issues);
+  // Nothing was written by the checks.
+  const snap = snapshot(root);
+  await check();
+  assert.deepEqual(changedFiles(snap, snapshot(root)), []);
+  await openSubterrains(w3, { all: true });
+  // A flat project has no seams: refused with the reason.
+  await assert.rejects(checkTerrainSeams(flat, { quiet: true }), /isn't split/);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

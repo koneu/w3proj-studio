@@ -1,6 +1,6 @@
 // Cliff types and ramps: what the terrain brushes and the AI tools share.
 
-import type { Corner, Terrain } from "./w3e";
+import { setLayer, type Corner, type Terrain } from "./w3e";
 
 /** What these functions report the corners they're about to change to. */
 export interface CornerLog {
@@ -396,6 +396,70 @@ export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () =
   return out;
 }
 
+/** The highest cliff the cliff brushes leave between two corners side by side or diagonal (cliffSlope). */
+export const MAX_CLIFF_STEP = 2;
+
+/** The level corner `other` comes to beside a corner on `level` under the cliff slope: within MAX_CLIFF_STEP of it. */
+export const cliffSlopeLevel = (level: number, other: number): number => Math.max(level - MAX_CLIFF_STEP, Math.min(level + MAX_CLIFF_STEP, other));
+
+/** The World Editor's cliff slope: after a cliff brush set its corners (`brush`), each corner beside or diagonal to
+ *  one that moved comes to within two levels of it, and so on outwards until nothing moves (the brush's own corners
+ *  stay). we-drive, 2026-11-15, branch cliff-slope-we: Increase Two clicked ten times on one pixel of flat.w3x, saved
+ *  after each click, left square rings 2, 4, 6, … round a size-1 brush and the brush's disc grown by one corner each
+ *  way per ring at size 3, every save the stamp of one corner (tools.test.ts); the editor's brush wrapped to level 0 on
+ *  a level-14 field (Increase Two from 14) left a pit 0, 2, 4, … 12 in square rings (we-compare cliff-slope-wrap). `moved(i,
+ *  from, first)` is called before corner i changes (from: its level then; first: it is beside the brush). */
+export function cliffSlope(t: Terrain, brush: readonly number[], moved: (i: number, from: number, first: boolean) => void): void {
+  const inBrush = new Set(brush);
+  const queue = [...brush];
+  // Each change moves a corner towards a level its neighbour already has; the bound only guards a terrain that could
+  // keep two corners trading places (none is known): every corner may change a few times over.
+  const most = brush.length + 16 * t.width * t.height;
+  for (let k = 0; k < queue.length && k < most; k++) {
+    const i = queue[k], level = t.corners[i].layer;
+    const x = i % t.width, y = Math.floor(i / t.width);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy, n = ny * t.width + nx;
+      if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height || inBrush.has(n)) continue;
+      const c = t.corners[n];
+      const to = cliffSlopeLevel(level, c.layer);
+      if (to === c.layer) continue;
+      moved(n, c.layer, k < brush.length);
+      setLayer(c, to);
+      queue.push(n);
+    }
+  }
+}
+
+/** The ramp runs through corner `i`: the unbroken lines of ramp-flagged corners along x and along y it is part of, of
+ *  two corners at least, each from its west or south end (`key` names the run, so callers can skip one seen before). */
+export function rampRunsThrough(t: Terrain, i: number): { key: string; run: number[] }[] {
+  if (!t.corners[i]?.ramp) return [];
+  const flagged = (x: number, y: number) => x >= 0 && y >= 0 && x < t.width && y < t.height && t.corners[y * t.width + x].ramp;
+  const x0 = i % t.width, y0 = Math.floor(i / t.width);
+  const out: { key: string; run: number[] }[] = [];
+  for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    let sx = x0, sy = y0;
+    while (flagged(sx - dx, sy - dy)) { sx -= dx; sy -= dy; }
+    const run: number[] = [];
+    for (let x = sx, y = sy; flagged(x, y); x += dx, y += dy) run.push(y * t.width + x);
+    if (run.length >= 2) out.push({ key: `${dx}:${sx},${sy}`, run });
+  }
+  return out;
+}
+
+/** How many cliff levels `levels` span. */
+export const levelSpan = (levels: readonly number[]): number => Math.max(...levels) - Math.min(...levels);
+
+/** Whether a ramp run with these cliff levels (in its order) climbs one level, one way: what the cliff and water
+ *  brushes leave of a run that did (dropBrokenRamps). A run that still spans one level but goes up and down again
+ *  (2,3,2: a water brush on the high corner raised the middle one next to its water, we-compare water-ramp-on,
+ *  2026-11-14) doesn't. */
+export function rampRunClimbs(levels: readonly number[]): boolean {
+  const oneWay = levels.every((l, k) => k === 0 || l >= levels[k - 1]) || levels.every((l, k) => k === 0 || l <= levels[k - 1]);
+  return levelSpan(levels) === 1 && oneWay;
+}
+
 /** After corners moved to another cliff level (`before`: corner index to its level before the move), the ramp runs
  *  through them that no longer climb are taken off, as the World Editor's cliff brush does (we-compare ramp-cliff-brush,
  *  2026-11-14, plateau.w3x's south face with ramp lines of three corners, low, low, high):
@@ -408,30 +472,13 @@ export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () =
  *  Left as they were, such flags make ramp tiles across two levels, which the editor draws with holes (black wedges).
  *  Returns the corners whose flag it cleared, each touched in `log` first. */
 export function dropBrokenRamps(t: Terrain, before: ReadonlyMap<number, number>, log: CornerLog): number[] {
-  const flagged = (x: number, y: number) => x >= 0 && y >= 0 && x < t.width && y < t.height && t.corners[y * t.width + x].ramp;
   const drop = new Set<number>();
   const seen = new Set<string>();
   for (const i of before.keys()) {
-    if (!t.corners[i].ramp) continue;
-    const x0 = i % t.width, y0 = Math.floor(i / t.width);
-    for (const [dx, dy] of [[1, 0], [0, 1]]) {
-      let sx = x0, sy = y0;
-      while (flagged(sx - dx, sy - dy)) { sx -= dx; sy -= dy; }
-      const key = `${dx}:${sx},${sy}`;
+    for (const { key, run } of rampRunsThrough(t, i)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const run: number[] = [];
-      for (let x = sx, y = sy; flagged(x, y); x += dx, y += dy) run.push(y * t.width + x);
-      if (run.length < 2) continue;
-      const span = (level: (k: number) => number) => {
-        const ls = run.map(level);
-        return Math.max(...ls) - Math.min(...ls);
-      };
-      // A run that still spans one level but no longer climbs one way (2,3,2: a water brush on the high corner raised
-      // the middle one next to its water, we-compare water-ramp-on, 2026-11-14) is broken too.
-      const after = run.map((k) => t.corners[k].layer);
-      const oneWay = after.every((l, k) => k === 0 || l >= after[k - 1]) || after.every((l, k) => k === 0 || l <= after[k - 1]);
-      if (span((k) => before.get(k) ?? t.corners[k].layer) === 1 && (span((k) => t.corners[k].layer) !== 1 || !oneWay)) for (const k of run) drop.add(k);
+      if (levelSpan(run.map((k) => before.get(k) ?? t.corners[k].layer)) === 1 && !rampRunClimbs(run.map((k) => t.corners[k].layer))) for (const k of run) drop.add(k);
     }
   }
   for (const k of drop) {

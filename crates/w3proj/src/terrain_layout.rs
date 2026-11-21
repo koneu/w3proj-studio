@@ -720,6 +720,20 @@ pub fn assemble(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
     Ok(w3e::write(&assemble_terrain(&layout, &|p| files.get(p).cloned())?))
 }
 
+/// The whole terrain of a split project whose `map/` folder this is, every subterrain read whatever the open set
+/// (`crate::terrain_open`), as `war3map.w3e.txt` text, with its subterrains: what the seam check looks at. None for a
+/// flat project; a layout or ground file that can't be read is an error.
+pub fn whole_ground(map_dir: &Path) -> Result<Option<(Vec<u8>, Vec<Subterrain>)>> {
+    if !is_split_on_disk(map_dir)? {
+        return Ok(None);
+    }
+    let layout = layout_of(map_dir)?;
+    let mut ground = BTreeMap::new();
+    read_if_there(map_dir, &layout.subterrains.iter().map(Subterrain::ground_path).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>(), &mut ground)?;
+    let t = assemble_terrain(&layout, &|p| ground.get(p).cloned())?;
+    Ok(Some((w3e::terrain_text(&t)?, layout.subterrains)))
+}
+
 /// Project files (relative to `map/`) in the split layout become those of the flat one: the layout's
 /// files go, `war3map.w3e.txt` holds the assembled terrain and the flat object files the merged
 /// objects. Files of the flat layout stay as they are; one of an object kind the subterrains hold is

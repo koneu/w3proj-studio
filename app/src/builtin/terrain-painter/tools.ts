@@ -1,11 +1,11 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
-import { cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
+import { cliffSlope, cliffTypeStencil, dropBrokenRamps, matchCliffTypes } from "../../lib/terrain/cliffs";
 import { liftToFloor, waterBasin } from "../../lib/terrain/waterrim";
 import { rampLift, randomVariation, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
-export { matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
+export { cliffSlope, matchCliffTypes, rampClick } from "../../lib/terrain/cliffs";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth" | "noise";
 /** Cliff layer up/down by one or two, level (the start's layer); water: shallow (one layer
@@ -66,35 +66,6 @@ export function topRefusal(tool: LayerTool, start: number, enforceLimits = false
  *  limits-off-cliff-cap): the pointer's corner moves down the growing slope, and a click on the top wraps it. Studio
  *  refuses that click instead (topRefusal). */
 export const ENFORCED_TOP_LEVEL = 14;
-
-/** The World Editor's cliff slope: after a cliff brush set its corners (`brush`), each corner beside or diagonal to
- *  one that moved comes to within two levels of it, and so on outwards until nothing moves (the brush's own corners
- *  stay). we-drive, 2026-11-15, branch cliff-slope-we: Increase Two clicked ten times on one pixel of flat.w3x, saved
- *  after each click, left square rings 2, 4, 6, … round a size-1 brush and the brush's disc grown by one corner each
- *  way per ring at size 3, every save the stamp of one corner (tools.test.ts); the editor's brush wrapped to level 0 on
- *  a level-14 field (Increase Two from 14) left a pit 0, 2, 4, … 12 in square rings (we-compare cliff-slope-wrap). `moved(i,
- *  from, first)` is called before corner i changes (from: its level then; first: it is beside the brush). */
-export function cliffSlope(t: Terrain, brush: readonly number[], moved: (i: number, from: number, first: boolean) => void): void {
-  const inBrush = new Set(brush);
-  const queue = [...brush];
-  // Each change moves a corner towards a level its neighbour already has; the bound only guards a terrain that could
-  // keep two corners trading places (none is known): every corner may change a few times over.
-  const most = brush.length + 16 * t.width * t.height;
-  for (let k = 0; k < queue.length && k < most; k++) {
-    const i = queue[k], level = t.corners[i].layer;
-    const x = i % t.width, y = Math.floor(i / t.width);
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const nx = x + dx, ny = y + dy, n = ny * t.width + nx;
-      if (nx < 0 || ny < 0 || nx >= t.width || ny >= t.height || inBrush.has(n)) continue;
-      const c = t.corners[n];
-      const to = Math.max(level - 2, Math.min(level + 2, c.layer));
-      if (to === c.layer) continue;
-      moved(n, c.layer, k < brush.length);
-      setLayer(c, to);
-      queue.push(n);
-    }
-  }
-}
 
 /** What a cliff or water stroke started on corner (x, y) sets, or null when it does nothing there (strokeLayer). Cliff
  *  tools step one level from the start point; water goes one or two levels below it, with the surface the water offset

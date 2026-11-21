@@ -16,6 +16,7 @@ macro_rules! print {
 // After the macros: its reports end quietly on a closed pipe too.
 mod rebuild;
 mod check;
+mod seams;
 
 /// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
 /// command still finishes its work (writes, exit code) as if nothing happened.
@@ -469,6 +470,12 @@ enum Cmd {
         /// release.
         #[arg(long)]
         allow_terrain_only_derived: bool,
+        /// A project whose terrain is split (map/terrain/) is first checked along its seams (`w3proj terrain seams`, the
+        /// app's Check Terrain Seams: the terrain brushes' cliff and ramp rules where two subterrains meet, run in
+        /// Node.js), and errors there stop the pack, as does a check that can't run. This packs anyway and tells them as
+        /// warnings.
+        #[arg(long)]
+        allow_seam_issues: bool,
         /// Pack the map script as the project has it. Without it, a script that is the one W3Proj
         /// Studio wrote last is made again from the project's files first, as `w3proj rebuild
         /// --only script` makes it (so it follows changed players, start locations and ally
@@ -637,6 +644,17 @@ enum TerrainCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Check a split terrain's seams as W3Proj Studio's Check Terrain Seams does: the terrain as saved (every
+    /// subterrain) with the terrain brushes' rules where two subterrains meet. Errors (exit code 1): a cliff of more
+    /// than two levels, ramp flags that don't climb one level; warnings: water that steps within a tile. Each line
+    /// names the corners and their subterrains; nothing is changed. Runs the app's own code in Node.js (22 or newer;
+    /// W3PROJ_NODE names another node). `w3proj pack` runs it too.
+    Seams {
+        project: PathBuf,
+        /// The report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -758,8 +776,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 println!("  kept the project's {s}: only its export header changed");
             }
         }
-        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, keep_script, game } => {
+        Cmd::Pack { project, output, keep_unused_strings, force_stale, allow_terrain_only_derived, allow_seam_issues, keep_script, game } => {
             check_derived(&project, force_stale, allow_terrain_only_derived)?;
+            seams::check_for_pack(&packed_projects(&project), allow_seam_issues, &extra)?;
             // The script Studio wrote last, made again from the files now there (the pack works out war3map.w3i's ally
             // priorities as the generator does, so the two agree); one that isn't Studio's goes in as it is, and
             // allies.rs's check of it warns when its priorities aren't those.
@@ -915,9 +934,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             }
         }
+        Cmd::Terrain { cmd: TerrainCmd::Seams { project, json } } => return seams::run(&project, json, &extra),
         Cmd::Terrain { cmd } => {
             let (r, what) = match cmd {
-                TerrainCmd::Check { .. } => unreachable!("matched above"),
+                TerrainCmd::Check { .. } | TerrainCmd::Seams { .. } => unreachable!("matched above"),
                 TerrainCmd::Split { project, rects } => (
                     w3proj::terrain_layout::split_project(&project, &rects).with_context(|| format!("splitting the terrain of {}", project.display()))?,
                     "split into map/terrain/",

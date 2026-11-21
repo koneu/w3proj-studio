@@ -8,6 +8,7 @@ import { checkpointOrStop } from "../../lib/checkpoint";
 import { errorText } from "../../lib/oserror";
 import { LAYOUT_FILE } from "../../lib/terrain/creationids";
 import { loadOpenState, openSummary, type OpenState } from "../../lib/terrain/openset";
+import { checkSeams, seamLines, seamSummary, type SeamReport } from "../../lib/terrain/seams";
 import { h } from "../../workbench/dom";
 
 /** The project's layout file when its terrain is split. */
@@ -127,6 +128,37 @@ export async function checkTerrainIds(w3: W3Api, arg?: { quiet?: boolean }): Pro
     void w3.window.showError(`Check Terrain IDs: ${[twice ? `${twice} creation number${twice === 1 ? "" : "s"} found twice` : "", overlaps ? `${overlaps} overlapping id range${overlaps === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")}. The Subterrains output lists them.`);
   } else {
     void w3.window.showInfo(`Check Terrain IDs: ${report.numbers} creation numbers, none twice, no overlapping ranges.`);
+  }
+  return report;
+}
+
+/** Check Terrain Seams: the whole terrain as saved (every subterrain read, closed ones too) checked along the seams
+ *  with the terrain brushes' cliff, ramp and water rules (lib/terrain/seams.ts, as `w3proj terrain seams` and
+ *  `w3proj pack`). Nothing is changed. The report goes to the Subterrains output; a message says the outcome. Rejects
+ *  when the terrain isn't split or its files can't be read. */
+export async function checkTerrainSeams(w3: W3Api, arg?: { quiet?: boolean }): Promise<SeamReport> {
+  const what = "Check Terrain Seams";
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  if (!isSplit(w3)) throw new Error(`${what}: the terrain isn't split (there is no map/terrain/terrain.json).`);
+  let report: SeamReport | null;
+  try {
+    report = await checkSeams((cmd, args) => w3.backend.invoke(cmd, args), project.root);
+  } catch (e) {
+    throw new Error(`${what}: ${errorText(e).replace(/\.?$/, ".")}`);
+  }
+  if (!report) throw new Error(`${what}: the terrain isn't split (there is no map/terrain/terrain.json).`);
+  if (w3.workspace.project()?.root !== project.root || arg?.quiet) return report;
+  const out = w3.output.channel("Subterrains");
+  out.clear();
+  for (const line of seamLines(report)) out.append(line);
+  const unsaved = w3.editors.unsavedPaths().length ? " (as saved: unsaved changes aren't in it)" : "";
+  if (report.issues.length) {
+    out.show();
+    const text = `${what}: ${seamSummary(report)}${unsaved}. The Subterrains output lists them.`;
+    void (report.errors ? w3.window.showError(text) : w3.window.showWarning(text));
+  } else {
+    void w3.window.showInfo(`${what}: ${seamSummary(report)}${unsaved}.`);
   }
   return report;
 }
@@ -251,6 +283,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrainLayout.split", shown(w3, (arg?: { layout?: SplitLayout; quiet?: boolean }) => splitTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.merge", shown(w3, (arg?: { quiet?: boolean }) => mergeTerrain(w3, arg))),
     w3.commands.register("w3.terrainLayout.checkIds", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainIds(w3, arg))),
+    w3.commands.register("w3.terrainLayout.checkSeams", shown(w3, (arg?: { quiet?: boolean }) => checkTerrainSeams(w3, arg))),
+    w3.mcp.registerTool("check_terrain_seams", async () => {
+      const r = await checkTerrainSeams(w3, { quiet: true });
+      return { errors: r.errors, warnings: r.warnings, seams: r.seams, seamCorners: r.seamCorners, issues: r.issues, summary: seamSummary(r) };
+    }),
     w3.commands.register("w3.terrainLayout.openSubterrains", shown(w3, (arg?: { names?: string[]; all?: boolean }) => openSubterrains(w3, arg))),
     w3.views.register(SUBTERRAINS_VIEW, { render: (el) => renderView(w3, el) }),
     w3.workspace.onDidChange(() => w3.views.refresh(SUBTERRAINS_VIEW)),
