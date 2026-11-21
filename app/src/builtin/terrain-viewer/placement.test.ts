@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
+import * as placement from "./placement";
 import { copyCentre, DEFAULT_START_GOLD, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, startGoldOf, unitGridCells, type PlacedFile } from "./placement";
 import { fragmentOf } from "../../lib/terrain/fragment";
 import { doodadOnGrid } from "./doodadgrid";
@@ -414,22 +415,37 @@ test("non-empty v8 files follow entry layout and handle absent vs unreadable war
   assert.equal(randLoaded.doc.skinIds, false);
   assert.ok(!("skinId" in (newEntry(randLoaded, "hfoo", [0, 0, 0], 0) as unknown as Record<string, unknown>)));
 
-  // Absent w3i on empty v8 -> false; unreadable w3i -> rejects (never silently false).
+  // Absent w3i on empty v8 -> false; unreadable w3i -> read-only load succeeds preserving skinIds & recording skinIdsError,
+  // while blankEntry (via newEntry/pastedEntry) and direct resolveV8SkinIds (editPlaced) enforce the error.
   const { w3: absent } = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", true) });
   const absentLoaded = (await loadPlacedFile(absent, "war3mapUnits.doo", "units"))!;
   assert.equal(absentLoaded.doc.skinIds, false);
+  assert.equal(absentLoaded.skinIdsError, undefined);
 
-  for (const badW3i of ["{not json", "[]", JSON.stringify({ version: 25 })]) {
+  for (const [badW3i, origFlag] of [["{not json", true], ["[]", false], [JSON.stringify({ version: 25 }), true]] as const) {
     const { w3: bad } = mockWorkspace({
       "map/war3map.w3i.json": badW3i,
-      "map/war3mapUnits.doo.json": emptyV8("units", false),
+      "map/war3mapUnits.doo.json": emptyV8("units", origFlag),
     });
-    await assert.rejects(loadPlacedFile(bad, "war3mapUnits.doo", "units"), /war3map\.w3i/);
-  }
-  const { w3: badRaw } = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", false) }, { "map/war3map.w3i": "{corrupt" });
-  await assert.rejects(loadPlacedFile(badRaw, "war3mapUnits.doo", "units"), /war3map\.w3i/);
+    const loaded = (await loadPlacedFile(bad, "war3mapUnits.doo", "units"))!;
+    assert.equal(loaded.doc.skinIds, origFlag);
+    assert.match(loaded.skinIdsError ?? "", /war3map\.w3i/);
+    assert.throws(() => newEntry(loaded, "sloc", [0, 0, 0], 0), /war3map\.w3i/);
+    assert.throws(() => pastedEntry(loaded, { entry: { id: "hfoo" }, angle: 0 }, [0, 0, 0]), /war3map\.w3i/);
+    assert.equal(loaded.issued, undefined);
 
-  // Project switch while reading throws instead of applying another project's w3i.
+    const resolveV8 = (placement as Record<string, unknown>).resolveV8SkinIds as typeof placement.resolveV8SkinIds;
+    assert.equal(typeof resolveV8, "function");
+    const directDoc = JSON.parse(emptyV8("units", origFlag)) as Record<string, unknown>;
+    await assert.rejects(resolveV8(bad, directDoc, directDoc.units as Placed[]), /war3map\.w3i/);
+  }
+  const { w3: badRaw } = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", true) }, { "map/war3map.w3i": "{corrupt" });
+  const loadedRawBad = (await loadPlacedFile(badRaw, "war3mapUnits.doo", "units"))!;
+  assert.equal(loadedRawBad.doc.skinIds, true);
+  assert.match(loadedRawBad.skinIdsError ?? "", /war3map\.w3i/);
+  assert.throws(() => newEntry(loadedRawBad, "sloc", [0, 0, 0], 0), /war3map\.w3i/);
+
+  // Project switch while reading throws instead of applying another project's w3i (even when read(w3i) returns null).
   const sw = mockWorkspace({ "map/war3map.w3i.json": JSON.stringify({ version: 33, editorVersion: 6117 }), "map/war3mapUnits.doo.json": emptyV8("units", false) });
   const origRead = sw.w3.workspace.readText.bind(sw.w3.workspace);
   sw.w3.workspace.readText = async (p: string) => {
@@ -438,4 +454,16 @@ test("non-empty v8 files follow entry layout and handle absent vs unreadable war
     return out;
   };
   await assert.rejects(loadPlacedFile(sw.w3, "war3mapUnits.doo", "units"), /project changed/i);
+
+  const swNull = mockWorkspace({ "map/war3mapUnits.doo.json": emptyV8("units", true) });
+  const nullDoc = JSON.parse(emptyV8("units", true)) as Record<string, unknown>;
+  const resolveV8 = (placement as Record<string, unknown>).resolveV8SkinIds as typeof placement.resolveV8SkinIds;
+  await assert.rejects(
+    resolveV8(swNull.w3, nullDoc, nullDoc.units as Placed[], async () => {
+      swNull.setRoot("/maps/OTHER");
+      return null;
+    }),
+    /project changed/i,
+  );
+  assert.equal(nullDoc.skinIds, true);
 });

@@ -19,8 +19,15 @@ const W3I_RAW = "map/war3map.w3i";
 const findProjectPath = (w3: W3Api, lower: string) =>
   w3.workspace.files().find((f) => f.path.toLowerCase() === lower)?.path ?? null;
 
+class ProjectSwitchedError extends Error {}
+
 async function readW3iReforged(w3: W3Api, read?: (path: string) => Promise<string | null>): Promise<boolean | null> {
   const root = w3.workspace.project?.()?.root;
+  const checkProject = () => {
+    if (w3.workspace.project?.()?.root !== root) {
+      throw new ProjectSwitchedError("The project changed meanwhile; nothing was read.");
+    }
+  };
   const jsonPath = findProjectPath(w3, W3I_JSON);
   const rawPath = findProjectPath(w3, W3I_RAW);
   let text: string | null = null;
@@ -28,27 +35,32 @@ async function readW3iReforged(w3: W3Api, read?: (path: string) => Promise<strin
     try {
       text = read ? await read(jsonPath) : await w3.workspace.readText(jsonPath);
     } catch (e) {
+      checkProject();
       throw new Error(`war3map.w3i is there but can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
     }
+    checkProject();
     if (text === null) throw new Error("war3map.w3i is there but can't be read, so version 8 skinIds can't be told.");
   } else if (rawPath) {
     try {
       text = root ? await w3.backend.invoke<string>("codec_decode", { root, path: rawPath }) : null;
     } catch (e) {
+      checkProject();
       throw new Error(`war3map.w3i is there but can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
     }
+    checkProject();
     if (text === null) throw new Error("war3map.w3i is there but can't be read, so version 8 skinIds can't be told.");
   } else if (read) {
     try {
       text = await read(W3I_JSON);
     } catch (e) {
+      checkProject();
       throw new Error(`war3map.w3i can't be read (${errorText(e)}), so version 8 skinIds can't be told.`);
     }
+    checkProject();
     if (text === null) return null;
   } else {
     return null;
   }
-  if (w3.workspace.project?.()?.root !== root) throw new Error("The project changed meanwhile; nothing was read.");
   let info: unknown;
   try {
     info = JSON.parse(text);
@@ -97,6 +109,8 @@ export interface PlacedFile {
   /** The highest numbers newEntry has handed out (editorId, a v13 doodad's first trailer value): entries made before any
    *  of them is put into `list` (a scatter fill makes them all, then inserts) still get one number each. */
   issued?: { editorId?: number; trailer?: number };
+  /** Set on a read-only load of an empty version-8 file when `war3map.w3i` couldn't be read; blocks `blankEntry`. */
+  skinIdsError?: string;
 }
 
 export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "units"): Promise<PlacedFile | null> {
@@ -108,13 +122,20 @@ export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "
   if (jsonPath) { text = await w3.workspace.readText(jsonPath); json = true; }
   else if (rawPath) { text = await w3.backend.invoke<string>("codec_decode", { root: root!, path: rawPath }); json = false; }
   else return null;
-  if (w3.workspace.project?.()?.root !== root) throw new Error("The project changed meanwhile; nothing was loaded.");
+  if (w3.workspace.project?.()?.root !== root) throw new ProjectSwitchedError("The project changed meanwhile; nothing was loaded.");
   const doc = JSON.parse(text) as Record<string, unknown>;
   const list = (doc[key] ?? []) as Placed[];
   doc[key] = list;
-  await resolveV8SkinIds(w3, doc, list);
+  let skinIdsError: string | undefined;
+  try {
+    await resolveV8SkinIds(w3, doc, list);
+  } catch (e) {
+    if (e instanceof ProjectSwitchedError) throw e;
+    if (w3.workspace.project?.()?.root !== root) throw new ProjectSwitchedError("The project changed meanwhile; nothing was loaded.");
+    skinIdsError = errorText(e);
+  }
   splitOwners(list);
-  return { name, key, doc, list, json, dirty: false };
+  return skinIdsError ? { name, key, doc, list, json, dirty: false, skinIdsError } : { name, key, doc, list, json, dirty: false };
 }
 
 /** `text` is the file as taken earlier; without it the file is serialized now. */
@@ -138,6 +159,7 @@ const UNSET = 0xffffffff;
 /** An entry with the fields the file's version has (formats/doodads.json, units.json), for a file
  *  with nothing to copy: a new map has no doodads yet. */
 function blankEntry(f: PlacedFile): Entry {
+  if (f.skinIdsError) throw new Error(f.skinIdsError);
   const version = Number(f.doc.version), subversion = Number(f.doc.subversion);
   const skin = version >= 12 || (version === 8 && f.doc.skinIds === true && (f.list.length === 0 || hasSkinId(f.list)));
   const base = { id: "", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1] } as Entry;
