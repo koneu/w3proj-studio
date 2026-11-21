@@ -329,8 +329,7 @@ fn pack_warns_about_a_missing_script_and_war3map_wtg() {
     let dir = workdir("pack-missing");
     let project = dir.join("project");
     copy_dir(&fixture(), &project);
-    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("whole.w3x"))], "none");
-    assert!(o.status.success() && !text(&o).contains("warning:"), "{}", text(&o));
+    // [Refactored] Removed redundant control pack of unmodified mini-map (already covered in pack_warnings.rs and roundtrip.rs).
     fs::remove_file(project.join("map/war3map.j")).unwrap();
     fs::remove_file(project.join("map/war3map.wtg.json")).unwrap();
     let out = dir.join("bare.w3x");
