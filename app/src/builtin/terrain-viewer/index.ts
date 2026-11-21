@@ -1865,7 +1865,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           notifyGroups(e);
           if (toolGroups.liveLists === liveLists) toolGroups.edited({ terrain: e.terrain, objects: e.objects });
           minimapStale.set();
-          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          occupancyPromise = walkPromise = maskPromise = destructablePromise = standingPromise = null;
           if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); if (!e.objects) refloat(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
@@ -1900,7 +1900,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (toolGroups.liveLists === liveLists) toolGroups.edited({ terrain: e.terrain, objects: e.objects });
           shadowEditsSoon();
           minimapStale.set();
-          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          occupancyPromise = walkPromise = maskPromise = destructablePromise = standingPromise = null;
           if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at) && !mark.pending(at)) {
             history[at - 1] = keyStep = joinSteps(keyStep, e);
             doc.setDirty(true);
@@ -2727,7 +2727,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               doodadCells.clear();
               roomShapes.clear();
               unitHalves.clear();
-              occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+              occupancyPromise = walkPromise = maskPromise = destructablePromise = standingPromise = null;
             }
             const before = objCtx;
             const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
@@ -2737,7 +2737,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
             for (const id of changed) { buildingCells.delete(id); doodadCells.delete(id); }
             if (changed.size) roomShapes.clear();
-            if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+            if (changed.size) occupancyPromise = walkPromise = maskPromise = destructablePromise = standingPromise = null;
             // A rebuild that starts meanwhile (a file taken in place) draws with the new data too.
             nextCtx = next;
             try {
@@ -4060,6 +4060,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let occupancyPromise: Promise<Occupancy> | null = null;
         /** What stops a walking unit; dropped with the above. */
         let walkPromise: Promise<Uint8Array> | null = null;
+        let maskPromise: Promise<Uint8Array> | null = null;
         let destructablePromise: Promise<Uint8Array> | null = null;
         let standingPromise: Promise<Uint8Array> | null = null;
         let pathingData: Promise<PathingData> | null = null;
@@ -4849,7 +4850,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
                 return objectsOnly ? Occupancy.mask(terrain, data, placed) : (await Occupancy.build(terrain, data, placed)).blocked;
               };
-              return objectsOnly ? blocked() : (walkPromise ??= blocked());
+              return objectsOnly ? (maskPromise ??= blocked()) : (walkPromise ??= blocked());
             },
             standing: () => (standingPromise ??= (async () => {
               pathingData = pathing();
@@ -6270,7 +6271,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {
           const reopenInstead = () => { if (openedBy.get(doc.path) === record) openedBy.delete(doc.path); return false; };
-          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          occupancyPromise = walkPromise = maskPromise = destructablePromise = standingPromise = null;
           minimapStale.set();
           // The editor's undo steps were for the map as it was.
           history.length = 0;

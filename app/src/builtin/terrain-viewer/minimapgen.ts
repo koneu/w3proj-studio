@@ -8,7 +8,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseMdx } from "../../lib/model/mdx";
 import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type PathMask, type Rgb } from "./minimap";
 import { importedPath, modeNames } from "../../lib/imports";
-import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./objects";
+import { loadSkins, modelPath, plainModelPath, reforgedModelPath, type Placed, type Skin } from "./objects";
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
@@ -103,16 +103,19 @@ export async function shownTextureMean(model: { textures: readonly { replaceable
  *  model's first texture (its replaceable texture, trees' for example, where the model asks for one), null when the
  *  model or texture can't be read. The first variation's model stands for all.
  *  `mean`: for a dot, shownTextureMean's colour when it has one. */
-export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "texId" | "texFile">,
+export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "texId" | "texFile" | "reforgedFile">,
   readFile: (path: string) => Promise<Uint8Array>, mean = false): Promise<Rgb | null> {
+  const candidates = [
+    modelPath(skin, 0),
+    plainModelPath(skin),
+    reforgedModelPath(skin, 0),
+    skin.reforgedFile ? plainModelPath({ file: skin.reforgedFile, numVar: skin.numVar }) : undefined,
+  ].filter((p): p is string => !!p);
   let model;
-  try {
-    model = parseMdx(await readFile(modelPath(skin, 0)));
-  } catch {
-    const plain = plainModelPath(skin);
-    if (!plain) return null;
-    try { model = parseMdx(await readFile(plain)); } catch { return null; }
+  for (const p of candidates) {
+    try { model = parseMdx(await readFile(p)); break; } catch { /* the next candidate */ }
   }
+  if (!model) return null;
   const pathOf = (tex: { replaceableId: number; path: string }) => tex.replaceableId === 0 ? tex.path
     : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";
   /** A texture's colour: null when it has none to read or can't be. HD models name their textures as the artists

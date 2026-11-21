@@ -64,6 +64,8 @@ const FIX: Record<string, string> = {
 };
 
 const HOSTILE = 24, MINE = "ngol", START = "sloc";
+/** Neutral structures that carry or teleport ground units across water or cliffs. */
+const TRANSPORT = new Set(["ngad", "nshp", "nwgt"]);
 /** Mines this far from a start belong to it. Measured: 771 to 781. */
 const OWN_MINE = [700, 850] as const;
 /** Measured: nothing nearer than 1,758. */
@@ -135,6 +137,7 @@ export function checkMelee(f: MeleeFacts) {
   const starts = f.units.filter((u) => u.id === START).map(place);
   const mines = f.units.filter((u) => u.id === MINE).map(place);
   const shops = f.units.filter((u) => u.player === 27 && u.id !== MINE && u.id !== START);
+  const hasTransport = f.units.some((u) => TRANSPORT.has(u.id));
   const camps = campsOf(f.units, f);
   const unknown = [...new Set(camps.flatMap((c) => c.creeps).filter((u) => u.randomLevel === undefined && f.level(u.id) === undefined).map((u) => u.id))];
   const unknownSight = [...new Set(camps.flatMap((c) => c.creeps).filter((u) => u.acquisition < 0 && f.sight(u.id) === undefined).map((u) => u.id))];
@@ -198,8 +201,9 @@ export function checkMelee(f: MeleeFacts) {
     const crowded = c.creeps.some((a, i) => c.creeps.slice(i + 1).some((b) => dist([a.x, a.y], [b.x, b.y]) < CREEP_GAP));
     if (crowded) add("camp overlap", "error", `Creeps here stand under ${CREEP_GAP} apart, on top of each other. In ladder camps they're at least 100 apart.`, c.centre);
     if (f.widestTo && !isGuard(c)) {
-      const way = f.widestTo(c.centre[0], c.centre[1]);
-      if (way < 160) add("camp access", "error", `The widest way to this camp is ${way}. On ladder maps it's usually 480 and never under 160: a group can't fight here.`, c.centre);
+      const way = Math.max(f.widestTo(c.centre[0], c.centre[1]), ...c.creeps.map((u) => f.widestTo!(u.x, u.y)));
+      if (way === 0 && hasTransport) add("camp access", "warning", "No way on foot reaches this camp (an island, behind trees, or past a waygate). The map has transport, so check that players can reach it.", c.centre);
+      else if (way < 160) add("camp access", "error", `The widest way to this camp is ${way}. On ladder maps it's usually 480 and never under 160: a group can't fight here.`, c.centre);
       else if (way < 224) add("camp access", "warning", `The widest way to this camp is ${way}. On ladder maps it's usually 480.`, c.centre);
     }
   }

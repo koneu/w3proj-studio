@@ -63,12 +63,13 @@ export class Occupancy {
   readonly blocked: Uint8Array;
   private footprints = new Map<string, Promise<Footprint | null>>();
 
-  private constructor(private terrain: Terrain, private data: PathingData) {
+  private constructor(private terrain: Terrain, private data: PathingData, ground = true) {
     this.w = (terrain.width - 1) * 4;
     this.h = (terrain.height - 1) * 4;
+    this.blocked = new Uint8Array(this.w * this.h);
+    if (!ground) return;
     // Painted Boundary doesn't count: doodads stand there (units and items are refused by onBoundary instead).
     const pathing = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, ownTiles: data.ownTiles(terrain.tileset), waterOffset: data.waterOffset(terrain.tileset), boundary: false }).subarray(16);
-    this.blocked = new Uint8Array(this.w * this.h);
     for (let i = 0; i < this.blocked.length; i++) if (pathing[i] & NO_WALK) this.blocked[i] = 1;
   }
 
@@ -84,8 +85,7 @@ export class Occupancy {
 
   /** Only the cells these placed objects cover, without the ground. */
   static async mask(terrain: Terrain, data: PathingData, placed: { entry: Placed; kind: string }[]): Promise<Uint8Array> {
-    const o = new Occupancy(terrain, data);
-    o.blocked.fill(0);
+    const o = new Occupancy(terrain, data, false);
     for (const { entry, kind } of placed) {
       const fp = await o.footprint(entry.id, kind);
       if (fp) o.mark(fp, entry.position[0], entry.position[1], entry.angle);
