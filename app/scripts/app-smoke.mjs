@@ -8467,8 +8467,17 @@ async function doodadSnapOnLoad(page, found) {
     // ---- on, the map's doodad data unreadable: a type's range may be the map's, so scales stay; flags are fixed ----
     const broken = make("broken");
     writeFileSync(join(broken, "map", "war3map.w3d.json"), "{ not json");
-    await open(broken);
-    await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
+    // The fix comes after the snap, once war3map.w3i is read: a slow read (a loaded machine, the gate's batch) leaves
+    // the doodads snapped and not fixed yet for a while. Made slow here on purpose, so the check waits for the fix.
+    await page.evaluate(`(() => { const ws = w3.workspace, read = ws.readText; window.__slowW3i = read;
+      ws.readText = async (p) => { if (/war3map\\.w3i\\.json$/i.test(p)) await new Promise((r) => setTimeout(r, 2000)); return read(p); }; })()`);
+    try {
+      await open(broken);
+      await until("the barrel on its grid", async () => same(xyAngle(await live()).LTbr?.slice(0, 2), [32, 32]), 30000).catch((e) => fail(`with the map's doodad data unreadable: ${e.message}`));
+      await until("the outside flags fixed", async () => scaleFlags(await live()).LOfl?.[3] === FIXED.LOfl[3], 30000).catch(() => {});
+    } finally {
+      await page.evaluate(`(() => { if (window.__slowW3i) w3.workspace.readText = window.__slowW3i; delete window.__slowW3i; })()`);
+    }
     const brokenLive = scaleFlags(await live()), brokenStored = scaleFlagsOnDisk(broken);
     for (const id of ["LTbr", "LOtr"]) if (!same(brokenLive[id]?.slice(0, 3), brokenStored[id].slice(0, 3))) fail(`with the map's doodad data unreadable ${id}'s scale became ${lit(brokenLive[id])}, not the map's ${lit(brokenStored[id])}`);
     for (const id of ["LTbr", "LOtr", "LOfl"]) if (brokenLive[id]?.[3] !== FIXED[id][3]) fail(`with the map's doodad data unreadable ${id}'s flags are ${brokenLive[id]?.[3]}, not ${FIXED[id][3]}`);
