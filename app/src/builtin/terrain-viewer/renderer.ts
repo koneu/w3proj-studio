@@ -994,11 +994,24 @@ export class TerrainRenderer {
     return !!this.partial?.hidden[y * (this.terrain.width - 1) + x];
   }
 
+  /** Puts the corners outside the open subterrains (a partial load) back as they were loaded, whatever changed them; true
+   *  when one had changed. */
+  restoreLocked(): boolean {
+    let changed = false;
+    for (const { index, corner } of this.partial?.locked ?? []) {
+      const c = this.terrain.corners[index];
+      if ((Object.keys(corner) as (keyof typeof corner)[]).some((k) => c[k] !== corner[k])) {
+        Object.assign(c, corner);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   /** Rebuilds everything derived from the corners after an edit. */
   terrainChanged() {
     const gl = this.gl;
-    // Corners outside the open subterrains are as they were loaded, whatever changed them.
-    if (this.partial) for (const { index, corner } of this.partial.locked) Object.assign(this.terrain.corners[index], corner);
+    this.restoreLocked();
     this.setCliffTiles(this.cliffTiles, this.groundOverrides);
     this.heightRange = null;
     this.freeVao(this.water.vao);

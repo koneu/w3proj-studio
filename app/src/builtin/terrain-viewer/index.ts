@@ -6443,7 +6443,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The map-edge marks are written from the w3i, as the World Editor's save does (we-drive, 2026-11-13: a copy
             // of AutumnLeaves_S2 with other marks came back marked by its complements). The view goes by the w3i anyway.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[]; players?: StartPlayer[] }>(w3, "map/war3map.w3i.json").catch(() => null);
-            if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
+            if (edgeInfo?.cameraComplements) {
+              markMapEdge(terrain, edgeInfo.cameraComplements);
+              // A partial load: the closed subterrains' corners (the default corner) aren't marked, they aren't saved.
+              renderer.restoreLocked();
+              renderer.refreshBorder();
+            }
             // Every player of the w3i without a start location gets one, as the World Editor's save gives them (there at
             // a random valid place; here the valid place nearest to the w3i's start: meleesave.ts newStartPlaces). A
             // start deleted since the open or the last save removes its player instead (syncPlayers); a w3i without

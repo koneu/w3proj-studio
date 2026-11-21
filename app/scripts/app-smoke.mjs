@@ -6125,6 +6125,8 @@ async function subterrains(page, found) {
     {
       const others = layout.subterrains.filter((s) => s.name !== "ne");
       const folderState = (s) => readdirSync(join(map, "terrain", s.folder)).sort().map((f) => `${f}:${statSync(join(map, "terrain", s.folder, f)).mtimeMs}:${readFileSync(join(map, "terrain", s.folder, f), "latin1")}`).join("|");
+      // The terrain editor's handle (as a tool group gets it), for a save of the editor itself.
+      await page.evaluate(`(async () => { const s = await w3.services.get("w3.terrain"); window.__subGroup = s.registerToolGroup({ id: "smoke-sub", title: "smoke-sub", order: 999, create: (ed) => { window.__subEd = ed; return { toolbar: document.createElement("div") }; } }); })()`);
       const opened = await run("w3.terrainLayout.openSubterrains", { names: ["ne"] });
       if (opened) fail(`Open Subterrains (ne) failed: ${opened}`);
       await editorUp();
@@ -6147,6 +6149,17 @@ async function subterrains(page, found) {
       const seamChanged = others.filter((s, i) => folderState(s) !== before[i]).map((s) => s.name);
       if (seamChanged.length) fail(`a paint over the seam with only ne open changed ${seamChanged.join(", ")}`);
       if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the paint over the seam left the editor unsaved (its save was refused?)");
+      // The editor's own save (it marks the map's edge from the w3i first): saved, the closed subterrains untouched.
+      const editorSave = await page.evaluate(`(async () => {
+        if (!window.__subEd) return "no terrain editor handle";
+        window.__subEd.pushEdit({ undo() {}, redo() {}, terrain: true, objects: false });
+        return w3.editors.saveAll().then(() => null, (e) => String(e?.message ?? e));
+      })()`);
+      await settled(page);
+      if (editorSave) fail(`the partial terrain editor's save failed: ${editorSave}`);
+      if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the partial terrain editor is unsaved after its own save");
+      const editorSaveChanged = others.filter((s, i) => folderState(s) !== before[i]).map((s) => s.name);
+      if (editorSaveChanged.length) fail(`the partial terrain editor's save changed ${editorSaveChanged.join(", ")}`);
       const partialRecord = JSON.parse(readFileSync(join(root, ".w3proj", "derived-from.json"), "utf8"));
       if (partialRecord.files?.["?closed-subterrains"] !== "3") fail(`the derived files' record after the partial save: ${lit(partialRecord.files?.["?closed-subterrains"])}`);
       const cliRefused = spawnSync(cli, ["pack", root, "-o", join(folder, "subterrains-partial.w3x"), "--keep-script"], { encoding: "utf8" });
@@ -6185,6 +6198,7 @@ async function subterrains(page, found) {
     await editorUp().catch(() => fail("the terrain editor isn't open after the merge"));
   } finally {
     await page.evaluate(`(() => { if (window.__subKept) w3.window.confirm = window.__subKept; delete window.__subKept; })()`).catch(() => {});
+    await page.evaluate(`(() => { window.__subGroup?.dispose(); delete window.__subGroup; delete window.__subEd; })()`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }
