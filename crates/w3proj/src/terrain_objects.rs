@@ -709,6 +709,26 @@ pub(crate) fn flat_numbers(kind: Kind, bytes: &[u8], offset: [f32; 2]) -> Result
     Ok(out)
 }
 
+/// An entry's text for telling whether it is the same as another: keys sorted, every number as the float it stands for
+/// (`1192` and `1192.0` are one value: the app's canonical JSON writes floats with a point, a file written by hand may
+/// not), so a write that only formats an entry anew doesn't count as changing it.
+fn canonical(v: &Value) -> String {
+    match v {
+        Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
+            let parts: Vec<String> = keys.iter().map(|k| format!("{}:{}", serde_json::to_string(k).expect("a string serializes"), canonical(&m[*k]))).collect();
+            format!("{{{}}}", parts.join(","))
+        }
+        Value::Array(a) => format!("[{}]", a.iter().map(canonical).collect::<Vec<_>>().join(",")),
+        Value::Number(n) => match n.as_f64() {
+            Some(f) => format!("{f:?}"),
+            None => n.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
 /// The open subterrains' files for a flat object file written as `new` in a partial load (`crate::terrain_open`;
 /// `take` and `near` as for `assemble_with`, `get` the loaded subterrains' files): every entry of the new file goes to
 /// the open subterrain owning it; one whose owner isn't open must be an entry the load read unchanged (from the halo, or
@@ -738,7 +758,7 @@ pub(crate) fn write_partial(
         return Err(refused("its header (magic, version, skin ids) changed, and closed subterrains' files are read by it".into()));
     }
     let version = doodads_version(heads);
-    let canon = |e: &Entry| serde_json::to_string(e).expect("JSON serializes");
+    let canon = |e: &Entry| canonical(&Value::Object(e.clone()));
     let open: Vec<bool> = (0..subs.len()).map(|i| take(i) == Some(true)).collect();
     // The loaded subterrains' files as they are: per subterrain, per list, the items (an open one's all, a halo one's
     // near ones).

@@ -387,6 +387,18 @@ test("Open Subterrains: closed ones are default-filled and left out, edits save 
   before = snapshot(root);
   await assert.rejects(placeUnits(w3, [[2500, 1900, 0]]), /lies in subterrain "b2", which isn't open/);
   assert.deepEqual(changedFiles(before, snapshot(root)), []);
+  // The doodads saved as loaded (halo ones among them, through the app's canonical JSON): nothing written.
+  before = snapshot(root);
+  const same = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+  assert.ok(same.list.some((p) => p.position[0] >= 1024), "halo doodads are loaded");
+  await savePlacedFile(w3, same);
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
+  // One of a0's moved within a0: a0's doodads.json only.
+  const mine = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+  const tree = mine.list.find((p) => p.position[0] < 900 && p.position[1] < 900)!;
+  tree.position = [tree.position[0] + 20, tree.position[1], tree.position[2]];
+  await savePlacedFile(w3, mine);
+  assert.deepEqual(changedFiles(before, snapshot(root)), ["map/terrain/a0/doodads.json"]);
   // A halo doodad moved: refused.
   const f = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
   const haloTree = f.list.find((p) => p.position[0] >= 1024)!;
