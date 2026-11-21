@@ -6486,6 +6486,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               saved: () => doc.setDirty(mark.isDirty(at)),
             });
             if (startsAdded.length) void rebuildObjects();
+            // The tool groups' files first (the Pathing tool's overrides): in a split project they are map/terrain/*/pathing.txt,
+            // sources of the derived files, so the record the derived files' update makes below has to see them written.
+            for (const g of groupInsts.values()) {
+              await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
+            }
             // The derived files follow what was written, not what an edit made meanwhile changed.
             const doodads = snap.doodads ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
             // In the rebuilds' turn, which write the same files: a rebuild running now ends first (else its files, made
@@ -6501,9 +6506,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               savedDoodads = snap.doodads ?? structuredClone(doodads);
             } else {
               w3.window.showError(`Saved, but pathing, shadows and the minimap weren't updated: a rebuild of them was still running after ${Math.round(SETTLE_LIMIT / 1000)} s. The next save updates them.`);
-            }
-            for (const g of groupInsts.values()) {
-              await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
           }) : undefined,
           focus: () => keysToMap(),

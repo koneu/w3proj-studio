@@ -6069,6 +6069,54 @@ async function subterrains(page, found) {
     if (differ(before, snapshot(map)).length) fail(`the reload changed ${differ(before, snapshot(map)).join(", ")}`);
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the reloaded terrain editor has unsaved changes it didn't make");
 
+    // Stage 3: pathing painted in the split project with the Pathing brush in the middle of the map (where the four
+    // subterrains meet) goes into the subterrains' pathing.txt, not .w3proj/pathing.json; the save's derived files go
+    // into .w3proj/derived/ (git-ignored), none into map/; the project packs, by the app and by `w3proj pack` without a
+    // flag, with the painted cell blocked in the map's pathing.
+    {
+      const store = join(root, ".w3proj", "derived");
+      const hands = new Hands(page);
+      await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Pathing").click()`);
+      await until("the Pathing tab", () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === "Pathing"`), 5000);
+      const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
+      await until("the pathing overlay", async () => /cells overridden/.test(await overridden()), 20000);
+      await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get("map/war3map.w3e.txt")(0, 0))()`);
+      await settled(page);
+      const c = await hands.where(".model-stage canvas");
+      await hands.mouse("mouseMoved", c.x, c.y);
+      await hands.click(".model-stage canvas");
+      await until("the stroke's cells", async () => /^[1-9]\d* cells/.test(await overridden()), 10000).catch(async () => fail(`the stroke made no overrides (${await overridden()})`));
+      const shown = Number((await overridden()).match(/^(\d+)/)?.[1] ?? 0);
+      await page.evaluate(`w3.editors.saveAll()`);
+      await settled(page);
+      if (existsSync(join(root, ".w3proj", "pathing.json"))) fail("the Pathing save wrote .w3proj/pathing.json in a split project");
+      const owners = layout.subterrains.filter((s) => existsSync(join(map, "terrain", s.folder, "pathing.txt"))).map((s) => s.name);
+      if (owners.length < 2) fail(`a stroke over the seams wrote pathing.txt in ${lit(owners)}, not in the subterrains it touched`);
+      const assembledPathing = await page.evaluate(`w3.workspace.readText(".w3proj/pathing.json").then((t) => JSON.parse(t).cells.length, (e) => String(e))`);
+      if (assembledPathing !== shown) fail(`the subterrains' pathing.txt read back as ${lit(assembledPathing)} overrides, the tool showed ${shown}`);
+      for (const f of ["war3map.wpm", "war3map.shd", "war3mapMap.blp"]) {
+        if (!existsSync(join(store, f))) fail(`the save left no .w3proj/derived/${f}`);
+        if (existsSync(join(map, f))) fail(`the save wrote map/${f} in a split project`);
+      }
+      if (!/^\/\.w3proj\/derived\/$/m.test(readFileSync(join(root, ".gitignore"), "utf8"))) fail(".gitignore doesn't ignore .w3proj/derived/");
+      if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the terrain editor is unsaved after the Pathing save");
+      const cell = (b, x, y) => b[16 + (128 + y) * b.readUInt32LE(8) + 128 + x];
+      const appMap = join(folder, "subterrains-app.w3x");
+      const packed = await page.evaluate(`w3.backend.invoke("project_pack", { root: ${lit(root)}, output: ${lit(appMap)} }).then(() => null, (e) => String(e?.message ?? e))`);
+      if (packed) fail(`the app's pack of the split project failed: ${packed}`);
+      const cliMap = join(folder, "subterrains-cli.w3x");
+      const cliPack = spawnSync(cli, ["pack", root, "-o", cliMap, "--keep-script"], { encoding: "utf8" });
+      if (cliPack.status !== 0) fail(`\`w3proj pack\` of the split project after the app's save refused: ${(cliPack.stdout + cliPack.stderr).trim().slice(-400)}`);
+      for (const out of [appMap, cliMap].filter((m) => existsSync(m))) {
+        const wpm = spawnSync(cli, ["cat", out, "war3map.wpm"], { maxBuffer: 1 << 26 });
+        if (wpm.status !== 0) { fail(`no war3map.wpm in ${out}`); continue; }
+        if (!wpm.stdout.equals(readFileSync(join(store, "war3map.wpm")))) fail(`the war3map.wpm in ${out} isn't .w3proj/derived/war3map.wpm`);
+        if (!(cell(wpm.stdout, 0, 0) & 0x02)) fail(`the painted middle cell can be walked in ${out} (flags ${cell(wpm.stdout, 0, 0).toString(16)})`);
+      }
+      await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select")?.click()`);
+      await settled(page);
+    }
+
     // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
     const merged = await run("w3.terrainLayout.merge", { quiet: true });
     if (merged) fail(`Merge Subterrains failed: ${merged}`);
@@ -6077,6 +6125,9 @@ async function subterrains(page, found) {
     const flat = existsSync(join(map, "war3map.w3e.txt")) ? readFileSync(join(map, "war3map.w3e.txt"), "utf8") : null;
     if (flat !== assembled) fail("the merged map/war3map.w3e.txt isn't the terrain the subterrains held");
     for (const f of ["war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"]) if (!existsSync(join(map, f))) fail(`the merge wrote no map/${f}`);
+    for (const f of ["war3map.wpm", "war3map.shd", "war3mapMap.blp"]) if (!existsSync(join(map, f))) fail(`the merge didn't bring map/${f} back from .w3proj/derived/`);
+    if (existsSync(join(root, ".w3proj", "derived"))) fail(".w3proj/derived/ is left after the merge");
+    if (!existsSync(join(root, ".w3proj", "pathing.json"))) fail("the merge didn't write the painted overrides back into .w3proj/pathing.json");
     await editorUp().catch(() => fail("the terrain editor isn't open after the merge"));
   } finally {
     await page.evaluate(`(() => { if (window.__subKept) w3.window.confirm = window.__subKept; delete window.__subKept; })()`).catch(() => {});

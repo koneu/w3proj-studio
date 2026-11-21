@@ -22,6 +22,8 @@ import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
 import { checkTerrainIds, FLAT_FILES, isSplit, mergeTerrain, splitTerrain } from "../builtin/terrain-layout/index";
+import { readPathingFile } from "../builtin/terrain-pathing/file";
+import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
 
 const cache = join(repoPath("app", "node_modules"), ".cache", "w3-layout-test");
 mkdirSync(cache, { recursive: true });
@@ -254,6 +256,51 @@ test("two branches placing in different subterrains merge without a duplicate nu
   const report = await checkTerrainIds(a.w3, { quiet: true });
   assert.equal(report.errors, true);
   assert.deepEqual(report.duplicates, [{ kind: "units", number: 10000, files: ["map/terrain/sw/units.json", "map/terrain/sw/units.json"] }]);
+});
+
+// ---- stage 3: derived files in .w3proj/derived/, the Pathing tool's file in the subterrains' pathing.txt ----
+
+test("the Pathing tool's file reads and writes through the subterrains' pathing.txt; a damaged one is unreadable, never empty", async () => {
+  const { w3, root } = await splitProject("pathing");
+  const FILE = ".w3proj/pathing.json";
+  // The mini map's pathing map: 16×8 cells; the 2×2 grid's seams at cell x 8 and y 4.
+  const exists = () => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(FILE) });
+  const read = () => readPathingFile(exists, () => w3.workspace.readText(FILE), 16, 8);
+  assert.deepEqual(await read(), { state: "absent" }, "no subterrain has overrides yet");
+  const file: PathingOverrides = { format: "w3proj.pathing/1", width: 16, height: 8, cells: [[7, 1, 2, 8], [8, 1, 2, 8], [3, 5, 0, 8]] };
+  await w3.workspace.writeText(FILE, pathingOverridesText(file));
+  const txt = (sub: string) => join(root, "map", "terrain", sub, "pathing.txt");
+  assert.deepEqual(["sw", "se", "nw"].map((s) => readFileSync(txt(s), "utf8")), ["7 1 0a 02\n", "0 1 0a 02\n", "3 1 08 00\n"]);
+  assert.throws(() => statSync(join(root, ".w3proj", "pathing.json")), "nothing written to .w3proj/pathing.json itself");
+  assert.deepEqual(await read(), { state: "ok", file: JSON.parse(pathingOverridesText(file)) });
+  assert.equal(await w3.workspace.readText(FILE), pathingOverridesText(file), "byte for byte");
+  assert.ok(w3.workspace.files().some((f) => f.path === FILE), "listed");
+  // A stroke in the north-west only: only nw's file changes, and the write was the app's own.
+  const before = snapshot(root);
+  file.cells[2] = [3, 5, 2, 0];
+  await w3.workspace.writeText(FILE, pathingOverridesText(file));
+  assert.deepEqual(changedFiles(before, snapshot(root)), ["map/terrain/nw/pathing.txt"]);
+  assert.deepEqual([...await workspaceOf(w3).externalChanges()], []);
+  // Damaged (a merge conflict left in it): there, unreadable, so painting stays off rather than writing over it.
+  writeFileSync(txt("nw"), "3 1 02 02\n<<<<<<< HEAD\n");
+  const damaged = await read();
+  assert.equal(damaged.state, "unreadable");
+  assert.match((damaged as { why: string }).why, /map\/terrain\/nw\/pathing\.txt line 2/);
+});
+
+test("a split project's derived files are read and written under their map/ names, kept in .w3proj/derived/", async () => {
+  const { w3, root } = await splitProject("derived");
+  const stored = join(root, ".w3proj", "derived", "war3map.wpm");
+  assert.throws(() => statSync(join(root, "map", "war3map.wpm")), "the split moved it out of map/");
+  assert.deepEqual(new Uint8Array(await w3.workspace.readBytes("map/war3map.wpm")), new Uint8Array(readFileSync(stored)));
+  assert.ok(w3.workspace.files().some((f) => f.path === "map/war3map.wpm"), "listed under its map/ name");
+  const wpm = new Uint8Array(readFileSync(stored));
+  wpm[wpm.length - 1] ^= 1;
+  await w3.workspace.writeBytes("map/war3map.wpm", wpm);
+  assert.deepEqual(new Uint8Array(readFileSync(stored)), wpm);
+  assert.throws(() => statSync(join(root, "map", "war3map.wpm")), "nothing written into map/");
+  assert.deepEqual([...await workspaceOf(w3).externalChanges()], [], "the store's file was the app's own write");
+  assert.match(readFileSync(join(root, ".gitignore"), "utf8"), /^\/\.w3proj\/derived\/$/m);
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */

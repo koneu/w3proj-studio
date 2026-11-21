@@ -479,7 +479,12 @@ w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
                                     #  nothing; --allow-deletes deletes them)
 w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x); warns when the map
                                     # has no war3map.j (no script) or no war3map.wtg (the World Editor
-                                    # can't open it), and packs it anyway
+                                    # can't open it), and packs it anyway. A project whose terrain is split
+                                    # (map/terrain/) keeps pathing, shadows and minimap in .w3proj/derived/
+                                    # (git-ignored) and its pathing overrides in map/terrain/*/pathing.txt; its
+                                    # pack refuses derived files that are stale or missing (open and save it in
+                                    # Studio, or `w3proj rebuild`); --allow-terrain-only-derived packs them as
+                                    # they are / leaves missing ones out (not for a release)
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --mode sd|hd|de; --force also makes fresh ones and replaces a script
