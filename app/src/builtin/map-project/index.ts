@@ -20,6 +20,9 @@ interface UnpackReport {
   /** Classic files the sync kept as the project had them: the map held their _HD.w3mod version's bytes under the plain
    *  name, as the World Editor in HD mode saves an import a unit uses (from the project root). */
   kept_classic?: string[];
+  /** `.mdl` files the sync left as the project had them: only the `// MDLFile version` / `// Exported on`
+   *  header lines differed (from the project root). */
+  kept_mdl?: string[];
 }
 
 interface PackReport {
@@ -85,17 +88,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     for (const [f, e] of r.errors) out.append(`  unreadable: ${f}: ${e}`);
     for (const f of r.strays ?? []) out.append(`  kept (a "\\" in the name, not deleted): ${f}`);
     for (const f of r.kept_classic ?? []) out.append(`  kept the project's Classic file (the map had its _HD.w3mod version's bytes in its place): ${f}`);
+    for (const f of r.kept_mdl ?? []) out.append(`  kept the project's .mdl file (only its export header changed): ${f}`);
   };
 
   /** Unpacks, asking before writing an incomplete (protected) map, and with `askDeletes` before deleting files of the
    *  project the map doesn't have (the backend then writes nothing until the answer). `stale`: true when an answer
    *  no longer counts (another project opened while the question waited); then nothing is written. */
-  const unpack = async (map: string, dir: string, title: string, askDeletes = false, stale = () => false): Promise<UnpackReport | null> => {
+  const unpack = async (map: string, dir: string, title: string, askDeletes = false, stale = () => false, overwriteMdlHeaders = false): Promise<UnpackReport | null> => {
     let allowIncomplete = false, refuseDeletes = askDeletes;
     for (;;) {
       try {
         return await w3.window.withProgress(title, () => w3.backend.invoke<UnpackReport>("project_unpack", {
-          map, dir, allowIncomplete, refuseDeletes, install: w3.settings.get<string>("game.installDir"),
+          map, dir, allowIncomplete, refuseDeletes, overwriteMdlHeaders, install: w3.settings.get<string>("game.installDir"),
         }));
       } catch (e) {
         const msg = String(e);
@@ -198,7 +202,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  as for restoring a checkpoint). `dir`: the project the map belongs to, which must still be the open one; the
    *  tabs, the file list and the script are those of the open project, so none of that is touched once another
    *  project is open (a switch while the backend unpacks, or while a question waits). */
-  const sync = async (map: string, askDeletes = true, dir = root()) => {
+  const sync = async (map: string, askDeletes = true, dir = root(), overwriteMdlHeaders = false) => {
     const elsewhere = () => w3.workspace.project()?.root !== dir;
     /** Checked after every wait: true (and said) once another project is open. */
     const moved = (what = `the sync from ${map} finished`) => {
@@ -207,7 +211,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return true;
     };
     if (moved(`not synced from ${map}`)) return;
-    const r = await unpack(map, dir, "Syncing from map", askDeletes, elsewhere);
+    const r = await unpack(map, dir, "Syncing from map", askDeletes, elsewhere, overwriteMdlHeaders);
     if (!r) return;
     logReport(`synced from ${map}`, r);
     if (moved()) return;
@@ -281,7 +285,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     // The new project replaces the open one: unsaved changes are settled first.
     if (!(await w3.editors.closeAllAsking())) return;
-    const r = await unpack(map, dir, "Importing map");
+    const r = await unpack(map, dir, "Importing map", false, () => false, true);
     if (!r) return;
     logReport(`imported ${map} → ${dir}`, r);
     // Opening another project looks for its stray files anyway; the open one is looked at again here.
@@ -320,7 +324,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.project.syncFromMap", async (file?: string, opts?: { replace?: boolean }) => {
       const dir = root();
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
-      if (map) await sync(map, opts?.replace !== true, dir);
+      if (map) await sync(map, opts?.replace !== true, dir, opts?.replace === true);
     }),
 
     // What a pack does to the project before it packs, without packing (we-compare packs through the backend after it).

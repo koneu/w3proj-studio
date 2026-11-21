@@ -587,6 +587,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 more_names: game_names(&game),
                 refuse_deletes: !allow_deletes,
                 replaces: None,
+                overwrite_mdl_headers: false,
             };
             let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &game, &trigger_data);
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
@@ -644,6 +645,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             for s in &report.kept_classic {
                 println!("  kept the project's {s}: the map had its _HD.w3mod version's bytes in its place (the World Editor in HD mode saves so)");
+            }
+            for s in &report.kept_mdl {
+                println!("  kept the project's {s}: only its export header changed");
             }
         }
         Cmd::Pack { project, output, keep_unused_strings, force_stale, keep_script, game } => {

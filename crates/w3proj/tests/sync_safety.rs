@@ -417,3 +417,133 @@ fn a_classic_file_the_world_editor_overwrote_with_its_hd_version_is_kept() {
     assert!(err.to_string().contains("can't be read"), "{err}");
     assert_eq!(fs::read(map.join("war3map.j")).unwrap(), before, "nothing was written");
 }
+
+#[test]
+fn an_mdl_whose_only_change_is_its_export_header_is_kept() {
+    let dir = workdir("keep-mdl-header");
+    let root = new_project(&dir);
+    let map = root.join("map");
+    let imported = map.join("war3mapImported");
+    fs::create_dir_all(&imported).unwrap();
+
+    let body = b"Version {\r\n\tFormatVersion 1800,\r\n}\r\nModel \"DNCTestTerrain\" {}\r\n";
+    let make_mdl = |ver: &[u8], date: &[u8], sep: &[u8], extra: &[u8]| {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"// MDLFile version");
+        out.extend_from_slice(ver);
+        out.extend_from_slice(sep);
+        out.extend_from_slice(b"// Exported on ");
+        out.extend_from_slice(date);
+        out.extend_from_slice(sep);
+        out.extend_from_slice(body);
+        out.extend_from_slice(extra);
+        out
+    };
+
+    // 1. Only line 2 (Exported on) changed (CRLF).
+    let dnc_old = make_mdl(b"\tOct 19 2026 13:17:20", b"Wed Nov  4 15:39:28 2026", b"\r\n", b"");
+    let dnc_new = make_mdl(b"\tOct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"");
+    // 2. Both header lines changed (Studio -> WE, LF -> CRLF).
+    let both_old = make_mdl(b"\tW3Proj Studio", b"Wed Nov  4 15:39:28 2026", b"\n", b"");
+    let both_new = make_mdl(b" Oct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"");
+    // 3. Case-insensitive .MDL in a subfolder.
+    let upper_old = make_mdl(b"\tW3Proj Studio", b"Wed Nov  4 15:39:28 2026", b"\r\n", b"");
+    let upper_new = make_mdl(b"\tOct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"");
+    // 4. Body changed -> must update.
+    let edited_old = make_mdl(b"\tOct 19 2026 13:17:20", b"Wed Nov  4 15:39:28 2026", b"\r\n", b"");
+    let edited_new = make_mdl(b"\tOct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"// edit\r\n");
+    // 5. Byte-identical .mdl -> unchanged, not listed in kept_mdl.
+    let same = make_mdl(b"\tOct 19 2026 13:17:20", b"Wed Nov  4 15:39:28 2026", b"\r\n", b"");
+    // 6. Brand-new .mdl not yet on disk -> written verbatim, not listed in kept_mdl.
+    let fresh = make_mdl(b"\tOct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"");
+    // 7. .mdl without the 2-line export header -> written when changed.
+    let plain_old = b"Version {\r\n\tFormatVersion 800,\r\n}\r\n";
+    let plain_new = b"// Custom comment\r\nVersion {\r\n\tFormatVersion 800,\r\n}\r\n";
+    // 8. Non-.mdl file with the 2-line export header -> written when changed.
+    let txt_old = make_mdl(b"\tOct 19 2026 13:17:20", b"Wed Nov  4 15:39:28 2026", b"\r\n", b"");
+    let txt_new = make_mdl(b"\tOct 19 2026 13:17:20", b"Fri Nov 20 18:00:00 2026", b"\r\n", b"");
+
+    fs::write(map.join("dnc.mdl"), &dnc_old).unwrap();
+    fs::write(map.join("both.mdl"), &both_old).unwrap();
+    fs::write(imported.join("Light.MDL"), &upper_old).unwrap();
+    fs::write(map.join("edited.mdl"), &edited_old).unwrap();
+    fs::write(map.join("same.mdl"), &same).unwrap();
+    fs::write(map.join("plain.mdl"), plain_old).unwrap();
+    fs::write(map.join("notes.txt"), &txt_old).unwrap();
+
+    // 9. Campaign nested chapter keeps its header-only .mdl too.
+    let chapter = root.join("maps").join("Chapter.w3x");
+    project::create(&chapter, Some(header("Chapter"))).unwrap();
+    fs::write(chapter.join("map").join("war3map.j"), SCRIPT).unwrap();
+    fs::write(chapter.join("map").join("dnc.mdl"), &dnc_old).unwrap();
+
+    let mut ex = extracted(
+        &root,
+        "Map",
+        &[
+            ("war3map.j", SCRIPT),
+            ("dnc.mdl", &dnc_new),
+            ("both.mdl", &both_new),
+            ("war3mapImported/Light.MDL", &upper_new),
+            ("edited.mdl", &edited_new),
+            ("same.mdl", &same),
+            ("fresh.mdl", &fresh),
+            ("plain.mdl", plain_new),
+            ("notes.txt", &txt_new),
+        ],
+    );
+    ex.nested.insert("Chapter.w3x".into(), extracted(&chapter, "Chapter", &[("war3map.j", SCRIPT), ("dnc.mdl", &dnc_new)]));
+
+    let r = project::write_files(&root, ex).unwrap();
+    assert_eq!(
+        r.kept_mdl,
+        [
+            "map/both.mdl",
+            "map/dnc.mdl",
+            "map/war3mapImported/Light.MDL",
+            "maps/Chapter.w3x/map/dnc.mdl",
+        ]
+    );
+    // written: edited.mdl, fresh.mdl, plain.mdl, notes.txt (4)
+    // unchanged: war3map.j, dnc.mdl, both.mdl, Light.MDL, same.mdl, chapter war3map.j, chapter dnc.mdl (7)
+    assert_eq!((r.written, r.unchanged), (4, 7));
+    assert_eq!(fs::read(map.join("dnc.mdl")).unwrap(), dnc_old);
+    assert_eq!(fs::read(map.join("both.mdl")).unwrap(), both_old);
+    assert_eq!(fs::read(imported.join("Light.MDL")).unwrap(), upper_old);
+    assert_eq!(fs::read(map.join("edited.mdl")).unwrap(), edited_new);
+    assert_eq!(fs::read(map.join("fresh.mdl")).unwrap(), fresh);
+    assert_eq!(fs::read(map.join("plain.mdl")).unwrap(), plain_new);
+    assert_eq!(fs::read(map.join("notes.txt")).unwrap(), txt_new);
+    assert_eq!(fs::read(chapter.join("map").join("dnc.mdl")).unwrap(), dnc_old);
+
+    // Unreadable existing .mdl stops the sync before anything else is written.
+    fs::remove_file(map.join("dnc.mdl")).unwrap();
+    fs::create_dir(map.join("dnc.mdl")).unwrap();
+    let script_before = fs::read(map.join("war3map.j")).unwrap();
+    let err = project::write_files(&root, extracted(&root, "Map", &[("war3map.j", b"changed"), ("dnc.mdl", &dnc_new)])).unwrap_err();
+    assert!(err.to_string().contains("can't be read"), "{err}");
+    assert_eq!(fs::read(map.join("war3map.j")).unwrap(), script_before, "nothing was written");
+    fs::remove_dir(map.join("dnc.mdl")).unwrap();
+    fs::write(map.join("dnc.mdl"), &dnc_old).unwrap();
+
+    // Unpack with overwrite_mdl_headers overwrites header-only .mdl files verbatim (checkpoint restore / overwrite).
+    let codecs = w3proj::Registry::with_formats(&[]).unwrap();
+    let built = dir.join("built.w3x");
+    fs::write(map.join("dnc.mdl"), &dnc_new).unwrap();
+    w3proj::pack(&root, Some(&built), &codecs).unwrap();
+    fs::write(map.join("dnc.mdl"), &dnc_old).unwrap();
+
+    let kept_report = w3proj::unpack(&built, &root, &codecs, &w3proj::UnpackOptions::default()).unwrap();
+    assert_eq!(kept_report.kept_mdl, ["map/dnc.mdl"]);
+    assert_eq!(fs::read(map.join("dnc.mdl")).unwrap(), dnc_old);
+
+    let overwrite_report = w3proj::unpack(
+        &built,
+        &root,
+        &codecs,
+        &w3proj::UnpackOptions { overwrite_mdl_headers: true, ..Default::default() },
+    )
+    .unwrap();
+    assert!(overwrite_report.kept_mdl.is_empty(), "{:?}", overwrite_report.kept_mdl);
+    assert_eq!(fs::read(map.join("dnc.mdl")).unwrap(), dnc_new);
+}

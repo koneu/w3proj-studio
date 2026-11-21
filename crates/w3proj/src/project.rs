@@ -313,6 +313,10 @@ pub struct UnpackReport {
     /// between folders: the map held the bytes of their `_HD.w3mod/` version under the plain name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kept_classic: Vec<String>,
+    /// `.mdl` files the sync left as the project had them (`keep_mdl_header_only`), from the project root
+    /// with `/` between folders: only the `// MDLFile version` / `// Exported on` header lines differed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept_mdl: Vec<String>,
 }
 
 impl UnpackReport {
@@ -856,7 +860,7 @@ const GITIGNORE: &str = "build/\n.*.tmp\n";
 /// Writes an extracted archive into a project directory. Existing pack
 /// settings in the manifest are kept.
 pub fn write_files(project: &Path, ex: Extracted) -> Result<UnpackReport> {
-    write_project(project, ex, true)
+    write_project(project, ex, true, false)
 }
 
 /// The manifest a sync into `project` keeps the pack settings of; None when there is none. One that is
@@ -915,10 +919,69 @@ fn keep_classic_over_hd(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -
     Ok(kept)
 }
 
+/// Returns the body of a text `.mdl` starting right after a two-line export header
+/// (`// MDLFile version…` followed by `// Exported on …`), or `None` when the file doesn't have
+/// both lines or has nothing after them.
+fn strip_mdl_export_header(bytes: &[u8]) -> Option<&[u8]> {
+    let n1 = bytes.iter().position(|&b| b == b'\n')?;
+    let line1 = bytes[..n1].strip_suffix(b"\r").unwrap_or(&bytes[..n1]);
+    if !line1.starts_with(b"// MDLFile version\t") && !line1.starts_with(b"// MDLFile version ") {
+        return None;
+    }
+    let rest = &bytes[n1 + 1..];
+    let n2 = rest.iter().position(|&b| b == b'\n')?;
+    let line2 = rest[..n2].strip_suffix(b"\r").unwrap_or(&rest[..n2]);
+    if !line2.starts_with(b"// Exported on ") {
+        return None;
+    }
+    let body = &rest[n2 + 1..];
+    (!body.is_empty()).then_some(body)
+}
+
+/// `.mdl` files a sync leaves as the project has them: existing files under `map_dir` where both
+/// the project's copy and the incoming one have the two-line export header (`// MDLFile version` /
+/// `// Exported on`) and are byte-identical from line 3 onward. Files that aren't on disk yet are
+/// untouched (fresh imports unpack verbatim); a file on disk that can't be read stops the sync
+/// before anything is written.
+fn keep_mdl_header_only(map_dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<Vec<String>> {
+    let mut kept = Vec::new();
+    for (rel, new) in files.iter_mut() {
+        if !Path::new(rel).extension().is_some_and(|e| e.eq_ignore_ascii_case("mdl")) {
+            continue;
+        }
+        let Some(new_body) = strip_mdl_export_header(new) else { continue };
+        let own = match fs::read(map_dir.join(rel)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(Error::Project(format!(
+                    "{} can't be read ({e}): without the project's copy the sync can't tell whether only its \
+                     export header changed. The sync stopped before writing this project",
+                    map_dir.join(rel).display()
+                )))
+            }
+        };
+        if own == *new {
+            continue;
+        }
+        if strip_mdl_export_header(&own) == Some(new_body) {
+            *new = own;
+            kept.push(rel.clone());
+        }
+    }
+    Ok(kept)
+}
+
 /// `top`: the project itself (gets git files), not a chapter map inside a campaign.
-fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackReport> {
+fn write_project(project: &Path, mut ex: Extracted, top: bool, overwrite_mdl_headers: bool) -> Result<UnpackReport> {
     // Before anything is written: a project copy that can't be read stops the sync here.
-    let kept = keep_classic_over_hd(&project.join(MAP_DIR), &mut ex.files)?;
+    let map_dir = project.join(MAP_DIR);
+    let kept = keep_classic_over_hd(&map_dir, &mut ex.files)?;
+    let kept_mdl = if overwrite_mdl_headers {
+        Vec::new()
+    } else {
+        keep_mdl_header_only(&map_dir, &mut ex.files)?
+    };
     fs::create_dir_all(project)?;
     if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
@@ -951,7 +1014,8 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
     }
     let mut report = ex.report;
     report.kept_classic.extend(kept.into_iter().map(|p| format!("{MAP_DIR}/{p}")));
-    sync_dir(&project.join(MAP_DIR), MAP_DIR, &ex.files, &mut report)?;
+    report.kept_mdl.extend(kept_mdl.into_iter().map(|p| format!("{MAP_DIR}/{p}")));
+    sync_dir(&map_dir, MAP_DIR, &ex.files, &mut report)?;
     // The map's pathing, shadows and minimap came with its terrain and doodads: they follow these (`derived`).
     crate::derived::record_now(project)?;
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
@@ -981,12 +1045,13 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         }
     }
     for (dir, inner) in std::mem::take(&mut ex.nested) {
-        let r = write_project(&maps_dir.join(&dir), inner, false)?;
+        let r = write_project(&maps_dir.join(&dir), inner, false, overwrite_mdl_headers)?;
         report.written += r.written;
         report.unchanged += r.unchanged;
         report.deleted += r.deleted;
         report.strays.extend(r.strays.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
         report.kept_classic.extend(r.kept_classic.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
+        report.kept_mdl.extend(r.kept_mdl.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
     }
     remove_empty_dirs(&maps_dir);
     // What couldn't be named: replaced as a whole (not counted), strays aside.
@@ -1016,6 +1081,9 @@ pub struct UnpackOptions {
     /// Replace Map unpacks into a new folder, then swaps it in). What would be deleted is what that
     /// one has that the map doesn't, from its root.
     pub replaces: Option<PathBuf>,
+    /// Write incoming `.mdl` files verbatim even when only their export header lines changed (used when
+    /// restoring a checkpoint or overwriting an existing project).
+    pub overwrite_mdl_headers: bool,
 }
 
 /// Extracts, asking `more_names` for candidates if files are left unnamed.
@@ -1055,7 +1123,7 @@ pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOption
             return Err(Error::WouldDelete(gone));
         }
     }
-    write_files(project, ex)
+    write_project(project, ex, true, opts.overwrite_mdl_headers)
 }
 
 /// The path made absolute and canonical where it exists (a project folder may not exist yet: then
