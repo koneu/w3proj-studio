@@ -578,6 +578,14 @@ pub fn grid_2x2(width: usize, height: usize) -> Vec<Rect> {
     out
 }
 
+/// The canvas of a flat project's terrain (`map/war3map.w3e.txt` under `map_dir`), in corners: what a split's
+/// rectangles are measured in.
+pub fn flat_canvas(map_dir: &Path) -> Result<[usize; 2]> {
+    let bytes = fs::read(map_dir.join(FLAT_FILE)).map_err(|e| Error::Project(format!("map/{FLAT_FILE} can't be read: {e}")))?;
+    let t = w3e::terrain_from_text(&bytes)?;
+    Ok([t.width, t.height])
+}
+
 // ---- project files ----
 
 fn key<'a>(files: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a String> {
@@ -788,6 +796,7 @@ fn read_if_there(map_dir: &Path, names: &[&str], files: &mut BTreeMap<String, Ve
 /// files are written first, then `map/war3map.w3e.txt` and the flat object files go. Nothing is
 /// written when the split can't be lossless. An object file packed raw stays where it is.
 pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let manifest = crate::project::Manifest::load(project)?;
     let packed_raw = |name: &str| manifest.pack.raw.iter().any(|r| r.eq_ignore_ascii_case(name));
     if packed_raw(FLAT_FILE) {
@@ -819,6 +828,7 @@ pub fn split_project(project: &Path, rects: &[Rect]) -> Result<Converted> {
 /// Merges a split project's terrain and objects back into `map/war3map.w3e.txt` and the flat object
 /// files (`flatten`): those are written first, then the layout's files go.
 pub fn merge_project(project: &Path) -> Result<Converted> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let map_dir = project.join(crate::project::MAP_DIR);
     if !is_split_on_disk(&map_dir)? {
         return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
@@ -841,6 +851,94 @@ pub fn merge_project(project: &Path) -> Result<Converted> {
     }
     let at = |p: &String| format!("{}/{p}", crate::project::MAP_DIR);
     Ok(Converted { written: written.iter().map(at).collect(), removed: layout_paths.iter().map(at).collect() })
+}
+
+// ---- the flat files a split project stands for (the app's file layer) ----
+
+/// The flat files (relative to `map/`) the split layout stands for: the app reads and writes these names in either
+/// layout (`flat_views`, `read_flat`, `write_flat`), so its code knows one layout only.
+pub const FLAT_NAMES: [&str; 4] = [FLAT_FILE, "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json"];
+
+/// One flat file a split project stands for, and the layout's files (relative to `map/`) it is made from: what
+/// changes it when it changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlatView {
+    pub name: &'static str,
+    pub sources: Vec<String>,
+}
+
+/// The flat files a project's `map/` folder stands for: None in the flat layout. The terrain is made from
+/// `terrain.json` and every file under `map/terrain/` that isn't an object file of a kind the subterrains hold
+/// (a stray file there changes it too: reading it then says why); each object kind in `objects` from
+/// `terrain.json` and its subterrains' files. A `terrain.json` that can't be read gives the terrain alone, made
+/// from every file under `map/terrain/`: reading it says what is wrong, rather than the map losing its terrain.
+pub fn flat_views(map_dir: &Path) -> Result<Option<Vec<FlatView>>> {
+    if !is_split_on_disk(map_dir)? {
+        return Ok(None);
+    }
+    let all: Vec<String> = crate::project::walk(&map_dir.join(DIR))?.into_iter().map(|r| format!("{DIR}/{r}")).collect();
+    let layout = match fs::read(map_dir.join(LAYOUT_FILE)).map_err(Error::from).and_then(|b| Layout::parse(&b)) {
+        Ok(l) => l,
+        Err(_) => return Ok(Some(vec![FlatView { name: FLAT_FILE, sources: all }])),
+    };
+    let kinds: Vec<Kind> = KINDS.into_iter().filter(|k| layout.objects.has(*k)).collect();
+    let objects: HashSet<String> = kinds.iter().flat_map(|k| layout.subterrains.iter().map(|s| s.object_path(*k))).collect();
+    let mut out = vec![FlatView { name: FLAT_FILE, sources: all.into_iter().filter(|p| !objects.contains(p)).collect() }];
+    for kind in kinds {
+        let sources = std::iter::once(LAYOUT_FILE.to_string()).chain(layout.subterrains.iter().map(|s| s.object_path(kind))).collect();
+        out.push(FlatView { name: kind.flat(), sources });
+    }
+    Ok(Some(out))
+}
+
+/// The layout's files and the flat object files beside them, read, then assembled into the flat files (`flatten`).
+fn read_flat_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut files = read_layout_files(map_dir)?;
+    let flat_names: Vec<&str> = KINDS.iter().flat_map(|k| [k.flat(), k.raw()]).collect();
+    read_if_there(map_dir, &flat_names, &mut files)?;
+    if !flatten(&mut files)? {
+        return Err(Error::Project(format!("the terrain isn't split (there is no map/{LAYOUT_FILE})")));
+    }
+    Ok(files)
+}
+
+/// The flat file `name` (one of `FLAT_NAMES`) of a split project's `map/` folder, assembled from the subterrains: the
+/// bytes `w3proj terrain merge` would write. Anything the layout's files have wrong is an error, never an empty file.
+pub fn read_flat(map_dir: &Path, name: &str) -> Result<Vec<u8>> {
+    let mut files = read_flat_files(map_dir)?;
+    files.remove(name).ok_or_else(|| Error::Project(format!("map/{name} isn't one the split terrain holds (map/{LAYOUT_FILE})")))
+}
+
+/// One write of a split project's files at a time (`write_flat`, `split_project`, `merge_project`): each reads what
+/// the others left, so none puts back what another just wrote.
+static FLAT_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Writes the flat file `name` (one of `FLAT_NAMES`) of a split project: the files it stands for as they are now with
+/// `bytes` in its place, sliced into the project's subterrains (`terrain.json` keeps them, its default corner and
+/// objects' header follow the content). Only files whose bytes changed are written; the paths written (relative to
+/// `map/`). Nothing is written when the content can't go into the layout as it is: a corner outside every subterrain
+/// that isn't the default, another canvas size, content that doesn't parse or come back the same.
+pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String>> {
+    let _one = FLAT_WRITES.lock().unwrap_or_else(|e| e.into_inner());
+    let layout = Layout::parse(&fs::read(map_dir.join(LAYOUT_FILE)).map_err(|e| Error::Project(format!("map/{LAYOUT_FILE} can't be read: {e}")))?)?;
+    let mut files = read_flat_files(map_dir)?;
+    if !files.contains_key(name) {
+        return Err(Error::Project(format!("map/{name} isn't one the split terrain holds (map/{LAYOUT_FILE})")));
+    }
+    files.insert(name.to_string(), bytes.to_vec());
+    let t = w3e::terrain_from_text(&files[FLAT_FILE])?;
+    if [t.width, t.height] != layout.corners() {
+        return Err(Error::Project(format!(
+            "the terrain is {}×{} corners, its subterrains cover a canvas of {}×{} (map/{LAYOUT_FILE}): a split terrain can't change size yet; merge it first (Merge Subterrains)",
+            t.width,
+            t.height,
+            layout.head.width,
+            layout.head.height
+        )));
+    }
+    let flats: Flats = KINDS.into_iter().filter(|k| layout.objects.has(*k)).map(|k| (k, files[k.flat()].clone())).collect();
+    let sliced = slice_terrain(&t, layout.subterrains, layout.default_corner, layout.doo_header, &flats)?;
+    write_changed(map_dir, &sliced)
 }
 
 /// Removes `dir` and the folders below it that are empty (a folder holding anything stays).
@@ -1225,6 +1323,75 @@ mod tests {
         let se: Value = serde_json::from_slice(&sync["terrain/se/units.json"]).unwrap();
         let ids: Vec<&Value> = se["units"].as_array().unwrap().iter().map(|u| &u["editorId"]).collect();
         assert_eq!(ids, vec![&Value::from(0), &Value::from(1)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The flat names of a split project: listed with what they are made from, read as merge would write them,
+    /// written back into the owning subterrain only; a write that can't be kept writes nothing; two writes at once
+    /// both land.
+    #[test]
+    fn flat_files_of_a_split_project() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-flat-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(flat_views(&dir).unwrap(), None, "a flat project has no flat views");
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        flat.remove("war3map.j");
+        with_objects(&mut flat, 8);
+        let mut files = flat.clone();
+        split(&mut files, &grid_2x2(t.width, t.height)).unwrap();
+        write_changed(&dir, &files).unwrap();
+
+        let views = flat_views(&dir).unwrap().unwrap();
+        assert_eq!(views.iter().map(|v| v.name).collect::<Vec<_>>(), FLAT_NAMES.to_vec());
+        assert!(views[0].sources.contains(&"terrain/terrain.json".to_string()) && views[0].sources.contains(&"terrain/ne/terrain.txt".to_string()));
+        assert!(!views[0].sources.iter().any(|s| s.ends_with("units.json")), "{:?}", views[0].sources);
+        assert_eq!(views[2].sources, ["terrain/terrain.json", "terrain/sw/units.json", "terrain/se/units.json", "terrain/nw/units.json", "terrain/ne/units.json"]);
+        for name in FLAT_NAMES {
+            assert_eq!(read_flat(&dir, name).unwrap(), flat[name], "{name}");
+        }
+
+        // The same content: nothing written. One corner in the north-east: that subterrain's ground only.
+        assert!(write_flat(&dir, FLAT_FILE, &flat[FLAT_FILE]).unwrap().is_empty());
+        let mut edited = t.clone();
+        edited.corners[(t.height - 1) * t.width + t.width - 1].height += 4;
+        let text = w3e::terrain_text(&edited).unwrap();
+        assert_eq!(write_flat(&dir, FLAT_FILE, &text).unwrap(), ["terrain/ne/terrain.txt"]);
+        assert_eq!(read_flat(&dir, FLAT_FILE).unwrap(), text);
+        // A unit over the seam: the two files it left and entered.
+        let units = String::from_utf8(flat["war3mapUnits.doo.json"].clone()).unwrap().replacen("-500.0", "100.0", 1);
+        assert_eq!(write_flat(&dir, "war3mapUnits.doo.json", units.as_bytes()).unwrap(), ["terrain/se/units.json", "terrain/sw/units.json"]);
+        assert!(objects::same(&read_flat(&dir, "war3mapUnits.doo.json").unwrap(), units.as_bytes()));
+
+        // Refused, nothing written: another canvas size, text that isn't a terrain, a name the layout doesn't hold.
+        let before = read_layout_files(&dir).unwrap();
+        let mut bigger = edited.clone();
+        bigger.width += 1;
+        bigger.corners = vec![bigger.corners[0]; bigger.width * bigger.height];
+        let e = write_flat(&dir, FLAT_FILE, &w3e::terrain_text(&bigger).unwrap()).unwrap_err().to_string();
+        assert!(e.contains("can't change size"), "{e}");
+        assert!(write_flat(&dir, FLAT_FILE, b"not a terrain").is_err());
+        assert!(write_flat(&dir, "war3map.w3c.json", b"{}").is_err());
+        assert_eq!(read_layout_files(&dir).unwrap(), before, "a refused write changes nothing");
+
+        // Two writes at once, of different files: each keeps the other's change.
+        let mut moved = edited.clone();
+        moved.corners[0].height += 8;
+        let text2 = w3e::terrain_text(&moved).unwrap();
+        let regions = String::from_utf8(flat["war3map.w3r.json"].clone()).unwrap().replace("\"r\"", "\"renamed\"");
+        std::thread::scope(|s| {
+            s.spawn(|| write_flat(&dir, FLAT_FILE, &text2).unwrap());
+            s.spawn(|| write_flat(&dir, "war3map.w3r.json", regions.as_bytes()).unwrap());
+        });
+        assert_eq!(read_flat(&dir, FLAT_FILE).unwrap(), text2);
+        assert!(String::from_utf8(read_flat(&dir, "war3map.w3r.json").unwrap()).unwrap().contains("renamed"));
+
+        // A terrain.json that can't be read: the terrain alone is listed, and reading it says why.
+        fs::write(dir.join(LAYOUT_FILE), b"{").unwrap();
+        let views = flat_views(&dir).unwrap().unwrap();
+        assert_eq!(views.iter().map(|v| v.name).collect::<Vec<_>>(), [FLAT_FILE]);
+        assert!(read_flat(&dir, FLAT_FILE).unwrap_err().to_string().contains("isn't JSON"));
         let _ = fs::remove_dir_all(&dir);
     }
 
