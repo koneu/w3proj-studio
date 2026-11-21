@@ -258,7 +258,7 @@ fn lists(kind: Kind) -> &'static [List] {
 
 /// Whether a creation number is a real assignment: 0 (old maps give every doodad editorId 0) and 4294967295 (unset)
 /// aren't, and never count as a creation number found twice. Entries with equal numbers keep their flat order.
-fn assigned(n: u32) -> bool {
+pub(crate) fn assigned(n: u32) -> bool {
     n != 0 && n != u32::MAX
 }
 
@@ -658,6 +658,59 @@ pub(crate) fn assemble(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) ->
     Ok(out)
 }
 
+/// The assigned creation numbers (`assigned`) of a flat object file's entries (its own list; special doodads have none),
+/// each with the world `(x, y)` that decides its subterrain (`owner`).
+pub(crate) fn flat_numbers(kind: Kind, bytes: &[u8], offset: [f32; 2]) -> Result<Vec<(u32, f64, f64)>> {
+    let (head, lists) = read_flat(kind, bytes)?;
+    let version = doodads_version(&head);
+    let key = list_key(kind, List::Main);
+    let mut out = Vec::new();
+    for (i, e) in lists.into_iter().next().unwrap_or_default().iter().enumerate() {
+        let k = sort_key(kind, List::Main, version, e).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
+        if let SortKey::Number(n) = k {
+            if assigned(n) {
+                let (x, y) = position(kind, List::Main, e, offset).map_err(|m| flat_err(kind, format!("{key}[{i}]: {m}")))?;
+                out.push((n, x, y));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// An assigned creation number in a subterrain's file (`sub_numbers`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Numbered {
+    pub kind: Kind,
+    /// The subterrain's index in `subterrains[]`.
+    pub sub: usize,
+    /// Its file, relative to `map/`.
+    pub path: String,
+    pub number: u32,
+}
+
+/// Every assigned creation number in the subterrains' files of the kinds `heads` has (`get`: path relative to `map/` →
+/// bytes), numbers found twice included (unlike `assemble`, which stops at the first). A missing or unreadable file is
+/// an error.
+pub(crate) fn sub_numbers(heads: &Heads, subs: &[Subterrain], get: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<Numbered>> {
+    let version = doodads_version(heads);
+    let mut out = Vec::new();
+    for kind in KINDS.into_iter().filter(|k| heads.has(*k)) {
+        for (i, s) in subs.iter().enumerate() {
+            let path = s.object_path(kind);
+            let bytes = get(&path).ok_or_else(|| Error::Format(format!("map/{path} is missing: subterrain \"{}\" has no {} file", s.name, kind.name())))?;
+            let lists = read_sub(kind, &path, &bytes, version)?;
+            for item in lists.into_iter().next().unwrap_or_default() {
+                if let SortKey::Number(n) = item.key {
+                    if assigned(n) {
+                        out.push(Numbered { kind, sub: i, path: path.clone(), number: n });
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Whether two flat object files hold the same (as JSON: they pack into the same bytes).
 pub(crate) fn same(a: &[u8], b: &[u8]) -> bool {
     match (serde_json::from_slice::<Value>(a), serde_json::from_slice::<Value>(b)) {
@@ -671,7 +724,7 @@ mod tests {
     use super::*;
 
     fn sub(name: &str, x: usize, y: usize, w: usize, h: usize) -> Subterrain {
-        Subterrain { name: name.into(), folder: name.into(), x, y, w, h, id_range: [0, 0] }
+        Subterrain { name: name.into(), folder: name.into(), x, y, w, h, id_ranges: vec![[0, 0]] }
     }
 
     /// Two subterrains side by side with a gap between them, on a canvas at offset (-512, -256):

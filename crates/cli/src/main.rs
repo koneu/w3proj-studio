@@ -563,6 +563,16 @@ enum TerrainCmd {
     },
     /// Merge map/terrain/ back into map/war3map.w3e.txt and the flat object files.
     Merge { project: PathBuf },
+    /// Check a split terrain's creation numbers (what scripts call gg_unit_hfoo_0012, gg_dest_…): a number found twice
+    /// in one kind (units and items, doodads, regions) and id ranges that overlap are errors (exit code 1); objects
+    /// whose number lies outside their subterrain's idRange are listed as information only (moved objects and
+    /// imported maps have them).
+    Check {
+        project: PathBuf,
+        /// The report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -830,8 +840,22 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Mcp => mcp::run()?,
         Cmd::ServeBackend { project, read_only } => rebuild::serve_stdio(&project, extra, read_only)?,
+        Cmd::Terrain { cmd: TerrainCmd::Check { project, json } } => {
+            let report = w3proj::terrain_ids::check(&project).with_context(|| format!("checking the creation numbers of {}", project.display()))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                for line in report.lines() {
+                    println!("{line}");
+                }
+            }
+            if report.has_errors() {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         Cmd::Terrain { cmd } => {
             let (r, what) = match cmd {
+                TerrainCmd::Check { .. } => unreachable!("matched above"),
                 TerrainCmd::Split { project, rects } => (
                     w3proj::terrain_layout::split_project(&project, &rects).with_context(|| format!("splitting the terrain of {}", project.display()))?,
                     "split into map/terrain/",

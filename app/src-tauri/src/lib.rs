@@ -227,6 +227,22 @@ async fn terrain_merge(root: String) -> CmdResult<Value> {
         .map_err(err)?
 }
 
+/// What the app's creation-number allocator goes by in a split project (`backend::flatview::id_layout`); null for a
+/// flat one.
+#[tauri::command]
+async fn terrain_id_layout(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::to_value(backend::flatview::id_layout(&root)?).map_err(err))
+        .await
+        .map_err(err)?
+}
+
+/// "Check Terrain IDs": creation numbers twice, overlapping id ranges, numbers outside their ranges
+/// (`backend::flatview::check`).
+#[tauri::command]
+async fn terrain_check(root: String) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || backend::flatview::check(&root)).await.map_err(err)?
+}
+
 /// Validates object-data JSON by encoding it, and returns it in canonical
 /// formatting so edits from the UI produce minimal diffs.
 #[tauri::command]
@@ -1119,6 +1135,8 @@ pub fn run() {
             derived_record,
             terrain_split,
             terrain_merge,
+            terrain_id_layout,
+            terrain_check,
             objects_canonicalize,
             objects_export,
             objects_import,

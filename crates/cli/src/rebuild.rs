@@ -509,6 +509,8 @@ impl Server {
                 self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
                 to_json(backend::flatview::merge(root()?)?)
             }
+            "terrain_id_layout" => to_json(backend::flatview::id_layout(root()?)?),
+            "terrain_check" => to_json(backend::flatview::check(root()?)?),
             "codec_decode" => to_json(backend::codec_decode(root()?, path()?, &self.formats)?),
             "codec_canonicalize" => to_json(backend::codec_canonicalize(root()?, path()?, arg(args, "text")?, &self.formats)?),
             "codec_write" => {

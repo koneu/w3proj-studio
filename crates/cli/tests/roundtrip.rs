@@ -1021,3 +1021,37 @@ fn a_split_terrain_packs_the_same_map_and_merges_back() {
     assert!(!w3proj(&["terrain", "split", s(&project)]).status.success());
 }
 
+/// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
+/// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
+/// naming both files. A flat project has nothing to check.
+#[test]
+fn terrain_check_lists_duplicates_and_a_pack_refuses_them() {
+    let dir = workdir("terrain_check");
+    let map = dir.join("first.w3x");
+    pack(&fixture(), &map);
+    let project = dir.join("project");
+    unpack(&map, &project);
+    assert!(!w3proj(&["terrain", "check", s(&project)]).status.success(), "flat: refused");
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in ["sw:0,0,2,1", "se:2,0,3,1", "nw:0,1,2,2", "ne:2,1,3,2"] {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    // The mini map's numbers (footman 2, doodads 0 and 1, region 0) lie below every range: information only.
+    let said = ok(&["terrain", "check", s(&project)]);
+    assert!(said.contains("info: 1 units in \"sw\" have numbers outside its idRange (2)") && said.contains("0 found twice"), "{said}");
+    let json: serde_json::Value = serde_json::from_str(&ok(&["terrain", "check", s(&project), "--json"])).unwrap();
+    assert_eq!(json["duplicates"], serde_json::json!([]));
+    // The footman's number given to a unit in ne as well (a merge of two branches that both took it).
+    let ne = project.join("map/terrain/ne/units.json");
+    let sw: serde_json::Value = serde_json::from_slice(&fs::read(project.join("map/terrain/sw/units.json")).unwrap()).unwrap();
+    let mut twin = sw["units"][0].clone();
+    twin["position"] = serde_json::json!([300.0, 200.0, 0.0]);
+    fs::write(&ne, serde_json::to_vec_pretty(&serde_json::json!({"units": [twin]})).unwrap()).unwrap();
+    let o = w3proj(&["terrain", "check", s(&project)]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("error: creation number 2 (units) is in map/terrain/sw/units.json and map/terrain/ne/units.json"), "{}", text(&o));
+    let o = w3proj(&["pack", s(&project), "-o", s(&dir.join("twice.w3x")), "--force-stale"]);
+    assert!(!o.status.success() && text(&o).contains("creation number 2 is in map/terrain/sw/units.json and in map/terrain/ne/units.json"), "{}", text(&o));
+}
+

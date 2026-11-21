@@ -155,6 +155,54 @@ pub fn merge(root: &str) -> CmdResult<layout::Converted> {
     layout::merge_project(Path::new(root)).map_err(err)
 }
 
+/// One subterrain as the app's creation-number allocator needs it (`terrain_id_layout`).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct IdSubterrain {
+    pub name: String,
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+    #[serde(rename = "idRanges")]
+    pub id_ranges: Vec<[u32; 2]>,
+}
+
+/// What the app's allocator (app/src/lib/terrain/creationids.ts) goes by in a split project: the canvas's offset
+/// (corner (0, 0) in world units; a coordinate that isn't a finite number is null) and the subterrains with their
+/// rectangles and id ranges.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct IdLayout {
+    pub offset: [Option<f64>; 2],
+    pub subterrains: Vec<IdSubterrain>,
+}
+
+/// "terrain_id_layout": the split project's `IdLayout`, None for a flat one. A `terrain.json` that can't be read is an
+/// error, never a flat project (a new object would get the flat project's number).
+pub fn id_layout(root: &str) -> CmdResult<Option<IdLayout>> {
+    let map_dir = Path::new(root).join(w3proj::project::MAP_DIR);
+    if !layout::is_split_on_disk(&map_dir).map_err(err)? {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(map_dir.join(layout::LAYOUT_FILE)).map_err(|e| format!("map/{} can't be read: {e}", layout::LAYOUT_FILE))?;
+    let l = layout::Layout::parse(&bytes).map_err(err)?;
+    let finite = |v: f32| v.is_finite().then_some(v as f64);
+    let offset = l.offset();
+    Ok(Some(IdLayout {
+        offset: [finite(offset[0]), finite(offset[1])],
+        subterrains: l.subterrains.into_iter().map(|s| IdSubterrain { name: s.name, x: s.x, y: s.y, w: s.w, h: s.h, id_ranges: s.id_ranges }).collect(),
+    }))
+}
+
+/// "Check Terrain IDs" (`terrain_check`): numbers twice, overlapping ranges, numbers outside their ranges
+/// (`w3proj::terrain_ids::check`, as `w3proj terrain check`), with the report's lines.
+pub fn check(root: &str) -> CmdResult<serde_json::Value> {
+    let report = w3proj::terrain_ids::check(Path::new(root)).map_err(err)?;
+    let mut v = serde_json::to_value(&report).map_err(err)?;
+    v["errors"] = report.has_errors().into();
+    v["lines"] = report.lines().into();
+    Ok(v)
+}
+
 /// Refuses to delete or move a flat file of a split project: it isn't a file, the subterrains are.
 pub fn refuse_moving(path: &Path) -> CmdResult<()> {
     match flat_of(path)? {

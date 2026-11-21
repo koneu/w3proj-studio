@@ -59,8 +59,9 @@ pub struct Subterrain {
     pub y: usize,
     pub w: usize,
     pub h: usize,
-    /// The creation numbers new objects in it get (`[min, max]`); never checked against existing ones.
-    pub id_range: [u32; 2],
+    /// The creation numbers new objects in it get: `[min, max]` ranges, lowest first (one, until a range is full and
+    /// Studio adds another, `crate::terrain_ids`). Never checked against existing objects.
+    pub id_ranges: Vec<[u32; 2]>,
 }
 
 impl Subterrain {
@@ -204,14 +205,61 @@ fn hex(s: &str) -> Result<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| bad("trailer isn't hex"))).collect()
 }
 
-const TOP: &[&str] = &["format", "tileset", "customTilesets", "ground", "cliffs", "corners", "offset", "w3eVersion", "trailer", "defaultCorner", "subterrains"];
+/// A subterrain's `idRange`: one range `[min, max]`, or a list of them `[[min, max], …]` once one was full.
+fn id_ranges(v: &Value, what: &str) -> Result<Vec<[u32; 2]>> {
+    let id = |v: &Value| uint(v, what, u32::MAX as u64).map(|v| v as u32);
+    let list = v.as_array().ok_or_else(|| bad(format!("{what} isn't a list")))?;
+    if list.iter().all(Value::is_array) && !list.is_empty() {
+        list.iter()
+            .map(|r| {
+                let [lo, hi] = pair(r, what)?;
+                Ok([id(lo)?, id(hi)?])
+            })
+            .collect()
+    } else {
+        let [lo, hi] = pair(v, what)?;
+        Ok(vec![[id(lo)?, id(hi)?]])
+    }
+}
+
+/// `idRange` as written: one range as `[min, max]` (as every terrain.json had it before ranges could be added), more
+/// as `[[min, max], …]`.
+fn id_ranges_json(ranges: &[[u32; 2]]) -> String {
+    match ranges {
+        [r] => format!("[{}, {}]", r[0], r[1]),
+        _ => format!("[{}]", ranges.iter().map(|r| format!("[{}, {}]", r[0], r[1])).collect::<Vec<_>>().join(", ")),
+    }
+}
+
+/// Two id ranges that overlap (`Layout::range_overlaps`): the subterrains' names and the ranges.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct RangeOverlap {
+    pub a: String,
+    #[serde(rename = "aRange")]
+    pub a_range: [u32; 2],
+    pub b: String,
+    #[serde(rename = "bRange")]
+    pub b_range: [u32; 2],
+}
+
+impl std::fmt::Display for RangeOverlap {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.a == self.b {
+            write!(f, "two idRanges of \"{}\" overlap ({}–{} and {}–{})", self.a, self.a_range[0], self.a_range[1], self.b_range[0], self.b_range[1])
+        } else {
+            write!(f, "the idRanges of \"{}\" and \"{}\" overlap ({}–{} and {}–{})", self.a, self.b, self.a_range[0], self.a_range[1], self.b_range[0], self.b_range[1])
+        }
+    }
+}
+
+const TOP: &[&str] =&["format", "tileset", "customTilesets", "ground", "cliffs", "corners", "offset", "w3eVersion", "trailer", "defaultCorner", "subterrains"];
 const SUB: &[&str] = &["name", "folder", "x", "y", "w", "h", "idRange"];
 const DOO: &[&str] = &["doodadsVersion", "doodadsSubversion", "unitsVersion", "unitsSubversion", "skinIds"];
 
 impl Layout {
-    /// Reads and checks `terrain.json` (`check`).
-    pub fn parse(bytes: &[u8]) -> Result<Layout> {
-        let doc = objects::strict_json(bytes).map_err(|e| bad(format!("isn't JSON: {e}")))?;
+    /// Reads `terrain.json` without `check` (`w3proj terrain check` lists what is wrong rather than stopping at it).
+    pub fn parse_unchecked(bytes: &[u8]) -> Result<Layout> {
+        let doc =objects::strict_json(bytes).map_err(|e| bad(format!("isn't JSON: {e}")))?;
         let o = object(&doc, "the file", TOP, &["dooHeader", "objects"])?;
         if o["format"].as_str() != Some(FORMAT) {
             return Err(bad(format!("format isn't \"{FORMAT}\"")));
@@ -273,8 +321,6 @@ impl Layout {
             let s = object(s, &what, SUB, &[])?;
             let text = |k: &str| s[k].as_str().map(str::to_string).ok_or_else(|| bad(format!("{what}.{k} isn't a string")));
             let num = |k: &str| uint(&s[k], &format!("{what}.{k}"), u32::MAX as u64).map(|v| v as usize);
-            let [lo, hi] = pair(&s["idRange"], &format!("{what}.idRange"))?;
-            let id = |v: &Value| uint(v, &format!("{what}.idRange"), u32::MAX as u64).map(|v| v as u32);
             subterrains.push(Subterrain {
                 name: text("name")?,
                 folder: text("folder")?,
@@ -282,18 +328,49 @@ impl Layout {
                 y: num("y")?,
                 w: num("w")?,
                 h: num("h")?,
-                id_range: [id(lo)?, id(hi)?],
+                id_ranges: id_ranges(&s["idRange"], &format!("{what}.idRange"))?,
             });
         }
-        let layout = Layout { head, default_corner, doo_header, objects, subterrains };
+        Ok(Layout { head, default_corner, doo_header, objects, subterrains })
+    }
+
+    /// Reads and checks `terrain.json` (`check`).
+    pub fn parse(bytes: &[u8]) -> Result<Layout> {
+        let layout = Layout::parse_unchecked(bytes)?;
         layout.check()?;
         Ok(layout)
     }
 
-    /// What loading checks: the canvas isn't too large, the default corner fits the version, there
-    /// is at least one subterrain, names and folders are unique (folders also ignoring case) and
-    /// safe, rectangles lie within the canvas and don't overlap, id ranges don't overlap.
+    /// What loading checks: `check_shape`, and no two id ranges overlap (`range_overlaps`).
     pub fn check(&self) -> Result<()> {
+        self.check_shape()?;
+        match self.range_overlaps().first() {
+            Some(o) => Err(bad(o.to_string())),
+            None => Ok(()),
+        }
+    }
+
+    /// Every two id ranges that overlap (of two subterrains, or two of one), in the order of their starts.
+    pub fn range_overlaps(&self) -> Vec<RangeOverlap> {
+        let mut ranges: Vec<(&[u32; 2], &str)> = self.subterrains.iter().flat_map(|s| s.id_ranges.iter().map(move |r| (r, s.name.as_str()))).collect();
+        ranges.sort();
+        let mut out = Vec::new();
+        for (i, (a, an)) in ranges.iter().enumerate() {
+            for (b, bn) in &ranges[i + 1..] {
+                if b[0] > a[1] {
+                    break;
+                }
+                out.push(RangeOverlap { a: an.to_string(), a_range: **a, b: bn.to_string(), b_range: **b });
+            }
+        }
+        out
+    }
+
+    /// What loading checks besides the id ranges' overlaps: the canvas isn't too large, the default corner fits the
+    /// version, there is at least one subterrain, names and folders are unique (folders also ignoring case) and
+    /// safe, rectangles lie within the canvas and don't overlap, each subterrain has id ranges that start before they
+    /// end.
+    pub fn check_shape(&self) -> Result<()> {
         let (width, height) = (self.head.width, self.head.height);
         let n = width.checked_mul(height).filter(|&n| n <= w3e::MAX_CORNERS).ok_or_else(|| bad("the canvas is too large"))?;
         if self.head.version == 11 && (self.default_corner.texture > 15 || self.default_corner.texture_bits != 0) {
@@ -320,7 +397,10 @@ impl Layout {
             if s.x.checked_add(s.w).is_none_or(|r| r > width) || s.y.checked_add(s.h).is_none_or(|t| t > height) {
                 return Err(bad(format!("subterrain \"{}\" ({},{} {}×{}) reaches past the canvas of {width}×{height} corners", s.name, s.x, s.y, s.w, s.h)));
             }
-            if s.id_range[0] > s.id_range[1] {
+            if s.id_ranges.is_empty() {
+                return Err(bad(format!("subterrain \"{}\" has no idRange", s.name)));
+            }
+            if s.id_ranges.iter().any(|r| r[0] > r[1]) {
                 return Err(bad(format!("subterrain \"{}\": idRange starts after it ends", s.name)));
             }
         }
@@ -338,19 +418,17 @@ impl Layout {
                 }
             }
         }
-        let mut ranges: Vec<&Subterrain> = self.subterrains.iter().collect();
-        ranges.sort_by_key(|s| s.id_range);
-        for p in ranges.windows(2) {
-            if p[1].id_range[0] <= p[0].id_range[1] {
-                return Err(bad(format!("the idRanges of \"{}\" and \"{}\" overlap", p[0].name, p[1].name)));
-            }
-        }
         Ok(())
     }
 
     /// The canvas in corners.
     pub fn corners(&self) -> [usize; 2] {
         [self.head.width, self.head.height]
+    }
+
+    /// The world position of corner (0, 0), what ownership measures rectangles from (`terrain_objects::owner`).
+    pub fn offset(&self) -> [f32; 2] {
+        self.head.offset
     }
 
     /// `terrain.json` as written to disk (keys in a fixed order, short lists on one line).
@@ -385,15 +463,14 @@ impl Layout {
             .iter()
             .map(|st| {
                 format!(
-                    "    {{\n      \"name\": {},\n      \"folder\": {},\n      \"x\": {},\n      \"y\": {},\n      \"w\": {},\n      \"h\": {},\n      \"idRange\": [{}, {}]\n    }}",
+                    "    {{\n      \"name\": {},\n      \"folder\": {},\n      \"x\": {},\n      \"y\": {},\n      \"w\": {},\n      \"h\": {},\n      \"idRange\": {}\n    }}",
                     q(&st.name),
                     q(&st.folder),
                     st.x,
                     st.y,
                     st.w,
                     st.h,
-                    st.id_range[0],
-                    st.id_range[1]
+                    id_ranges_json(&st.id_ranges)
                 )
             })
             .collect();
@@ -546,7 +623,7 @@ fn split_terrain(t: &Terrain, rects: &[Rect], flats: &Flats) -> Result<BTreeMap<
     for (i, r) in rects.iter().enumerate() {
         let lo = u32::try_from(i + 1).ok().and_then(|n| n.checked_mul(10000)).ok_or_else(|| Error::Format("too many subterrains".into()))?;
         let hi = lo.checked_add(9999).ok_or_else(|| Error::Format("too many subterrains".into()))?;
-        subterrains.push(Subterrain { name: r.name.clone(), folder: r.name.clone(), x: r.x, y: r.y, w: r.w, h: r.h, id_range: [lo, hi] });
+        subterrains.push(Subterrain { name: r.name.clone(), folder: r.name.clone(), x: r.x, y: r.y, w: r.w, h: r.h, id_ranges: vec![[lo, hi]] });
     }
     let mut covered = vec![false; t.width * t.height];
     for s in &subterrains {
@@ -754,7 +831,7 @@ pub fn write_changed(map_dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Resul
 
 /// The split layout's files on disk (relative to `map/`), read; a project without `map/terrain/`
 /// gives none.
-fn read_layout_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+pub(crate) fn read_layout_files(map_dir: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut files = BTreeMap::new();
     for rel in crate::project::walk(&map_dir.join(DIR))? {
         let path = format!("{DIR}/{rel}");
@@ -925,6 +1002,19 @@ pub fn write_flat(map_dir: &Path, name: &str, bytes: &[u8]) -> Result<Vec<String
     if !files.contains_key(name) {
         return Err(Error::Project(format!("map/{name} isn't one the split terrain holds (map/{LAYOUT_FILE})")));
     }
+    let mut layout = layout;
+    // A creation number new in this write that lies above every id range: the range Studio's allocator took for it
+    // once its subterrain's were full, recorded now (`crate::terrain_ids::record_new`).
+    if let Some(kind) = KINDS.into_iter().find(|k| k.flat() == name && layout.objects.has(*k)) {
+        let offset = layout.head.offset;
+        let old: HashSet<u32> = objects::flat_numbers(kind, &files[name], offset)?.into_iter().map(|(n, _, _)| n).collect();
+        let new: Vec<(u32, usize)> = objects::flat_numbers(kind, bytes, offset)?
+            .into_iter()
+            .filter(|(n, _, _)| !old.contains(n))
+            .map(|(n, x, y)| (n, objects::owner(&layout.subterrains, offset, x, y)))
+            .collect();
+        crate::terrain_ids::record_new(&mut layout.subterrains, new);
+    }
     files.insert(name.to_string(), bytes.to_vec());
     let t = w3e::terrain_from_text(&files[FLAT_FILE])?;
     if [t.width, t.height] != layout.corners() {
@@ -1016,7 +1106,7 @@ mod tests {
         let mut files = flat_files(&terrain(12, false));
         split(&mut files, &[]).unwrap();
         let layout = Layout::parse(&files[LAYOUT_FILE]).unwrap();
-        assert_eq!(layout.subterrains, vec![Subterrain { name: "main".into(), folder: "main".into(), x: 0, y: 0, w: 9, h: 7, id_range: [10000, 19999] }]);
+        assert_eq!(layout.subterrains, vec![Subterrain { name: "main".into(), folder: "main".into(), x: 0, y: 0, w: 9, h: 7, id_ranges: vec![[10000, 19999]] }]);
         let ground = String::from_utf8(files["terrain/main/terrain.txt"].clone()).unwrap();
         assert!(ground.starts_with("corners 9 7\n\n[height]\n"), "{ground}");
         assert!(!ground.contains("[trailer]"));
@@ -1088,6 +1178,20 @@ mod tests {
         fails(format!("{},{}", sub("a", "a", 0, 0, 5, 5, [1, 9]), sub("b", "b", 4, 4, 2, 2, [10, 19])), "overlap");
         fails(format!("{},{}", sub("a", "a", 0, 0, 5, 5, [1, 10]), sub("b", "b", 5, 5, 2, 2, [10, 19])), "idRanges");
         fails(sub("a", "a", 0, 0, 5, 5, [9, 1]), "starts after");
+        // idRange as a list of ranges (once one was full): read, written back the same; overlaps within one subterrain
+        // and with another's are errors, as are an empty list and a range that isn't two numbers.
+        let list = |r: &str| sub("a", "a", 0, 0, 5, 5, [1, 9]).replace("[1,9]", r);
+        let two = ok(format!("{},{}", list("[[1,9],[20,29]]"), sub("b", "b", 5, 0, 5, 10, [10, 19]))).unwrap();
+        assert_eq!(two.subterrains[0].id_ranges, [[1, 9], [20, 29]]);
+        assert_eq!(two.subterrains[1].id_ranges, [[10, 19]]);
+        let text = String::from_utf8(two.to_json().unwrap()).unwrap();
+        assert!(text.contains("\"idRange\": [[1, 9], [20, 29]]\n") && text.contains("\"idRange\": [10, 19]\n"), "{text}");
+        assert_eq!(Layout::parse(text.as_bytes()).unwrap().subterrains, two.subterrains);
+        fails(list("[[1,9],[5,12]]"), "two idRanges of \"a\" overlap");
+        fails(format!("{},{}", list("[[1,9],[15,29]]"), sub("b", "b", 5, 0, 5, 10, [10, 19])), "the idRanges of \"b\" and \"a\" overlap");
+        fails(list("[]"), "idRange");
+        fails(list("[[1,9],[3]]"), "idRange");
+        fails(list("[[1,9],[9,1]]"), "starts after");
         fails(format!("{},{}", sub("a", "x", 0, 0, 5, 5, [1, 9]), sub("b", "X", 5, 5, 2, 2, [10, 19])), "ignoring case");
         fails(format!("{},{}", sub("a", "x", 0, 0, 5, 5, [1, 9]), sub("a", "y", 5, 5, 2, 2, [10, 19])), "named");
         for folder in ["", ".", "..", "a/b", "a\\\\b", "../up", "c:", "con", "Lpt1.txt", "x.", " x", "terrain.json"] {
@@ -1392,6 +1496,50 @@ mod tests {
         let views = flat_views(&dir).unwrap().unwrap();
         assert_eq!(views.iter().map(|v| v.name).collect::<Vec<_>>(), [FLAT_FILE]);
         assert!(read_flat(&dir, FLAT_FILE).unwrap_err().to_string().contains("isn't JSON"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A creation number new in a write and above every id range (what Studio's allocator hands out once a
+    /// subterrain's ranges are full): its block is recorded in terrain.json for the subterrain holding the object, in
+    /// the same write. Numbers already there, inside a range or below the top record nothing.
+    #[test]
+    fn a_new_number_above_every_range_records_its_range() {
+        let dir = std::env::temp_dir().join(format!("w3proj-terrain-ranges-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let t = terrain(12, false);
+        let mut flat = flat_files(&t);
+        flat.remove("war3map.j");
+        with_objects(&mut flat, 8);
+        let mut files = flat.clone();
+        split(&mut files, &grid_2x2(t.width, t.height)).unwrap();
+        write_changed(&dir, &files).unwrap();
+        let ranges = |name: &str| Layout::parse(&fs::read(dir.join(LAYOUT_FILE)).unwrap()).unwrap().subterrains.into_iter().find(|s| s.name == name).unwrap().id_ranges;
+        assert_eq!(ranges("sw"), [[10000, 19999]]);
+        // The flat units with one more at the end (so no other entry's place changes).
+        let unit_at = |n: u32, x: f64, y: f64| {
+            let mut doc: Value = serde_json::from_slice(&flat["war3mapUnits.doo.json"]).unwrap();
+            doc["units"].as_array_mut().unwrap().push(serde_json::json!({"id": "hfoo", "position": [x, y, 0.0], "editorId": n}));
+            serde_json::to_string_pretty(&doc).unwrap() + "\n"
+        };
+        let units = |n: u32| unit_at(n, -500.0, 10.0);
+        // A number typed by hand below the top, and one inside ne's range, in sw: nothing recorded.
+        for n in [15, 40000] {
+            let written = write_flat(&dir, "war3mapUnits.doo.json", units(n).as_bytes()).unwrap();
+            assert_eq!(written, ["terrain/sw/units.json"], "{n}");
+        }
+        // 50003 in sw: above every range (ne's ends at 49999).
+        let text = units(50003);
+        let written = write_flat(&dir, "war3mapUnits.doo.json", text.as_bytes()).unwrap();
+        assert_eq!(written, ["terrain/sw/units.json", "terrain/terrain.json"]);
+        assert_eq!(ranges("sw"), [[10000, 19999], [50000, 59999]]);
+        let json = String::from_utf8(fs::read(dir.join(LAYOUT_FILE)).unwrap()).unwrap();
+        assert!(json.contains("\"idRange\": [[10000, 19999], [50000, 59999]]\n") && json.contains("\"idRange\": [20000, 29999]\n"), "{json}");
+        // The same file again (the number isn't new now), and the object moved to ne: nothing more recorded.
+        assert!(write_flat(&dir, "war3mapUnits.doo.json", text.as_bytes()).unwrap().is_empty());
+        let moved = unit_at(50003, 400.0, 700.0);
+        assert_eq!(write_flat(&dir, "war3mapUnits.doo.json", moved.as_bytes()).unwrap(), ["terrain/ne/units.json", "terrain/sw/units.json"]);
+        assert_eq!(ranges("ne"), [[40000, 49999]]);
         let _ = fs::remove_dir_all(&dir);
     }
 
