@@ -46,7 +46,15 @@ async fn path_normalize(path: String) -> String {
 /// the disk, which on a network or mapped drive can take long.
 #[tauri::command]
 async fn project_open(path: String) -> CmdResult<ProjectInfo> {
-    tauri::async_runtime::spawn_blocking(move || backend::open_project(&path)).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = backend::open_project(&path)?;
+        // A project split before derived files and pathing overrides moved out of git: moved now. One that can't move
+        // (two copies that differ, overrides that don't fit) stays, and reading those files says why.
+        let _ = w3proj::terrain_layout::migrate_split(Path::new(&info.root));
+        Ok(info)
+    })
+    .await
+    .map_err(err)?
 }
 
 /// Size and last write of one file, as `project_files` reports them: what a write left, to tell it
@@ -481,7 +489,11 @@ fn fs_rmdir(root: String, path: String) -> CmdResult<()> {
 /// Deletes a file of the project; empty folders it leaves behind go too (up to the root).
 #[tauri::command]
 fn fs_delete(root: String, path: String) -> CmdResult<()> {
-    backend::flatview::refuse_moving(Path::new(&path))?;
+    // A split project's flat files can't be deleted; its derived files go from the store, the Pathing tool's file from
+    // the subterrains (backend::flatview).
+    if backend::flatview::delete_view(Path::new(&path))? {
+        return Ok(());
+    }
     let p = inside(&root, &path)?;
     std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     remove_empty_parents(&root, &p)
@@ -530,6 +542,12 @@ fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
 #[tauri::command]
 async fn fs_copy(from: String, to: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
+        // A file of a split project that stands for others (backend::flatview: the Pathing tool's backup of its file)
+        // is copied by its content.
+        if backend::flatview::view_of(Path::new(&from))?.is_some() || backend::flatview::view_of(Path::new(&to))?.is_some() {
+            let bytes = backend::read_bytes(Path::new(&from)).map_err(|e| format!("{from} → {to}: {e}"))?;
+            return backend::write_bytes(Path::new(&to), &bytes).map(|_| ());
+        }
         if let Some(parent) = Path::new(&to).parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }

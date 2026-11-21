@@ -69,11 +69,212 @@ pub fn flat_of(path: &Path) -> CmdResult<Option<Flat>> {
     Ok(views.and_then(|v| v.into_iter().find(|v| v.name == *name)).map(|v| Flat { map_dir: map_dir.to_path_buf(), name: v.name, sources: v.sources }))
 }
 
-/// A file's bytes: a flat file of a split project assembled (`flat_of`), any other as it is on disk.
+/// Whether `map_dir` (a folder named `map`, any case) is a split project's: its layout file is there (one look at the
+/// disk for every other project) and decides so. A layout that can't be told is an error.
+fn split_map_dir(map_dir: &Path) -> CmdResult<bool> {
+    if !map_dir.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(w3proj::project::MAP_DIR)) {
+        return Ok(false);
+    }
+    if !exists_checked(&join_rel(map_dir, layout::LAYOUT_FILE))? {
+        return Ok(false);
+    }
+    layout::is_split_on_disk(map_dir).map_err(err)
+}
+
+/// A derived file of a split project (`map/war3map.wpm`, `.shd`, `war3mapMap.blp`, `war3map.mmp(.json)`,
+/// `w3proj::derived::FILES`): the file in the project's store `.w3proj/derived/` it is kept as (the name there in any
+/// case, else the one asked for). None for any other file and in a flat project.
+pub fn derived_of(path: &Path) -> CmdResult<Option<PathBuf>> {
+    let Some(file) = path.file_name().and_then(|n| n.to_str()) else { return Ok(None) };
+    if w3proj::derived::derived_name(file).is_none() {
+        return Ok(None);
+    }
+    let Some(map_dir) = path.parent() else { return Ok(None) };
+    let Some(project) = map_dir.parent() else { return Ok(None) };
+    if !split_map_dir(map_dir)? {
+        return Ok(None);
+    }
+    let store = w3proj::derived::store_dir(project);
+    let stored = match std::fs::read_dir(&store) {
+        Ok(entries) => entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).find(|n| n.eq_ignore_ascii_case(file)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", store.display())),
+    };
+    Ok(Some(store.join(stored.as_deref().unwrap_or(file))))
+}
+
+/// The Pathing tool's `.w3proj/pathing.json` of a split project (`w3proj::terrain_pathing`): its project folder. None for
+/// any other file and in a flat project.
+pub fn pathing_of(path: &Path) -> CmdResult<Option<PathBuf>> {
+    let named = |p: &Path, name: &str| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name));
+    let [dir, file] = w3proj::terrain_pathing::JSON_FILE;
+    let Some(parent) = path.parent() else { return Ok(None) };
+    if !named(path, file) || !named(parent, dir) {
+        return Ok(None);
+    }
+    let Some(project) = parent.parent() else { return Ok(None) };
+    Ok(split_map_dir(&project.join(w3proj::project::MAP_DIR))?.then(|| project.to_path_buf()))
+}
+
+/// The error a read of a file that isn't there gives (the app tells "not found" by it).
+fn not_found(path: &Path) -> String {
+    format!("{}: {}", path.display(), std::io::Error::from_raw_os_error(2))
+}
+
+/// The subterrains' `pathing.txt` of a split project that are there, as paths.
+fn pathing_paths(project: &Path) -> CmdResult<Vec<PathBuf>> {
+    let map_dir = project.join(w3proj::project::MAP_DIR);
+    Ok(layout::pathing_files(project).map_err(err)?.iter().map(|p| join_rel(&map_dir, p)).collect())
+}
+
+/// The stamp of a split project's `.w3proj/pathing.json`: the size and last write of its subterrains' `pathing.txt`
+/// (`Flat::stamp`); None when there is none.
+pub fn pathing_stamp(project: &Path) -> Option<Stamp> {
+    let paths = pathing_paths(project).ok()?;
+    if paths.is_empty() {
+        return crate::stamp_of(&w3proj::terrain_pathing::json_path(project)).ok();
+    }
+    let (mut size, mut modified) = (0, 0);
+    for p in &paths {
+        if let Ok(meta) = std::fs::metadata(p) {
+            size += meta.len();
+            modified = modified.max(modified_ms(&meta));
+        }
+    }
+    Some(Stamp { size, modified, also: Vec::new() })
+}
+
+/// Whether a split project's `.w3proj/pathing.json` is there: a subterrain has a `pathing.txt` (or the file itself is
+/// there, which reading then says is in the way).
+pub fn pathing_exists(project: &Path) -> CmdResult<bool> {
+    Ok(!pathing_paths(project)?.is_empty() || exists_checked(&w3proj::terrain_pathing::json_path(project))?)
+}
+
+/// A split project's `.w3proj/pathing.json`, assembled (`w3proj::terrain_layout::read_pathing`); "not found" when no
+/// subterrain has overrides.
+fn read_pathing(project: &Path) -> CmdResult<Vec<u8>> {
+    layout::read_pathing(project).map_err(err)?.ok_or_else(|| not_found(&w3proj::terrain_pathing::json_path(project)))
+}
+
+/// Writes a split project's `.w3proj/pathing.json` into its subterrains' `pathing.txt`
+/// (`w3proj::terrain_layout::write_pathing`): the stamp, with every file written or removed in `also`.
+fn write_pathing(project: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
+    let (written, removed) = layout::write_pathing(project, bytes).map_err(|e| format!("{} wasn't saved into map/terrain/: {e}", w3proj::terrain_pathing::JSON_NAME))?;
+    let map_dir = project.join(w3proj::project::MAP_DIR);
+    let mut also = Vec::new();
+    for rel in &written {
+        let at = join_rel(&map_dir, rel);
+        let s = crate::stamp_of(&at)?;
+        also.push(Also { path: at.to_string_lossy().into_owned(), size: s.size, modified: s.modified });
+    }
+    // A file removed: listed with size and time 0, as gone.
+    for rel in &removed {
+        also.push(Also { path: join_rel(&map_dir, rel).to_string_lossy().into_owned(), size: 0, modified: 0 });
+    }
+    let mut stamp = pathing_stamp(project).unwrap_or(Stamp { size: 0, modified: 0, also: Vec::new() });
+    stamp.also = also;
+    Ok(stamp)
+}
+
+/// Writes a derived file of a split project into the store (`derived_of`): the stamp, the stored file in `also`. The
+/// project's `.gitignore` gets the store when it is made.
+fn write_derived(project_file: &Path, real: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
+    let project = project_file.parent().and_then(Path::parent).ok_or("no project folder")?;
+    let new_store = !exists_checked(&w3proj::derived::store_dir(project))?;
+    let s = crate::write_file(real, |f| std::io::Write::write_all(f, bytes))?;
+    if new_store {
+        w3proj::derived::ensure_ignored(project).map_err(err)?;
+    }
+    Ok(Stamp { size: s.size, modified: s.modified, also: vec![Also { path: real.to_string_lossy().into_owned(), size: s.size, modified: s.modified }] })
+}
+
+/// What a project path stands for in a split project: one of its flat files, a derived file in the store, the Pathing
+/// tool's file; None for every other path (it is what it is).
+pub enum View {
+    Flat(Flat),
+    Derived(PathBuf),
+    Pathing(PathBuf),
+}
+
+/// `View` of a path. A layout that can't be told is an error, never "a file of its own".
+pub fn view_of(path: &Path) -> CmdResult<Option<View>> {
+    if let Some(f) = flat_of(path)? {
+        return Ok(Some(View::Flat(f)));
+    }
+    if let Some(real) = derived_of(path)? {
+        return Ok(Some(View::Derived(real)));
+    }
+    Ok(pathing_of(path)?.map(View::Pathing))
+}
+
+/// A file's bytes: a flat file of a split project assembled (`flat_of`), a derived one from the store, the Pathing tool's
+/// file from the subterrains, any other as it is on disk.
 pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
-    match flat_of(path)? {
-        Some(f) => layout::read_flat(&f.map_dir, f.name).map_err(err),
+    match view_of(path)? {
+        Some(View::Flat(f)) => layout::read_flat(&f.map_dir, f.name).map_err(err),
+        Some(View::Derived(real)) => std::fs::read(&real).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Pathing(project)) => read_pathing(&project),
         None => std::fs::read(path).map_err(err),
+    }
+}
+
+/// Writes a file of a split project that stands for others (`view_of`); None for any other file (the caller writes it).
+pub fn write_view(path: &Path, bytes: &[u8]) -> CmdResult<Option<Stamp>> {
+    Ok(match view_of(path)? {
+        Some(View::Flat(f)) => Some(write_flat(&f, bytes)?),
+        Some(View::Derived(real)) => Some(write_derived(path, &real, bytes)?),
+        Some(View::Pathing(project)) => Some(write_pathing(&project, bytes)?),
+        None => None,
+    })
+}
+
+/// A file's size and time when it stands for others in a split project (`view_of`): Some(None) when it isn't there,
+/// None for any other file.
+pub fn stat_view(path: &Path) -> CmdResult<Option<Option<Stamp>>> {
+    Ok(match view_of(path)? {
+        Some(View::Flat(f)) => Some(Some(f.stamp())),
+        Some(View::Derived(real)) => Some(crate::stamp_of(&real).ok()),
+        Some(View::Pathing(project)) => Some(pathing_stamp(&project)),
+        None => None,
+    })
+}
+
+/// A hash of what a file of a split project that stands for others holds; None for any other file, Some(None) when it
+/// can't be read.
+pub fn hash_view(path: &Path) -> CmdResult<Option<Option<String>>> {
+    Ok(match view_of(path)? {
+        Some(View::Flat(f)) => Some(f.hash().ok()),
+        Some(View::Derived(real)) => Some(std::fs::read(real).ok().map(|b| crate::content_hash(&b))),
+        Some(View::Pathing(project)) => Some(read_pathing(&project).ok().map(|b| crate::content_hash(&b))),
+        None => None,
+    })
+}
+
+/// Whether a file that stands for others in a split project is there; None for any other file.
+pub fn exists_view(path: &Path) -> CmdResult<Option<bool>> {
+    Ok(match view_of(path)? {
+        Some(View::Flat(_)) => Some(true),
+        Some(View::Derived(real)) => Some(exists_checked(&real)?),
+        Some(View::Pathing(project)) => Some(pathing_exists(&project)?),
+        None => None,
+    })
+}
+
+/// Deletes a file of a split project that stands for others: a derived file in the store, the Pathing tool's file (every
+/// subterrain's `pathing.txt`). A flat file can't be deleted (`refuse_moving`). False for any other file (the caller
+/// deletes it).
+pub fn delete_view(path: &Path) -> CmdResult<bool> {
+    match view_of(path)? {
+        Some(View::Flat(_)) => refuse_moving(path).map(|_| true),
+        Some(View::Derived(real)) => std::fs::remove_file(&real).map(|_| true).map_err(|e| format!("{}: {e}", path.display())),
+        Some(View::Pathing(project)) => {
+            if layout::delete_pathing(&project).map_err(err)?.is_empty() {
+                // Only the file itself (in the way): it goes as any file.
+                return Ok(false);
+            }
+            Ok(true)
+        }
+        None => Ok(false),
     }
 }
 
@@ -133,6 +334,28 @@ pub fn list_flat(root: &Path, files: &mut Vec<FileInfo>) {
             }
             let s = Flat { map_dir: map_dir.clone(), name: v.name, sources: v.sources }.stamp();
             files.push(FileInfo { path, size: s.size, modified: s.modified });
+        }
+        // The derived files in the store under their map/ names, and the Pathing tool's file when a subterrain has
+        // overrides (one of these names on disk is listed as itself already).
+        let Some(project) = map_dir.parent() else { continue };
+        let at = if map.contains('/') { map.rsplit_once('/').map(|(p, _)| format!("{p}/")).unwrap_or_default() } else { String::new() };
+        let mut more = Vec::new();
+        if let Ok(store) = w3proj::derived::read_store(project) {
+            for name in store.keys() {
+                if let Ok(s) = crate::stamp_of(&w3proj::derived::store_dir(project).join(name)) {
+                    more.push(FileInfo { path: format!("{map}/{name}"), size: s.size, modified: s.modified });
+                }
+            }
+        }
+        if pathing_paths(project).is_ok_and(|p| !p.is_empty()) {
+            if let Some(s) = pathing_stamp(project) {
+                more.push(FileInfo { path: format!("{at}{}", w3proj::terrain_pathing::JSON_NAME), size: s.size, modified: s.modified });
+            }
+        }
+        for f in more {
+            if !files.iter().any(|g| g.path.eq_ignore_ascii_case(&f.path)) {
+                files.push(f);
+            }
         }
     }
     files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
@@ -209,12 +432,20 @@ pub fn check(root: &str) -> CmdResult<serde_json::Value> {
     Ok(v)
 }
 
-/// Refuses to delete or move a flat file of a split project: it isn't a file, the subterrains are.
+/// Refuses to delete or move a flat file of a split project: it isn't a file, the subterrains are. Moving a derived file
+/// or the Pathing tool's file of a split project is refused too (they stand for files elsewhere; deleting them is
+/// `delete_view`).
 pub fn refuse_moving(path: &Path) -> CmdResult<()> {
-    match flat_of(path)? {
-        Some(f) => Err(format!(
+    match view_of(path)? {
+        Some(View::Flat(f)) => Err(format!(
             "map/{} isn't a file of its own: the project's terrain is split, and it is made from map/terrain/. Merge the subterrains first (Merge Subterrains)",
             f.name
+        )),
+        Some(View::Derived(real)) => Err(format!("{} can't be moved: the project's terrain is split, and it is kept as {}", path.display(), real.display())),
+        Some(View::Pathing(_)) => Err(format!(
+            "{} can't be moved: the project's terrain is split, and its pathing overrides are kept in map/terrain/<subterrain>/{}",
+            w3proj::terrain_pathing::JSON_NAME,
+            w3proj::terrain_pathing::FILE
         )),
         None => Ok(()),
     }
@@ -370,6 +601,117 @@ mod tests {
     fn layout_files(project: &Path) -> Vec<(String, Vec<u8>)> {
         let dir = project.join("map/terrain");
         crate::list_tree(&dir).unwrap().into_iter().map(|p| (p.clone(), fs::read(dir.join(&p)).unwrap())).collect()
+    }
+
+    /// The derived files of a split project answer from `.w3proj/derived/` under their map/ names: read, stat, exists,
+    /// listed, written there (named in `also`, `.gitignore` made to ignore the store), deleted from there, never moved.
+    /// The flat project's are its own files (control).
+    #[test]
+    fn derived_files_of_a_split_project_are_in_the_store() {
+        let (flat, split) = split_mini("derived");
+        let wpm = split.join("map").join("war3map.wpm");
+        let stored = split.join(".w3proj").join("derived").join("war3map.wpm");
+        assert!(!wpm.exists() && stored.is_file(), "the split moved it");
+        assert!(derived_of(&flat.join("map").join("war3map.wpm")).unwrap().is_none(), "control: a flat project's file is itself");
+        assert_eq!(derived_of(&wpm).unwrap().as_deref(), Some(stored.as_path()));
+        assert_eq!(crate::read_bytes(&wpm).unwrap(), fs::read(flat.join("map/war3map.wpm")).unwrap());
+        assert!(crate::exists(&wpm).unwrap());
+        let s = crate::stat(&wpm).unwrap();
+        assert_eq!(s.size, fs::metadata(&stored).unwrap().len());
+        let (listed, _) = crate::walk_project(&split, false).unwrap();
+        let f = listed.iter().find(|f| f.path == "map/war3map.wpm").expect("listed under its map/ name");
+        assert_eq!((f.size, f.modified), (s.size, s.modified));
+        // Absent ones: not there, reading says "not found" as for any file; a write makes it in the store.
+        let shd = split.join("map").join("war3map.shd");
+        assert!(!crate::exists(&shd).unwrap() && crate::stat(&shd).is_none());
+        assert!(crate::read_bytes(&shd).unwrap_err().contains("os error 2"));
+        let _ = fs::remove_file(split.join(".gitignore"));
+        let _ = fs::remove_dir_all(split.join(".w3proj").join("derived"));
+        let st = crate::write_bytes(&shd, b"shadows").unwrap();
+        let in_store = split.join(".w3proj").join("derived").join("war3map.shd");
+        assert_eq!(fs::read(&in_store).unwrap(), b"shadows");
+        assert!(!shd.exists(), "nothing written into map/");
+        assert_eq!(st.also.iter().map(|a| a.path.as_str()).collect::<Vec<_>>(), [in_store.to_string_lossy()]);
+        assert!(fs::read_to_string(split.join(".gitignore")).unwrap().contains("/.w3proj/derived/\n"), "the new store is ignored");
+        // A raw minimap icons file through the codec commands lands in the store too.
+        let root = split.to_string_lossy().into_owned();
+        let icons = fs::read_to_string(flat.join("map").join("war3map.mmp.json")).unwrap();
+        crate::codec_write(&root, "map/war3map.mmp", &icons, &[]).unwrap();
+        assert!(split.join(".w3proj").join("derived").join("war3map.mmp").is_file() && !split.join("map").join("war3map.mmp").exists());
+        let back: serde_json::Value = serde_json::from_str(&crate::codec_decode(&root, "map/war3map.mmp", &[]).unwrap()).unwrap();
+        assert_eq!(back, serde_json::from_str::<serde_json::Value>(&icons).unwrap());
+        assert!(refuse_moving(&shd).is_err(), "never moved");
+        assert!(delete_view(&shd).unwrap());
+        assert!(!in_store.exists());
+        assert!(!delete_view(&flat.join("map").join("war3map.wpm")).unwrap(), "control: a flat project's file is deleted as any file");
+        let _ = fs::remove_dir_all(flat.parent().unwrap());
+    }
+
+    /// The Pathing tool's `.w3proj/pathing.json` of a split project is assembled from the subterrains' `pathing.txt` and
+    /// sliced back: a write changes only the owning subterrain's file, reads back byte for byte, is listed and stat with
+    /// its files' stamp; a damaged pathing.txt is an error (the file is there, it can't be read); deleting removes every
+    /// pathing.txt. A flat project's file is a file (control).
+    #[test]
+    fn the_pathing_file_of_a_split_project() {
+        let (flat, split) = split_mini("pathing");
+        let json = split.join(".w3proj").join("pathing.json");
+        assert!(pathing_of(&flat.join(".w3proj").join("pathing.json")).unwrap().is_none(), "control");
+        assert!(!crate::exists(&json).unwrap() && crate::stat(&json).is_none(), "no overrides: no file");
+        assert!(crate::read_bytes(&json).unwrap_err().contains("os error 2"));
+        // The mini map: 5×3 corners, 16×8 cells; the 2×2 grid's seams at cell x 8 and y 4.
+        let text = |cells: &[[u32; 4]]| {
+            let rows: Vec<String> = cells.iter().map(|c| format!("\n    [{},{},{},{}]", c[0], c[1], c[2], c[3])).collect();
+            format!("{{\n  \"format\": \"w3proj.pathing/1\",\n  \"width\": 16,\n  \"height\": 8,\n  \"cells\": [{}\n  ]\n}}\n", rows.join(","))
+        };
+        let one = text(&[[7, 1, 2, 8], [8, 1, 2, 8], [3, 5, 0, 8]]);
+        let st = crate::write_bytes(&json, one.as_bytes()).unwrap();
+        assert!(!json.exists(), "nothing written to .w3proj/pathing.json");
+        let txt = |s: &str| split.join("map").join("terrain").join(s).join("pathing.txt");
+        assert_eq!(fs::read_to_string(txt("sw")).unwrap(), "7 1 0a 02\n");
+        assert_eq!(fs::read_to_string(txt("se")).unwrap(), "0 1 0a 02\n");
+        assert_eq!(fs::read_to_string(txt("nw")).unwrap(), "3 1 08 00\n");
+        assert!(!txt("ne").exists());
+        assert_eq!(st.also.len(), 3);
+        assert_eq!(crate::read_text(&json).unwrap(), one, "read back byte for byte");
+        let (listed, _) = crate::walk_project(&split, false).unwrap();
+        let f = listed.iter().find(|f| f.path == ".w3proj/pathing.json").expect("listed");
+        let s = crate::stat(&json).unwrap();
+        assert_eq!((f.size, f.modified), (s.size, s.modified));
+        assert_eq!(crate::stat_hashed(&json).unwrap().hash, Some(crate::content_hash(one.as_bytes())));
+        // An edit in the north-west only: only nw's file is written; one that leaves se without overrides removes its file.
+        let sw_before = fs::metadata(txt("sw")).unwrap().modified().unwrap();
+        let two = text(&[[7, 1, 2, 8], [8, 1, 2, 8], [3, 5, 2, 0]]);
+        let st = crate::write_bytes(&json, two.as_bytes()).unwrap();
+        assert_eq!(st.also.iter().map(|a| a.path.clone()).collect::<Vec<_>>(), [txt("nw").to_string_lossy().into_owned()], "only the owning pathing.txt");
+        assert_eq!(fs::metadata(txt("sw")).unwrap().modified().unwrap(), sw_before);
+        let three = text(&[[7, 1, 2, 8], [3, 5, 2, 0]]);
+        crate::write_bytes(&json, three.as_bytes()).unwrap();
+        assert!(!txt("se").exists());
+        assert_eq!(crate::read_text(&json).unwrap(), three);
+        // Refused, nothing written: another size, fields a split project can't keep.
+        let files_before = layout_files(&split);
+        assert!(crate::write_bytes(&json, three.replace("\"width\": 16", "\"width\": 20").as_bytes()).unwrap_err().contains("20×8"));
+        assert!(crate::write_bytes(&json, three.replace("\"format\"", "\"note\": 1,\n  \"format\"").as_bytes()).unwrap_err().contains("\"note\""));
+        assert_eq!(layout_files(&split), files_before);
+        // A damaged pathing.txt: there, and reading it says which line; the terrain still opens.
+        fs::write(txt("nw"), "3 1 08 00\ngarbage\n").unwrap();
+        assert!(crate::exists(&json).unwrap());
+        assert!(crate::read_bytes(&json).unwrap_err().contains("map/terrain/nw/pathing.txt line 2"));
+        assert!(crate::read_bytes(&split.join("map").join("war3map.w3e.txt")).is_ok());
+        // A real .w3proj/pathing.json beside them is in the way.
+        fs::write(txt("nw"), "3 1 08 00\n").unwrap();
+        fs::write(&json, &three).unwrap();
+        assert!(crate::read_bytes(&json).unwrap_err().contains("is there, but the terrain is split"));
+        fs::remove_file(&json).unwrap();
+        // Deleted: every pathing.txt goes; moving is refused.
+        assert!(refuse_moving(&json).is_err());
+        assert!(delete_view(&json).unwrap());
+        assert!(!txt("sw").exists() && !txt("nw").exists() && !crate::exists(&json).unwrap());
+        // The flat project's file is written as itself.
+        let fj = flat.join(".w3proj").join("pathing.json");
+        crate::write_bytes(&fj, one.as_bytes()).unwrap();
+        assert_eq!(fs::read_to_string(&fj).unwrap(), one);
+        let _ = fs::remove_dir_all(flat.parent().unwrap());
     }
 
     /// A `terrain.json` that can't be read: the terrain is listed and exists, and reading it is an error naming the

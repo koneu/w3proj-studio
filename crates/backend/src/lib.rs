@@ -287,16 +287,17 @@ pub fn read_bytes(path: &Path) -> CmdResult<Vec<u8>> {
 /// Writes a file the app saves (`fs_write_text`, `fs_write_bytes`): in one step (`write_file`), or for a split
 /// terrain's flat file into the subterrains it stands for (`flatview::write_flat`).
 pub fn write_bytes(path: &Path, bytes: &[u8]) -> CmdResult<Stamp> {
-    match flatview::flat_of(path)? {
-        Some(f) => flatview::write_flat(&f, bytes),
+    match flatview::write_view(path, bytes)? {
+        Some(stamp) => Ok(stamp),
         None => write_file(path, |f| f.write_all(bytes)),
     }
 }
 
-/// A file's size and time (`fs_stat`), None when there is none; a split terrain's flat file has its sources'.
+/// A file's size and time (`fs_stat`), None when there is none; a split terrain's flat file has its sources', a derived
+/// file its stored file's, the Pathing tool's file its subterrains' `pathing.txt` (`flatview::stat_view`).
 pub fn stat(path: &Path) -> Option<Stamp> {
-    match flatview::flat_of(path) {
-        Ok(Some(f)) => Some(f.stamp()),
+    match flatview::stat_view(path) {
+        Ok(Some(s)) => s,
         _ => stamp_of(path).ok(),
     }
 }
@@ -312,9 +313,8 @@ pub struct HashedStamp {
 /// Size, last write and a hash of the contents (`fs_stat_hashed`); None when there is no such file, no hash when it
 /// is there but can't be read (it isn't taken for missing). A split terrain's flat file: its sources'.
 pub fn stat_hashed(path: &Path) -> Option<HashedStamp> {
-    if let Ok(Some(f)) = flatview::flat_of(path) {
-        let s = f.stamp();
-        return Some(HashedStamp { size: s.size, modified: s.modified, hash: f.hash().ok() });
+    if let (Ok(Some(s)), Ok(Some(hash))) = (flatview::stat_view(path), flatview::hash_view(path)) {
+        return s.map(|s| HashedStamp { size: s.size, modified: s.modified, hash });
     }
     // Time first: a write between the two gives a hash of the newer bytes with the older time, which differs
     // from the next look at the time anyway.
@@ -337,7 +337,10 @@ pub fn content_hash(bytes: &[u8]) -> String {
 /// Whether something is at the path (`fs_exists`), a split terrain's flat file too. A path that can't be checked is
 /// an error (`exists_checked`).
 pub fn exists(path: &Path) -> CmdResult<bool> {
-    Ok(flatview::flat_of(path)?.is_some() || exists_checked(path)?)
+    match flatview::exists_view(path)? {
+        Some(there) => Ok(there),
+        None => exists_checked(path),
+    }
 }
 
 /// Whether something is at the path. A path that can't be checked (a folder above it may not be looked
@@ -403,7 +406,8 @@ pub fn codec_decode(root: &str, path: &str, formats: &[PathBuf]) -> CmdResult<St
     // The file first: callers try this for files that may not be there (the raw form of a document
     // whose JSON form is missing), and loading the format definitions for nothing is slow.
     let full = Path::new(root).join(path);
-    let bytes = std::fs::read(&full).map_err(err)?;
+    // A split project's derived files are answered from its store (flatview).
+    let bytes = read_bytes(&full)?;
     let registry = Registry::for_project(Path::new(root), formats).map_err(err)?;
     let name = w3proj::paths::to_archive_name(rel);
     let mut last = format!("no format definition reads {name}");
@@ -435,7 +439,8 @@ pub fn codec_write(root: &str, path: &str, text: &str, formats: &[PathBuf]) -> C
     for codec in registry.for_archive_name(&name) {
         match codec.encode(&name, text.as_bytes()) {
             Ok(bin) => {
-                return write_file(&Path::new(root).join(path), |f| f.write_all(&bin));
+                // A split project's derived files go into its store (flatview).
+                return write_bytes(&Path::new(root).join(path), &bin);
             }
             Err(e) => last = e.to_string(),
         }
