@@ -44,6 +44,9 @@ export function gameCli(): { bin: string; install: string[] } | null {
 }
 let cli: { bin: string; install: string[] } | null | undefined;
 function findGameCli(): { bin: string; install: string[] } | null {
+  // [Refactored] Treat an explicit empty W3PROJ_GAME="" (used by `gate.mjs commit` tier) as disabling slow CASC reads;
+  // `tstestcorpus` in `corpus`/`batch` tiers sets W3PROJ_GAME + W3PROJ_REQUIRE_CORPUS=1 so game tests always run there.
+  if (process.env.W3PROJ_GAME === "") return null;
   const where = mainCheckout();
   if (!where) return null;
   const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;

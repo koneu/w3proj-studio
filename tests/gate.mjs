@@ -287,8 +287,9 @@ const steps = [
   { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
   // The web demo (docs/web-demo.md): its own build folder (app/dist-demo), so no "dist" lock. A missing browser FAILS, as in ui-smoke.
   { id: "demo", name: "web demo build and check (headless)", tier: "commit", weight: 2, run: shell("node scripts/demo-check.mjs --build", { cwd: app }) },
-  { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
-  { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
+  { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 4, run: shell("npm run --silent check", { cwd: app }) },
+  // [Refactored] Fast commit-tier unit tests skip slow CASC game-file reads (W3PROJ_GAME=""); `tstestcorpus` runs them with W3PROJ_REQUIRE_CORPUS=1.
+  { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 4, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_GAME: "" } }) },
   // The same tests in the tier that has the corpus and the game: a test for a missing map or game file FAILS here instead of skipping (testutil.ts).
   { id: "tstestcorpus", name: "TypeScript unit tests on the corpus (nothing skipped)", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", needs(hasGame, "the game", shell("npm test --silent -- --test-reporter=dot", { cwd: app, env: { W3PROJ_REQUIRE_CORPUS: "1", W3PROJ_CORPUS: corpus, W3PROJ_GAME: game, W3PROJ_BIN: bin } }))) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
