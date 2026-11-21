@@ -4942,6 +4942,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           sunShadows: () => ({ ...renderer.sunShadowState }),
           waterDepth: () => ({ ...renderer.waterDepthState }),
+          renderStats: () => renderer.renderStats(),
           drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
           drawnStartBuildings: () => renderer.batches.filter((b) => previewBatches.includes(b)).flatMap((b) => b.instances.map((i) => ({ x: i.world[12], y: i.world[13] }))),
           drawnUnits: (group = "units") => renderer.batches.filter((b) => b.group === group).flatMap((b) => b.instances.flatMap((i) => {

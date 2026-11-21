@@ -134,6 +134,16 @@ export interface DeriveSources {
  *  went through, records what terrain and doodad files they follow (w3proj::derived: `w3proj pack` outside the app
  *  refuses them once those change again). */
 export async function writeDerived(w3: W3Api, s: DeriveSources) {
+  // Each run's time as a performance measure "w3.derive" (scripts/measure-subterrains.mjs reads them).
+  const started = performance.now();
+  try {
+    await writeDerivedNow(w3, s);
+  } finally {
+    performance.measure("w3.derive", { start: started, end: performance.now() });
+  }
+}
+
+async function writeDerivedNow(w3: W3Api, s: DeriveSources) {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const gone = () => s.stillOpen?.() === false;
   // Taken before anything is made: a terrain or doodad file written meanwhile shows as changed since.

@@ -1498,6 +1498,18 @@ export class TerrainRenderer {
     return Object.fromEntries([...this.shapes].map(([name, m]) => [name, m.count]));
   }
 
+  /** What the renderer holds to draw (for measuring, TerrainEditorHandle.renderStats): the ground's quads (one per tile
+   *  and texture layer), the water's triangles, per object group the batches (models) and instances. */
+  renderStats(): { groundQuads: number; waterTriangles: number; groups: Record<string, { batches: number; instances: number }> } {
+    const groups: Record<string, { batches: number; instances: number }> = {};
+    for (const b of this.batches) {
+      const g = (groups[b.group] ??= { batches: 0, instances: 0 });
+      g.batches++;
+      g.instances += b.instances.length;
+    }
+    return { groundQuads: this.ranges.reduce((n, r) => n + r.count / 6, 0), waterTriangles: this.water.count / 3, groups };
+  }
+
   /** How many rings each named set has (setRings; for tests and the app's state). */
   ringCounts(): Record<string, number> {
     return Object.fromEntries([...this.ringSets].map(([name, rings]) => [name, rings.length]));

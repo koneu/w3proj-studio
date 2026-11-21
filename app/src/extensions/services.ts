@@ -216,6 +216,9 @@ export interface TerrainEditorHandle {
   /** The last frame's depth picture of the models under HD water (they show through it): whether it was drawn, and
    *  how many models were in it. For tests and measuring. */
   waterDepth(): { drawn: boolean; models: number };
+  /** What the view holds to draw: the ground's quads (per tile and texture layer), the water's triangles, per object
+   *  group (cliffs, doodads, units, …) the models and their instances. For measuring (scripts/measure-subterrains.mjs). */
+  renderStats(): { groundQuads: number; waterTriangles: number; groups: Record<string, { batches: number; instances: number }> };
   /** Where the placed units' models are drawn now (a flyer at its flying height, a ship on the water), by their
    *  placement's id and position, with the team colour they're drawn in and their model ("" for a checkered cube).
    *  For tests and measuring. */
