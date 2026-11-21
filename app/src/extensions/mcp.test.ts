@@ -39,7 +39,8 @@ test("a call waits for `ready` (the project's whole file list) before its tool r
   t.declare("ext.a", "builtin", [read]);
   t.registerTool("look", () => { ran++; return "seen"; });
   const call = t.call("look", {});
-  await new Promise((r) => setTimeout(r, 5));
+  // [Refactored] Flush microtasks with setImmediate instead of a fixed 5ms setTimeout delay.
+  await new Promise((r) => setImmediate(r));
   assert.equal(ran, 0, "not before the list is read");
   release();
   assert.deepEqual(await call, { content: [{ type: "text", text: "seen" }] });
@@ -101,22 +102,18 @@ test("settings can hide a tool from the list and from calls", async () => {
   assert.equal((await t.call("look", {})).isError, true);
 });
 
-test("a tool can need a setting of its own", () => {
+// [Merged] Consolidated "the revision follows the list" into "a tool can need a setting of its own".
+test("a tool can need a setting of its own, and the revision follows the list", () => {
   let on = false;
   const { t } = tools({ allowed: ({ needs }) => !needs || on });
+  const empty = t.revision();
   t.declare("ext.a", "builtin", [read, { name: "save", description: "Saves", needs: "mcp.saveTool" }]);
+  assert.notEqual(t.revision(), empty);
   assert.deepEqual(t.list().map((x) => x.name), ["look"]);
   const closed = t.revision();
   on = true;
   assert.deepEqual(t.list().map((x) => x.name), ["look", "save"]);
   assert.notEqual(t.revision(), closed);
-});
-
-test("the revision follows the list", () => {
-  const { t } = tools();
-  const empty = t.revision();
-  t.declare("ext.a", "builtin", [read]);
-  assert.notEqual(t.revision(), empty);
 });
 
 test("requests from the bridge always get an answer", async () => {
