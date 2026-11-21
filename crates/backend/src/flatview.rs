@@ -182,8 +182,9 @@ fn write_derived(project_file: &Path, real: &Path, bytes: &[u8]) -> CmdResult<St
     let project = project_file.parent().and_then(Path::parent).ok_or("no project folder")?;
     let new_store = !exists_checked(&w3proj::derived::store_dir(project))?;
     let s = crate::write_file(real, |f| std::io::Write::write_all(f, bytes))?;
+    // The file is written either way; a .gitignore that can't be read is left alone (split, merge and pack say so).
     if new_store {
-        w3proj::derived::ensure_ignored(project).map_err(err)?;
+        let _ = w3proj::derived::ensure_ignored(project);
     }
     Ok(Stamp { size: s.size, modified: s.modified, also: vec![Also { path: real.to_string_lossy().into_owned(), size: s.size, modified: s.modified }] })
 }
