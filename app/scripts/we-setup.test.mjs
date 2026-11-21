@@ -3,7 +3,7 @@
 // refuses others); the "game" is a small folder next to it, under target/tmp.
 import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -180,43 +180,27 @@ test("--compare fails when the snapshots hold no guarded file (they prove nothin
 test("the World Editor lock: a lock another run takes while a stale one is taken over is put back, not swept away", async () => {
   await withEnv(undefined, async () => {
     const dir = lockPath();
-    const child = spawn(process.execPath, ["-e", ""]);
-    await new Promise((ok) => child.on("close", ok));
-    const other = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"]);
-    try {
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: child.pid, repo: "dead" }));
-      // Another run takes the lock between the stale check and the rename.
-      const steal = () => { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir); writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: other.pid, repo: "other", since: "now" })); };
-      await assert.rejects(takeLock(() => {}, 1500, { beforeRename: steal }), /still holds/);
-      assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, other.pid, "the other run's lock is where it was");
-      assert.deepEqual(readdirSync(join(dir, "..")).filter((n) => n.includes("stale")), [], "nothing left behind");
-      // Control: without the other run, the stale lock is taken over.
-      rmSync(dir, { recursive: true, force: true });
-      mkdirSync(dir);
-      writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: child.pid, repo: "dead" }));
-      const said = [];
-      const release = await takeLock((m) => said.push(m), 5000);
-      assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, process.pid);
-      assert.match(said.join("\n"), /took over the World Editor lock of dead/);
-      release();
-    } finally { other.kill(); }
-  });
-});
-
-test("we-rofs.c compiles without warnings, and takes the mode only for O_CREAT or a whole O_TMPFILE", (t) => {
-  try { execFileSync("cc", ["--version"], { stdio: "ignore" }); } catch { return t.skip("no C compiler"); }
-  const src = repoPath("app", "scripts", "we-rofs.c"); // the test runs bundled: found from the working directory up
-  const text = readFileSync(src, "utf8");
-  assert.ok(!/flags & \(O_CREAT \| O_TMPFILE\)/.test(text), "the mask test is also true for a plain O_DIRECTORY");
-  const dir = scratchDir("we-rofs-");
-  try {
-    const out = join(dir, "we-rofs.so");
-    execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", out, src, "-ldl"], { stdio: ["ignore", "pipe", "pipe"] });
-    assert.ok(lstatSync(out).size > 0);
-  } finally {
+    // [Refactored] Use guaranteed dead PID (above Linux pid_max) and live parent PID (process.ppid) instead of spawning
+    // two child Node processes, and use timeoutMs=40 instead of 1500.
+    const deadPid = 2 ** 22 + 12345;
+    const livePid = process.ppid;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: deadPid, repo: "dead" }));
+    // Another run takes the lock between the stale check and the rename.
+    const steal = () => { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir); writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: livePid, repo: "other", since: "now" })); };
+    await assert.rejects(takeLock(() => {}, 40, { beforeRename: steal }), /still holds/);
+    assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, livePid, "the other run's lock is where it was");
+    assert.deepEqual(readdirSync(join(dir, "..")).filter((n) => n.includes("stale")), [], "nothing left behind");
+    // Control: without the other run, the stale lock is taken over.
     rmSync(dir, { recursive: true, force: true });
-  }
+    mkdirSync(dir);
+    writeFileSync(join(dir, "owner.json"), JSON.stringify({ pid: deadPid, repo: "dead" }));
+    const said = [];
+    const release = await takeLock((m) => said.push(m), 5000);
+    assert.equal(JSON.parse(readFileSync(join(dir, "owner.json"), "utf8")).pid, process.pid);
+    assert.match(said.join("\n"), /took over the World Editor lock of dead/);
+    release();
+  });
 });
 
 /** Opens a file of a read-only mount for writing (open O_RDWR, creat) as the editor's CASC reader does, in bubblewrap
@@ -243,12 +227,18 @@ for name, path in (("creat", f), ("creatMissing", f + ".new")):
 print(json.dumps(out))
 `;
 
-test("we-rofs.so turns a read-write open and a creat of a read-only file into a read-only open; a write through it fails", (t) => {
-  try { execFileSync("cc", ["--version"], { stdio: "ignore" }); execFileSync("bwrap", ["--ro-bind", "/", "/", "true"], { stdio: "ignore" }); } catch { return t.skip("no C compiler or no working bubblewrap"); }
-  const dir = scratchDir("we-rofs-run-");
+// [Refactored] Merged the two we-rofs tests so `cc -Wall -Werror -shared -fPIC -O2` compiles we-rofs.c once instead of twice.
+test("we-rofs.c compiles without warnings and turns a read-write open or creat of a read-only file into a read-only open", (t) => {
+  try { execFileSync("cc", ["--version"], { stdio: "ignore" }); } catch { return t.skip("no C compiler"); }
+  const src = repoPath("app", "scripts", "we-rofs.c"); // the test runs bundled: found from the working directory up
+  const text = readFileSync(src, "utf8");
+  assert.ok(!/flags & \(O_CREAT \| O_TMPFILE\)/.test(text), "the mask test is also true for a plain O_DIRECTORY");
+  const dir = scratchDir("we-rofs-");
   try {
     const so = join(dir, "we-rofs.so");
-    execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", so, repoPath("app", "scripts", "we-rofs.c"), "-ldl"]);
+    execFileSync("cc", ["-Wall", "-Werror", "-shared", "-fPIC", "-O2", "-o", so, src, "-ldl"], { stdio: ["ignore", "pipe", "pipe"] });
+    assert.ok(lstatSync(so).size > 0);
+    try { execFileSync("bwrap", ["--ro-bind", "/", "/", "true"], { stdio: "ignore" }); } catch { return; }
     const data = join(dir, "data.idx");
     writeFileSync(data, "CASC");
     const probe = join(dir, "probe.py");

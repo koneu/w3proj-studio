@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, statSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { repoPath } from "../src/lib/testhelpers/testutil";
 import { modeArgs, requireValid } from "../../tests/gen-args.mjs";
@@ -12,8 +12,18 @@ import { modeArgs, requireValid } from "../../tests/gen-args.mjs";
 const specs = repoPath("tests", "fixtures", "we-specs");
 /** name -> size and mtime of every file in the folder, to see that nothing was written. */
 const snapshot = () => Object.fromEntries(readdirSync(specs).map((n) => [n, `${statSync(join(specs, n)).size}/${statSync(join(specs, n)).mtimeMs}`]));
-// Any existing file stands in for the cli and the game folder: the arguments are checked before they are used.
-const run = (script, ...args) => spawnSync(process.execPath, [join(specs, script), process.execPath, specs, ...args], { encoding: "utf8", env: { ...process.env, W3_ALLOW_STALE: "1" } });
+
+// [Refactored] Run generator CLI argument checks concurrently via async spawn + Promise.all instead of 30 sequential spawnSync calls.
+const runAsync = (script, ...args) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [join(specs, script), process.execPath, specs, ...args], {
+    env: { ...process.env, W3_ALLOW_STALE: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (d) => { stderr += d; });
+  child.on("error", reject);
+  child.on("close", (status) => resolve({ status, stderr }));
+});
 
 test("modeArgs leaves out --allow-stale", () => {
   assert.deepEqual(modeArgs(["node", "x.mjs", "cli", "game", "--allow-stale", "far", "1,2"]), ["far", "1,2"]);
@@ -21,7 +31,7 @@ test("modeArgs leaves out --allow-stale", () => {
   requireValid(true, "never printed"); // returns when valid (the exit 2 is tested through the generators below)
 });
 
-test("an unknown mode exits 2 and writes nothing", () => {
+test("an unknown mode exits 2 and writes nothing", async () => {
   const before = snapshot();
   const bad = [
     ["make-camps.mjs", "bb"], ["make-camps.mjs", "far"], ["make-camps.mjs", "far", "1,2,3,4,5"], ["make-camps.mjs", "far", "x"], ["make-camps.mjs", "b", "extra"],
@@ -33,19 +43,26 @@ test("an unknown mode exits 2 and writes nothing", () => {
     ["make-melee-valid.mjs", "--out"], ["make-melee-valid.mjs", "--case"], ["make-melee-valid.mjs", "--case", "x"], ["make-melee-valid.mjs", "--case", "../x={}"],
     ["make-special-wpm.mjs", "grid"], ["make-special-wpm.mjs", "gird", "YCr1"], ["make-special-wpm.mjs", "grid", "../x"], ["make-special-wpm.mjs", "grid", "YCr1", "x"],
   ];
-  for (const [script, ...args] of bad) {
-    const r = run(script, ...args);
+  const results = await Promise.all(bad.map(([script, ...args]) => runAsync(script, ...args)));
+  bad.forEach(([script, ...args], i) => {
+    const r = results[i];
     assert.equal(r.status, 2, `${script} ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
-  }
+  });
   assert.deepEqual(snapshot(), before);
 });
 
-test("control: a known mode is not refused (it gets as far as the missing tools)", () => {
+test("control: a known mode is not refused (it gets as far as the missing tools)", async () => {
   // The cli here is node itself, so the unpack step fails (exit 1, not 2); nothing is written before it.
   const before = snapshot();
-  for (const [script, ...args] of [["make-camps.mjs", "b"], ["make-camps.mjs", "far", "1700,2800"], ["make-fence.mjs", "dest"], ["make-neutral-facing.mjs", "neg"], ["make-doodad-snap.mjs", "misc"], ["make-custom-tilesets.mjs", "few3"], ["make-minimap-tiles.mjs", "impulse"], ["make-special-wpm.mjs", "grid", "YCr1"]]) {
-    const r = run(script, ...args);
+  const known = [
+    ["make-camps.mjs", "b"], ["make-camps.mjs", "far", "1700,2800"], ["make-fence.mjs", "dest"],
+    ["make-neutral-facing.mjs", "neg"], ["make-doodad-snap.mjs", "misc"], ["make-custom-tilesets.mjs", "few3"],
+    ["make-minimap-tiles.mjs", "impulse"], ["make-special-wpm.mjs", "grid", "YCr1"],
+  ];
+  const results = await Promise.all(known.map(([script, ...args]) => runAsync(script, ...args)));
+  known.forEach(([script, ...args], i) => {
+    const r = results[i];
     assert.notEqual(r.status, 2, `${script} ${args.join(" ")}: refused\n${r.stderr}`);
-  }
+  });
   assert.deepEqual(snapshot(), before);
 });
