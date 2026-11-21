@@ -634,6 +634,18 @@ enum TerrainCmd {
     },
     /// Merge map/terrain/ back into map/war3map.w3e.txt and the flat object files.
     Merge { project: PathBuf },
+    /// Change a split terrain's subterrains: the new set of rectangles, each continuing old subterrains or none. The
+    /// map stays the same (terrain, objects, regions and pathing overrides are cut into the new rectangles, objects by
+    /// position); a subterrain keeps the id ranges of those it continues and its folder while it keeps its name; a
+    /// renamed one's folder is renamed, a new one gets the next block of 10000 above every range. Refused, with nothing
+    /// written, when rectangles overlap or reach past the canvas, or a corner left out differs from defaultCorner.
+    Relayout {
+        project: PathBuf,
+        /// A subterrain of the new set: NAME:x,y,w,h (the one of that name, or a new one) or NAME=OLD[+OLD…]:x,y,w,h (a
+        /// rename, or old ones joined; NAME=:x,y,w,h a new one). Repeat for each; old ones not continued are dropped.
+        #[arg(long = "rect", value_name = "NAME[=OLD+OLD]:X,Y,W,H", required = true)]
+        rects: Vec<w3proj::terrain_layout::Planned>,
+    },
     /// Check a split terrain's creation numbers (what scripts call gg_unit_hfoo_0012, gg_dest_…): a number found twice
     /// in one kind (units and items, doodads, regions) and id ranges that overlap are errors (exit code 1); objects
     /// whose number lies outside their subterrain's idRange are listed as information only (moved objects and
@@ -945,6 +957,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 TerrainCmd::Merge { project } => (
                     w3proj::terrain_layout::merge_project(&project).with_context(|| format!("merging the terrain of {}", project.display()))?,
                     "merged into map/war3map.w3e.txt",
+                ),
+                TerrainCmd::Relayout { project, rects } => (
+                    w3proj::terrain_layout::relayout_project(&project, &rects).with_context(|| format!("changing the subterrains of {}", project.display()))?,
+                    "subterrains changed",
                 ),
             };
             for f in &r.written {

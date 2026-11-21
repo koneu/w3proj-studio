@@ -1703,8 +1703,9 @@ fn unresolved_strings(ex: &Extracted, codecs: &Registry, at: &str, unresolved: &
 /// project files have to come back byte for byte, and the map packed from them has to be the one
 /// packed from the flat files. The derived files go into the store and back (`derived::take`, as
 /// a split moves them), and a Pathing tool file with overrides over the seams
-/// (`terrain_pathing::sample_json`) into the subterrains' `pathing.txt` and back, byte for byte. A
-/// terrain kept raw has nothing to split.
+/// (`terrain_pathing::sample_json`) into the subterrains' `pathing.txt` and back, byte for byte. Between the
+/// split and the merge the subterrains are joined, renamed and resized (`terrain_layout::relayout`), which must
+/// change nothing either. A terrain kept raw has nothing to split.
 fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &mut Vec<String>) {
     use crate::terrain_layout as tl;
     let text = ex.files.keys().find(|k| k.eq_ignore_ascii_case(tl::FLAT_FILE));
@@ -1720,6 +1721,20 @@ fn split_terrain_round_trip(ex: &Extracted, codecs: &Registry, at: &str, out: &m
                     return Ok(Some("pathing.json"));
                 }
                 files.extend(sliced);
+            }
+            // Then the subterrains changed as the Subterrains commands change them (`terrain_layout::relayout`): the south
+            // two joined, the north-west renamed and grown one corner east, the north-east shrunk to make room.
+            if let [sw, _, nw, _] = &tl::grid_2x2(t.width, t.height)[..] {
+                let grow = usize::from(nw.w + 1 < t.width);
+                let plan: Vec<tl::Planned> = [
+                    format!("south=sw+se:0,0,{},{}", t.width, sw.h),
+                    format!("west=nw:0,{},{},{}", nw.y, nw.w + grow, nw.h),
+                    format!("ne:{},{},{},{}", nw.w + grow, nw.y, t.width - nw.w - grow, nw.h),
+                ]
+                .iter()
+                .map(|s| s.parse().map_err(Error::Project))
+                .collect::<Result<_>>()?;
+                tl::relayout(&mut files, &plan)?;
             }
             tl::flatten(&mut files)?;
             files.extend(store);

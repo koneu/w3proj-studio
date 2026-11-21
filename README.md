@@ -321,6 +321,15 @@ that don't climb one level are errors, water that steps within a tile a warning.
 subterrain and changes nothing. `w3proj pack` of a split project runs it first and refuses on errors (and when the check
 can't run: it needs Node.js); `--allow-seam-issues` packs anyway and says so.
 
+**New Subterrain…**, **Resize Subterrain…**, **Rename Subterrain…** and **Join Subterrains…** (palette, the
+Subterrains view; `w3proj terrain relayout --rect NAME[=OLD+OLD]:x,y,w,h …`) change the rectangles without changing the
+map: terrain, objects (by position), regions and pathing overrides are cut into the new ones. A rectangle placed over
+others takes a whole side off each (or all of one); a subterrain keeps its creation-number ranges when moved, resized or
+renamed (its folder is renamed), a joined one gets all of theirs, a new one the next block. Refused, nothing written,
+while anything is unsaved, when one would be cut in pieces, or when a corner left out differs from the default corner.
+**Toggle Subterrain Overlay** draws the rectangles and names over the terrain editor's map. A split terrain still can't
+change its map size (Map Size refuses at the save): merge it first.
+
 Every codec is checked on unpack: a file is only stored as JSON or text if
 `encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
 lose anything. This was run over 676 local maps without a mismatch.
@@ -511,6 +520,8 @@ w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.
                                     # --allow-seam-issues
 w3proj terrain seams MyMap/         # a split terrain's seams checked with the brushes' cliff, ramp and water
                                     # rules (the app's Check Terrain Seams, run in Node); --json; exit 1 on errors
+w3proj terrain relayout MyMap/ --rect south=sw+se:0,0,129,64 --rect nw:0,64,64,65 --rect ne:64,64,65,65
+                                    # new set of subterrains (joined, renamed, resized, new); the map stays the same
 w3proj rebuild MyMap/               # pathing, shadows, minimap (when terrain or doodads changed) and the
                                     # map script, made as the app makes them; --only=wpm,shd,minimap,script,
                                     # --mode sd|hd|de; --force also makes fresh ones and replaces a script

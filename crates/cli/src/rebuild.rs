@@ -521,6 +521,11 @@ impl Server {
                 self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
                 to_json(backend::flatview::merge(root()?)?)
             }
+            "terrain_relayout" => {
+                self.writable(&Path::new(root()?).join("map").to_string_lossy())?;
+                let plan: Vec<String> = args.get("plan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                to_json(backend::flatview::relayout(root()?, &plan)?)
+            }
             "terrain_id_layout" => to_json(backend::flatview::id_layout(root()?)?),
             "terrain_check" => to_json(backend::flatview::check(root()?)?),
             "terrain_whole" => to_json(backend::flatview::whole(root()?)?),

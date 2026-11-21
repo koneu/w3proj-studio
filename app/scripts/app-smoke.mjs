@@ -6205,6 +6205,44 @@ async function subterrains(page, found) {
       if (cliSeams.status !== 0 || !/no seam issues: 6 seams/.test(cliSeams.stdout)) fail(`\`w3proj terrain seams\`: exit ${cliSeams.status}, ${(cliSeams.stdout + cliSeams.stderr).trim().slice(-300)}`);
     }
 
+    // Stage 5: Rename, Join, Resize and New Subterrain by their commands. The map stays the same (the flat files read the
+    // same, `w3proj pack` gives the same map), the folders follow the names, the editor reopens on it unsaved-free; a
+    // resize that would drop corners is refused with nothing written.
+    {
+      const FLATS = ["map/war3map.w3e.txt", "map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json"];
+      const flatNow = () => page.evaluate(`Promise.all(${lit(FLATS)}.map((p) => w3.workspace.readText(p)))`);
+      const folders = () => readdirSync(join(map, "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+      const packTo = (name) => { const out = join(folder, name); const r = spawnSync(cli, ["pack", root, "-o", out, "--keep-script"], { encoding: "utf8" }); return r.status === 0 ? readFileSync(out) : `exit ${r.status}: ${(r.stdout + r.stderr).trim().slice(-300)}`; };
+      const flatBefore = await flatNow();
+      const packedBefore = packTo("subterrains-before-relayout.w3x");
+      if (typeof packedBefore === "string") fail(`\`w3proj pack\` before the subterrain changes: ${packedBefore}`);
+      const steps = [
+        ["w3.terrainLayout.renameSubterrain", { name: "ne", to: "north_east", quiet: true }, ["north_east", "nw", "se", "sw"]],
+        ["w3.terrainLayout.joinSubterrains", { names: ["sw", "se"], to: "south", quiet: true }, ["north_east", "nw", "south"]],
+        ["w3.terrainLayout.resizeSubterrain", { name: "nw", rect: "0,32,40,33", quiet: true }, ["north_east", "nw", "south"]],
+        ["w3.terrainLayout.newSubterrain", { name: "east", rect: "60,32,5,33", quiet: true }, ["east", "north_east", "nw", "south"]],
+      ];
+      for (const [id, arg, want] of steps) {
+        const r = await run(id, arg);
+        if (r) { fail(`${id} ${lit(arg)} failed: ${r}`); break; }
+        await editorUp();
+        await settled(page);
+        if (lit(folders()) !== lit(want)) fail(`after ${id}: map/terrain/ holds ${lit(folders())}, not ${lit(want)}`);
+        if (lit(await flatNow()) !== lit(flatBefore)) fail(`after ${id} the flat files read otherwise: the map changed`);
+        if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail(`after ${id} the terrain editor has unsaved changes`);
+      }
+      const nw = JSON.parse(readFileSync(join(map, "terrain", "terrain.json"), "utf8")).subterrains.find((s) => s.name === "nw");
+      if (nw?.w !== 40) fail(`the resized nw is ${lit(nw)}`);
+      const before = snapshot(map);
+      const refused = await run("w3.terrainLayout.resizeSubterrain", { name: "east", rect: "62,32,3,20", quiet: true });
+      if (!refused || !/would be lost/.test(refused) || !/Nothing was changed/.test(refused)) fail(`a resize leaving corners out was refused with ${lit(refused)}`);
+      if (differ(before, snapshot(map)).length) fail(`the refused resize changed ${differ(before, snapshot(map)).join(", ")}`);
+      await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+      const packedAfter = packTo("subterrains-after-relayout.w3x");
+      if (typeof packedAfter === "string") fail(`\`w3proj pack\` after the subterrain changes: ${packedAfter}`);
+      else if (Buffer.isBuffer(packedBefore) && !packedAfter.equals(packedBefore)) fail("the project packs another map after the subterrain changes");
+    }
+
     // Merge Subterrains: the flat files back, the terrain as the subterrains held it; the editor still on it.
     const merged = await run("w3.terrainLayout.merge", { quiet: true });
     if (merged) fail(`Merge Subterrains failed: ${merged}`);

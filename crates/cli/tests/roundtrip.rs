@@ -1207,6 +1207,46 @@ fn terrain_seams_reports_two_merged_edits_and_a_pack_refuses_them() {
     assert_eq!(fs::read_to_string(terrain("se")).unwrap(), se_b);
 }
 
+/// `w3proj terrain relayout`: subterrains joined, renamed and resized pack into the very same map, the derived files'
+/// record stays fresh (a plain pack goes ahead), a renamed folder goes, the ranges follow, and a merge gives back the
+/// flat files. One that would drop corners writes nothing.
+#[test]
+fn terrain_relayout_packs_the_same_map() {
+    let dir = workdir("terrain_relayout");
+    let first = dir.join("first.w3x");
+    pack(&fixture(), &first);
+    let project = dir.join("project");
+    unpack(&first, &project);
+    let flat_text = fs::read(project.join("map/war3map.w3e.txt")).unwrap();
+    fs::write(project.join(".w3proj/pathing.json"), PATHING).unwrap();
+    let mut args = vec!["terrain", "split", s(&project)];
+    for r in GRID {
+        args.extend(["--rect", r]);
+    }
+    ok(&args);
+    for name in ["war3map.shd", "war3mapMap.blp"] {
+        fs::write(project.join(".w3proj/derived").join(name), name.as_bytes()).unwrap();
+    }
+    let split = dir.join("split.w3x");
+    ok(&["pack", s(&project), "-o", s(&split)]);
+    let map = project.join("map");
+    let before = files(&project);
+    let o = w3proj(&["terrain", "relayout", s(&project), "--rect", "sw:0,0,2,1", "--rect", "nw:0,1,2,2", "--rect", "ne:2,1,3,2"]);
+    assert!(!o.status.success() && text(&o).contains("would be lost"), "{}", text(&o));
+    assert_eq!(files(&project), before, "a refused relayout wrote something");
+    let said = ok(&["terrain", "relayout", s(&project), "--rect", "south=sw+se:0,0,5,1", "--rect", "west=nw:0,1,3,2", "--rect", "ne:3,1,2,2"]);
+    assert!(said.contains("subterrains changed"), "{said}");
+    assert!(!map.join("terrain/sw").exists() && !map.join("terrain/nw").exists() && map.join("terrain/south/terrain.txt").is_file() && map.join("terrain/west/units.json").is_file());
+    let layout = fs::read_to_string(map.join("terrain/terrain.json")).unwrap();
+    assert!(layout.contains("\"name\": \"south\",\n      \"folder\": \"south\",\n      \"x\": 0,\n      \"y\": 0,\n      \"w\": 5,\n      \"h\": 1,\n      \"idRange\": [[10000, 19999], [20000, 29999]]"), "{layout}");
+    let relaid = dir.join("relaid.w3x");
+    ok(&["pack", s(&project), "-o", s(&relaid)]);
+    assert_eq!(fs::read(&split).unwrap(), fs::read(&relaid).unwrap(), "the changed subterrains pack another map");
+    ok(&["terrain", "merge", s(&project)]);
+    assert_eq!(fs::read(map.join("war3map.w3e.txt")).unwrap(), flat_text);
+    assert_eq!(fs::read_to_string(project.join(".w3proj/pathing.json")).unwrap(), PATHING);
+}
+
 /// `w3proj terrain check`: a split project's creation numbers. Numbers outside a subterrain's range are information
 /// (exit 0); a number in two subterrains' files is an error naming both (exit 1), and the same duplicate stops a pack,
 /// naming both files. A flat project has nothing to check.

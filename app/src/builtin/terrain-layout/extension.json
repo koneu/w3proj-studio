@@ -14,7 +14,11 @@
       { "id": "w3.terrainLayout.merge", "when": "project", "title": "Merge Subterrains", "category": "Terrain" },
       { "id": "w3.terrainLayout.checkIds", "when": "project", "title": "Check Terrain IDs", "category": "Terrain" },
       { "id": "w3.terrainLayout.checkSeams", "when": "project", "title": "Check Terrain Seams", "category": "Terrain" },
-      { "id": "w3.terrainLayout.openSubterrains", "when": "project", "title": "Open Subterrains…", "category": "Terrain" }
+      { "id": "w3.terrainLayout.openSubterrains", "when": "project", "title": "Open Subterrains…", "category": "Terrain" },
+      { "id": "w3.terrainLayout.newSubterrain", "when": "project", "title": "New Subterrain…", "category": "Terrain" },
+      { "id": "w3.terrainLayout.resizeSubterrain", "when": "project", "title": "Resize Subterrain…", "category": "Terrain" },
+      { "id": "w3.terrainLayout.renameSubterrain", "when": "project", "title": "Rename Subterrain…", "category": "Terrain" },
+      { "id": "w3.terrainLayout.joinSubterrains", "when": "project", "title": "Join Subterrains…", "category": "Terrain" }
     ]
   }
 }

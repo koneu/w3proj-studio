@@ -9,6 +9,7 @@ import { errorText } from "../../lib/oserror";
 import { LAYOUT_FILE } from "../../lib/terrain/creationids";
 import { loadOpenState, openSummary, type OpenState } from "../../lib/terrain/openset";
 import { checkSeams, seamLines, seamSummary, type SeamReport } from "../../lib/terrain/seams";
+import { joinPlan, nameProblem, parseRect, placePlan, planText, renamePlan, type PlannedSubterrain, type SubRect } from "../../lib/terrain/subterrainplan";
 import { h } from "../../workbench/dom";
 
 /** The project's layout file when its terrain is split. */
@@ -163,6 +164,98 @@ export async function checkTerrainSeams(w3: W3Api, arg?: { quiet?: boolean }): P
   return report;
 }
 
+// ---- New, Resize, Rename and Join Subterrains (lib/terrain/subterrainplan.ts, backend terrain_relayout) ----
+
+/** A rectangle given to a command: `x,y,w,h` text or numbers. */
+type RectArg = string | { x: number; y: number; w: number; h: number };
+const rectOf = (r: RectArg | undefined) => (typeof r === "string" ? parseRect(r) : r && [r.x, r.y, r.w, r.h].every(Number.isFinite) ? r : null);
+const rectText = (s: { x: number; y: number; w: number; h: number }) => `${s.x},${s.y},${s.w},${s.h}`;
+
+/** Changes the subterrains: `plan` makes the new set from the current ones (a string: why it can't; undefined:
+ *  cancelled). Refused while anything is unsaved, before any question; the change itself goes through `convert` (the
+ *  derived work first, a checkpoint, the file list read again, the editors of the terrain and object files opened
+ *  again: the open choice may have changed with the names). The map stays the same; only which file holds what changes. */
+async function changeSubterrains(w3: W3Api, what: string, plan: (subs: SubRect[]) => Promise<PlannedSubterrain[] | string | undefined>, quiet: boolean): Promise<Converted | null> {
+  const project = w3.workspace.project();
+  if (!project) throw new Error(`${what}: no project is open.`);
+  const unsaved = w3.editors.unsavedPaths();
+  if (unsaved.length) throw new Error(`${what}: save or discard the changes in ${unsaved.join(", ")} first.`);
+  const s = await openState(w3, what);
+  const p = await plan(s.subterrains.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+  if (p === undefined) return null;
+  if (typeof p === "string") throw new Error(`${what}: ${p.replace(/\.?$/, ".")} Nothing was changed.`);
+  // The questions took time: another project, or an edit made meanwhile, stops it.
+  if (w3.workspace.project()?.root !== project.root) throw new Error(`${what}: the project changed meanwhile. Nothing was changed.`);
+  const done = await convert(w3, what, (root) => w3.backend.invoke<Converted>("terrain_relayout", { root, plan: p.map(planText) }), quiet);
+  w3.views.refresh(SUBTERRAINS_VIEW);
+  return done;
+}
+
+/** Picks one of `subs` (`given` skips the question). */
+async function pickSubterrain(w3: W3Api, subs: SubRect[], placeholder: string, given?: string): Promise<SubRect | undefined | string> {
+  if (given !== undefined) return subs.find((s) => s.name === given) ?? `There is no subterrain "${given}".`;
+  const pick = await w3.window.quickPick(subs.map((s) => ({ label: s.name, description: `${s.w}×${s.h} corners at ${s.x},${s.y}`, value: s })), { placeholder });
+  return pick?.value;
+}
+
+const RECT_PROMPT = "x,y,w,h in corners ((0,0) the south-west corner; a subterrain owns corners x to x+w-1)";
+
+/** New Subterrain…: a rectangle that takes a whole side off the subterrains it covers (or all of one), or lies where
+ *  none is; it gets the next block of creation numbers. */
+export function newSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean }) {
+  return changeSubterrains(w3, "New Subterrain", async (subs) => {
+    const name = arg?.name ?? (await w3.window.inputBox({ prompt: "The new subterrain's name (its folder under map/terrain/)" }));
+    if (name === undefined) return undefined;
+    const bad = nameProblem(name, subs);
+    if (bad) return bad;
+    const text = arg?.rect ?? (await w3.window.inputBox({ prompt: `Where: ${RECT_PROMPT}`, placeholder: subs[0] ? rectText(subs[0]) : "0,0,64,64" }));
+    if (text === undefined) return undefined;
+    const r = rectOf(text);
+    return r ? placePlan(subs, { name, ...r, from: [] }) : `"${typeof text === "string" ? text : rectText(text)}" isn't x,y,w,h`;
+  }, arg?.quiet === true);
+}
+
+/** Resize Subterrain…: its new rectangle takes from its neighbours what it covers (a whole side of each); corners it
+ *  gives up must be the default corner, or another subterrain has to take them (resize that one over them). */
+export function resizeSubterrain(w3: W3Api, arg?: { name?: string; rect?: RectArg; quiet?: boolean }) {
+  return changeSubterrains(w3, "Resize Subterrain", async (subs) => {
+    const s = await pickSubterrain(w3, subs, "Resize which subterrain?", arg?.name);
+    if (s === undefined || typeof s === "string") return s;
+    const text = arg?.rect ?? (await w3.window.inputBox({ prompt: `${s.name}'s new rectangle: ${RECT_PROMPT}`, value: rectText(s) }));
+    if (text === undefined) return undefined;
+    const r = rectOf(text);
+    return r ? placePlan(subs, { name: s.name, ...r, from: [s.name] }, s.name) : `"${typeof text === "string" ? text : rectText(text)}" isn't x,y,w,h`;
+  }, arg?.quiet === true);
+}
+
+/** Rename Subterrain…: its folder is renamed, its creation-number ranges stay. */
+export function renameSubterrain(w3: W3Api, arg?: { name?: string; to?: string; quiet?: boolean }) {
+  return changeSubterrains(w3, "Rename Subterrain", async (subs) => {
+    const s = await pickSubterrain(w3, subs, "Rename which subterrain?", arg?.name);
+    if (s === undefined || typeof s === "string") return s;
+    const to = arg?.to ?? (await w3.window.inputBox({ prompt: `${s.name}'s new name (its folder is renamed)`, value: s.name }));
+    if (to === undefined || to === s.name) return undefined;
+    return renamePlan(subs, s.name, to);
+  }, arg?.quiet === true);
+}
+
+/** Join Subterrains…: two or more side by side become one over the rectangle round them, with all their ranges. */
+export function joinSubterrains(w3: W3Api, arg?: { names?: string[]; to?: string; quiet?: boolean }) {
+  return changeSubterrains(w3, "Join Subterrains", async (subs) => {
+    let names = arg?.names;
+    if (!names) {
+      const a = await pickSubterrain(w3, subs, "Join which subterrain…");
+      if (a === undefined || typeof a === "string") return a;
+      const b = await pickSubterrain(w3, subs.filter((s) => s.name !== a.name), `…with which (beside ${a.name})?`);
+      if (b === undefined || typeof b === "string") return b;
+      names = [a.name, b.name];
+    }
+    const to = arg?.to ?? (await w3.window.inputBox({ prompt: "The joined subterrain's name", value: names[0] }));
+    if (to === undefined) return undefined;
+    return joinPlan(subs, names, to);
+  }, arg?.quiet === true);
+}
+
 // ---- Open Subterrains… (spec "Working on Part of the Map") ----
 
 /** The project's open state (terrain_open_state); rejects for a flat project. */
@@ -266,6 +359,12 @@ function renderView(w3: W3Api, el: HTMLElement) {
       h("button.link-inline", { onclick: () => choose(s.subterrains.map((y) => y.name)) }, "Open all"),
       " · ",
       h("button.link-inline", { title: "Toggle Subterrain Overlay: the rectangles and names over the terrain editor's map", onclick: () => void w3.commands.execute("w3.terrain.toggleSubterrains").catch((e) => w3.window.showError(errorText(e))) }, "Show on the map")));
+    const command = (id: string, label: string, title: string) => h("button.link-inline", { title, onclick: () => void w3.commands.execute(id).catch(() => {}) }, label);
+    rows.push(h("div.tree-row", {},
+      command("w3.terrainLayout.newSubterrain", "New…", "New Subterrain…: a rectangle taken from the subterrains it covers"), " · ",
+      command("w3.terrainLayout.resizeSubterrain", "Resize…", "Resize Subterrain…"), " · ",
+      command("w3.terrainLayout.renameSubterrain", "Rename…", "Rename Subterrain…: its folder is renamed, its creation numbers stay"), " · ",
+      command("w3.terrainLayout.joinSubterrains", "Join…", "Join Subterrains…: two side by side become one")));
     body.replaceChildren(...rows);
   }, (e) => body.replaceChildren(h("div.view-empty", {}, errorText(e))));
 }
@@ -291,6 +390,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { errors: r.errors, warnings: r.warnings, seams: r.seams, seamCorners: r.seamCorners, issues: r.issues, summary: seamSummary(r) };
     }),
     w3.commands.register("w3.terrainLayout.openSubterrains", shown(w3, (arg?: { names?: string[]; all?: boolean }) => openSubterrains(w3, arg))),
+    w3.commands.register("w3.terrainLayout.newSubterrain", shown(w3, (arg?: { name?: string; rect?: RectArg; quiet?: boolean }) => newSubterrain(w3, arg))),
+    w3.commands.register("w3.terrainLayout.resizeSubterrain", shown(w3, (arg?: { name?: string; rect?: RectArg; quiet?: boolean }) => resizeSubterrain(w3, arg))),
+    w3.commands.register("w3.terrainLayout.renameSubterrain", shown(w3, (arg?: { name?: string; to?: string; quiet?: boolean }) => renameSubterrain(w3, arg))),
+    w3.commands.register("w3.terrainLayout.joinSubterrains", shown(w3, (arg?: { names?: string[]; to?: string; quiet?: boolean }) => joinSubterrains(w3, arg))),
     w3.views.register(SUBTERRAINS_VIEW, { render: (el) => renderView(w3, el) }),
     w3.workspace.onDidChange(() => w3.views.refresh(SUBTERRAINS_VIEW)),
   );

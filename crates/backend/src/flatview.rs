@@ -380,6 +380,14 @@ pub fn split(root: &str, rects: &[String]) -> CmdResult<layout::Converted> {
     layout::split_project(Path::new(root), &rects).map_err(err)
 }
 
+/// New, resized, renamed and joined subterrains (`terrain_relayout`, as `w3proj terrain relayout`): `plan` is the new
+/// set, each `NAME[=OLD+OLD]:x,y,w,h` (`w3proj::terrain_layout::Planned`). The files written and removed; the refusal's
+/// reason as the error, nothing written then.
+pub fn relayout(root: &str, plan: &[String]) -> CmdResult<layout::Converted> {
+    let plan = plan.iter().map(|p| p.parse::<layout::Planned>()).collect::<Result<Vec<_>, _>>()?;
+    layout::relayout_project(Path::new(root), &plan).map_err(err)
+}
+
 /// "Merge Subterrains" (`terrain_merge`): the split terrain back into `map/war3map.w3e.txt` and the flat object files.
 pub fn merge(root: &str) -> CmdResult<layout::Converted> {
     layout::merge_project(Path::new(root)).map_err(err)

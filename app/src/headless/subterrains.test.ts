@@ -22,7 +22,7 @@ import { nextRegionIndex } from "../lib/terrain/regions";
 import { unlistedFiles } from "../lib/imports";
 import type { WorkspaceService } from "../workbench/workspace";
 import manifest from "../builtin/terrain-layout/extension.json";
-import { checkTerrainIds, checkTerrainSeams, FLAT_FILES, isSplit, mergeTerrain, openSubterrains, splitTerrain } from "../builtin/terrain-layout/index";
+import { checkTerrainIds, checkTerrainSeams, FLAT_FILES, isSplit, joinSubterrains, mergeTerrain, newSubterrain, openSubterrains, renameSubterrain, resizeSubterrain, splitTerrain } from "../builtin/terrain-layout/index";
 import { readPathingFile } from "../builtin/terrain-pathing/file";
 import { pathingOverridesText, type PathingOverrides } from "../lib/terrain/resize";
 
@@ -479,6 +479,57 @@ test("Check Terrain Seams: two saves that are each fine, merged as git merges th
   await openSubterrains(w3, { all: true });
   // A flat project has no seams: refused with the reason.
   await assert.rejects(checkTerrainSeams(flat, { quiet: true }), /isn't split/);
+});
+
+test("New, Resize, Rename and Join Subterrains: the map stays the same, objects go where their position lies, ranges and the open choice follow", async () => {
+  const { w3, root } = await bigSplit("relayout");
+  const whole = await loaded(w3);
+  const layout = () => JSON.parse(readFileSync(join(root, "map", "terrain", "terrain.json"), "utf8")) as { subterrains: { name: string; folder: string; x: number; y: number; w: number; h: number; idRange: unknown }[] };
+  const sub = (name: string) => layout().subterrains.find((s) => s.name === name);
+  const doodadsIn = (folder: string) => (JSON.parse(readFileSync(join(root, "map", "terrain", folder, "doodads.json"), "utf8")).doodads as { position: number[] }[]).map((d) => d.position);
+  const folders = () => readdirSync(join(root, "map", "terrain"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  const same = async (what: string) => assert.deepEqual(await loaded(w3), whole, `${what}: the map changed`);
+
+  // Rename: the folder goes with the name, the range stays.
+  const range = sub("a0")!.idRange;
+  await renameSubterrain(w3, { name: "a0", to: "south_west", quiet: true });
+  assert.deepEqual(folders(), ["a1", "a2", "b0", "b1", "b2", "south_west"]);
+  assert.deepEqual(sub("south_west")!.idRange, range);
+  await same("rename");
+  // Join a1 and a2: one folder, both ranges.
+  await joinSubterrains(w3, { names: ["a1", "a2"], to: "south_east", quiet: true });
+  assert.deepEqual(folders(), ["b0", "b1", "b2", "south_east", "south_west"]);
+  assert.deepEqual(sub("south_east")!.idRange, [[20000, 29999], [30000, 39999]]);
+  assert.deepEqual([sub("south_east")!.x, sub("south_east")!.w], [8, 17]);
+  await same("join");
+  // Resize b0 two corners east, into b1: b1's doodads in those two columns go to b0.
+  const b1Before = doodadsIn("b1").length;
+  const taken = doodadsIn("b1").filter(([x]) => x < 128 * 10).length;
+  assert.ok(taken > 0, "control: there are doodads in the columns taken");
+  await resizeSubterrain(w3, { name: "b0", rect: "0,8,10,9", quiet: true });
+  assert.deepEqual([sub("b1")!.x, sub("b1")!.w], [10, 6]);
+  assert.equal(doodadsIn("b1").length, b1Before - taken);
+  assert.ok(doodadsIn("b0").every(([x]) => x < 128 * 10) && doodadsIn("b1").every(([x]) => x >= 128 * 10), "each doodad in the subterrain its position lies in");
+  await same("resize");
+  // A new one taking b1's west side: the next block of numbers.
+  await newSubterrain(w3, { name: "mid", rect: { x: 10, y: 8, w: 2, h: 9 }, quiet: true });
+  assert.deepEqual(sub("mid")!.idRange, [70000, 79999]);
+  assert.deepEqual([sub("b1")!.x, sub("b1")!.w], [12, 4]);
+  await same("new");
+
+  // Refused, nothing written: corners given up that aren't the default corner, a name taken, one cut in pieces.
+  const before = snapshot(root);
+  await assert.rejects(resizeSubterrain(w3, { name: "b2", rect: "16,8,8,9", quiet: true }), /Resize Subterrain: .*would be lost.* Nothing was changed\./);
+  await assert.rejects(renameSubterrain(w3, { name: "b2", to: "MID", quiet: true }), /already/);
+  await assert.rejects(newSubterrain(w3, { name: "hole", rect: "20,10,2,2", quiet: true }), /would leave b2 in pieces/);
+  assert.deepEqual(changedFiles(before, snapshot(root)), []);
+
+  // With some closed: the open choice follows a rename; the closed files are read for the change (it is of the whole map).
+  await openSubterrains(w3, { names: ["south_west", "b1"] });
+  await renameSubterrain(w3, { name: "b1", to: "north", quiet: true });
+  assert.equal(readFileSync(join(root, ".w3proj", "open-subterrains.json"), "utf8"), "{\n  \"format\": \"w3proj.open-subterrains/1\",\n  \"open\": [\"south_west\", \"north\"]\n}\n");
+  await openSubterrains(w3, { all: true });
+  await same("rename with some closed");
 });
 
 /** The workspace service behind a headless w3 (for externalChanges, which the extension API doesn't have). */
